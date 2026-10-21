@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::pull_request::Sha;
 
 pub trait CodeSource {
@@ -21,6 +23,17 @@ pub enum FileStatus {
     Modified,
     Renamed,
     Deleted,
+}
+
+impl fmt::Display for FileStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Added => "added",
+            Self::Modified => "modified",
+            Self::Renamed => "renamed",
+            Self::Deleted => "deleted",
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -97,9 +110,9 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
         } else if let Some(path) = raw.strip_prefix("rename to ") {
             file.new_path = Some(unquote(path));
         } else if let Some(path) = raw.strip_prefix("--- ") {
-            file.old_path = unquote(path).strip_prefix("a/").map(str::to_string);
+            file.old_path = path_after_prefix(path, "a/");
         } else if let Some(path) = raw.strip_prefix("+++ ") {
-            file.new_path = unquote(path).strip_prefix("b/").map(str::to_string);
+            file.new_path = path_after_prefix(path, "b/");
         } else if raw.starts_with("Binary files ") {
             file.binary = true;
         } else if let Some((old, new)) = hunk_ranges(raw) {
@@ -116,6 +129,13 @@ fn same_path_in_git_header(paths: &str) -> Option<String> {
     let half = paths.len().checked_sub(5)? / 2;
     let (old, new) = (paths.get(2..2 + half)?, paths.get(half + 5..)?);
     (old == new).then(|| old.to_string())
+}
+
+/// Git ends `---` and `+++` paths that hold a space with a tab.
+fn path_after_prefix(path: &str, prefix: &str) -> Option<String> {
+    unquote(path.trim_end_matches('\t'))
+        .strip_prefix(prefix)
+        .map(str::to_string)
 }
 
 fn unquote_pair(paths: &str) -> String {

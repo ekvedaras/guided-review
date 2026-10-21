@@ -3,7 +3,7 @@ use std::fmt;
 use sha2::{Digest, Sha256};
 
 use crate::code_source::{CodeSource, FileDiff, FileStatus, Line};
-use crate::php::Symbols;
+use crate::php::{Symbol, Symbols};
 use crate::pull_request::Sha;
 
 /// `app/Foo.php#Foo::handle`, or just `app/Foo.php` for a whole-file piece.
@@ -116,10 +116,15 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
         .diff(base, head)?
         .into_iter()
         .map(|diff| {
-            let pieces = if diff.path().ends_with(".php") && !diff.binary {
+            let symbol_pieces = if diff.path().ends_with(".php") && !diff.binary {
                 cut_php(source, base, head, &diff)?
             } else {
+                Vec::new()
+            };
+            let pieces = if symbol_pieces.is_empty() {
                 vec![whole_file_piece(&diff)]
+            } else {
+                symbol_pieces
             };
             Ok(ChangedFile {
                 path: diff.path().to_string(),
@@ -141,7 +146,7 @@ fn whole_file_piece(diff: &FileDiff) -> Piece {
             symbol: None,
         },
         kind: PieceKind::File,
-        status: piece_status_of(diff.status()),
+        status: diff.status().into(),
         added: added.len(),
         removed: removed.len(),
         signature: None,
@@ -157,49 +162,41 @@ fn cut_php(
     head: &Sha,
     diff: &FileDiff,
 ) -> anyhow::Result<Vec<Piece>> {
-    let base_symbols = match &diff.old_path {
-        Some(path) => Symbols::find(&source.file_at(base, path)?),
-        None => Symbols::find(""),
-    };
-    let head_symbols = match &diff.new_path {
-        Some(path) => Symbols::find(&source.file_at(head, path)?),
-        None => Symbols::find(""),
-    };
+    let base_symbols = symbols_at(source, base, diff.old_path.as_deref())?;
+    let head_symbols = symbols_at(source, head, diff.new_path.as_deref())?;
 
     let mut changes: Vec<SymbolChange> = Vec::new();
     for line in &diff.removed {
         let symbol = base_symbols.innermost_at(line.number);
-        let anchor = symbol.map_or(line.number, |symbol| symbol.first_line);
-        let path = symbol.map_or(TOP, |symbol| symbol.path.as_str());
-        SymbolChange::for_path(&mut changes, path, anchor)
+        SymbolChange::entry_for(&mut changes, symbol)
             .removed
             .push(line);
     }
     for line in &diff.added {
         let symbol = head_symbols.innermost_at(line.number);
-        let anchor = symbol.map_or(line.number, |symbol| symbol.first_line);
-        let path = symbol.map_or(TOP, |symbol| symbol.path.as_str());
-        let change = SymbolChange::for_path(&mut changes, path, anchor);
-        change.added.push(line);
-        change.head_anchor.get_or_insert(anchor);
+        SymbolChange::entry_for(&mut changes, symbol)
+            .added
+            .push(line);
     }
-    changes.sort_by_key(|change| change.head_anchor.unwrap_or(change.base_anchor));
 
-    Ok(changes
+    let mut pieces: Vec<(usize, Piece)> = changes
         .into_iter()
         .map(|change| {
-            let in_base = base_symbols.named(&change.path);
-            let in_head = head_symbols.named(&change.path);
+            let in_base = base_symbols.named(&change.symbol_path);
+            let in_head = head_symbols.named(&change.symbol_path);
             let (kind, status) = match (in_base, in_head) {
-                (_, Some(symbol)) if in_base.is_none() => (symbol.kind, PieceStatus::Added),
+                (None, Some(symbol)) => (symbol.kind, PieceStatus::Added),
                 (Some(symbol), None) => (symbol.kind, PieceStatus::Deleted),
-                (_, Some(symbol)) => (symbol.kind, PieceStatus::Modified),
-                (None, None) => (PieceKind::Top, piece_status_of(diff.status())),
+                (Some(_), Some(symbol)) => (symbol.kind, PieceStatus::Modified),
+                (None, None) => (PieceKind::Top, diff.status().into()),
             };
-            Piece {
+            let position = in_head
+                .or(in_base)
+                .map_or_else(|| change.first_line(), |symbol| symbol.first_line);
+            let piece = Piece {
                 id: PieceId {
                     path: diff.path().to_string(),
-                    symbol: Some(change.path.clone()),
+                    symbol: Some(change.symbol_path),
                 },
                 kind,
                 status,
@@ -207,28 +204,38 @@ fn cut_php(
                 removed: change.removed.len(),
                 signature: in_head.or(in_base).map(|symbol| symbol.signature.clone()),
                 diff_hash: DiffHash::of(&change.removed, &change.added),
-            }
+            };
+            (position, piece)
         })
-        .collect())
+        .collect();
+    pieces.sort_by_key(|(position, _)| *position);
+    Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
+}
+
+fn symbols_at(source: &dyn CodeSource, sha: &Sha, path: Option<&str>) -> anyhow::Result<Symbols> {
+    Ok(match path {
+        Some(path) => Symbols::find(&source.file_at(sha, path)?),
+        None => Symbols::find(""),
+    })
 }
 
 struct SymbolChange<'a> {
-    path: String,
-    base_anchor: usize,
-    head_anchor: Option<usize>,
+    symbol_path: String,
     removed: Vec<&'a Line>,
     added: Vec<&'a Line>,
 }
 
 impl<'a> SymbolChange<'a> {
-    fn for_path<'c>(changes: &'c mut Vec<Self>, path: &str, anchor: usize) -> &'c mut Self {
-        let index = match changes.iter().position(|change| change.path == path) {
+    fn entry_for<'c>(changes: &'c mut Vec<Self>, symbol: Option<&Symbol>) -> &'c mut Self {
+        let symbol_path = symbol.map_or(TOP, |symbol| symbol.path.as_str());
+        let index = match changes
+            .iter()
+            .position(|change| change.symbol_path == symbol_path)
+        {
             Some(index) => index,
             None => {
                 changes.push(Self {
-                    path: path.to_string(),
-                    base_anchor: anchor,
-                    head_anchor: None,
+                    symbol_path: symbol_path.to_string(),
                     removed: Vec::new(),
                     added: Vec::new(),
                 });
@@ -237,12 +244,23 @@ impl<'a> SymbolChange<'a> {
         };
         &mut changes[index]
     }
+
+    fn first_line(&self) -> usize {
+        self.added
+            .iter()
+            .chain(&self.removed)
+            .map(|line| line.number)
+            .min()
+            .unwrap_or_default()
+    }
 }
 
-fn piece_status_of(file: FileStatus) -> PieceStatus {
-    match file {
-        FileStatus::Added => PieceStatus::Added,
-        FileStatus::Deleted => PieceStatus::Deleted,
-        FileStatus::Modified | FileStatus::Renamed => PieceStatus::Modified,
+impl From<FileStatus> for PieceStatus {
+    fn from(file: FileStatus) -> Self {
+        match file {
+            FileStatus::Added => Self::Added,
+            FileStatus::Deleted => Self::Deleted,
+            FileStatus::Modified | FileStatus::Renamed => Self::Modified,
+        }
     }
 }

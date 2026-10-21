@@ -95,6 +95,6 @@ impl fmt::Display for Sha {
 }
 
 pub struct PullRequestTips {
-    pub base_branch: Sha,
+    pub base_branch_tip: Sha,
     pub head: Sha,
 }

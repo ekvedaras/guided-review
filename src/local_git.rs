@@ -13,18 +13,14 @@ pub struct LocalGit {
 }
 
 impl LocalGit {
-    pub fn find(
-        repo: &RepoName,
-        current_dir: &Path,
-        config: &Config,
-    ) -> anyhow::Result<Option<Self>> {
+    pub fn find(repo: &RepoName, current_dir: &Path) -> anyhow::Result<Option<Self>> {
         let current = Self {
             repo: current_dir.to_path_buf(),
         };
         if current.is_clone_of(repo) {
             return Ok(Some(current));
         }
-        let Some(configured) = config.clone_of(repo) else {
+        let Some(configured) = Config::load()?.clone_of(repo) else {
             return Ok(None);
         };
         let configured = Self { repo: configured };

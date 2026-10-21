@@ -384,3 +384,103 @@ class Order
         run.stdout
     );
 }
+
+#[test]
+fn outline_cuts_php_files_with_spaces_in_their_path() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("app/Gift Card.php", ORDER_V1);
+    let base = repo.commit("base");
+    repo.write("app/Gift Card.php", ORDER_V2);
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+
+    let run = GuidedReview::new(&repo, &github).run(&["outline", PR]);
+
+    assert_eq!(
+        run.stdout_with(&[(&base, "<base>"), (&head, "<head>")]),
+        ORDER_OUTLINE.replace("app/Order.php", "app/Gift Card.php")
+    );
+}
+
+#[test]
+fn outline_uses_the_current_folder_even_when_config_is_broken() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("app/Order.php", ORDER_V1);
+    let base = repo.commit("base");
+    repo.write("app/Order.php", ORDER_V2);
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+    std::fs::create_dir_all(repo.home().join(".guided-review")).unwrap();
+    std::fs::write(repo.home().join(".guided-review/config.toml"), "[clones\n").unwrap();
+
+    let run = GuidedReview::new(&repo, &github).run(&["outline", PR]);
+
+    assert_eq!(
+        run.stdout_with(&[(&base, "<base>"), (&head, "<head>")]),
+        ORDER_OUTLINE
+    );
+}
+
+#[test]
+fn methods_of_anonymous_classes_belong_to_the_named_symbol_around_them() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let order = |total: &str| {
+        format!(
+            r#"<?php
+
+class Order
+{{
+    public function pricing(): Pricing
+    {{
+        return new class implements Pricing {{
+            public function total(): int
+            {{
+                return {total};
+            }}
+        }};
+    }}
+}}
+"#
+        )
+    };
+    repo.write("app/Order.php", &order("1"));
+    let base = repo.commit("base");
+    repo.write("app/Order.php", &order("2"));
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+
+    let run = GuidedReview::new(&repo, &github).run(&["outline", PR]);
+
+    assert!(
+        run.stdout_with(&[]).ends_with(
+            "  app/Order.php#Order::pricing  method  modified  +1 −1  public function pricing(): Pricing\n"
+        ),
+        "{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn a_renamed_php_file_without_line_changes_is_one_whole_file_piece() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("app/Order.php", ORDER_V1);
+    let base = repo.commit("base");
+    repo.git(&["mv", "app/Order.php", "app/Purchase.php"]);
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+
+    let run = GuidedReview::new(&repo, &github).run(&["outline", PR]);
+
+    assert_eq!(
+        run.stdout_with(&[(&base, "<base>"), (&head, "<head>")]),
+        "\
+pr: https://github.com/acme/shop/pull/7
+base: <base>
+head: <head>
+1 file, 1 piece, +0 −0
+
+app/Purchase.php  renamed  +0 −0
+  app/Purchase.php  file  modified  +0 −0
+"
+    );
+}

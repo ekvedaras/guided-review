@@ -43,7 +43,7 @@ impl GitHub {
             .and_then(|mut response| response.body_mut().read_json())
             .with_context(|| format!("could not read {pr} from GitHub"))?;
         Ok(PullRequestTips {
-            base_branch: Sha::new(&pull.base.sha),
+            base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })
     }

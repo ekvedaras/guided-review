@@ -1,6 +1,5 @@
 use std::fmt;
 
-use crate::code_source::FileStatus;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 
@@ -31,10 +30,7 @@ impl fmt::Display for Outline<'_> {
             writeln!(
                 f,
                 "{}  {}  +{} −{}",
-                file.path,
-                status_of(file.status),
-                file.added,
-                file.removed
+                file.path, file.status, file.added, file.removed
             )?;
             for piece in &file.pieces {
                 write!(
@@ -54,13 +50,4 @@ impl fmt::Display for Outline<'_> {
 
 fn counted(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
-}
-
-fn status_of(status: FileStatus) -> &'static str {
-    match status {
-        FileStatus::Added => "added",
-        FileStatus::Modified => "modified",
-        FileStatus::Renamed => "renamed",
-        FileStatus::Deleted => "deleted",
-    }
 }
