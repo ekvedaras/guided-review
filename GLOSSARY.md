@@ -10,7 +10,7 @@
 
 **Skim step**: A step the reviewer only needs to glance at, for example callers that only pass a flag.
 
-**Diff piece**: A part of a PR diff that a step can point to. It can be smaller than a file, even part of one method.
+**Diff piece**: A part of a PR diff that a step can point to. Usually one changed symbol: a method, function or class. Some pieces carry a mark: `format` (only layout changed), `moved` (same code, new place), `generated` (made by a tool).
 
 **Outline**: A short list of all diff pieces in a PR, with no code. A tour writer reads it first and opens only the pieces it needs.
 
