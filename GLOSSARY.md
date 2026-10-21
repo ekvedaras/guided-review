@@ -25,3 +25,7 @@
 **Refresh**: An AI pass on a re-pinned tour. It rewrites only the steps whose pieces changed and places new pieces into steps.
 
 **Ask**: A question to the AI about one place in a tour (selected lines, a step, or the whole tour), with its answers and follow-ups. The viewer keeps it; it is not part of the tour.
+
+**Test set**: A fixed list of real PRs used to score the tour writer. Every change to how tours are written runs on it.
+
+**Reviewer note**: A short note per PR in the test set, written once by the reviewer. It says what a good tour of that PR must show: the main flow and the diagrams it needs.
