@@ -12,6 +12,8 @@
 
 **Diff piece**: A part of a PR diff that a step can point to. It can be smaller than a file, even part of one method.
 
+**Outline**: A short list of all diff pieces in a PR, with no code. A tour writer reads it first and opens only the pieces it needs.
+
 **Tour file**: The saved form of a tour. Any viewer can show it.
 
 **Viewer**: A thing that shows a tour file to the reviewer and tracks which steps were read.
