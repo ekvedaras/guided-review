@@ -15,6 +15,16 @@ pub struct PieceId {
     pub symbol: Option<String>,
 }
 
+impl PieceId {
+    /// `#Foo::handle` under its file header in the outline; a whole-file piece keeps its path.
+    pub fn within_file(&self) -> String {
+        match &self.symbol {
+            Some(symbol) => format!("#{symbol}"),
+            None => self.path.clone(),
+        }
+    }
+}
+
 impl fmt::Display for PieceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.symbol {

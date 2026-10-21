@@ -20,6 +20,10 @@ impl fmt::Display for Outline<'_> {
         writeln!(f, "head: {}", self.head)?;
         writeln!(
             f,
+            "piece id: <file>#<symbol>, or <file> for a whole-file piece"
+        )?;
+        writeln!(
+            f,
             "{}, {}, +{added} −{removed}",
             counted(self.files.len(), "file", "files"),
             counted(pieces, "piece", "pieces")
@@ -36,7 +40,11 @@ impl fmt::Display for Outline<'_> {
                 write!(
                     f,
                     "  {}  {}  {}  +{} −{}",
-                    piece.id, piece.kind, piece.status, piece.added, piece.removed
+                    piece.id.within_file(),
+                    piece.kind,
+                    piece.status,
+                    piece.added,
+                    piece.removed
                 )?;
                 if let Some(signature) = &piece.signature {
                     write!(f, "  {signature}")?;

@@ -45,10 +45,11 @@ class Order
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +1 −1
 
 app/Order.php  modified  +1 −1
-  app/Order.php#Order::total  method  modified  +1 −1  public function total(): int
+  #Order::total  method  modified  +1 −1  public function total(): int
 "
     );
 }
@@ -106,11 +107,12 @@ class Order
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 2 pieces, +4 −2
 
 app/Order.php  modified  +4 −2
-  app/Order.php#Order::discount  method  modified  +3 −1  public function discount(): int
-  app/Order.php#Order::total  method  modified  +1 −1  public function total(): int
+  #Order::discount  method  modified  +3 −1  public function discount(): int
+  #Order::total  method  modified  +1 −1  public function total(): int
 "
     );
 }
@@ -177,14 +179,15 @@ function money(int $cents): string
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+piece id: <file>#<symbol>, or <file> for a whole-file piece
 2 files, 3 pieces, +2 −7
 
 app/Order.php  modified  +1 −6
-  app/Order.php#Order  class  modified  +1 −1  final class Order
-  app/Order.php#Order::legacyTotal  method  deleted  +0 −5  public function legacyTotal(): int
+  #Order  class  modified  +1 −1  final class Order
+  #Order::legacyTotal  method  deleted  +0 −5  public function legacyTotal(): int
 
 app/helpers.php  modified  +1 −1
-  app/helpers.php#money  function  modified  +1 −1  function money(int $cents): string
+  #money  function  modified  +1 −1  function money(int $cents): string
 "
     );
 }
@@ -215,10 +218,11 @@ const ORDER_OUTLINE: &str = "\
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +1 −1
 
 app/Order.php  modified  +1 −1
-  app/Order.php#Order::total  method  modified  +1 −1  public function total(): int
+  #Order::total  method  modified  +1 −1  public function total(): int
 ";
 
 #[test]
@@ -329,6 +333,7 @@ fn outline_lists_a_non_php_file_as_one_whole_file_piece() {
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +2 −1
 
 docs/setup.md  modified  +2 −1
@@ -378,7 +383,7 @@ class Order
 
     assert!(
         run.stdout_with(&[]).ends_with(
-            "  app/Order.php#Order::place  method  modified  +1 −1  public function place( Cart $cart, string $url = 'https://shop.test', ): void\n"
+            "  #Order::place  method  modified  +1 −1  public function place( Cart $cart, string $url = 'https://shop.test', ): void\n"
         ),
         "{}",
         run.stdout
@@ -453,7 +458,7 @@ class Order
 
     assert!(
         run.stdout_with(&[]).ends_with(
-            "  app/Order.php#Order::pricing  method  modified  +1 −1  public function pricing(): Pricing\n"
+            "  #Order::pricing  method  modified  +1 −1  public function pricing(): Pricing\n"
         ),
         "{}",
         run.stdout
@@ -477,6 +482,7 @@ fn a_renamed_php_file_without_line_changes_is_one_whole_file_piece() {
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +0 −0
 
 app/Purchase.php  renamed  +0 −0
