@@ -17,3 +17,5 @@
 **Tour file**: The saved form of a tour. Any viewer can show it.
 
 **Viewer**: A thing that shows a tour file to the reviewer and tracks which steps were read.
+
+**Read tick**: A mark that says the reviewer has read a step. The viewer owns it. A step can get a read tick or lose it when the reviewer marks its files as viewed, or not viewed, on GitHub.
