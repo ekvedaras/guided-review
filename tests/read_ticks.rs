@@ -228,3 +228,32 @@ fn writers_saving_the_same_state_file_at_once_all_succeed_and_leave_no_temp_file
     assert_eq!(shop.state_on_disk()["read_ticks"], json!({}));
     assert_eq!(shop.files_in_state_folder(), ["7.json", "7.json.lock"]);
 }
+
+#[test]
+fn changes_made_to_the_same_state_file_at_once_are_all_kept() {
+    let shop = Shop::with_pull();
+    let head = guided_review::pull_request::Sha::new(&shop.head);
+    let writers: Vec<_> = (0..8)
+        .map(|writer| {
+            let (state_file, head) = (shop.state_file(), head.clone());
+            std::thread::spawn(move || {
+                (0..10)
+                    .map(|change| {
+                        let step = format!("step-{writer}-{change}");
+                        state_file.update(|state| state.tick(&step.as_str().into(), &head))
+                    })
+                    .collect::<anyhow::Result<Vec<()>>>()
+            })
+        })
+        .collect();
+
+    for writer in writers {
+        writer.join().unwrap().unwrap();
+    }
+
+    let ticks = shop.state_on_disk()["read_ticks"]
+        .as_object()
+        .unwrap()
+        .len();
+    assert_eq!(ticks, 80);
+}

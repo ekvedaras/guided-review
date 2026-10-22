@@ -82,9 +82,10 @@ impl ReviewStateFile {
     /// Reads the file again before changing it: the viewer and the Asks each keep their own
     /// copy in memory, and neither may write the other's section back stale.
     pub fn update(&self, change: impl FnOnce(&mut ReviewState)) -> anyhow::Result<()> {
+        let _lock = self.lock()?;
         let mut state = self.load()?;
         change(&mut state);
-        self.save(&state)
+        self.write(&state)
     }
 
     pub fn save(&self, state: &ReviewState) -> anyhow::Result<()> {
