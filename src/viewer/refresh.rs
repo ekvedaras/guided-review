@@ -54,7 +54,7 @@ impl RefreshBrief {
             .collect();
         let unplaced_new_pieces = coverage::uncovered(tour, files)
             .into_iter()
-            .map(|piece| piece.id.to_string())
+            .map(|part| part.piece.id.to_string())
             .filter(|id| record.status_of(id) == Some(RepinStatus::New))
             .collect();
         let new_or_changed_pieces = record
