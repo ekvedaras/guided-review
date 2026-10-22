@@ -1,7 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString, Stateful,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
+    Stateful,
     StatefulInteractiveElement, Styled, Subscription, Task, Window, actions, div, px,
 };
 
@@ -33,6 +34,7 @@ use crate::app::components::text_input::TextDraft;
 use crate::app::components::thread_view::{
     OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
+use crate::app::frame_stats::{FrameStats, FrameStatsMode, ScriptMove};
 use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
@@ -89,6 +91,8 @@ pub struct OneStepLayout {
     is_retrying_comments: bool,
     is_syncing: bool,
     sync_again: bool,
+    screen_scroll: ScrollHandle,
+    frame_stats: Option<FrameStats>,
     _focus_subscription: Subscription,
     jump: Entity<JumpPalette>,
     /// `None` hides every Open in IDE button.
@@ -168,9 +172,20 @@ impl OneStepLayout {
             is_retrying_comments: false,
             is_syncing: false,
             sync_again: false,
+            screen_scroll: ScrollHandle::new(),
+            frame_stats: FrameStatsMode::from_env().map(FrameStats::new),
             _focus_subscription: focus_subscription,
             _use_as_comment_subscription: use_as_comment_subscription,
         };
+        if layout.frame_stats.is_some() {
+            cx.on_app_quit(|this, _| {
+                if let Some(stats) = &this.frame_stats {
+                    stats.report_on_quit();
+                }
+                async {}
+            })
+            .detach();
+        }
         layout.start_background_work(source, cx);
         layout
     }
@@ -199,6 +214,9 @@ impl OneStepLayout {
             this.update(cx, |this, cx| {
                 this.review.set_files_at_head(files_at_head);
                 this.review.set_highlights(highlights);
+                if let Some(stats) = this.frame_stats.as_mut() {
+                    stats.code_arrived();
+                }
                 cx.notify();
             })
             .ok();
@@ -283,6 +301,30 @@ impl OneStepLayout {
             .update(cx, |panel, cx| panel.review_changed(review, cx));
         self.diagrams = Self::new_diagrams(cx);
         self.start_background_work(updated.source, cx);
+    }
+
+    fn run_scroll_script(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(stats) = self
+            .frame_stats
+            .as_mut()
+            .filter(|stats| stats.is_scroll_script())
+        else {
+            return;
+        };
+        if let ScriptMove::ScreenDone(report) = stats.scroll_script_frame(&self.screen_scroll) {
+            let active = if window.is_window_active() {
+                "active"
+            } else {
+                "INACTIVE window"
+            };
+            eprintln!("{:?} ({active}): {report}", self.review.screen());
+            if !self.review.go_forward() {
+                cx.quit();
+                return;
+            }
+            self.screen_scroll.set_offset(gpui::point(px(0.), px(0.)));
+        }
+        window.request_animation_frame();
     }
 
     fn ask_button(
@@ -1386,6 +1428,8 @@ impl Render for OneStepLayout {
             Self::KEY_CONTEXT.to_string()
         };
         self.load_images(cx);
+        let frame_painted_marker = self.frame_stats.as_mut().map(FrameStats::frame_started);
+        self.run_scroll_script(window, cx);
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
@@ -1454,6 +1498,7 @@ impl Render for OneStepLayout {
                     .child(
                         div()
                             .id("screen")
+                            .track_scroll(&self.screen_scroll)
                             .flex_1()
                             .overflow_y_scroll()
                             .p_6()
@@ -1464,6 +1509,7 @@ impl Render for OneStepLayout {
                 row.child(self.ask.clone())
             })
             .child(self.jump.clone())
+            .children(frame_painted_marker)
     }
 }
 

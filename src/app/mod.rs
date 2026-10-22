@@ -2,6 +2,7 @@
 //! around a `viewer::Review`, so a new layout later is one new file in `layouts`.
 
 pub mod components;
+mod frame_stats;
 mod layouts;
 
 use std::sync::Arc;
