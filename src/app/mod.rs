@@ -4,14 +4,18 @@
 mod components;
 mod layouts;
 
+use std::sync::Arc;
+
 use gpui::{App, AppContext, Bounds, Focusable, KeyBinding, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
+use crate::code_source::CodeSource;
 use crate::viewer::Review;
+use components::palette::{Appearance, Palette};
 use layouts::one_step::{GoBack, GoForward, OneStepLayout};
 
 /// Blocks until the window is closed.
-pub fn run(review: Review) {
+pub fn run(review: Review, source: Arc<dyn CodeSource>) {
     application().run(move |cx: &mut App| {
         cx.bind_keys([
             KeyBinding::new("right", GoForward, Some(OneStepLayout::KEY_CONTEXT)),
@@ -25,7 +29,15 @@ pub fn run(review: Review) {
             ..Default::default()
         };
         cx.open_window(options, |window, cx| {
-            let layout = cx.new(|cx| OneStepLayout::new(review, cx));
+            Palette::set_active(Appearance::of_window(window.appearance()));
+            let layout = cx.new(|cx| OneStepLayout::new(review, source, cx));
+            layout.update(cx, |_, cx| {
+                cx.observe_window_appearance(window, |_, window, cx| {
+                    Palette::set_active(Appearance::of_window(window.appearance()));
+                    cx.notify();
+                })
+                .detach();
+            });
             layout.focus_handle(cx).focus(window, cx);
             layout
         })

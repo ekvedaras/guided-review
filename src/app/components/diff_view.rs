@@ -1,4 +1,7 @@
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px};
+use gpui::{
+    App, HighlightStyle, IntoElement, ParentElement, RenderOnce, Styled, StyledText, Window, div,
+    px,
+};
 
 use crate::viewer::{DiffLine, PieceDiff, Side};
 
@@ -77,8 +80,32 @@ impl RenderOnce for DiffRow {
             .child(line_number(base_number))
             .child(line_number(head_number))
             .child(div().w(px(16.)).flex_none().child(sign))
-            .child(div().flex_1().whitespace_nowrap().child(self.line.text))
+            .child(
+                div()
+                    .flex_1()
+                    .whitespace_nowrap()
+                    .child(highlighted(self.line)),
+            )
     }
+}
+
+fn highlighted(line: DiffLine) -> StyledText {
+    let highlights: Vec<_> = line
+        .spans
+        .iter()
+        .filter(|span| {
+            line.text.is_char_boundary(span.range.start)
+                && line.text.is_char_boundary(span.range.end)
+        })
+        .map(|span| {
+            let style = HighlightStyle {
+                color: Some(Palette::code(span.capture).into()),
+                ..Default::default()
+            };
+            (span.range.clone(), style)
+        })
+        .collect();
+    StyledText::new(line.text).with_highlights(highlights)
 }
 
 fn line_number(number: String) -> impl IntoElement {

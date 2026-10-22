@@ -1,8 +1,9 @@
+use super::highlight::{Highlights, Span};
 use crate::coverage;
 use crate::pieces::{ChangedFile, Piece, PieceId};
 use crate::tour::{PieceRef, Step, Tour};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     Base,
     Head,
@@ -21,6 +22,8 @@ pub struct LineLocation {
 pub struct DiffLine {
     pub location: LineLocation,
     pub text: String,
+    /// Empty until the file's highlights are ready.
+    pub spans: Vec<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +41,12 @@ pub struct StepPage<'a> {
 }
 
 impl<'a> StepPage<'a> {
-    pub(super) fn of(step: &'a Step, tour: &Tour, files: &[ChangedFile]) -> Self {
+    pub(super) fn of(
+        step: &'a Step,
+        tour: &Tour,
+        files: &[ChangedFile],
+        highlights: &Highlights,
+    ) -> Self {
         let pieces = step
             .pieces
             .iter()
@@ -46,7 +54,7 @@ impl<'a> StepPage<'a> {
                 PieceRef::Rest { rest } => coverage::left_for_rest(tour, files, rest),
                 _ => pointer.named_pieces(files).unwrap_or_default(),
             })
-            .map(PieceDiff::of)
+            .map(|piece| PieceDiff::of(piece, highlights))
             .collect();
         Self {
             step,
@@ -58,7 +66,7 @@ impl<'a> StepPage<'a> {
 }
 
 impl PieceDiff {
-    fn of(piece: &Piece) -> Self {
+    fn of(piece: &Piece, highlights: &Highlights) -> Self {
         let on_side = |side: Side| {
             move |line: &crate::code_source::Line| DiffLine {
                 location: LineLocation {
@@ -67,6 +75,7 @@ impl PieceDiff {
                     line: line.number,
                 },
                 text: line.text.clone(),
+                spans: highlights.spans(side, &piece.id.path, line.number).to_vec(),
             }
         };
         let lines = piece

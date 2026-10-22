@@ -8,6 +8,7 @@ use crate::pieces::{self, ChangedFile};
 use crate::pull_request::Sha;
 use crate::tour::{Step, Tour};
 
+use super::highlight::{HighlightRequest, Highlights};
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::step_page::StepPage;
 
@@ -58,6 +59,7 @@ pub struct Review {
     state_file: ReviewStateFile,
     /// Ticked steps the reviewer opened again to reread. Not saved: a reopened app shows them folded.
     unfolded: BTreeSet<StepId>,
+    highlights: Highlights,
 }
 
 impl Review {
@@ -82,7 +84,21 @@ impl Review {
             state,
             state_file,
             unfolded: BTreeSet::new(),
+            highlights: Highlights::default(),
         })
+    }
+
+    /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.
+    pub fn highlight_request(&self) -> HighlightRequest {
+        HighlightRequest::for_files(
+            &self.files,
+            &Sha::new(&self.tour.base),
+            &Sha::new(&self.tour.head),
+        )
+    }
+
+    pub fn set_highlights(&mut self, highlights: Highlights) {
+        self.highlights = highlights;
     }
 
     pub fn screen(&self) -> &Screen {
@@ -102,7 +118,7 @@ impl Review {
             return None;
         };
         let step = self.tour.steps().into_iter().find(|step| step.id == id.0)?;
-        let mut page = StepPage::of(step, &self.tour, &self.files);
+        let mut page = StepPage::of(step, &self.tour, &self.files, &self.highlights);
         page.is_ticked = self.is_ticked(id);
         page.is_folded = self.is_folded(id);
         Some(page)

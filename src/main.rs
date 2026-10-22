@@ -163,6 +163,6 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
     let review = Review::open(tour, source.as_ref(), ReviewStateFile::for_pr(&home, pr))?;
 
-    guided_review::app::run(review);
+    guided_review::app::run(review, source.into());
     Ok(())
 }

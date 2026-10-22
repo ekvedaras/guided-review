@@ -4,8 +4,11 @@ use gpui::{
     px,
 };
 
+use std::sync::Arc;
+
 use crate::app::components::diff_view::DiffView;
 use crate::app::components::palette::{Palette, TEXT_FONT};
+use crate::code_source::CodeSource;
 use crate::viewer::{Review, Screen, StepId, StepPage};
 
 actions!(one_step, [GoForward, GoBack]);
@@ -19,7 +22,21 @@ pub struct OneStepLayout {
 impl OneStepLayout {
     pub const KEY_CONTEXT: &str = "OneStepLayout";
 
-    pub fn new(review: Review, cx: &mut Context<Self>) -> Self {
+    /// The step shows plain code at once; the colours follow when the background pass is done.
+    pub fn new(review: Review, source: Arc<dyn CodeSource>, cx: &mut Context<Self>) -> Self {
+        let request = review.highlight_request();
+        cx.spawn(async move |this, cx| {
+            let highlights = cx
+                .background_executor()
+                .spawn(async move { request.compute(source.as_ref()) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.review.set_highlights(highlights);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         Self {
             review,
             focus: cx.focus_handle(),
