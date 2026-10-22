@@ -13,7 +13,7 @@ use guided_review::tour::Tour;
 use support::{FakeGitHub, FixtureRepo, GuidedReview};
 use tempfile::TempDir;
 
-const PR: &str = "https://github.com/acme/shop/pull/7";
+const PR: &str = "https://github.com/acme/shop.app/pull/7";
 const NOTE: &str = "Flow is cart to checkout to receipt. Needs a sequence diagram on checkout.";
 
 struct FakeWriter<'a> {
@@ -119,7 +119,7 @@ fn eval_add_stores_the_note_for_the_pr_under_the_evals_folder() {
     assert!(run.success, "{}", run.stderr);
     let stored = std::fs::read_to_string(
         repo.home()
-            .join(".guided-review/evals/notes/acme/shop/7.md"),
+            .join(".guided-review/evals/notes/acme/shop.app/7.md"),
     )
     .unwrap();
     assert_eq!(stored.trim(), NOTE);
@@ -214,7 +214,7 @@ fn a_run_prints_its_scores_and_is_saved_with_date_and_skill_version() {
         "2026-10-22",
     );
 
-    assert!(report.contains("acme/shop#7"), "{report}");
+    assert!(report.contains("acme/shop.app#7"), "{report}");
     assert!(report.contains("order: partial - order reason"), "{report}");
     assert!(report.contains("skim: pass - skim reason"), "{report}");
     assert!(report.contains("first run"), "{report}");
@@ -254,7 +254,7 @@ fn the_next_run_prints_what_changed_since_the_last_one() {
 
     assert!(report.contains("since 2026-10-22"), "{report}");
     assert!(
-        report.contains("acme/shop#7 order: pass -> fail - order reason"),
+        report.contains("acme/shop.app#7 order: pass -> fail - order reason"),
         "{report}"
     );
     assert!(!report.contains("grouping: pass -> "), "{report}");

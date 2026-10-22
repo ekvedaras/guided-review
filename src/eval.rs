@@ -190,9 +190,9 @@ impl EvalStore {
         for owner in sorted_entries(&self.root.join("notes"))? {
             for repo in sorted_entries(&owner)? {
                 for note in sorted_entries(&repo)? {
-                    let names = [&owner, &repo, &note]
-                        .map(|path| path.file_stem().unwrap_or_default().to_string_lossy());
-                    let [owner, name, number] = names;
+                    let owner = owner.file_name().unwrap_or_default().to_string_lossy();
+                    let name = repo.file_name().unwrap_or_default().to_string_lossy();
+                    let number = note.file_stem().unwrap_or_default().to_string_lossy();
                     test_set.push(TestPr {
                         pr: format!("https://github.com/{owner}/{name}/pull/{number}").parse()?,
                         note: std::fs::read_to_string(&note)?,
@@ -286,7 +286,9 @@ impl Eval<'_> {
             skill_version: self.skill.version(),
             prs,
         };
-        self.store.save_run(&record)?;
+        if !record.prs.is_empty() {
+            self.store.save_run(&record)?;
+        }
         Ok(Report {
             record,
             previous,
