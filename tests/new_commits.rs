@@ -9,7 +9,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Review, ReviewStateFile, Side, StepId, TourUpdater, ViewedState, repin_tour,
+    Review, ReviewStateFile, Side, StepId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
 use support::FixtureRepo;
@@ -508,13 +508,13 @@ fn the_change_since_read_is_built_from_hunks_with_context_around_its_changes() {
 }
 
 #[test]
-fn update_tour_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
+fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     let shop = Shop::with_tour_at_first_head();
     shop.tick(&["total", "keep"]);
     let second_head = shop.commit_second_head();
     let github = FakeGitHub::with_pull(&shop.base, &second_head, &SentLog::default());
     let clone = shop.repo.path().to_path_buf();
-    let updater = TourUpdater {
+    let repinner = TourRepinner {
         home: shop.repo.home().to_path_buf(),
         pr: shop.pr(),
         pick_code_source: Arc::new(move |_| {
@@ -524,11 +524,11 @@ fn update_tour_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
         }),
     };
 
-    let updated = updater.run(&github).unwrap();
+    let repinned = repinner.run(&github).unwrap();
 
-    assert_eq!(updated.review.head(), second_head);
+    assert_eq!(repinned.review.head(), second_head);
     assert_eq!(Tour::load(&shop.tour_path()).unwrap().head, second_head);
-    assert_eq!(ticked(&updated.review), ["keep"]);
+    assert_eq!(ticked(&repinned.review), ["keep"]);
 }
 
 #[test]

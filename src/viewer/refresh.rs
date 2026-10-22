@@ -8,7 +8,7 @@ use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use crate::repin::RepinStatus;
 use crate::tour::Tour;
 
-use super::new_commits::{PickCodeSource, UpdatedTour};
+use super::new_commits::{PickCodeSource, RepinnedTour};
 use super::ports::RefreshWriter;
 use super::review::{Review, StepId};
 use super::review_state::{RepinRecord, ReviewStateFile};
@@ -125,7 +125,7 @@ pub struct TourRefresher {
 
 impl TourRefresher {
     /// Blocks until the AI is done; the app runs it off the main thread.
-    pub fn run(&self) -> anyhow::Result<UpdatedTour> {
+    pub fn run(&self) -> anyhow::Result<RepinnedTour> {
         self.writer.refresh(&self.pr)?;
         let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
         let pinned = PullRequestTips {
@@ -138,7 +138,7 @@ impl TourRefresher {
             source.as_ref(),
             ReviewStateFile::for_pr(&self.home, &self.pr),
         )?;
-        Ok(UpdatedTour {
+        Ok(RepinnedTour {
             review,
             source: source.into(),
         })

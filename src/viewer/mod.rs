@@ -43,7 +43,7 @@ pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snipp
 pub use image_preview::{ImageCache, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage};
 pub use jump::{JumpKind, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
-pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
+pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists, RefreshWriter,
     ThreadNotCreated, TurnStopper, ViewedFile, ViewedState, ViewedSyncUnavailable,

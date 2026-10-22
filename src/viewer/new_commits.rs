@@ -33,20 +33,20 @@ pub type PickCodeSource =
     Arc<dyn Fn(&PullRequestTips) -> anyhow::Result<Box<dyn CodeSource>> + Send + Sync>;
 
 /// The "Update tour" button's work: what the CLI's `repin` does, then a fresh `Review` on the result.
-pub struct TourUpdater {
+pub struct TourRepinner {
     pub home: PathBuf,
     pub pr: PullRequestUrl,
     pub pick_code_source: PickCodeSource,
 }
 
-pub struct UpdatedTour {
+pub struct RepinnedTour {
     pub review: Review,
     pub source: Arc<dyn CodeSource>,
 }
 
-impl TourUpdater {
+impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
-    pub fn run(&self, github: &dyn GitHubPort) -> anyhow::Result<UpdatedTour> {
+    pub fn run(&self, github: &dyn GitHubPort) -> anyhow::Result<RepinnedTour> {
         let tips = github.pull_request_tips(&self.pr)?;
         let source = (self.pick_code_source)(&tips)?;
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
@@ -59,7 +59,7 @@ impl TourUpdater {
             &tips.head,
         )?;
         let review = Review::open(tour, source.as_ref(), state_file)?;
-        Ok(UpdatedTour {
+        Ok(RepinnedTour {
             review,
             source: source.into(),
         })

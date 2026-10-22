@@ -5,8 +5,14 @@ use gpui::{
 
 use crate::viewer::RefreshBrief;
 
-use super::new_commits_banner::TourUpdate;
 use super::palette::Palette;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshProgress {
+    Idle,
+    Running,
+    Failed(String),
+}
 
 type OnRefresh = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -15,19 +21,19 @@ type OnRefresh = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 #[derive(IntoElement)]
 pub struct RefreshBanner {
     brief: RefreshBrief,
-    refresh: TourUpdate,
+    progress: RefreshProgress,
     on_refresh: OnRefresh,
 }
 
 impl RefreshBanner {
     pub fn new(
         brief: RefreshBrief,
-        refresh: TourUpdate,
+        progress: RefreshProgress,
         on_refresh: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             brief,
-            refresh,
+            progress,
             on_refresh: Box::new(on_refresh),
         }
     }
@@ -35,9 +41,9 @@ impl RefreshBanner {
 
 impl RenderOnce for RefreshBanner {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let message = match &self.refresh {
-            TourUpdate::Running => "Refreshing the tour with your claude…".to_string(),
-            TourUpdate::Idle | TourUpdate::Failed(_) => format!(
+        let message = match &self.progress {
+            RefreshProgress::Running => "Refreshing the tour with your claude…".to_string(),
+            RefreshProgress::Idle | RefreshProgress::Failed(_) => format!(
                 "{} to rewrite, {} to place since the new commits.",
                 counted(self.brief.stale_steps.len(), "step", "steps"),
                 counted(
@@ -47,11 +53,11 @@ impl RenderOnce for RefreshBanner {
                 ),
             ),
         };
-        let button_label = match &self.refresh {
-            TourUpdate::Failed(_) => "Try again",
-            TourUpdate::Idle | TourUpdate::Running => "Refresh",
+        let button_label = match &self.progress {
+            RefreshProgress::Failed(_) => "Try again",
+            RefreshProgress::Idle | RefreshProgress::Running => "Refresh",
         };
-        let button = (self.refresh != TourUpdate::Running).then(|| {
+        let button = (self.progress != RefreshProgress::Running).then(|| {
             div()
                 .id("refresh-tour")
                 .px_3()
@@ -68,9 +74,9 @@ impl RenderOnce for RefreshBanner {
                 "{hint}. A full redo may read better: `/tour --redo` in claude."
             )))
         });
-        let error = match &self.refresh {
-            TourUpdate::Failed(error) => Some(div().child(SharedString::from(error.clone()))),
-            TourUpdate::Idle | TourUpdate::Running => None,
+        let error = match &self.progress {
+            RefreshProgress::Failed(error) => Some(div().child(SharedString::from(error.clone()))),
+            RefreshProgress::Idle | RefreshProgress::Running => None,
         };
         div()
             .px_6()

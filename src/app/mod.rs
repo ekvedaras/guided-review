@@ -14,7 +14,7 @@ use gpui_platform::application;
 
 use crate::code_source::CodeSource;
 use crate::ide::Ide;
-use crate::viewer::{GitHubPort, Review, TourRefresher, TourUpdater};
+use crate::viewer::{GitHubPort, Review, TourRefresher, TourRepinner};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
@@ -29,7 +29,7 @@ pub fn run(
     ask: AskSetup,
     ide: Option<Ide>,
     github: Arc<dyn GitHubPort>,
-    updater: TourUpdater,
+    repinner: TourRepinner,
     refresher: TourRefresher,
 ) {
     application().run(move |cx: &mut App| {
@@ -58,7 +58,7 @@ pub fn run(
                 github,
                 ide,
                 tour_work: TourWork {
-                    updater: Arc::new(updater),
+                    repinner: Arc::new(repinner),
                     refresher: Arc::new(refresher),
                 },
             };

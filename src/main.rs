@@ -22,7 +22,7 @@ use guided_review::tour::Tour;
 use guided_review::tour_check;
 use guided_review::viewer::{
     Asks, GitHubPort, PickCodeSource, RefreshBrief, Review, ReviewStateFile, TourRefresher,
-    TourUpdater, repin_tour,
+    TourRepinner, repin_tour,
 };
 
 #[derive(Parser)]
@@ -326,7 +326,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
             clone.clone().unwrap_or_else(|| home.clone()),
         )),
     };
-    let updater = TourUpdater {
+    let repinner = TourRepinner {
         home,
         pr: pr.clone(),
         pick_code_source,
@@ -338,7 +338,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
         ask,
         ide,
         Arc::new(github),
-        updater,
+        repinner,
         refresher,
     );
     Ok(())

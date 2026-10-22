@@ -8,10 +8,10 @@ use crate::viewer::OldHead;
 
 use super::palette::Palette;
 
-type OnUpdate = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type OnRepin = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TourUpdate {
+pub enum RepinProgress {
     Idle,
     Running,
     Failed(String),
@@ -21,39 +21,39 @@ pub enum TourUpdate {
 #[derive(IntoElement)]
 pub struct NewCommitsBanner {
     old_head: OldHead,
-    update: TourUpdate,
-    on_update: OnUpdate,
+    progress: RepinProgress,
+    on_repin: OnRepin,
 }
 
 impl NewCommitsBanner {
     pub fn new(
         old_head: OldHead,
-        update: TourUpdate,
-        on_update: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        progress: RepinProgress,
+        on_repin: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             old_head,
-            update,
-            on_update: Box::new(on_update),
+            progress,
+            on_repin: Box::new(on_repin),
         }
     }
 }
 
 impl RenderOnce for NewCommitsBanner {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let message = match &self.update {
-            TourUpdate::Running => "Updating the tour…".to_string(),
-            TourUpdate::Idle | TourUpdate::Failed(_) => format!(
+        let message = match &self.progress {
+            RepinProgress::Running => "Updating the tour…".to_string(),
+            RepinProgress::Idle | RepinProgress::Failed(_) => format!(
                 "New commits. The tour is for {}, the PR is now at {}. Update the tour to comment.",
                 short(&self.old_head.tour_head),
                 short(&self.old_head.pr_head)
             ),
         };
-        let button_label = match &self.update {
-            TourUpdate::Failed(_) => "Try again",
-            TourUpdate::Idle | TourUpdate::Running => "Update tour",
+        let button_label = match &self.progress {
+            RepinProgress::Failed(_) => "Try again",
+            RepinProgress::Idle | RepinProgress::Running => "Update tour",
         };
-        let button = (self.update != TourUpdate::Running).then(|| {
+        let button = (self.progress != RepinProgress::Running).then(|| {
             div()
                 .id("update-tour")
                 .px_3()
@@ -62,12 +62,12 @@ impl RenderOnce for NewCommitsBanner {
                 .border_1()
                 .border_color(Palette::border())
                 .cursor_pointer()
-                .on_click(self.on_update)
+                .on_click(self.on_repin)
                 .child(button_label)
         });
-        let error = match &self.update {
-            TourUpdate::Failed(error) => Some(div().child(SharedString::from(error.clone()))),
-            TourUpdate::Idle | TourUpdate::Running => None,
+        let error = match &self.progress {
+            RepinProgress::Failed(error) => Some(div().child(SharedString::from(error.clone()))),
+            RepinProgress::Idle | RepinProgress::Running => None,
         };
         div()
             .px_6()

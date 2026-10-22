@@ -26,9 +26,9 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::image_row::{ImagePictures, ImageRow};
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::markdown_view::OpenDetails;
-use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
+use crate::app::components::new_commits_banner::{NewCommitsBanner, RepinProgress};
 use crate::app::components::palette::{Palette, TEXT_FONT};
-use crate::app::components::refresh_banner::RefreshBanner;
+use crate::app::components::refresh_banner::{RefreshBanner, RefreshProgress};
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::text_input::TextDraft;
 use crate::app::components::thread_view::{
@@ -43,8 +43,8 @@ use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
     Ask, CommentPlace, CommentResult, FinishResult, GitHubPort, ImageCache, LineLocation,
-    MoreContext, OldHead, Place, QueuedComment, RefreshBrief, Review, Screen, SendMode, StepId,
-    ThreadView, TourRefresher, TourUpdater, UpdatedTour,
+    MoreContext, OldHead, Place, QueuedComment, RefreshBrief, RepinnedTour, Review, Screen,
+    SendMode, StepId, ThreadView, TourRefresher, TourRepinner,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -56,7 +56,7 @@ actions!(one_step, [GoForward, GoBack, ToggleJump]);
 
 /// The two buttons that move a tour on: Update tour (no AI) and Refresh (the local `claude`).
 pub struct TourWork {
-    pub updater: Arc<TourUpdater>,
+    pub repinner: Arc<TourRepinner>,
     pub refresher: Arc<TourRefresher>,
 }
 
@@ -86,10 +86,10 @@ pub struct OneStepLayout {
     image_pictures: HashMap<String, Rc<ImagePictures>>,
     loading_images: HashSet<String>,
     diagrams: Entity<Diagrams>,
-    updater: Arc<TourUpdater>,
-    tour_update: TourUpdate,
+    repinner: Arc<TourRepinner>,
+    repin_progress: RepinProgress,
     refresher: Arc<TourRefresher>,
-    tour_refresh: TourUpdate,
+    refresh_progress: RefreshProgress,
     focus: FocusHandle,
     ask: Entity<AskPanel>,
     pr_head_check: Option<Task<()>>,
@@ -207,10 +207,10 @@ impl OneStepLayout {
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
             diagrams,
-            updater: tour_work.updater,
-            tour_update: TourUpdate::Idle,
+            repinner: tour_work.repinner,
+            repin_progress: RepinProgress::Idle,
             refresher: tour_work.refresher,
-            tour_refresh: TourUpdate::Idle,
+            refresh_progress: RefreshProgress::Idle,
             focus,
             ask,
             jump,
@@ -348,28 +348,28 @@ impl OneStepLayout {
     }
 
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
-    fn update_tour(&mut self, cx: &mut Context<Self>) {
-        if self.tour_update == TourUpdate::Running {
+    fn repin(&mut self, cx: &mut Context<Self>) {
+        if self.repin_progress == RepinProgress::Running {
             return;
         }
-        self.tour_update = TourUpdate::Running;
+        self.repin_progress = RepinProgress::Running;
         self.save_typing_now();
         self.review.start_repin();
-        let (updater, github) = (self.updater.clone(), self.github.clone());
+        let (repinner, github) = (self.repinner.clone(), self.github.clone());
         cx.spawn(async move |this, cx| {
-            let updated = cx
+            let repinned = cx
                 .background_executor()
-                .spawn(async move { updater.run(github.as_ref()) })
+                .spawn(async move { repinner.run(github.as_ref()) })
                 .await;
             this.update(cx, |this, cx| {
-                match updated {
-                    Ok(updated) => {
-                        this.tour_update = TourUpdate::Idle;
-                        this.reopen(updated, cx);
+                match repinned {
+                    Ok(repinned) => {
+                        this.repin_progress = RepinProgress::Idle;
+                        this.reopen(repinned, cx);
                     }
                     Err(error) => {
                         this.review.repin_failed();
-                        this.tour_update = TourUpdate::Failed(format!("{error:#}"));
+                        this.repin_progress = RepinProgress::Failed(format!("{error:#}"));
                     }
                 }
                 cx.notify();
@@ -381,10 +381,10 @@ impl OneStepLayout {
 
     /// Runs only on the button, in the background: the user's `claude` rewrites the marked steps.
     fn refresh_tour(&mut self, cx: &mut Context<Self>) {
-        if self.tour_refresh == TourUpdate::Running {
+        if self.refresh_progress == RefreshProgress::Running {
             return;
         }
-        self.tour_refresh = TourUpdate::Running;
+        self.refresh_progress = RefreshProgress::Running;
         self.save_typing_now();
         let refresher = self.refresher.clone();
         cx.spawn(async move |this, cx| {
@@ -395,10 +395,12 @@ impl OneStepLayout {
             this.update(cx, |this, cx| {
                 match refreshed {
                     Ok(refreshed) => {
-                        this.tour_refresh = TourUpdate::Idle;
+                        this.refresh_progress = RefreshProgress::Idle;
                         this.reopen(refreshed, cx);
                     }
-                    Err(error) => this.tour_refresh = TourUpdate::Failed(format!("{error:#}")),
+                    Err(error) => {
+                        this.refresh_progress = RefreshProgress::Failed(format!("{error:#}"))
+                    }
                 }
                 cx.notify();
             })
@@ -407,11 +409,11 @@ impl OneStepLayout {
         .detach();
     }
 
-    fn reopen(&mut self, updated: UpdatedTour, cx: &mut Context<Self>) {
+    fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
         let screen = self.review.screen().clone();
         self.save_typing_now();
-        self.review = updated.review;
-        self.source = updated.source.clone();
+        self.review = repinned.review;
+        self.source = repinned.source.clone();
         self.image_pictures.clear();
         self.loading_images.clear();
         if let Screen::Step(id) = screen {
@@ -423,7 +425,7 @@ impl OneStepLayout {
         self.diagrams = Self::new_diagrams(cx);
         self.rows = PageRows::none();
         self.review_changed(cx);
-        self.start_background_work(updated.source, cx);
+        self.start_background_work(repinned.source, cx);
     }
 
     /// Folded steps are opened, so the script scrolls through their pieces too.
@@ -1513,8 +1515,8 @@ impl Render for OneStepLayout {
                     .children(self.old_head.clone().map(|old_head| {
                         NewCommitsBanner::new(
                             old_head,
-                            self.tour_update.clone(),
-                            cx.listener(|this, _, _, cx| this.update_tour(cx)),
+                            self.repin_progress.clone(),
+                            cx.listener(|this, _, _, cx| this.repin(cx)),
                         )
                     }))
                     .children(self.lines_to_ask.clone().map(|place| {
@@ -1543,7 +1545,7 @@ impl Render for OneStepLayout {
                             .map(|brief| {
                                 RefreshBanner::new(
                                     brief,
-                                    self.tour_refresh.clone(),
+                                    self.refresh_progress.clone(),
                                     cx.listener(|this, _, _, cx| this.refresh_tour(cx)),
                                 )
                             }),
