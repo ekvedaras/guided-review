@@ -153,6 +153,43 @@ pub struct Piece {
     moved_body: Option<String>,
 }
 
+impl Piece {
+    fn new(
+        id: PieceId,
+        kind: PieceKind,
+        status: PieceStatus,
+        removed: &[&Line],
+        added: &[&Line],
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            status,
+            added: added.len(),
+            removed: removed.len(),
+            signature: None,
+            marks: Vec::new(),
+            diff_hash: DiffHash::of(removed, added),
+            removed_lines: removed.iter().copied().cloned().collect(),
+            added_lines: added.iter().copied().cloned().collect(),
+            image: None,
+            moved_body: None,
+        }
+    }
+
+    fn with_signature(self, signature: Option<String>) -> Self {
+        Self { signature, ..self }
+    }
+
+    fn with_marks(self, marks: Vec<PieceMark>) -> Self {
+        Self { marks, ..self }
+    }
+
+    fn with_moved_body(self, moved_body: Option<String>) -> Self {
+        Self { moved_body, ..self }
+    }
+}
+
 #[derive(Debug)]
 pub struct ChangedFile {
     pub path: String,
@@ -172,11 +209,17 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
     source.read_ahead(&files_cut_reads(base, head, &diffs));
     let generated = generated_files(source, head);
     let mut files = diffs
-        .into_iter()
+        .iter()
         .map(|diff| {
-            let pieces = match cut_by_file_rules(source, base, head, &diff, &generated) {
+            let context = CutContext {
+                source,
+                base,
+                head,
+                diff,
+            };
+            let pieces = match context.cut_by_file_rules(&generated) {
                 Some(pieces) => pieces,
-                None => cut_by_symbols(source, base, head, &diff)?,
+                None => context.cut_by_symbols()?,
             };
             Ok(ChangedFile {
                 path: diff.path().to_string(),
@@ -216,51 +259,6 @@ fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
         .collect()
 }
 
-fn cut_by_symbols(
-    source: &dyn CodeSource,
-    base: &Sha,
-    head: &Sha,
-    diff: &FileDiff,
-) -> anyhow::Result<Vec<Piece>> {
-    let symbol_pieces = match Language::for_path(diff.path()) {
-        Some(language) => cut_symbols(source, base, head, diff, language)?,
-        None => Vec::new(),
-    };
-    Ok(if symbol_pieces.is_empty() {
-        vec![whole_file_piece(diff)]
-    } else {
-        symbol_pieces
-    })
-}
-
-/// Every file-level decision, made before any symbol is looked for.
-/// `None` means the file is a normal source file and symbols decide its pieces.
-fn cut_by_file_rules(
-    source: &dyn CodeSource,
-    base: &Sha,
-    head: &Sha,
-    diff: &FileDiff,
-    generated: &GeneratedFiles,
-) -> Option<Vec<Piece>> {
-    if generated.contains(diff.path()) {
-        let mut piece = whole_file_piece(diff);
-        piece.marks.push(PieceMark::Generated);
-        return Some(vec![piece]);
-    }
-    if image_facts::is_image_path(diff.path())
-        && (diff.binary || image_facts::is_svg_path(diff.path()))
-    {
-        return Some(vec![image_piece(source, base, head, diff)]);
-    }
-    if diff.binary || diff.status() == FileStatus::Deleted {
-        return Some(vec![whole_file_piece(diff)]);
-    }
-    if is_cut_per_hunk(diff.path()) && !diff.hunks.is_empty() {
-        return Some(hunk_pieces(diff));
-    }
-    None
-}
-
 const GIT_ATTRIBUTES: &str = ".gitattributes";
 
 fn generated_files(source: &dyn CodeSource, head: &Sha) -> GeneratedFiles {
@@ -268,175 +266,272 @@ fn generated_files(source: &dyn CodeSource, head: &Sha) -> GeneratedFiles {
     GeneratedFiles::new(&attributes_at_head)
 }
 
-fn hunk_pieces(diff: &FileDiff) -> Vec<Piece> {
-    diff.hunks
-        .iter()
-        .enumerate()
-        .map(|(index, hunk)| {
-            let removed: Vec<&Line> = hunk.removed.iter().collect();
-            let added: Vec<&Line> = hunk.added.iter().collect();
-            Piece {
-                id: PieceId {
-                    path: diff.path().to_string(),
-                    symbol: Some(format!("hunk-{}", index + 1)),
-                },
-                kind: PieceKind::Hunk,
-                status: diff.status().into(),
-                added: added.len(),
-                removed: removed.len(),
-                signature: Some(hunk.header.clone()),
-                marks: Vec::new(),
-                diff_hash: DiffHash::of(&removed, &added),
-                removed_lines: hunk.removed.clone(),
-                added_lines: hunk.added.clone(),
-                image: None,
-                moved_body: None,
-            }
-        })
-        .collect()
+/// What cutting one changed file into pieces needs to know.
+struct CutContext<'a> {
+    source: &'a dyn CodeSource,
+    base: &'a Sha,
+    head: &'a Sha,
+    diff: &'a FileDiff,
 }
 
-fn whole_file_piece(diff: &FileDiff) -> Piece {
-    let removed: Vec<&Line> = diff.removed.iter().collect();
-    let added: Vec<&Line> = diff.added.iter().collect();
-    Piece {
-        id: PieceId {
-            path: diff.path().to_string(),
-            symbol: None,
-        },
-        kind: PieceKind::File,
-        status: diff.status().into(),
-        added: added.len(),
-        removed: removed.len(),
-        signature: None,
-        marks: Vec::new(),
-        diff_hash: DiffHash::of(&removed, &added),
-        removed_lines: diff.removed.clone(),
-        added_lines: diff.added.clone(),
-        image: None,
-        moved_body: None,
+impl<'a> CutContext<'a> {
+    fn cut_by_symbols(&self) -> anyhow::Result<Vec<Piece>> {
+        let symbol_pieces = match Language::for_path(self.diff.path()) {
+            Some(language) => self.cut_symbols(language)?,
+            None => Vec::new(),
+        };
+        Ok(if symbol_pieces.is_empty() {
+            vec![self.whole_file_piece()]
+        } else {
+            symbol_pieces
+        })
+    }
+
+    /// Every file-level decision, made before any symbol is looked for.
+    /// `None` means the file is a normal source file and symbols decide its pieces.
+    fn cut_by_file_rules(&self, generated: &GeneratedFiles) -> Option<Vec<Piece>> {
+        let diff = self.diff;
+        if generated.contains(diff.path()) {
+            let piece = self.whole_file_piece();
+            return Some(vec![piece.with_marks(vec![PieceMark::Generated])]);
+        }
+        if image_facts::is_image_path(diff.path())
+            && (diff.binary || image_facts::is_svg_path(diff.path()))
+        {
+            return Some(vec![self.image_piece()]);
+        }
+        if diff.binary || diff.status() == FileStatus::Deleted {
+            return Some(vec![self.whole_file_piece()]);
+        }
+        if is_cut_per_hunk(diff.path()) && !diff.hunks.is_empty() {
+            return Some(self.hunk_pieces());
+        }
+        None
+    }
+
+    fn hunk_pieces(&self) -> Vec<Piece> {
+        self.diff
+            .hunks
+            .iter()
+            .enumerate()
+            .map(|(index, hunk)| {
+                let removed: Vec<&Line> = hunk.removed.iter().collect();
+                let added: Vec<&Line> = hunk.added.iter().collect();
+                Piece::new(
+                    PieceId {
+                        path: self.diff.path().to_string(),
+                        symbol: Some(format!("hunk-{}", index + 1)),
+                    },
+                    PieceKind::Hunk,
+                    self.diff.status().into(),
+                    &removed,
+                    &added,
+                )
+                .with_signature(Some(hunk.header.clone()))
+            })
+            .collect()
+    }
+
+    fn whole_file_piece(&self) -> Piece {
+        let removed: Vec<&Line> = self.diff.removed.iter().collect();
+        let added: Vec<&Line> = self.diff.added.iter().collect();
+        Piece::new(
+            PieceId {
+                path: self.diff.path().to_string(),
+                symbol: None,
+            },
+            PieceKind::File,
+            self.diff.status().into(),
+            &removed,
+            &added,
+        )
+    }
+
+    fn image_piece(&self) -> Piece {
+        let size_at = |sha: &Sha, path: Option<&str>| {
+            let path = path?;
+            if self.source.blob_info_at(sha, path).ok()?.size > image_facts::MAX_PREVIEW_BYTES {
+                return None;
+            }
+            let bytes = self.source.blob_at(sha, path).ok()?;
+            image_facts::measure(path, &bytes)
+        };
+        let mut piece = self.whole_file_piece();
+        piece.kind = PieceKind::Image;
+        piece.image = Some(ImageChange {
+            base: size_at(self.base, self.diff.old_path.as_deref()),
+            head: size_at(self.head, self.diff.new_path.as_deref()),
+        });
+        piece
+    }
+
+    fn symbols_at(
+        &self,
+        sha: &Sha,
+        path: Option<&str>,
+        language: Language,
+    ) -> anyhow::Result<Symbols> {
+        Ok(match path {
+            Some(path) => Symbols::find(&self.source.file_at(sha, path)?, language),
+            None => Symbols::find("", language),
+        })
+    }
+
+    fn cut_symbols(&self, language: Language) -> anyhow::Result<Vec<Piece>> {
+        let base_symbols = self.symbols_at(self.base, self.diff.old_path.as_deref(), language)?;
+        let head_symbols = self.symbols_at(self.head, self.diff.new_path.as_deref(), language)?;
+        let pairing = SymbolPairing::new(&base_symbols, &head_symbols);
+        let changes = join_blank_line_changes(self.changes_by_slot(&pairing));
+        let mut pieces: Vec<(usize, Piece)> = changes
+            .into_iter()
+            .map(|change| symbol_piece(&pairing, change, self.diff.status().into()))
+            .collect();
+        pieces.sort_by_key(|(position, _)| *position);
+        Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
+    }
+
+    /// Changed lines grouped by head slot: a removed line of a renamed symbol counts for its head name.
+    fn changes_by_slot(&self, pairing: &SymbolPairing) -> Vec<SymbolChange<'a>> {
+        let diff = self.diff;
+        let mut changes: Vec<SymbolChange> = Vec::new();
+        for line in &diff.removed {
+            let slot = pairing.head_slot_of_removed_line(line.number);
+            SymbolChange::entry_for(&mut changes, diff.path(), slot)
+                .removed
+                .push(line);
+        }
+        for line in &diff.added {
+            let slot = pairing.head.slot_at(line.number);
+            SymbolChange::entry_for(&mut changes, diff.path(), slot)
+                .added
+                .push(line);
+        }
+        changes
     }
 }
 
-fn image_piece(source: &dyn CodeSource, base: &Sha, head: &Sha, diff: &FileDiff) -> Piece {
-    let size_at = |sha: &Sha, path: Option<&str>| {
-        let path = path?;
-        if source.blob_info_at(sha, path).ok()?.size > image_facts::MAX_PREVIEW_BYTES {
-            return None;
-        }
-        let bytes = source.blob_at(sha, path).ok()?;
-        image_facts::measure(path, &bytes)
-    };
-    let mut piece = whole_file_piece(diff);
-    piece.kind = PieceKind::Image;
-    piece.image = Some(ImageChange {
-        base: size_at(base, diff.old_path.as_deref()),
-        head: size_at(head, diff.new_path.as_deref()),
-    });
-    piece
+/// The symbols of a file at base and at head, and which base symbol continues as which head symbol.
+struct SymbolPairing<'a> {
+    base: &'a Symbols,
+    head: &'a Symbols,
+    head_path_of_base: HashMap<String, String>,
+    base_path_of_head: HashMap<String, String>,
 }
 
-fn cut_symbols(
-    source: &dyn CodeSource,
-    base: &Sha,
-    head: &Sha,
-    diff: &FileDiff,
-    language: Language,
-) -> anyhow::Result<Vec<Piece>> {
-    let base_symbols = symbols_at(source, base, diff.old_path.as_deref(), language)?;
-    let head_symbols = symbols_at(source, head, diff.new_path.as_deref(), language)?;
-    let head_path_of_base = base_symbols.pair_with_head(&head_symbols);
-    let base_path_of_head: HashMap<&str, &str> = head_path_of_base
-        .iter()
-        .map(|(base, head)| (head.as_str(), base.as_str()))
-        .collect();
+impl<'a> SymbolPairing<'a> {
+    fn new(base: &'a Symbols, head: &'a Symbols) -> Self {
+        let head_path_of_base = base.pair_with_head(head);
+        let base_path_of_head = head_path_of_base
+            .iter()
+            .map(|(base, head)| (head.clone(), base.clone()))
+            .collect();
+        Self {
+            base,
+            head,
+            head_path_of_base,
+            base_path_of_head,
+        }
+    }
 
-    let mut changes: Vec<SymbolChange> = Vec::new();
-    for line in &diff.removed {
-        let slot = match base_symbols.slot_at(line.number) {
+    fn head_slot_of_removed_line(&self, base_line: usize) -> Slot {
+        match self.base.slot_at(base_line) {
             Slot::Symbol(path) => {
-                Slot::Symbol(head_path_of_base.get(&path).cloned().unwrap_or(path))
+                Slot::Symbol(self.head_path_of_base.get(&path).cloned().unwrap_or(path))
             }
             other => other,
+        }
+    }
+
+    fn slots_of(&self, head_slot: &Slot) -> SlotPair {
+        let base = match head_slot {
+            Slot::Symbol(path) => {
+                Slot::Symbol(self.base_path_of_head.get(path).unwrap_or(path).clone())
+            }
+            other => other.clone(),
         };
-        SymbolChange::entry_for(&mut changes, slot)
-            .removed
-            .push(line);
+        SlotPair {
+            base,
+            head: head_slot.clone(),
+        }
     }
-    for line in &diff.added {
-        let slot = head_symbols.slot_at(line.number);
-        SymbolChange::entry_for(&mut changes, slot).added.push(line);
+}
+
+/// The same part of a file as it is named at base and at head.
+struct SlotPair {
+    base: Slot,
+    head: Slot,
+}
+
+fn symbol_piece(
+    pairing: &SymbolPairing,
+    change: SymbolChange,
+    file_status: PieceStatus,
+) -> (usize, Piece) {
+    let slots = pairing.slots_of(&change.slot);
+    let in_base = symbol_in(pairing.base, &slots.base);
+    let in_head = symbol_in(pairing.head, &slots.head);
+    let (kind, status) = kind_and_status(&change.slot, in_base, in_head, file_status);
+    let position = in_head
+        .or(in_base)
+        .map_or_else(|| change.first_line(), |symbol| symbol.first_line);
+    let base_tokens = pairing.base.tokens_in(&slots.base);
+    let head_tokens = pairing.head.tokens_in(&slots.head);
+    let mark = mark_for(&change, &slots, pairing, base_tokens == head_tokens);
+    let moved_body = match (&change.slot, status) {
+        (Slot::Symbol(_), PieceStatus::Added) => Some(head_tokens.join(TOKEN_SEPARATOR)),
+        (Slot::Symbol(_), PieceStatus::Deleted) => Some(base_tokens.join(TOKEN_SEPARATOR)),
+        _ => None,
+    };
+    let piece = Piece::new(
+        PieceId {
+            path: change.path.to_string(),
+            symbol: Some(change.slot.id()),
+        },
+        kind,
+        status,
+        &change.removed,
+        &change.added,
+    )
+    .with_marks(mark.into_iter().collect())
+    .with_signature(in_head.or(in_base).map(|symbol| symbol.signature.clone()))
+    .with_moved_body(moved_body);
+    (position, piece)
+}
+
+fn kind_and_status(
+    slot: &Slot,
+    in_base: Option<&Symbol>,
+    in_head: Option<&Symbol>,
+    file_status: PieceStatus,
+) -> (PieceKind, PieceStatus) {
+    match (slot, in_base, in_head) {
+        (Slot::Imports, ..) => (PieceKind::Imports, file_status),
+        (Slot::Top, ..) => (PieceKind::Top, file_status),
+        (_, None, Some(symbol)) => (symbol.kind, PieceStatus::Added),
+        (_, Some(symbol), None) => (symbol.kind, PieceStatus::Deleted),
+        (_, Some(_), Some(symbol)) => (symbol.kind, PieceStatus::Modified),
+        (_, None, None) => unreachable!("a symbol slot is found on base or head"),
     }
+}
 
-    let changes = join_blank_line_changes(changes);
-
-    let mut pieces: Vec<(usize, Piece)> = changes
-        .into_iter()
-        .map(|change| {
-            let (base_slot, head_slot) = match &change.slot {
-                Slot::Symbol(path) => (
-                    Slot::Symbol(
-                        base_path_of_head
-                            .get(path.as_str())
-                            .map_or(path.clone(), |base| base.to_string()),
-                    ),
-                    change.slot.clone(),
-                ),
-                other => (other.clone(), other.clone()),
-            };
-            let in_base = symbol_in(&base_symbols, &base_slot);
-            let in_head = symbol_in(&head_symbols, &head_slot);
-            let (kind, status) = match (&change.slot, in_base, in_head) {
-                (Slot::Imports, ..) => (PieceKind::Imports, diff.status().into()),
-                (Slot::Top, ..) => (PieceKind::Top, diff.status().into()),
-                (_, None, Some(symbol)) => (symbol.kind, PieceStatus::Added),
-                (_, Some(symbol), None) => (symbol.kind, PieceStatus::Deleted),
-                (_, Some(_), Some(symbol)) => (symbol.kind, PieceStatus::Modified),
-                (_, None, None) => unreachable!("a symbol slot is found on base or head"),
-            };
-            let position = in_head
-                .or(in_base)
-                .map_or_else(|| change.first_line(), |symbol| symbol.first_line);
-            let base_tokens = base_symbols.tokens_in(&base_slot);
-            let head_tokens = head_symbols.tokens_in(&head_slot);
-            let same_tokens = base_tokens == head_tokens;
-            let mark = if !same_tokens {
-                None
-            } else if matches!(change.slot, Slot::Symbol(_))
-                && change.moves_code()
-                && base_symbols.text_in(&base_slot) == head_symbols.text_in(&head_slot)
-            {
-                Some(PieceMark::Moved)
-            } else {
-                Some(PieceMark::Format)
-            };
-            let moved_body = match (&change.slot, status) {
-                (Slot::Symbol(_), PieceStatus::Added) => Some(head_tokens.join(TOKEN_SEPARATOR)),
-                (Slot::Symbol(_), PieceStatus::Deleted) => Some(base_tokens.join(TOKEN_SEPARATOR)),
-                _ => None,
-            };
-            let piece = Piece {
-                id: PieceId {
-                    path: diff.path().to_string(),
-                    symbol: Some(change.slot.id()),
-                },
-                kind,
-                status,
-                marks: mark.into_iter().collect(),
-                added: change.added.len(),
-                removed: change.removed.len(),
-                signature: in_head.or(in_base).map(|symbol| symbol.signature.clone()),
-                diff_hash: DiffHash::of(&change.removed, &change.added),
-                removed_lines: change.removed.iter().copied().cloned().collect(),
-                added_lines: change.added.iter().copied().cloned().collect(),
-                image: None,
-                moved_body,
-            };
-            (position, piece)
-        })
-        .collect();
-    pieces.sort_by_key(|(position, _)| *position);
-    Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
+/// Same tokens on both sides means only formatting changed, or the symbol only moved inside the file.
+fn mark_for(
+    change: &SymbolChange,
+    slots: &SlotPair,
+    pairing: &SymbolPairing,
+    same_tokens: bool,
+) -> Option<PieceMark> {
+    if !same_tokens {
+        return None;
+    }
+    let moved = matches!(change.slot, Slot::Symbol(_))
+        && change.moves_code()
+        && pairing.base.text_in(&slots.base) == pairing.head.text_in(&slots.head);
+    Some(if moved {
+        PieceMark::Moved
+    } else {
+        PieceMark::Format
+    })
 }
 
 /// Blank-line-only changes ride along with the nearest piece that has real changes.
@@ -505,30 +600,20 @@ fn mark_moved_symbols(files: &mut [ChangedFile]) {
     }
 }
 
-fn symbols_at(
-    source: &dyn CodeSource,
-    sha: &Sha,
-    path: Option<&str>,
-    language: Language,
-) -> anyhow::Result<Symbols> {
-    Ok(match path {
-        Some(path) => Symbols::find(&source.file_at(sha, path)?, language),
-        None => Symbols::find("", language),
-    })
-}
-
 struct SymbolChange<'a> {
+    path: &'a str,
     slot: Slot,
     removed: Vec<&'a Line>,
     added: Vec<&'a Line>,
 }
 
 impl<'a> SymbolChange<'a> {
-    fn entry_for(changes: &mut Vec<Self>, slot: Slot) -> &mut Self {
+    fn entry_for<'c>(changes: &'c mut Vec<Self>, path: &'a str, slot: Slot) -> &'c mut Self {
         let index = match changes.iter().position(|change| change.slot == slot) {
             Some(index) => index,
             None => {
                 changes.push(Self {
+                    path,
                     slot,
                     removed: Vec::new(),
                     added: Vec::new(),
