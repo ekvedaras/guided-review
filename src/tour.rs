@@ -91,7 +91,11 @@ impl Tour {
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let text = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, text + "\n")
+        let mut temp_name = path.as_os_str().to_owned();
+        temp_name.push(".tmp");
+        let temp = std::path::PathBuf::from(temp_name);
+        std::fs::write(&temp, text + "\n")
+            .and_then(|()| std::fs::rename(&temp, path))
             .with_context(|| format!("could not write {}", path.display()))
     }
 

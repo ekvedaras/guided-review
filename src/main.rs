@@ -5,7 +5,7 @@ use guided_review::github::GitHub;
 use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::show::Show;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
@@ -92,11 +92,23 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let tips = github.pull_request_tips(pr)?;
     let current_dir = std::env::current_dir().context("could not read the current folder")?;
     let source = pick_code_source(&github, pr, &tips, &current_dir)?;
-    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-    let files = pieces::cut(source.as_ref(), &base, &tips.head)?;
-
-    tour.pin(pr, &base, &tips.head);
+    if tour.head.is_empty() {
+        let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
+        tour.pin(pr, &base, &tips.head);
+    } else {
+        if tour.pr.is_empty() {
+            tour.pr = pr.to_string();
+        }
+        if tour.head != tips.head.to_string() {
+            println!("warning: PR has new commits; run `guided-review repin`");
+        }
+    }
     tour.save(&tour_path)?;
+    let files = pieces::cut(
+        source.as_ref(),
+        &Sha::new(&tour.base),
+        &Sha::new(&tour.head),
+    )?;
 
     let report = tour_check::check(&tour, &files);
     print!("{report}");

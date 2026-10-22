@@ -252,3 +252,34 @@ fn hunk_pieces_are_valid_pointer_targets_and_cover_their_hunk() {
     ]));
     assert_eq!(both.stdout, "0 errors, 0 warnings\n");
 }
+
+#[test]
+fn check_never_moves_a_pinned_tour_when_the_pull_request_has_new_commits() {
+    let shop = Shop::with_pull();
+    let mut pinned = tour(vec![step(
+        "all",
+        json!([
+            {"file": "app/Order.php"},
+            {"file": "app/Services/Pricing.php"},
+            {"file": "README.md"},
+        ]),
+    )]);
+    pinned["pr"] = json!(PR);
+    pinned["base"] = json!(shop.base);
+    pinned["head"] = json!(shop.head);
+    shop.write_tour(pinned);
+    shop.repo.write("README.md", "hello\nworld\nagain\n");
+    let newer_head = shop.repo.commit("newer");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &shop.base, &newer_head);
+
+    let run = GuidedReview::new(&shop.repo, &github).run(&["check", PR]);
+
+    assert!(run.success, "{}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        "warning: PR has new commits; run `guided-review repin`\n0 errors, 0 warnings\n"
+    );
+    let written = shop.tour_on_disk();
+    assert_eq!(written["head"], shop.head.as_str());
+    assert_eq!(written["base"], shop.base.as_str());
+}
