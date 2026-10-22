@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::pull_request::Sha;
 
-pub trait CodeSource {
+pub trait CodeSource: Send + Sync {
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String>;
     fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>>;
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>>;

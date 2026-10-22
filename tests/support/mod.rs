@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+pub mod fake_ports;
+
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};

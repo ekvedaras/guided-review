@@ -29,12 +29,7 @@ impl PieceRef {
 pub fn uncovered<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<&'a Piece> {
     let steps = tour.steps();
     let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
-    let named: HashSet<String> = pointers
-        .iter()
-        .filter_map(|pointer| pointer.named_pieces(files))
-        .flatten()
-        .map(|piece| piece.id.to_string())
-        .collect();
+    let named = named_by_any_pointer(&pointers, files);
     let rest_folders: Vec<&str> = pointers
         .iter()
         .filter_map(|pointer| match pointer {
@@ -52,6 +47,29 @@ pub fn uncovered<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<&'a Piece> {
         })
         .flat_map(|file| &file.pieces)
         .filter(|piece| !named.contains(&piece.id.to_string()))
+        .collect()
+}
+
+/// What a `rest` pointer stands for: the changes under its folder that no other pointer names.
+pub fn left_for_rest<'a>(tour: &Tour, files: &'a [ChangedFile], folder: &str) -> Vec<&'a Piece> {
+    let steps = tour.steps();
+    let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
+    let named = named_by_any_pointer(&pointers, files);
+    let folder = folder.trim_matches('/');
+    files
+        .iter()
+        .filter(|file| is_under(&file.path, folder))
+        .flat_map(|file| &file.pieces)
+        .filter(|piece| !named.contains(&piece.id.to_string()))
+        .collect()
+}
+
+fn named_by_any_pointer(pointers: &[&PieceRef], files: &[ChangedFile]) -> HashSet<String> {
+    pointers
+        .iter()
+        .filter_map(|pointer| pointer.named_pieces(files))
+        .flatten()
+        .map(|piece| piece.id.to_string())
         .collect()
 }
 
