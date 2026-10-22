@@ -513,13 +513,50 @@ impl Review {
         ThreadActionRequest {
             pr: self.pr.clone(),
             action,
+            tour_is_old: self.old_head().is_some(),
         }
+    }
+
+    pub fn reply_draft(&self, thread_id: &str) -> Option<&str> {
+        self.state.reply_draft(thread_id)
+    }
+
+    /// Opens the reply box; the text typed in it is saved by `edit_reply`.
+    pub fn open_reply(&mut self, thread_id: &str) -> anyhow::Result<()> {
+        self.state.open_reply(thread_id);
+        self.save_viewer_sections()
+    }
+
+    pub fn edit_reply(&mut self, thread_id: &str, text: &str) -> anyhow::Result<()> {
+        self.state.write_reply(thread_id, text);
+        self.save_viewer_sections()
+    }
+
+    pub fn discard_reply(&mut self, thread_id: &str) -> anyhow::Result<()> {
+        self.state.drop_reply(thread_id);
+        self.save_viewer_sections()
+    }
+
+    pub fn finish_body(&self) -> &str {
+        self.state.finish_body()
+    }
+
+    pub fn edit_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
+        self.state.write_finish_body(text);
+        self.save_viewer_sections()
     }
 
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
         match (&outcome.result, &outcome.action) {
-            (ThreadActionResult::Done, ThreadAction::Reply { mode, .. }) => {
+            (
+                ThreadActionResult::Done,
+                ThreadAction::Reply {
+                    thread_id, mode, ..
+                },
+            ) => {
                 self.has_pending_review = Some(*mode == SendMode::AddToReview);
+                // The reply is on GitHub; a draft that fails to clear only shows again as text to discard.
+                let _ = self.discard_reply(thread_id);
             }
             (
                 ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),
@@ -603,6 +640,8 @@ impl Review {
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
         if outcome.result == FinishResult::Sent {
             self.has_pending_review = Some(false);
+            // The review is on GitHub; a body that fails to clear is only a draft left to overwrite.
+            let _ = self.edit_finish_body("");
         }
         outcome.result
     }

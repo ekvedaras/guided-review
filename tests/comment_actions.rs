@@ -2,7 +2,7 @@
 mod support;
 
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     CommentPlace, CommentRefusal, LineLocation, Markdown, Reaction, ReactionCount, Review,
@@ -404,4 +404,96 @@ fn a_thread_knows_the_lines_a_suggestion_is_against() {
         block,
         guided_review::viewer::Block::Code { language: Some(language), .. } if language == "suggestion"
     )));
+}
+
+#[test]
+fn a_reply_being_written_is_saved_and_comes_back_after_reopening() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+
+    review.open_reply("T1").unwrap();
+    review.edit_reply("T1", "because it was slow").unwrap();
+
+    let reopened = pull.open();
+    assert_eq!(reopened.reply_draft("T1"), Some("because it was slow"));
+    assert_eq!(reopened.reply_draft("T2"), None);
+}
+
+#[test]
+fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.open_reply("T1").unwrap();
+    review.edit_reply("T1", "because").unwrap();
+
+    review.act_on_thread(
+        ThreadAction::Reply {
+            thread_id: "T1".into(),
+            body: "because".into(),
+            mode: SendMode::AddToReview,
+        },
+        &github,
+    );
+    assert_eq!(pull.open().reply_draft("T1"), None);
+
+    review.open_reply("T1").unwrap();
+    review.edit_reply("T1", "again").unwrap();
+    review.discard_reply("T1").unwrap();
+    assert_eq!(pull.open().reply_draft("T1"), None);
+}
+
+#[test]
+fn a_failed_reply_keeps_its_draft() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.edit_reply("T1", "because").unwrap();
+    github.lose_connection(true);
+
+    review.act_on_thread(
+        ThreadAction::Reply {
+            thread_id: "T1".into(),
+            body: "because".into(),
+            mode: SendMode::AddToReview,
+        },
+        &github,
+    );
+
+    assert_eq!(pull.open().reply_draft("T1"), Some("because"));
+}
+
+#[test]
+fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.pr_head_is(Sha::new("newer-head"));
+    review.open_reply("T1").unwrap();
+    review.edit_reply("T1", "because").unwrap();
+
+    let result = review.act_on_thread(
+        ThreadAction::Reply {
+            thread_id: "T1".into(),
+            body: "because".into(),
+            mode: SendMode::AddToReview,
+        },
+        &github,
+    );
+
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::TourIsOld)
+    );
+    assert!(
+        !pull
+            .sent
+            .entries()
+            .iter()
+            .any(|entry| entry.contains("reply to")),
+        "nothing was sent"
+    );
+    assert_eq!(review.reply_draft("T1"), Some("because"), "the text stays");
 }

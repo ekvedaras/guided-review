@@ -44,7 +44,7 @@ impl RenderOnce for NewCommitsBanner {
         let message = match &self.update {
             TourUpdate::Running => "Updating the tour…".to_string(),
             TourUpdate::Idle | TourUpdate::Failed(_) => format!(
-                "New commits. The tour is for {}, the PR is now at {}.",
+                "New commits. The tour is for {}, the PR is now at {}. Update the tour to comment.",
                 short(&self.old_head.tour_head),
                 short(&self.old_head.pr_head)
             ),

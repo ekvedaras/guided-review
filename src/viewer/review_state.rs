@@ -42,6 +42,12 @@ pub struct ReviewState {
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
     comment_queue: Vec<QueuedComment>,
+    /// Reply text not sent yet, by thread id; each one is an open reply box.
+    #[serde(default)]
+    reply_drafts: BTreeMap<String, String>,
+    /// The body of the review being finished, not sent yet.
+    #[serde(default)]
+    finish_body: String,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -246,6 +252,34 @@ impl ReviewState {
         self.github_baseline_due = from.github_baseline_due;
         self.comment_drafts = from.comment_drafts.clone();
         self.comment_queue = from.comment_queue.clone();
+        self.reply_drafts = from.reply_drafts.clone();
+        self.finish_body = from.finish_body.clone();
+    }
+
+    pub(super) fn reply_draft(&self, thread_id: &str) -> Option<&str> {
+        self.reply_drafts.get(thread_id).map(String::as_str)
+    }
+
+    pub(super) fn open_reply(&mut self, thread_id: &str) {
+        self.reply_drafts.entry(thread_id.to_string()).or_default();
+    }
+
+    pub(super) fn write_reply(&mut self, thread_id: &str, text: &str) {
+        if let Some(draft) = self.reply_drafts.get_mut(thread_id) {
+            *draft = text.to_string();
+        }
+    }
+
+    pub(super) fn drop_reply(&mut self, thread_id: &str) {
+        self.reply_drafts.remove(thread_id);
+    }
+
+    pub(super) fn finish_body(&self) -> &str {
+        &self.finish_body
+    }
+
+    pub(super) fn write_finish_body(&mut self, text: &str) {
+        self.finish_body = text.to_string();
     }
 
     pub(super) fn comment_drafts(&self) -> &[CommentDraft] {

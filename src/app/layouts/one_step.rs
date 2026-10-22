@@ -17,7 +17,7 @@ use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     DiffView, OnMoreContext, OnOpenInIde, RowGesture, RowSelecting, threads_by_piece,
 };
-use crate::app::components::finish_review::{FinishReviewDialog, OnFinish};
+use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
@@ -26,7 +26,9 @@ use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
 use crate::app::components::text_input::TextDraft;
-use crate::app::components::thread_view::{OnThreadAction, ThreadElement};
+use crate::app::components::thread_view::{
+    OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
+};
 use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
@@ -637,6 +639,36 @@ impl OneStepLayout {
         })
     }
 
+    /// Reply text goes to the core, which saves it, so it survives scrolling and restarts.
+    fn on_reply_draft(&self, thread_id: &str, cx: &mut Context<Self>) -> OnReplyDraft {
+        let (layout, thread_id) = (cx.entity(), thread_id.to_string());
+        Rc::new(move |change, cx| {
+            layout.update(cx, |this, cx| {
+                let saved = match change {
+                    ReplyDraftChange::Open => this.review.open_reply(&thread_id),
+                    ReplyDraftChange::Edit(text) => this.review.edit_reply(&thread_id, &text),
+                    ReplyDraftChange::Discard => this.review.discard_reply(&thread_id),
+                };
+                if let Err(error) = saved {
+                    eprintln!("could not save the reply text: {error:#}");
+                }
+                cx.notify();
+            });
+        })
+    }
+
+    fn on_finish_body_edit(&self, cx: &mut Context<Self>) -> OnBodyEdit {
+        let layout = cx.entity();
+        Rc::new(move |text, cx| {
+            layout.update(cx, |this, cx| {
+                if let Err(error) = this.review.edit_finish_body(&text) {
+                    eprintln!("could not save the review text: {error:#}");
+                }
+                cx.notify();
+            });
+        })
+    }
+
     /// Sends the review in the background and shows the answer in the dialog.
     fn on_finish_review(&self, cx: &mut Context<Self>) -> OnFinish {
         let layout = cx.entity();
@@ -682,6 +714,8 @@ impl OneStepLayout {
             let element = ThreadElement::new(
                 view.clone(),
                 self.review.can_comment_now(),
+                self.review.reply_draft(&view.thread.id).map(str::to_string),
+                self.on_reply_draft(&view.thread.id, cx),
                 cx.listener(move |this, _, _, cx| {
                     this.review.toggle_thread_fold(&id);
                     cx.notify();
@@ -777,6 +811,8 @@ impl OneStepLayout {
         let finish_dialog = FinishReviewDialog::new(
             self.review.can_approve_or_request_changes(),
             self.review.approve_warning(),
+            self.review.finish_body().to_string(),
+            self.on_finish_body_edit(cx),
             self.on_finish_review(cx),
         );
         let step_rows = self.review.sidebar().into_iter().map(|entry| {

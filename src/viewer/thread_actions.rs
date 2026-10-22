@@ -39,6 +39,8 @@ pub enum ThreadActionResult {
 pub struct ThreadActionRequest {
     pub(super) pr: PullRequestUrl,
     pub(super) action: ThreadAction,
+    /// The tour is behind the PR head: the thread may sit on lines the tour does not show.
+    pub(super) tour_is_old: bool,
 }
 
 pub struct ThreadActionOutcome {
@@ -65,6 +67,9 @@ impl ThreadActionRequest {
     }
 
     fn perform(&self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        if self.tour_is_old && matches!(self.action, ThreadAction::Reply { .. }) {
+            return Err(TourIsOld.into());
+        }
         match &self.action {
             ThreadAction::Reply {
                 thread_id,
@@ -87,8 +92,21 @@ impl ThreadActionRequest {
     }
 }
 
+#[derive(Debug)]
+struct TourIsOld;
+
+impl std::fmt::Display for TourIsOld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        CommentRefusal::TourIsOld.fmt(f)
+    }
+}
+
+impl std::error::Error for TourIsOld {}
+
 fn classify(error: anyhow::Error) -> ThreadActionResult {
-    if error.downcast_ref::<PendingReviewExists>().is_some() {
+    if error.downcast_ref::<TourIsOld>().is_some() {
+        ThreadActionResult::Refused(CommentRefusal::TourIsOld)
+    } else if error.downcast_ref::<PendingReviewExists>().is_some() {
         ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
     } else if let Some(unavailable) = error.downcast_ref::<ViewedSyncUnavailable>() {
         ThreadActionResult::Refused(CommentRefusal::NoAccess(unavailable.to_string()))

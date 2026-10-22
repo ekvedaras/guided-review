@@ -220,3 +220,33 @@ fn finishing_ends_the_pending_review() {
 
     assert!(review.can_comment_now());
 }
+
+#[test]
+fn the_review_body_being_written_is_saved_and_goes_when_the_review_is_sent() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    review.pull_viewer_authorship(&github).unwrap();
+    review.edit_finish_body("looks good so far").unwrap();
+
+    assert_eq!(pull.open().finish_body(), "looks good so far");
+
+    let result = review.finish_review(ReviewVerdict::Comment, "looks good so far", &github);
+
+    assert_eq!(result, FinishResult::Sent);
+    assert_eq!(pull.open().finish_body(), "");
+}
+
+#[test]
+fn a_refused_finish_keeps_the_body() {
+    let pull = Pull::new();
+    let github = pull.github().with_viewer_as_pull_author();
+    let mut review = pull.open();
+    review.pull_viewer_authorship(&github).unwrap();
+    review.edit_finish_body("not yet").unwrap();
+
+    let result = review.finish_review(ReviewVerdict::Approve, "not yet", &github);
+
+    assert!(matches!(result, FinishResult::Refused(_)));
+    assert_eq!(pull.open().finish_body(), "not yet");
+}

@@ -20,9 +20,17 @@ type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 pub type OnThreadAction =
     Rc<dyn Fn(ThreadAction, Box<dyn FnOnce(&ThreadActionResult, &mut App)>, &mut App)>;
 
-/// What the reviewer is doing in one thread: the reply being written and the action under way.
+/// What happened to the reply being written; the core saves it, so it survives scrolling away.
+pub enum ReplyDraftChange {
+    Open,
+    Edit(String),
+    Discard,
+}
+
+pub type OnReplyDraft = Rc<dyn Fn(ReplyDraftChange, &mut App)>;
+
+/// What the reviewer is doing in one thread: the action under way. The reply text is the core's.
 struct ThreadUi {
-    reply: Option<TextDraft>,
     is_busy: bool,
     problem: Option<String>,
     focus: FocusHandle,
@@ -31,12 +39,21 @@ struct ThreadUi {
 impl ThreadUi {
     fn new(cx: &mut Context<Self>) -> Self {
         Self {
-            reply: None,
             is_busy: false,
             problem: None,
             focus: cx.focus_handle(),
         }
     }
+}
+
+struct ReplyBox<'a> {
+    thread_id: &'a str,
+    can_reply_now: bool,
+    on_action: &'a OnThreadAction,
+    on_reply_draft: &'a OnReplyDraft,
+    ui: &'a Entity<ThreadUi>,
+    focus: &'a FocusHandle,
+    is_busy: bool,
 }
 
 /// One review thread as the reviewer sees it under a line, or after the code of a step.
@@ -45,6 +62,8 @@ impl ThreadUi {
 pub struct ThreadElement {
     view: ThreadView,
     can_reply_now: bool,
+    reply: Option<String>,
+    on_reply_draft: OnReplyDraft,
     on_toggle: OnToggle,
     on_action: OnThreadAction,
 }
@@ -53,12 +72,16 @@ impl ThreadElement {
     pub fn new(
         view: ThreadView,
         can_reply_now: bool,
+        reply: Option<String>,
+        on_reply_draft: OnReplyDraft,
         on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_action: OnThreadAction,
     ) -> Self {
         Self {
             view,
             can_reply_now,
+            reply,
+            on_reply_draft,
             on_toggle: Box::new(on_toggle),
             on_action,
         }
@@ -124,7 +147,6 @@ fn run_action(
     action: ThreadAction,
     ui: &Entity<ThreadUi>,
     on_action: &OnThreadAction,
-    clear_reply: bool,
     cx: &mut App,
 ) {
     ui.update(cx, |ui, cx| {
@@ -139,7 +161,6 @@ fn run_action(
             done_ui.update(cx, |ui, cx| {
                 ui.is_busy = false;
                 match result {
-                    ThreadActionResult::Done if clear_reply => ui.reply = None,
                     ThreadActionResult::Done => {}
                     ThreadActionResult::Refused(refusal) => ui.problem = Some(refusal.to_string()),
                     ThreadActionResult::Failed(reason) => ui.problem = Some(reason.clone()),
@@ -189,7 +210,7 @@ impl ThreadElement {
                             reaction,
                             on: !viewer_has_reacted,
                         };
-                        run_action(action, &ui, &on_action, false, cx);
+                        run_action(action, &ui, &on_action, cx);
                     })
                 },
             ))
@@ -197,48 +218,62 @@ impl ThreadElement {
     }
 
     fn reply_box(
-        thread_id: &str,
-        can_reply_now: bool,
-        on_action: &OnThreadAction,
+        ReplyBox {
+            thread_id,
+            can_reply_now,
+            on_action,
+            on_reply_draft,
+            ui,
+            focus,
+            is_busy,
+        }: ReplyBox,
         reply: &TextDraft,
-        ui: &Entity<ThreadUi>,
-        focus: &FocusHandle,
-        is_busy: bool,
     ) -> AnyElement {
         let thread_id = thread_id.to_string();
         let send = {
             let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
+            let body = reply.text().to_string();
             move |mode: SendMode| {
                 let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
+                let body = body.clone();
                 move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                    send_reply(&ui, &on_action, &thread_id, mode, cx);
+                    send_reply(&ui, &on_action, &thread_id, body.clone(), mode, cx);
                 }
             }
         };
         let on_key = {
             let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
+            let (body, on_reply_draft) = (reply.text().to_string(), on_reply_draft.clone());
             move |event: &KeyDownEvent, _: &mut Window, cx: &mut App| {
                 let keystroke = &event.keystroke;
                 if ui.read(cx).is_busy {
                     return;
                 }
                 match keystroke.key.as_str() {
-                    "escape" => ui.update(cx, |ui, cx| {
-                        ui.reply = None;
-                        cx.notify();
-                    }),
+                    "escape" => on_reply_draft(ReplyDraftChange::Discard, cx),
                     "enter" if keystroke.modifiers.platform => {
-                        send_reply(&ui, &on_action, &thread_id, SendMode::AddToReview, cx);
+                        send_reply(
+                            &ui,
+                            &on_action,
+                            &thread_id,
+                            body.clone(),
+                            SendMode::AddToReview,
+                            cx,
+                        );
                     }
-                    key => ui.update(cx, |ui, cx| {
-                        let Some(text) = &mut ui.reply else { return };
-                        match key {
-                            "enter" => text.newline(),
-                            _ if text.edit(keystroke) => {}
-                            _ => return,
+                    key => {
+                        let mut edited = TextDraft::with_text(&body);
+                        let changed = match key {
+                            "enter" => {
+                                edited.newline();
+                                true
+                            }
+                            _ => edited.edit(keystroke),
+                        };
+                        if changed {
+                            on_reply_draft(ReplyDraftChange::Edit(edited.text().to_string()), cx);
                         }
-                        cx.notify();
-                    }),
+                    }
                 }
             }
         };
@@ -261,13 +296,8 @@ impl ThreadElement {
                 .child(
                     small_button(SharedString::from(format!("reply-cancel-{id}")), "Cancel")
                         .on_click({
-                            let ui = ui.clone();
-                            move |_, _, cx| {
-                                ui.update(cx, |ui, cx| {
-                                    ui.reply = None;
-                                    cx.notify();
-                                })
-                            }
+                            let on_reply_draft = on_reply_draft.clone();
+                            move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
                         }),
                 )
         });
@@ -298,24 +328,19 @@ fn send_reply(
     ui: &Entity<ThreadUi>,
     on_action: &OnThreadAction,
     thread_id: &str,
+    body: String,
     mode: SendMode,
     cx: &mut App,
 ) {
-    let Some(body) = ui
-        .read(cx)
-        .reply
-        .as_ref()
-        .map(|draft| draft.text().to_string())
-        .filter(|body| !body.trim().is_empty())
-    else {
+    if body.trim().is_empty() {
         return;
-    };
+    }
     let action = ThreadAction::Reply {
         thread_id: thread_id.to_string(),
         body,
         mode,
     };
-    run_action(action, ui, on_action, true, cx);
+    run_action(action, ui, on_action, cx);
 }
 
 trait WhenElse: Sized {
@@ -395,14 +420,11 @@ impl RenderOnce for ThreadElement {
                     }),
             )
         });
-        let (reply, is_busy, problem, focus) = {
+        let reply = self.reply.clone();
+        let on_reply_draft = self.on_reply_draft.clone();
+        let (is_busy, problem, focus) = {
             let state = ui.read(cx);
-            (
-                state.reply.as_ref().map(|draft| draft.text().to_string()),
-                state.is_busy,
-                state.problem.clone(),
-                state.focus.clone(),
-            )
+            (state.is_busy, state.problem.clone(), state.focus.clone())
         };
         let (can_reply_now, on_action) = (self.can_reply_now, self.on_action.clone());
         let actions = (!self.view.is_folded).then(|| {
@@ -417,7 +439,7 @@ impl RenderOnce for ThreadElement {
                 }
             };
             let (resolve_ui, resolve_on_action) = (ui.clone(), on_action.clone());
-            let reply_ui = ui.clone();
+            let open_reply = on_reply_draft.clone();
             let reply_focus = focus.clone();
             let buttons = div()
                 .flex()
@@ -425,10 +447,7 @@ impl RenderOnce for ThreadElement {
                 .child(
                     small_button(SharedString::from(format!("reply-{id}")), "Reply").on_click(
                         move |_, window, cx| {
-                            reply_ui.update(cx, |ui, cx| {
-                                ui.reply.get_or_insert_with(TextDraft::default);
-                                cx.notify();
-                            });
+                            open_reply(ReplyDraftChange::Open, cx);
                             window.focus(&reply_focus, cx);
                         },
                     ),
@@ -443,13 +462,7 @@ impl RenderOnce for ThreadElement {
                         },
                     )
                     .on_click(move |_, _, cx| {
-                        run_action(
-                            resolve_action.clone(),
-                            &resolve_ui,
-                            &resolve_on_action,
-                            false,
-                            cx,
-                        );
+                        run_action(resolve_action.clone(), &resolve_ui, &resolve_on_action, cx);
                     }),
                 );
             div()
@@ -458,13 +471,16 @@ impl RenderOnce for ThreadElement {
                 .gap_2()
                 .children(reply.as_deref().map(|text| {
                     Self::reply_box(
-                        &id,
-                        can_reply_now,
-                        &on_action,
+                        ReplyBox {
+                            thread_id: &id,
+                            can_reply_now,
+                            on_action: &on_action,
+                            on_reply_draft: &on_reply_draft,
+                            ui: &ui,
+                            focus: &focus,
+                            is_busy,
+                        },
                         &TextDraft::with_text(text),
-                        &ui,
-                        &focus,
-                        is_busy,
                     )
                 }))
                 .child(buttons.when_else(is_busy, |row| row.opacity(0.5)))

@@ -15,11 +15,13 @@ use super::text_input::TextDraft;
 pub type OnFinish =
     Rc<dyn Fn(ReviewVerdict, String, Box<dyn FnOnce(&FinishResult, &mut App)>, &mut App)>;
 
-/// What the reviewer is doing in the finish dialog.
+/// Hands the review body to the core, which saves it, each time it changes.
+pub type OnBodyEdit = Rc<dyn Fn(String, &mut App)>;
+
+/// What the reviewer is doing in the finish dialog. The body is not here: the core keeps it.
 struct FinishUi {
     is_open: bool,
     verdict: ReviewVerdict,
-    body: TextDraft,
     /// The reviewer saw the unread warning and has to say yes to it once more.
     is_confirming_approval: bool,
     is_busy: bool,
@@ -28,11 +30,10 @@ struct FinishUi {
 }
 
 impl FinishUi {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(has_draft: bool, cx: &mut Context<Self>) -> Self {
         Self {
-            is_open: false,
+            is_open: has_draft,
             verdict: ReviewVerdict::Comment,
-            body: TextDraft::default(),
             is_confirming_approval: false,
             is_busy: false,
             problem: None,
@@ -46,14 +47,24 @@ impl FinishUi {
 pub struct FinishReviewDialog {
     can_judge: bool,
     warning: Option<ApproveWarning>,
+    body: String,
+    on_body_edit: OnBodyEdit,
     on_finish: OnFinish,
 }
 
 impl FinishReviewDialog {
-    pub fn new(can_judge: bool, warning: Option<ApproveWarning>, on_finish: OnFinish) -> Self {
+    pub fn new(
+        can_judge: bool,
+        warning: Option<ApproveWarning>,
+        body: String,
+        on_body_edit: OnBodyEdit,
+        on_finish: OnFinish,
+    ) -> Self {
         Self {
             can_judge,
             warning,
+            body,
+            on_body_edit,
             on_finish,
         }
     }
@@ -85,11 +96,8 @@ fn update(ui: &Entity<FinishUi>, cx: &mut App, change: impl FnOnce(&mut FinishUi
     });
 }
 
-fn submit(ui: &Entity<FinishUi>, on_finish: &OnFinish, cx: &mut App) {
-    let (verdict, body) = {
-        let state = ui.read(cx);
-        (state.verdict, state.body.text().to_string())
-    };
+fn submit(ui: &Entity<FinishUi>, body: String, on_finish: &OnFinish, cx: &mut App) {
+    let verdict = ui.read(cx).verdict;
     update(ui, cx, |ui| {
         ui.is_busy = true;
         ui.problem = None;
@@ -105,7 +113,6 @@ fn submit(ui: &Entity<FinishUi>, on_finish: &OnFinish, cx: &mut App) {
                 match result {
                     FinishResult::Sent => {
                         ui.is_open = false;
-                        ui.body.clear();
                         ui.verdict = ReviewVerdict::Comment;
                     }
                     FinishResult::Refused(refusal) => ui.problem = Some(refusal.to_string()),
@@ -117,23 +124,39 @@ fn submit(ui: &Entity<FinishUi>, on_finish: &OnFinish, cx: &mut App) {
     );
 }
 
-fn on_key(ui: &Entity<FinishUi>, event: &KeyDownEvent, cx: &mut App) {
+fn on_key(
+    ui: &Entity<FinishUi>,
+    body: &str,
+    on_body_edit: &OnBodyEdit,
+    event: &KeyDownEvent,
+    cx: &mut App,
+) {
     let keystroke = &event.keystroke;
     if ui.read(cx).is_busy {
         return;
     }
-    update(ui, cx, |ui| match keystroke.key.as_str() {
-        "escape" => ui.is_open = false,
-        "enter" => ui.body.newline(),
-        _ => {
-            ui.body.edit(keystroke);
+    if keystroke.key == "escape" {
+        return update(ui, cx, |ui| ui.is_open = false);
+    }
+    let mut edited = TextDraft::with_text(body);
+    let changed = match keystroke.key.as_str() {
+        "enter" => {
+            edited.newline();
+            true
         }
-    });
+        _ => edited.edit(keystroke),
+    };
+    if changed {
+        on_body_edit(edited.text().to_string(), cx);
+    }
 }
 
 impl RenderOnce for FinishReviewDialog {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let ui = window.use_keyed_state("finish-review-ui", cx, |_, cx| FinishUi::new(cx));
+        let ui = window.use_keyed_state("finish-review-ui", cx, {
+            let has_draft = !self.body.is_empty();
+            move |_, cx| FinishUi::new(has_draft, cx)
+        });
         let state = ui.read(cx);
         let (is_open, verdict, is_busy, is_confirming) = (
             state.is_open,
@@ -143,9 +166,9 @@ impl RenderOnce for FinishReviewDialog {
         );
         let (body, problem, focus) = (
             if state.is_busy {
-                state.body.text().to_string()
+                self.body.clone()
             } else {
-                state.body.shown()
+                TextDraft::with_text(&self.body).shown()
             },
             state.problem.clone(),
             state.focus.clone(),
@@ -207,7 +230,7 @@ impl RenderOnce for FinishReviewDialog {
             .flatten();
         let must_confirm = unread_warning.is_some() && !is_confirming;
         let submit_button = {
-            let (ui, on_finish) = (ui.clone(), self.on_finish.clone());
+            let (ui, on_finish, text) = (ui.clone(), self.on_finish.clone(), self.body.clone());
             button(
                 "submit-review",
                 if must_confirm {
@@ -220,11 +243,12 @@ impl RenderOnce for FinishReviewDialog {
                 if must_confirm {
                     update(&ui, cx, |ui| ui.is_confirming_approval = true);
                 } else {
-                    submit(&ui, &on_finish, cx);
+                    submit(&ui, text.clone(), &on_finish, cx);
                 }
             })
         };
-        let key_ui = ui.clone();
+        let (key_ui, key_body, on_body_edit) =
+            (ui.clone(), self.body.clone(), self.on_body_edit.clone());
         let warning_text = unread_warning.filter(|_| is_confirming).map(|warning| {
             div().text_sm().text_color(red()).child(format!(
                 "Not read yet: {} step{} and {} safety net piece{}. Approve anyway?",
@@ -245,7 +269,9 @@ impl RenderOnce for FinishReviewDialog {
                     .id("finish-review-body")
                     .key_context("CommentInput")
                     .track_focus(&focus)
-                    .on_key_down(move |event, _, cx| on_key(&key_ui, event, cx))
+                    .on_key_down(move |event, _, cx| {
+                        on_key(&key_ui, &key_body, &on_body_edit, event, cx)
+                    })
                     .min_h(px(64.))
                     .p_2()
                     .rounded_md()
