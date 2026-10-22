@@ -21,6 +21,7 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
 use crate::app::components::palette::{Palette, TEXT_FONT};
+use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
 use crate::app::components::text_input::TextDraft;
@@ -29,12 +30,26 @@ use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
     CommentPlace, CommentResult, GitHubPort, LineLocation, MoreContext, Place, Review, Screen,
-    SendMode, StepId, StepPage, ThreadView, TourUpdater,
+    SendMode, StepId, StepPage, ThreadView, TourRefresher, TourUpdater, UpdatedTour,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
 actions!(one_step, [GoForward, GoBack, ToggleJump]);
+
+/// The two buttons that move a tour on: Update tour (no AI) and Refresh (the local `claude`).
+pub struct TourWork {
+    pub updater: Arc<TourUpdater>,
+    pub refresher: Arc<TourRefresher>,
+}
+
+/// What the layout talks to outside the window.
+pub struct Collaborators {
+    pub github: Arc<dyn GitHubPort>,
+    /// `None` hides every Open in IDE button.
+    pub ide: Option<Ide>,
+    pub tour_work: TourWork,
+}
 
 /// The one layout: step tree on the left, one screen on the right (the summary, or one step).
 pub struct OneStepLayout {
@@ -43,6 +58,8 @@ pub struct OneStepLayout {
     diagrams: Entity<Diagrams>,
     updater: Arc<TourUpdater>,
     tour_update: TourUpdate,
+    refresher: Arc<TourRefresher>,
+    tour_refresh: TourUpdate,
     focus: FocusHandle,
     ask: Entity<AskPanel>,
     pr_head_check: Option<Task<()>>,
@@ -67,14 +84,11 @@ pub struct OneStepLayout {
 impl OneStepLayout {
     pub const KEY_CONTEXT: &str = "OneStepLayout";
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         review: Review,
         source: Arc<dyn CodeSource>,
         ask: AskSetup,
-        ide: Option<Ide>,
-        github: Arc<dyn GitHubPort>,
-        updater: Arc<TourUpdater>,
+        collaborators: Collaborators,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -102,12 +116,19 @@ impl OneStepLayout {
             }
         })
         .detach();
+        let Collaborators {
+            github,
+            ide,
+            tour_work,
+        } = collaborators;
         let mut layout = Self {
             review,
             github,
             diagrams,
-            updater,
+            updater: tour_work.updater,
             tour_update: TourUpdate::Idle,
+            refresher: tour_work.refresher,
+            tour_refresh: TourUpdate::Idle,
             focus,
             ask,
             jump,
@@ -181,14 +202,8 @@ impl OneStepLayout {
             this.update(cx, |this, cx| {
                 match updated {
                     Ok(updated) => {
-                        let screen = this.review.screen().clone();
-                        this.review = updated.review;
-                        if let Screen::Step(id) = screen {
-                            this.review.go_to(&id);
-                        }
                         this.tour_update = TourUpdate::Idle;
-                        this.diagrams = Self::new_diagrams(cx);
-                        this.start_background_work(updated.source, cx);
+                        this.reopen(updated, cx);
                     }
                     Err(error) => {
                         this.review.repin_failed();
@@ -200,6 +215,43 @@ impl OneStepLayout {
             .ok();
         })
         .detach();
+    }
+
+    /// Runs only on the button, in the background: the user's `claude` rewrites the marked steps.
+    fn refresh_tour(&mut self, cx: &mut Context<Self>) {
+        if self.tour_refresh == TourUpdate::Running {
+            return;
+        }
+        self.tour_refresh = TourUpdate::Running;
+        let refresher = self.refresher.clone();
+        cx.spawn(async move |this, cx| {
+            let refreshed = cx
+                .background_executor()
+                .spawn(async move { refresher.run() })
+                .await;
+            this.update(cx, |this, cx| {
+                match refreshed {
+                    Ok(refreshed) => {
+                        this.tour_refresh = TourUpdate::Idle;
+                        this.reopen(refreshed, cx);
+                    }
+                    Err(error) => this.tour_refresh = TourUpdate::Failed(format!("{error:#}")),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn reopen(&mut self, updated: UpdatedTour, cx: &mut Context<Self>) {
+        let screen = self.review.screen().clone();
+        self.review = updated.review;
+        if let Screen::Step(id) = screen {
+            self.review.go_to(&id);
+        }
+        self.diagrams = Self::new_diagrams(cx);
+        self.start_background_work(updated.source, cx);
     }
 
     fn ask_button(
@@ -1095,6 +1147,17 @@ impl Render for OneStepLayout {
                             .bg(Palette::current())
                             .child(notice)
                     }))
+                    .children(
+                        Some(self.review.refresh_brief())
+                            .filter(|brief| !brief.is_empty() && self.review.old_head().is_none())
+                            .map(|brief| {
+                                RefreshBanner::new(
+                                    brief,
+                                    self.tour_refresh.clone(),
+                                    cx.listener(|this, _, _, cx| this.refresh_tour(cx)),
+                                )
+                            }),
+                    )
                     .child(
                         div()
                             .id("screen")

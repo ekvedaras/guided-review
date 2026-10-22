@@ -3,11 +3,16 @@ name: tour
 description: Write a top-down guided-review tour of a GitHub PR with the guided-review CLI. Use when the user types /tour <pr-url> or asks for a guided review of a PR.
 ---
 
-# /tour <pr-url>
+# /tour <pr-url> [--redo]
 
 Write a **tour file**: the PR's changes as **steps**, main flow first, details later. The `guided-review` CLI owns the facts (piece ids, shas); you own the story: order, nesting, text, diagrams, skim flags, summary. Terms: `GLOSSARY.md` in the guided-review repo.
 
 The tour is done when `guided-review check <pr-url>` prints `0 errors` and you have handled every warning.
+
+## Refresh and redo
+
+- `~/.guided-review/tours/<owner>/<repo>/<pr-number>.json` exists and no `--redo`: this is a **Refresh**, follow "Refresh" at the end. Do not write a new tour.
+- No tour file, or `--redo`: write a full new tour with the steps below, replacing the old file.
 
 ## Steps
 
@@ -72,3 +77,18 @@ A reviewer skims: short lines, visuals over prose. Text fields are small Markdow
 - A piece with only `file` takes every piece of that file. `lines` is for files the outline shows as hunks.
 - `{"rest": "dir"}` takes every piece under `dir` that no other pointer covers; `""` takes everything left. Use it for skim steps.
 - A step may have no pieces when it holds only a diagram or a `tldr`.
+
+## Refresh
+
+Rewrite only what the new commits made stale; every other step stays as it is, word for word.
+
+1. `guided-review repin <pr-url>` moves the tour to the PR's current head (a no-op when it is there already).
+2. `guided-review refresh <pr-url>` prints the brief: `stale steps` (their text may be old) and `new pieces no step holds`. `nothing to refresh` means stop and say so.
+3. Read the tour file, `guided-review outline <pr-url>` and `guided-review show` for the stale steps' pieces and the new pieces only.
+4. Edit the tour file:
+   - Each stale step: rewrite its `why`, `check`, `tldr` and `diagram` so they are true of the new code. Keep its `id`, place and pieces.
+   - Each new piece: add a pointer to the step it belongs to. Noise goes to the `skim` step. Add a new step only when no step fits.
+   - Leave all other steps untouched.
+5. `guided-review check <pr-url>` until `0 errors, 0 warnings`.
+6. `guided-review refresh <pr-url> --done` clears the marks.
+7. If the brief has a `redo:` line, tell the user a full `/tour --redo <pr-url>` may read better. Never start a redo yourself.

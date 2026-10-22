@@ -5,7 +5,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::app::AskSetup;
-use guided_review::claude_cli::ClaudeCli;
+use guided_review::claude_cli::{ClaudeCli, ClaudeTourWriter};
 use guided_review::config::Config;
 use guided_review::github::GitHub;
 use guided_review::ide::Ide;
@@ -17,7 +17,10 @@ use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{Asks, Review, ReviewStateFile, TourUpdater, repin_tour};
+use guided_review::viewer::{
+    Asks, PickCodeSource, RefreshBrief, Review, ReviewStateFile, TourRefresher, TourUpdater,
+    repin_tour,
+};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -44,6 +47,12 @@ enum Command {
     Check { pr: PullRequestUrl },
     /// Move the tour to the PR's new head and print what became of each piece
     Repin { pr: PullRequestUrl },
+    /// Print what a Refresh of the tour has to do; `--done` clears the marks once it is done
+    Refresh {
+        pr: PullRequestUrl,
+        #[arg(long)]
+        done: bool,
+    },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
 }
@@ -54,6 +63,7 @@ fn main() -> anyhow::Result<()> {
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
         Command::Check { pr } => check(&pr),
         Command::Repin { pr } => repin_command(&pr),
+        Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
     }
 }
@@ -153,6 +163,33 @@ fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let state_file = ReviewStateFile::for_pr(&home, pr);
+    if done {
+        state_file.update(|state| state.finish_refresh())?;
+        println!("refresh done: marks cleared");
+        return Ok(());
+    }
+    let tour = Tour::load(&Tour::path_for(&home, pr))?;
+    let pinned = PullRequestTips {
+        base_branch_tip: Sha::new(&tour.base),
+        head: Sha::new(&tour.head),
+    };
+    let current_dir = std::env::current_dir().context("could not read the current folder")?;
+    let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
+    let files = pieces::cut(
+        source.as_ref(),
+        &Sha::new(&tour.base),
+        &Sha::new(&tour.head),
+    )?;
+    print!(
+        "{}",
+        RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())
+    );
+    Ok(())
+}
+
 fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     let tour_path = Tour::path_for(&home, pr);
@@ -173,21 +210,39 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
 
     let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load()?;
+    let pick_code_source: PickCodeSource = {
+        let (github, pr, current_dir) = (github.clone(), pr.clone(), current_dir.clone());
+        Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
+    };
+
     let ask = AskSetup {
         asks: Asks::load(Arc::new(ReviewStateFile::for_pr(&home, pr)))?,
         launcher: Arc::new(ClaudeCli::new()),
         clone: clone.clone(),
         settings: config.ask_settings(),
     };
+    let refresher = TourRefresher {
+        home: home.clone(),
+        pr: pr.clone(),
+        pick_code_source: pick_code_source.clone(),
+        writer: Arc::new(ClaudeTourWriter::new(
+            clone.clone().unwrap_or_else(|| home.clone()),
+        )),
+    };
     let updater = TourUpdater {
         home,
         pr: pr.clone(),
-        pick_code_source: {
-            let (github, pr) = (github.clone(), pr.clone());
-            Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
-        },
+        pick_code_source,
     };
     let ide = Ide::for_clone(clone, config.ide_template());
-    guided_review::app::run(review, source.into(), ask, ide, Arc::new(github), updater);
+    guided_review::app::run(
+        review,
+        source.into(),
+        ask,
+        ide,
+        Arc::new(github),
+        updater,
+        refresher,
+    );
     Ok(())
 }

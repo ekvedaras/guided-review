@@ -12,6 +12,7 @@ mod jump;
 mod markdown;
 mod new_commits;
 mod ports;
+mod refresh;
 mod review;
 mod review_state;
 mod row_selection;
@@ -32,8 +33,9 @@ pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists, ThreadNotCreated,
-    ViewedFile, ViewedState, ViewedSyncUnavailable,
+    TourWriter, ViewedFile, ViewedState, ViewedSyncUnavailable,
 };
+pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{
     OldHead, ReadProgress, RepinRunning, Review, Screen, SidebarEntry, StepId, SyncOutcome,
     SyncRequest,

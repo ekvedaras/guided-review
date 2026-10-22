@@ -154,3 +154,8 @@ pub trait AgentPort: Send {
     /// passing every stream line to `on_line` as it arrives.
     fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
 }
+
+/// Starts the local AI on the tour skill to Refresh the tour of a PR. Blocks until it is done.
+pub trait TourWriter: Send + Sync {
+    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()>;
+}

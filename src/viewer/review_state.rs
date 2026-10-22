@@ -164,6 +164,11 @@ impl ReviewState {
         self.github_baseline_due = true;
     }
 
+    /// A Refresh answered what the re-pin left open, so its marks go.
+    pub fn finish_refresh(&mut self) {
+        self.last_repin = None;
+    }
+
     pub fn last_repin(&self) -> Option<&RepinRecord> {
         self.last_repin.as_ref()
     }

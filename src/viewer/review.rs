@@ -24,6 +24,7 @@ use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::jump::{self, JumpTarget};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
+use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
@@ -298,6 +299,10 @@ impl Review {
             }
         }
         Some(page)
+    }
+
+    pub fn refresh_brief(&self) -> RefreshBrief {
+        RefreshBrief::of(&self.tour, &self.files, self.state.last_repin())
     }
 
     fn changes_since_read(&self, id: &StepId) -> Option<(Sha, &[ChangedFile])> {

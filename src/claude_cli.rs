@@ -5,9 +5,13 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
-use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort};
+use crate::pull_request::PullRequestUrl;
+use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, TourWriter};
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
+
+/// Reads and writes only what the tour skill needs: its own CLI, `gh pr view`, and the tour files.
+const TOUR_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
 
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
 pub struct ClaudeCli {
@@ -92,5 +96,45 @@ impl Drop for ClaudeConversation {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// Runs the tour skill as a Refresh through the user's own `claude`, in one non-interactive run.
+pub struct ClaudeTourWriter {
+    binary: PathBuf,
+    cwd: PathBuf,
+}
+
+impl ClaudeTourWriter {
+    /// `cwd` is where the skill may read code: the repo clone when there is one.
+    pub fn new(cwd: PathBuf) -> Self {
+        Self::with_binary(PathBuf::from("claude"), cwd)
+    }
+
+    pub fn with_binary(binary: PathBuf, cwd: PathBuf) -> Self {
+        Self { binary, cwd }
+    }
+}
+
+impl TourWriter for ClaudeTourWriter {
+    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
+        let prompt = format!(
+            "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh."
+        );
+        let output = Command::new(&self.binary)
+            .args(["-p", &prompt])
+            .args(["--permission-mode", "dontAsk"])
+            .args(["--allowedTools", TOUR_WRITER_TOOLS])
+            .current_dir(&self.cwd)
+            .stdin(Stdio::null())
+            .output()
+            .with_context(|| format!("could not start `{}`", self.binary.display()))?;
+        if !output.status.success() {
+            bail!(
+                "claude stopped: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
     }
 }
