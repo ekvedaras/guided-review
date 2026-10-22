@@ -299,6 +299,8 @@ fn cut_symbols(
         SymbolChange::entry_for(&mut changes, slot).added.push(line);
     }
 
+    let changes = join_blank_line_changes(changes);
+
     let mut pieces: Vec<(usize, Piece)> = changes
         .into_iter()
         .map(|change| {
@@ -365,6 +367,35 @@ fn cut_symbols(
         .collect();
     pieces.sort_by_key(|(position, _)| *position);
     Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
+}
+
+/// Blank-line-only changes ride along with the nearest piece that has real changes.
+/// They stay a piece of their own only when nothing else in the file changed.
+fn join_blank_line_changes(changes: Vec<SymbolChange>) -> Vec<SymbolChange> {
+    let (blank_only, mut changes): (Vec<_>, Vec<_>) =
+        changes.into_iter().partition(|change| !change.moves_code());
+    if changes.is_empty() {
+        return blank_only;
+    }
+    for blank in blank_only {
+        for (is_added, line) in blank
+            .removed
+            .into_iter()
+            .map(|line| (false, line))
+            .chain(blank.added.into_iter().map(|line| (true, line)))
+        {
+            let nearest = changes
+                .iter_mut()
+                .min_by_key(|change| change.distance_to(line.number))
+                .expect("changes is not empty");
+            if is_added {
+                nearest.added.push(line);
+            } else {
+                nearest.removed.push(line);
+            }
+        }
+    }
+    changes
 }
 
 fn symbol_in<'s>(symbols: &'s Symbols, slot: &Slot) -> Option<&'s Symbol> {
@@ -439,6 +470,15 @@ impl<'a> SymbolChange<'a> {
             .iter()
             .chain(&self.removed)
             .any(|line| !line.text.trim().is_empty())
+    }
+
+    fn distance_to(&self, line: usize) -> usize {
+        self.added
+            .iter()
+            .chain(&self.removed)
+            .map(|other| other.number.abs_diff(line))
+            .min()
+            .unwrap_or(usize::MAX)
     }
 
     fn first_line(&self) -> usize {

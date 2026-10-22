@@ -233,8 +233,7 @@ fn a_symbol_moved_inside_its_file_with_an_unchanged_body_is_marked_moved() {
         rows,
         "\
 app/Order.php  modified  +5 −5
-  #Order  class  modified  +1 −1  format  class Order
-  #Order::c  method  modified  +4 −4  moved  public function c(): int
+  #Order::c  method  modified  +5 −5  moved  public function c(): int
 "
     );
 }
@@ -261,14 +260,28 @@ fn a_symbol_moved_to_another_file_with_an_unchanged_body_is_marked_moved_on_both
         rows,
         "\
 app/Invoice.php  modified  +8 −0
-  #(top)  top  modified  +1 −0  format
-  #Invoice  class  added  +3 −0  moved  class Invoice
+  #Invoice  class  added  +4 −0  moved  class Invoice
   #Invoice::total  method  added  +4 −0  moved  public function total(): int
 
 app/Order.php  modified  +0 −8
-  #(top)  top  modified  +0 −1  format
-  #Invoice  class  deleted  +0 −3  moved  class Invoice
+  #Invoice  class  deleted  +0 −4  moved  class Invoice
   #Invoice::total  method  deleted  +0 −4  moved  public function total(): int
+"
+    );
+}
+
+#[test]
+fn a_blank_line_only_change_is_its_own_format_piece_when_nothing_else_changed() {
+    let rows = rows_of_change(
+        &[("app/Order.php", &order("", "", "", TOTAL))],
+        &[("app/Order.php", &order("", "", "", &format!("\n{TOTAL}")))],
+    );
+
+    assert_eq!(
+        rows,
+        "\
+app/Order.php  modified  +1 −0
+  #Order  class  modified  +1 −0  format  class Order
 "
     );
 }
