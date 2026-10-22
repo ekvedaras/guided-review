@@ -101,9 +101,10 @@ impl Symbols {
                 Some((_, outer_path)) => format!("{outer_path}::{name}"),
                 None => name,
             };
-            let kind = match (language, kind) {
-                (Language::Php, PieceKind::Method) if is_in_test_class(&path) => PieceKind::Test,
-                _ => kind,
+            let kind = if language.is_test(kind, &path) {
+                PieceKind::Test
+            } else {
+                kind
             };
             symbols.push(Symbol {
                 path: path.clone(),
@@ -281,13 +282,6 @@ fn tokens_of(root: Node, source: &str) -> Vec<Token> {
         }
     }
     tokens
-}
-
-/// PHP tests are the methods of a class named `*Test`.
-fn is_in_test_class(method_path: &str) -> bool {
-    method_path
-        .split_once("::")
-        .is_some_and(|(class, _)| class.ends_with("Test"))
 }
 
 fn kind_of(capture: &str) -> PieceKind {

@@ -207,74 +207,17 @@ impl ImportedNames {
         let Ok(text) = source.file_at(head, path) else {
             return Self(Vec::new());
         };
-        let names = match Language::for_path(path) {
-            Some(Language::Php) => php_imports(&text),
-            Some(Language::TypeScript | Language::Tsx) | None => typescript_imports(&text),
-        };
-        Self(names.iter().map(|name| normalized(name)).collect())
+        let language = Language::for_path(path).unwrap_or(Language::TypeScript);
+        Self(
+            language
+                .imported_names(&text)
+                .iter()
+                .map(|name| normalized(name))
+                .collect(),
+        )
     }
 
     fn contain(&self, name: &str) -> bool {
         !name.is_empty() && self.0.iter().any(|imported| imported == name)
     }
-}
-
-/// `use App\Models\Order;`, `use App\{Cart, Item as Line};`
-fn php_imports(text: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for statement in text
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("use "))
-    {
-        let statement = statement.trim_end_matches(';');
-        let statement = statement
-            .strip_prefix("function ")
-            .or_else(|| statement.strip_prefix("const "))
-            .unwrap_or(statement);
-        let items = match statement.split_once('{') {
-            Some((_, group)) => group.trim_end_matches('}').split(',').collect(),
-            None => vec![statement],
-        };
-        for item in items {
-            let imported = item.split(" as ").next().unwrap_or(item).trim();
-            names.push(imported.rsplit('\\').next().unwrap_or(imported).to_string());
-        }
-    }
-    names
-}
-
-/// `import { Cart as C } from "../src/cart"` gives `Cart` and `cart`.
-fn typescript_imports(text: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut statement = String::new();
-    for line in text.lines() {
-        if statement.is_empty() && !line.trim_start().starts_with("import ") {
-            continue;
-        }
-        statement.push_str(line);
-        statement.push(' ');
-        let Some((clause, module)) = statement.rsplit_once(" from ") else {
-            if statement.trim_start().starts_with("import \"")
-                || statement.trim_start().starts_with("import '")
-            {
-                statement.clear();
-            }
-            continue;
-        };
-        let module = module
-            .trim()
-            .trim_end_matches(';')
-            .trim_matches(['"', '\'']);
-        names.push(file_stem(module).to_string());
-        let clause = clause.trim_start().trim_start_matches("import").trim();
-        let clause = clause.strip_prefix("type ").unwrap_or(clause);
-        for part in clause.split([',', '{', '}']) {
-            let imported = part.split(" as ").next().unwrap_or(part).trim();
-            if !imported.is_empty() && !imported.starts_with('*') {
-                names.push(imported.to_string());
-            }
-        }
-        statement.clear();
-    }
-    names
 }
