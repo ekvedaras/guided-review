@@ -393,3 +393,25 @@ fn rest_lists_what_it_took() {
         "note: rest \"\" takes 5 pieces in 3 files: README.md, app/Order.php, app/Services/Pricing.php\n0 errors, 0 warnings\n"
     );
 }
+
+#[test]
+fn the_tours_dir_override_moves_where_every_command_reads_and_writes_the_tour() {
+    let fixture = Shop::with_pull();
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let path = elsewhere.path().join("acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, covering_everything().to_string()).unwrap();
+    let cli = || {
+        GuidedReview::new(&fixture.repo, &fixture.github)
+            .with_env("GUIDED_REVIEW_TOURS_DIR", elsewhere.path())
+    };
+
+    let check = cli().run(&["check", PR]);
+    let tour_path = cli().run(&["tour-path", PR]);
+
+    assert!(check.success, "{}{}", check.stdout, check.stderr);
+    let pinned: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(pinned["head"], fixture.head.as_str());
+    assert!(!fixture.tour_path().exists());
+    assert_eq!(tour_path.stdout.trim(), path.to_str().unwrap());
+}

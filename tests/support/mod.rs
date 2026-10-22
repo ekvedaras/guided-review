@@ -80,6 +80,7 @@ pub struct GuidedReview<'a> {
     repo: &'a FixtureRepo,
     github: &'a FakeGitHub,
     current_dir: PathBuf,
+    env: Vec<(String, PathBuf)>,
 }
 
 impl<'a> GuidedReview<'a> {
@@ -88,7 +89,14 @@ impl<'a> GuidedReview<'a> {
             repo,
             github,
             current_dir: repo.path().to_path_buf(),
+            env: Vec::new(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_env(mut self, name: &str, value: &Path) -> Self {
+        self.env.push((name.to_string(), value.to_path_buf()));
+        self
     }
 
     pub fn in_dir(mut self, dir: &Path) -> Self {
@@ -99,7 +107,9 @@ impl<'a> GuidedReview<'a> {
     pub fn run(&self, args: &[&str]) -> Run {
         let empty_gh_config = self.repo.home().join(".config/gh");
         std::fs::create_dir_all(&empty_gh_config).unwrap();
-        let output = cargo_bin_cmd!("guided-review")
+        let mut command = cargo_bin_cmd!("guided-review");
+        command.envs(self.env.iter().map(|(name, value)| (name, value)));
+        let output = command
             .args(args)
             .current_dir(&self.current_dir)
             .env("HOME", self.repo.home())

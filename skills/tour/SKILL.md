@@ -11,7 +11,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
 
 ## Refresh and redo
 
-- `~/.guided-review/tours/<owner>/<repo>/<pr-number>.json` exists and no `--redo`: this is a **Refresh**, follow "Refresh" at the end. Do not write a new tour.
+- The tour file (path: `guided-review tour-path <pr-url>`) exists and no `--redo`: this is a **Refresh**, follow "Refresh" at the end. Do not write a new tour.
 - No tour file, or `--redo`: write a full new tour with the steps below, replacing the old file.
 
 ## Steps
@@ -22,7 +22,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
    - `worktree at head: yes`: you may grep and read the working tree. With `no`, the working tree is another version of the code; read code only through `show --around`.
    - A test piece lists up to 3 `subjects`, best first (`+N more` hides the rest; `same` repeats the line above). Put a test next to its subject, or in a late proof step.
 3. Open only the pieces you need to understand the flow: `guided-review show <pr-url> <piece id>…`. A file path as id opens every piece of that file. Add `--around` when the change needs the code near it at head. Pieces you can place from signature and size alone stay closed.
-4. Write the tour to `~/.guided-review/tours/<owner>/<repo>/<pr-number>.json` (`mkdir -p` first), in the shape below. Leave `version`, `pr`, `base`, `head` out; `check` fills them.
+4. Write the tour to the path `guided-review tour-path <pr-url>` prints (`mkdir -p` its folder first), in the shape below. Leave `version`, `pr`, `base`, `head` out; `check` fills them.
 5. Run `guided-review check <pr-url>`. Fix every error. Handle every warning by changing the tour:
    - `no step covers <piece>`: put the piece in the step it belongs to, or in a `rest` piece under a `skim` step. Noise (renames, imports, generated code) goes to that `skim` step.
    - A limit warning (summary, bullets, `why`, pieces per step, top-level steps): shorten, split, or nest as it says. Pieces per step counts every piece the step names, imports and `(top)` included, but not what `rest` takes.

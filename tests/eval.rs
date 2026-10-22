@@ -2,7 +2,6 @@
 mod support;
 
 use std::cell::RefCell;
-use std::path::Path;
 
 use guided_review::eval::{
     Eval, EvalStore, EvalWriter, JudgeInput, Rule, Score, Skill, TourJudge, TourSource, Verdict,
@@ -17,7 +16,7 @@ const PR: &str = "https://github.com/acme/shop.app/pull/7";
 const NOTE: &str = "Flow is cart to checkout to receipt. Needs a sequence diagram on checkout.";
 
 struct FakeWriter<'a> {
-    home: &'a Path,
+    tours_dirs: RefCell<Vec<std::path::PathBuf>>,
     secret: &'a str,
     briefs: RefCell<Vec<String>>,
 }
@@ -27,7 +26,10 @@ impl EvalWriter for FakeWriter<'_> {
         let seen = format!("{brief:?} {} {}", brief.pr, brief.skill);
         assert!(!seen.contains(self.secret), "the writer saw the note");
         self.briefs.borrow_mut().push(seen);
-        let path = Tour::path_for(self.home, brief.pr);
+        self.tours_dirs
+            .borrow_mut()
+            .push(brief.tours_dir.to_path_buf());
+        let path = Tour::path_in(brief.tours_dir, brief.pr);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, r#"{"title":"written by the fake writer","steps":[]}"#).unwrap();
         Ok(())
@@ -93,7 +95,7 @@ fn run_eval(
     date: &str,
 ) -> (String, FakeWriter<'static>) {
     let writer = FakeWriter {
-        home: Box::leak(home.path().to_path_buf().into_boxed_path()),
+        tours_dirs: RefCell::default(),
         secret: NOTE,
         briefs: RefCell::default(),
     };
@@ -157,14 +159,14 @@ fn the_judge_gets_the_note_and_the_tour_while_the_writer_never_sees_the_note() {
 }
 
 #[test]
-fn a_real_tour_in_the_way_is_put_back_after_the_writer_ran() {
+fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
     let (home, store) = setup();
     let pr: PullRequestUrl = PR.parse().unwrap();
     let tour_path = Tour::path_for(home.path(), &pr);
     std::fs::create_dir_all(tour_path.parent().unwrap()).unwrap();
     std::fs::write(&tour_path, r#"{"title":"my real tour"}"#).unwrap();
 
-    run_eval(
+    let (_, writer) = run_eval(
         &home,
         &store,
         &FakeJudge::answering(vec![Score::Pass]),
@@ -173,10 +175,14 @@ fn a_real_tour_in_the_way_is_put_back_after_the_writer_ran() {
         "2026-10-22",
     );
 
+    let run_folder = home.path().join(".guided-review/evals/tours/2026-10-22");
+    assert_eq!(*writer.tours_dirs.borrow(), vec![run_folder.clone()]);
+    assert!(Tour::path_in(&run_folder, &pr).exists());
     assert_eq!(
         std::fs::read_to_string(&tour_path).unwrap(),
         r#"{"title":"my real tour"}"#
     );
+    assert!(!tour_path.with_extension("json.eval-aside").exists());
 }
 
 #[test]

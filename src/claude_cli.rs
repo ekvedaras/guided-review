@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use anyhow::{Context, bail};
@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::pull_request::PullRequestUrl;
+use crate::tour::Tour;
 use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter};
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
@@ -141,10 +142,15 @@ impl RefreshWriter for ClaudeRefreshWriter {
 }
 
 /// What the skill needs: its CLI, `gh pr view`, reading code, and writing the tour file. Nothing else.
-const EVAL_WRITER_TOOLS: &str = "Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(gh pr view:*),Bash(mkdir -p ~/.guided-review/tours/*),Read,Grep,Glob,Write(~/.guided-review/tours/**)";
+fn eval_writer_tools(tours_dir: &Path) -> String {
+    let tours_dir = tours_dir.display();
+    format!(
+        "Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review tour-path:*),Bash(gh pr view:*),Bash(mkdir -p {tours_dir}/*),Read,Grep,Glob,Write({tours_dir}/**)"
+    )
+}
 
 /// Reviewer notes live here; the writer must not read them.
-const EVAL_WRITER_BLOCKED: &str = "Read(~/.guided-review/evals/**),Grep(~/.guided-review/evals/**),Glob(~/.guided-review/evals/**)";
+const EVAL_WRITER_BLOCKED: &str = "Read(~/.guided-review/evals/notes/**),Grep(~/.guided-review/evals/notes/**),Glob(~/.guided-review/evals/notes/**),Read(~/.guided-review/evals/results/**),Grep(~/.guided-review/evals/results/**),Glob(~/.guided-review/evals/results/**)";
 
 /// Writes a fresh tour from the skill text in the brief, sandboxed away from the reviewer notes. Unlike the refresh writer it does not rely on the installed skill, so every eval run uses the skill under test.
 pub struct ClaudeEvalWriter {
@@ -173,9 +179,10 @@ impl EvalWriter for ClaudeEvalWriter {
         command
             .args(["-p", "--output-format", "json"])
             .args(["--permission-mode", "dontAsk"])
-            .args(["--allowedTools", EVAL_WRITER_TOOLS])
+            .args(["--allowedTools", &eval_writer_tools(brief.tours_dir)])
             .args(["--disallowedTools", EVAL_WRITER_BLOCKED])
             .args(["--append-system-prompt", brief.skill])
+            .env(Tour::TOURS_DIR_ENV, brief.tours_dir)
             .current_dir(std::env::temp_dir());
         run_headless(
             command,

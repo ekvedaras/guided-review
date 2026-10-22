@@ -36,6 +36,8 @@ struct Cli {
 enum Command {
     /// Print the diff pieces of a PR, grouped by file, without code
     Outline { pr: PullRequestUrl },
+    /// Print where the tour file of a PR lives
+    TourPath { pr: PullRequestUrl },
     /// Print the diff of the given pieces
     Show {
         pr: PullRequestUrl,
@@ -82,6 +84,7 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Outline { pr } => outline(&pr),
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
+        Command::TourPath { pr } => tour_path(&pr),
         Command::Check { pr } => check(&pr),
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
@@ -95,6 +98,12 @@ fn main() -> anyhow::Result<()> {
             existing_tours,
         } => eval(existing_tours),
     }
+}
+
+fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    println!("{}", Tour::path_for(&home, pr).display());
+    Ok(())
 }
 
 fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {

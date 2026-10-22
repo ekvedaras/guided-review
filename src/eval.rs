@@ -126,6 +126,8 @@ impl Skill {
 pub struct WriterBrief<'a> {
     pub pr: &'a PullRequestUrl,
     pub skill: &'a str,
+    /// The only tours folder the writer may use; never the reviewer's own.
+    pub tours_dir: &'a Path,
 }
 
 pub struct JudgeInput<'a> {
@@ -133,7 +135,7 @@ pub struct JudgeInput<'a> {
     pub tour_json: &'a str,
 }
 
-/// Writes the tour of `brief.pr` to its usual tour file.
+/// Writes the tour of `brief.pr` into `brief.tours_dir`.
 pub trait EvalWriter {
     fn write_tour(&self, brief: &WriterBrief) -> anyhow::Result<()>;
 }
@@ -224,21 +226,8 @@ impl EvalStore {
             .with_context(|| format!("could not write {}", path.display()))
     }
 
-    fn keep_written_tour(
-        &self,
-        date: &str,
-        pr: &PullRequestUrl,
-        tour: &Path,
-    ) -> anyhow::Result<()> {
-        let kept = self
-            .root
-            .join("tours")
-            .join(date)
-            .join(pr.repo.to_string())
-            .join(format!("{}.json", pr.number));
-        std::fs::create_dir_all(kept.parent().expect("kept tour path has a folder"))?;
-        std::fs::copy(tour, kept)?;
-        Ok(())
+    fn run_tours_dir(&self, date: &str) -> PathBuf {
+        self.root.join("tours").join(date)
     }
 }
 
@@ -303,19 +292,19 @@ impl Eval<'_> {
         source: &TourSource,
         date: &str,
     ) -> anyhow::Result<Verdicts> {
-        let tour_path = Tour::path_for(self.home, pr);
         match source {
-            TourSource::ExistingTours => self.judge_tour(&tour_path, note),
+            TourSource::ExistingTours => self.judge_tour(&Tour::path_for(self.home, pr), note),
             TourSource::WriteNew => {
-                let _put_back = PutBack::aside(&tour_path)?;
+                let tours_dir = self.store.run_tours_dir(date);
                 self.writer.write_tour(&WriterBrief {
                     pr,
                     skill: self.skill.text(),
+                    tours_dir: &tours_dir,
                 })?;
+                let tour_path = Tour::path_in(&tours_dir, pr);
                 if !tour_path.exists() {
                     bail!("the writer did not leave a tour file");
                 }
-                self.store.keep_written_tour(date, pr, &tour_path)?;
                 self.judge_tour(&tour_path, note)
             }
         }
@@ -328,35 +317,6 @@ impl Eval<'_> {
             note,
             tour_json: &tour_json,
         })
-    }
-}
-
-/// Moves a reviewer's real tour out of the writer's way and restores it when dropped.
-struct PutBack {
-    tour: PathBuf,
-    aside: PathBuf,
-}
-
-impl PutBack {
-    fn aside(tour: &Path) -> anyhow::Result<Self> {
-        let aside = tour.with_extension("json.eval-aside");
-        if tour.exists() {
-            std::fs::rename(tour, &aside)
-                .with_context(|| format!("could not move {} aside", tour.display()))?;
-        }
-        Ok(Self {
-            tour: tour.to_path_buf(),
-            aside,
-        })
-    }
-}
-
-impl Drop for PutBack {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.tour);
-        if self.aside.exists() {
-            let _ = std::fs::rename(&self.aside, &self.tour);
-        }
     }
 }
 

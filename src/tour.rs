@@ -76,8 +76,20 @@ pub enum PieceRef {
 }
 
 impl Tour {
+    pub const TOURS_DIR_ENV: &'static str = "GUIDED_REVIEW_TOURS_DIR";
+
+    /// `~/.guided-review/tours`, unless `GUIDED_REVIEW_TOURS_DIR` points the commands elsewhere.
+    pub fn tours_dir(home: &Path) -> PathBuf {
+        std::env::var_os(Self::TOURS_DIR_ENV)
+            .map_or_else(|| home.join(".guided-review/tours"), PathBuf::from)
+    }
+
     pub fn path_for(home: &Path, pr: &PullRequestUrl) -> PathBuf {
-        home.join(".guided-review/tours")
+        Self::path_in(&Self::tours_dir(home), pr)
+    }
+
+    pub fn path_in(tours_dir: &Path, pr: &PullRequestUrl) -> PathBuf {
+        tours_dir
             .join(pr.repo.to_string())
             .join(format!("{}.json", pr.number))
     }

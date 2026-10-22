@@ -12,7 +12,7 @@ fn fake_claude(dir: &Path, answer: &str) -> PathBuf {
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\ncat > \"{dir}/stdin\"\ncat <<'JSON'\n{answer}\nJSON\n",
+            "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\necho \"$GUIDED_REVIEW_TOURS_DIR\" > \"{dir}/tours_dir\"\ncat > \"{dir}/stdin\"\ncat <<'JSON'\n{answer}\nJSON\n",
             dir = dir.display()
         ),
     )
@@ -34,6 +34,7 @@ fn the_writer_runs_with_narrow_tools_and_gets_the_skill_but_no_note() {
         .write_tour(&WriterBrief {
             pr: &pr,
             skill: "SKILL TEXT",
+            tours_dir: Path::new("/runs/one"),
         })
         .unwrap();
 
@@ -44,6 +45,10 @@ fn the_writer_runs_with_narrow_tools_and_gets_the_skill_but_no_note() {
     assert!(args.contains("Bash(guided-review check:*)"), "{args}");
     assert!(args.contains("--append-system-prompt SKILL TEXT"), "{args}");
     assert!(args.contains("--disallowedTools"), "{args}");
+    assert!(args.contains("Write(/runs/one/**)"), "{args}");
+    assert!(!args.contains("Write(~/.guided-review/tours"), "{args}");
+    let tours_dir = std::fs::read_to_string(dir.path().join("tours_dir")).unwrap();
+    assert_eq!(tours_dir.trim(), "/runs/one");
     let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap();
     assert!(stdin.contains("https://github.com/acme/shop/pull/7"));
 }
@@ -61,6 +66,7 @@ fn the_writer_failing_is_an_error() {
         .write_tour(&WriterBrief {
             pr: &pr,
             skill: "s",
+            tours_dir: Path::new("/runs/one"),
         })
         .unwrap_err();
 
