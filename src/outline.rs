@@ -53,6 +53,7 @@ impl fmt::Display for Outline<'_> {
                 "{}  {}  +{} −{}",
                 file.path, file.status, file.added, file.removed
             )?;
+            let mut last_subjects = String::new();
             for piece in &file.pieces {
                 write!(
                     f,
@@ -71,7 +72,13 @@ impl fmt::Display for Outline<'_> {
                 }
                 writeln!(f)?;
                 if let Some(candidates) = self.subjects.of(&piece.id) {
-                    writeln!(f, "    subjects: {candidates}")?;
+                    let listed = candidates.to_string();
+                    if listed == last_subjects {
+                        writeln!(f, "    subjects: same")?;
+                    } else {
+                        writeln!(f, "    subjects: {listed}")?;
+                        last_subjects = listed;
+                    }
                 }
             }
         }

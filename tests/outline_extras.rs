@@ -182,7 +182,7 @@ fn php_test_methods_are_test_pieces_with_subjects_found_by_name() {
 }
 
 #[test]
-fn several_name_matches_are_all_listed_best_first() {
+fn several_name_matches_are_listed_best_first_up_to_three() {
     let legacy = ORDER_PHP.replace("class Order", "namespace Legacy;\n\nclass Order");
     let legacy_changed =
         ORDER_PHP_CHANGED.replace("class Order", "namespace Legacy;\n\nclass Order");
@@ -202,7 +202,7 @@ fn several_name_matches_are_all_listed_best_first() {
     assert_eq!(
         subject_lines(&section),
         [
-            "    subjects: app/Legacy/Order.php#Order::total (name), app/Order.php#Order::total (name), app/Legacy/Order.php#Order::tax (name), app/Order.php#Order::tax (name)"
+            "    subjects: app/Legacy/Order.php#Order::total (name), app/Order.php#Order::total (name), app/Legacy/Order.php#Order::tax (name), +1 more"
         ]
     );
 }
@@ -274,4 +274,61 @@ fn a_test_without_candidates_says_so_instead_of_guessing() {
     );
 
     assert_eq!(subject_lines(&section), ["    subjects: none found"]);
+}
+
+#[test]
+fn tests_that_share_their_subjects_say_same_instead_of_repeating_the_list() {
+    let tests = |amount: u8| {
+        ORDER_TEST_PHP.replace(
+            "    public function testTotal(): void\n    {\n        assert(1 === 1);\n    }\n",
+            &format!(
+                "    public function testSums(): void\n    {{\n        assert(1 === {amount});\n    }}\n\n    public function testRounding(): void\n    {{\n        assert(1 === {amount});\n    }}\n"
+            ),
+        )
+    };
+    let section = pieces_section(
+        &[
+            ("app/Order.php", ORDER_PHP),
+            ("tests/OrderTest.php", &tests(1)),
+        ],
+        &[
+            ("app/Order.php", ORDER_PHP_CHANGED),
+            ("tests/OrderTest.php", &tests(2)),
+        ],
+    );
+
+    assert_eq!(
+        subject_lines(&section),
+        [
+            "    subjects: app/Order.php#Order::total (name), app/Order.php#Order::tax (name)",
+            "    subjects: same",
+        ]
+    );
+}
+
+#[test]
+fn imports_and_top_pieces_are_never_offered_as_subjects() {
+    let with_import = |body: &str| body.replace("class Order", "use App\\Money;\n\nclass Order");
+    let section = pieces_section(
+        &[
+            ("app/Order.php", &with_import(ORDER_PHP)),
+            ("tests/OrderTest.php", ORDER_TEST_PHP),
+        ],
+        &[
+            (
+                "app/Order.php",
+                &with_import(ORDER_PHP_CHANGED).replace("App\\Money", "App\\Cash"),
+            ),
+            ("tests/OrderTest.php", ORDER_TEST_PHP_CHANGED),
+        ],
+    );
+
+    assert!(
+        section.iter().any(|line| line.starts_with("  #imports")),
+        "{section:#?}"
+    );
+    assert_eq!(
+        subject_lines(&section),
+        ["    subjects: app/Order.php#Order::total (name), app/Order.php#Order::tax (name)"]
+    );
 }

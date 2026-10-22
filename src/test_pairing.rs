@@ -34,6 +34,8 @@ impl SubjectCandidates {
     }
 }
 
+const MAX_LISTED: usize = 3;
+
 pub struct Subjects(Vec<Subject>);
 
 struct Subject {
@@ -52,7 +54,7 @@ impl fmt::Display for Subjects {
         if self.0.is_empty() {
             return f.write_str("none found");
         }
-        for (index, subject) in self.0.iter().enumerate() {
+        for (index, subject) in self.0.iter().take(MAX_LISTED).enumerate() {
             if index > 0 {
                 f.write_str(", ")?;
             }
@@ -62,7 +64,10 @@ impl fmt::Display for Subjects {
             };
             write!(f, "{} ({basis})", subject.id)?;
         }
-        Ok(())
+        match self.0.len().saturating_sub(MAX_LISTED) {
+            0 => Ok(()),
+            more => write!(f, ", +{more} more"),
+        }
     }
 }
 
@@ -74,7 +79,11 @@ fn is_possible_subject(piece: &Piece) -> bool {
     piece.status != PieceStatus::Deleted
         && !matches!(
             piece.kind,
-            PieceKind::Test | PieceKind::Top | PieceKind::File | PieceKind::Hunk
+            PieceKind::Test
+                | PieceKind::Top
+                | PieceKind::Imports
+                | PieceKind::File
+                | PieceKind::Hunk
         )
 }
 
