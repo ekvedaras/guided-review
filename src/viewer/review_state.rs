@@ -256,6 +256,20 @@ impl ReviewState {
         self.finish_body = from.finish_body.clone();
     }
 
+    pub(super) fn typed_text(&self) -> TypedText {
+        TypedText {
+            comment_drafts: self.comment_drafts.clone(),
+            reply_drafts: self.reply_drafts.clone(),
+            finish_body: self.finish_body.clone(),
+        }
+    }
+
+    pub(super) fn take_typed_text(&mut self, typed: TypedText) {
+        self.comment_drafts = typed.comment_drafts;
+        self.reply_drafts = typed.reply_drafts;
+        self.finish_body = typed.finish_body;
+    }
+
     pub(super) fn reply_drafts(&self) -> &BTreeMap<String, String> {
         &self.reply_drafts
     }
@@ -344,7 +358,15 @@ impl ReviewState {
     }
 }
 
+/// The text boxes of the viewer: what is saved while typing.
+pub struct TypedText {
+    comment_drafts: Vec<CommentDraft>,
+    reply_drafts: BTreeMap<String, String>,
+    finish_body: String,
+}
+
 /// `~/.guided-review/state/<owner>/<repo>/<pr>.json`
+#[derive(Clone)]
 pub struct ReviewStateFile {
     path: PathBuf,
 }

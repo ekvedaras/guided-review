@@ -497,3 +497,55 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     );
     assert_eq!(review.reply_draft("T1"), Some("because"), "the text stays");
 }
+
+#[test]
+fn typed_text_reaches_the_file_only_when_its_save_runs_off_the_ui_thread() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = drag(&mut review, "line 9", "line ten");
+    review.open_reply("T1").unwrap();
+
+    review.type_in_draft(&place, "use a name").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
+    review.type_in_finish_body("overall fine").unwrap();
+
+    let before = pull.open();
+    assert_eq!(before.reply_draft("T1"), Some(""));
+    assert_eq!(before.finish_body(), "");
+    assert_eq!(review.reply_draft("T1"), Some("because"));
+
+    review.typing_save().unwrap().run().unwrap();
+
+    let after = pull.open();
+    assert_eq!(after.reply_draft("T1"), Some("because"));
+    assert_eq!(after.finish_body(), "overall fine");
+    assert_eq!(after.comment_drafts()[0].body, "use a name");
+    assert!(review.typing_save().is_none());
+}
+
+#[test]
+fn a_typing_save_that_a_later_save_overtook_is_dropped() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
+    let stale = review.typing_save().unwrap();
+
+    review.discard_reply("T1").unwrap();
+    stale.run().unwrap();
+
+    assert_eq!(pull.open().reply_draft("T1"), None);
+}
+
+#[test]
+fn a_save_made_at_once_takes_the_typed_text_with_it() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
+
+    review.open_reply("T2").unwrap();
+
+    assert_eq!(pull.open().reply_draft("T1"), Some("because"));
+    assert!(review.typing_save().is_none());
+}

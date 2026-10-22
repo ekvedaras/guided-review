@@ -24,6 +24,7 @@ mod step_page;
 mod suggestion;
 mod thread_actions;
 mod threads;
+mod typing_save;
 
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
@@ -62,3 +63,4 @@ pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 pub use threads::{ReviewThread, ThreadComment, ThreadView};
+pub use typing_save::TypingSave;

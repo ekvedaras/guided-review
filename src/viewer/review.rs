@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +41,7 @@ use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 use super::threads::{self, ReviewThread, ThreadPlacement};
+use super::typing_save::{SaveOrder, TypingSave};
 use crate::repin::RepinStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -137,6 +140,8 @@ pub struct Review {
     /// Unknown until GitHub answers; Approve and Request changes are only offered when it is known to be `false`.
     viewer_did_author: Option<bool>,
     image_previews: HashMap<String, ImagePreview>,
+    saves: Arc<SaveOrder>,
+    typing_is_unsaved: AtomicBool,
 }
 
 impl Review {
@@ -197,6 +202,8 @@ impl Review {
             has_pending_review: None,
             viewer_did_author: None,
             image_previews: HashMap::new(),
+            saves: Arc::default(),
+            typing_is_unsaved: AtomicBool::new(false),
         })
     }
 
@@ -910,6 +917,40 @@ impl Review {
         self.state.comment_queue()
     }
 
+    /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
+    pub fn type_in_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
+        self.state.write_draft(place, body);
+        self.typing_is_unsaved.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub fn type_in_reply(&mut self, thread_id: &str, text: &str) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
+        self.state.write_reply(thread_id, text);
+        self.typing_is_unsaved.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub fn type_in_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
+        self.state.write_finish_body(text);
+        self.typing_is_unsaved.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
+    pub fn typing_save(&mut self) -> Option<TypingSave> {
+        if !self.typing_is_unsaved.swap(false, Ordering::Relaxed) {
+            return None;
+        }
+        Some(TypingSave::new(
+            self.state_file.clone(),
+            self.saves.clone(),
+            self.state.typed_text(),
+        ))
+    }
+
     /// Saved at once, so a crash loses nothing.
     pub fn edit_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
         self.state.write_draft(place, body);
@@ -1368,8 +1409,13 @@ impl Review {
     /// these are written into a freshly loaded file.
     fn save_viewer_sections(&self) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
-        self.state_file
-            .update(|saved| saved.take_viewer_sections(&self.state))
+        let turn = self.saves.next_turn();
+        self.saves.write(turn, || {
+            self.state_file
+                .update(|saved| saved.take_viewer_sections(&self.state))
+        })?;
+        self.typing_is_unsaved.store(false, Ordering::Relaxed);
+        Ok(())
     }
 
     fn refuse_changes_while_repinning(&self) -> anyhow::Result<()> {
