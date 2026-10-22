@@ -45,6 +45,17 @@ pub struct DiffLine {
 }
 
 impl DiffLine {
+    /// A thread hangs under this row when it is on the row's own line, or, for an unchanged row,
+    /// on the line it has at base.
+    pub(super) fn holds(&self, location: &LineLocation) -> bool {
+        self.is_inside_hunk()
+            && self.location.path == location.path
+            && match (self.kind, location.side) {
+                (LineKind::Context { base_line, .. }, Side::Base) => base_line == location.line,
+                _ => self.location.side == location.side && self.location.line == location.line,
+            }
+    }
+
     pub fn is_change(&self) -> bool {
         matches!(self.kind, LineKind::Removed | LineKind::Added)
     }
@@ -123,7 +134,7 @@ impl SafetyNetPage {
 }
 
 impl PieceDiff {
-    fn of(part: PiecePart, files: &[ChangedFile], display: &DiffDisplay) -> Self {
+    pub(super) fn of(part: PiecePart, files: &[ChangedFile], display: &DiffDisplay) -> Self {
         let piece = part.piece;
         let file = files
             .iter()

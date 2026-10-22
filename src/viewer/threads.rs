@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::coverage::{self, PiecePart};
+use crate::coverage;
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
+use super::diff_display::DiffDisplay;
 use super::review::StepId;
-use super::step_page::{LineLocation, Side};
+use super::step_page::{LineLocation, PieceDiff, Side};
 
 /// A review thread as GitHub holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,8 +79,13 @@ pub(super) struct ThreadPlacement {
 }
 
 impl ThreadPlacement {
-    pub fn of(tour: &Tour, files: &[ChangedFile], threads: &[ReviewThread]) -> Self {
-        let steps: Vec<(StepId, Vec<PiecePart>)> = tour
+    pub fn of(
+        tour: &Tour,
+        files: &[ChangedFile],
+        threads: &[ReviewThread],
+        display: &DiffDisplay,
+    ) -> Self {
+        let steps: Vec<(StepId, Vec<PieceDiff>)> = tour
             .steps()
             .into_iter()
             .map(|step| {
@@ -87,6 +93,7 @@ impl ThreadPlacement {
                     .pieces
                     .iter()
                     .flat_map(|pointer| pointer.shown_parts(tour, files))
+                    .map(|part| PieceDiff::of(part, files, display))
                     .collect();
                 (StepId::from(step.id.as_str()), parts)
             })
@@ -96,8 +103,8 @@ impl ThreadPlacement {
             let home = steps
                 .iter()
                 .find(|(_, parts)| match thread.anchor() {
-                    Some(anchor) => parts.iter().any(|part| holds(part, &anchor)),
-                    None => parts.iter().any(|part| part.piece.id.path == thread.path),
+                    Some(anchor) => parts.iter().any(|piece| hangs_under_a_row(piece, &anchor)),
+                    None => parts.iter().any(|piece| piece.id.path == thread.path),
                 })
                 .map_or(Home::SafetyNet, |(id, _)| Home::Step(id.clone()));
             homes.entry(home).or_default().push(thread.clone());
@@ -118,27 +125,14 @@ impl ThreadPlacement {
     }
 }
 
-/// GitHub takes comments on changed lines and on the unchanged lines around them in the diff.
-const GITHUB_CONTEXT_LINES: usize = 3;
-
-fn holds(part: &PiecePart, location: &LineLocation) -> bool {
-    part.piece.id.path == location.path
-        && match location.side {
-            Side::Base => part
-                .removed_lines
-                .iter()
-                .any(|line| line.number == location.line),
-            Side::Head => part
-                .added_lines
-                .iter()
-                .any(|line| line.number.abs_diff(location.line) <= GITHUB_CONTEXT_LINES),
-        }
+fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
+    piece.lines().any(|row| row.holds(location))
 }
 
 /// Turns placed threads into what a screen shows. `shown` is the code the screen has.
 pub(super) fn views(
     threads: &[ReviewThread],
-    shown: &[PiecePart],
+    shown: &[PieceDiff],
     flipped: &BTreeSet<String>,
 ) -> Vec<ThreadView> {
     threads
@@ -147,7 +141,7 @@ pub(super) fn views(
             is_folded: thread.is_folded_by_default() != flipped.contains(&thread.id),
             anchor: thread
                 .anchor()
-                .filter(|anchor| shown.iter().any(|part| holds(part, anchor))),
+                .filter(|anchor| shown.iter().any(|piece| hangs_under_a_row(piece, anchor))),
             thread: thread.clone(),
         })
         .collect()

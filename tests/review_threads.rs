@@ -35,6 +35,31 @@ impl Shop {
         Self { repo, base, head }
     }
 
+    fn source(&self) -> LocalGit {
+        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+            .unwrap()
+            .unwrap()
+    }
+
+    /// Threads arrive before the files at head are read, as in the app.
+    fn open_with_threads_then_head_files(&self, threads: &[ReviewThread]) -> Review {
+        let mut review = self.open(list_step());
+        review.set_threads(threads);
+        let files_at_head = review.files_at_head_request().read(&self.source());
+        review.set_files_at_head(files_at_head);
+        review.go_to(&"list".into());
+        review
+    }
+
+    fn with_list(base_lines: &[&str], head_lines: &[&str]) -> Self {
+        let repo = FixtureRepo::cloned_from("acme/shop");
+        repo.write("list.txt", &format!("{}\n", base_lines.join("\n")));
+        let base = repo.commit("base");
+        repo.write("list.txt", &format!("{}\n", head_lines.join("\n")));
+        let head = repo.commit("head");
+        Self { repo, base, head }
+    }
+
     fn open(&self, steps: Vec<Value>) -> Review {
         let tour: Tour = serde_json::from_value(json!({
             "pr": "https://github.com/acme/shop/pull/7",
@@ -45,9 +70,7 @@ impl Shop {
             "steps": steps,
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
-            .unwrap()
-            .unwrap();
+        let source = self.source();
         let state_file = ReviewStateFile::for_pr(
             self.repo.home(),
             &"https://github.com/acme/shop/pull/7"
@@ -250,4 +273,73 @@ fn threads_are_pulled_from_github_for_the_tours_pr() {
     );
     review.go_to(&"order".into());
     assert_eq!(ids(&review.current_step().unwrap().threads), ["t1"]);
+}
+
+fn list_step() -> Vec<Value> {
+    vec![step("list", json!([{"file": "list.txt"}]))]
+}
+
+fn hangs_in_step(shop: &Shop, thread: ReviewThread) -> Option<(Side, usize)> {
+    let review = shop.open_with_threads_then_head_files(&[thread]);
+    let page = review.current_step().unwrap();
+    page.threads
+        .first()
+        .and_then(|view| view.anchor.as_ref())
+        .map(|anchor| (anchor.side, anchor.line))
+}
+
+fn is_in_safety_net_only(shop: &Shop, thread: ReviewThread) -> bool {
+    let review = shop.open_with_threads_then_head_files(&[thread]);
+    review.current_step().unwrap().threads.is_empty()
+        && ids(&review.safety_net().unwrap().threads) == ["t1"]
+}
+
+#[test]
+fn a_left_comment_on_an_unchanged_line_hangs_under_the_row_the_step_shows_for_it() {
+    let base: Vec<_> = (1..=10).map(|n| format!("l{n}")).collect();
+    let mut head = base.clone();
+    head.splice(2..2, ["new1".to_string(), "new2".to_string()]);
+    let shop = Shop::with_list(
+        &base.iter().map(String::as_str).collect::<Vec<_>>(),
+        &head.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+
+    let on_base = |line| thread("t1", "list.txt", Side::Base, line);
+    // base line 4 is head line 6, three lines below the two added ones
+    assert_eq!(hangs_in_step(&shop, on_base(4)), Some((Side::Base, 4)));
+    assert_eq!(hangs_in_step(&shop, on_base(1)), Some((Side::Base, 1)));
+    // base line 6 is head line 8, outside what the step shows
+    assert!(is_in_safety_net_only(&shop, on_base(6)));
+}
+
+#[test]
+fn threads_around_a_deletion_only_piece_hang_under_the_rows_the_step_shows() {
+    let base: Vec<_> = (1..=10).map(|n| format!("l{n}")).collect();
+    let mut head = base.clone();
+    head.drain(4..6);
+    let shop = Shop::with_list(
+        &base.iter().map(String::as_str).collect::<Vec<_>>(),
+        &head.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    let on = |side, line| thread("t1", "list.txt", side, line);
+
+    // head lines 2..=7 show: three above the cut, three below
+    assert_eq!(
+        hangs_in_step(&shop, on(Side::Head, 4)),
+        Some((Side::Head, 4))
+    );
+    assert_eq!(
+        hangs_in_step(&shop, on(Side::Head, 5)),
+        Some((Side::Head, 5))
+    );
+    assert_eq!(
+        hangs_in_step(&shop, on(Side::Base, 5)),
+        Some((Side::Base, 5))
+    );
+    // base line 8 is head line 6
+    assert_eq!(
+        hangs_in_step(&shop, on(Side::Base, 8)),
+        Some((Side::Base, 8))
+    );
+    assert!(is_in_safety_net_only(&shop, on(Side::Head, 8)));
 }

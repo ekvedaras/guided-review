@@ -82,6 +82,7 @@ pub struct Review {
     /// then the safety net when it holds anything.
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
+    pulled_threads: Vec<ReviewThread>,
     threads: ThreadPlacement,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<String>,
@@ -125,6 +126,7 @@ impl Review {
             files,
             steps_in_reading_order,
             has_uncovered_changes,
+            pulled_threads: Vec::new(),
             threads: ThreadPlacement::default(),
             thread_fold_flipped: BTreeSet::new(),
             screen: Screen::Summary,
@@ -159,6 +161,7 @@ impl Review {
 
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) {
         self.files_at_head = files_at_head;
+        self.place_threads();
     }
 
     pub fn show_more_context(&mut self, more: &MoreContext) {
@@ -219,12 +222,11 @@ impl Review {
         let display = self.display(&links);
         let mut page = StepPage::of(step, &self.tour, &self.files, &display, self.is_folded(id));
         page.is_ticked = self.is_ticked(id);
-        let shown: Vec<_> = step
-            .pieces
-            .iter()
-            .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
-            .collect();
-        page.threads = threads::views(self.threads.in_step(id), &shown, &self.thread_fold_flipped);
+        page.threads = threads::views(
+            self.threads.in_step(id),
+            &page.pieces,
+            &self.thread_fold_flipped,
+        );
         Some(page)
     }
 
@@ -295,10 +297,9 @@ impl Review {
         self.reading_order().contains(&Screen::SafetyNet).then(|| {
             let links = self.links();
             let mut page = SafetyNetPage::of(&self.tour, &self.files, &self.display(&links));
-            let shown = coverage::safety_net(&self.tour, &self.files);
             page.threads = threads::views(
                 self.threads.in_safety_net(),
-                &shown,
+                &page.pieces,
                 &self.thread_fold_flipped,
             );
             page
@@ -332,7 +333,21 @@ impl Review {
     }
 
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
-        self.threads = ThreadPlacement::of(&self.tour, &self.files, threads);
+        self.pulled_threads = threads.to_vec();
+        self.place_threads();
+    }
+
+    /// Placed by the rows a step shows, which depend on the files read at head, so again when those arrive.
+    fn place_threads(&mut self) {
+        let links = self.links();
+        let display = DiffDisplay {
+            highlights: &Highlights::default(),
+            files_at_head: &self.files_at_head,
+            more_context: &HashMap::new(),
+            ignores_whitespace: false,
+            links: &links,
+        };
+        self.threads = ThreadPlacement::of(&self.tour, &self.files, &self.pulled_threads, &display);
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &str) {
