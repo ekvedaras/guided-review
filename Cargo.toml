@@ -12,7 +12,7 @@ futures = "0.3"
 globset = "0.4.20"
 gpui = { git = "https://github.com/zed-industries/zed", rev = "d38a754e1b6399a9a6ef26bbbdd95417b57eb988", package = "gpui" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d38a754e1b6399a9a6ef26bbbdd95417b57eb988", package = "gpui_platform", features = ["font-kit", "runtime_shaders"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 merman = { version = "=0.9.1", default-features = false, features = ["svg", "diagram-flowchart", "diagram-sequence", "diagram-state", "native-fonts"] }
 pulldown-cmark = { version = "0.13.5", default-features = false }
 resvg = { version = "0.46", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }

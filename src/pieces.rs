@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use crate::code_source::{CodeSource, FileDiff, FileStatus, Hunk, Line};
 use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
+use crate::image_facts::{self, ImageChange};
 use crate::language::Language;
 use crate::pull_request::Sha;
 use crate::symbols::{Slot, Symbol, Symbols};
@@ -53,6 +54,7 @@ pub enum PieceKind {
     Top,
     File,
     Hunk,
+    Image,
 }
 
 impl fmt::Display for PieceKind {
@@ -72,6 +74,7 @@ impl fmt::Display for PieceKind {
             Self::Top => "top",
             Self::File => "file",
             Self::Hunk => "hunk",
+            Self::Image => "image",
         })
     }
 }
@@ -145,6 +148,8 @@ pub struct Piece {
     pub diff_hash: DiffHash,
     pub removed_lines: Vec<Line>,
     pub added_lines: Vec<Line>,
+    /// Set on image pieces; the sizes are unknown when the bytes are not a readable image.
+    pub image: Option<ImageChange>,
     moved_body: Option<String>,
 }
 
@@ -168,7 +173,7 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
     let mut files = diffs
         .into_iter()
         .map(|diff| {
-            let pieces = match cut_by_file_rules(&diff, &generated) {
+            let pieces = match cut_by_file_rules(source, base, head, &diff, &generated) {
                 Some(pieces) => pieces,
                 None => cut_by_symbols(source, base, head, &diff)?,
             };
@@ -207,11 +212,22 @@ fn cut_by_symbols(
 
 /// Every file-level decision, made before any symbol is looked for.
 /// `None` means the file is a normal source file and symbols decide its pieces.
-fn cut_by_file_rules(diff: &FileDiff, generated: &GeneratedFiles) -> Option<Vec<Piece>> {
+fn cut_by_file_rules(
+    source: &dyn CodeSource,
+    base: &Sha,
+    head: &Sha,
+    diff: &FileDiff,
+    generated: &GeneratedFiles,
+) -> Option<Vec<Piece>> {
     if generated.contains(diff.path()) {
         let mut piece = whole_file_piece(diff);
         piece.marks.push(PieceMark::Generated);
         return Some(vec![piece]);
+    }
+    if image_facts::is_image_path(diff.path())
+        && (diff.binary || image_facts::is_svg_path(diff.path()))
+    {
+        return Some(vec![image_piece(source, base, head, diff)]);
     }
     if diff.binary || diff.status() == FileStatus::Deleted {
         return Some(vec![whole_file_piece(diff)]);
@@ -248,6 +264,7 @@ fn hunk_pieces(diff: &FileDiff) -> Vec<Piece> {
                 diff_hash: DiffHash::of(&removed, &added),
                 removed_lines: hunk.removed.clone(),
                 added_lines: hunk.added.clone(),
+                image: None,
                 moved_body: None,
             }
         })
@@ -271,8 +288,24 @@ fn whole_file_piece(diff: &FileDiff) -> Piece {
         diff_hash: DiffHash::of(&removed, &added),
         removed_lines: diff.removed.clone(),
         added_lines: diff.added.clone(),
+        image: None,
         moved_body: None,
     }
+}
+
+fn image_piece(source: &dyn CodeSource, base: &Sha, head: &Sha, diff: &FileDiff) -> Piece {
+    let size_at = |sha: &Sha, path: Option<&str>| {
+        let path = path?;
+        let bytes = source.blob_at(sha, path).ok()?;
+        image_facts::measure(path, &bytes)
+    };
+    let mut piece = whole_file_piece(diff);
+    piece.kind = PieceKind::Image;
+    piece.image = Some(ImageChange {
+        base: size_at(base, diff.old_path.as_deref()),
+        head: size_at(head, diff.new_path.as_deref()),
+    });
+    piece
 }
 
 fn cut_symbols(
@@ -368,6 +401,7 @@ fn cut_symbols(
                 diff_hash: DiffHash::of(&change.removed, &change.added),
                 removed_lines: change.removed.iter().copied().cloned().collect(),
                 added_lines: change.added.iter().copied().cloned().collect(),
+                image: None,
                 moved_body,
             };
             (position, piece)

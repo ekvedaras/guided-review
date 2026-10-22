@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::image_facts::ImageChange;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::test_pairing::SubjectCandidates;
@@ -67,6 +68,9 @@ impl fmt::Display for Outline<'_> {
                 )?;
                 for mark in &piece.marks {
                     write!(f, "  {mark}")?;
+                }
+                if let Some(image) = piece.image.filter(ImageChange::is_known) {
+                    write!(f, "  {image}")?;
                 }
                 if let Some(signature) = &piece.signature {
                     write!(f, "  {}", short(signature))?;

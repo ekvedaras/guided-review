@@ -45,6 +45,12 @@ impl FixtureRepo {
         std::fs::write(file, content).unwrap();
     }
 
+    pub fn write_bytes(&self, path: &str, content: &[u8]) {
+        let file = self.root.path().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, content).unwrap();
+    }
+
     pub fn commit(&self, message: &str) -> String {
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "--allow-empty", "-m", message]);
@@ -187,4 +193,19 @@ impl FakeGitHub {
 
         Self { url }
     }
+}
+
+/// A real PNG of one flat colour, so the code under test can read its size.
+pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(width, height, image::Rgba(rgba))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+pub fn svg_of(width: u32, height: u32) -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">\n<rect width=\"{width}\" height=\"{height}\" fill=\"red\"/>\n</svg>\n"
+    )
 }
