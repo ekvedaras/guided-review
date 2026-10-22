@@ -3,7 +3,7 @@ use std::process::Command;
 
 use anyhow::{Context, bail};
 
-use crate::code_source::{CodeSource, FileDiff, parse_unified_diff};
+use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 
@@ -135,6 +135,19 @@ impl CodeSource for LocalGit {
 
     fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
         self.git_bytes(&["show", &format!("{sha}:{path}")])
+    }
+
+    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
+        let listed = self.git(&["ls-tree", "-l", "--full-tree", sha.as_str(), "--", path])?;
+        let mut fields = listed.split_whitespace();
+        let (id, size) = (fields.nth(2), fields.next());
+        match (id, size.and_then(|size| size.parse().ok())) {
+            (Some(id), Some(size)) => Ok(BlobInfo {
+                id: id.to_string(),
+                size,
+            }),
+            _ => bail!("{path} is not a file at {sha}"),
+        }
     }
 
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>> {

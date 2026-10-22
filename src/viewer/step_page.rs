@@ -101,6 +101,8 @@ pub struct PieceDiff {
     pub changes_only_whitespace: bool,
     /// Set for a binary file: it has no lines, only this one row.
     pub binary_file: Option<GitHubLink>,
+    /// The file is a picture; the app shows it from `Review::image_preview`.
+    pub is_image: bool,
     /// What the last re-pin did to this piece; `None` when the tour was not re-pinned.
     pub repin_status: Option<RepinStatus>,
 }
@@ -198,12 +200,14 @@ impl PieceDiff {
             part.range
                 .map(|[first, last]| first as usize..=last as usize),
         );
+        let is_image = piece.kind == PieceKind::Image;
         let has_changes = !part.removed_lines.is_empty() || !part.added_lines.is_empty();
         Self {
             id: piece.id.clone(),
             changes_only_whitespace: has_changes && hunks.is_empty(),
             hunks,
-            binary_file: file.binary.then(|| display.links.to_file(file)),
+            binary_file: (file.binary && !is_image).then(|| display.links.to_file(file)),
+            is_image,
             repin_status: None,
         }
     }
@@ -230,6 +234,7 @@ impl PieceDiff {
             hunks: Vec::new(),
             changes_only_whitespace: false,
             binary_file: None,
+            is_image: false,
             repin_status: None,
         };
         let Some(file) = since_files.iter().find(|file| file.path == piece.id.path) else {
@@ -284,7 +289,8 @@ impl PieceDiff {
         diff.changes_only_whitespace =
             (!removed.is_empty() || !added.is_empty()) && diff.hunks.is_empty();
         diff.binary_file =
-            (file.binary && !changed_since.is_empty()).then(|| display.links.to_file(file));
+            (file.binary && !changed_since.is_empty() && piece.kind != PieceKind::Image)
+                .then(|| display.links.to_file(file));
         diff
     }
 }

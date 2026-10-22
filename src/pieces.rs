@@ -296,6 +296,9 @@ fn whole_file_piece(diff: &FileDiff) -> Piece {
 fn image_piece(source: &dyn CodeSource, base: &Sha, head: &Sha, diff: &FileDiff) -> Piece {
     let size_at = |sha: &Sha, path: Option<&str>| {
         let path = path?;
+        if source.blob_info_at(sha, path).ok()?.size > image_facts::MAX_PREVIEW_BYTES {
+            return None;
+        }
         let bytes = source.blob_at(sha, path).ok()?;
         image_facts::measure(path, &bytes)
     };

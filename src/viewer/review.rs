@@ -26,6 +26,7 @@ use super::finish_review::{
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::jump::{self, JumpTarget};
+use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
@@ -128,6 +129,7 @@ pub struct Review {
     has_pending_review: Option<bool>,
     /// Unknown until GitHub answers; Approve and Request changes are only offered when it is known to be `false`.
     viewer_did_author: Option<bool>,
+    image_previews: HashMap<String, ImagePreview>,
 }
 
 impl Review {
@@ -187,6 +189,7 @@ impl Review {
             selection: None,
             has_pending_review: None,
             viewer_did_author: None,
+            image_previews: HashMap::new(),
         })
     }
 
@@ -211,6 +214,30 @@ impl Review {
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) {
         self.files_at_head = files_at_head;
         self.place_threads();
+    }
+
+    /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
+    /// only while their step is shown.
+    pub fn image_preview_requests(&self) -> Vec<ImagePreviewRequest> {
+        let mut requests: Vec<ImagePreviewRequest> = Vec::new();
+        for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
+            let path = &piece.id.path;
+            let is_wanted = !self.image_previews.contains_key(path)
+                && !requests.iter().any(|request| request.path() == path);
+            let file = self.files.iter().find(|file| file.path == *path);
+            if let (true, Some(file)) = (is_wanted, file) {
+                requests.push(ImagePreviewRequest::for_file(file, &self.base, &self.head));
+            }
+        }
+        requests
+    }
+
+    pub fn set_image_preview(&mut self, preview: ImagePreview) {
+        self.image_previews.insert(preview.path.clone(), preview);
+    }
+
+    pub fn image_preview(&self, path: &str) -> Option<&ImagePreview> {
+        self.image_previews.get(path)
     }
 
     pub fn show_more_context(&mut self, more: &MoreContext) {
@@ -811,8 +838,27 @@ impl Review {
         Ok(Some(place))
     }
 
+    /// The comment box of a picture opens on the whole file, under the same rules as on lines.
+    pub fn begin_file_comment(&mut self, path: &str) -> Result<CommentPlace, CommentRefusal> {
+        if self.old_head().is_some() {
+            return Err(CommentRefusal::TourIsOld);
+        }
+        let place = CommentPlace::on_file(path);
+        self.state.open_draft(place.clone());
+        self.save_viewer_sections()
+            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
+        Ok(place)
+    }
+
     /// Every row the current screen shows, top to bottom.
     fn screen_lines(&self) -> Vec<DiffLine> {
+        self.screen_pieces()
+            .iter()
+            .flat_map(|piece| piece.lines().cloned())
+            .collect()
+    }
+
+    fn screen_pieces(&self) -> Vec<PieceDiff> {
         match &self.screen {
             Screen::Step(_) => self
                 .current_step()
@@ -824,9 +870,6 @@ impl Review {
                 .unwrap_or_default(),
             Screen::Summary => Vec::new(),
         }
-        .iter()
-        .flat_map(|piece| piece.lines().cloned())
-        .collect()
     }
 
     pub fn comment_drafts(&self) -> &[CommentDraft] {

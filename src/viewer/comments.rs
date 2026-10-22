@@ -6,7 +6,7 @@ use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ports::{GitHubPort, PendingReviewExists, ThreadNotCreated, ViewedSyncUnavailable};
 use super::row_selection::SelectedLines;
-use super::step_page::LineLocation;
+use super::step_page::{LineLocation, Side};
 
 /// The lines a comment is on: one line, or a range that may cross hunks and sides.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -21,6 +21,23 @@ impl CommentPlace {
             start: selected.first().clone(),
             end: selected.last().clone(),
         }
+    }
+
+    /// A comment on a whole file, which GitHub takes for a picture. It has no line: line 0 never exists.
+    pub fn on_file(path: &str) -> Self {
+        let file = LineLocation {
+            path: path.to_string(),
+            side: Side::Head,
+            line: 0,
+        };
+        Self {
+            start: file.clone(),
+            end: file,
+        }
+    }
+
+    pub fn is_file_comment(&self) -> bool {
+        self.end.line == 0
     }
 
     pub fn path(&self) -> &str {

@@ -6,6 +6,8 @@ use crate::pull_request::Sha;
 pub trait CodeSource: Send + Sync {
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String>;
     fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>>;
+    /// What a file is at `sha`, without reading it: the blob id names its content, so equal ids are equal bytes.
+    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo>;
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>>;
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha>;
     /// True when the checked-out files are exactly `head`, so they can be opened in an IDE.
@@ -14,6 +16,12 @@ pub trait CodeSource: Send + Sync {
     fn local_clone(&self) -> Option<&Path> {
         None
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobInfo {
+    pub id: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Default)]

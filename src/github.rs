@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use serde::Deserialize;
 
-use crate::code_source::{CodeSource, FileDiff, parse_unified_diff};
+use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
     CommentPlace, PendingReviewExists, Reaction, ReactionCount, ReviewThread, ReviewVerdict,
@@ -278,13 +278,17 @@ impl GitHub {
             "pullRequestId": self.pull_request_id(pr)?,
             "path": place.path(),
             "body": body,
-            "line": place.end.line,
-            "side": graphql_side(place.end.side),
-            "subjectType": "LINE",
         });
-        if !place.is_single_line() {
-            input["startLine"] = place.start.line.into();
-            input["startSide"] = graphql_side(place.start.side).into();
+        if place.is_file_comment() {
+            input["subjectType"] = "FILE".into();
+        } else {
+            input["line"] = place.end.line.into();
+            input["side"] = graphql_side(place.end.side).into();
+            input["subjectType"] = "LINE".into();
+            if !place.is_single_line() {
+                input["startLine"] = place.start.line.into();
+                input["startSide"] = graphql_side(place.start.side).into();
+            }
         }
         let data = self
             .graphql(
@@ -536,6 +540,28 @@ impl CodeSource for GitHubCodeSource {
             .get(&url, "application/vnd.github.raw+json")
             .with_context(|| format!("could not read {path} at {sha} from GitHub"))?;
         Ok(response.body_mut().read_to_vec()?)
+    }
+
+    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
+        #[derive(Deserialize)]
+        struct ContentsJson {
+            sha: String,
+            size: u64,
+        }
+        let url = format!(
+            "repos/{}/contents/{}?ref={sha}",
+            self.repo,
+            percent_encode_path(path)
+        );
+        let contents: ContentsJson = self
+            .github
+            .get(&url, "application/vnd.github.object+json")
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not look up {path} at {sha} on GitHub"))?;
+        Ok(BlobInfo {
+            id: contents.sha,
+            size: contents.size,
+        })
     }
 
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>> {

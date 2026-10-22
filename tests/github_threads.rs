@@ -400,3 +400,20 @@ fn the_pr_author_is_read_from_viewer_did_author() {
 
     assert!(GitHub::at(&url).viewer_authored(&pr()).unwrap());
 }
+
+#[test]
+fn a_file_comment_is_a_thread_of_subject_type_file_without_lines() {
+    let (url, asked) = serve_graphql(vec![PULL_ID.into(), THREAD_ADDED.into()]);
+
+    GitHub::at(&url)
+        .add_review_thread(&pr(), &CommentPlace::on_file("logo.png"), "why red?")
+        .unwrap();
+
+    let input = &asked_as_json(&asked)[1]["variables"]["input"];
+    assert_eq!(
+        *input,
+        serde_json::json!({
+            "pullRequestId": "PR_1", "path": "logo.png", "body": "why red?", "subjectType": "FILE",
+        })
+    );
+}

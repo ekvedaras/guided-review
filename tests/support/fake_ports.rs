@@ -89,6 +89,9 @@ impl FakeGitHub {
     }
 
     fn describe(place: &CommentPlace, body: &str) -> String {
+        if place.is_file_comment() {
+            return format!("{} FILE {body:?}", place.path());
+        }
         let side = |side: Side| if side == Side::Base { "LEFT" } else { "RIGHT" };
         let start = if place.is_single_line() {
             String::new()
