@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
-use guided_review::viewer::{ReadProgress, Review, ReviewStateFile};
+use guided_review::viewer::{ReadProgress, Review, ReviewState, ReviewStateFile};
 use serde_json::{Value, json};
 use support::FixtureRepo;
 
@@ -32,6 +32,15 @@ impl Shop {
         self.repo
             .home()
             .join(".guided-review/state/acme/shop/7.json")
+    }
+
+    fn files_in_state_folder(&self) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(self.state_path().parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
     }
 
     fn state_file(&self) -> ReviewStateFile {
@@ -98,11 +107,7 @@ fn the_state_file_keeps_each_tick_with_the_head_it_was_made_at() {
         shop.state_on_disk()["read_ticks"],
         json!({"emails": {"head": shop.head}})
     );
-    let leftovers: Vec<_> = std::fs::read_dir(shop.state_path().parent().unwrap())
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect();
-    assert_eq!(leftovers, ["7.json"]);
+    assert_eq!(shop.files_in_state_folder(), ["7.json", "7.json.lock"]);
 }
 
 #[test]
@@ -197,4 +202,26 @@ fn a_broken_state_file_stops_the_app_from_opening_instead_of_being_overwritten()
         std::fs::read_to_string(shop.state_path()).unwrap(),
         "{ not json"
     );
+}
+
+#[test]
+fn writers_saving_the_same_state_file_at_once_all_succeed_and_leave_no_temp_files() {
+    let shop = Shop::with_pull();
+    let writers: Vec<_> = (0..8)
+        .map(|_| {
+            let state_file = shop.state_file();
+            std::thread::spawn(move || {
+                (0..50)
+                    .map(|_| state_file.save(&ReviewState::default()))
+                    .collect::<anyhow::Result<Vec<()>>>()
+            })
+        })
+        .collect();
+
+    for writer in writers {
+        writer.join().unwrap().unwrap();
+    }
+
+    assert_eq!(shop.state_on_disk()["read_ticks"], json!({}));
+    assert_eq!(shop.files_in_state_folder(), ["7.json", "7.json.lock"]);
 }

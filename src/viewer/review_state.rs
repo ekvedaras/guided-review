@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -75,14 +76,37 @@ impl ReviewStateFile {
         }
     }
 
-    /// Written to a temp file first, so a crash mid-write never leaves half a file behind.
     pub fn save(&self, state: &ReviewState) -> anyhow::Result<()> {
+        let _lock = self.lock()?;
+        self.write(state)
+    }
+
+    /// One lock file per state file, so writers in this app, in its background work and in a
+    /// CLI run at the same time take turns instead of overwriting each other.
+    fn lock(&self) -> anyhow::Result<std::fs::File> {
         let folder = self.path.parent().expect("the state file sits in a folder");
         std::fs::create_dir_all(folder)
             .with_context(|| format!("could not create {}", folder.display()))?;
-        let temp = self.path.with_extension("json.tmp");
-        let text = serde_json::to_string_pretty(state)?;
-        std::fs::write(&temp, text + "\n")
+        let lock_path = self.path.with_extension("json.lock");
+        let lock = std::fs::File::create(&lock_path)
+            .with_context(|| format!("could not create {}", lock_path.display()))?;
+        lock.lock()
+            .with_context(|| format!("could not lock {}", lock_path.display()))?;
+        Ok(lock)
+    }
+
+    fn unique_temp_path(&self) -> PathBuf {
+        static WRITES: AtomicU64 = AtomicU64::new(0);
+        let write = WRITES.fetch_add(1, Ordering::Relaxed);
+        self.path
+            .with_extension(format!("json.{}.{write}.tmp", std::process::id()))
+    }
+
+    /// Written to a temp file of its own first, so a crash mid-write never leaves half a file behind.
+    fn write(&self, state: &ReviewState) -> anyhow::Result<()> {
+        let text = serde_json::to_string_pretty(state)? + "\n";
+        let temp = self.unique_temp_path();
+        std::fs::write(&temp, text)
             .with_context(|| format!("could not write {}", temp.display()))?;
         std::fs::rename(&temp, &self.path)
             .with_context(|| format!("could not write {}", self.path.display()))
