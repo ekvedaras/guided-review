@@ -2,11 +2,14 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::github::GitHub;
+use guided_review::local_git::LocalGit;
 use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
+use guided_review::tour::Tour;
+use guided_review::tour_check;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -29,12 +32,15 @@ enum Command {
         #[arg(long)]
         around: bool,
     },
+    /// Pin the tour file of a PR to its commits, then list its errors and warnings
+    Check { pr: PullRequestUrl },
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Outline { pr } => outline(&pr),
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
+        Command::Check { pr } => check(&pr),
     }
 }
 
@@ -75,5 +81,33 @@ fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()>
         }
         .render()?
     );
+    Ok(())
+}
+
+fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let tour_path = Tour::path_for(&home, pr);
+    let mut tour = Tour::load(&tour_path)?;
+
+    let tips = GitHub::from_env().pull_request_tips(pr)?;
+    let current_dir = std::env::current_dir().context("could not read the current folder")?;
+    let source = LocalGit::find(&pr.repo, &current_dir)?.with_context(|| {
+        format!(
+            "no local clone of {} found; run this inside one, or add it under [clones] in ~/.guided-review/config.toml",
+            pr.repo
+        )
+    })?;
+    source.require_commits(&[&tips.base_branch_tip, &tips.head])?;
+    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
+    let files = pieces::cut(&source, &base, &tips.head)?;
+
+    tour.pin(pr, &base, &tips.head);
+    tour.save(&tour_path)?;
+
+    let report = tour_check::check(&tour, &files);
+    print!("{report}");
+    if !report.errors.is_empty() {
+        std::process::exit(1);
+    }
     Ok(())
 }
