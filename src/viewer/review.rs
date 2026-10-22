@@ -844,7 +844,8 @@ impl Review {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::on_file(path);
-        self.state.open_draft(place.clone());
+        self.state
+            .open_draft(place.clone(), &Sha::new(&self.tour.head));
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)
