@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant","content":[]}},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"po"}},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ng"}},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"pong"}]},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"result","subtype":"success","is_error":false,"result":"pong","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673","stop_reason":"end_turn"}

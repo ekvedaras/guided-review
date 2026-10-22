@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::github::GitHub;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
@@ -13,7 +15,27 @@ impl GitHubPort for GitHub {
     }
 }
 
-/// The local AI behind Ask: start a conversation, send a message, stream the answer.
+/// How to start the local AI for one Ask.
+#[derive(Debug, Clone)]
+pub struct AgentLaunch {
+    /// The repo checkout the AI reads code in.
+    pub cwd: PathBuf,
+    pub model: String,
+    pub effort: String,
+    pub system_prompt: String,
+    /// The earlier session of an Ask that survived an app restart.
+    pub resume: Option<String>,
+}
+
+/// Starts a live conversation. Starting must not wait for the first answer.
+pub trait AgentLauncher: Send + Sync {
+    fn start(&self, launch: &AgentLaunch) -> anyhow::Result<Box<dyn AgentPort>>;
+}
+
+/// One live conversation with the local AI. The core reads its raw stream lines
+/// and turns them into `AgentEvent`s, so adapters stay thin.
 pub trait AgentPort: Send {
-    fn ask(&mut self, question: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
+    /// Sends one message and blocks until the answer to it is complete,
+    /// passing every stream line to `on_line` as it arrives.
+    fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
 }

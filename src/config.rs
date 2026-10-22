@@ -12,6 +12,33 @@ pub struct Config {
     /// `"owner/repo" = "~/path/to/clone"`
     #[serde(default)]
     clones: BTreeMap<String, String>,
+    #[serde(default)]
+    ask_model: Option<String>,
+    #[serde(default)]
+    ask_effort: Option<String>,
+}
+
+/// Which model answers an Ask, and how hard it thinks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskSettings {
+    pub model: String,
+    pub effort: String,
+}
+
+impl Default for AskSettings {
+    fn default() -> Self {
+        Self {
+            model: "opus".to_string(),
+            effort: "medium".to_string(),
+        }
+    }
+}
+
+impl AskSettings {
+    pub fn from_config_text(text: &str) -> anyhow::Result<Self> {
+        let config: Config = toml::from_str(text).context("could not read the config")?;
+        Ok(config.ask_settings())
+    }
 }
 
 impl Config {
@@ -26,6 +53,14 @@ impl Config {
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error).with_context(|| format!("could not read {}", path.display())),
+        }
+    }
+
+    pub fn ask_settings(&self) -> AskSettings {
+        let default = AskSettings::default();
+        AskSettings {
+            model: self.ask_model.clone().unwrap_or(default.model),
+            effort: self.ask_effort.clone().unwrap_or(default.effort),
         }
     }
 

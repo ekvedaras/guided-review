@@ -1,0 +1,70 @@
+use serde_json::Value;
+
+/// What the AI did, as the viewer cares about it. Nothing above this file sees JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentEvent {
+    TextDelta(String),
+    ToolUse { summary: String },
+    Done { session_id: String },
+    Error(String),
+}
+
+impl AgentEvent {
+    /// Reads one `stream-json` line of the `claude` CLI. Lines the viewer has no use for give no events.
+    pub fn from_line(line: &str) -> Vec<Self> {
+        let Ok(json) = serde_json::from_str::<Value>(line) else {
+            return Vec::new();
+        };
+        match json["type"].as_str() {
+            Some("stream_event") => text_delta(&json).into_iter().collect(),
+            Some("assistant") => tool_uses(&json),
+            Some("result") => vec![outcome(&json)],
+            _ => Vec::new(),
+        }
+    }
+}
+
+fn text_delta(json: &Value) -> Option<AgentEvent> {
+    let delta = &json["event"]["delta"];
+    (delta["type"] == "text_delta")
+        .then(|| AgentEvent::TextDelta(delta["text"].as_str().unwrap_or_default().to_string()))
+}
+
+fn tool_uses(json: &Value) -> Vec<AgentEvent> {
+    json["message"]["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "tool_use")
+        .map(|block| AgentEvent::ToolUse {
+            summary: describe_tool_use(block),
+        })
+        .collect()
+}
+
+fn describe_tool_use(block: &Value) -> String {
+    let name = block["name"].as_str().unwrap_or("tool");
+    let input = &block["input"];
+    let target = ["file_path", "path", "pattern", "command"]
+        .iter()
+        .find_map(|key| input[key].as_str());
+    match target {
+        Some(target) => format!("{name} {target}"),
+        None => name.to_string(),
+    }
+}
+
+fn outcome(json: &Value) -> AgentEvent {
+    if json["is_error"] == true {
+        AgentEvent::Error(
+            json["result"]
+                .as_str()
+                .unwrap_or("the AI failed")
+                .to_string(),
+        )
+    } else {
+        AgentEvent::Done {
+            session_id: json["session_id"].as_str().unwrap_or_default().to_string(),
+        }
+    }
+}

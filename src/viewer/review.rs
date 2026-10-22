@@ -8,7 +8,14 @@ use crate::pieces::{self, ChangedFile};
 use crate::pull_request::Sha;
 use crate::tour::{Step, Tour};
 
+use std::path::PathBuf;
+
+use crate::config::AskSettings;
+
+use super::ask::Place;
+use super::ask_context;
 use super::highlight::{HighlightRequest, Highlights};
+use super::ports::AgentLaunch;
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::step_page::StepPage;
 
@@ -122,6 +129,30 @@ impl Review {
         page.is_ticked = self.is_ticked(id);
         page.is_folded = self.is_folded(id);
         Some(page)
+    }
+
+    pub fn head(&self) -> &str {
+        &self.tour.head
+    }
+
+    /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
+    pub fn ask_context(&self, place: &Place) -> Option<String> {
+        ask_context::context_for(&self.tour, &self.files, place)
+    }
+
+    pub fn agent_launch(
+        &self,
+        cwd: PathBuf,
+        settings: &AskSettings,
+        resume: Option<String>,
+    ) -> AgentLaunch {
+        AgentLaunch {
+            cwd,
+            model: settings.model.clone(),
+            effort: settings.effort.clone(),
+            system_prompt: ask_context::system_prompt(&self.tour.pr),
+            resume,
+        }
     }
 
     pub fn sidebar(&self) -> Vec<SidebarEntry<'_>> {
