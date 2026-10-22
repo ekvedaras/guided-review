@@ -128,3 +128,41 @@ fn show_fails_on_an_unknown_piece_id_before_printing_anything() {
         run.stderr
     );
 }
+
+#[test]
+fn show_around_a_hunk_prints_the_lines_around_it_at_head() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let config = |tenth: &str| -> String {
+        (1..=20)
+            .map(|number| match number {
+                10 => format!("{tenth}\n"),
+                _ => format!("key{number}: {number}\n"),
+            })
+            .collect()
+    };
+    repo.write("config.yml", &config("key10: 10"));
+    let base = repo.commit("base");
+    repo.write("config.yml", &config("key10: ten"));
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+
+    let run = GuidedReview::new(&repo, &github).run(&["show", "--around", PR, "config.yml#hunk-1"]);
+
+    assert_eq!(
+        run.stdout_with(&[]),
+        "\
+config.yml#hunk-1  hunk  modified  +1 −1
+-10: key10: 10
++10: key10: ten
+
+around, at head (lines 7-13):
+7: key7: 7
+8: key8: 8
+9: key9: 9
+10: key10: ten
+11: key11: 11
+12: key12: 12
+13: key13: 13
+"
+    );
+}

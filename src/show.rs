@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::code_source::{CodeSource, FileStatus, Line};
 use crate::language::Language;
-use crate::pieces::{ChangedFile, Piece};
+use crate::pieces::{ChangedFile, Piece, PieceKind};
 use crate::pull_request::Sha;
 use crate::symbols::Symbols;
 
@@ -77,13 +77,19 @@ impl Show<'_> {
         }
         let code = self.source.file_at(self.head, &file.path)?;
         let lines: Vec<&str> = code.lines().collect();
-        let span = match &piece.id.symbol {
-            Some(symbol) => Language::for_path(&file.path).and_then(|language| {
+        let span = match (&piece.id.symbol, piece.kind) {
+            (_, PieceKind::Hunk) => hunk_at_head(piece).map(|(first, last)| {
+                (
+                    first.saturating_sub(LINES_AROUND_A_HUNK).max(1),
+                    last + LINES_AROUND_A_HUNK,
+                )
+            }),
+            (Some(symbol), _) => Language::for_path(&file.path).and_then(|language| {
                 Symbols::find(&code, language)
                     .named(symbol)
                     .map(|symbol| (symbol.first_line, symbol.last_line))
             }),
-            None => Some((1, lines.len())),
+            (None, _) => Some((1, lines.len())),
         };
         let Some(span) = span else {
             writeln!(out, "\nnot at head: the piece is deleted")?;
@@ -96,6 +102,26 @@ impl Show<'_> {
             writeln!(out, "{number}: {}", lines[number - 1])?;
         }
         Ok(())
+    }
+}
+
+const LINES_AROUND_A_HUNK: usize = 3;
+
+/// A hunk that only removes lines sits after the head line its header names (`+9,0`).
+fn hunk_at_head(piece: &Piece) -> Option<(usize, usize)> {
+    let added = piece.added_lines.iter().map(|line| line.number);
+    match (added.clone().min(), added.max()) {
+        (Some(first), Some(last)) => Some((first, last)),
+        _ => {
+            let header = piece.signature.as_deref()?;
+            let after = header.split_once('+')?.1;
+            let start: usize = after
+                .split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()?;
+            Some((start.max(1), start.max(1)))
+        }
     }
 }
 
