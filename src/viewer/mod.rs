@@ -49,8 +49,8 @@ pub use ports::{
 pub use reactions::{Reaction, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{
-    OldHead, ReadProgress, RepinRunning, Review, Screen, SidebarEntry, StepId, SyncOutcome,
-    SyncRequest,
+    OldHead, ReadProgress, RepinRunning, Review, SafetyNetSize, Screen, SidebarEntry, StepId,
+    SyncOutcome, SyncRequest,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};

@@ -83,6 +83,13 @@ pub struct ReadProgress {
     pub total: usize,
 }
 
+/// What the sidebar counts for the safety net, cheap enough to ask on every change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SafetyNetSize {
+    pub pieces: usize,
+    pub threads: usize,
+}
+
 /// The tour was written for an older head than the PR has now, so it may be stale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OldHead {
@@ -584,6 +591,16 @@ impl Review {
             );
             page
         })
+    }
+
+    /// `None` when every change is in a step. Does not build the page.
+    pub fn safety_net_size(&self) -> Option<SafetyNetSize> {
+        self.reading_order()
+            .contains(&Screen::SafetyNet)
+            .then(|| SafetyNetSize {
+                pieces: coverage::safety_net(&self.tour, &self.files).len(),
+                threads: self.threads.in_safety_net().len(),
+            })
     }
 
     fn display<'a>(&'a self, links: &'a GitHubLinks<'a>) -> DiffDisplay<'a> {

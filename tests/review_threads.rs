@@ -5,7 +5,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Review, ReviewStateFile, ReviewThread, Screen, Side, ThreadComment, ThreadView,
+    Review, ReviewStateFile, ReviewThread, SafetyNetSize, Screen, Side, ThreadComment, ThreadView,
 };
 use serde_json::{Value, json};
 use support::FixtureRepo;
@@ -186,6 +186,29 @@ fn a_thread_on_a_line_no_step_shows_goes_to_the_safety_net_even_when_every_chang
     review.go_to(&"config".into());
     assert!(review.go_forward());
     assert_eq!(review.screen(), &Screen::SafetyNet);
+}
+
+#[test]
+fn the_safety_net_size_counts_what_its_page_shows() {
+    let mut review =
+        Shop::with_pull().open(vec![step("order", json!([{"file": "app/Order.php"}]))]);
+    review.set_threads(&[thread("t1", "config.yml", Side::Head, 3)]);
+
+    let net = review.safety_net().unwrap();
+    assert_eq!(
+        review.safety_net_size(),
+        Some(SafetyNetSize {
+            pieces: net.pieces.len(),
+            threads: 1,
+        })
+    );
+}
+
+#[test]
+fn there_is_no_safety_net_size_without_a_safety_net() {
+    let review = Shop::with_pull().open(steps());
+
+    assert_eq!(review.safety_net_size(), None);
 }
 
 #[test]
