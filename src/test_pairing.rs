@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::code_source::CodeSource;
+use crate::language::Language;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind, PieceStatus};
 use crate::pull_request::Sha;
 
@@ -197,10 +198,9 @@ impl ImportedNames {
         let Ok(text) = source.file_at(head, path) else {
             return Self(Vec::new());
         };
-        let names = if path.ends_with(".php") {
-            php_imports(&text)
-        } else {
-            typescript_imports(&text)
+        let names = match Language::for_path(path) {
+            Some(Language::Php) => php_imports(&text),
+            Some(Language::TypeScript | Language::Tsx) | None => typescript_imports(&text),
         };
         Self(names.iter().map(|name| normalized(name)).collect())
     }
