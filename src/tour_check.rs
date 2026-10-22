@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::coverage;
+use crate::language::Language;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::tour::{PieceRef, Step, Tour};
 
@@ -18,10 +19,28 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Warning {
     Uncovered(String),
+    LinesUncovered {
+        piece: String,
+        lines: usize,
+    },
+    LinesOnParsableFile {
+        step: String,
+        file: String,
+        lines: [u32; 2],
+    },
     SummaryTooLong(usize),
-    BulletTooLong { words: usize, bullet: String },
-    WhyTooLong { step: String, lines: usize },
-    TooManyPieces { step: String, pieces: usize },
+    BulletTooLong {
+        words: usize,
+        bullet: String,
+    },
+    WhyTooLong {
+        step: String,
+        lines: usize,
+    },
+    TooManyPieces {
+        step: String,
+        pieces: usize,
+    },
     TooManyTopLevelSteps(usize),
 }
 
@@ -37,10 +56,16 @@ pub fn check(tour: &Tour, files: &[ChangedFile]) -> Report {
     for step in tour.steps() {
         check_step(step, files, &mut report);
     }
-    for piece in coverage::uncovered(tour, files) {
-        report
-            .warnings
-            .push(Warning::Uncovered(piece.id.to_string()));
+    for part in coverage::uncovered(tour, files) {
+        let piece = part.piece.id.to_string();
+        report.warnings.push(if part.is_whole() {
+            Warning::Uncovered(piece)
+        } else {
+            Warning::LinesUncovered {
+                piece,
+                lines: part.removed_lines.len() + part.added_lines.len(),
+            }
+        });
     }
     if tour.summary.len() > MAX_SUMMARY_BULLETS {
         report
@@ -67,6 +92,15 @@ pub fn check(tour: &Tour, files: &[ChangedFile]) -> Report {
 fn check_step(step: &Step, files: &[ChangedFile], report: &mut Report) {
     let mut pieces = 0;
     for pointer in &step.pieces {
+        if let PieceRef::Lines { file, lines } = pointer
+            && Language::for_path(file).is_some()
+        {
+            report.warnings.push(Warning::LinesOnParsableFile {
+                step: step.id.clone(),
+                file: file.clone(),
+                lines: *lines,
+            });
+        }
         match pointer.named_pieces(files) {
             Some(named) => pieces += named.len(),
             None => report.errors.push(Error::UnknownPiece {
@@ -104,6 +138,18 @@ impl fmt::Display for Warning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Uncovered(piece) => write!(f, "no step covers {piece}"),
+            Self::LinesUncovered { piece, lines } => {
+                write!(
+                    f,
+                    "{} of {piece} are in no step",
+                    counted(*lines, "changed line")
+                )
+            }
+            Self::LinesOnParsableFile { step, file, lines } => write!(
+                f,
+                "step \"{step}\": {file} lines {}-{}: the tool can parse this file, use file + symbol",
+                lines[0], lines[1]
+            ),
             Self::SummaryTooLong(bullets) => write!(
                 f,
                 "summary has {bullets} bullets, keep it to {MAX_SUMMARY_BULLETS}"

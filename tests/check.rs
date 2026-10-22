@@ -283,3 +283,94 @@ fn check_never_moves_a_pinned_tour_when_the_pull_request_has_new_commits() {
     assert_eq!(written["head"], shop.head.as_str());
     assert_eq!(written["base"], shop.base.as_str());
 }
+
+struct CiFile {
+    repo: FixtureRepo,
+    github: FakeGitHub,
+}
+
+impl CiFile {
+    fn with_two_changes_in_one_hunk() -> Self {
+        let repo = FixtureRepo::cloned_from("acme/shop");
+        let lines = |word: &str| {
+            (1..=6)
+                .map(|n| match n {
+                    2 | 3 => format!("{word} {n}\n"),
+                    _ => format!("line {n}\n"),
+                })
+                .collect::<String>()
+        };
+        repo.write("ci.yml", &lines("old"));
+        let base = repo.commit("base");
+        repo.write("ci.yml", &lines("new"));
+        let head = repo.commit("head");
+        let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+        Self { repo, github }
+    }
+
+    fn check_with(&self, steps: Vec<Value>) -> Run {
+        let path = self
+            .repo
+            .home()
+            .join(".guided-review/tours/acme/shop/7.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, tour(steps).to_string()).unwrap();
+        GuidedReview::new(&self.repo, &self.github).run(&["check", PR])
+    }
+}
+
+#[test]
+fn a_line_range_covers_only_the_changed_lines_inside_it_and_check_warns_about_the_rest() {
+    let ci = CiFile::with_two_changes_in_one_hunk();
+
+    let run = ci.check_with(vec![step(
+        "ci",
+        json!([{"file": "ci.yml", "lines": [1, 2]}]),
+    )]);
+
+    assert_eq!(
+        run.stdout,
+        "warning: 2 changed lines of ci.yml#hunk-1 are in no step\n0 errors, 1 warning\n"
+    );
+}
+
+#[test]
+fn rest_takes_the_changed_lines_a_line_range_left() {
+    let ci = CiFile::with_two_changes_in_one_hunk();
+
+    let run = ci.check_with(vec![
+        step("ci", json!([{"file": "ci.yml", "lines": [1, 2]}])),
+        step("others", json!([{"rest": ""}])),
+    ]);
+
+    assert_eq!(run.stdout, "0 errors, 0 warnings\n");
+}
+
+#[test]
+fn line_ranges_cover_a_hunk_together() {
+    let ci = CiFile::with_two_changes_in_one_hunk();
+
+    let run = ci.check_with(vec![
+        step("first", json!([{"file": "ci.yml", "lines": [1, 2]}])),
+        step("second", json!([{"file": "ci.yml", "lines": [3, 6]}])),
+    ]);
+
+    assert_eq!(run.stdout, "0 errors, 0 warnings\n");
+}
+
+#[test]
+fn a_line_range_on_a_file_the_tool_can_parse_warns_to_use_file_and_symbol() {
+    let shop = Shop::with_pull();
+    shop.write_tour(tour(vec![
+        step(
+            "order",
+            json!([{"file": "app/Order.php", "lines": [1, 10]}]),
+        ),
+        step("others", json!([{"rest": ""}])),
+    ]));
+
+    assert_eq!(
+        shop.check().stdout,
+        "warning: step \"order\": app/Order.php lines 1-10: the tool can parse this file, use file + symbol\n0 errors, 1 warning\n"
+    );
+}
