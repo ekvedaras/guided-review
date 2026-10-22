@@ -4,7 +4,7 @@ mod support;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{Capture, DiffLine, Review, Side};
+use guided_review::viewer::{Capture, DiffLine, Review, ReviewStateFile, Side};
 use serde_json::json;
 use support::FixtureRepo;
 
@@ -21,7 +21,11 @@ fn open_review(repo: &FixtureRepo, base: &str, head: &str) -> (Review, LocalGit)
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let mut review = Review::open(tour, &source).unwrap();
+    let state_file = ReviewStateFile::for_pr(
+        repo.home(),
+        &"https://github.com/acme/shop/pull/7".parse().unwrap(),
+    );
+    let mut review = Review::open(tour, &source, state_file).unwrap();
     review.go_forward();
     (review, source)
 }
