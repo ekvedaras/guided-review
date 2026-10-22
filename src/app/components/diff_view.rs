@@ -15,6 +15,9 @@ use crate::viewer::{
 
 use super::palette::{CODE_FONT, Palette};
 
+/// Opens a line of the head in the reviewer's IDE.
+pub type OnOpenInIde = Rc<dyn Fn(&LineLocation, &mut App)>;
+
 pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
 
 /// What the mouse does on a row. The release is handled above the rows, wherever the mouse is let go.
@@ -45,6 +48,7 @@ pub struct DiffView {
     threads: Vec<(LineLocation, AnyElement)>,
     is_change_since_read: bool,
     selecting: Option<RowSelecting>,
+    open_in_ide: Option<OnOpenInIde>,
 }
 
 impl DiffView {
@@ -55,7 +59,14 @@ impl DiffView {
             threads: Vec::new(),
             is_change_since_read: false,
             selecting: None,
+            open_in_ide: None,
         }
+    }
+
+    /// Cmd-click on a line number opens that line in the IDE; without it the click always opens GitHub.
+    pub fn with_open_in_ide(mut self, open_in_ide: Option<OnOpenInIde>) -> Self {
+        self.open_in_ide = open_in_ide;
+        self
     }
 
     /// In that view a piece without lines was not touched since the reviewer read the step.
@@ -120,6 +131,7 @@ impl RenderOnce for DiffView {
                     hunk,
                     &self.on_more_context,
                     self.selecting.as_ref(),
+                    self.open_in_ide.as_ref(),
                     &mut threads,
                 )
             })
@@ -206,6 +218,7 @@ fn hunk_rows(
     hunk: DiffHunk,
     on_more_context: &OnMoreContext,
     selecting: Option<&RowSelecting>,
+    open_in_ide: Option<&OnOpenInIde>,
     threads: &mut Vec<(LineLocation, AnyElement)>,
 ) -> Vec<AnyElement> {
     let mut rows = Vec::new();
@@ -218,7 +231,7 @@ fn hunk_rows(
     }
     for line in hunk.rows {
         let location = line.location.clone();
-        rows.push(DiffRow::new(line, selecting.cloned()).into_any_element());
+        rows.push(DiffRow::new(line, selecting.cloned(), open_in_ide.cloned()).into_any_element());
         let (here, later): (Vec<_>, Vec<_>) = std::mem::take(threads)
             .into_iter()
             .partition(|(at, _)| *at == location);
@@ -265,11 +278,20 @@ fn hunk_gap(
 struct DiffRow {
     line: DiffLine,
     selecting: Option<RowSelecting>,
+    open_in_ide: Option<OnOpenInIde>,
 }
 
 impl DiffRow {
-    fn new(line: DiffLine, selecting: Option<RowSelecting>) -> Self {
-        Self { line, selecting }
+    fn new(
+        line: DiffLine,
+        selecting: Option<RowSelecting>,
+        open_in_ide: Option<OnOpenInIde>,
+    ) -> Self {
+        Self {
+            line,
+            selecting,
+            open_in_ide,
+        }
     }
 }
 
@@ -277,6 +299,8 @@ impl RenderOnce for DiffRow {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let location = &self.line.location;
         let link = self.line.github_link.clone();
+        let ide_at = self.line.open_at().cloned();
+        let open_in_ide = self.open_in_ide.clone();
         let number = location.line.to_string();
         let (base_number, head_number, sign) = match self.line.kind {
             LineKind::Removed => (number, String::new(), "-"),
@@ -313,7 +337,12 @@ impl RenderOnce for DiffRow {
                     .flex()
                     .flex_none()
                     .cursor_pointer()
-                    .on_click(move |_, _, cx| cx.open_url(link.as_str()))
+                    .on_click(move |event, _, cx| {
+                        match (event.modifiers().secondary(), &open_in_ide, &ide_at) {
+                            (true, Some(open_in_ide), Some(at)) => open_in_ide(at, cx),
+                            _ => cx.open_url(link.as_str()),
+                        }
+                    })
                     .child(line_number(base_number))
                     .child(line_number(head_number)),
             )

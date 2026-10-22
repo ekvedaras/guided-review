@@ -2,7 +2,7 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, Styled, Wind
 
 use crate::viewer::{LineLocation, SafetyNetPage};
 
-use super::diff_view::{DiffView, OnMoreContext, RowSelecting, threads_by_piece};
+use super::diff_view::{DiffView, OnMoreContext, OnOpenInIde, RowSelecting, threads_by_piece};
 use super::palette::Palette;
 
 /// Every change the tour does not show, so nothing in the PR stays hidden.
@@ -13,6 +13,7 @@ pub struct SafetyNetView {
     line_threads: Vec<(LineLocation, AnyElement)>,
     other_threads: Vec<AnyElement>,
     selecting: Option<RowSelecting>,
+    open_in_ide: Option<OnOpenInIde>,
 }
 
 impl SafetyNetView {
@@ -25,7 +26,13 @@ impl SafetyNetView {
             line_threads: Vec::new(),
             other_threads: Vec::new(),
             selecting: None,
+            open_in_ide: None,
         }
+    }
+
+    pub fn with_open_in_ide(mut self, open_in_ide: Option<OnOpenInIde>) -> Self {
+        self.open_in_ide = open_in_ide;
+        self
     }
 
     pub fn with_row_selecting(mut self, selecting: RowSelecting) -> Self {
@@ -62,7 +69,8 @@ impl RenderOnce for SafetyNetView {
                     .zip(self.page.pieces)
                     .map(|(threads, piece)| {
                         let view = DiffView::new(piece, self.on_more_context.clone())
-                            .with_threads(threads);
+                            .with_threads(threads)
+                            .with_open_in_ide(self.open_in_ide.clone());
                         match self.selecting.clone() {
                             Some(selecting) => view.with_row_selecting(selecting),
                             None => view,

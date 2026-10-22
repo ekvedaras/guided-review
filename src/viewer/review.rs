@@ -692,11 +692,26 @@ impl Review {
 
     /// The cmd+k list for what the reviewer has typed so far.
     pub fn jump_targets(&self, query: &str) -> Vec<JumpTarget> {
-        jump::rank(jump::all_targets(&self.tour, &self.files), query)
+        let safety_net = self.safety_net();
+        let safety_net_files: Vec<&str> = safety_net
+            .iter()
+            .flat_map(|page| &page.pieces)
+            .map(|piece| piece.id.path.as_str())
+            .collect();
+        jump::rank(
+            jump::all_targets(&self.tour, &self.files, &safety_net_files),
+            query,
+        )
     }
 
+    /// A folded step opens for the session so the file or symbol the reviewer asked for is on screen.
     pub fn jump_to(&mut self, target: &JumpTarget) {
-        self.go_to(&target.step);
+        self.go_to_screen(target.screen.clone());
+        if let Screen::Step(id) = &target.screen
+            && self.is_folded(id)
+        {
+            self.toggle_fold(id);
+        }
     }
 
     pub fn go_to_summary(&mut self) {

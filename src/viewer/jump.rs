@@ -1,7 +1,7 @@
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
-use super::review::StepId;
+use super::review::{Screen, StepId};
 use super::step_page::pieces_of;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,23 +17,27 @@ pub struct JumpTarget {
     pub kind: JumpKind,
     /// What the query is matched against and what the row shows first.
     pub label: String,
-    /// The step title for files and symbols, empty for steps.
+    /// The step title for files and symbols, empty for steps; "Safety net" for files only it shows.
     pub detail: String,
-    pub step: StepId,
+    pub screen: Screen,
 }
 
-/// Steps, then the files and symbols each step shows, in reading order.
-pub(super) fn all_targets(tour: &Tour, files: &[ChangedFile]) -> Vec<JumpTarget> {
+/// Steps, then the files and symbols each step shows, in reading order, then the files only the safety net shows.
+pub(super) fn all_targets(
+    tour: &Tour,
+    files: &[ChangedFile],
+    safety_net_files: &[&str],
+) -> Vec<JumpTarget> {
     let mut targets = Vec::new();
+    let mut shown_files: Vec<&str> = Vec::new();
     for step in tour.steps() {
-        let id = StepId::from(step.id.as_str());
+        let id = Screen::Step(StepId::from(step.id.as_str()));
         targets.push(JumpTarget {
             kind: JumpKind::Step,
             label: step.title.clone(),
             detail: String::new(),
-            step: id.clone(),
+            screen: id.clone(),
         });
-        let mut shown_files: Vec<&str> = Vec::new();
         for piece in pieces_of(step, tour, files) {
             let path = piece.id.path.as_str();
             if !shown_files.contains(&path) {
@@ -42,7 +46,7 @@ pub(super) fn all_targets(tour: &Tour, files: &[ChangedFile]) -> Vec<JumpTarget>
                     kind: JumpKind::File,
                     label: path.to_string(),
                     detail: step.title.clone(),
-                    step: id.clone(),
+                    screen: id.clone(),
                 });
             }
             if piece.id.symbol.as_deref().is_some_and(is_named_symbol) {
@@ -50,9 +54,20 @@ pub(super) fn all_targets(tour: &Tour, files: &[ChangedFile]) -> Vec<JumpTarget>
                     kind: JumpKind::Symbol,
                     label: piece.id.to_string(),
                     detail: step.title.clone(),
-                    step: id.clone(),
+                    screen: id.clone(),
                 });
             }
+        }
+    }
+    for path in safety_net_files {
+        if !shown_files.contains(path) {
+            shown_files.push(path);
+            targets.push(JumpTarget {
+                kind: JumpKind::File,
+                label: (*path).to_string(),
+                detail: "Safety net".to_string(),
+                screen: Screen::SafetyNet,
+            });
         }
     }
     targets

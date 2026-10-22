@@ -64,6 +64,11 @@ impl DiffLine {
             }
     }
 
+    /// Removed lines are not in the files at head, so an IDE has nothing to open for them.
+    pub fn open_at(&self) -> Option<&LineLocation> {
+        (self.location.side == Side::Head).then_some(&self.location)
+    }
+
     pub fn is_change(&self) -> bool {
         matches!(self.kind, LineKind::Removed | LineKind::Added)
     }

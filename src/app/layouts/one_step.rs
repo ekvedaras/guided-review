@@ -15,7 +15,7 @@ use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
 use crate::app::components::comment_composer::{CommentComposer, OnCompose, QueuedCommentNote};
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    DiffView, OnMoreContext, RowGesture, RowSelecting, threads_by_piece,
+    DiffView, OnMoreContext, OnOpenInIde, RowGesture, RowSelecting, threads_by_piece,
 };
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
@@ -589,20 +589,16 @@ impl OneStepLayout {
         let at = at?;
         let launch = ide.launch(Path::new(&at.path), at.line);
         Some(
-            tool_button(key, "Open in IDE").on_click(cx.listener(move |_, _, _, cx| {
-                match &launch {
-                    IdeLaunch::Url(url) => cx.open_url(url),
-                    IdeLaunch::Shell(command) => {
-                        if let Err(error) = std::process::Command::new("sh")
-                            .args(["-c", command])
-                            .spawn()
-                        {
-                            eprintln!("could not run the IDE command: {error}");
-                        }
-                    }
-                }
-            })),
+            tool_button(key, "Open in IDE")
+                .on_click(cx.listener(move |_, _, _, cx| run_launch(&launch, cx))),
         )
+    }
+
+    fn open_line_in_ide(&self) -> Option<OnOpenInIde> {
+        let ide = self.ide.clone()?;
+        Some(Rc::new(move |at: &LineLocation, cx: &mut App| {
+            run_launch(&ide.launch(Path::new(&at.path), at.line), cx)
+        }))
     }
 
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
@@ -731,6 +727,7 @@ impl OneStepLayout {
                     SafetyNetView::new(page, self.on_more_context(cx))
                         .with_row_selecting(self.row_selecting(cx))
                         .with_threads(under_lines, after_code)
+                        .with_open_in_ide(self.open_line_in_ide())
                         .into_any_element()
                 }
                 None => div().into_any_element(),
@@ -803,6 +800,7 @@ impl OneStepLayout {
                         DiffView::new(piece.clone(), on_more_context.clone())
                             .with_row_selecting(selecting.clone())
                             .with_threads(threads)
+                            .with_open_in_ide(self.open_line_in_ide())
                             .in_change_since_read(shows_change_since_read),
                     )
             })
@@ -1110,5 +1108,19 @@ impl Render for OneStepLayout {
                 row.child(self.ask.clone())
             })
             .child(self.jump.clone())
+    }
+}
+
+fn run_launch(launch: &IdeLaunch, cx: &mut App) {
+    match launch {
+        IdeLaunch::Url(url) => cx.open_url(url),
+        IdeLaunch::Shell(command) => {
+            if let Err(error) = std::process::Command::new("sh")
+                .args(["-c", command])
+                .spawn()
+            {
+                eprintln!("could not run the IDE command: {error}");
+            }
+        }
     }
 }

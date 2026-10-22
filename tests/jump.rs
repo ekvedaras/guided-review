@@ -133,7 +133,7 @@ fn a_symbol_target_names_its_file_and_step() {
         .find(|target| target.kind == JumpKind::Symbol)
         .unwrap();
 
-    assert_eq!(symbol.step, "totals".into());
+    assert_eq!(symbol.screen, Screen::Step("totals".into()));
     assert_eq!(symbol.detail, "Order totals go up");
 }
 
@@ -146,4 +146,66 @@ fn a_piece_opens_in_the_ide_at_its_first_changed_line_at_head() {
     let at = page.pieces[0].open_at().unwrap();
 
     assert_eq!((at.path.as_str(), at.line), ("app/Order.php", 7));
+}
+
+#[test]
+fn picking_a_target_in_a_folded_step_unfolds_it_for_the_session() {
+    let mut review = open(shop_tour());
+    let skim = "totals".into();
+    review.toggle_fold(&skim);
+    assert!(review.is_folded(&skim));
+
+    let symbol = review.jump_targets("Order::total")[0].clone();
+    review.jump_to(&symbol);
+
+    assert!(!review.is_folded(&skim));
+}
+
+#[test]
+fn picking_a_target_in_an_open_step_leaves_it_open() {
+    let mut review = open(shop_tour());
+    let id = "totals".into();
+
+    let symbol = review.jump_targets("Order::total")[0].clone();
+    review.jump_to(&symbol);
+
+    assert!(!review.is_folded(&id));
+}
+
+#[test]
+fn files_only_the_safety_net_shows_are_jump_targets() {
+    let mut review = open(vec![step(
+        "totals",
+        "Order totals go up",
+        json!([{"file": "app/Order.php", "symbol": "Order::total"}]),
+    )]);
+
+    let readme = review
+        .jump_targets("README")
+        .into_iter()
+        .find(|target| target.kind == JumpKind::File)
+        .unwrap();
+    assert_eq!(readme.detail, "Safety net");
+
+    review.jump_to(&readme);
+    assert_eq!(review.screen(), &Screen::SafetyNet);
+}
+
+#[test]
+fn a_line_opens_in_the_ide_when_it_exists_at_head() {
+    let mut review = open(shop_tour());
+    review.jump_to(&review.jump_targets("Order::total")[0].clone());
+
+    let page = review.current_step().unwrap();
+    let opens: Vec<_> = page.pieces[0]
+        .lines()
+        .map(|line| (line.is_change(), line.open_at().map(|at| at.line)))
+        .collect();
+
+    assert!(opens.contains(&(true, Some(7))));
+    assert!(
+        opens
+            .iter()
+            .any(|(is_change, at)| *is_change && at.is_none())
+    );
 }
