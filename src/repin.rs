@@ -99,7 +99,7 @@ pub fn repin(
     if tour.base.is_empty() || tour.head.is_empty() {
         bail!("the tour is not pinned to commits yet; run `guided-review check` first");
     }
-    let old_files = pieces::cut(source, &Sha::new(&tour.base), &Sha::new(&tour.head))?;
+    let old_files = pieces::cut(source, &tour.base, &tour.head)?;
     let new_files = pieces::cut(source, new_base, new_head)?;
     let old: Vec<&Piece> = old_files.iter().flat_map(|file| &file.pieces).collect();
     let new: Vec<&Piece> = new_files.iter().flat_map(|file| &file.pieces).collect();
@@ -122,10 +122,10 @@ pub fn repin(
 
     let moved_line_ranges = line_ranges_in_changed_files(tour, &matching, &old, &new);
 
-    if tour.head != new_head.as_str() {
-        tour.previous_head = Some(std::mem::replace(&mut tour.head, new_head.to_string()));
+    if tour.head != *new_head {
+        tour.previous_head = Some(std::mem::replace(&mut tour.head, new_head.clone()));
     }
-    tour.base = new_base.to_string();
+    tour.base = new_base.clone();
     retarget(
         &mut tour.steps,
         &matching.new_id_of_old_hunk,

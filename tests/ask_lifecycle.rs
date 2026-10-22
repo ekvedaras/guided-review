@@ -319,7 +319,7 @@ fn an_ask_on_an_old_head_is_pinned_to_the_tour_head() {
     let id = asks.start(total_step(), review.head());
     let context = review.ask_context(&total_step()).unwrap();
 
-    assert_eq!(asks.get(id).unwrap().head, shop.first_head);
+    assert_eq!(asks.get(id).unwrap().head, Sha::new(&shop.first_head));
     assert!(context.contains(&format!("Head commit: {}", shop.first_head)));
     assert!(!context.contains(&second_head));
     assert!(context.contains("return 2;"));

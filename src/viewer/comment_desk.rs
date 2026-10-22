@@ -333,7 +333,7 @@ fn keep_as_draft(state: &mut ReviewState, request: &CommentRequest) {
     let place = &request.draft.place;
     if request.origin == Origin::Queue {
         state.drop_queued(place);
-        state.open_draft(place.clone(), &Sha::new(&request.draft.written_at));
+        state.open_draft(place.clone(), &request.draft.written_at);
         state.write_draft(place, &request.draft.body);
     }
 }

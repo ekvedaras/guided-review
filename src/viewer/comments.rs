@@ -60,12 +60,12 @@ pub struct CommentDraft {
     /// The tour head whose line numbers `place` uses. Empty in files from before it was kept,
     /// which are taken as current.
     #[serde(default)]
-    pub written_at: String,
+    pub written_at: Sha,
 }
 
 impl CommentDraft {
     pub fn is_placed_at(&self, head: &Sha) -> bool {
-        self.written_at.is_empty() || self.written_at == head.to_string()
+        self.written_at.is_empty() || self.written_at == *head
     }
 }
 

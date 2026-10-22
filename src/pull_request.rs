@@ -83,7 +83,20 @@ impl fmt::Display for PullRequestUrl {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Empty when not known yet: a tour that was never pinned, a state file from before shas were kept.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct Sha(String);
 
 impl Sha {
@@ -93,6 +106,10 @@ impl Sha {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

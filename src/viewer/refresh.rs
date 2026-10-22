@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::coverage;
 use crate::pieces::ChangedFile;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{PullRequestTips, PullRequestUrl};
 use crate::repin::RepinStatus;
 use crate::tour::Tour;
 
@@ -129,8 +129,8 @@ impl TourRefresher {
         self.writer.refresh(&self.pr)?;
         let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
         let pinned = PullRequestTips {
-            base_branch_tip: Sha::new(&tour.base),
-            head: Sha::new(&tour.head),
+            base_branch_tip: tour.base.clone(),
+            head: tour.head.clone(),
         };
         let source = (self.pick_code_source)(&pinned)?;
         let review = Review::open(

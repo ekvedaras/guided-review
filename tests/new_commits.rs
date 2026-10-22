@@ -527,8 +527,11 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
 
     let repinned = repinner.run(&github).unwrap();
 
-    assert_eq!(repinned.review.head(), second_head);
-    assert_eq!(Tour::load(&shop.tour_path()).unwrap().head, second_head);
+    assert_eq!(repinned.review.head(), &Sha::new(&second_head));
+    assert_eq!(
+        Tour::load(&shop.tour_path()).unwrap().head,
+        Sha::new(&second_head)
+    );
     assert_eq!(ticked(&repinned.review), ["keep"]);
 }
 

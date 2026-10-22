@@ -130,7 +130,7 @@ fn asks_go_into_the_per_pr_state_file_next_to_whatever_else_it_holds() {
     let store = Arc::new(ReviewStateFile::for_pr(home.path(), &pr));
 
     let mut asks = Asks::load(store.clone()).unwrap();
-    let id = asks.start(Place::Tour, "head1");
+    let id = asks.start(Place::Tour, &Sha::new("head1"));
     asks.begin_turn(id, "What is this?", "context");
 
     let state: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
@@ -159,7 +159,7 @@ fn saving_asks_keeps_the_read_ticks_and_the_other_way_round() {
 
     file.update(|state| state.tick(&"order".into(), &Sha::new("abc")))
         .unwrap();
-    let id = asks.start(Place::Tour, "head1");
+    let id = asks.start(Place::Tour, &Sha::new("head1"));
     asks.begin_turn(id, "What is this?", "context");
     file.update(|state| state.untick(&"other".into())).unwrap();
 

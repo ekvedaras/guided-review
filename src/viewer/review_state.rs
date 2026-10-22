@@ -58,16 +58,16 @@ struct ViewerSections {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReadTick {
     /// The head the step was read at; after new commits it tells what changed since.
-    pub head: String,
+    pub head: Sha,
 }
 
 /// What the last re-pin (or re-pins, until a Refresh) did, from the head the tour was read at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepinRecord {
-    pub from_base: String,
-    pub from_head: String,
-    pub to_base: String,
-    pub to_head: String,
+    pub from_base: Sha,
+    pub from_head: Sha,
+    pub to_base: Sha,
+    pub to_head: Sha,
     /// Pieces at `to_head`, by id.
     pub pieces: BTreeMap<String, RepinStatus>,
     /// By old id: a gone hunk's ordinal may belong to another hunk now.
@@ -83,10 +83,10 @@ impl RepinRecord {
         repin: &Repin,
     ) -> Self {
         Self {
-            from_base: from_base.to_string(),
-            from_head: from_head.to_string(),
-            to_base: to_base.to_string(),
-            to_head: to_head.to_string(),
+            from_base: from_base.clone(),
+            from_head: from_head.clone(),
+            to_base: to_base.clone(),
+            to_head: to_head.clone(),
             pieces: repin
                 .pieces
                 .iter()
@@ -206,12 +206,9 @@ impl ReviewState {
 
     pub fn tick(&mut self, step: &StepId, head: &Sha) {
         self.viewer.read_before.remove(step);
-        self.viewer.read_ticks.insert(
-            step.clone(),
-            ReadTick {
-                head: head.to_string(),
-            },
-        );
+        self.viewer
+            .read_ticks
+            .insert(step.clone(), ReadTick { head: head.clone() });
     }
 
     pub fn untick(&mut self, step: &StepId) {
@@ -318,7 +315,7 @@ impl ReviewState {
             self.typed.comment_drafts.push(CommentDraft {
                 place,
                 body: String::new(),
-                written_at: head.to_string(),
+                written_at: head.clone(),
             });
         }
     }

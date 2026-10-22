@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 
 const VERSION: u32 = 1;
 
@@ -15,11 +15,11 @@ pub struct Tour {
     #[serde(default)]
     pub pr: String,
     #[serde(default)]
-    pub base: String,
+    pub base: Sha,
     #[serde(default)]
-    pub head: String,
+    pub head: Sha,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_head: Option<String>,
+    pub previous_head: Option<Sha>,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -115,8 +115,19 @@ impl Tour {
     pub fn pin(&mut self, pr: &PullRequestUrl, base: &Sha, head: &Sha) {
         self.version = VERSION;
         self.pr = pr.to_string();
-        self.base = base.to_string();
-        self.head = head.to_string();
+        self.base = base.clone();
+        self.head = head.clone();
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        !self.base.is_empty() && !self.head.is_empty()
+    }
+
+    pub fn pinned_tips(&self) -> PullRequestTips {
+        PullRequestTips {
+            base_branch_tip: self.base.clone(),
+            head: self.head.clone(),
+        }
     }
 
     /// Every step, parents before their children.

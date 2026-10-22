@@ -20,7 +20,7 @@ pub fn repin_tour(
     new_head: &Sha,
 ) -> anyhow::Result<(Tour, Repin)> {
     let mut tour = Tour::load(tour_path)?;
-    let (old_base, old_head) = (Sha::new(&tour.base), Sha::new(&tour.head));
+    let (old_base, old_head) = (tour.base.clone(), tour.head.clone());
     let result = repin(&mut tour, source, new_base, new_head)?;
     tour.save(tour_path)?;
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);

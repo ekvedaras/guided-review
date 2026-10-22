@@ -15,7 +15,7 @@ use guided_review::ide::Ide;
 use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
-use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
@@ -164,16 +164,12 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
         if tour.pr.is_empty() {
             tour.pr = pr.to_string();
         }
-        if tour.head != tips.head.to_string() {
+        if tour.head != tips.head {
             println!("warning: PR has new commits; run `guided-review repin`");
         }
     }
     tour.save(&tour_path)?;
-    let files = pieces::cut(
-        source.as_ref(),
-        &Sha::new(&tour.base),
-        &Sha::new(&tour.head),
-    )?;
+    let files = pieces::cut(source.as_ref(), &tour.base, &tour.head)?;
 
     let report = tour_check::check(&tour, &files);
     print!("{report}");
@@ -210,17 +206,10 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let tour = Tour::load(&Tour::path_for(&home, pr))?;
-    let pinned = PullRequestTips {
-        base_branch_tip: Sha::new(&tour.base),
-        head: Sha::new(&tour.head),
-    };
+    let pinned = tour.pinned_tips();
     let current_dir = std::env::current_dir().context("could not read the current folder")?;
     let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
-    let files = pieces::cut(
-        source.as_ref(),
-        &Sha::new(&tour.base),
-        &Sha::new(&tour.head),
-    )?;
+    let files = pieces::cut(source.as_ref(), &tour.base, &tour.head)?;
     print!(
         "{}",
         RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())
@@ -296,10 +285,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let tour = Tour::load(&tour_path)?;
 
     // The tour is read at the commits it is pinned to, even when the PR has moved on since.
-    let pinned = PullRequestTips {
-        base_branch_tip: Sha::new(&tour.base),
-        head: Sha::new(&tour.head),
-    };
+    let pinned = tour.pinned_tips();
     let current_dir = std::env::current_dir().context("could not read the current folder")?;
     let github = GitHub::from_env();
     let source = pick_code_source(&github, pr, &pinned, &current_dir)?;

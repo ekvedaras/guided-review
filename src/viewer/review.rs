@@ -126,7 +126,7 @@ pub struct Review {
     repin_running: bool,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
-    changes_since: BTreeMap<String, Vec<ChangedFile>>,
+    changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
     comment_desk: CommentDesk,
@@ -144,7 +144,7 @@ impl Review {
     ) -> anyhow::Result<Self> {
         let state = state_file.load()?;
         let pr: PullRequestUrl = tour.pr.parse()?;
-        let (base, head) = (Sha::new(&tour.base), Sha::new(&tour.head));
+        let (base, head) = (tour.base.clone(), tour.head.clone());
         let files = pieces::cut(source, &base, &head)?;
         let steps = tour
             .steps()
@@ -152,17 +152,17 @@ impl Review {
             .map(|step| Screen::Step(StepId::from(step.id.as_str())));
         let steps_in_reading_order = std::iter::once(Screen::Summary).chain(steps).collect();
         let has_uncovered_changes = threads::uncovered(&tour, &files);
-        let read_heads: BTreeSet<&str> = tour
+        let read_heads: BTreeSet<&Sha> = tour
             .steps()
             .iter()
             .filter_map(|step| read_head_of(&state, &StepId::from(step.id.as_str())))
-            .filter(|read_head| *read_head != tour.head)
+            .filter(|read_head| **read_head != tour.head)
             .collect();
         let changes_since = read_heads
             .into_iter()
             .filter_map(|read_head| {
-                let files = pieces::cut(source, &Sha::new(read_head), &head).ok()?;
-                Some((read_head.to_string(), files))
+                let files = pieces::cut(source, read_head, &head).ok()?;
+                Some((read_head.clone(), files))
             })
             .collect();
         Ok(Self {
@@ -194,11 +194,7 @@ impl Review {
 
     /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.
     pub fn highlight_request(&self) -> HighlightRequest {
-        HighlightRequest::for_files(
-            &self.files,
-            &Sha::new(&self.tour.base),
-            &Sha::new(&self.tour.head),
-        )
+        HighlightRequest::for_files(&self.files, &self.tour.base, &self.tour.head)
     }
 
     pub fn set_highlights(&mut self, highlights: Highlights) {
@@ -207,7 +203,7 @@ impl Review {
 
     /// Context lines come from the files at head, read off the main thread like the colours.
     pub fn files_at_head_request(&self) -> FilesAtHeadRequest {
-        FilesAtHeadRequest::for_files(&self.files, &Sha::new(&self.tour.head))
+        FilesAtHeadRequest::for_files(&self.files, &self.tour.head)
     }
 
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) {
@@ -343,7 +339,7 @@ impl Review {
     fn changes_since_read(&self, id: &StepId) -> Option<(Sha, &[ChangedFile])> {
         let read_head = read_head_of(&self.state, id)?;
         let since_files = self.changes_since.get(read_head)?;
-        Some((Sha::new(read_head), since_files))
+        Some((read_head.clone(), since_files))
     }
 
     /// Flips a step read before between the change since reading and the full diff, for the session.
@@ -384,7 +380,7 @@ impl Review {
                 .all(|pointer| pointer.shown_parts(&self.tour, &self.files).is_empty())
     }
 
-    pub fn head(&self) -> &str {
+    pub fn head(&self) -> &Sha {
         &self.tour.head
     }
 
@@ -1100,9 +1096,9 @@ impl std::fmt::Display for RepinRunning {
 impl std::error::Error for RepinRunning {}
 
 /// The head a step was last read at: its tick, or the tick a re-pin took away.
-fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a str> {
+fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a Sha> {
     state
         .read_tick(step)
         .or_else(|| state.read_before(step))
-        .map(|tick| tick.head.as_str())
+        .map(|tick| &tick.head)
 }

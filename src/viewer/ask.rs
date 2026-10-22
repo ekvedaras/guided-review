@@ -1,3 +1,4 @@
+use crate::pull_request::Sha;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -55,7 +56,7 @@ pub struct Message {
 pub struct Ask {
     pub id: AskId,
     pub place: Place,
-    pub head: String,
+    pub head: Sha,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
@@ -100,14 +101,14 @@ impl Asks {
     }
 
     /// A new, empty Ask. It is kept only once it holds a question.
-    pub fn start(&mut self, place: Place, head: &str) -> AskId {
+    pub fn start(&mut self, place: Place, head: &Sha) -> AskId {
         let id = AskId(self.asks.iter().map(|ask| ask.id.0 + 1).max().unwrap_or(1));
         self.asks.insert(
             0,
             Ask {
                 id,
                 place,
-                head: head.to_string(),
+                head: head.clone(),
                 session_id: None,
                 messages: Vec::new(),
                 activity: None,

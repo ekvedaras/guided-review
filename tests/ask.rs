@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
+use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentLauncher, AgentPort, Asks, Author, Place, Review, ReviewStateFile, StepId,
@@ -22,7 +22,7 @@ const SESSION: &str = "7f2cd173-4eda-4770-aeb2-c82977b1b673";
 
 struct Shop {
     review: Review,
-    head: String,
+    head: Sha,
 }
 
 fn shop() -> Shop {
@@ -58,7 +58,7 @@ fn shop() -> Shop {
     );
     Shop {
         review: Review::open(tour, &source, state_file).unwrap(),
-        head,
+        head: Sha::new(&head),
     }
 }
 
@@ -96,7 +96,7 @@ fn asking_about_a_step_sends_pointers_step_text_and_diff_lines_and_streams_the_a
     let message = sent.agent_lines().pop().unwrap();
     for expected in [
         "https://github.com/acme/shop/pull/7",
-        &head,
+        head.as_str(),
         "Total changes",
         "pricing moved to two",
         "app/Order.php",
