@@ -37,6 +37,16 @@ impl CommentPlace {
 pub struct CommentDraft {
     pub place: CommentPlace,
     pub body: String,
+    /// The tour head whose line numbers `place` uses. Empty in files from before it was kept,
+    /// which are taken as current.
+    #[serde(default)]
+    pub written_at: String,
+}
+
+impl CommentDraft {
+    pub fn is_placed_at(&self, head: &Sha) -> bool {
+        self.written_at.is_empty() || self.written_at == head.to_string()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +70,9 @@ pub struct QueuedComment {
 pub enum CommentRefusal {
     /// The tour is for an older head, so its lines may not be where GitHub has them.
     TourIsOld,
+    /// A re-pin moved the tour since the comment was written: the text stays, but its line
+    /// numbers belong to the old code.
+    CodeMoved,
     NotInsideHunk,
     /// Someone started a pending review since the last look, so "Comment now" is off.
     PendingReviewExists,
@@ -70,6 +83,7 @@ impl fmt::Display for CommentRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TourIsOld => f.write_str("Update tour to comment"),
+            Self::CodeMoved => f.write_str("Code moved, place the comment again"),
             Self::NotInsideHunk => f.write_str("GitHub takes comments only on lines of the diff"),
             Self::PendingReviewExists => {
                 f.write_str("There is a pending review now: add the comment to it")
@@ -134,6 +148,9 @@ impl CommentRequest {
     }
 
     fn send(&self, github: &dyn GitHubPort, pr: &PullRequestUrl) -> Outcome {
+        if !self.draft.is_placed_at(&self.tour_head) {
+            return Outcome::Refused(CommentRefusal::CodeMoved);
+        }
         match github.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
             Ok(_) => return Outcome::Refused(CommentRefusal::TourIsOld),

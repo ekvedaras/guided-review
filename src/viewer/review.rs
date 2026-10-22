@@ -515,7 +515,8 @@ impl Review {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::of(&selected);
-        self.state.open_draft(place.clone());
+        self.state
+            .open_draft(place.clone(), &Sha::new(&self.tour.head));
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(Some(place))
@@ -669,7 +670,8 @@ impl Review {
         let place = &request.draft.place;
         if request.origin == Origin::Queue {
             self.state.drop_queued(place);
-            self.state.open_draft(place.clone());
+            self.state
+                .open_draft(place.clone(), &Sha::new(&request.draft.written_at));
             self.state.write_draft(place, &request.draft.body);
         }
     }

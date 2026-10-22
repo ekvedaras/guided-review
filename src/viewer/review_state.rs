@@ -257,11 +257,12 @@ impl ReviewState {
             .find(|draft| &draft.place == place)
     }
 
-    pub(super) fn open_draft(&mut self, place: CommentPlace) {
+    pub(super) fn open_draft(&mut self, place: CommentPlace, head: &Sha) {
         if self.draft_at(&place).is_none() {
             self.comment_drafts.push(CommentDraft {
                 place,
                 body: String::new(),
+                written_at: head.to_string(),
             });
         }
     }

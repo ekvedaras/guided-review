@@ -65,10 +65,14 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
+        self.open_at(&self.head)
+    }
+
+    fn open_at(&self, head: &str) -> Review {
         let tour: Tour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
-            "head": self.head,
+            "head": head,
             "title": "Notes",
             "summary": [],
             "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "notes.txt"}], "children": []}],
@@ -410,4 +414,59 @@ fn discarding_removes_the_draft_from_the_state_file() {
     review.discard_draft(&place).unwrap();
 
     assert!(pull.open().comment_drafts().is_empty());
+}
+
+#[test]
+fn a_draft_written_before_a_repin_keeps_its_text_but_is_not_sent_to_the_old_lines() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = comment_on(&mut review, "line ten");
+    typed(&mut review, &place, "why ten?");
+    pull.repo.write("other.txt", "new\n");
+    let later = pull.repo.commit("later");
+    let mut repinned = pull.open_at(&later);
+
+    let result = repinned.send_comment(&place, SendMode::AddToReview, &pull.github_at(&later));
+
+    assert_eq!(
+        result.unwrap(),
+        Some(CommentResult::Refused(CommentRefusal::CodeMoved))
+    );
+    assert_eq!(
+        CommentRefusal::CodeMoved.to_string(),
+        "Code moved, place the comment again"
+    );
+    assert_eq!(repinned.comment_drafts()[0].body, "why ten?");
+    assert!(
+        pull.sent
+            .entries()
+            .iter()
+            .all(|entry| !entry.contains("add thread"))
+    );
+}
+
+#[test]
+fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = comment_on(&mut review, "line ten");
+    typed(&mut review, &place, "later please");
+    let offline = pull.github();
+    offline.lose_connection(true);
+    review
+        .send_comment(&place, SendMode::AddToReview, &offline)
+        .unwrap();
+    assert_eq!(review.queued_comments().len(), 1);
+    pull.repo.write("other.txt", "new\n");
+    let later = pull.repo.commit("later");
+    let mut repinned = pull.open_at(&later);
+
+    let before = pull.sent.entries().len();
+    repinned
+        .send_queued_comments(&pull.github_at(&later))
+        .unwrap();
+
+    assert_eq!(repinned.queued_comments().len(), 1);
+    assert_eq!(repinned.queued_comments()[0].draft.body, "later please");
+    assert_eq!(pull.sent.entries().len(), before);
 }
