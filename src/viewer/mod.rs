@@ -5,6 +5,7 @@ mod agent_event;
 mod agent_pool;
 mod ask;
 mod ask_context;
+mod comment_desk;
 mod comments;
 mod diff_display;
 mod display_options;

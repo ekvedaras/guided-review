@@ -17,9 +17,10 @@ use crate::config::AskSettings;
 
 use super::ask::{Ask, Place};
 use super::ask_context;
+use super::comment_desk::CommentDesk;
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
-    Origin, Outcome, QueuedComment, SendMode,
+    QueuedComment, SendMode,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::display_options::DisplayOptions;
@@ -34,10 +35,7 @@ use super::ports::AgentLaunch;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
-use super::step_page::{
-    DiffLine, LineLocation, PieceDiff, SafetyNetPage, Side, SinceRead, StepPage,
-};
-use super::suggestion::suggestion_block;
+use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
@@ -131,11 +129,7 @@ pub struct Review {
     changes_since: BTreeMap<String, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
-    selection: Option<RowSelection>,
-    /// Unknown until GitHub answers; "Comment now" is only offered when it is known to be `false`.
-    has_pending_review: Option<bool>,
-    /// Unknown until GitHub answers; Approve and Request changes are only offered when it is known to be `false`.
-    viewer_did_author: Option<bool>,
+    comment_desk: CommentDesk,
     display_options: DisplayOptions,
     saves: Arc<SaveOrder>,
     typing_is_unsaved: AtomicBool,
@@ -191,9 +185,7 @@ impl Review {
             repin_running: false,
             changes_since,
             full_diff_shown: BTreeSet::new(),
-            selection: None,
-            has_pending_review: None,
-            viewer_did_author: None,
+            comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
             saves: Arc::default(),
             typing_is_unsaved: AtomicBool::new(false),
@@ -442,21 +434,10 @@ impl Review {
         if !selected.take_comment() {
             return Err(CommentRefusal::NotInsideHunk);
         }
-        let place = CommentPlace::of(&selected);
-        self.state
-            .open_draft(place.clone(), &Sha::new(&self.tour.head));
-        let written = self
-            .state
-            .draft_at(&place)
-            .map(|draft| draft.body.trim_end().to_string())
-            .unwrap_or_default();
         let answer = ask.latest_answer().unwrap_or_default();
-        let body = if written.is_empty() {
-            answer.to_string()
-        } else {
-            format!("{written}\n\n{answer}")
-        };
-        self.state.write_draft(&place, &body);
+        let place = self
+            .comment_desk
+            .add_to_draft(&mut self.state, &selected, &self.head, answer);
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)
@@ -633,20 +614,17 @@ impl Review {
     }
 
     pub fn pending_review_is(&mut self, exists: bool) {
-        self.has_pending_review = Some(exists);
+        self.comment_desk.pending_review_is(exists);
     }
 
     /// "Comment now" shows only when there is surely no pending review.
     pub fn can_comment_now(&self) -> bool {
-        self.has_pending_review == Some(false)
+        self.comment_desk.can_comment_now()
     }
 
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
-        ThreadActionRequest {
-            pr: self.pr.clone(),
-            action,
-            tour_is_old: self.old_head().is_some(),
-        }
+        self.comment_desk
+            .thread_action_request(&self.pr, action, self.old_head().is_some())
     }
 
     pub fn reply_draft(&self, thread_id: &str) -> Option<&str> {
@@ -679,22 +657,12 @@ impl Review {
     }
 
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
-        match (&outcome.result, &outcome.action) {
-            (
-                ThreadActionResult::Done,
-                ThreadAction::Reply {
-                    thread_id, mode, ..
-                },
-            ) => {
-                self.has_pending_review = Some(*mode == SendMode::AddToReview);
-                // The reply is on GitHub; a draft that fails to clear only shows again as text to discard.
-                let _ = self.discard_reply(thread_id);
-            }
-            (
-                ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),
-                ThreadAction::Reply { .. },
-            ) => self.has_pending_review = Some(true),
-            _ => {}
+        if self
+            .comment_desk
+            .apply_thread_action(&mut self.state, &outcome)
+        {
+            // The reply is on GitHub; a draft that fails to clear only shows again as text to discard.
+            let _ = self.save_viewer_sections();
         }
         if let Some(threads) = &outcome.threads {
             self.set_threads(threads);
@@ -703,12 +671,12 @@ impl Review {
     }
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
-        self.viewer_did_author = Some(authored);
+        self.comment_desk.viewer_authorship_is(authored);
     }
 
     /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.
     pub fn can_approve_or_request_changes(&self) -> bool {
-        self.viewer_did_author == Some(false)
+        self.comment_desk.can_approve_or_request_changes()
     }
 
     /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
@@ -731,92 +699,70 @@ impl Review {
         verdict: ReviewVerdict,
         body: &str,
     ) -> Result<FinishRequest, FinishRefusal> {
-        let judges = verdict != ReviewVerdict::Comment;
-        if judges && !self.can_approve_or_request_changes() {
-            return Err(FinishRefusal::OwnPullRequest);
-        }
-        let has_text = !body.trim().is_empty();
-        let needs_text = match verdict {
-            ReviewVerdict::Approve => false,
-            ReviewVerdict::RequestChanges => true,
-            ReviewVerdict::Comment => self.has_pending_review != Some(true),
-        };
-        if needs_text && !has_text {
-            return Err(FinishRefusal::BodyNeeded(verdict));
-        }
-        Ok(FinishRequest {
-            pr: self.pr.clone(),
-            verdict,
-            body: body.trim().to_string(),
-        })
+        self.comment_desk
+            .finish_review_request(&self.pr, verdict, body)
     }
 
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
-        if outcome.result == FinishResult::Sent {
-            self.has_pending_review = Some(false);
+        let result = self.comment_desk.apply_finish(&mut self.state, outcome);
+        if result == FinishResult::Sent {
             // The review is on GitHub; a body that fails to clear is only a draft left to overwrite.
-            let _ = self.edit_finish_body("");
+            let _ = self.save_viewer_sections();
         }
-        outcome.result
+        result
     }
 
     pub fn begin_selection(&mut self, row: LineLocation) {
-        self.selection = Some(RowSelection::start_at(row));
+        self.comment_desk.begin_selection(row);
     }
 
     pub fn extend_selection(&mut self, row: LineLocation) {
-        if let Some(selection) = &mut self.selection {
-            selection.extend_to(row);
-        }
+        self.comment_desk.extend_selection(row);
     }
 
     pub fn is_selecting(&self) -> bool {
-        self.selection.is_some()
+        self.comment_desk.row_selection().is_some()
     }
 
     /// The drag in progress, for a view that knows its rows and draws them without building the page.
     pub fn row_selection(&self) -> Option<&RowSelection> {
-        self.selection.as_ref()
+        self.comment_desk.row_selection()
     }
 
     /// The rows being dragged over, for drawing them.
     pub fn selected_lines(&self) -> Option<SelectedLines> {
-        self.selection.as_ref()?.resolve(&self.screen_lines())
+        self.comment_desk
+            .row_selection()?
+            .resolve(&self.screen_lines())
     }
 
     pub fn cancel_selection(&mut self) {
-        self.selection = None;
+        self.comment_desk.cancel_selection();
     }
 
     /// The drag ends: when the rows can take a comment, a comment box opens on them.
     pub fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
-        let Some(selected) = self.selected_lines() else {
-            self.selection = None;
-            return Ok(None);
-        };
-        self.selection = None;
-        if !selected.take_comment() {
-            return Err(CommentRefusal::NotInsideHunk);
+        let screen_lines = self.screen_lines();
+        let tour_is_old = self.old_head().is_some();
+        let place = self.comment_desk.finish_selection(
+            &mut self.state,
+            &screen_lines,
+            tour_is_old,
+            &self.head,
+        )?;
+        if place.is_some() {
+            self.save_viewer_sections()
+                .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         }
-        if self.old_head().is_some() {
-            return Err(CommentRefusal::TourIsOld);
-        }
-        let place = CommentPlace::of(&selected);
-        self.state
-            .open_draft(place.clone(), &Sha::new(&self.tour.head));
-        self.save_viewer_sections()
-            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        Ok(Some(place))
+        Ok(place)
     }
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
     pub fn begin_file_comment(&mut self, path: &str) -> Result<CommentPlace, CommentRefusal> {
-        if self.old_head().is_some() {
-            return Err(CommentRefusal::TourIsOld);
-        }
-        let place = CommentPlace::on_file(path);
-        self.state
-            .open_draft(place.clone(), &Sha::new(&self.tour.head));
+        let tour_is_old = self.old_head().is_some();
+        let place =
+            self.comment_desk
+                .begin_file_comment(&mut self.state, path, tour_is_old, &self.head)?;
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)
@@ -898,35 +844,22 @@ impl Review {
         self.save_viewer_sections()
     }
 
-    /// "Suggest change" shows only when the range starts and ends on lines of the head:
-    /// a suggestion replaces lines that stay. Removed rows in between are left out of it.
+    /// "Suggest change" shows only when the range starts and ends on lines of the head.
     pub fn can_suggest_change(&self, place: &CommentPlace) -> bool {
-        !place.is_file_comment() && place.start.side == Side::Head && place.end.side == Side::Head
+        CommentDesk::can_suggest_change(place)
     }
 
     /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
     /// `None` when the lines cannot be suggested on or there is no draft.
     pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
-        let Some(typed) = self.state.draft_at(place).map(|draft| draft.body.clone()) else {
-            return Ok(None);
-        };
-        if !self.can_suggest_change(place) {
-            return Ok(None);
-        }
         let rows = self.rows_of(place).unwrap_or_default();
-        let kept_lines: Vec<&str> = rows
-            .iter()
-            .filter(|row| row.location.side == Side::Head)
-            .map(|row| row.text.as_str())
-            .collect();
-        let block = suggestion_block(&kept_lines);
-        let body = if typed.trim().is_empty() {
-            block
-        } else {
-            format!("{}\n\n{block}", typed.trim_end())
-        };
-        self.edit_draft(place, &body)?;
-        Ok(Some(body))
+        let body = self
+            .comment_desk
+            .suggest_change(&mut self.state, place, &rows);
+        if body.is_some() {
+            self.save_viewer_sections()?;
+        }
+        Ok(body)
     }
 
     fn rows_of(&self, place: &CommentPlace) -> Option<Vec<DiffLine>> {
@@ -938,94 +871,20 @@ impl Review {
 
     /// `None` when there is no such draft.
     pub fn comment_request(&self, place: &CommentPlace, mode: SendMode) -> Option<CommentRequest> {
-        let draft = self.state.draft_at(place)?.clone();
-        Some(CommentRequest::new(
-            Origin::Draft,
-            draft,
-            mode,
-            Sha::new(&self.tour.head),
-            self.pr.clone(),
-        ))
+        self.comment_desk
+            .comment_request(&self.state, place, mode, &self.head, &self.pr)
     }
 
     /// The oldest comment in the queue, to send again.
     pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        let queued = self.state.comment_queue().first()?;
-        Some(CommentRequest::new(
-            Origin::Queue,
-            queued.draft.clone(),
-            queued.mode,
-            Sha::new(&self.tour.head),
-            self.pr.clone(),
-        ))
+        self.comment_desk
+            .queued_comment_request(&self.state, &self.head, &self.pr)
     }
 
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
-        let CommentOutcome { request, how } = outcome;
-        let place = request.draft.place.clone();
-        let result = match how {
-            Outcome::Sent => {
-                self.has_pending_review = Some(request.mode == SendMode::AddToReview);
-                self.leave(&request.origin, &place);
-                CommentResult::Sent
-            }
-            Outcome::Failed(reason) => {
-                self.keep_for_retry(&request, &reason);
-                CommentResult::Queued(reason)
-            }
-            Outcome::Rejected(reason) => {
-                self.has_pending_review = Some(true);
-                self.keep_as_draft(&request);
-                CommentResult::Rejected(reason)
-            }
-            Outcome::Refused(refusal) => {
-                if refusal == CommentRefusal::PendingReviewExists {
-                    self.has_pending_review = Some(true);
-                    if let Some(queued) = self.state.queued_at(&place) {
-                        queued.mode = SendMode::AddToReview;
-                    }
-                }
-                CommentResult::Refused(refusal)
-            }
-        };
+        let result = self.comment_desk.apply_comment(&mut self.state, outcome);
         self.save_viewer_sections()?;
         Ok(result)
-    }
-
-    fn leave(&mut self, origin: &Origin, place: &CommentPlace) {
-        match origin {
-            Origin::Draft => self.state.drop_draft(place),
-            Origin::Queue => self.state.drop_queued(place).map(|queued| queued.draft),
-        };
-    }
-
-    fn keep_for_retry(&mut self, request: &CommentRequest, reason: &str) {
-        let place = &request.draft.place;
-        match request.origin {
-            Origin::Draft => {
-                self.state.drop_draft(place);
-                self.state.queue_comment(QueuedComment {
-                    draft: request.draft.clone(),
-                    mode: request.mode,
-                    failed_because: reason.to_string(),
-                });
-            }
-            Origin::Queue => {
-                if let Some(queued) = self.state.queued_at(place) {
-                    queued.failed_because = reason.to_string();
-                }
-            }
-        }
-    }
-
-    fn keep_as_draft(&mut self, request: &CommentRequest) {
-        let place = &request.draft.place;
-        if request.origin == Origin::Queue {
-            self.state.drop_queued(place);
-            self.state
-                .open_draft(place.clone(), &Sha::new(&request.draft.written_at));
-            self.state.write_draft(place, &request.draft.body);
-        }
     }
 
     fn links(&self) -> GitHubLinks<'_> {
