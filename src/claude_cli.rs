@@ -7,12 +7,12 @@ use serde_json::{Value, json};
 
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, TourWriter};
+use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter};
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
 /// Reads and writes only what the tour skill needs: its own CLI, `gh pr view`, and the tour files.
-const TOUR_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
+const REFRESH_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
 
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
 pub struct ClaudeCli {
@@ -101,12 +101,12 @@ impl Drop for ClaudeConversation {
 }
 
 /// Runs the tour skill as a Refresh through the user's own `claude`, in one non-interactive run.
-pub struct ClaudeTourWriter {
+pub struct ClaudeRefreshWriter {
     binary: PathBuf,
     cwd: PathBuf,
 }
 
-impl ClaudeTourWriter {
+impl ClaudeRefreshWriter {
     /// `cwd` is where the skill may read code: the repo clone when there is one.
     pub fn new(cwd: PathBuf) -> Self {
         Self::with_binary(PathBuf::from("claude"), cwd)
@@ -117,7 +117,7 @@ impl ClaudeTourWriter {
     }
 }
 
-impl TourWriter for ClaudeTourWriter {
+impl RefreshWriter for ClaudeRefreshWriter {
     fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
         let prompt = format!(
             "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh."
@@ -125,7 +125,7 @@ impl TourWriter for ClaudeTourWriter {
         let output = Command::new(&self.binary)
             .args(["-p", &prompt])
             .args(["--permission-mode", "dontAsk"])
-            .args(["--allowedTools", TOUR_WRITER_TOOLS])
+            .args(["--allowedTools", REFRESH_WRITER_TOOLS])
             .current_dir(&self.cwd)
             .stdin(Stdio::null())
             .output()
@@ -146,6 +146,7 @@ const EVAL_WRITER_TOOLS: &str = "Bash(guided-review outline:*),Bash(guided-revie
 /// Reviewer notes live here; the writer must not read them.
 const EVAL_WRITER_BLOCKED: &str = "Read(~/.guided-review/evals/**),Grep(~/.guided-review/evals/**),Glob(~/.guided-review/evals/**)";
 
+/// Writes a fresh tour from the skill text in the brief, sandboxed away from the reviewer notes. Unlike the refresh writer it does not rely on the installed skill, so every eval run uses the skill under test.
 pub struct ClaudeEvalWriter {
     binary: PathBuf,
 }

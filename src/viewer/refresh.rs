@@ -9,7 +9,7 @@ use crate::repin::RepinStatus;
 use crate::tour::Tour;
 
 use super::new_commits::{PickCodeSource, UpdatedTour};
-use super::ports::TourWriter;
+use super::ports::RefreshWriter;
 use super::review::{Review, StepId};
 use super::review_state::{RepinRecord, ReviewStateFile};
 
@@ -120,7 +120,7 @@ pub struct TourRefresher {
     pub home: PathBuf,
     pub pr: PullRequestUrl,
     pub pick_code_source: PickCodeSource,
-    pub writer: Arc<dyn TourWriter>,
+    pub writer: Arc<dyn RefreshWriter>,
 }
 
 impl TourRefresher {

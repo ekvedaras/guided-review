@@ -156,6 +156,6 @@ pub trait AgentPort: Send {
 }
 
 /// Starts the local AI on the tour skill to Refresh the tour of a PR. Blocks until it is done.
-pub trait TourWriter: Send + Sync {
+pub trait RefreshWriter: Send + Sync {
     fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()>;
 }

@@ -5,12 +5,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use guided_review::claude_cli::ClaudeTourWriter;
+use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    PickCodeSource, Review, ReviewStateFile, TourRefresher, TourWriter, repin_tour,
+    PickCodeSource, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
 };
 use serde_json::json;
 use support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -204,7 +204,7 @@ struct SkillStandIn {
     fails: bool,
 }
 
-impl TourWriter for SkillStandIn {
+impl RefreshWriter for SkillStandIn {
     fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
         assert_eq!(pr.to_string(), self.pr.to_string());
         if self.fails {
@@ -274,7 +274,7 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
     let dir = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
     let writer =
-        ClaudeTourWriter::with_binary(fake_claude(dir.path(), 0), cwd.path().to_path_buf());
+        ClaudeRefreshWriter::with_binary(fake_claude(dir.path(), 0), cwd.path().to_path_buf());
 
     writer.refresh(&PR.parse().unwrap()).unwrap();
 
@@ -301,7 +301,7 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
 fn a_claude_that_exits_with_an_error_fails_the_refresh_with_what_it_said() {
     let dir = TempDir::new().unwrap();
     let writer =
-        ClaudeTourWriter::with_binary(fake_claude(dir.path(), 1), dir.path().to_path_buf());
+        ClaudeRefreshWriter::with_binary(fake_claude(dir.path(), 1), dir.path().to_path_buf());
 
     let error = writer.refresh(&PR.parse().unwrap()).unwrap_err();
 

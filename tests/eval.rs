@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use guided_review::eval::{
-    Eval, EvalStore, JudgeInput, Rule, Score, Skill, TourJudge, TourSource, EvalWriter, Verdict,
+    Eval, EvalStore, EvalWriter, JudgeInput, Rule, Score, Skill, TourJudge, TourSource, Verdict,
     Verdicts, WriterBrief,
 };
 use guided_review::pull_request::PullRequestUrl;

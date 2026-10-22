@@ -32,8 +32,8 @@ pub use jump::{JumpKind, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists, ThreadNotCreated,
-    TourWriter, ViewedFile, ViewedState, ViewedSyncUnavailable,
+    AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists, RefreshWriter,
+    ThreadNotCreated, ViewedFile, ViewedState, ViewedSyncUnavailable,
 };
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{

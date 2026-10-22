@@ -5,7 +5,9 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::app::AskSetup;
-use guided_review::claude_cli::{ClaudeCli, ClaudeEvalWriter, ClaudeTourJudge, ClaudeTourWriter};
+use guided_review::claude_cli::{
+    ClaudeCli, ClaudeEvalWriter, ClaudeRefreshWriter, ClaudeTourJudge,
+};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
@@ -217,7 +219,6 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-
 fn eval_add(pr: &PullRequestUrl, note: &str) -> anyhow::Result<()> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     EvalStore::in_home(&home).add(pr, note)?;
@@ -312,7 +313,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
         home: home.clone(),
         pr: pr.clone(),
         pick_code_source: pick_code_source.clone(),
-        writer: Arc::new(ClaudeTourWriter::new(
+        writer: Arc::new(ClaudeRefreshWriter::new(
             clone.clone().unwrap_or_else(|| home.clone()),
         )),
     };

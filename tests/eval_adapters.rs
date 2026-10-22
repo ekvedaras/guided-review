@@ -1,8 +1,8 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use guided_review::claude_cli::{ClaudeTourJudge, ClaudeEvalWriter};
-use guided_review::eval::{JudgeInput, Rule, Score, TourJudge, EvalWriter, WriterBrief};
+use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
+use guided_review::eval::{EvalWriter, JudgeInput, Rule, Score, TourJudge, WriterBrief};
 use guided_review::pull_request::PullRequestUrl;
 use tempfile::TempDir;
 
