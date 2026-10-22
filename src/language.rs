@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use tree_sitter::Node;
+
 /// The one place that decides which files are cut into symbol pieces and with which grammar and query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
@@ -30,6 +32,18 @@ impl Language {
         match self {
             Self::Php => include_str!("../queries/php/symbols.scm"),
             Self::TypeScript | Self::Tsx => include_str!("../queries/typescript/symbols.scm"),
+        }
+    }
+
+    /// Statements that only bring names into the file: they make up the `imports` piece.
+    pub fn is_import(self, node: Node) -> bool {
+        match self {
+            Self::Php => match node.kind() {
+                "namespace_use_declaration" => true,
+                "namespace_definition" => node.child_by_field_name("body").is_none(),
+                _ => false,
+            },
+            Self::TypeScript | Self::Tsx => node.kind() == "import_statement",
         }
     }
 }
