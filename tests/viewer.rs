@@ -4,7 +4,7 @@ mod support;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{Review, Screen, Side};
+use guided_review::viewer::{Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
 use support::FixtureRepo;
 
@@ -45,7 +45,11 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        Review::open(tour, &source).unwrap()
+        let state_file = ReviewStateFile::for_pr(
+            self.repo.home(),
+            &"https://github.com/acme/shop/pull/7".parse().unwrap(),
+        );
+        Review::open(tour, &source, state_file).unwrap()
     }
 }
 

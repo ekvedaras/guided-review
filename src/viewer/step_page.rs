@@ -32,6 +32,9 @@ pub struct PieceDiff {
 pub struct StepPage<'a> {
     pub step: &'a Step,
     pub pieces: Vec<PieceDiff>,
+    pub is_ticked: bool,
+    /// Folded pages show their title only.
+    pub is_folded: bool,
 }
 
 impl<'a> StepPage<'a> {
@@ -45,7 +48,12 @@ impl<'a> StepPage<'a> {
             })
             .map(PieceDiff::of)
             .collect();
-        Self { step, pieces }
+        Self {
+            step,
+            pieces,
+            is_ticked: false,
+            is_folded: false,
+        }
     }
 }
 

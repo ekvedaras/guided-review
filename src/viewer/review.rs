@@ -1,13 +1,18 @@
+use std::collections::BTreeSet;
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 use crate::code_source::CodeSource;
 use crate::pieces::{self, ChangedFile};
 use crate::pull_request::Sha;
 use crate::tour::{Step, Tour};
 
+use super::review_state::{ReviewState, ReviewStateFile};
 use super::step_page::StepPage;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct StepId(String);
 
 impl From<&str> for StepId {
@@ -34,6 +39,13 @@ pub struct SidebarEntry<'a> {
     pub title: &'a str,
     pub depth: usize,
     pub is_current: bool,
+    pub is_ticked: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadProgress {
+    pub read: usize,
+    pub total: usize,
 }
 
 pub struct Review {
@@ -42,11 +54,20 @@ pub struct Review {
     /// Parent, its children, then the next parent: from the big picture to the details.
     reading_order: Vec<StepId>,
     screen: Screen,
+    state: ReviewState,
+    state_file: ReviewStateFile,
+    /// Ticked steps the reviewer opened again to reread. Not saved: a reopened app shows them folded.
+    unfolded: BTreeSet<StepId>,
 }
 
 impl Review {
     /// Code is read at the tour's own base and head, not the PR's current ones.
-    pub fn open(tour: Tour, source: &dyn CodeSource) -> anyhow::Result<Self> {
+    pub fn open(
+        tour: Tour,
+        source: &dyn CodeSource,
+        state_file: ReviewStateFile,
+    ) -> anyhow::Result<Self> {
+        let state = state_file.load()?;
         let files = pieces::cut(source, &Sha::new(&tour.base), &Sha::new(&tour.head))?;
         let reading_order = tour
             .steps()
@@ -58,6 +79,9 @@ impl Review {
             files,
             reading_order,
             screen: Screen::Summary,
+            state,
+            state_file,
+            unfolded: BTreeSet::new(),
         })
     }
 
@@ -78,7 +102,10 @@ impl Review {
             return None;
         };
         let step = self.tour.steps().into_iter().find(|step| step.id == id.0)?;
-        Some(StepPage::of(step, &self.tour, &self.files))
+        let mut page = StepPage::of(step, &self.tour, &self.files);
+        page.is_ticked = self.is_ticked(id);
+        page.is_folded = self.is_folded(id);
+        Some(page)
     }
 
     pub fn sidebar(&self) -> Vec<SidebarEntry<'_>> {
@@ -86,16 +113,19 @@ impl Review {
             steps: &'a [Step],
             depth: usize,
             current: Option<&StepId>,
+            state: &ReviewState,
             into: &mut Vec<SidebarEntry<'a>>,
         ) {
             for step in steps {
+                let id = StepId::from(step.id.as_str());
                 into.push(SidebarEntry {
-                    id: StepId::from(step.id.as_str()),
+                    is_current: current == Some(&id),
+                    is_ticked: state.read_tick(&id).is_some(),
+                    id,
                     title: &step.title,
                     depth,
-                    is_current: current.is_some_and(|id| id.0 == step.id),
                 });
-                walk(&step.children, depth + 1, current, into);
+                walk(&step.children, depth + 1, current, state, into);
             }
         }
         let current = match &self.screen {
@@ -103,7 +133,7 @@ impl Review {
             Screen::Step(id) => Some(id),
         };
         let mut entries = Vec::new();
-        walk(&self.tour.steps, 0, current, &mut entries);
+        walk(&self.tour.steps, 0, current, &self.state, &mut entries);
         entries
     }
 
@@ -145,6 +175,49 @@ impl Review {
                 self.screen = Screen::Step(self.reading_order[position - 1].clone());
                 true
             }
+        }
+    }
+
+    pub fn is_ticked(&self, id: &StepId) -> bool {
+        self.state.read_tick(id).is_some()
+    }
+
+    /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
+    pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
+        if !self.reading_order.contains(id) {
+            return Ok(());
+        }
+        self.state.tick(id, &Sha::new(&self.tour.head));
+        self.unfolded.remove(id);
+        self.state_file.save(&self.state)
+    }
+
+    pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
+        self.state.untick(id);
+        self.unfolded.remove(id);
+        self.state_file.save(&self.state)
+    }
+
+    /// A ticked step folds; the reviewer can open it again without losing the tick.
+    pub fn is_folded(&self, id: &StepId) -> bool {
+        self.is_ticked(id) && !self.unfolded.contains(id)
+    }
+
+    pub fn toggle_fold(&mut self, id: &StepId) {
+        if !self.unfolded.remove(id) && self.is_ticked(id) {
+            self.unfolded.insert(id.clone());
+        }
+    }
+
+    /// Only steps of this tour count: ticks of steps a refresh removed stay in the file but not here.
+    pub fn progress(&self) -> ReadProgress {
+        ReadProgress {
+            read: self
+                .reading_order
+                .iter()
+                .filter(|id| self.is_ticked(id))
+                .count(),
+            total: self.reading_order.len(),
         }
     }
 

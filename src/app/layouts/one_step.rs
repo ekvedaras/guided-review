@@ -50,6 +50,12 @@ impl OneStepLayout {
                 cx.notify();
             }))
             .child("Summary");
+        let progress = self.review.progress();
+        let progress_row = div()
+            .px_3()
+            .pb_2()
+            .text_color(Palette::muted_text())
+            .child(format!("Read {} of {}", progress.read, progress.total));
         let step_rows = self.review.sidebar().into_iter().map(|entry| {
             let id: StepId = entry.id.clone();
             div()
@@ -63,6 +69,7 @@ impl OneStepLayout {
                     this.review.go_to(&id);
                     cx.notify();
                 }))
+                .when_ticked(entry.is_ticked)
                 .child(entry.title.to_string())
         });
         div()
@@ -76,14 +83,41 @@ impl OneStepLayout {
             .border_r_1()
             .border_color(Palette::border())
             .text_sm()
+            .child(progress_row)
             .child(summary_row)
             .children(step_rows)
     }
 
-    fn screen(&self) -> AnyElement {
+    fn screen(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.review.current_step() {
             None => summary_screen(self.review.title(), self.review.summary()).into_any_element(),
-            Some(page) => step_screen(page).into_any_element(),
+            Some(page) => step_screen(page, cx).into_any_element(),
+        }
+    }
+
+    fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
+        let saved = if self.review.is_ticked(id) {
+            self.review.untick(id)
+        } else {
+            self.review.tick(id)
+        };
+        if let Err(error) = saved {
+            eprintln!("could not save the read tick: {error:#}");
+        }
+        cx.notify();
+    }
+}
+
+trait TickedRow {
+    fn when_ticked(self, is_ticked: bool) -> Self;
+}
+
+impl<E: Styled> TickedRow for E {
+    fn when_ticked(self, is_ticked: bool) -> Self {
+        if is_ticked {
+            self.text_color(Palette::muted_text())
+        } else {
+            self
         }
     }
 }
@@ -115,19 +149,72 @@ fn summary_screen(title: &str, summary: &[String]) -> impl IntoElement {
         )
 }
 
-fn step_screen(page: StepPage<'_>) -> impl IntoElement {
+fn step_screen(page: StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
     let step = page.step;
-    div()
+    let screen = div()
         .flex()
         .flex_col()
         .gap_3()
-        .child(div().text_xl().child(step.title.clone()))
+        .child(step_header(&page, cx));
+    if page.is_folded {
+        return screen.child(
+            div()
+                .text_sm()
+                .text_color(Palette::muted_text())
+                .child("Folded because it is read. Click the title to open it."),
+        );
+    }
+    screen
         .child(
             div()
                 .text_color(Palette::muted_text())
                 .child(step.why.clone()),
         )
         .children(page.pieces.into_iter().map(DiffView::new))
+}
+
+fn step_header(page: &StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    let id = StepId::from(page.step.id.as_str());
+    let title = div()
+        .id("step-title")
+        .flex_1()
+        .text_xl()
+        .child(page.step.title.clone());
+    let title = if page.is_ticked {
+        let id = id.clone();
+        title
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.review.toggle_fold(&id);
+                cx.notify();
+            }))
+    } else {
+        title
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(title)
+        .child(tick_button(page.is_ticked, id, cx))
+}
+
+fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    div()
+        .id("tick")
+        .px_3()
+        .py_1()
+        .rounded_md()
+        .border_1()
+        .border_color(Palette::border())
+        .cursor_pointer()
+        .text_sm()
+        .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
+        .child(if is_ticked {
+            "✓ Read"
+        } else {
+            "Mark as read"
+        })
 }
 
 impl Focusable for OneStepLayout {
@@ -156,7 +243,7 @@ impl Render for OneStepLayout {
                     .h_full()
                     .overflow_y_scroll()
                     .p_6()
-                    .child(self.screen()),
+                    .child(self.screen(cx)),
             )
     }
 }

@@ -11,7 +11,7 @@ use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::Review;
+use guided_review::viewer::{Review, ReviewStateFile};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -161,7 +161,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     };
     let current_dir = std::env::current_dir().context("could not read the current folder")?;
     let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
-    let review = Review::open(tour, source.as_ref())?;
+    let review = Review::open(tour, source.as_ref(), ReviewStateFile::for_pr(&home, pr))?;
 
     guided_review::app::run(review);
     Ok(())
