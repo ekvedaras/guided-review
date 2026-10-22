@@ -12,12 +12,11 @@ use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
-use guided_review::repin::repin;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{Asks, Review, ReviewStateFile};
+use guided_review::viewer::{Asks, Review, ReviewStateFile, repin_tour};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -53,7 +52,7 @@ fn main() -> anyhow::Result<()> {
         Command::Outline { pr } => outline(&pr),
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
         Command::Check { pr } => check(&pr),
-        Command::Repin { pr } => repin_tour(&pr),
+        Command::Repin { pr } => repin_command(&pr),
         Command::Open { pr } => open(&pr),
     }
 }
@@ -135,10 +134,11 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn repin_tour(pr: &PullRequestUrl) -> anyhow::Result<()> {
+fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     let tour_path = Tour::path_for(&home, pr);
-    let mut tour = Tour::load(&tour_path)?;
+    // Fails before any network call when there is no tour yet.
+    Tour::load(&tour_path)?;
 
     let github = GitHub::from_env();
     let tips = github.pull_request_tips(pr)?;
@@ -146,8 +146,8 @@ fn repin_tour(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let source = pick_code_source(&github, pr, &tips, &current_dir)?;
     let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
 
-    let result = repin(&mut tour, source.as_ref(), &base, &tips.head)?;
-    tour.save(&tour_path)?;
+    let state_file = ReviewStateFile::for_pr(&home, pr);
+    let (_, result) = repin_tour(&tour_path, &state_file, source.as_ref(), &base, &tips.head)?;
     print!("{result}");
     Ok(())
 }

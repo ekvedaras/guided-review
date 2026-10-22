@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -6,6 +6,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::pull_request::{PullRequestUrl, Sha};
+use crate::repin::{Repin, RepinStatus};
 
 use super::ask::{Ask, AskStore};
 use super::review::StepId;
@@ -25,6 +26,15 @@ pub struct ReviewState {
     /// Viewed changes GitHub has not taken yet, newest wish per file.
     #[serde(default)]
     unsent_viewed: BTreeMap<String, bool>,
+    #[serde(default)]
+    last_repin: Option<RepinRecord>,
+    /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
+    #[serde(default)]
+    read_before: BTreeMap<StepId, ReadTick>,
+    /// After a re-pin GitHub's viewed state is taken as it is, so its "not viewed" for files
+    /// the new commits touched is not read as the reviewer unticking.
+    #[serde(default)]
+    github_baseline_due: bool,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -36,8 +46,146 @@ pub struct ReadTick {
     pub head: String,
 }
 
+/// What the last re-pin (or re-pins, until a Refresh) did, from the head the tour was read at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepinRecord {
+    pub from_base: String,
+    pub from_head: String,
+    pub to_base: String,
+    pub to_head: String,
+    /// Pieces at `to_head`, by id.
+    pub pieces: BTreeMap<String, RepinStatus>,
+    /// By old id: a gone hunk's ordinal may belong to another hunk now.
+    pub gone_by_step: BTreeMap<StepId, BTreeSet<String>>,
+}
+
+impl RepinRecord {
+    pub fn new(
+        from_base: &Sha,
+        from_head: &Sha,
+        to_base: &Sha,
+        to_head: &Sha,
+        repin: &Repin,
+    ) -> Self {
+        Self {
+            from_base: from_base.to_string(),
+            from_head: from_head.to_string(),
+            to_base: to_base.to_string(),
+            to_head: to_head.to_string(),
+            pieces: repin
+                .pieces
+                .iter()
+                .filter(|piece| piece.status != RepinStatus::Gone)
+                .map(|piece| (piece.id.to_string(), piece.status))
+                .collect(),
+            gone_by_step: repin
+                .steps
+                .iter()
+                .map(|step| {
+                    let gone = step
+                        .pieces
+                        .iter()
+                        .filter(|piece| piece.status == RepinStatus::Gone)
+                        .map(|piece| piece.id.to_string())
+                        .collect();
+                    (StepId::from(step.step.as_str()), gone)
+                })
+                .filter(|(_, gone): &(StepId, BTreeSet<String>)| !gone.is_empty())
+                .collect(),
+        }
+    }
+
+    pub fn status_of(&self, piece: &str) -> Option<RepinStatus> {
+        self.pieces.get(piece).copied()
+    }
+
+    pub fn gone_count(&self, step: &StepId) -> usize {
+        self.gone_by_step.get(step).map_or(0, BTreeSet::len)
+    }
+
+    /// Two re-pins with no Refresh between read as one, from where the first one started:
+    /// what changed in the first stays changed even when the second leaves it alone.
+    fn following(self, earlier: &RepinRecord) -> Self {
+        let was_new_then = |id: &String| earlier.pieces.get(id) == Some(&RepinStatus::New);
+        let pieces = self
+            .pieces
+            .into_iter()
+            .map(|(id, now)| {
+                let status = match (earlier.pieces.get(&id), now) {
+                    (Some(RepinStatus::New), _) => RepinStatus::New,
+                    (Some(RepinStatus::Changed), RepinStatus::Same) => RepinStatus::Changed,
+                    _ => now,
+                };
+                (id, status)
+            })
+            .collect();
+        let mut gone_by_step = earlier.gone_by_step.clone();
+        for (step, gone) in self.gone_by_step {
+            gone_by_step
+                .entry(step)
+                .or_default()
+                .extend(gone.into_iter().filter(|id| !was_new_then(id)));
+        }
+        gone_by_step.retain(|_, gone| !gone.is_empty());
+        Self {
+            from_base: earlier.from_base.clone(),
+            from_head: earlier.from_head.clone(),
+            pieces,
+            gone_by_step,
+            ..self
+        }
+    }
+}
+
 impl ReviewState {
+    /// Steps whose pieces changed or gained new ones lose their tick; it is kept as `read_before`.
+    pub fn record_repin(&mut self, record: RepinRecord, repin: &Repin) {
+        for step in repin
+            .steps
+            .iter()
+            .filter(|step| step.has_changed_or_new_piece())
+        {
+            let id = StepId::from(step.step.as_str());
+            if let Some(tick) = self.read_ticks.remove(&id) {
+                self.read_before.insert(id, tick);
+            }
+        }
+        self.last_repin = Some(match self.last_repin.take() {
+            Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
+            _ => record,
+        });
+        self.github_baseline_due = true;
+    }
+
+    pub fn last_repin(&self) -> Option<&RepinRecord> {
+        self.last_repin.as_ref()
+    }
+
+    pub fn read_before(&self, step: &StepId) -> Option<&ReadTick> {
+        self.read_before.get(step)
+    }
+
+    pub fn github_baseline_due(&self) -> bool {
+        self.github_baseline_due
+    }
+
+    /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
+    pub(super) fn take_github_baseline(
+        &mut self,
+        on_github: &BTreeMap<String, bool>,
+        wishes: &BTreeMap<String, bool>,
+    ) {
+        self.viewed_on_github = on_github.clone();
+        self.unsent_viewed = wishes
+            .iter()
+            .filter(|(path, viewed)| self.was_viewed_on_github(path) != **viewed)
+            .map(|(path, viewed)| (path.clone(), *viewed))
+            .collect();
+        self.github_baseline_due = false;
+    }
+
     pub fn tick(&mut self, step: &StepId, head: &Sha) {
+        self.read_before.remove(step);
         self.read_ticks.insert(
             step.clone(),
             ReadTick {
@@ -82,6 +230,8 @@ impl ReviewState {
         self.read_ticks = from.read_ticks.clone();
         self.viewed_on_github = from.viewed_on_github.clone();
         self.unsent_viewed = from.unsent_viewed.clone();
+        self.read_before = from.read_before.clone();
+        self.github_baseline_due = from.github_baseline_due;
     }
 
     pub fn read_tick(&self, step: &StepId) -> Option<&ReadTick> {

@@ -2,13 +2,15 @@ use std::collections::HashMap;
 use std::fmt;
 
 use anyhow::bail;
+use serde::{Deserialize, Serialize};
 
 use crate::code_source::CodeSource;
-use crate::pieces::{self, Piece, PieceId, PieceKind};
+use crate::pieces::{self, ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::tour::{PieceRef, Step, Tour};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RepinStatus {
     Same,
     Changed,
@@ -35,9 +37,25 @@ pub struct PieceRepin {
     pub status: RepinStatus,
 }
 
+/// The pieces one step showed before that are gone now, and the ones it shows at the new head.
+#[derive(Debug, Clone)]
+pub struct StepRepin {
+    pub step: String,
+    pub pieces: Vec<PieceRepin>,
+}
+
+impl StepRepin {
+    pub fn has_changed_or_new_piece(&self) -> bool {
+        self.pieces
+            .iter()
+            .any(|piece| matches!(piece.status, RepinStatus::Changed | RepinStatus::New))
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Repin {
     pub pieces: Vec<PieceRepin>,
+    pub steps: Vec<StepRepin>,
     pub moved_line_ranges: Vec<String>,
 }
 
@@ -87,6 +105,20 @@ pub fn repin(
     let new: Vec<&Piece> = new_files.iter().flat_map(|file| &file.pieces).collect();
 
     let matching = Matching::between(&old, &new);
+    let gone_by_step: Vec<Vec<PieceRepin>> = tour
+        .steps()
+        .iter()
+        .map(|step| {
+            shown_ids(step, tour, &old_files)
+                .into_iter()
+                .filter(|id| matching.gone_ids.contains(&id.to_string()))
+                .map(|id| PieceRepin {
+                    id,
+                    status: RepinStatus::Gone,
+                })
+                .collect()
+        })
+        .collect();
 
     let moved_line_ranges = line_ranges_in_changed_files(tour, &matching, &old, &new);
 
@@ -100,15 +132,38 @@ pub fn repin(
         &matching.gone_hunks,
     );
 
+    let status_of_new = |id: &PieceId| {
+        matching
+            .status_of_new
+            .get(&id.to_string())
+            .copied()
+            .unwrap_or(RepinStatus::New)
+    };
+    let steps = tour
+        .steps()
+        .iter()
+        .zip(gone_by_step)
+        .map(|(step, gone)| StepRepin {
+            step: step.id.clone(),
+            pieces: gone
+                .into_iter()
+                .chain(
+                    shown_ids(step, tour, &new_files)
+                        .into_iter()
+                        .map(|id| PieceRepin {
+                            status: status_of_new(&id),
+                            id,
+                        }),
+                )
+                .collect(),
+        })
+        .collect();
+
     let mut pieces: Vec<PieceRepin> = new
         .iter()
         .map(|piece| PieceRepin {
             id: piece.id.clone(),
-            status: matching
-                .status_of_new
-                .get(&piece.id.to_string())
-                .copied()
-                .unwrap_or(RepinStatus::New),
+            status: status_of_new(&piece.id),
         })
         .collect();
     pieces.extend(
@@ -121,8 +176,23 @@ pub fn repin(
     );
     Ok(Repin {
         pieces,
+        steps,
         moved_line_ranges,
     })
+}
+
+fn shown_ids(step: &Step, tour: &Tour, files: &[ChangedFile]) -> Vec<PieceId> {
+    let mut ids: Vec<PieceId> = Vec::new();
+    for part in step
+        .pieces
+        .iter()
+        .flat_map(|pointer| pointer.shown_parts(tour, files))
+    {
+        if !ids.contains(&part.piece.id) {
+            ids.push(part.piece.id.clone());
+        }
+    }
+    ids
 }
 
 /// Line numbers are not followed to the new head, so a range in a file whose pieces changed,

@@ -19,9 +19,10 @@ use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreCont
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
-use super::review_state::{ReviewState, ReviewStateFile};
-use super::step_page::{SafetyNetPage, StepPage};
+use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
+use super::step_page::{PieceDiff, SafetyNetPage, SinceRead, StepPage};
 use super::threads::{self, ReviewThread, ThreadPlacement};
+use crate::repin::RepinStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -55,6 +56,8 @@ pub struct SidebarEntry<'a> {
     pub is_current: bool,
     pub is_ticked: bool,
     pub thread_count: usize,
+    /// Shown greyed: every piece of the step is gone since the last version.
+    pub is_gone: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +101,11 @@ pub struct Review {
     files_at_head: FilesAtHead,
     more_context: HashMap<MoreContext, usize>,
     ignores_whitespace: bool,
+    /// The diff from each older head some step was read at to the tour's head.
+    /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
+    changes_since: BTreeMap<String, Vec<ChangedFile>>,
+    /// Steps read before whose full diff the reviewer asked for. Not saved.
+    full_diff_shown: BTreeSet<StepId>,
 }
 
 impl Review {
@@ -117,6 +125,19 @@ impl Review {
             .map(|step| Screen::Step(StepId::from(step.id.as_str())));
         let steps_in_reading_order = std::iter::once(Screen::Summary).chain(steps).collect();
         let has_uncovered_changes = threads::uncovered(&tour, &files);
+        let read_heads: BTreeSet<&str> = tour
+            .steps()
+            .iter()
+            .filter_map(|step| read_head_of(&state, &StepId::from(step.id.as_str())))
+            .filter(|read_head| *read_head != tour.head)
+            .collect();
+        let changes_since = read_heads
+            .into_iter()
+            .filter_map(|read_head| {
+                let files = pieces::cut(source, &Sha::new(read_head), &head).ok()?;
+                Some((read_head.to_string(), files))
+            })
+            .collect();
         Ok(Self {
             tour,
             pr,
@@ -138,6 +159,8 @@ impl Review {
             files_at_head: FilesAtHead::default(),
             more_context: HashMap::new(),
             ignores_whitespace: false,
+            changes_since,
+            full_diff_shown: BTreeSet::new(),
         })
     }
 
@@ -217,17 +240,95 @@ impl Review {
         let Screen::Step(id) = &self.screen else {
             return None;
         };
-        let step = self.tour.steps().into_iter().find(|step| step.id == id.0)?;
+        let step = self.step(id)?;
         let links = self.links();
         let display = self.display(&links);
         let mut page = StepPage::of(step, &self.tour, &self.files, &display, self.is_folded(id));
         page.is_ticked = self.is_ticked(id);
+        let shown: Vec<_> = step
+            .pieces
+            .iter()
+            .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
+            .collect();
         page.threads = threads::views(
             self.threads.in_step(id),
             &page.pieces,
             &self.thread_fold_flipped,
         );
+        if let Some(record) = self.repin_record() {
+            self.mark_repin_status(&mut page.pieces);
+            page.gone_pieces = record.gone_count(id);
+            page.text_may_be_old = page
+                .pieces
+                .iter()
+                .any(|piece| piece.repin_status == Some(RepinStatus::Changed));
+        }
+        page.is_gone = self.is_gone(step);
+        if let Some((read_head, since_files)) = self.changes_since_read(id) {
+            let showing_full_diff = self.full_diff_shown.contains(id);
+            page.since_read = Some(SinceRead {
+                read_at: read_head.clone(),
+                showing_full_diff,
+            });
+            if !showing_full_diff {
+                let links_from_read_head = GitHubLinks {
+                    pr: &self.pr,
+                    base: &read_head,
+                    head: &self.head,
+                };
+                let since_display = self.display(&links_from_read_head);
+                page.pieces = shown
+                    .into_iter()
+                    .map(|part| PieceDiff::since_read(part, since_files, &since_display))
+                    .collect();
+                self.mark_repin_status(&mut page.pieces);
+            }
+        }
         Some(page)
+    }
+
+    fn changes_since_read(&self, id: &StepId) -> Option<(Sha, &[ChangedFile])> {
+        let read_head = read_head_of(&self.state, id)?;
+        let since_files = self.changes_since.get(read_head)?;
+        Some((Sha::new(read_head), since_files))
+    }
+
+    /// Flips a step read before between the change since reading and the full diff, for the session.
+    pub fn toggle_full_diff(&mut self, id: &StepId) {
+        if !self.full_diff_shown.remove(id) {
+            self.full_diff_shown.insert(id.clone());
+        }
+    }
+
+    fn step(&self, id: &StepId) -> Option<&Step> {
+        self.tour.steps().into_iter().find(|step| step.id == id.0)
+    }
+
+    /// A record of a re-pin to another head says nothing about this tour any more.
+    fn repin_record(&self) -> Option<&RepinRecord> {
+        self.state
+            .last_repin()
+            .filter(|record| record.to_head == self.tour.head)
+    }
+
+    fn mark_repin_status(&self, pieces: &mut [PieceDiff]) {
+        if let Some(record) = self.repin_record() {
+            for piece in pieces {
+                piece.repin_status = record.status_of(&piece.id.to_string());
+            }
+        }
+    }
+
+    fn is_gone(&self, step: &Step) -> bool {
+        let id = StepId::from(step.id.as_str());
+        step.diagram.is_none()
+            && self
+                .repin_record()
+                .is_some_and(|record| record.gone_count(&id) > 0)
+            && step
+                .pieces
+                .iter()
+                .all(|pointer| pointer.shown_parts(&self.tour, &self.files).is_empty())
     }
 
     pub fn head(&self) -> &str {
@@ -259,21 +360,21 @@ impl Review {
             steps: &'a [Step],
             depth: usize,
             current: Option<&StepId>,
-            state: &ReviewState,
-            threads: &ThreadPlacement,
+            review: &Review,
             into: &mut Vec<SidebarEntry<'a>>,
         ) {
             for step in steps {
                 let id = StepId::from(step.id.as_str());
                 into.push(SidebarEntry {
                     is_current: current == Some(&id),
-                    is_ticked: state.read_tick(&id).is_some(),
-                    thread_count: threads.in_step(&id).len(),
+                    is_ticked: review.is_ticked(&id),
+                    thread_count: review.threads.in_step(&id).len(),
+                    is_gone: review.is_gone(step),
                     id,
                     title: &step.title,
                     depth,
                 });
-                walk(&step.children, depth + 1, current, state, threads, into);
+                walk(&step.children, depth + 1, current, review, into);
             }
         }
         let current = match &self.screen {
@@ -281,14 +382,7 @@ impl Review {
             Screen::Summary | Screen::SafetyNet => None,
         };
         let mut entries = Vec::new();
-        walk(
-            &self.tour.steps,
-            0,
-            current,
-            &self.state,
-            &self.threads,
-            &mut entries,
-        );
+        walk(&self.tour.steps, 0, current, self, &mut entries);
         entries
     }
 
@@ -297,6 +391,7 @@ impl Review {
         self.reading_order().contains(&Screen::SafetyNet).then(|| {
             let links = self.links();
             let mut page = SafetyNetPage::of(&self.tour, &self.files, &self.display(&links));
+            self.mark_repin_status(&mut page.pieces);
             page.threads = threads::views(
                 self.threads.in_safety_net(),
                 &page.pieces,
@@ -427,9 +522,12 @@ impl Review {
         self.save_viewer_sections()
     }
 
-    /// Skim and ticked steps fold; the reviewer can flip that for the session without losing the tick.
+    /// Skim, ticked and gone steps fold; the reviewer can flip that for the session without losing the tick.
     pub fn is_folded(&self, id: &StepId) -> bool {
-        let folds_by_default = self.is_ticked(id) || self.is_skim(id);
+        let folds_by_default = self.is_ticked(id)
+            || self
+                .step(id)
+                .is_some_and(|step| step.skim || self.is_gone(step));
         folds_by_default != self.fold_flipped.contains(id)
     }
 
@@ -437,13 +535,6 @@ impl Review {
         if !self.fold_flipped.remove(id) {
             self.fold_flipped.insert(id.clone());
         }
-    }
-
-    fn is_skim(&self, id: &StepId) -> bool {
-        self.tour
-            .steps()
-            .into_iter()
-            .any(|step| step.id == id.0 && step.skim)
     }
 
     /// Only steps of this tour count: ticks of steps a refresh removed stay in the file but not here.
@@ -471,11 +562,38 @@ impl Review {
 
     /// Everything the network part of a sync needs, owned, so it can run on a background thread.
     pub fn sync_request(&self) -> SyncRequest {
+        let baseline_wishes = self
+            .state
+            .github_baseline_due()
+            .then(|| self.baseline_wishes());
         SyncRequest {
             tour_head: Sha::new(&self.tour.head),
             unsent: self.state.unsent_viewed().clone(),
+            baseline_wishes,
             is_off: self.sync_off_because.is_some(),
         }
+    }
+
+    /// After a re-pin: viewed for every file whose steps are all still ticked, and the queued
+    /// "not viewed" edits for the rest. Queued "viewed" edits are dropped: the ticks say it again
+    /// where it is still true.
+    fn baseline_wishes(&self) -> BTreeMap<String, bool> {
+        let coverage = self.coverage();
+        let is_fully_ticked =
+            |path: &str| coverage.is_fully_ticked(path, |step| self.is_ticked(step));
+        let still_viewed = coverage
+            .files_by_step
+            .values()
+            .flatten()
+            .filter(|path| is_fully_ticked(path))
+            .map(|path| (path.clone(), true));
+        let still_not_viewed = self
+            .state
+            .unsent_viewed()
+            .iter()
+            .filter(|(path, viewed)| !**viewed && !is_fully_ticked(path))
+            .map(|(path, _)| (path.clone(), false));
+        still_viewed.chain(still_not_viewed).collect()
     }
 
     /// Runs the whole sync here and now; the app runs `SyncRequest::run` in the background
@@ -490,11 +608,22 @@ impl Review {
         if self.sync_off_because.is_some() {
             return Ok(());
         }
-        for (path, viewed) in &outcome.sent {
-            self.state.sent_viewed(path, *viewed);
-        }
-        if let Some(on_github) = &outcome.on_github {
-            self.pull_viewed(on_github);
+        match (&outcome.baseline_wishes, &outcome.on_github) {
+            (Some(wishes), Some(on_github)) => {
+                self.state.take_github_baseline(on_github, wishes);
+                for (path, viewed) in &outcome.sent {
+                    self.state.sent_viewed(path, *viewed);
+                }
+            }
+            (Some(_), None) => {}
+            (None, on_github) => {
+                for (path, viewed) in &outcome.sent {
+                    self.state.sent_viewed(path, *viewed);
+                }
+                if let Some(on_github) = on_github {
+                    self.pull_viewed(on_github);
+                }
+            }
         }
         let saved = self.save_viewer_sections();
         match outcome.error.map(Err).unwrap_or(Ok(())).and(saved) {
@@ -598,6 +727,14 @@ impl Review {
     }
 }
 
+/// The head a step was last read at: its tick, or the tick a re-pin took away.
+fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a str> {
+    state
+        .read_tick(step)
+        .or_else(|| state.read_before(step))
+        .map(|tick| tick.head.as_str())
+}
+
 /// Which files each step holds, and which files have changes no step holds.
 #[derive(Default)]
 struct Coverage {
@@ -627,6 +764,8 @@ impl Coverage {
 pub struct SyncRequest {
     tour_head: Sha,
     unsent: BTreeMap<String, bool>,
+    /// Set for the first sync after a re-pin; it replaces `unsent`.
+    baseline_wishes: Option<BTreeMap<String, bool>>,
     is_off: bool,
 }
 
@@ -634,6 +773,7 @@ pub struct SyncRequest {
 pub struct SyncOutcome {
     sent: Vec<(String, bool)>,
     on_github: Option<BTreeMap<String, bool>>,
+    baseline_wishes: Option<BTreeMap<String, bool>>,
     error: Option<anyhow::Error>,
 }
 
@@ -642,6 +782,7 @@ impl SyncOutcome {
         Self {
             sent: Vec::new(),
             on_github: None,
+            baseline_wishes: None,
             error: None,
         }
     }
@@ -663,27 +804,69 @@ impl SyncRequest {
                 };
             }
         }
-        let mut outcome = SyncOutcome::nothing();
-        for (path, viewed) in &self.unsent {
-            match github.set_file_viewed(pr, path, *viewed) {
-                Ok(()) => outcome.sent.push((path.clone(), *viewed)),
-                Err(error) => {
-                    outcome.error = Some(error);
-                    break;
+        match self.baseline_wishes {
+            Some(wishes) => Self::take_baseline(github, pr, wishes),
+            None => {
+                let mut outcome = SyncOutcome::nothing();
+                outcome.error = push(github, pr, &self.unsent, &mut outcome.sent).err();
+                match read_viewed(github, pr) {
+                    Ok(on_github) => outcome.on_github = Some(on_github),
+                    Err(error) => outcome.error = outcome.error.or(Some(error)),
                 }
+                outcome
             }
         }
-        match github.viewed_files(pr) {
-            Ok(files) => {
-                outcome.on_github = Some(
-                    files
-                        .into_iter()
-                        .map(|file| (file.path, file.state == ViewedState::Viewed))
-                        .collect(),
-                );
+    }
+
+    /// GitHub is read first, so only wishes it does not already match are pushed.
+    fn take_baseline(
+        github: &dyn GitHubPort,
+        pr: &PullRequestUrl,
+        wishes: BTreeMap<String, bool>,
+    ) -> SyncOutcome {
+        let on_github = match read_viewed(github, pr) {
+            Ok(on_github) => on_github,
+            Err(error) => {
+                return SyncOutcome {
+                    error: Some(error),
+                    ..SyncOutcome::nothing()
+                };
             }
-            Err(error) => outcome.error = outcome.error.or(Some(error)),
-        }
+        };
+        let differing: BTreeMap<String, bool> = wishes
+            .iter()
+            .filter(|(path, viewed)| on_github.get(*path).copied().unwrap_or(false) != **viewed)
+            .map(|(path, viewed)| (path.clone(), *viewed))
+            .collect();
+        let mut outcome = SyncOutcome::nothing();
+        outcome.error = push(github, pr, &differing, &mut outcome.sent).err();
+        outcome.on_github = Some(on_github);
+        outcome.baseline_wishes = Some(wishes);
         outcome
     }
+}
+
+/// Stops at the first failure; what was not sent stays queued.
+fn push(
+    github: &dyn GitHubPort,
+    pr: &PullRequestUrl,
+    wishes: &BTreeMap<String, bool>,
+    sent: &mut Vec<(String, bool)>,
+) -> anyhow::Result<()> {
+    for (path, viewed) in wishes {
+        github.set_file_viewed(pr, path, *viewed)?;
+        sent.push((path.clone(), *viewed));
+    }
+    Ok(())
+}
+
+fn read_viewed(
+    github: &dyn GitHubPort,
+    pr: &PullRequestUrl,
+) -> anyhow::Result<BTreeMap<String, bool>> {
+    Ok(github
+        .viewed_files(pr)?
+        .into_iter()
+        .map(|file| (file.path, file.state == ViewedState::Viewed))
+        .collect())
 }

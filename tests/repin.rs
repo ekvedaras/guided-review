@@ -192,6 +192,30 @@ fn a_hunk_edited_in_place_is_changed_not_gone_and_new() {
 }
 
 #[test]
+fn repin_stores_the_piece_statuses_in_the_review_state_for_the_app() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.repo.write("app/Order.php", &order_php(3, 1, 9));
+    let second_head = shop.repo.commit("second head");
+
+    let run = shop.repin_onto(&shop.base, &second_head);
+
+    assert!(run.success, "{}", run.stderr);
+    let state_path = shop
+        .repo
+        .home()
+        .join(".guided-review/state/acme/shop/7.json");
+    let state: Value = serde_json::from_str(&std::fs::read_to_string(state_path).unwrap()).unwrap();
+    let record = &state["last_repin"];
+    assert_eq!(record["from_head"], shop.head.as_str());
+    assert_eq!(record["to_head"], second_head.as_str());
+    assert_eq!(record["pieces"]["app/Order.php#Order::total"], "changed");
+    assert_eq!(
+        record["gone_by_step"],
+        json!({"orders": ["app/Order.php#Order::tax"]})
+    );
+}
+
+#[test]
 fn repin_without_a_tour_file_fails() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let base = repo.commit("base");

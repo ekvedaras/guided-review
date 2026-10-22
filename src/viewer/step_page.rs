@@ -2,7 +2,10 @@ use super::diff_display::{DiffDisplay, DiffHunk};
 use super::github_link::GitHubLink;
 use super::highlight::Span;
 use crate::coverage::{self, PiecePart};
-use crate::pieces::{ChangedFile, PieceId};
+use crate::code_source::Line;
+use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
+use crate::pull_request::Sha;
+use crate::repin::RepinStatus;
 use crate::tour::{Step, Tour};
 
 use super::threads::ThreadView;
@@ -80,15 +83,32 @@ pub struct PieceDiff {
     pub changes_only_whitespace: bool,
     /// Set for a binary file: it has no lines, only this one row.
     pub binary_file: Option<GitHubLink>,
+    /// What the last re-pin did to this piece; `None` when the tour was not re-pinned.
+    pub repin_status: Option<RepinStatus>,
 }
 
 pub struct StepPage<'a> {
     pub step: &'a Step,
     pub pieces: Vec<PieceDiff>,
     pub is_ticked: bool,
-    /// Skim and ticked steps show their text but keep their pieces closed.
+    /// Skim, ticked and gone steps show their text but keep their pieces closed.
     pub is_folded: bool,
     pub threads: Vec<ThreadView>,
+    /// Pieces this step showed before the last re-pin that no longer exist.
+    pub gone_pieces: usize,
+    /// Nothing left to show: no pieces, no diagram, only gone pieces.
+    pub is_gone: bool,
+    /// A piece changed in the last re-pin, so the step's text was written for older code.
+    pub text_may_be_old: bool,
+    /// Set when the step was read at an older head: its pieces then show only what changed since.
+    pub since_read: Option<SinceRead>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SinceRead {
+    pub read_at: Sha,
+    /// The reviewer asked for the whole PR diff of the step instead of the change since reading.
+    pub showing_full_diff: bool,
 }
 
 impl<'a> StepPage<'a> {
@@ -111,6 +131,10 @@ impl<'a> StepPage<'a> {
             is_ticked: false,
             is_folded,
             threads: Vec::new(),
+            gone_pieces: 0,
+            is_gone: false,
+            text_may_be_old: false,
+            since_read: None,
         }
     }
 }
@@ -154,10 +178,83 @@ impl PieceDiff {
             changes_only_whitespace: has_changes && hunks.is_empty(),
             hunks,
             binary_file: file.binary.then(|| display.links.to_file(file)),
+            repin_status: None,
         }
     }
 
     pub fn lines(&self) -> impl Iterator<Item = &DiffLine> {
         self.hunks.iter().flat_map(|hunk| hunk.rows.iter())
+    }
+}
+
+impl PieceDiff {
+    /// The change to a piece between the head it was read at and the tour's head, cut from the
+    /// diff between those two heads. Symbol pieces match by id; hunks and whole-file pieces by
+    /// where their lines are, because hunk ordinals of the two diffs say nothing about each other.
+    /// No rows means nothing changed since the read. `display` links lines to the read head and
+    /// shares everything else with the full diff, so rows keep path, side, line, links and spans.
+    pub(super) fn since_read(
+        part: PiecePart,
+        since_files: &[ChangedFile],
+        display: &DiffDisplay,
+    ) -> Self {
+        let piece = part.piece;
+        let mut diff = Self {
+            id: piece.id.clone(),
+            hunks: Vec::new(),
+            changes_only_whitespace: false,
+            binary_file: None,
+            repin_status: None,
+        };
+        let Some(file) = since_files.iter().find(|file| file.path == piece.id.path) else {
+            return diff;
+        };
+        let added_range = piece.added_lines.first().zip(piece.added_lines.last());
+        let changed_since: Vec<&Piece> = file
+            .pieces
+            .iter()
+            .filter(|since| match (&piece.id.symbol, piece.kind) {
+                (None, _) => true,
+                (Some(_), PieceKind::Hunk) => added_range.is_some_and(|(first, last)| {
+                    since
+                        .added_lines
+                        .iter()
+                        .any(|line| (first.number..=last.number).contains(&line.number))
+                }),
+                (Some(_), _) => since.id == piece.id,
+            })
+            .collect();
+        let removed: Vec<&Line> = changed_since
+            .iter()
+            .flat_map(|since| &since.removed_lines)
+            .collect();
+        let added: Vec<&Line> = changed_since
+            .iter()
+            .flat_map(|since| &since.added_lines)
+            .collect();
+        // Its own key, so asking for more lines here does not widen the same piece in the full diff.
+        let since_id = PieceId {
+            path: piece.id.path.clone(),
+            symbol: Some(format!("{}@since-read", piece.id.symbol.as_deref().unwrap_or(""))),
+        };
+        diff.hunks = display.hunks(
+            &since_id,
+            file,
+            &removed,
+            &added,
+            part.range
+                .map(|[first, last]| first as usize..=last as usize),
+        );
+        // Removed lines are numbered at the read head, so the PR base's colours do not fit them.
+        for row in diff.hunks.iter_mut().flat_map(|hunk| hunk.rows.iter_mut()) {
+            if row.location.side == Side::Base {
+                row.spans.clear();
+            }
+        }
+        diff.changes_only_whitespace =
+            (!removed.is_empty() || !added.is_empty()) && diff.hunks.is_empty();
+        diff.binary_file =
+            (file.binary && !changed_since.is_empty()).then(|| display.links.to_file(file));
+        diff
     }
 }
