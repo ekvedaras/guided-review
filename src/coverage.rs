@@ -4,58 +4,58 @@ use crate::code_source::Line;
 use crate::pieces::{ChangedFile, Piece};
 use crate::tour::{PieceRef, Tour};
 
-impl PieceRef {
-    /// The pieces this pointer names directly; `None` when it names something that did not change.
-    /// `rest` names nothing directly, it only mops up what is left.
-    pub fn named_pieces<'a>(&self, files: &'a [ChangedFile]) -> Option<Vec<&'a Piece>> {
-        match self {
-            Self::Rest { .. } => Some(Vec::new()),
-            Self::WholeFile { file } => files
+/// The pieces this pointer names directly; `None` when it names something that did not change.
+/// `rest` names nothing directly, it only mops up what is left.
+pub fn named_pieces<'a>(pointer: &PieceRef, files: &'a [ChangedFile]) -> Option<Vec<&'a Piece>> {
+    match pointer {
+        PieceRef::Rest { .. } => Some(Vec::new()),
+        PieceRef::WholeFile { file } => files
+            .iter()
+            .find(|changed| changed.path == *file)
+            .map(|changed| changed.pieces.iter().collect()),
+        PieceRef::Lines { file, lines } => {
+            files
                 .iter()
                 .find(|changed| changed.path == *file)
-                .map(|changed| changed.pieces.iter().collect()),
-            Self::Lines { file, lines } => {
-                files
-                    .iter()
-                    .find(|changed| changed.path == *file)
-                    .map(|changed| {
-                        changed
-                            .pieces
-                            .iter()
-                            .filter(|piece| PiecePart::within(piece, *lines).is_some())
-                            .collect()
-                    })
-            }
-            Self::Symbol { file, symbol } => files
-                .iter()
-                .flat_map(|changed| &changed.pieces)
-                .find(|piece| {
-                    piece.id.path == *file && piece.id.symbol.as_deref() == Some(symbol.as_str())
+                .map(|changed| {
+                    changed
+                        .pieces
+                        .iter()
+                        .filter(|piece| PiecePart::within(piece, *lines).is_some())
+                        .collect()
                 })
-                .map(|piece| vec![piece]),
         }
+        PieceRef::Symbol { file, symbol } => files
+            .iter()
+            .flat_map(|changed| &changed.pieces)
+            .find(|piece| {
+                piece.id.path == *file && piece.id.symbol.as_deref() == Some(symbol.as_str())
+            })
+            .map(|piece| vec![piece]),
     }
 }
 
-impl PieceRef {
-    /// What a step shows for this pointer: whole pieces, or for a line range only the lines inside it.
-    pub fn shown_parts<'a>(&self, tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
-        match self {
-            Self::Rest { rest } => left_for_rest(tour, files, rest),
-            _ => self.named_parts(files),
-        }
+/// What a step shows for this pointer: whole pieces, or for a line range only the lines inside it.
+pub fn shown_parts<'a>(
+    pointer: &PieceRef,
+    tour: &Tour,
+    files: &'a [ChangedFile],
+) -> Vec<PiecePart<'a>> {
+    match pointer {
+        PieceRef::Rest { rest } => left_for_rest(tour, files, rest),
+        _ => named_parts(pointer, files),
     }
+}
 
-    /// The parts this pointer names directly; a line range names only the lines inside it.
-    fn named_parts<'a>(&self, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
-        let pieces = self.named_pieces(files).unwrap_or_default();
-        match self {
-            Self::Lines { lines, .. } => pieces
-                .into_iter()
-                .filter_map(|piece| PiecePart::within(piece, *lines))
-                .collect(),
-            _ => pieces.into_iter().map(PiecePart::whole).collect(),
-        }
+/// The parts this pointer names directly; a line range names only the lines inside it.
+fn named_parts<'a>(pointer: &PieceRef, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
+    let pieces = named_pieces(pointer, files).unwrap_or_default();
+    match pointer {
+        PieceRef::Lines { lines, .. } => pieces
+            .into_iter()
+            .filter_map(|piece| PiecePart::within(piece, *lines))
+            .collect(),
+        _ => pieces.into_iter().map(PiecePart::whole).collect(),
     }
 }
 
@@ -152,7 +152,7 @@ impl Seen {
     fn named_by(pointers: &[&PieceRef], files: &[ChangedFile]) -> Self {
         Self::of(pointers.iter().flat_map(|pointer| match pointer {
             PieceRef::Rest { .. } => Vec::new(),
-            named => named.named_parts(files),
+            named => named_parts(named, files),
         }))
     }
 
@@ -174,7 +174,7 @@ pub fn safety_net<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a
         tour.steps()
             .iter()
             .flat_map(|step| &step.pieces)
-            .flat_map(|pointer| pointer.shown_parts(tour, files)),
+            .flat_map(|pointer| shown_parts(pointer, tour, files)),
     );
     files
         .iter()

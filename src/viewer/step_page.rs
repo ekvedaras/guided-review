@@ -142,7 +142,7 @@ impl<'a> StepPage<'a> {
         let pieces = step
             .pieces
             .iter()
-            .flat_map(|pointer| pointer.shown_parts(tour, files))
+            .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
             .map(|part| PieceDiff::of(part, files, display))
             .collect();
         Self {
@@ -299,7 +299,7 @@ impl PieceDiff {
 pub(super) fn pieces_of<'a>(step: &Step, tour: &Tour, files: &'a [ChangedFile]) -> Vec<&'a Piece> {
     step.pieces
         .iter()
-        .flat_map(|pointer| pointer.shown_parts(tour, files))
+        .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
         .map(|part| part.piece)
         .collect()
 }

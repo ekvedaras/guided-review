@@ -42,7 +42,7 @@ impl RefreshBrief {
             .filter(|step| {
                 step.pieces
                     .iter()
-                    .flat_map(|pointer| pointer.shown_parts(tour, files))
+                    .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
                     .any(|part| {
                         record.status_of(&part.piece.id.to_string()) == Some(RepinStatus::Changed)
                     })

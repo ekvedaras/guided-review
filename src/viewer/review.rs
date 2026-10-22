@@ -291,7 +291,7 @@ impl Review {
         let shown: Vec<_> = step
             .pieces
             .iter()
-            .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
+            .flat_map(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files))
             .collect();
         page.threads = threads::views(
             self.threads.in_step(id),
@@ -377,7 +377,7 @@ impl Review {
             && step
                 .pieces
                 .iter()
-                .all(|pointer| pointer.shown_parts(&self.tour, &self.files).is_empty())
+                .all(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files).is_empty())
     }
 
     pub fn head(&self) -> &Sha {
@@ -405,7 +405,9 @@ impl Review {
                     || self.step(step).is_some_and(|step| {
                         step.pieces
                             .iter()
-                            .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
+                            .flat_map(|pointer| {
+                                coverage::shown_parts(pointer, &self.tour, &self.files)
+                            })
                             .any(|part| moved(&part.piece.id.to_string()))
                     })
             }

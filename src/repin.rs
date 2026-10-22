@@ -5,6 +5,7 @@ use anyhow::bail;
 use serde::{Deserialize, Serialize};
 
 use crate::code_source::CodeSource;
+use crate::coverage;
 use crate::pieces::{self, ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::tour::{PieceRef, Step, Tour};
@@ -35,6 +36,15 @@ impl fmt::Display for RepinStatus {
 pub struct PieceRepin {
     pub id: PieceId,
     pub status: RepinStatus,
+}
+
+impl PieceRepin {
+    fn gone(id: PieceId) -> Self {
+        Self {
+            id,
+            status: RepinStatus::Gone,
+        }
+    }
 }
 
 /// The pieces one step showed before that are gone now, and the ones it shows at the new head.
@@ -112,10 +122,7 @@ pub fn repin(
             shown_ids(step, tour, &old_files)
                 .into_iter()
                 .filter(|id| matching.gone_ids.contains(&id.to_string()))
-                .map(|id| PieceRepin {
-                    id,
-                    status: RepinStatus::Gone,
-                })
+                .map(PieceRepin::gone)
                 .collect()
         })
         .collect();
@@ -169,10 +176,7 @@ pub fn repin(
     pieces.extend(
         old.iter()
             .filter(|piece| matching.gone_ids.contains(&piece.id.to_string()))
-            .map(|piece| PieceRepin {
-                id: piece.id.clone(),
-                status: RepinStatus::Gone,
-            }),
+            .map(|piece| PieceRepin::gone(piece.id.clone())),
     );
     Ok(Repin {
         pieces,
@@ -186,7 +190,7 @@ fn shown_ids(step: &Step, tour: &Tour, files: &[ChangedFile]) -> Vec<PieceId> {
     for part in step
         .pieces
         .iter()
-        .flat_map(|pointer| pointer.shown_parts(tour, files))
+        .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
     {
         if !ids.contains(&part.piece.id) {
             ids.push(part.piece.id.clone());

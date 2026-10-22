@@ -213,7 +213,7 @@ impl Coverage {
             let paths = step
                 .pieces
                 .iter()
-                .flat_map(|pointer| pointer.shown_parts(tour, files))
+                .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
                 .map(|part| part.piece.id.path.clone());
             coverage
                 .files_by_step

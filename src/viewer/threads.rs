@@ -122,7 +122,7 @@ impl ThreadPlacement {
                 let parts = step
                     .pieces
                     .iter()
-                    .flat_map(|pointer| pointer.shown_parts(tour, files))
+                    .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
                     .map(|part| PieceDiff::of(part, files, display))
                     .collect();
                 (StepId::from(step.id.as_str()), parts)

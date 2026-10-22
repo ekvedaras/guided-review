@@ -125,7 +125,7 @@ fn check_step(step: &Step, files: &[ChangedFile], report: &mut Report) {
                 lines: *lines,
             });
         }
-        match pointer.named_pieces(files) {
+        match coverage::named_pieces(pointer, files) {
             Some(named) => pieces += named.len(),
             None => report.errors.push(Error::UnknownPiece {
                 step: step.id.clone(),
