@@ -1,17 +1,21 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Subscription, Task, Window, actions, div, px,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Subscription, Task, Window, actions, div, px,
 };
 
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
+use crate::app::components::comment_composer::{CommentComposer, OnCompose, QueuedCommentNote};
 use crate::app::components::diagram::{DiagramView, Diagrams};
-use crate::app::components::diff_view::{DiffView, OnMoreContext, threads_by_piece};
+use crate::app::components::diff_view::{
+    DiffView, OnMoreContext, RowGesture, RowSelecting, threads_by_piece,
+};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
 use crate::app::components::palette::{Palette, TEXT_FONT};
@@ -20,8 +24,8 @@ use crate::app::components::step_notes::StepNotes;
 use crate::app::components::thread_view::ThreadElement;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    GitHubPort, LineLocation, MoreContext, Place, Review, Screen, StepId, StepPage, ThreadView,
-    TourUpdater,
+    CommentPlace, CommentResult, GitHubPort, LineLocation, MoreContext, Place, Review, Screen,
+    SendMode, StepId, StepPage, ThreadView, TourUpdater,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -40,6 +44,14 @@ pub struct OneStepLayout {
     pr_head_check: Option<Task<()>>,
     threads_pull: Option<Task<()>>,
     push_debounce: Option<Task<()>>,
+    pending_review_check: Option<Task<()>>,
+    /// The comment box that takes the keys.
+    composing: Option<CommentPlace>,
+    sending_comments: HashSet<CommentPlace>,
+    comment_problems: HashMap<CommentPlace, String>,
+    /// Why the last drag opened no comment box.
+    selection_notice: Option<String>,
+    is_retrying_comments: bool,
     is_syncing: bool,
     sync_again: bool,
     _focus_subscription: Subscription,
@@ -62,6 +74,8 @@ impl OneStepLayout {
                 this.check_pr_head(cx);
                 this.sync(cx);
                 this.pull_threads(cx);
+                this.pull_pending_review(cx);
+                this.retry_queued_comments(cx);
             }
         });
         let diagrams = Self::new_diagrams(cx);
@@ -78,6 +92,12 @@ impl OneStepLayout {
             pr_head_check: None,
             threads_pull: None,
             push_debounce: None,
+            pending_review_check: None,
+            composing: None,
+            sending_comments: HashSet::new(),
+            comment_problems: HashMap::new(),
+            selection_notice: None,
+            is_retrying_comments: false,
             is_syncing: false,
             sync_again: false,
             _focus_subscription: focus_subscription,
@@ -118,6 +138,8 @@ impl OneStepLayout {
         self.check_pr_head(cx);
         self.sync(cx);
         self.pull_threads(cx);
+        self.pull_pending_review(cx);
+        self.retry_queued_comments(cx);
     }
 
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
@@ -248,6 +270,258 @@ impl OneStepLayout {
                 Err(error) => eprintln!("warning: could not read the review threads: {error:#}"),
             }
         }));
+    }
+
+    fn pull_pending_review(&mut self, cx: &mut Context<Self>) {
+        let pr = self.review.pr().clone();
+        let github = self.github.clone();
+        self.pending_review_check = Some(cx.spawn(async move |this, cx| {
+            let exists = cx
+                .background_executor()
+                .spawn(async move { github.has_pending_review(&pr) })
+                .await;
+            match exists {
+                Ok(exists) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.review.pending_review_is(exists);
+                        cx.notify();
+                    });
+                }
+                Err(error) => eprintln!("warning: could not look for a pending review: {error:#}"),
+            }
+        }));
+    }
+
+    fn row_selecting(&self, cx: &mut Context<Self>) -> RowSelecting {
+        let layout = cx.entity();
+        RowSelecting {
+            selected: self.review.selected_lines(),
+            on_gesture: Rc::new(move |gesture, at, _window, cx| {
+                layout.update(cx, |this, cx| this.on_row_gesture(gesture, at, cx))
+            }),
+        }
+    }
+
+    fn on_row_gesture(&mut self, gesture: RowGesture, at: &LineLocation, cx: &mut Context<Self>) {
+        match gesture {
+            RowGesture::Press => {
+                self.selection_notice = None;
+                self.review.begin_selection(at.clone());
+            }
+            RowGesture::Over if self.review.is_selecting() => {
+                self.review.extend_selection(at.clone());
+            }
+            RowGesture::Over => return,
+        }
+        cx.notify();
+    }
+
+    fn end_row_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.review.is_selecting() {
+            return;
+        }
+        match self.review.finish_selection() {
+            Ok(Some(place)) => {
+                self.composing = Some(place);
+                window.focus(&self.focus, cx);
+            }
+            Ok(None) => {}
+            Err(refusal) => self.selection_notice = Some(refusal.to_string()),
+        }
+        cx.notify();
+    }
+
+    fn on_comment_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(place) = self.composing.clone() else {
+            return;
+        };
+        if !self.focus.is_focused(window) {
+            return;
+        }
+        let Some(draft) = self
+            .review
+            .comment_drafts()
+            .iter()
+            .find(|d| d.place == place)
+        else {
+            return;
+        };
+        let mut body = draft.body.clone();
+        let keystroke = &event.keystroke;
+        match keystroke.key.as_str() {
+            "escape" => self.composing = None,
+            "enter" if keystroke.modifiers.platform => {
+                return self.send_comment(place, SendMode::AddToReview, cx);
+            }
+            "enter" => body.push('\n'),
+            "backspace" => {
+                body.pop();
+            }
+            _ if !keystroke.modifiers.control && !keystroke.modifiers.platform => {
+                match &keystroke.key_char {
+                    Some(text) => body.push_str(text),
+                    None => return,
+                }
+            }
+            _ => return,
+        }
+        if let Err(error) = self.review.edit_draft(&place, &body) {
+            eprintln!("could not save the comment text: {error:#}");
+        }
+        cx.notify();
+    }
+
+    fn send_comment(&mut self, place: CommentPlace, mode: SendMode, cx: &mut Context<Self>) {
+        let Some(request) = self.review.comment_request(&place, mode) else {
+            return;
+        };
+        self.sending_comments.insert(place.clone());
+        self.comment_problems.remove(&place);
+        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { request.run(github.as_ref(), &pr) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.sending_comments.remove(&place);
+                match this.review.apply_comment(outcome) {
+                    Ok(CommentResult::Sent) => {
+                        this.composing = None;
+                        this.pull_threads(cx);
+                    }
+                    Ok(CommentResult::Queued(_)) => this.composing = None,
+                    Ok(CommentResult::Refused(refusal)) => {
+                        this.comment_problems.insert(place, refusal.to_string());
+                    }
+                    Ok(CommentResult::Rejected(reason)) => {
+                        this.comment_problems.insert(place, reason);
+                    }
+                    Err(error) => {
+                        this.comment_problems.insert(place, format!("{error:#}"));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Sends the queue oldest first, one comment at a time, until one does not go.
+    fn retry_queued_comments(&mut self, cx: &mut Context<Self>) {
+        if self.is_retrying_comments {
+            return;
+        }
+        let Some(request) = self.review.queued_comment_request() else {
+            return;
+        };
+        self.is_retrying_comments = true;
+        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { request.run(github.as_ref(), &pr) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.is_retrying_comments = false;
+                match this.review.apply_comment(outcome) {
+                    Ok(CommentResult::Sent) => {
+                        this.pull_threads(cx);
+                        this.retry_queued_comments(cx);
+                    }
+                    Ok(_) => {}
+                    Err(error) => eprintln!("could not send a queued comment: {error:#}"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn discard_comment(&mut self, place: &CommentPlace, cx: &mut Context<Self>) {
+        if let Err(error) = self.review.discard_draft(place) {
+            eprintln!("could not save after discarding a comment: {error:#}");
+        }
+        if self.composing.as_ref() == Some(place) {
+            self.composing = None;
+        }
+        self.comment_problems.remove(place);
+        cx.notify();
+    }
+
+    fn on_compose(
+        &self,
+        place: &CommentPlace,
+        cx: &mut Context<Self>,
+        act: impl Fn(&mut Self, CommentPlace, &mut Window, &mut Context<Self>) + 'static,
+    ) -> OnCompose {
+        let (layout, place) = (cx.entity(), place.clone());
+        Rc::new(move |window, cx| {
+            layout.update(cx, |this, cx| act(this, place.clone(), window, cx))
+        })
+    }
+
+    /// Open comment boxes and comments waiting for GitHub, each with the row it hangs under.
+    fn comment_elements(&self, cx: &mut Context<Self>) -> Vec<(LineLocation, AnyElement)> {
+        let queued = self
+            .review
+            .queued_comments()
+            .iter()
+            .map(|queued| {
+                let place = queued.draft.place.clone();
+                let on_discard = self.on_compose(&place, cx, |this, place, _, cx| {
+                    this.discard_comment(&place, cx)
+                });
+                (
+                    place.end,
+                    QueuedCommentNote::new(queued.clone(), on_discard).into_any_element(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let old_head_problem = self
+            .review
+            .old_head()
+            .map(|_| crate::viewer::CommentRefusal::TourIsOld.to_string());
+        let can_comment_now = self.review.can_comment_now();
+        let composers = self.review.comment_drafts().iter().map(|draft| {
+            let place = &draft.place;
+            let is_focused = self.composing.as_ref() == Some(place);
+            let problem = self
+                .comment_problems
+                .get(place)
+                .cloned()
+                .or(old_head_problem.clone());
+            let composer = CommentComposer::new(
+                draft.clone(),
+                is_focused,
+                self.sending_comments.contains(place),
+                can_comment_now,
+                problem,
+                self.on_compose(place, cx, |this, place, window, cx| {
+                    this.composing = Some(place);
+                    window.focus(&this.focus, cx);
+                    cx.notify();
+                }),
+                self.on_compose(place, cx, |this, place, _, cx| {
+                    this.send_comment(place, SendMode::AddToReview, cx)
+                }),
+                self.on_compose(place, cx, |this, place, _, cx| {
+                    this.send_comment(place, SendMode::CommentNow, cx)
+                }),
+                self.on_compose(place, cx, |this, place, _, cx| {
+                    this.discard_comment(&place, cx)
+                }),
+            );
+            (place.end.clone(), composer.into_any_element())
+        });
+        queued.into_iter().chain(composers).collect()
     }
 
     /// Threads under a line come with their line, the rest go after the code.
@@ -397,8 +671,10 @@ impl OneStepLayout {
             },
             Screen::SafetyNet => match self.review.safety_net() {
                 Some(page) => {
-                    let (under_lines, after_code) = self.thread_elements(&page.threads, cx);
+                    let (mut under_lines, after_code) = self.thread_elements(&page.threads, cx);
+                    under_lines.extend(self.comment_elements(cx));
                     SafetyNetView::new(page, self.on_more_context(cx))
+                        .with_row_selecting(self.row_selecting(cx))
                         .with_threads(under_lines, after_code)
                         .into_any_element()
                 }
@@ -429,7 +705,9 @@ impl OneStepLayout {
             cx,
         );
         let on_more_context = self.on_more_context(cx);
-        let (under_lines, after_code) = self.thread_elements(&page.threads, cx);
+        let (mut under_lines, after_code) = self.thread_elements(&page.threads, cx);
+        under_lines.extend(self.comment_elements(cx));
+        let selecting = self.row_selecting(cx);
         let mut threads_of_piece = threads_by_piece(&page.pieces, under_lines).into_iter();
         let shows_change_since_read = page
             .since_read
@@ -457,6 +735,7 @@ impl OneStepLayout {
                     .child(div().flex().justify_end().child(button))
                     .child(
                         DiffView::new(piece.clone(), on_more_context.clone())
+                            .with_row_selecting(selecting.clone())
                             .with_threads(threads)
                             .in_change_since_read(shows_change_since_read),
                     )
@@ -692,8 +971,21 @@ impl Focusable for OneStepLayout {
 impl Render for OneStepLayout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .key_context(Self::KEY_CONTEXT)
+            .key_context(if self.composing.is_some() {
+                "OneStepLayout CommentInput"
+            } else {
+                Self::KEY_CONTEXT
+            })
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::on_comment_key))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),
+            )
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::go_back))
             .size_full()
@@ -714,6 +1006,14 @@ impl Render for OneStepLayout {
                             self.tour_update.clone(),
                             cx.listener(|this, _, _, cx| this.update_tour(cx)),
                         )
+                    }))
+                    .children(self.selection_notice.clone().map(|notice| {
+                        div()
+                            .px_6()
+                            .py_1()
+                            .text_sm()
+                            .bg(Palette::current())
+                            .child(notice)
                     }))
                     .child(
                         div()

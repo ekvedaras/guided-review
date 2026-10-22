@@ -24,7 +24,10 @@ pub fn run(
     updater: TourUpdater,
 ) {
     application().run(move |cx: &mut App| {
-        let typing_is_not_navigation = format!("{} && !AskInput", OneStepLayout::KEY_CONTEXT);
+        let typing_is_not_navigation = format!(
+            "{} && !AskInput && !CommentInput",
+            OneStepLayout::KEY_CONTEXT
+        );
         cx.bind_keys([
             KeyBinding::new("right", GoForward, Some(&typing_is_not_navigation)),
             KeyBinding::new("j", GoForward, Some(&typing_is_not_navigation)),

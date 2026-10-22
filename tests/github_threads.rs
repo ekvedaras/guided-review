@@ -5,7 +5,9 @@ use std::thread;
 
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::Side;
+use guided_review::viewer::{
+    CommentPlace, LineLocation, PendingReviewExists, Side, ThreadNotCreated,
+};
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
 fn serve_graphql(answers: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
@@ -103,4 +105,143 @@ fn review_threads_are_read_over_graphql_page_by_page() {
     assert_eq!(asked[1]["variables"]["after"], "CURSOR1");
     assert_eq!(asked[0]["variables"]["owner"], "acme");
     assert_eq!(asked[0]["variables"]["number"], 7);
+}
+
+fn location(side: Side, line: usize) -> LineLocation {
+    LineLocation {
+        path: "a.php".into(),
+        side,
+        line,
+    }
+}
+
+const PULL_ID: &str = r#"{"data":{"repository":{"pullRequest":{"id":"PR_1"}}}}"#;
+const THREAD_ADDED: &str = r#"{"data":{"addPullRequestReviewThread":{"thread":{"id":"T9","comments":{"nodes":[{"pullRequestReview":{"id":"REVIEW_1"}}]}}}}}"#;
+
+fn asked_as_json(asked: &Arc<Mutex<Vec<String>>>) -> Vec<serde_json::Value> {
+    asked
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|body| serde_json::from_str(body).unwrap())
+        .collect()
+}
+
+fn pr() -> PullRequestUrl {
+    "https://github.com/acme/shop/pull/7".parse().unwrap()
+}
+
+#[test]
+fn a_range_comment_is_added_as_a_thread_with_both_sides() {
+    let (url, asked) = serve_graphql(vec![PULL_ID.into(), THREAD_ADDED.into()]);
+    let place = CommentPlace {
+        start: location(Side::Base, 10),
+        end: location(Side::Head, 12),
+    };
+
+    let review = GitHub::at(&url)
+        .add_review_thread(&pr(), &place, "why?")
+        .unwrap();
+
+    assert_eq!(review, "REVIEW_1");
+    let input = &asked_as_json(&asked)[1]["variables"]["input"];
+    assert_eq!(
+        *input,
+        serde_json::json!({
+            "pullRequestId": "PR_1", "path": "a.php", "body": "why?", "line": 12,
+            "side": "RIGHT", "startLine": 10, "startSide": "LEFT", "subjectType": "LINE",
+        })
+    );
+}
+
+#[test]
+fn a_single_line_comment_sends_no_start() {
+    let (url, asked) = serve_graphql(vec![PULL_ID.into(), THREAD_ADDED.into()]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    GitHub::at(&url)
+        .add_review_thread(&pr(), &place, "x")
+        .unwrap();
+
+    let input = &asked_as_json(&asked)[1]["variables"]["input"];
+    assert!(input.get("startLine").is_none() && input.get("startSide").is_none());
+}
+
+#[test]
+fn a_null_thread_without_errors_is_a_failure() {
+    let (url, _) = serve_graphql(vec![
+        PULL_ID.into(),
+        r#"{"data":{"addPullRequestReviewThread":{"thread":null}}}"#.into(),
+    ]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    let error = GitHub::at(&url)
+        .add_review_thread(&pr(), &place, "x")
+        .unwrap_err();
+
+    assert!(error.downcast_ref::<ThreadNotCreated>().is_some());
+}
+
+#[test]
+fn github_saying_one_pending_review_per_user_is_told_apart() {
+    let (url, _) = serve_graphql(vec![
+        PULL_ID.into(),
+        r#"{"errors":[{"message":"User can only have one pending review per pull request"}],"data":null}"#.into(),
+    ]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    let error = GitHub::at(&url)
+        .add_review_thread(&pr(), &place, "x")
+        .unwrap_err();
+
+    assert!(error.downcast_ref::<PendingReviewExists>().is_some());
+}
+
+#[test]
+fn comment_now_submits_the_review_the_thread_went_into() {
+    let (url, asked) = serve_graphql(vec![
+        PULL_ID.into(),
+        THREAD_ADDED.into(),
+        r#"{"data":{"submitPullRequestReview":{"clientMutationId":null}}}"#.into(),
+    ]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    GitHub::at(&url).comment_now(&pr(), &place, "x").unwrap();
+
+    let input = &asked_as_json(&asked)[2]["variables"]["input"];
+    assert_eq!(
+        *input,
+        serde_json::json!({"pullRequestReviewId": "REVIEW_1", "event": "COMMENT"})
+    );
+}
+
+#[test]
+fn only_a_pending_review_the_viewer_wrote_counts() {
+    let answer = |viewer: bool| {
+        format!(
+            r#"{{"data":{{"repository":{{"pullRequest":{{"reviews":{{"nodes":[{{"viewerDidAuthor":{viewer}}}]}}}}}}}}}}"#
+        )
+    };
+    let (url, _) = serve_graphql(vec![
+        answer(true),
+        answer(false),
+        r#"{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[]}}}}}"#.into(),
+    ]);
+    let github = GitHub::at(&url);
+
+    assert!(github.has_pending_review(&pr()).unwrap());
+    assert!(!github.has_pending_review(&pr()).unwrap());
+    assert!(!github.has_pending_review(&pr()).unwrap());
 }

@@ -2,18 +2,38 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
+    AnyElement, App, ElementId, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText,
+    Window, div, px,
 };
 
 use crate::repin::RepinStatus;
 use crate::viewer::{
     DiffHunk, DiffLine, Edge, GitHubLink, LineKind, LineLocation, MoreContext, PieceDiff,
+    SelectedLines,
 };
 
 use super::palette::{CODE_FONT, Palette};
 
 pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
+
+/// What the mouse does on a row. The release is handled above the rows, wherever the mouse is let go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowGesture {
+    /// Down on the row's comment button: the drag starts here.
+    Press,
+    /// The mouse is over the row: a drag in progress reaches it.
+    Over,
+}
+
+pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut App)>;
+
+/// The rows a drag selects and how to tell the layout what the mouse does on rows.
+#[derive(Clone)]
+pub struct RowSelecting {
+    pub selected: Option<SelectedLines>,
+    pub on_gesture: OnRowGesture,
+}
 
 /// Our own diff view (Zed's is GPL). One row per line, grouped in hunks like on GitHub, and each row keeps
 /// its `LineLocation` so comments can hang off any row later. A click on a line number opens that line on GitHub.
@@ -24,6 +44,7 @@ pub struct DiffView {
     /// Shown right under the row at their location.
     threads: Vec<(LineLocation, AnyElement)>,
     is_change_since_read: bool,
+    selecting: Option<RowSelecting>,
 }
 
 impl DiffView {
@@ -33,12 +54,19 @@ impl DiffView {
             on_more_context,
             threads: Vec::new(),
             is_change_since_read: false,
+            selecting: None,
         }
     }
 
     /// In that view a piece without lines was not touched since the reviewer read the step.
     pub fn in_change_since_read(mut self, is_change_since_read: bool) -> Self {
         self.is_change_since_read = is_change_since_read;
+        self
+    }
+
+    /// Without it the rows take no comments.
+    pub fn with_row_selecting(mut self, selecting: RowSelecting) -> Self {
+        self.selecting = Some(selecting);
         self
     }
 
@@ -86,7 +114,14 @@ impl RenderOnce for DiffView {
             .into_iter()
             .enumerate()
             .flat_map(|(index, hunk)| {
-                hunk_rows(&id, index, hunk, &self.on_more_context, &mut threads)
+                hunk_rows(
+                    &id,
+                    index,
+                    hunk,
+                    &self.on_more_context,
+                    self.selecting.as_ref(),
+                    &mut threads,
+                )
             })
             .collect();
         div()
@@ -170,6 +205,7 @@ fn hunk_rows(
     index: usize,
     hunk: DiffHunk,
     on_more_context: &OnMoreContext,
+    selecting: Option<&RowSelecting>,
     threads: &mut Vec<(LineLocation, AnyElement)>,
 ) -> Vec<AnyElement> {
     let mut rows = Vec::new();
@@ -182,7 +218,7 @@ fn hunk_rows(
     }
     for line in hunk.rows {
         let location = line.location.clone();
-        rows.push(DiffRow::new(line).into_any_element());
+        rows.push(DiffRow::new(line, selecting.cloned()).into_any_element());
         let (here, later): (Vec<_>, Vec<_>) = std::mem::take(threads)
             .into_iter()
             .partition(|(at, _)| *at == location);
@@ -228,11 +264,12 @@ fn hunk_gap(
 #[derive(IntoElement)]
 struct DiffRow {
     line: DiffLine,
+    selecting: Option<RowSelecting>,
 }
 
 impl DiffRow {
-    fn new(line: DiffLine) -> Self {
-        Self { line }
+    fn new(line: DiffLine, selecting: Option<RowSelecting>) -> Self {
+        Self { line, selecting }
     }
 }
 
@@ -246,10 +283,30 @@ impl RenderOnce for DiffRow {
             LineKind::Added => (String::new(), number, "+"),
             LineKind::Context { base_line, .. } => (base_line.to_string(), number, " "),
         };
+        let is_selected = self
+            .selecting
+            .as_ref()
+            .and_then(|selecting| selecting.selected.as_ref())
+            .is_some_and(|selected| selected.contains(location));
+        let comment_button = self
+            .selecting
+            .as_ref()
+            .map(|selecting| comment_button(&self.line, selecting.on_gesture.clone()));
         let row = div()
+            .id(SharedString::from(format!(
+                "row-{}-{:?}-{}",
+                location.path, location.side, location.line
+            )))
+            .group("diff-row")
             .flex()
             .font_family(CODE_FONT)
             .text_sm()
+            .when_some(self.selecting.clone(), |row, selecting| {
+                let at = location.clone();
+                row.on_mouse_move(move |_, window, cx| {
+                    (selecting.on_gesture)(RowGesture::Over, &at, window, cx)
+                })
+            })
             .child(
                 div()
                     .id(SharedString::from(link.to_string()))
@@ -260,8 +317,12 @@ impl RenderOnce for DiffRow {
                     .child(line_number(base_number))
                     .child(line_number(head_number)),
             )
+            .child(
+                comment_button.unwrap_or_else(|| div().w(px(20.)).flex_none().into_any_element()),
+            )
             .child(div().w(px(16.)).flex_none().child(sign));
         let row = match self.line.kind {
+            _ if is_selected => row.bg(Palette::current()),
             LineKind::Removed => row.bg(Palette::removed_line()),
             LineKind::Added => row.bg(Palette::added_line()),
             LineKind::Context { .. } => row,
@@ -273,6 +334,26 @@ impl RenderOnce for DiffRow {
                 .child(highlighted(self.line)),
         )
     }
+}
+
+/// The "+" in the gutter that starts a comment. Rows outside GitHub's hunks have none.
+fn comment_button(line: &DiffLine, on_gesture: OnRowGesture) -> AnyElement {
+    let space = div().w(px(20.)).flex_none();
+    if !line.takes_comment() {
+        return space.into_any_element();
+    }
+    let location = line.location.clone();
+    space
+        .id("comment-button")
+        .text_color(Palette::muted_text())
+        .opacity(0.)
+        .group_hover("diff-row", |button| button.opacity(1.))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            on_gesture(RowGesture::Press, &location, window, cx)
+        })
+        .child("+")
+        .into_any_element()
 }
 
 fn highlighted(line: DiffLine) -> StyledText {

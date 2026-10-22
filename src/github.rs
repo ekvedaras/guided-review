@@ -8,7 +8,8 @@ use serde::Deserialize;
 use crate::code_source::{CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    ReviewThread, Side, ThreadComment, ViewedFile, ViewedState, ViewedSyncUnavailable,
+    CommentPlace, PendingReviewExists, ReviewThread, Side, ThreadComment, ThreadNotCreated,
+    ViewedFile, ViewedState, ViewedSyncUnavailable,
 };
 
 #[derive(Clone)]
@@ -246,6 +247,96 @@ impl GitHub {
         }
     }
 
+    pub fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        reviews(states: PENDING, first: 10) { nodes { viewerDidAuthor } }
+                    } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not look for a pending review on {pr}"))?;
+        let reviews = data["repository"]["pullRequest"]["reviews"]["nodes"]
+            .as_array()
+            .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
+        Ok(reviews
+            .iter()
+            .any(|review| review["viewerDidAuthor"].as_bool() == Some(true)))
+    }
+
+    /// Returns the id of the pending review the thread went into.
+    pub fn add_review_thread(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<String> {
+        let mut input = serde_json::json!({
+            "pullRequestId": self.pull_request_id(pr)?,
+            "path": place.path(),
+            "body": body,
+            "line": place.end.line,
+            "side": graphql_side(place.end.side),
+            "subjectType": "LINE",
+        });
+        if !place.is_single_line() {
+            input["startLine"] = place.start.line.into();
+            input["startSide"] = graphql_side(place.start.side).into();
+        }
+        let data = self
+            .graphql(
+                "mutation($input: AddPullRequestReviewThreadInput!) {
+                    addPullRequestReviewThread(input: $input) {
+                        thread { id comments(first: 1) { nodes { pullRequestReview { id } } } }
+                    }
+                }",
+                serde_json::json!({"input": input}),
+            )
+            .map_err(one_pending_review_error)?;
+        let thread = &data["addPullRequestReviewThread"]["thread"];
+        if thread.is_null() {
+            return Err(ThreadNotCreated(format!(
+                "GitHub took no comment on {} line {}",
+                place.path(),
+                place.end.line
+            ))
+            .into());
+        }
+        Ok(thread["comments"]["nodes"][0]["pullRequestReview"]["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    /// A thread in a new pending review, posted right away. GitHub posts nothing past an existing
+    /// pending review, so the caller checks for one first.
+    pub fn comment_now(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let review_id = self.add_review_thread(pr, place, body)?;
+        let posted = self.graphql(
+            "mutation($input: SubmitPullRequestReviewInput!) {
+                submitPullRequestReview(input: $input) { clientMutationId }
+            }",
+            serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
+        );
+        if let Err(error) = posted {
+            let _ = self.graphql(
+                "mutation($input: DeletePullRequestReviewInput!) {
+                    deletePullRequestReview(input: $input) { clientMutationId }
+                }",
+                serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
+            );
+            return Err(error.context("could not post the comment"));
+        }
+        Ok(())
+    }
+
     fn get(&self, path: &str, accept: &str) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
         let mut request = ureq::get(format!("{}/{path}", self.api))
             .header("Accept", accept)
@@ -329,6 +420,21 @@ impl CodeSource for GitHubCodeSource {
 
     fn working_tree_is_at(&self, _head: &Sha) -> bool {
         false
+    }
+}
+
+fn graphql_side(side: Side) -> &'static str {
+    match side {
+        Side::Base => "LEFT",
+        Side::Head => "RIGHT",
+    }
+}
+
+fn one_pending_review_error(error: anyhow::Error) -> anyhow::Error {
+    if format!("{error:#}").contains("one pending review") {
+        PendingReviewExists.into()
+    } else {
+        error
     }
 }
 

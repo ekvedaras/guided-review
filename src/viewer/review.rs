@@ -15,12 +15,17 @@ use crate::config::AskSettings;
 
 use super::ask::Place;
 use super::ask_context;
+use super::comments::{
+    CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
+    Origin, Outcome, QueuedComment, SendMode,
+};
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
-use super::step_page::{PieceDiff, SafetyNetPage, SinceRead, StepPage};
+use super::row_selection::{RowSelection, SelectedLines};
+use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
 use super::threads::{self, ReviewThread, ThreadPlacement};
 use crate::repin::RepinStatus;
 
@@ -107,6 +112,9 @@ pub struct Review {
     changes_since: BTreeMap<String, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
+    selection: Option<RowSelection>,
+    /// Unknown until GitHub answers; "Comment now" is only offered when it is known to be `false`.
+    has_pending_review: Option<bool>,
 }
 
 impl Review {
@@ -163,6 +171,8 @@ impl Review {
             ignores_whitespace: false,
             changes_since,
             full_diff_shown: BTreeSet::new(),
+            selection: None,
+            has_pending_review: None,
         })
     }
 
@@ -450,6 +460,217 @@ impl Review {
     pub fn toggle_thread_fold(&mut self, thread_id: &str) {
         if !self.thread_fold_flipped.remove(thread_id) {
             self.thread_fold_flipped.insert(thread_id.to_string());
+        }
+    }
+
+    /// Blocking; the app runs it in the background on open and on focus.
+    pub fn pull_pending_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        self.has_pending_review = Some(github.has_pending_review(&self.pr)?);
+        Ok(())
+    }
+
+    pub fn pending_review_is(&mut self, exists: bool) {
+        self.has_pending_review = Some(exists);
+    }
+
+    /// "Comment now" shows only when there is surely no pending review.
+    pub fn can_comment_now(&self) -> bool {
+        self.has_pending_review == Some(false)
+    }
+
+    pub fn begin_selection(&mut self, row: LineLocation) {
+        self.selection = Some(RowSelection::start_at(row));
+    }
+
+    pub fn extend_selection(&mut self, row: LineLocation) {
+        if let Some(selection) = &mut self.selection {
+            selection.extend_to(row);
+        }
+    }
+
+    pub fn is_selecting(&self) -> bool {
+        self.selection.is_some()
+    }
+
+    /// The rows being dragged over, for drawing them.
+    pub fn selected_lines(&self) -> Option<SelectedLines> {
+        self.selection.as_ref()?.resolve(&self.screen_lines())
+    }
+
+    pub fn cancel_selection(&mut self) {
+        self.selection = None;
+    }
+
+    /// The drag ends: when the rows can take a comment, a comment box opens on them.
+    pub fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
+        let Some(selected) = self.selected_lines() else {
+            self.selection = None;
+            return Ok(None);
+        };
+        self.selection = None;
+        if !selected.take_comment() {
+            return Err(CommentRefusal::NotInsideHunk);
+        }
+        if self.old_head().is_some() {
+            return Err(CommentRefusal::TourIsOld);
+        }
+        let place = CommentPlace::of(&selected);
+        self.state.open_draft(place.clone());
+        self.save_viewer_sections()
+            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
+        Ok(Some(place))
+    }
+
+    /// Every row the current screen shows, top to bottom.
+    fn screen_lines(&self) -> Vec<DiffLine> {
+        match &self.screen {
+            Screen::Step(_) => self
+                .current_step()
+                .map(|page| page.pieces)
+                .unwrap_or_default(),
+            Screen::SafetyNet => self
+                .safety_net()
+                .map(|page| page.pieces)
+                .unwrap_or_default(),
+            Screen::Summary => Vec::new(),
+        }
+        .iter()
+        .flat_map(|piece| piece.lines().cloned())
+        .collect()
+    }
+
+    pub fn comment_drafts(&self) -> &[CommentDraft] {
+        self.state.comment_drafts()
+    }
+
+    pub fn queued_comments(&self) -> &[QueuedComment] {
+        self.state.comment_queue()
+    }
+
+    /// Saved at once, so a crash loses nothing.
+    pub fn edit_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
+        self.state.write_draft(place, body);
+        self.save_viewer_sections()
+    }
+
+    pub fn discard_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
+        self.state.drop_draft(place);
+        self.state.drop_queued(place);
+        self.save_viewer_sections()
+    }
+
+    /// `None` when there is no such draft.
+    pub fn comment_request(&self, place: &CommentPlace, mode: SendMode) -> Option<CommentRequest> {
+        let draft = self.state.draft_at(place)?.clone();
+        Some(CommentRequest::new(
+            Origin::Draft,
+            draft,
+            mode,
+            Sha::new(&self.tour.head),
+        ))
+    }
+
+    /// The oldest comment in the queue, to send again.
+    pub fn queued_comment_request(&self) -> Option<CommentRequest> {
+        let queued = self.state.comment_queue().first()?;
+        Some(CommentRequest::new(
+            Origin::Queue,
+            queued.draft.clone(),
+            queued.mode,
+            Sha::new(&self.tour.head),
+        ))
+    }
+
+    /// Runs the whole send here and now; the app runs `CommentRequest::run` in the background
+    /// and then `apply_comment` instead.
+    pub fn send_comment(
+        &mut self,
+        place: &CommentPlace,
+        mode: SendMode,
+        github: &dyn GitHubPort,
+    ) -> anyhow::Result<Option<CommentResult>> {
+        let Some(request) = self.comment_request(place, mode) else {
+            return Ok(None);
+        };
+        let outcome = request.run(github, &self.pr);
+        self.apply_comment(outcome).map(Some)
+    }
+
+    /// Sends the queue oldest first and stops at the first comment that does not go.
+    pub fn send_queued_comments(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        while let Some(request) = self.queued_comment_request() {
+            let outcome = request.run(github, &self.pr);
+            if self.apply_comment(outcome)? != CommentResult::Sent {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
+        let CommentOutcome { request, how } = outcome;
+        let place = request.draft.place.clone();
+        let result = match how {
+            Outcome::Sent => {
+                self.has_pending_review = Some(request.mode == SendMode::AddToReview);
+                self.leave(&request.origin, &place);
+                CommentResult::Sent
+            }
+            Outcome::Failed(reason) => {
+                self.keep_for_retry(&request, &reason);
+                CommentResult::Queued(reason)
+            }
+            Outcome::Rejected(reason) => {
+                self.has_pending_review = Some(true);
+                self.keep_as_draft(&request);
+                CommentResult::Rejected(reason)
+            }
+            Outcome::Refused(refusal) => {
+                if refusal == CommentRefusal::PendingReviewExists {
+                    self.has_pending_review = Some(true);
+                    if let Some(queued) = self.state.queued_at(&place) {
+                        queued.mode = SendMode::AddToReview;
+                    }
+                }
+                CommentResult::Refused(refusal)
+            }
+        };
+        self.save_viewer_sections()?;
+        Ok(result)
+    }
+
+    fn leave(&mut self, origin: &Origin, place: &CommentPlace) {
+        match origin {
+            Origin::Draft => self.state.drop_draft(place),
+            Origin::Queue => self.state.drop_queued(place).map(|queued| queued.draft),
+        };
+    }
+
+    fn keep_for_retry(&mut self, request: &CommentRequest, reason: &str) {
+        let place = &request.draft.place;
+        match request.origin {
+            Origin::Draft => {
+                self.state.drop_draft(place);
+                self.state.queue_comment(QueuedComment {
+                    draft: request.draft.clone(),
+                    mode: request.mode,
+                    failed_because: reason.to_string(),
+                });
+            }
+            Origin::Queue => {
+                if let Some(queued) = self.state.queued_at(place) {
+                    queued.failed_because = reason.to_string();
+                }
+            }
+        }
+    }
+
+    fn keep_as_draft(&mut self, request: &CommentRequest) {
+        let place = &request.draft.place;
+        if request.origin == Origin::Queue {
+            self.state.drop_queued(place);
+            self.state.open_draft(place.clone());
+            self.state.write_draft(place, &request.draft.body);
         }
     }
 

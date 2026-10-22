@@ -9,6 +9,7 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
 
 use super::ask::{Ask, AskStore};
+use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::review::StepId;
 
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
@@ -35,6 +36,12 @@ pub struct ReviewState {
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
     github_baseline_due: bool,
+    /// Comment text not sent yet; each one is an open comment box.
+    #[serde(default)]
+    comment_drafts: Vec<CommentDraft>,
+    /// Comments GitHub did not take, oldest first.
+    #[serde(default)]
+    comment_queue: Vec<QueuedComment>,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -232,6 +239,60 @@ impl ReviewState {
         self.unsent_viewed = from.unsent_viewed.clone();
         self.read_before = from.read_before.clone();
         self.github_baseline_due = from.github_baseline_due;
+        self.comment_drafts = from.comment_drafts.clone();
+        self.comment_queue = from.comment_queue.clone();
+    }
+
+    pub(super) fn comment_drafts(&self) -> &[CommentDraft] {
+        &self.comment_drafts
+    }
+
+    pub(super) fn comment_queue(&self) -> &[QueuedComment] {
+        &self.comment_queue
+    }
+
+    pub(super) fn draft_at(&self, place: &CommentPlace) -> Option<&CommentDraft> {
+        self.comment_drafts
+            .iter()
+            .find(|draft| &draft.place == place)
+    }
+
+    pub(super) fn open_draft(&mut self, place: CommentPlace) {
+        if self.draft_at(&place).is_none() {
+            self.comment_drafts.push(CommentDraft {
+                place,
+                body: String::new(),
+            });
+        }
+    }
+
+    pub(super) fn write_draft(&mut self, place: &CommentPlace, body: &str) {
+        if let Some(draft) = self.comment_drafts.iter_mut().find(|d| &d.place == place) {
+            draft.body = body.to_string();
+        }
+    }
+
+    pub(super) fn drop_draft(&mut self, place: &CommentPlace) -> Option<CommentDraft> {
+        let at = self.comment_drafts.iter().position(|d| &d.place == place)?;
+        Some(self.comment_drafts.remove(at))
+    }
+
+    pub(super) fn queue_comment(&mut self, queued: QueuedComment) {
+        self.comment_queue.push(queued);
+    }
+
+    pub(super) fn queued_at(&mut self, place: &CommentPlace) -> Option<&mut QueuedComment> {
+        self.comment_queue
+            .iter_mut()
+            .find(|queued| &queued.draft.place == place)
+    }
+
+    pub(super) fn drop_queued(&mut self, place: &CommentPlace) -> Option<QueuedComment> {
+        let at = self
+            .comment_queue
+            .iter()
+            .position(|queued| &queued.draft.place == place)?;
+        Some(self.comment_queue.remove(at))
     }
 
     pub fn read_tick(&self, step: &StepId) -> Option<&ReadTick> {

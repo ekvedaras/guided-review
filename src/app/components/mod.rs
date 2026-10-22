@@ -1,5 +1,6 @@
 pub mod ask_panel;
 pub mod diagram;
+pub mod comment_composer;
 pub mod diff_view;
 pub mod fold_toggle;
 pub mod markdown_view;

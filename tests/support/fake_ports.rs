@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, GitHubPort, ReviewThread, ViewedFile,
-    ViewedState, ViewedSyncUnavailable,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, GitHubPort,
+    PendingReviewExists, ReviewThread, Side, ThreadNotCreated, ViewedFile, ViewedState,
+    ViewedSyncUnavailable,
 };
 
 /// What the app core sent out, in order, across both fakes.
@@ -29,6 +30,11 @@ pub struct FakeGitHub {
     pushes_fail: AtomicBool,
     refuses_with: Mutex<Option<String>>,
     pub threads: Vec<ReviewThread>,
+    has_pending_review: AtomicBool,
+    answers_thread_null: AtomicBool,
+    cannot_reach_github: AtomicBool,
+    /// Says "one pending review per user" to the next `comment_now`, as if one appeared meanwhile.
+    pending_review_appears_on_comment_now: AtomicBool,
 }
 
 impl FakeGitHub {
@@ -40,7 +46,49 @@ impl FakeGitHub {
             pushes_fail: AtomicBool::new(false),
             refuses_with: Mutex::default(),
             threads: Vec::new(),
+            has_pending_review: AtomicBool::new(false),
+            answers_thread_null: AtomicBool::new(false),
+            cannot_reach_github: AtomicBool::new(false),
+            pending_review_appears_on_comment_now: AtomicBool::new(false),
         }
+    }
+
+    /// A pending review started on the GitHub web page.
+    pub fn with_web_pending_review(self) -> Self {
+        self.has_pending_review.store(true, Ordering::SeqCst);
+        self
+    }
+
+    pub fn has_pending_review_now(&self) -> bool {
+        self.has_pending_review.load(Ordering::SeqCst)
+    }
+
+    pub fn answer_new_threads_with_null(&self, on: bool) {
+        self.answers_thread_null.store(on, Ordering::SeqCst);
+    }
+
+    pub fn lose_connection(&self, lost: bool) {
+        self.cannot_reach_github.store(lost, Ordering::SeqCst);
+    }
+
+    pub fn a_pending_review_appears_on_comment_now(&self) {
+        self.pending_review_appears_on_comment_now
+            .store(true, Ordering::SeqCst);
+    }
+
+    fn describe(place: &CommentPlace, body: &str) -> String {
+        let side = |side: Side| if side == Side::Base { "LEFT" } else { "RIGHT" };
+        let start = if place.is_single_line() {
+            String::new()
+        } else {
+            format!("{} {} to ", side(place.start.side), place.start.line)
+        };
+        format!(
+            "{} {start}{} {} {body:?}",
+            place.path(),
+            side(place.end.side),
+            place.end.line
+        )
     }
 
     pub fn viewing(self, path: &str, state: ViewedState) -> Self {
@@ -116,6 +164,60 @@ impl GitHubPort for FakeGitHub {
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
         self.sent.push(format!("github: threads of {pr}"));
         Ok(self.threads.clone())
+    }
+
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        self.sent.push(format!("github: pending review of {pr}"));
+        Ok(self.has_pending_review_now())
+    }
+
+    fn add_review_thread(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.sent.push(format!(
+            "github: add thread {} to {pr}",
+            Self::describe(place, body)
+        ));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        self.has_pending_review.store(true, Ordering::SeqCst);
+        if self.answers_thread_null.load(Ordering::SeqCst) {
+            return Err(ThreadNotCreated("thread: null".into()).into());
+        }
+        Ok(())
+    }
+
+    fn comment_now(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.sent.push(format!(
+            "github: comment now {} on {pr}",
+            Self::describe(place, body)
+        ));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        if self
+            .pending_review_appears_on_comment_now
+            .swap(false, Ordering::SeqCst)
+        {
+            self.has_pending_review.store(true, Ordering::SeqCst);
+        }
+        if self.has_pending_review_now() {
+            return Err(PendingReviewExists.into());
+        }
+        if self.answers_thread_null.load(Ordering::SeqCst) {
+            self.has_pending_review.store(true, Ordering::SeqCst);
+            return Err(ThreadNotCreated("thread: null".into()).into());
+        }
+        Ok(())
     }
 }
 

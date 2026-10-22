@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use super::comments::CommentPlace;
 use super::threads::ReviewThread;
 use crate::github::GitHub;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
@@ -16,7 +17,52 @@ pub trait GitHubPort: Send + Sync {
     fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()>;
 
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>>;
+
+    /// Whether the viewer has a pending review on the PR, one made here or on the web.
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
+
+    /// Adds a thread to the pending review, or starts one. Fails with `ThreadNotCreated`
+    /// when GitHub answers without a thread.
+    fn add_review_thread(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()>;
+
+    /// Posts one comment at once as a review of its own. Fails with `PendingReviewExists`
+    /// when the viewer has a pending review, which GitHub would not post past.
+    fn comment_now(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()>;
 }
+
+/// GitHub answered a new thread with `thread: null` and no error. It leaves an empty pending review behind.
+#[derive(Debug)]
+pub struct ThreadNotCreated(pub String);
+
+impl std::fmt::Display for ThreadNotCreated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ThreadNotCreated {}
+
+/// "User can only have one pending review per pull request."
+#[derive(Debug)]
+pub struct PendingReviewExists;
+
+impl std::fmt::Display for PendingReviewExists {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("there is a pending review already")
+    }
+}
+
+impl std::error::Error for PendingReviewExists {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewedState {
@@ -59,6 +105,28 @@ impl GitHubPort for GitHub {
 
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
         GitHub::review_threads(self, pr)
+    }
+
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        GitHub::has_pending_review(self, pr)
+    }
+
+    fn add_review_thread(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        GitHub::add_review_thread(self, pr, place, body).map(|_| ())
+    }
+
+    fn comment_now(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        GitHub::comment_now(self, pr, place, body)
     }
 }
 

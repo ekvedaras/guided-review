@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use super::diff_display::{DiffDisplay, DiffHunk};
 use super::github_link::GitHubLink;
 use super::highlight::Span;
@@ -10,14 +12,14 @@ use crate::tour::{Step, Tour};
 
 use super::threads::ThreadView;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Side {
     Base,
     Head,
 }
 
 /// Where a shown line lives. Comments, GitHub links and "open in IDE" all start from this.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LineLocation {
     /// GitHub addresses both sides of a renamed file by its new path.
     pub path: String,
@@ -72,6 +74,14 @@ impl DiffLine {
                 ..
             }
         )
+    }
+}
+
+impl DiffLine {
+    /// The one rule for a comment button and for a selection: whether GitHub takes a comment on this row.
+    /// Rows of other views (for example removed lines of an older head) must be refused here.
+    pub fn takes_comment(&self) -> bool {
+        self.is_inside_hunk()
     }
 }
 
