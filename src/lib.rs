@@ -19,6 +19,7 @@ pub mod repin;
 pub mod show;
 pub mod symbols;
 pub mod test_pairing;
+pub mod timestamp;
 pub mod tour;
 pub mod tour_check;
 pub mod viewer;

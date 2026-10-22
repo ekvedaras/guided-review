@@ -333,12 +333,8 @@ impl Report {
 }
 
 fn short_pr(url: &str) -> String {
-    url.strip_prefix("https://github.com/")
-        .and_then(|path| path.split_once("/pull/"))
-        .map_or_else(
-            || url.to_string(),
-            |(repo, number)| format!("{repo}#{number}"),
-        )
+    url.parse::<PullRequestUrl>()
+        .map_or_else(|_| url.to_string(), |pr| pr.short())
 }
 
 impl fmt::Display for Report {

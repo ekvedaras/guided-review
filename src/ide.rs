@@ -9,6 +9,12 @@ impl IdeTemplate {
         Self(text)
     }
 
+    fn fill(&self, path: &str, line: usize) -> String {
+        self.0
+            .replace("{path}", path)
+            .replace("{line}", &line.to_string())
+    }
+
     fn is_url(&self) -> bool {
         let scheme = self.0.split("://").next().unwrap_or_default();
         self.0.contains("://")
@@ -45,21 +51,10 @@ impl Ide {
     /// `path` is relative to the clone root.
     pub fn launch(&self, path: &Path, line: usize) -> IdeLaunch {
         let absolute = self.clone_root.join(path).to_string_lossy().into_owned();
-        let line = line.to_string();
         if self.template.is_url() {
-            IdeLaunch::Url(
-                self.template
-                    .0
-                    .replace("{path}", &percent_encode_path(&absolute))
-                    .replace("{line}", &line),
-            )
+            IdeLaunch::Url(self.template.fill(&percent_encode_path(&absolute), line))
         } else {
-            IdeLaunch::Shell(
-                self.template
-                    .0
-                    .replace("{path}", &shell_quote(&absolute))
-                    .replace("{line}", &line),
-            )
+            IdeLaunch::Shell(self.template.fill(&shell_quote(&absolute), line))
         }
     }
 }

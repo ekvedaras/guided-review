@@ -77,6 +77,13 @@ impl FromStr for PullRequestUrl {
     }
 }
 
+impl PullRequestUrl {
+    /// `owner/repo#number`
+    pub fn short(&self) -> String {
+        format!("{}#{}", self.repo, self.number)
+    }
+}
+
 impl fmt::Display for PullRequestUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "https://github.com/{}/pull/{}", self.repo, self.number)

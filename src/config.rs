@@ -40,14 +40,17 @@ impl Default for AskSettings {
 
 impl AskSettings {
     pub fn from_config_text(text: &str) -> anyhow::Result<Self> {
-        let config: Config = toml::from_str(text).context("could not read the config")?;
-        Ok(config.ask_settings())
+        Ok(Config::from_text(text)?.ask_settings())
     }
 }
 
 impl Config {
     pub fn from_text(text: &str) -> anyhow::Result<Self> {
-        toml::from_str(text).context("could not read the config")
+        Self::parse(text, "the config")
+    }
+
+    fn parse(text: &str, source: &str) -> anyhow::Result<Self> {
+        toml::from_str(text).with_context(|| format!("could not read {source}"))
     }
 
     pub fn ide_template(&self) -> Option<IdeTemplate> {
@@ -60,9 +63,7 @@ impl Config {
         };
         let path = home.join(".guided-review/config.toml");
         match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                toml::from_str(&text).with_context(|| format!("could not read {}", path.display()))
-            }
+            Ok(text) => Self::parse(&text, &path.display().to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error).with_context(|| format!("could not read {}", path.display())),
         }
