@@ -206,3 +206,29 @@ fn repin_without_a_tour_file_fails() {
         run.stderr
     );
 }
+
+#[test]
+fn a_line_range_in_a_file_that_changed_gets_a_warning_and_one_in_an_untouched_file_does_not() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.write_tour(json!({
+        "title": "Orders",
+        "summary": ["Orders change"],
+        "steps": [{"id": "orders", "title": "Orders", "why": "because", "pieces": [
+            {"file": "config.yaml", "lines": [14, 16]},
+            {"file": "app/Order.php", "lines": [5, 9]},
+        ]}],
+    }));
+    shop.check();
+    shop.repo
+        .write("config.yaml", &yaml(&[(3, "added above"), (15, "first")]));
+    let second_head = shop.repo.commit("second head");
+
+    let run = shop.repin_onto(&shop.base, &second_head);
+
+    let stdout = run.stdout_with(&[]);
+    assert!(
+        stdout.contains("warning: config.yaml lines 14-16 may have moved; check the range\n"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("warning: app/Order.php"), "{stdout}");
+}

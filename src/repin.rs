@@ -38,6 +38,7 @@ pub struct PieceRepin {
 #[derive(Debug, Default)]
 pub struct Repin {
     pub pieces: Vec<PieceRepin>,
+    pub moved_line_ranges: Vec<String>,
 }
 
 impl Repin {
@@ -61,7 +62,11 @@ impl fmt::Display for Repin {
             self.count(RepinStatus::Changed),
             self.count(RepinStatus::Gone),
             self.count(RepinStatus::New),
-        )
+        )?;
+        for range in &self.moved_line_ranges {
+            writeln!(f, "warning: {range} may have moved; check the range")?;
+        }
+        Ok(())
     }
 }
 
@@ -82,6 +87,8 @@ pub fn repin(
     let new: Vec<&Piece> = new_files.iter().flat_map(|file| &file.pieces).collect();
 
     let matching = Matching::between(&old, &new);
+
+    let moved_line_ranges = line_ranges_in_changed_files(tour, &matching, &old, &new);
 
     if tour.head != new_head.as_str() {
         tour.previous_head = Some(std::mem::replace(&mut tour.head, new_head.to_string()));
@@ -112,7 +119,38 @@ pub fn repin(
                 status: RepinStatus::Gone,
             }),
     );
-    Ok(Repin { pieces })
+    Ok(Repin {
+        pieces,
+        moved_line_ranges,
+    })
+}
+
+/// Line numbers are not followed to the new head, so a range in a file whose pieces changed,
+/// went away or appeared may now point at other lines.
+fn line_ranges_in_changed_files(
+    tour: &Tour,
+    matching: &Matching,
+    old: &[&Piece],
+    new: &[&Piece],
+) -> Vec<String> {
+    let touched = |path: &String| {
+        old.iter()
+            .filter(|piece| matching.gone_ids.contains(&piece.id.to_string()))
+            .chain(new.iter().filter(|piece| {
+                matching.status_of_new.get(&piece.id.to_string()) != Some(&RepinStatus::Same)
+            }))
+            .any(|piece| &piece.id.path == path)
+    };
+    tour.steps()
+        .iter()
+        .flat_map(|step| &step.pieces)
+        .filter_map(|pointer| match pointer {
+            PieceRef::Lines { file, lines } if touched(file) => {
+                Some(format!("{file} lines {}-{}", lines[0], lines[1]))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 struct Matching {
