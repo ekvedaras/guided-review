@@ -1,4 +1,5 @@
 pub mod app;
+pub mod cached_code_source;
 pub mod claude_cli;
 pub mod code_source;
 pub mod config;

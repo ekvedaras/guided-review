@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-use crate::code_source::{CodeSource, FileStatus};
+use crate::code_source::{CodeSource, FileAt, FileStatus};
 use crate::pieces::ChangedFile;
 use crate::pull_request::Sha;
 
@@ -335,6 +335,16 @@ impl HighlightRequest {
 
     /// A file that cannot be read stays plain.
     pub fn compute(&self, source: &dyn CodeSource) -> Highlights {
+        source.read_ahead(
+            &self
+                .targets
+                .iter()
+                .map(|target| FileAt {
+                    sha: target.sha.clone(),
+                    path: target.path.clone(),
+                })
+                .collect::<Vec<_>>(),
+        );
         let mut configurations: HashMap<HighlightLanguage, HighlightConfiguration> = HashMap::new();
         let mut files = HashMap::new();
         for target in &self.targets {

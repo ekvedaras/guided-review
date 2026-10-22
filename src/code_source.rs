@@ -16,12 +16,21 @@ pub trait CodeSource: Send + Sync {
     fn local_clone(&self) -> Option<&Path> {
         None
     }
+
+    /// Says which files will be read next, so a source that can fetch them together does.
+    fn read_ahead(&self, _files: &[FileAt]) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobInfo {
     pub id: String,
     pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileAt {
+    pub sha: Sha,
+    pub path: String,
 }
 
 #[derive(Debug, Default)]

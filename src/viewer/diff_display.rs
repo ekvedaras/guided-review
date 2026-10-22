@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ops::RangeInclusive;
 
-use crate::code_source::{CodeSource, FileStatus, Line};
+use crate::code_source::{CodeSource, FileAt, FileStatus, Line};
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::Sha;
 
@@ -34,6 +34,16 @@ impl FilesAtHeadRequest {
 
     /// A file that cannot be read shows its changes without context.
     pub fn read(&self, source: &dyn CodeSource) -> FilesAtHead {
+        source.read_ahead(
+            &self
+                .paths
+                .iter()
+                .map(|path| FileAt {
+                    sha: self.head.clone(),
+                    path: path.clone(),
+                })
+                .collect::<Vec<_>>(),
+        );
         let files = self
             .paths
             .iter()

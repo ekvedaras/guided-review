@@ -83,7 +83,7 @@ impl fmt::Display for PullRequestUrl {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Sha(String);
 
 impl Sha {

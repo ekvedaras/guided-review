@@ -3,7 +3,7 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
-use crate::code_source::{CodeSource, FileDiff, FileStatus, Hunk, Line};
+use crate::code_source::{CodeSource, FileAt, FileDiff, FileStatus, Hunk, Line};
 use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
 use crate::image_facts::{self, ImageChange};
 use crate::language::Language;
@@ -169,6 +169,7 @@ pub struct ChangedFile {
 
 pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Vec<ChangedFile>> {
     let diffs = source.diff(base, head)?;
+    source.read_ahead(&files_cut_reads(base, head, &diffs));
     let generated = generated_files(source, head);
     let mut files = diffs
         .into_iter()
@@ -191,6 +192,28 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
         .collect::<anyhow::Result<Vec<ChangedFile>>>()?;
     mark_moved_symbols(&mut files);
     Ok(files)
+}
+
+/// Generated files are read too, since `.gitattributes` is not known yet.
+fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
+    let cut_by_symbols = diffs.iter().filter(|diff| {
+        !diff.binary
+            && diff.status() != FileStatus::Deleted
+            && !(is_cut_per_hunk(diff.path()) && !diff.hunks.is_empty())
+            && Language::for_path(diff.path()).is_some()
+    });
+    let both_sides = cut_by_symbols.flat_map(|diff| {
+        let at_base = diff.old_path.as_deref().map(|path| (base, path));
+        let at_head = diff.new_path.as_deref().map(|path| (head, path));
+        at_base.into_iter().chain(at_head)
+    });
+    std::iter::once((head, GIT_ATTRIBUTES))
+        .chain(both_sides)
+        .map(|(sha, path)| FileAt {
+            sha: sha.clone(),
+            path: path.to_string(),
+        })
+        .collect()
 }
 
 fn cut_by_symbols(
@@ -238,8 +261,10 @@ fn cut_by_file_rules(
     None
 }
 
+const GIT_ATTRIBUTES: &str = ".gitattributes";
+
 fn generated_files(source: &dyn CodeSource, head: &Sha) -> GeneratedFiles {
-    let attributes_at_head = source.file_at(head, ".gitattributes").unwrap_or_default();
+    let attributes_at_head = source.file_at(head, GIT_ATTRIBUTES).unwrap_or_default();
     GeneratedFiles::new(&attributes_at_head)
 }
 
