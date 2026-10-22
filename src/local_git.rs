@@ -125,6 +125,10 @@ impl LocalGit {
 }
 
 impl CodeSource for LocalGit {
+    fn local_clone(&self) -> Option<&Path> {
+        Some(&self.repo)
+    }
+
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
         self.git(&["show", &format!("{sha}:{path}")])
     }

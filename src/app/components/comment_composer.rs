@@ -8,6 +8,7 @@ use gpui::{
 use crate::viewer::{CommentDraft, CommentPlace, QueuedComment};
 
 use super::palette::Palette;
+use super::text_input::TextDraft;
 
 pub type OnCompose = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -28,6 +29,8 @@ pub struct CommentComposer {
 }
 
 impl CommentComposer {
+    pub const KEY_CONTEXT: &str = "CommentInput";
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         draft: CommentDraft,
@@ -73,7 +76,12 @@ impl RenderOnce for CommentComposer {
         let place = &self.draft.place;
         let id = SharedString::from(format!("composer-{}-{}", place.path(), place.end.line));
         let on_focus = self.on_focus.clone();
-        let cursor = if self.is_focused { "\u{258f}" } else { "" };
+        let body = TextDraft::with_text(&self.draft.body);
+        let body = if self.is_focused {
+            body.shown()
+        } else {
+            body.text().to_string()
+        };
         let buttons = (!self.is_sending).then(|| {
             div()
                 .flex()
@@ -108,11 +116,7 @@ impl RenderOnce for CommentComposer {
                     .text_color(Palette::muted_text())
                     .child(describe(place)),
             )
-            .child(
-                div()
-                    .min_h(gpui::px(48.))
-                    .child(format!("{}{cursor}", self.draft.body)),
-            )
+            .child(div().min_h(gpui::px(48.)).child(body))
             .children(
                 self.problem
                     .map(|problem| div().text_sm().text_color(red()).child(problem)),

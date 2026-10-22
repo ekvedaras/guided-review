@@ -5,6 +5,7 @@ pub mod config;
 pub mod coverage;
 pub mod file_rules;
 pub mod github;
+pub mod ide;
 pub mod language;
 pub mod local_git;
 pub mod outline;

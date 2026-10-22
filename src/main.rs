@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -7,7 +8,7 @@ use guided_review::app::AskSetup;
 use guided_review::claude_cli::ClaudeCli;
 use guided_review::config::Config;
 use guided_review::github::GitHub;
-use guided_review::local_git::LocalGit;
+use guided_review::ide::Ide;
 use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
@@ -170,11 +171,13 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let source = pick_code_source(&github, pr, &pinned, &current_dir)?;
     let review = Review::open(tour, source.as_ref(), ReviewStateFile::for_pr(&home, pr))?;
 
+    let clone = source.local_clone().map(Path::to_path_buf);
+    let config = Config::load()?;
     let ask = AskSetup {
         asks: Asks::load(Arc::new(ReviewStateFile::for_pr(&home, pr)))?,
         launcher: Arc::new(ClaudeCli::new()),
-        clone: LocalGit::find(&pr.repo, &current_dir)?.map(|clone| clone.root().to_path_buf()),
-        settings: Config::load()?.ask_settings(),
+        clone: clone.clone(),
+        settings: config.ask_settings(),
     };
     let updater = TourUpdater {
         home,
@@ -184,6 +187,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
             Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
         },
     };
-    guided_review::app::run(review, source.into(), ask, Arc::new(github), updater);
+    let ide = Ide::for_clone(clone, config.ide_template());
+    guided_review::app::run(review, source.into(), ask, ide, Arc::new(github), updater);
     Ok(())
 }

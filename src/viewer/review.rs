@@ -22,6 +22,7 @@ use super::comments::{
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
+use super::jump::{self, JumpTarget};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -687,6 +688,15 @@ impl Review {
     /// Ids the tour does not hold are ignored: the sidebar only offers real steps.
     pub fn go_to(&mut self, id: &StepId) {
         self.go_to_screen(Screen::Step(id.clone()));
+    }
+
+    /// The cmd+k list for what the reviewer has typed so far.
+    pub fn jump_targets(&self, query: &str) -> Vec<JumpTarget> {
+        jump::rank(jump::all_targets(&self.tour, &self.files), query)
+    }
+
+    pub fn jump_to(&mut self, target: &JumpTarget) {
+        self.go_to(&target.step);
     }
 
     pub fn go_to_summary(&mut self) {

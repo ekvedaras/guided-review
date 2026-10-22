@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::Path;
 
 use crate::pull_request::Sha;
 
@@ -9,6 +10,10 @@ pub trait CodeSource: Send + Sync {
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha>;
     /// True when the checked-out files are exactly `head`, so they can be opened in an IDE.
     fn working_tree_is_at(&self, head: &Sha) -> bool;
+    /// The clone this source reads, so a file can be opened in an IDE. `None` for GitHub.
+    fn local_clone(&self) -> Option<&Path> {
+        None
+    }
 }
 
 #[derive(Debug, Default)]

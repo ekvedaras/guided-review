@@ -15,6 +15,7 @@ use crate::config::AskSettings;
 use crate::viewer::{AgentLaunch, AgentLauncher, Ask, AskId, Asks, Author, Place, Review};
 
 use super::palette::{Palette, TEXT_FONT};
+use super::text_input::TextDraft;
 
 /// Everything the panel needs to talk to the AI, built once at startup.
 pub struct AskSetup {
@@ -84,7 +85,7 @@ pub struct AskPanel {
     setup: AskSetup,
     target: Option<Target>,
     selected: Option<AskId>,
-    draft: String,
+    draft: TextDraft,
     busy: HashSet<AskId>,
     workers: HashMap<AskId, Worker>,
     from_workers: UnboundedSender<(AskId, WorkerMessage)>,
@@ -113,7 +114,7 @@ impl AskPanel {
             setup,
             target: None,
             selected: None,
-            draft: String::new(),
+            draft: TextDraft::default(),
             busy: HashSet::new(),
             workers: HashMap::new(),
             from_workers,
@@ -218,7 +219,7 @@ impl AskPanel {
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
-        let question = self.draft.trim().to_string();
+        let question = self.draft.text().trim().to_string();
         let (Some(id), Some(target)) = (self.selected, &self.target) else {
             return;
         };
@@ -265,15 +266,9 @@ impl AskPanel {
         match keystroke.key.as_str() {
             "enter" => self.send(cx),
             "escape" => self.close(window, cx),
-            "backspace" => {
-                self.draft.pop();
+            _ => {
+                self.draft.edit(keystroke);
             }
-            _ if !keystroke.modifiers.control && !keystroke.modifiers.platform => {
-                if let Some(text) = &keystroke.key_char {
-                    self.draft.push_str(text);
-                }
-            }
-            _ => {}
         }
         cx.notify();
     }
@@ -357,7 +352,7 @@ impl Render for AskPanel {
             Some(id) if self.busy.contains(&id) => div()
                 .text_color(Palette::muted_text())
                 .child("Waiting for the answer..."),
-            Some(_) => div().child(format!("{}\u{258f}", self.draft)),
+            Some(_) => div().child(self.draft.shown()),
             None => div().text_color(red()).child(
                 "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml",
             ),

@@ -8,6 +8,7 @@ mod comments;
 mod diff_display;
 mod github_link;
 mod highlight;
+mod jump;
 mod markdown;
 mod new_commits;
 mod ports;
@@ -26,6 +27,7 @@ pub use comments::{
 pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
 pub use github_link::GitHubLink;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
+pub use jump::{JumpKind, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
 pub use ports::{

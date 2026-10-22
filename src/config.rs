@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
 
 /// `~/.guided-review/config.toml`
@@ -16,6 +17,9 @@ pub struct Config {
     ask_model: Option<String>,
     #[serde(default)]
     ask_effort: Option<String>,
+    /// `idea://open?file={path}&line={line}` or a shell command such as `code --goto {path}:{line}`.
+    #[serde(default)]
+    ide: Option<String>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -42,6 +46,14 @@ impl AskSettings {
 }
 
 impl Config {
+    pub fn from_text(text: &str) -> anyhow::Result<Self> {
+        toml::from_str(text).context("could not read the config")
+    }
+
+    pub fn ide_template(&self) -> Option<IdeTemplate> {
+        self.ide.clone().map(IdeTemplate::new)
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         let Some(home) = std::env::home_dir() else {
             return Ok(Self::default());

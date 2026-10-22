@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,12 +18,15 @@ use crate::app::components::diff_view::{
     DiffView, OnMoreContext, RowGesture, RowSelecting, threads_by_piece,
 };
 use crate::app::components::fold_toggle::FoldToggle;
+use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
 use crate::app::components::palette::{Palette, TEXT_FONT};
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
+use crate::app::components::text_input::TextDraft;
 use crate::app::components::thread_view::ThreadElement;
 use crate::code_source::CodeSource;
+use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
     CommentPlace, CommentResult, GitHubPort, LineLocation, MoreContext, Place, Review, Screen,
     SendMode, StepId, StepPage, ThreadView, TourUpdater,
@@ -30,7 +34,7 @@ use crate::viewer::{
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
-actions!(one_step, [GoForward, GoBack]);
+actions!(one_step, [GoForward, GoBack, ToggleJump]);
 
 /// The one layout: step tree on the left, one screen on the right (the summary, or one step).
 pub struct OneStepLayout {
@@ -55,6 +59,9 @@ pub struct OneStepLayout {
     is_syncing: bool,
     sync_again: bool,
     _focus_subscription: Subscription,
+    jump: Entity<JumpPalette>,
+    /// `None` hides every Open in IDE button.
+    ide: Option<Ide>,
 }
 
 impl OneStepLayout {
@@ -64,6 +71,7 @@ impl OneStepLayout {
         review: Review,
         source: Arc<dyn CodeSource>,
         ask: AskSetup,
+        ide: Option<Ide>,
         github: Arc<dyn GitHubPort>,
         updater: Arc<TourUpdater>,
         window: &mut Window,
@@ -81,6 +89,18 @@ impl OneStepLayout {
         let diagrams = Self::new_diagrams(cx);
         let focus = cx.focus_handle();
         let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
+        let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
+        cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
+            JumpEvent::QueryChanged(query) => {
+                let targets = this.review.jump_targets(query);
+                palette.update(cx, |palette, _| palette.set_targets(targets));
+            }
+            JumpEvent::Picked(target) => {
+                this.review.jump_to(target);
+                cx.notify();
+            }
+        })
+        .detach();
         let mut layout = Self {
             review,
             github,
@@ -89,6 +109,8 @@ impl OneStepLayout {
             tour_update: TourUpdate::Idle,
             focus,
             ask,
+            jump,
+            ide,
             pr_head_check: None,
             threads_pull: None,
             push_debounce: None,
@@ -351,26 +373,21 @@ impl OneStepLayout {
         else {
             return;
         };
-        let mut body = draft.body.clone();
+        let mut body = TextDraft::with_text(&draft.body);
         let keystroke = &event.keystroke;
         match keystroke.key.as_str() {
             "escape" => self.composing = None,
             "enter" if keystroke.modifiers.platform => {
                 return self.send_comment(place, SendMode::AddToReview, cx);
             }
-            "enter" => body.push('\n'),
-            "backspace" => {
-                body.pop();
-            }
-            _ if !keystroke.modifiers.control && !keystroke.modifiers.platform => {
-                match &keystroke.key_char {
-                    Some(text) => body.push_str(text),
-                    None => return,
+            "enter" => body.newline(),
+            _ => {
+                if !body.edit(keystroke) {
+                    return;
                 }
             }
-            _ => return,
         }
-        if let Err(error) = self.review.edit_draft(&place, &body) {
+        if let Err(error) = self.review.edit_draft(&place, body.text()) {
             eprintln!("could not save the comment text: {error:#}");
         }
         cx.notify();
@@ -548,6 +565,43 @@ impl OneStepLayout {
             }
         }
         (under_lines, after_code)
+    }
+
+    fn toggle_jump(&mut self, _: &ToggleJump, window: &mut Window, cx: &mut Context<Self>) {
+        let targets = self.review.jump_targets("");
+        self.jump.update(cx, |palette, cx| {
+            if palette.is_open() {
+                palette.close(window, cx);
+            } else {
+                palette.open(targets, window, cx);
+            }
+        });
+    }
+
+    fn ide_button(
+        &self,
+        key: String,
+        at: Option<&LineLocation>,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        let ide = self.ide.as_ref()?;
+        let at = at?;
+        let launch = ide.launch(Path::new(&at.path), at.line);
+        Some(
+            tool_button(key, "Open in IDE").on_click(cx.listener(move |_, _, _, cx| {
+                match &launch {
+                    IdeLaunch::Url(url) => cx.open_url(url),
+                    IdeLaunch::Shell(command) => {
+                        if let Err(error) = std::process::Command::new("sh")
+                            .args(["-c", command])
+                            .spawn()
+                        {
+                            eprintln!("could not run the IDE command: {error}");
+                        }
+                    }
+                }
+            })),
+        )
     }
 
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
@@ -732,7 +786,18 @@ impl OneStepLayout {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().flex().justify_end().child(button))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .children(self.ide_button(
+                                format!("ide-piece-{step_id}-{}", piece.id),
+                                piece.open_at(),
+                                cx,
+                            ))
+                            .child(button),
+                    )
                     .child(
                         DiffView::new(piece.clone(), on_more_context.clone())
                             .with_row_selecting(selecting.clone())
@@ -944,6 +1009,20 @@ fn whitespace_toggle(is_on: bool, cx: &mut Context<OneStepLayout>) -> impl IntoE
         .child("Hide whitespace")
 }
 
+fn tool_button(id: impl Into<gpui::ElementId>, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .px_2()
+        .py_1()
+        .cursor_pointer()
+        .text_sm()
+        .text_color(Palette::muted_text())
+        .border_1()
+        .border_color(Palette::border())
+        .rounded_md()
+        .child(label)
+}
+
 fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
     div()
         .id("tick")
@@ -970,12 +1049,13 @@ impl Focusable for OneStepLayout {
 
 impl Render for OneStepLayout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let key_context = if self.composing.is_some() {
+            format!("{} {}", Self::KEY_CONTEXT, CommentComposer::KEY_CONTEXT)
+        } else {
+            Self::KEY_CONTEXT.to_string()
+        };
         div()
-            .key_context(if self.composing.is_some() {
-                "OneStepLayout CommentInput"
-            } else {
-                Self::KEY_CONTEXT
-            })
+            .key_context(key_context.as_str())
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_comment_key))
             .on_mouse_up(
@@ -988,6 +1068,7 @@ impl Render for OneStepLayout {
             )
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::go_back))
+            .on_action(cx.listener(Self::toggle_jump))
             .size_full()
             .flex()
             .bg(Palette::background())
@@ -1027,5 +1108,6 @@ impl Render for OneStepLayout {
             .when(self.ask.read(cx).is_open(), |row| {
                 row.child(self.ask.clone())
             })
+            .child(self.jump.clone())
     }
 }

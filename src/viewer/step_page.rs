@@ -56,7 +56,7 @@ impl DiffLine {
     /// A thread hangs under this row when it is on the row's own line, or, for an unchanged row,
     /// on the line it has at base.
     pub(super) fn holds(&self, location: &LineLocation) -> bool {
-        self.is_inside_hunk()
+        self.takes_comment()
             && self.location.path == location.path
             && match (self.kind, location.side) {
                 (LineKind::Context { base_line, .. }, Side::Base) => base_line == location.line,
@@ -171,6 +171,14 @@ impl SafetyNetPage {
 }
 
 impl PieceDiff {
+    /// Where an IDE opens this piece: the first added line, or the first removed one when nothing was added.
+    pub fn open_at(&self) -> Option<&LineLocation> {
+        self.lines()
+            .find(|line| line.location.side == Side::Head)
+            .or(self.lines().next())
+            .map(|line| &line.location)
+    }
+
     pub(super) fn of(part: PiecePart, files: &[ChangedFile], display: &DiffDisplay) -> Self {
         let piece = part.piece;
         let file = files
@@ -274,4 +282,13 @@ impl PieceDiff {
             (file.binary && !changed_since.is_empty()).then(|| display.links.to_file(file));
         diff
     }
+}
+
+/// The pieces a step shows, in pointer order.
+pub(super) fn pieces_of<'a>(step: &Step, tour: &Tour, files: &'a [ChangedFile]) -> Vec<&'a Piece> {
+    step.pieces
+        .iter()
+        .flat_map(|pointer| pointer.shown_parts(tour, files))
+        .map(|part| part.piece)
+        .collect()
 }
