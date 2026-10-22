@@ -107,7 +107,14 @@ impl CodeSource for GitHubCodeSource {
                 "application/vnd.github.diff",
             )
             .and_then(|mut response| Ok(response.body_mut().read_to_string()?))
-            .with_context(|| format!("could not read the diff {base}...{head} from GitHub"))?;
+            .map_err(|error| match error.downcast_ref::<ureq::Error>() {
+                Some(ureq::Error::StatusCode(406 | 422)) => anyhow::anyhow!(
+                    "GitHub refuses to send the diff {base}...{head} because it is too large; \
+                     use a local clone of {} (run from inside it, or list it under [clones] in the config)",
+                    self.repo
+                ),
+                _ => error.context(format!("could not read the diff {base}...{head} from GitHub")),
+            })?;
         Ok(parse_unified_diff(&patch))
     }
 

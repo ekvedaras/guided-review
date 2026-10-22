@@ -105,11 +105,41 @@ fn without_a_clone_the_tour_reads_code_from_github() {
     );
 }
 
+#[test]
+fn a_diff_github_refuses_as_too_large_tells_the_user_to_use_a_local_clone() {
+    let author = FixtureRepo::cloned_from("acme/shop");
+    author.write("app/Order.php", ORDER_V1);
+    let base = author.commit("base");
+    author.write("app/Order.php", ORDER_V2);
+    let head = author.commit("head");
+    let other_repo = FixtureRepo::cloned_from("acme/blog");
+    let github = FakeCodeHost::new("acme/shop", 7)
+        .pull(&base, &head)
+        .refuse_compare_diff(
+            &base,
+            &head,
+            "406 Not Acceptable",
+            r#"{"message":"Sorry, the diff exceeded the maximum number of files (300)."}"#,
+        )
+        .merge_base(&base, &head, &base)
+        .serve();
+
+    let run = GuidedReview::new(&author, &github)
+        .in_dir(other_repo.path())
+        .run(&["outline", PR]);
+
+    assert!(!run.success);
+    assert!(run.stderr.contains("too large"), "{}", run.stderr);
+    assert!(run.stderr.contains("local clone"), "{}", run.stderr);
+    assert!(run.stderr.contains("[clones]"), "{}", run.stderr);
+}
+
 /// Serves only what the GitHub adapter asks for, and only with the test token.
 struct FakeCodeHost {
     repo: String,
     number: u32,
     routes: HashMap<(String, bool), String>,
+    refusals: HashMap<String, (String, String)>,
 }
 
 impl FakeCodeHost {
@@ -118,6 +148,7 @@ impl FakeCodeHost {
             repo: repo.to_string(),
             number,
             routes: HashMap::new(),
+            refusals: HashMap::new(),
         }
     }
 
@@ -135,6 +166,13 @@ impl FakeCodeHost {
     fn compare_diff(self, base: &str, head: &str, diff: &str) -> Self {
         let path = format!("/repos/{}/compare/{base}...{head}", self.repo);
         self.route(path, true, diff)
+    }
+
+    fn refuse_compare_diff(mut self, base: &str, head: &str, status: &str, body: &str) -> Self {
+        let path = format!("/repos/{}/compare/{base}...{head}", self.repo);
+        self.refusals
+            .insert(path, (status.to_string(), body.to_string()));
+        self
     }
 
     fn merge_base(self, a: &str, b: &str, merge_base: &str) -> Self {
@@ -170,7 +208,12 @@ impl FakeCodeHost {
                 }
                 let path = request_line.split_whitespace().nth(1).unwrap_or_default();
                 let route = self.routes.get(&(path.to_string(), as_diff));
+                let refusal = self.refusals.get(path).filter(|_| as_diff);
                 let (status, body) = match route {
+                    _ if refusal.is_some() => {
+                        let (status, body) = refusal.unwrap();
+                        (status.as_str(), body.as_str())
+                    }
                     Some(body) if authorized => ("200 OK", body.as_str()),
                     Some(_) => ("401 Unauthorized", "{}"),
                     None => ("404 Not Found", r#"{"message":"Not Found"}"#),
