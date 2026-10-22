@@ -27,6 +27,7 @@ use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::sidebar_row::sidebar_row;
 use crate::app::components::thread_view::{
     OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
@@ -556,12 +557,7 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
-        let summary_row = div()
-            .id("summary")
-            .px_3()
-            .py_1()
-            .cursor_pointer()
-            .when_current(sidebar.is_summary_current, colors)
+        let summary_row = sidebar_row(colors, "summary", 0, sidebar.is_summary_current)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, Review::go_to_summary);
             }))
@@ -594,26 +590,20 @@ impl OneStepLayout {
         );
         let step_rows = sidebar.steps.iter().map(|step| {
             let id: StepId = step.id.clone();
-            div()
-                .id(SharedString::from(format!("step-{id}")))
-                .pl(px(12. + 16. * step.depth as f32))
-                .pr_3()
-                .py_1()
-                .cursor_pointer()
-                .when_current(step.is_current, colors)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.change_review(cx, |review| review.go_to(&id));
-                }))
-                .when_ticked(step.is_ticked || step.is_gone, colors)
-                .child(step.label.clone())
+            sidebar_row(
+                colors,
+                SharedString::from(format!("step-{id}")),
+                step.depth,
+                step.is_current,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| review.go_to(&id));
+            }))
+            .when_ticked(step.is_ticked || step.is_gone, colors)
+            .child(step.label.clone())
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
-            div()
-                .id("safety-net")
-                .px_3()
-                .py_1()
-                .cursor_pointer()
-                .when_current(safety_net.is_current, colors)
+            sidebar_row(colors, "safety-net", 0, safety_net.is_current)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.change_review(cx, Review::go_to_safety_net);
                 }))
