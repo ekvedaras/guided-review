@@ -64,6 +64,8 @@ pub struct PiecePart<'a> {
     pub piece: &'a Piece,
     pub removed_lines: Vec<&'a Line>,
     pub added_lines: Vec<&'a Line>,
+    /// Set when a line range cut the piece: unchanged lines around it stay inside the range.
+    pub range: Option<[u32; 2]>,
 }
 
 impl<'a> PiecePart<'a> {
@@ -74,8 +76,11 @@ impl<'a> PiecePart<'a> {
     /// A line is inside a range by its own number: base numbers for removed lines, head numbers for added.
     fn within(piece: &'a Piece, [first, last]: [u32; 2]) -> Option<Self> {
         let range = first as usize..=last as usize;
-        Some(Self::keeping(piece, |line| range.contains(&line.number)))
-            .filter(|part| !part.is_empty())
+        let part = Self::keeping(piece, |line| range.contains(&line.number));
+        (!part.is_empty()).then_some(Self {
+            range: Some([first, last]),
+            ..part
+        })
     }
 
     fn keeping(piece: &'a Piece, keep: impl Fn(&Line) -> bool) -> Self {
@@ -87,6 +92,7 @@ impl<'a> PiecePart<'a> {
                 .filter(|line| keep(line))
                 .collect(),
             added_lines: piece.added_lines.iter().filter(|line| keep(line)).collect(),
+            range: None,
         }
     }
 
@@ -103,6 +109,7 @@ impl<'a> PiecePart<'a> {
                 .iter()
                 .filter(|line| !seen.added.contains(&line.number))
                 .collect(),
+            range: None,
         }
     }
 

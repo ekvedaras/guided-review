@@ -3,7 +3,10 @@ use std::fmt::Write;
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
+use std::collections::HashMap;
+
 use super::ask::Place;
+use super::diff_display::{DiffDisplay, FilesAtHead};
 use super::github_link::GitHubLinks;
 use super::highlight::Highlights;
 use super::step_page::{PieceDiff, Side, StepPage};
@@ -26,6 +29,19 @@ pub(super) fn context_for(
     place: &Place,
 ) -> Option<String> {
     let mut text = pointers(tour);
+    // The AI is told the changed lines only; unchanged context it can read itself.
+    let (highlights, files_at_head, more_context) = (
+        Highlights::default(),
+        FilesAtHead::default(),
+        HashMap::new(),
+    );
+    let display = DiffDisplay {
+        highlights: &highlights,
+        files_at_head: &files_at_head,
+        more_context: &more_context,
+        ignores_whitespace: false,
+        links,
+    };
     match place {
         Place::Tour => {
             writeln!(text, "Place: the whole tour \"{}\"", tour.title).ok()?;
@@ -43,9 +59,7 @@ pub(super) fn context_for(
                 .into_iter()
                 .find(|step| step.id == id.to_string())?;
             step_heading(&mut text, step.title.as_str(), step.why.as_str(), "step")?;
-            for piece in
-                StepPage::of(step, tour, files, links, &Highlights::default(), false).pieces
-            {
+            for piece in StepPage::of(step, tour, files, &display, false).pieces {
                 piece_lines(&mut text, &piece)?;
             }
         }
@@ -55,7 +69,7 @@ pub(super) fn context_for(
                 .into_iter()
                 .find(|s| s.id == step.to_string())?;
             step_heading(&mut text, &step.title, &step.why, "piece")?;
-            let page = StepPage::of(step, tour, files, links, &Highlights::default(), false);
+            let page = StepPage::of(step, tour, files, &display, false);
             let piece = page.pieces.iter().find(|p| p.id.to_string() == *piece)?;
             piece_lines(&mut text, piece)?;
         }
@@ -80,7 +94,7 @@ fn step_heading(text: &mut String, title: &str, why: &str, kind: &str) -> Option
 
 fn piece_lines(text: &mut String, piece: &PieceDiff) -> Option<()> {
     writeln!(text, "\nPiece {}", piece.id).ok()?;
-    for line in &piece.lines {
+    for line in piece.lines() {
         let (sign, side) = match line.location.side {
             Side::Base => ('-', "base"),
             Side::Head => ('+', "head"),

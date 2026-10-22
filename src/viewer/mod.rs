@@ -4,6 +4,7 @@
 mod agent_event;
 mod ask;
 mod ask_context;
+mod diff_display;
 mod github_link;
 mod highlight;
 mod ports;
@@ -13,6 +14,7 @@ mod step_page;
 
 pub use agent_event::AgentEvent;
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
+pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
 pub use github_link::GitHubLink;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span};
 pub use ports::{
@@ -23,4 +25,4 @@ pub use review::{
     OldHead, ReadProgress, Review, Screen, SidebarEntry, StepId, SyncOutcome, SyncRequest,
 };
 pub use review_state::{ReadTick, ReviewState, ReviewStateFile};
-pub use step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, Side, StepPage};
+pub use step_page::{DiffLine, LineKind, LineLocation, PieceDiff, SafetyNetPage, Side, StepPage};

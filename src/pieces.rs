@@ -3,7 +3,7 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
-use crate::code_source::{CodeSource, FileDiff, FileStatus, Line};
+use crate::code_source::{CodeSource, FileDiff, FileStatus, Hunk, Line};
 use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
 use crate::language::Language;
 use crate::pull_request::Sha;
@@ -158,6 +158,8 @@ pub struct ChangedFile {
     pub added: usize,
     pub removed: usize,
     pub pieces: Vec<Piece>,
+    /// Every change of the file, whichever piece holds it.
+    pub hunks: Vec<Hunk>,
 }
 
 pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Vec<ChangedFile>> {
@@ -178,6 +180,7 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
                 added: diff.added.len(),
                 removed: diff.removed.len(),
                 pieces,
+                hunks: diff.hunks.clone(),
             })
         })
         .collect::<anyhow::Result<Vec<ChangedFile>>>()?;

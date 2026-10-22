@@ -91,8 +91,7 @@ fn ids(pieces: &[PieceDiff]) -> Vec<String> {
 
 fn lines(piece: &PieceDiff) -> Vec<String> {
     piece
-        .lines
-        .iter()
+        .lines()
         .map(|line| {
             let side = match line.location.side {
                 Side::Base => "-",
@@ -202,7 +201,7 @@ fn every_line_links_to_the_same_line_on_github_at_the_tours_commits() {
         .unwrap()
         .pieces
         .iter()
-        .flat_map(|piece| &piece.lines)
+        .flat_map(|piece| piece.lines())
         .map(|line| line.github_link.to_string())
         .collect();
     assert_eq!(
@@ -239,7 +238,7 @@ fn a_binary_file_is_one_row_with_a_link_to_it_on_github() {
 
     let page = review.current_step().unwrap();
     let logo = &page.pieces[0];
-    assert!(logo.lines.is_empty());
+    assert!(logo.lines().next().is_none());
     assert_eq!(
         logo.binary_file.as_ref().map(ToString::to_string),
         Some(format!(

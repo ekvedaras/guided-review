@@ -5,18 +5,20 @@ use gpui::{
     Subscription, Task, Window, actions, div, px,
 };
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
 use crate::app::components::diff_view::DiffView;
+use crate::app::components::diff_view::OnMoreContext;
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::old_head_note::OldHeadNote;
 use crate::app::components::palette::{Palette, TEXT_FONT};
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
 use crate::code_source::CodeSource;
-use crate::viewer::{GitHubPort, Place, Review, Screen, StepId, StepPage};
+use crate::viewer::{GitHubPort, MoreContext, Place, Review, Screen, StepId, StepPage};
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
@@ -48,12 +50,19 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) -> Self {
         let request = review.highlight_request();
+        let files_at_head_request = review.files_at_head_request();
         cx.spawn(async move |this, cx| {
-            let highlights = cx
+            let (files_at_head, highlights) = cx
                 .background_executor()
-                .spawn(async move { request.compute(source.as_ref()) })
+                .spawn(async move {
+                    (
+                        files_at_head_request.read(source.as_ref()),
+                        request.compute(source.as_ref()),
+                    )
+                })
                 .await;
             this.update(cx, |this, cx| {
+                this.review.set_files_at_head(files_at_head);
                 this.review.set_highlights(highlights);
                 cx.notify();
             })
@@ -266,7 +275,7 @@ impl OneStepLayout {
                 None => div().into_any_element(),
             },
             Screen::SafetyNet => match self.review.safety_net() {
-                Some(page) => SafetyNetView::new(page).into_any_element(),
+                Some(page) => SafetyNetView::new(page, self.on_more_context(cx)).into_any_element(),
                 None => div().into_any_element(),
             },
         }
@@ -280,6 +289,7 @@ impl OneStepLayout {
             page.step.title.clone(),
             cx,
         );
+        let on_more_context = self.on_more_context(cx);
         let pieces: Vec<_> = page
             .pieces
             .iter()
@@ -299,10 +309,23 @@ impl OneStepLayout {
                     .flex_col()
                     .gap_1()
                     .child(div().flex().justify_end().child(button))
-                    .child(DiffView::new(piece.clone()))
+                    .child(DiffView::new(piece.clone(), on_more_context.clone()))
             })
             .collect();
-        step_screen(page, step_button, pieces, cx)
+        step_screen(
+            page,
+            step_button,
+            pieces,
+            self.review.ignores_whitespace(),
+            cx,
+        )
+    }
+
+    fn on_more_context(&self, cx: &mut Context<Self>) -> OnMoreContext {
+        Rc::new(cx.listener(|this, more: &MoreContext, _, cx| {
+            this.review.show_more_context(more);
+            cx.notify();
+        }))
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
@@ -365,6 +388,7 @@ fn step_screen(
     page: StepPage<'_>,
     ask: impl IntoElement,
     pieces: Vec<impl IntoElement>,
+    ignores_whitespace: bool,
     cx: &mut Context<OneStepLayout>,
 ) -> impl IntoElement {
     let step = page.step;
@@ -392,6 +416,7 @@ fn step_screen(
         )
         .child(div().flex().child(ask))
         .child(StepNotes::of(step))
+        .child(whitespace_toggle(ignores_whitespace, cx))
         .children(fold_toggle)
         .children(pieces)
 }
@@ -420,6 +445,25 @@ fn step_header(page: &StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl Int
         .gap_3()
         .child(title)
         .child(tick_button(page.is_ticked, id, cx))
+}
+
+fn whitespace_toggle(is_on: bool, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    div()
+        .id("ignore-whitespace")
+        .self_start()
+        .px_3()
+        .py_1()
+        .rounded_md()
+        .border_1()
+        .border_color(Palette::border())
+        .cursor_pointer()
+        .text_sm()
+        .when_current(is_on)
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.review.toggle_ignore_whitespace();
+            cx.notify();
+        }))
+        .child("Hide whitespace")
 }
 
 fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {

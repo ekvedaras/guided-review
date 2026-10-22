@@ -186,8 +186,7 @@ fn shown_lines(review: &Review) -> Vec<(String, Vec<String>)> {
         .iter()
         .map(|piece| {
             let lines = piece
-                .lines
-                .iter()
+                .lines()
                 .map(|line| {
                     let side = match line.location.side {
                         Side::Base => "base",

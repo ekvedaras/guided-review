@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ use crate::config::AskSettings;
 
 use super::ask::Place;
 use super::ask_context;
+use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
@@ -87,6 +88,9 @@ pub struct Review {
     highlights: Highlights,
     /// Why viewed sync is switched off for this session; the app shows it as a banner.
     sync_off_because: Option<String>,
+    files_at_head: FilesAtHead,
+    more_context: HashMap<MoreContext, usize>,
+    ignores_whitespace: bool,
 }
 
 impl Review {
@@ -124,6 +128,9 @@ impl Review {
             fold_flipped: BTreeSet::new(),
             highlights: Highlights::default(),
             sync_off_because: None,
+            files_at_head: FilesAtHead::default(),
+            more_context: HashMap::new(),
+            ignores_whitespace: false,
         })
     }
 
@@ -138,6 +145,27 @@ impl Review {
 
     pub fn set_highlights(&mut self, highlights: Highlights) {
         self.highlights = highlights;
+    }
+
+    /// Context lines come from the files at head, read off the main thread like the colours.
+    pub fn files_at_head_request(&self) -> FilesAtHeadRequest {
+        FilesAtHeadRequest::for_files(&self.files, &Sha::new(&self.tour.head))
+    }
+
+    pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) {
+        self.files_at_head = files_at_head;
+    }
+
+    pub fn show_more_context(&mut self, more: &MoreContext) {
+        DiffDisplay::more_lines(&mut self.more_context, more);
+    }
+
+    pub fn ignores_whitespace(&self) -> bool {
+        self.ignores_whitespace
+    }
+
+    pub fn toggle_ignore_whitespace(&mut self) {
+        self.ignores_whitespace = !self.ignores_whitespace;
     }
 
     pub fn screen(&self) -> &Screen {
@@ -182,14 +210,9 @@ impl Review {
             return None;
         };
         let step = self.tour.steps().into_iter().find(|step| step.id == id.0)?;
-        let mut page = StepPage::of(
-            step,
-            &self.tour,
-            &self.files,
-            &self.links(),
-            &self.highlights,
-            self.is_folded(id),
-        );
+        let links = self.links();
+        let display = self.display(&links);
+        let mut page = StepPage::of(step, &self.tour, &self.files, &display, self.is_folded(id));
         page.is_ticked = self.is_ticked(id);
         Some(page)
     }
@@ -249,9 +272,20 @@ impl Review {
 
     /// `None` when every change is in a step.
     pub fn safety_net(&self) -> Option<SafetyNetPage> {
-        self.reading_order
-            .contains(&Screen::SafetyNet)
-            .then(|| SafetyNetPage::of(&self.tour, &self.files, &self.links(), &self.highlights))
+        self.reading_order.contains(&Screen::SafetyNet).then(|| {
+            let links = self.links();
+            SafetyNetPage::of(&self.tour, &self.files, &self.display(&links))
+        })
+    }
+
+    fn display<'a>(&'a self, links: &'a GitHubLinks<'a>) -> DiffDisplay<'a> {
+        DiffDisplay {
+            highlights: &self.highlights,
+            files_at_head: &self.files_at_head,
+            more_context: &self.more_context,
+            ignores_whitespace: self.ignores_whitespace,
+            links,
+        }
     }
 
     fn links(&self) -> GitHubLinks<'_> {

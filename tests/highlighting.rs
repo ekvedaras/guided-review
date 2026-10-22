@@ -36,7 +36,7 @@ fn lines(review: &Review) -> Vec<DiffLine> {
         .unwrap()
         .pieces
         .into_iter()
-        .flat_map(|piece| piece.lines)
+        .flat_map(|piece| piece.lines().cloned().collect::<Vec<_>>())
         .collect()
 }
 

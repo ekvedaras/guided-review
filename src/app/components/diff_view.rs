@@ -1,27 +1,51 @@
+use std::rc::Rc;
+
 use gpui::{
-    App, HighlightStyle, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, Window, div, px,
+    AnyElement, App, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
 };
 
-use crate::viewer::{DiffLine, GitHubLink, PieceDiff, Side};
+use crate::viewer::{DiffHunk, DiffLine, Edge, GitHubLink, LineKind, MoreContext, PieceDiff};
 
 use super::palette::{CODE_FONT, Palette};
 
-/// Our own diff view (Zed's is GPL). One row per line, and each row keeps its `LineLocation`
-/// so comments can hang off any row later. A click on a line number opens that line on GitHub.
+pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
+
+/// Our own diff view (Zed's is GPL). One row per line, grouped in hunks like on GitHub, and each row keeps
+/// its `LineLocation` so comments can hang off any row later. A click on a line number opens that line on GitHub.
 #[derive(IntoElement)]
 pub struct DiffView {
     piece: PieceDiff,
+    on_more_context: OnMoreContext,
 }
 
 impl DiffView {
-    pub fn new(piece: PieceDiff) -> Self {
-        Self { piece }
+    pub fn new(piece: PieceDiff, on_more_context: OnMoreContext) -> Self {
+        Self {
+            piece,
+            on_more_context,
+        }
     }
 }
 
 impl RenderOnce for DiffView {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let id = self.piece.id.to_string();
+        let only_whitespace = self.piece.changes_only_whitespace.then(|| {
+            div()
+                .px_2()
+                .py_1()
+                .text_sm()
+                .text_color(Palette::muted_text())
+                .child("Only whitespace changed.")
+        });
+        let hunks: Vec<AnyElement> = self
+            .piece
+            .hunks
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, hunk)| hunk_rows(&id, index, hunk, &self.on_more_context))
+            .collect();
         div()
             .flex()
             .flex_col()
@@ -38,10 +62,11 @@ impl RenderOnce for DiffView {
                     .border_color(Palette::border())
                     .text_sm()
                     .font_family(CODE_FONT)
-                    .child(self.piece.id.to_string()),
+                    .child(id.clone()),
             )
             .children(self.piece.binary_file.map(BinaryFileRow::new))
-            .children(self.piece.lines.into_iter().map(DiffRow::new))
+            .children(only_whitespace)
+            .children(hunks)
     }
 }
 
@@ -72,6 +97,61 @@ impl RenderOnce for BinaryFileRow {
     }
 }
 
+fn hunk_rows(
+    piece: &str,
+    index: usize,
+    hunk: DiffHunk,
+    on_more_context: &OnMoreContext,
+) -> Vec<AnyElement> {
+    let mut rows = Vec::new();
+    if index > 0 || hunk.more_above.is_some() {
+        rows.push(hunk_gap(
+            ElementId::from(format!("{piece}-above-{index}")),
+            hunk.more_above,
+            on_more_context,
+        ));
+    }
+    rows.extend(
+        hunk.rows
+            .into_iter()
+            .map(|line| DiffRow::new(line).into_any_element()),
+    );
+    if hunk.more_below.is_some() {
+        rows.push(hunk_gap(
+            ElementId::from(format!("{piece}-below-{index}")),
+            hunk.more_below,
+            on_more_context,
+        ));
+    }
+    rows
+}
+
+/// The band between hunks, like GitHub's `@@` line; clicking it shows more unchanged lines.
+fn hunk_gap(
+    id: ElementId,
+    more: Option<MoreContext>,
+    on_more_context: &OnMoreContext,
+) -> AnyElement {
+    let band = div()
+        .id(id)
+        .px_2()
+        .bg(Palette::sidebar())
+        .text_xs()
+        .text_color(Palette::muted_text());
+    let Some(more) = more else {
+        return band.child("⋯").into_any_element();
+    };
+    let label = match more.edge {
+        Edge::Above => "↑ Show more lines",
+        Edge::Below => "↓ Show more lines",
+    };
+    let on_more_context = on_more_context.clone();
+    band.cursor_pointer()
+        .on_click(move |_, window, cx| on_more_context(&more, window, cx))
+        .child(label)
+        .into_any_element()
+}
+
 #[derive(IntoElement)]
 struct DiffRow {
     line: DiffLine,
@@ -87,23 +167,14 @@ impl RenderOnce for DiffRow {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let location = &self.line.location;
         let link = self.line.github_link.clone();
-        let (base_number, head_number, sign, background) = match location.side {
-            Side::Base => (
-                location.line.to_string(),
-                String::new(),
-                "-",
-                Palette::removed_line(),
-            ),
-            Side::Head => (
-                String::new(),
-                location.line.to_string(),
-                "+",
-                Palette::added_line(),
-            ),
+        let number = location.line.to_string();
+        let (base_number, head_number, sign) = match self.line.kind {
+            LineKind::Removed => (number, String::new(), "-"),
+            LineKind::Added => (String::new(), number, "+"),
+            LineKind::Context { base_line, .. } => (base_line.to_string(), number, " "),
         };
-        div()
+        let row = div()
             .flex()
-            .bg(background)
             .font_family(CODE_FONT)
             .text_sm()
             .child(
@@ -116,13 +187,18 @@ impl RenderOnce for DiffRow {
                     .child(line_number(base_number))
                     .child(line_number(head_number)),
             )
-            .child(div().w(px(16.)).flex_none().child(sign))
-            .child(
-                div()
-                    .flex_1()
-                    .whitespace_nowrap()
-                    .child(highlighted(self.line)),
-            )
+            .child(div().w(px(16.)).flex_none().child(sign));
+        let row = match self.line.kind {
+            LineKind::Removed => row.bg(Palette::removed_line()),
+            LineKind::Added => row.bg(Palette::added_line()),
+            LineKind::Context { .. } => row,
+        };
+        row.child(
+            div()
+                .flex_1()
+                .whitespace_nowrap()
+                .child(highlighted(self.line)),
+        )
     }
 }
 

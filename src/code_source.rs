@@ -21,12 +21,30 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Hunk {
     /// `@@ -2 +2 @@`
     pub header: String,
+    /// As git writes it: the first added line, or the line above the cut when nothing was added.
+    pub head_start: usize,
     pub removed: Vec<Line>,
     pub added: Vec<Line>,
+}
+
+impl Hunk {
+    /// The last unchanged line at head above this hunk; 0 at the top of the file.
+    pub fn head_line_above(&self) -> usize {
+        if self.added.is_empty() {
+            self.head_start
+        } else {
+            self.head_start - 1
+        }
+    }
+
+    /// The first unchanged line at head below this hunk.
+    pub fn head_line_below(&self) -> usize {
+        self.head_line_above() + self.added.len() + 1
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +164,7 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
             (new_line, new_left) = new;
             file.hunks.push(Hunk {
                 header: hunk_header(raw),
+                head_start: new.0,
                 removed: Vec::new(),
                 added: Vec::new(),
             });

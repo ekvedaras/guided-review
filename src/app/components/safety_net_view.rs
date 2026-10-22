@@ -2,20 +2,24 @@ use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
 use crate::viewer::SafetyNetPage;
 
-use super::diff_view::DiffView;
+use super::diff_view::{DiffView, OnMoreContext};
 use super::palette::Palette;
 
 /// Every change the tour does not show, so nothing in the PR stays hidden.
 #[derive(IntoElement)]
 pub struct SafetyNetView {
     page: SafetyNetPage,
+    on_more_context: OnMoreContext,
 }
 
 impl SafetyNetView {
     pub const TITLE: &str = "Not in any step";
 
-    pub fn new(page: SafetyNetPage) -> Self {
-        Self { page }
+    pub fn new(page: SafetyNetPage, on_more_context: OnMoreContext) -> Self {
+        Self {
+            page,
+            on_more_context,
+        }
     }
 }
 
@@ -31,6 +35,11 @@ impl RenderOnce for SafetyNetView {
                     .text_color(Palette::muted_text())
                     .child("Changes in this PR that no step of the tour shows."),
             )
-            .children(self.page.pieces.into_iter().map(DiffView::new))
+            .children(
+                self.page
+                    .pieces
+                    .into_iter()
+                    .map(|piece| DiffView::new(piece, self.on_more_context.clone())),
+            )
     }
 }
