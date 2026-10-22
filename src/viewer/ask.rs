@@ -117,6 +117,10 @@ impl Asks {
         id
     }
 
+    pub fn all(&self) -> &[Ask] {
+        &self.asks
+    }
+
     pub fn get(&self, id: AskId) -> Option<&Ask> {
         self.asks.iter().find(|ask| ask.id == id)
     }

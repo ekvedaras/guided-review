@@ -1,18 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    Context, Div, ElementId, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Window, div,
-    px, red,
+    Context, Div, ElementId, EventEmitter, FocusHandle, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement,
+    Styled, Window, div, px, red,
 };
 
 use crate::config::AskSettings;
-use crate::viewer::{AgentLaunch, AgentLauncher, Ask, AskId, Asks, Author, Place, Review};
+use crate::viewer::{
+    AgentLaunch, AgentLauncher, AgentPool, Ask, AskId, Asks, Author, LineLocation, Opening, Place,
+    Review, StepId, TurnStopper,
+};
 
 use super::palette::{Palette, TEXT_FONT};
 use super::text_input::TextDraft;
@@ -32,9 +36,15 @@ enum WorkerMessage {
     Failed(String),
 }
 
+/// How often the panel looks for AI processes idle long enough to stop.
+const IDLE_CHECK: Duration = Duration::from_secs(30);
+
 /// One live `claude` process, driven from its own thread so the window never waits on it.
+/// Dropping it ends the thread, and the process with it.
 struct Worker {
     questions: mpsc::Sender<String>,
+    /// Set by the thread once the process runs.
+    stopper: Arc<Mutex<Option<Arc<dyn TurnStopper>>>>,
 }
 
 impl Worker {
@@ -45,6 +55,8 @@ impl Worker {
         into: UnboundedSender<(AskId, WorkerMessage)>,
     ) -> Self {
         let (questions, incoming) = mpsc::channel::<String>();
+        let stopper = Arc::new(Mutex::new(None));
+        let stopper_of_thread = stopper.clone();
         std::thread::spawn(move || {
             let mut agent = match launcher.start(&launch) {
                 Ok(agent) => agent,
@@ -53,6 +65,9 @@ impl Worker {
                     return;
                 }
             };
+            if let Ok(mut slot) = stopper_of_thread.lock() {
+                *slot = Some(agent.turn_stopper());
+            }
             while let Ok(message) = incoming.recv() {
                 let result = agent.ask(&message, &mut |line| {
                     let _ = into.unbounded_send((id, WorkerMessage::Line(line.to_string())));
@@ -69,15 +84,24 @@ impl Worker {
                 }
             }
         });
-        Self { questions }
+        Self { questions, stopper }
+    }
+
+    fn stopper(&self) -> Option<Arc<dyn TurnStopper>> {
+        self.stopper.lock().ok()?.clone()
     }
 }
+
+/// Asks the layout to put an answer into the comment box; only the review can place it.
+pub struct UseAsComment(pub Ask);
 
 struct Target {
     place: Place,
     label: String,
     context: String,
     launch: AgentLaunch,
+    /// Why no new question can be asked here.
+    unavailable: Option<&'static str>,
 }
 
 /// The right side panel: Asks about one place, newest first, and the box to ask the next one.
@@ -86,8 +110,12 @@ pub struct AskPanel {
     target: Option<Target>,
     selected: Option<AskId>,
     draft: TextDraft,
-    busy: HashSet<AskId>,
+    pool: AgentPool,
     workers: HashMap<AskId, Worker>,
+    /// Asks a re-pin changed the code under, as of the review last shown.
+    code_changed: HashSet<AskId>,
+    /// Why the last question did not go out.
+    notice: Option<&'static str>,
     from_workers: UnboundedSender<(AskId, WorkerMessage)>,
     focus: FocusHandle,
     layout_focus: FocusHandle,
@@ -110,13 +138,24 @@ impl AskPanel {
             }
         })
         .detach();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(IDLE_CHECK).await;
+                if this.update(cx, |panel, _| panel.stop_idle()).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         Self {
             setup,
             target: None,
             selected: None,
             draft: TextDraft::default(),
-            busy: HashSet::new(),
+            pool: AgentPool::default(),
             workers: HashMap::new(),
+            code_changed: HashSet::new(),
+            notice: None,
             from_workers,
             focus: cx.focus_handle(),
             layout_focus,
@@ -131,6 +170,37 @@ impl AskPanel {
         self.setup.asks.count_at(place)
     }
 
+    /// Asks about selected lines in a step (or, with `None`, the safety net), by place.
+    pub fn line_places(&self, step: Option<&StepId>) -> Vec<(Place, usize)> {
+        let mut places: Vec<(Place, usize)> = Vec::new();
+        for ask in self.setup.asks.all() {
+            let Place::Lines { step: of, .. } = &ask.place else {
+                continue;
+            };
+            if of.as_ref() != step || ask.messages.is_empty() {
+                continue;
+            }
+            match places.iter_mut().find(|(place, _)| place == &ask.place) {
+                Some((_, count)) => *count += 1,
+                None => places.push((ask.place.clone(), 1)),
+            }
+        }
+        places
+    }
+
+    /// The review was re-pinned or reopened: notes on old answers follow it.
+    pub fn review_changed(&mut self, review: &Review, cx: &mut Context<Self>) {
+        self.code_changed = self
+            .setup
+            .asks
+            .all()
+            .iter()
+            .filter(|ask| review.code_changed_since(ask))
+            .map(|ask| ask.id)
+            .collect();
+        cx.notify();
+    }
+
     /// Shows the Asks of a place and gets the AI ready: its process starts now, not at the first question.
     pub fn open(
         &mut self,
@@ -140,9 +210,13 @@ impl AskPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (Some(context), Some(clone)) = (review.ask_context(&place), self.setup.clone.clone())
-        else {
-            return self.show_unavailable(place, label, window, cx);
+        self.review_changed(review, cx);
+        self.notice = None;
+        let Some(clone) = self.setup.clone.clone() else {
+            return self.show_unavailable(place, label, NO_CLONE, window, cx);
+        };
+        let Some(context) = review.ask_context(&place) else {
+            return self.show_unavailable(place, label, PLACE_GONE, window, cx);
         };
         let launch = review.agent_launch(clone, &self.setup.settings, None);
         let reuses_draft = self.selected.is_some_and(|id| {
@@ -159,6 +233,7 @@ impl AskPanel {
             label,
             context,
             launch,
+            unavailable: None,
         });
         self.draft.clear();
         if let Some(id) = self.selected {
@@ -172,6 +247,7 @@ impl AskPanel {
         &mut self,
         place: Place,
         label: String,
+        reason: &'static str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -187,6 +263,7 @@ impl AskPanel {
                 system_prompt: String::new(),
                 resume: None,
             },
+            unavailable: Some(reason),
         });
         window.focus(&self.focus, cx);
         cx.notify();
@@ -198,17 +275,23 @@ impl AskPanel {
         cx.notify();
     }
 
-    fn ensure_worker(&mut self, id: AskId) {
-        if self.workers.contains_key(&id) {
-            return;
+    /// Gets the Ask a live process, stopping the one used longest ago when three are live.
+    /// False when all three are answering.
+    fn ensure_worker(&mut self, id: AskId) -> bool {
+        let Some(target) = &self.target else {
+            return false;
+        };
+        let launch = self.setup.asks.launch_for(id, target.launch.clone());
+        match self.pool.open(id, Instant::now()) {
+            Opening::Live if self.workers.contains_key(&id) => return true,
+            Opening::Live => {}
+            Opening::Start { stop } => {
+                if let Some(stopped) = stop {
+                    self.workers.remove(&stopped);
+                }
+            }
+            Opening::AllAnswering => return false,
         }
-        let Some(target) = &self.target else { return };
-        let mut launch = target.launch.clone();
-        launch.resume = self
-            .setup
-            .asks
-            .get(id)
-            .and_then(|ask| ask.session_id.clone());
         let worker = Worker::spawn(
             self.setup.launcher.clone(),
             launch,
@@ -216,6 +299,13 @@ impl AskPanel {
             self.from_workers.clone(),
         );
         self.workers.insert(id, worker);
+        true
+    }
+
+    fn stop_idle(&mut self) {
+        for id in self.pool.stop_idle(Instant::now()) {
+            self.workers.remove(&id);
+        }
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
@@ -223,35 +313,46 @@ impl AskPanel {
         let (Some(id), Some(target)) = (self.selected, &self.target) else {
             return;
         };
-        if question.is_empty() || self.busy.contains(&id) {
+        if question.is_empty() || self.pool.is_answering(id) {
             return;
         }
-        let message = self.setup.asks.begin_turn(id, &question, &target.context);
+        let context = target.context.clone();
+        if !self.ensure_worker(id) {
+            self.notice = Some(ALL_ANSWERING);
+            return cx.notify();
+        }
+        self.notice = None;
+        let message = self.setup.asks.begin_turn(id, &question, &context);
         self.draft.clear();
-        self.ensure_worker(id);
         let delivered = self
             .workers
             .get(&id)
             .is_some_and(|worker| worker.questions.send(message.clone()).is_ok());
         if !delivered {
             self.workers.remove(&id);
+            self.pool.ended(id);
             self.ensure_worker(id);
             if let Some(worker) = self.workers.get(&id) {
                 let _ = worker.questions.send(message);
             }
         }
-        self.busy.insert(id);
+        self.pool.turn_started(id, Instant::now());
+        cx.notify();
+    }
+
+    fn stop_turn(&mut self, id: AskId, cx: &mut Context<Self>) {
+        if let Some(stopper) = self.workers.get(&id).and_then(Worker::stopper) {
+            self.setup.asks.stop_turn(id, stopper.as_ref());
+        }
         cx.notify();
     }
 
     fn on_worker_message(&mut self, id: AskId, message: WorkerMessage, cx: &mut Context<Self>) {
         match message {
             WorkerMessage::Line(line) => self.setup.asks.apply_line(id, &line),
-            WorkerMessage::TurnEnded => {
-                self.busy.remove(&id);
-            }
+            WorkerMessage::TurnEnded => self.pool.turn_ended(id, Instant::now()),
             WorkerMessage::Failed(reason) => {
-                self.busy.remove(&id);
+                self.pool.ended(id);
                 self.workers.remove(&id);
                 self.setup
                     .asks
@@ -312,24 +413,64 @@ impl AskPanel {
         if let Some(failure) = &ask.failure {
             block = block.child(div().text_color(red()).child(failure.clone()));
         }
-        if !is_selected {
+        if self.code_changed.contains(&id) {
             block = block.child(
+                div()
+                    .text_color(Palette::muted_text())
+                    .child("Code changed since: this answer may be old"),
+            );
+        }
+        let is_answering = self.pool.is_answering(id);
+        let mut actions = div().flex().gap_3().text_color(Palette::muted_text());
+        if is_answering {
+            actions = actions.child(
+                div()
+                    .id(SharedString::from(format!("stop-turn-{}", id_label(id))))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| this.stop_turn(id, cx)))
+                    .child("Stop"),
+            );
+        }
+        let has_lines = matches!(ask.place, Place::Lines { .. } | Place::Piece { .. });
+        if has_lines && !is_answering && ask.latest_answer().is_some() {
+            let ask_to_use = ask.clone();
+            actions = actions.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "use-as-comment-{}",
+                        id_label(id)
+                    )))
+                    .cursor_pointer()
+                    .on_click(
+                        cx.listener(move |_, _, _, cx| cx.emit(UseAsComment(ask_to_use.clone()))),
+                    )
+                    .child("Use as comment"),
+            );
+        }
+        if !is_selected {
+            actions = actions.child(
                 div()
                     .id(SharedString::from(format!("follow-up-{}", id_label(id))))
                     .cursor_pointer()
-                    .text_color(Palette::muted_text())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = Some(id);
                         this.draft.clear();
+                        this.notice = None;
                         this.ensure_worker(id);
                         cx.notify();
                     }))
                     .child("Follow up"),
             );
         }
-        block
+        block.child(actions)
     }
 }
+
+const NO_CLONE: &str = "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml";
+const PLACE_GONE: &str = "These lines are not in the tour any more: select them again to ask";
+const ALL_ANSWERING: &str = "Three Asks are answering now: wait for one, or stop it";
+
+impl EventEmitter<UseAsComment> for AskPanel {}
 
 fn id_label(id: AskId) -> String {
     serde_json::to_string(&id).unwrap_or_default()
@@ -348,14 +489,19 @@ impl Render for AskPanel {
             .into_iter()
             .map(|ask| self.ask_block(ask, cx).into_any_element())
             .collect();
-        let input = match self.selected {
-            Some(id) if self.busy.contains(&id) => div()
+        let input = match (self.selected, target.unavailable) {
+            (_, Some(reason)) => div().text_color(red()).child(reason),
+            (Some(id), None) if self.pool.is_answering(id) => div()
                 .text_color(Palette::muted_text())
                 .child("Waiting for the answer..."),
-            Some(_) => div().child(self.draft.shown()),
-            None => div().text_color(red()).child(
-                "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml",
-            ),
+            _ => div()
+                .flex()
+                .flex_col()
+                .children(
+                    self.notice
+                        .map(|notice| div().text_color(red()).child(notice)),
+                )
+                .child(self.draft.shown()),
         };
         div()
             .id("ask-panel")
@@ -407,6 +553,14 @@ impl Render for AskPanel {
                     .child(input),
             )
             .into_any_element()
+    }
+}
+
+pub fn lines_label(start: &LineLocation, end: &LineLocation) -> String {
+    if start == end {
+        format!("{} line {}", end.path, end.line)
+    } else {
+        format!("{} lines {} to {}", end.path, start.line, end.line)
     }
 }
 

@@ -11,7 +11,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
+use crate::app::components::ask_panel::{
+    AskPanel, AskSetup, UseAsComment, ask_button, lines_label,
+};
 use crate::app::components::comment_composer::{CommentComposer, OnCompose, QueuedCommentNote};
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
@@ -32,7 +34,7 @@ use crate::app::components::thread_view::{
 use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
-    CommentPlace, CommentResult, FinishResult, GitHubPort, LineLocation, MoreContext, Place,
+    Ask, CommentPlace, CommentResult, FinishResult, GitHubPort, LineLocation, MoreContext, Place,
     Review, Screen, SendMode, StepId, StepPage, ThreadView, TourRefresher, TourUpdater,
     UpdatedTour,
 };
@@ -76,6 +78,8 @@ pub struct OneStepLayout {
     comment_problems: HashMap<CommentPlace, String>,
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
+    /// The rows of the last drag, to ask the AI about.
+    lines_to_ask: Option<Place>,
     is_retrying_comments: bool,
     is_syncing: bool,
     sync_again: bool,
@@ -83,6 +87,7 @@ pub struct OneStepLayout {
     jump: Entity<JumpPalette>,
     /// `None` hides every Open in IDE button.
     ide: Option<Ide>,
+    _use_as_comment_subscription: Subscription,
 }
 
 impl OneStepLayout {
@@ -125,6 +130,10 @@ impl OneStepLayout {
             ide,
             tour_work,
         } = collaborators;
+        let use_as_comment_subscription =
+            cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
+                this.use_as_comment(ask, window, cx)
+            });
         let mut layout = Self {
             review,
             github,
@@ -145,10 +154,12 @@ impl OneStepLayout {
             sending_comments: HashSet::new(),
             comment_problems: HashMap::new(),
             selection_notice: None,
+            lines_to_ask: None,
             is_retrying_comments: false,
             is_syncing: false,
             sync_again: false,
             _focus_subscription: focus_subscription,
+            _use_as_comment_subscription: use_as_comment_subscription,
         };
         layout.start_background_work(source, cx);
         layout
@@ -254,6 +265,9 @@ impl OneStepLayout {
         if let Screen::Step(id) = screen {
             self.review.go_to(&id);
         }
+        let review = &self.review;
+        self.ask
+            .update(cx, |panel, cx| panel.review_changed(review, cx));
         self.diagrams = Self::new_diagrams(cx);
         self.start_background_work(updated.source, cx);
     }
@@ -390,6 +404,7 @@ impl OneStepLayout {
         match gesture {
             RowGesture::Press => {
                 self.selection_notice = None;
+                self.lines_to_ask = None;
                 self.review.begin_selection(at.clone());
             }
             RowGesture::Over if self.review.is_selecting() => {
@@ -404,6 +419,10 @@ impl OneStepLayout {
         if !self.review.is_selecting() {
             return;
         }
+        self.lines_to_ask = self
+            .review
+            .selected_lines()
+            .map(|selected| self.review.place_of_lines(&selected));
         match self.review.finish_selection() {
             Ok(Some(place)) => {
                 self.composing = Some(place);
@@ -545,6 +564,41 @@ impl OneStepLayout {
         Rc::new(move |window, cx| {
             layout.update(cx, |this, cx| act(this, place.clone(), window, cx))
         })
+    }
+
+    fn use_as_comment(&mut self, ask: &Ask, window: &mut Window, cx: &mut Context<Self>) {
+        match self.review.use_as_comment(ask) {
+            Ok(place) => {
+                self.selection_notice = None;
+                self.composing = Some(place);
+                window.focus(&self.focus, cx);
+            }
+            Err(refusal) => self.selection_notice = Some(refusal.to_string()),
+        }
+        cx.notify();
+    }
+
+    /// Markers under the last row of each selection that has Asks.
+    fn ask_markers(
+        &self,
+        step: Option<&StepId>,
+        cx: &mut Context<Self>,
+    ) -> Vec<(LineLocation, AnyElement)> {
+        let places = self.ask.read(cx).line_places(step);
+        places
+            .into_iter()
+            .filter_map(|(place, _)| {
+                let Place::Lines { start, end, .. } = &place else {
+                    return None;
+                };
+                let key = format!("ask-lines-{}-{}-{}", end.path, start.line, end.line);
+                let button = self.ask_button(key, place.clone(), lines_label(start, end), cx);
+                Some((
+                    end.clone(),
+                    div().flex().px_2().py_1().child(button).into_any_element(),
+                ))
+            })
+            .collect()
     }
 
     /// Open comment boxes and comments waiting for GitHub, each with the row it hangs under.
@@ -895,6 +949,7 @@ impl OneStepLayout {
                 Some(page) => {
                     let (mut under_lines, after_code) = self.thread_elements(&page.threads, cx);
                     under_lines.extend(self.comment_elements(cx));
+                    under_lines.extend(self.ask_markers(None, cx));
                     SafetyNetView::new(page, self.on_more_context(cx))
                         .with_row_selecting(self.row_selecting(cx))
                         .with_threads(under_lines, after_code)
@@ -932,6 +987,7 @@ impl OneStepLayout {
         let on_more_context = self.on_more_context(cx);
         let (mut under_lines, after_code) = self.thread_elements(&page.threads, cx);
         under_lines.extend(self.comment_elements(cx));
+        under_lines.extend(self.ask_markers(Some(&step_id), cx));
         let selecting = self.row_selecting(cx);
         let mut threads_of_piece = threads_by_piece(&page.pieces, under_lines).into_iter();
         let shows_change_since_read = page
@@ -1259,6 +1315,18 @@ impl Render for OneStepLayout {
                             self.tour_update.clone(),
                             cx.listener(|this, _, _, cx| this.update_tour(cx)),
                         )
+                    }))
+                    .children(self.lines_to_ask.clone().map(|place| {
+                        let label = match &place {
+                            Place::Lines { start, end, .. } => lines_label(start, end),
+                            _ => String::new(),
+                        };
+                        div().px_6().py_1().flex().child(self.ask_button(
+                            "ask-selected-lines".into(),
+                            place,
+                            label,
+                            cx,
+                        ))
                     }))
                     .children(self.selection_notice.clone().map(|notice| {
                         div()

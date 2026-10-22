@@ -169,3 +169,26 @@ fn saving_asks_keeps_the_read_ticks_and_the_other_way_round() {
     assert_eq!(state["read_ticks"]["order"]["head"], "abc");
     assert_eq!(state["asks"][0]["messages"][0]["text"], "What is this?");
 }
+
+#[test]
+fn stopping_a_turn_asks_claude_to_interrupt_over_its_input_and_keeps_the_process() {
+    let dir = TempDir::new().unwrap();
+    let clone = TempDir::new().unwrap();
+    let launcher = ClaudeCli::with_binary(fake_claude(dir.path()));
+    let agent = launcher.start(&launch(clone.path(), None)).unwrap();
+
+    agent.turn_stopper().stop_turn().unwrap();
+
+    let received = dir.path().join("received");
+    let mut lines = String::new();
+    for _ in 0..100 {
+        lines = std::fs::read_to_string(&received).unwrap_or_default();
+        if !lines.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let sent: Value = serde_json::from_str(lines.lines().next().unwrap()).unwrap();
+    assert_eq!(sent["type"], "control_request");
+    assert_eq!(sent["request"]["subtype"], "interrupt");
+}
