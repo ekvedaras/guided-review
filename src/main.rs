@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::app::AskSetup;
@@ -10,10 +9,9 @@ use guided_review::claude_cli::{
 };
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
-use guided_review::github::GitHub;
 use guided_review::ide::Ide;
+use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
-use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
@@ -21,10 +19,7 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{
-    Asks, PickCodeSource, PullRequestTipsPort, RefreshBrief, Review, ReviewStateFile,
-    TourRefresher, TourRepinner, repin_tour,
-};
+use guided_review::viewer::{Asks, RefreshBrief, Review, TourRefresher, TourRepinner, repin_tour};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -102,44 +97,35 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
-    println!("{}", Tour::path_for(&home, pr).display());
+    println!("{}", Tour::path_for(&home_folder()?, pr).display());
     Ok(())
 }
 
 fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let github = GitHub::from_env();
-    let tips = github.pull_request_tips(pr)?;
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = pick_code_source(&github, pr, &tips, &current_dir)?;
-    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-    let files = pieces::cut(source.as_ref(), &base, &tips.head)?;
+    let code = OpenedPr::new(pr)?.at_live_tips()?;
+    let (base, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
         Outline {
             pr,
             base: &base,
-            head: &tips.head,
+            head: &code.tips.head,
             files: &files,
-            worktree_at_head: source.working_tree_is_at(&tips.head),
-            subjects: &SubjectCandidates::find(source.as_ref(), &tips.head, &files),
+            worktree_at_head: code.source.working_tree_is_at(&code.tips.head),
+            subjects: &SubjectCandidates::find(code.source.as_ref(), &code.tips.head, &files),
         }
     );
     Ok(())
 }
 
 fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()> {
-    let github = GitHub::from_env();
-    let tips = github.pull_request_tips(pr)?;
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = pick_code_source(&github, pr, &tips, &current_dir)?;
-    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-    let files = pieces::cut(source.as_ref(), &base, &tips.head)?;
+    let code = OpenedPr::new(pr)?.at_live_tips()?;
+    let (_, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
         Show {
-            source: source.as_ref(),
-            head: &tips.head,
+            source: code.source.as_ref(),
+            head: &code.tips.head,
             files: &files,
             ids,
             around
@@ -150,27 +136,23 @@ fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()>
 }
 
 fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
-    let tour_path = Tour::path_for(&home, pr);
+    let opened = OpenedPr::new(pr)?;
+    let tour_path = opened.tour_path();
     let mut tour = Tour::load(&tour_path)?;
 
-    let github = GitHub::from_env();
-    let tips = github.pull_request_tips(pr)?;
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = pick_code_source(&github, pr, &tips, &current_dir)?;
+    let code = opened.at_live_tips()?;
     if tour.head.is_empty() {
-        let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-        tour.pin(pr, &base, &tips.head);
+        tour.pin(pr, &code.merge_base()?, &code.tips.head);
     } else {
         if tour.pr.is_empty() {
             tour.pr = pr.to_string();
         }
-        if tour.head != tips.head {
+        if tour.head != code.tips.head {
             println!("warning: PR has new commits; run `guided-review repin`");
         }
     }
     tour.save(&tour_path)?;
-    let files = pieces::cut(source.as_ref(), &tour.base, &tour.head)?;
+    let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
 
     let report = tour_check::check(&tour, &files);
     print!("{report}");
@@ -181,36 +163,35 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
 }
 
 fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
-    let tour_path = Tour::path_for(&home, pr);
+    let opened = OpenedPr::new(pr)?;
+    let tour_path = opened.tour_path();
     // Fails before any network call when there is no tour yet.
     Tour::load(&tour_path)?;
 
-    let github = GitHub::from_env();
-    let tips = github.pull_request_tips(pr)?;
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = pick_code_source(&github, pr, &tips, &current_dir)?;
-    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-
-    let state_file = ReviewStateFile::for_pr(&home, pr);
-    let (_, result) = repin_tour(&tour_path, &state_file, source.as_ref(), &base, &tips.head)?;
+    let code = opened.at_live_tips()?;
+    let base = code.merge_base()?;
+    let (_, result) = repin_tour(
+        &tour_path,
+        &opened.state_file(),
+        code.source.as_ref(),
+        &base,
+        &code.tips.head,
+    )?;
     print!("{result}");
     Ok(())
 }
 
 fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
-    let state_file = ReviewStateFile::for_pr(&home, pr);
+    let opened = OpenedPr::new(pr)?;
+    let state_file = opened.state_file();
     if done {
         state_file.update(|state| state.finish_refresh())?;
         println!("refresh done: marks cleared");
         return Ok(());
     }
-    let tour = Tour::load(&Tour::path_for(&home, pr))?;
-    let pinned = tour.pinned_tips();
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
-    let files = pieces::cut(source.as_ref(), &tour.base, &tour.head)?;
+    let tour = Tour::load(&opened.tour_path())?;
+    let code = opened.at_pinned_tips(&tour)?;
+    let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
     print!(
         "{}",
         RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())
@@ -219,14 +200,14 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
 }
 
 fn eval_add(pr: &PullRequestUrl, note: &str) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
+    let home = home_folder()?;
     EvalStore::in_home(&home).add(pr, note)?;
     println!("added {pr} to the test set");
     Ok(())
 }
 
 fn eval(existing_tours: bool) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
+    let home = home_folder()?;
     let report = Eval {
         store: &EvalStore::in_home(&home),
         home: &home,
@@ -250,53 +231,45 @@ fn eval(existing_tours: bool) -> anyhow::Result<()> {
 }
 
 fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
-    let tour_path = Tour::path_for(&home, pr);
+    let opened = OpenedPr::new(pr)?;
+    let tour_path = opened.tour_path();
     if !tour_path.exists() {
         anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
     }
     let tour = Tour::load(&tour_path)?;
+    let code = opened.at_pinned_tips(&tour)?;
+    let review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
 
-    // The tour is read at the commits it is pinned to, even when the PR has moved on since.
-    let pinned = tour.pinned_tips();
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let github = GitHub::from_env();
-    let source = pick_code_source(&github, pr, &pinned, &current_dir)?;
-    let review = Review::open(tour, source.as_ref(), ReviewStateFile::for_pr(&home, pr))?;
-
-    let clone = source.local_clone().map(Path::to_path_buf);
+    let clone = code.source.local_clone().map(Path::to_path_buf);
     let config = Config::load()?;
-    let pick_code_source: PickCodeSource = {
-        let (github, pr, current_dir) = (github.clone(), pr.clone(), current_dir.clone());
-        Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
-    };
+    let pick_code_source = opened.code_source_picker();
 
     let ask = AskSetup {
-        asks: Asks::load(Arc::new(ReviewStateFile::for_pr(&home, pr)))?,
+        asks: Asks::load(Arc::new(opened.state_file()))?,
         launcher: Arc::new(ClaudeCli::new()),
         clone: clone.clone(),
         settings: config.ask_settings(),
     };
     let refresher = TourRefresher {
-        home: home.clone(),
+        home: opened.home.clone(),
         pr: pr.clone(),
         pick_code_source: pick_code_source.clone(),
         writer: Arc::new(ClaudeRefreshWriter::new(
-            clone.clone().unwrap_or_else(|| home.clone()),
+            clone.clone().unwrap_or_else(|| opened.home.clone()),
         )),
     };
     let repinner = TourRepinner {
-        home,
+        home: opened.home,
         pr: pr.clone(),
         pick_code_source,
     };
     let ide = Ide::for_clone(clone, config.ide_template());
     guided_review::app::run(
         review,
-        source.into(),
+        code.source.into(),
         ask,
         ide,
-        Arc::new(github),
+        Arc::new(opened.github),
         repinner,
         refresher,
     );

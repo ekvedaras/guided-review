@@ -11,6 +11,7 @@ pub mod ide;
 pub mod image_facts;
 pub mod language;
 pub mod local_git;
+pub mod opened_pr;
 pub mod outline;
 pub mod pick_code_source;
 pub mod pieces;
