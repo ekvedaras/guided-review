@@ -6,6 +6,7 @@ use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
 use guided_review::pull_request::{PullRequestUrl, Sha};
+use guided_review::repin::repin;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
@@ -34,6 +35,8 @@ enum Command {
     },
     /// Pin the tour file of a PR to its commits, then list its errors and warnings
     Check { pr: PullRequestUrl },
+    /// Move the tour to the PR's new head and print what became of each piece
+    Repin { pr: PullRequestUrl },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -41,6 +44,7 @@ fn main() -> anyhow::Result<()> {
         Command::Outline { pr } => outline(&pr),
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
         Command::Check { pr } => check(&pr),
+        Command::Repin { pr } => repin_tour(&pr),
     }
 }
 
@@ -118,5 +122,22 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     if !report.errors.is_empty() {
         std::process::exit(1);
     }
+    Ok(())
+}
+
+fn repin_tour(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let tour_path = Tour::path_for(&home, pr);
+    let mut tour = Tour::load(&tour_path)?;
+
+    let github = GitHub::from_env();
+    let tips = github.pull_request_tips(pr)?;
+    let current_dir = std::env::current_dir().context("could not read the current folder")?;
+    let source = pick_code_source(&github, pr, &tips, &current_dir)?;
+    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
+
+    let result = repin(&mut tour, source.as_ref(), &base, &tips.head)?;
+    tour.save(&tour_path)?;
+    print!("{result}");
     Ok(())
 }

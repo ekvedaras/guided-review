@@ -9,6 +9,7 @@ pub mod outline;
 pub mod pick_code_source;
 pub mod pieces;
 pub mod pull_request;
+pub mod repin;
 pub mod show;
 pub mod symbols;
 pub mod test_pairing;
