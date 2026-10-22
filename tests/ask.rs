@@ -93,7 +93,7 @@ fn asking_about_a_step_sends_pointers_step_text_and_diff_lines_and_streams_the_a
     let context = review.ask_context(&order_step()).unwrap();
     asks.ask(id, "Why two?", &context, agent.as_mut()).unwrap();
 
-    let message = sent.entries().pop().unwrap();
+    let message = sent.agent_lines().pop().unwrap();
     for expected in [
         "https://github.com/acme/shop/pull/7",
         &head,
@@ -143,7 +143,7 @@ fn a_follow_up_sends_only_the_question() {
     asks.ask(id, "And in tests?", &context, agent.as_mut())
         .unwrap();
 
-    assert_eq!(sent.entries().pop().unwrap(), "agent: And in tests?");
+    assert_eq!(sent.agent_lines().pop().unwrap(), "agent: And in tests?");
     assert_eq!(asks.get(id).unwrap().messages.len(), 4);
 }
 
@@ -264,7 +264,7 @@ fn the_agent_is_started_in_the_clone_with_default_model_and_effort_and_can_resum
     start(&launcher, Some(SESSION));
 
     assert_eq!(
-        sent.entries(),
+        sent.agent_lines(),
         [
             "agent started in /clones/shop with opus / medium".to_string(),
             format!("agent started in /clones/shop with opus / medium, resuming {SESSION}"),

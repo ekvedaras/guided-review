@@ -8,7 +8,7 @@ use guided_review::viewer::{PieceDiff, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
 use support::FixtureRepo;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 
 struct Shop {
     repo: FixtureRepo,
@@ -297,8 +297,10 @@ fn a_note_shows_when_the_pr_has_moved_past_the_tours_head() {
     assert_eq!(note.tour_head.as_str(), shop.head);
     assert_eq!(note.pr_head.as_str(), "f00d");
     assert_eq!(
-        sent.entries(),
-        ["github: tips of https://github.com/acme/shop/pull/7"]
+        sent.github_calls(),
+        [GitHubCall::TipsOf(
+            "https://github.com/acme/shop/pull/7".parse().unwrap()
+        )]
     );
 }
 

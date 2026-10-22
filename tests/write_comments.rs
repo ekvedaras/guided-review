@@ -6,11 +6,12 @@ use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     CommentPlace, CommentRefusal, CommentResult, LineLocation, Review, ReviewStateFile, SendMode,
+    Side,
 };
 use serde_json::json;
 use support::FixtureRepo;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -205,8 +206,12 @@ fn a_comment_goes_into_the_pending_review_by_default() {
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(
-        pull.sent.entries().last().unwrap(),
-        &format!("github: add thread notes.txt RIGHT 10 to RIGHT 12 \"why?\" to {PR}")
+        pull.sent.github_calls().last().unwrap(),
+        &GitHubCall::AddThread {
+            pr: PR.parse().unwrap(),
+            place,
+            body: "why?".into()
+        }
     );
     assert!(review.comment_drafts().is_empty(), "a sent draft is gone");
     assert!(github.has_pending_review_now());
@@ -224,12 +229,22 @@ fn a_range_from_a_removed_line_to_an_added_one_goes_left_to_right() {
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();
 
-    assert!(
-        pull.sent
-            .entries()
-            .last()
-            .unwrap()
-            .contains("notes.txt LEFT 10 to RIGHT 10 \"renamed\"")
+    assert_eq!(
+        pull.sent.github_calls().last().unwrap(),
+        &GitHubCall::AddThread {
+            pr: PR.parse().unwrap(),
+            place: place.clone(),
+            body: "renamed".into()
+        }
+    );
+    assert_eq!(
+        (
+            place.start.side,
+            place.start.line,
+            place.end.side,
+            place.end.line
+        ),
+        (Side::Base, 10, Side::Head, 10)
     );
 }
 
@@ -272,12 +287,11 @@ fn comment_now_posts_at_once_and_leaves_no_pending_review() {
     let result = review.send_comment(&place, SendMode::CommentNow, &github);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
-    assert!(
-        pull.sent
-            .entries()
-            .iter()
-            .any(|e| e.starts_with("github: comment now notes.txt RIGHT 10 \"now\""))
-    );
+    assert!(pull.sent.github_calls().contains(&GitHubCall::CommentNow {
+        pr: PR.parse().unwrap(),
+        place,
+        body: "now".into()
+    }));
     assert!(review.can_comment_now());
 }
 
@@ -289,7 +303,7 @@ fn comment_now_is_refused_when_a_pending_review_appeared_meanwhile_and_the_text_
     review.pull_pending_review(&github).unwrap();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "now");
-    github.a_pending_review_appears_on_comment_now();
+    github.inject(GitHubFault::PendingReviewAppearsOnCommentNow);
 
     let result = review.send_comment(&place, SendMode::CommentNow, &github);
 
@@ -306,7 +320,7 @@ fn comment_now_is_refused_when_a_pending_review_appeared_meanwhile_and_the_text_
 fn thread_null_is_a_failure_that_keeps_the_text_and_is_not_retried() {
     let pull = Pull::new();
     let github = pull.github();
-    github.answer_new_threads_with_null(true);
+    github.inject(GitHubFault::NewThreadsAnswerNull);
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "lost?");
@@ -329,7 +343,7 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later");
-    github.lose_connection(true);
+    github.inject(GitHubFault::ConnectionLost);
 
     let result = review.send_comment(&place, SendMode::AddToReview, &github);
 
@@ -342,7 +356,7 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
         "it is in the state file"
     );
 
-    github.lose_connection(false);
+    github.heal(&GitHubFault::ConnectionLost);
     review.send_queued_comments(&github).unwrap();
 
     assert!(review.queued_comments().is_empty());
@@ -356,7 +370,7 @@ fn a_queued_comment_keeps_waiting_while_github_is_unreachable() {
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later");
-    github.lose_connection(true);
+    github.inject(GitHubFault::ConnectionLost);
     review
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();
@@ -386,11 +400,11 @@ fn nothing_is_written_while_the_tour_is_behind_the_pr_head() {
     );
     assert!(
         pull.sent
-            .entries()
+            .github_calls()
             .iter()
-            .all(|entry| !entry.contains("add thread")),
+            .all(|call| !matches!(call, GitHubCall::AddThread { .. })),
         "{:?}",
-        pull.sent.entries()
+        pull.sent.github_calls()
     );
     assert_eq!(review.comment_drafts()[0].body, "stale");
 }
@@ -440,9 +454,9 @@ fn a_draft_written_before_a_repin_keeps_its_text_but_is_not_sent_to_the_old_line
     assert_eq!(repinned.comment_drafts()[0].body, "why ten?");
     assert!(
         pull.sent
-            .entries()
+            .github_calls()
             .iter()
-            .all(|entry| !entry.contains("add thread"))
+            .all(|call| !matches!(call, GitHubCall::AddThread { .. }))
     );
 }
 
@@ -453,7 +467,7 @@ fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later please");
     let offline = pull.github();
-    offline.lose_connection(true);
+    offline.inject(GitHubFault::ConnectionLost);
     review
         .send_comment(&place, SendMode::AddToReview, &offline)
         .unwrap();
@@ -462,12 +476,12 @@ fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
     let later = pull.repo.commit("later");
     let mut repinned = pull.open_at(&later);
 
-    let before = pull.sent.entries().len();
+    let before = pull.sent.github_calls().len();
     repinned
         .send_queued_comments(&pull.github_at(&later))
         .unwrap();
 
     assert_eq!(repinned.queued_comments().len(), 1);
     assert_eq!(repinned.queued_comments()[0].draft.body, "later please");
-    assert_eq!(pull.sent.entries().len(), before);
+    assert_eq!(pull.sent.github_calls().len(), before);
 }

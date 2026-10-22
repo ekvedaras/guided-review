@@ -12,7 +12,7 @@ use guided_review::viewer::{
 };
 use serde_json::json;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use support::{FixtureRepo, png_of, svg_of};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -269,9 +269,11 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
 
     assert_eq!(result, Some(CommentResult::Sent));
     assert!(place.is_file_comment());
-    assert!(sent.entries().contains(&format!(
-        "github: add thread logo.png FILE \"is the red intended?\" to {PR}"
-    )));
+    assert!(sent.github_calls().contains(&GitHubCall::AddThread {
+        pr: PR.parse().unwrap(),
+        place,
+        body: "is the red intended?".into()
+    }));
 }
 
 #[test]

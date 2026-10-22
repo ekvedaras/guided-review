@@ -10,7 +10,7 @@ use guided_review::viewer::{
 use serde_json::{Value, json};
 use support::FixtureRepo;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 
 struct Shop {
     repo: FixtureRepo,
@@ -294,8 +294,10 @@ fn threads_are_pulled_from_github_for_the_tours_pr() {
     review.pull_threads(&github).unwrap();
 
     assert_eq!(
-        sent.entries(),
-        ["github: threads of https://github.com/acme/shop/pull/7"]
+        sent.github_calls(),
+        [GitHubCall::ThreadsOf(
+            "https://github.com/acme/shop/pull/7".parse().unwrap()
+        )]
     );
     review.go_to(&"order".into());
     assert_eq!(ids(&review.current_step().unwrap().threads), ["t1"]);

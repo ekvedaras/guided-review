@@ -8,7 +8,7 @@ use guided_review::viewer::{Review, ReviewStateFile, ViewedState};
 use serde_json::json;
 use support::FixtureRepo;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -216,7 +216,7 @@ fn a_step_without_files_never_ticks_from_github() {
 fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
     let shop = Shop::with_pull();
     let github = all_unviewed(&shop);
-    github.pushes_fail(true);
+    github.inject(GitHubFault::ViewedPushesFail);
     let mut review = shop.open();
     review.tick(&"c-only".into()).unwrap();
 
@@ -224,7 +224,7 @@ fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
     assert!(review.not_synced());
     drop(review);
 
-    github.pushes_fail(false);
+    github.heal(&GitHubFault::ViewedPushesFail);
     let mut review = shop.open();
     assert!(review.not_synced());
     review.sync(&github).unwrap();
@@ -238,7 +238,7 @@ fn a_queued_local_edit_beats_what_github_says() {
     let github = all_unviewed(&shop);
     let mut review = shop.open();
     review.sync(&github).unwrap();
-    github.pushes_fail(true);
+    github.inject(GitHubFault::ViewedPushesFail);
     review.tick(&"c-only".into()).unwrap();
     github.set_viewed("c.txt", ViewedState::Unviewed);
     github.set_viewed("a.txt", ViewedState::Viewed);
@@ -246,7 +246,7 @@ fn a_queued_local_edit_beats_what_github_says() {
     assert!(review.sync(&github).is_err());
 
     assert_eq!(ticked(&review), ["a-only", "c-only"]);
-    github.pushes_fail(false);
+    github.heal(&GitHubFault::ViewedPushesFail);
     review.sync(&github).unwrap();
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Viewed);
 }
@@ -255,7 +255,7 @@ fn a_queued_local_edit_beats_what_github_says() {
 fn without_access_sync_switches_off_with_a_banner_and_ticks_still_work() {
     let shop = Shop::with_pull();
     let github = all_unviewed(&shop);
-    github.refuse_everything("GitHub refused the token");
+    github.inject(GitHubFault::TokenRefused("GitHub refused the token".into()));
     let mut review = shop.open();
     assert_eq!(review.sync_banner(), None);
 
@@ -263,10 +263,10 @@ fn without_access_sync_switches_off_with_a_banner_and_ticks_still_work() {
     assert_eq!(review.sync_banner(), Some("GitHub refused the token"));
 
     review.tick(&"c-only".into()).unwrap();
-    let calls_before = shop.sent.entries().len();
+    let calls_before = shop.sent.github_calls().len();
     review.sync(&github).unwrap();
     assert_eq!(ticked(&review), ["c-only"]);
-    assert_eq!(shop.sent.entries().len(), calls_before);
+    assert_eq!(shop.sent.github_calls().len(), calls_before);
     assert!(!review.not_synced());
 }
 
@@ -286,8 +286,8 @@ fn nothing_syncs_while_the_tour_is_not_at_the_pull_request_head() {
     assert!(review.not_synced());
     assert!(
         shop.sent
-            .entries()
+            .github_calls()
             .iter()
-            .all(|entry| entry.starts_with("github: tips"))
+            .all(|call| matches!(call, GitHubCall::TipsOf(_)))
     );
 }

@@ -10,7 +10,7 @@ use guided_review::viewer::{
 use serde_json::json;
 use support::FixtureRepo;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -134,11 +134,10 @@ fn finishing_sends_the_verdict_and_body() {
     let result = review.finish_review(ReviewVerdict::Approve, "ship it", &github);
 
     assert_eq!(result, FinishResult::Sent);
-    assert!(
-        pull.sent
-            .entries()
-            .contains(&"github: submit APPROVE \"ship it\"".to_string())
-    );
+    assert!(pull.sent.github_calls().contains(&GitHubCall::Submit {
+        verdict: ReviewVerdict::Approve,
+        body: "ship it".into()
+    }));
 }
 
 #[test]
@@ -157,9 +156,9 @@ fn approving_or_requesting_changes_on_your_own_pr_is_refused_before_anything_is_
     assert!(
         !pull
             .sent
-            .entries()
+            .github_calls()
             .iter()
-            .any(|entry| entry.contains("submit"))
+            .any(|call| matches!(call, GitHubCall::Submit { .. }))
     );
 }
 
@@ -201,7 +200,7 @@ fn a_failed_finish_says_why() {
     let github = pull.github();
     let mut review = pull.open();
     review.pull_viewer_authorship(&github).unwrap();
-    github.lose_connection(true);
+    github.inject(GitHubFault::ConnectionLost);
 
     assert_eq!(
         review.finish_review(ReviewVerdict::Approve, "", &github),

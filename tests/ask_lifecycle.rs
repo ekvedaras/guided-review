@@ -255,7 +255,7 @@ fn after_a_restart_a_follow_up_resumes_the_session_and_sends_only_the_question()
     asks.ask(id, "And in tests?", &context, agent.as_mut())
         .unwrap();
 
-    let entries = sent.entries();
+    let entries = sent.agent_lines();
     assert_eq!(
         entries[0],
         "agent started in /clones/shop with opus / medium"
@@ -294,7 +294,10 @@ fn stopping_a_turn_keeps_the_answer_so_far_marked_stopped_and_the_session() {
         .ask(&message, &mut |line| asks.apply_line(id, line))
         .unwrap();
 
-    assert!(sent.entries().contains(&"agent: stop the turn".to_string()));
+    assert!(
+        sent.agent_lines()
+            .contains(&"agent: stop the turn".to_string())
+    );
     let ask = asks.get(id).unwrap();
     assert_eq!(ask.messages[1].text, "It returns");
     assert!(ask.messages[1].stopped);

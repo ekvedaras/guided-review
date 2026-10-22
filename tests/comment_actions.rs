@@ -12,7 +12,7 @@ use guided_review::viewer::{
 use serde_json::json;
 use support::FixtureRepo;
 use support::app_path::AppPath;
-use support::fake_ports::{FakeGitHub, SentLog};
+use support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -146,11 +146,10 @@ fn resolving_a_thread_tells_github_and_shows_it_resolved() {
     );
 
     assert_eq!(result, ThreadActionResult::Done);
-    assert!(
-        pull.sent
-            .entries()
-            .contains(&"github: resolve T1".to_string())
-    );
+    assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
+        thread_id: "T1".into(),
+        resolved: true
+    }));
     assert!(shown_thread(&review).is_resolved);
 }
 
@@ -170,11 +169,10 @@ fn unresolving_a_thread_tells_github_and_shows_it_open() {
         &github,
     );
 
-    assert!(
-        pull.sent
-            .entries()
-            .contains(&"github: unresolve T1".to_string())
-    );
+    assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
+        thread_id: "T1".into(),
+        resolved: false
+    }));
     assert!(!shown_thread(&review).is_resolved);
 }
 
@@ -220,12 +218,15 @@ fn a_reaction_is_added_and_removed_on_a_click() {
     assert_eq!(rocket(&review).count, 0);
     assert_eq!(
         pull.sent
-            .entries()
-            .iter()
-            .filter(|entry| entry.contains("ROCKET"))
-            .cloned()
+            .github_calls()
+            .into_iter()
+            .filter(|call| matches!(call, GitHubCall::SetReaction { .. }))
             .collect::<Vec<_>>(),
-        ["github: react ROCKET on C1", "github: unreact ROCKET on C1"]
+        [true, false].map(|on| GitHubCall::SetReaction {
+            comment_id: "C1".into(),
+            reaction: Reaction::Rocket,
+            on
+        })
     );
 }
 
@@ -308,9 +309,9 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
     assert!(
         !pull
             .sent
-            .entries()
+            .github_calls()
             .iter()
-            .any(|entry| entry.contains("reply to")),
+            .any(|call| matches!(call, GitHubCall::Reply { .. })),
         "nothing was sent"
     );
     assert!(!review.can_comment_now());
@@ -322,7 +323,7 @@ fn a_failed_action_says_why_and_changes_nothing() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
-    github.lose_connection(true);
+    github.inject(GitHubFault::ConnectionLost);
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
@@ -452,7 +453,7 @@ fn a_failed_reply_keeps_its_draft() {
     let mut review = pull.open();
     review.open_reply("T1").unwrap();
     review.edit_reply("T1", "because").unwrap();
-    github.lose_connection(true);
+    github.inject(GitHubFault::ConnectionLost);
 
     review.act_on_thread(
         ThreadAction::Reply {
@@ -491,9 +492,9 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     assert!(
         !pull
             .sent
-            .entries()
+            .github_calls()
             .iter()
-            .any(|entry| entry.contains("reply to")),
+            .any(|call| matches!(call, GitHubCall::Reply { .. })),
         "nothing was sent"
     );
     assert_eq!(review.reply_draft("T1"), Some("because"), "the text stays");
