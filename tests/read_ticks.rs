@@ -176,14 +176,17 @@ fn sections_a_newer_app_wrote_survive_a_tick() {
     std::fs::create_dir_all(shop.state_path().parent().unwrap()).unwrap();
     std::fs::write(
         shop.state_path(),
-        json!({"read_ticks": {}, "asks": [{"question": "why?"}]}).to_string(),
+        json!({"read_ticks": {}, "bookmarks": [{"question": "why?"}]}).to_string(),
     )
     .unwrap();
     let mut review = shop.open();
 
     review.tick(&"emails".into()).unwrap();
 
-    assert_eq!(shop.state_on_disk()["asks"], json!([{"question": "why?"}]));
+    assert_eq!(
+        shop.state_on_disk()["bookmarks"],
+        json!([{"question": "why?"}])
+    );
 }
 
 #[test]

@@ -234,15 +234,16 @@ impl Review {
         if !self.reading_order.contains(id) {
             return Ok(());
         }
-        self.state.tick(id, &Sha::new(&self.tour.head));
+        let head = Sha::new(&self.tour.head);
+        self.state.tick(id, &head);
         self.unfolded.remove(id);
-        self.state_file.save(&self.state)
+        self.state_file.update(|saved| saved.tick(id, &head))
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
         self.state.untick(id);
         self.unfolded.remove(id);
-        self.state_file.save(&self.state)
+        self.state_file.update(|saved| saved.untick(id))
     }
 
     /// A ticked step folds; the reviewer can open it again without losing the tick.

@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 use guided_review::app::AskSetup;
-use guided_review::ask_store::FileAskStore;
 use guided_review::claude_cli::ClaudeCli;
 use guided_review::config::Config;
 use guided_review::github::GitHub;
@@ -171,7 +170,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let review = Review::open(tour, source.as_ref(), ReviewStateFile::for_pr(&home, pr))?;
 
     let ask = AskSetup {
-        asks: Asks::load(Arc::new(FileAskStore::new(&home, pr)))?,
+        asks: Asks::load(Arc::new(ReviewStateFile::for_pr(&home, pr)))?,
         launcher: Arc::new(ClaudeCli::new()),
         clone: LocalGit::find(&pr.repo, &current_dir)?.map(|clone| clone.root().to_path_buf()),
         settings: Config::load()?.ask_settings(),

@@ -2,9 +2,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use guided_review::ask_store::FileAskStore;
 use guided_review::claude_cli::ClaudeCli;
-use guided_review::viewer::{AgentLaunch, AgentLauncher, Asks, Place};
+use guided_review::pull_request::Sha;
+use guided_review::viewer::{AgentLaunch, AgentLauncher, Asks, Place, ReviewStateFile};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -126,15 +126,15 @@ fn asks_go_into_the_per_pr_state_file_next_to_whatever_else_it_holds() {
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
     let file = home.path().join(".guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, r#"{"read_ticks":{"order":"abc"}}"#).unwrap();
-    let store = Arc::new(FileAskStore::new(home.path(), &pr));
+    std::fs::write(&file, r#"{"read_ticks":{"order":{"head":"abc"}}}"#).unwrap();
+    let store = Arc::new(ReviewStateFile::for_pr(home.path(), &pr));
 
     let mut asks = Asks::load(store.clone()).unwrap();
     let id = asks.start(Place::Tour, "head1");
     asks.begin_turn(id, "What is this?", "context");
 
     let state: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!(state["read_ticks"], json!({"order":"abc"}));
+    assert_eq!(state["read_ticks"], json!({"order":{"head":"abc"}}));
     assert_eq!(state["asks"][0]["messages"][0]["text"], "What is this?");
     let reloaded = Asks::load(store).unwrap();
     assert_eq!(reloaded.count_at(&Place::Tour), 1);
@@ -145,7 +145,27 @@ fn without_a_state_file_there_are_no_asks() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
 
-    let asks = Asks::load(Arc::new(FileAskStore::new(home.path(), &pr))).unwrap();
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
 
     assert_eq!(asks.count_at(&Place::Tour), 0);
+}
+
+#[test]
+fn saving_asks_keeps_the_read_ticks_and_the_other_way_round() {
+    let home = TempDir::new().unwrap();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let mut asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+
+    file.update(|state| state.tick(&"order".into(), &Sha::new("abc")))
+        .unwrap();
+    let id = asks.start(Place::Tour, "head1");
+    asks.begin_turn(id, "What is this?", "context");
+    file.update(|state| state.untick(&"other".into())).unwrap();
+
+    let text =
+        std::fs::read_to_string(home.path().join(".guided-review/state/acme/shop/7.json")).unwrap();
+    let state: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(state["read_ticks"]["order"]["head"], "abc");
+    assert_eq!(state["asks"][0]["messages"][0]["text"], "What is this?");
 }

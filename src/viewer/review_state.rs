@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pull_request::{PullRequestUrl, Sha};
 
+use super::ask::{Ask, AskStore};
 use super::review::StepId;
 
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
@@ -16,6 +17,8 @@ use super::review::StepId;
 pub struct ReviewState {
     #[serde(default)]
     read_ticks: BTreeMap<StepId, ReadTick>,
+    #[serde(default)]
+    asks: Vec<Ask>,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -76,6 +79,14 @@ impl ReviewStateFile {
         }
     }
 
+    /// Reads the file again before changing it: the viewer and the Asks each keep their own
+    /// copy in memory, and neither may write the other's section back stale.
+    pub fn update(&self, change: impl FnOnce(&mut ReviewState)) -> anyhow::Result<()> {
+        let mut state = self.load()?;
+        change(&mut state);
+        self.save(&state)
+    }
+
     pub fn save(&self, state: &ReviewState) -> anyhow::Result<()> {
         let _lock = self.lock()?;
         self.write(state)
@@ -110,5 +121,15 @@ impl ReviewStateFile {
             .with_context(|| format!("could not write {}", temp.display()))?;
         std::fs::rename(&temp, &self.path)
             .with_context(|| format!("could not write {}", self.path.display()))
+    }
+}
+
+impl AskStore for ReviewStateFile {
+    fn load(&self) -> anyhow::Result<Vec<Ask>> {
+        Ok(ReviewStateFile::load(self)?.asks)
+    }
+
+    fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {
+        self.update(|state| state.asks = asks.to_vec())
     }
 }
