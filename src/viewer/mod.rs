@@ -7,6 +7,7 @@ mod ask;
 mod ask_context;
 mod comments;
 mod diff_display;
+mod display_options;
 mod finish_review;
 mod github_link;
 mod highlight;

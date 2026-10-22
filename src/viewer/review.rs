@@ -22,6 +22,7 @@ use super::comments::{
     Origin, Outcome, QueuedComment, SendMode,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
+use super::display_options::DisplayOptions;
 use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
@@ -123,12 +124,8 @@ pub struct Review {
     /// Skim and ticked steps start folded; these are the steps whose fold the reviewer flipped.
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
-    highlights: Highlights,
     viewed_sync: ViewedSync,
     repin_running: bool,
-    files_at_head: FilesAtHead,
-    more_context: HashMap<MoreContext, usize>,
-    ignores_whitespace: bool,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<String, Vec<ChangedFile>>,
@@ -139,7 +136,7 @@ pub struct Review {
     has_pending_review: Option<bool>,
     /// Unknown until GitHub answers; Approve and Request changes are only offered when it is known to be `false`.
     viewer_did_author: Option<bool>,
-    image_previews: HashMap<String, ImagePreview>,
+    display_options: DisplayOptions,
     saves: Arc<SaveOrder>,
     typing_is_unsaved: AtomicBool,
 }
@@ -190,18 +187,14 @@ impl Review {
             state,
             state_file,
             fold_flipped: BTreeSet::new(),
-            highlights: Highlights::default(),
             viewed_sync: ViewedSync::default(),
             repin_running: false,
-            files_at_head: FilesAtHead::default(),
-            more_context: HashMap::new(),
-            ignores_whitespace: false,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             selection: None,
             has_pending_review: None,
             viewer_did_author: None,
-            image_previews: HashMap::new(),
+            display_options: DisplayOptions::default(),
             saves: Arc::default(),
             typing_is_unsaved: AtomicBool::new(false),
         })
@@ -217,7 +210,7 @@ impl Review {
     }
 
     pub fn set_highlights(&mut self, highlights: Highlights) {
-        self.highlights = highlights;
+        self.display_options.set_highlights(highlights);
     }
 
     /// Context lines come from the files at head, read off the main thread like the colours.
@@ -226,7 +219,7 @@ impl Review {
     }
 
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) {
-        self.files_at_head = files_at_head;
+        self.display_options.set_files_at_head(files_at_head);
         self.place_threads();
     }
 
@@ -236,7 +229,7 @@ impl Review {
         let mut requests: Vec<ImagePreviewRequest> = Vec::new();
         for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
             let path = &piece.id.path;
-            let is_wanted = !self.image_previews.contains_key(path)
+            let is_wanted = self.display_options.image_preview(path).is_none()
                 && !requests.iter().any(|request| request.path() == path);
             let file = self.files.iter().find(|file| file.path == *path);
             if let (true, Some(file)) = (is_wanted, file) {
@@ -248,27 +241,24 @@ impl Review {
 
     /// A preview loaded for another base or head, e.g. before a re-open, is dropped. Says whether it was kept.
     pub fn set_image_preview(&mut self, preview: ImagePreview) -> bool {
-        if !preview.is_of(&self.base, &self.head) {
-            return false;
-        }
-        self.image_previews.insert(preview.path.clone(), preview);
-        true
+        self.display_options
+            .set_image_preview(preview, &self.base, &self.head)
     }
 
     pub fn image_preview(&self, path: &str) -> Option<&ImagePreview> {
-        self.image_previews.get(path)
+        self.display_options.image_preview(path)
     }
 
     pub fn show_more_context(&mut self, more: &MoreContext) {
-        DiffDisplay::more_lines(&mut self.more_context, more);
+        self.display_options.show_more_context(more);
     }
 
     pub fn ignores_whitespace(&self) -> bool {
-        self.ignores_whitespace
+        self.display_options.ignores_whitespace()
     }
 
     pub fn toggle_ignore_whitespace(&mut self) {
-        self.ignores_whitespace = !self.ignores_whitespace;
+        self.display_options.toggle_ignore_whitespace();
     }
 
     pub fn screen(&self) -> &Screen {
@@ -319,7 +309,7 @@ impl Review {
             self.threads.in_step(id),
             &page.pieces,
             &self.thread_fold_flipped,
-            &self.files_at_head,
+            self.display_options.files_at_head(),
             self.state.reply_drafts(),
         );
         if let Some(record) = self.repin_record() {
@@ -588,7 +578,7 @@ impl Review {
                 self.threads.in_safety_net(),
                 &page.pieces,
                 &self.thread_fold_flipped,
-                &self.files_at_head,
+                self.display_options.files_at_head(),
                 self.state.reply_drafts(),
             );
             page
@@ -606,13 +596,7 @@ impl Review {
     }
 
     fn display<'a>(&'a self, links: &'a GitHubLinks<'a>) -> DiffDisplay<'a> {
-        DiffDisplay {
-            highlights: &self.highlights,
-            files_at_head: &self.files_at_head,
-            more_context: &self.more_context,
-            ignores_whitespace: self.ignores_whitespace,
-            links,
-        }
+        self.display_options.display(links)
     }
 
     fn reading_order(&self) -> Vec<Screen> {
@@ -634,7 +618,7 @@ impl Review {
         let links = self.links();
         let display = DiffDisplay {
             highlights: &Highlights::default(),
-            files_at_head: &self.files_at_head,
+            files_at_head: self.display_options.files_at_head(),
             more_context: &HashMap::new(),
             ignores_whitespace: false,
             links: &links,
