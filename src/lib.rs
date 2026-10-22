@@ -1,3 +1,4 @@
+pub mod app;
 pub mod code_source;
 pub mod config;
 pub mod coverage;

@@ -5,12 +5,13 @@ use guided_review::github::GitHub;
 use guided_review::outline::Outline;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
-use guided_review::pull_request::{PullRequestUrl, Sha};
+use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::repin::repin;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
+use guided_review::viewer::Review;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -37,6 +38,8 @@ enum Command {
     Check { pr: PullRequestUrl },
     /// Move the tour to the PR's new head and print what became of each piece
     Repin { pr: PullRequestUrl },
+    /// Open the app on the tour of a PR
+    Open { pr: PullRequestUrl },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -45,6 +48,7 @@ fn main() -> anyhow::Result<()> {
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
         Command::Check { pr } => check(&pr),
         Command::Repin { pr } => repin_tour(&pr),
+        Command::Open { pr } => open(&pr),
     }
 }
 
@@ -139,5 +143,26 @@ fn repin_tour(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let result = repin(&mut tour, source.as_ref(), &base, &tips.head)?;
     tour.save(&tour_path)?;
     print!("{result}");
+    Ok(())
+}
+
+fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let tour_path = Tour::path_for(&home, pr);
+    if !tour_path.exists() {
+        anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
+    }
+    let tour = Tour::load(&tour_path)?;
+
+    // The tour is read at the commits it is pinned to, even when the PR has moved on since.
+    let pinned = PullRequestTips {
+        base_branch_tip: Sha::new(&tour.base),
+        head: Sha::new(&tour.head),
+    };
+    let current_dir = std::env::current_dir().context("could not read the current folder")?;
+    let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
+    let review = Review::open(tour, source.as_ref())?;
+
+    guided_review::app::run(review);
     Ok(())
 }
