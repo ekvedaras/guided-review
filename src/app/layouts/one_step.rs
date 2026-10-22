@@ -2,24 +2,31 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Window, actions, div, px,
+    Subscription, Task, Window, actions, div, px,
 };
 
 use std::sync::Arc;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
 use crate::app::components::diff_view::DiffView;
+use crate::app::components::fold_toggle::FoldToggle;
+use crate::app::components::old_head_note::OldHeadNote;
 use crate::app::components::palette::{Palette, TEXT_FONT};
+use crate::app::components::safety_net_view::SafetyNetView;
+use crate::app::components::step_notes::StepNotes;
 use crate::code_source::CodeSource;
-use crate::viewer::{Place, Review, Screen, StepId, StepPage};
+use crate::viewer::{GitHubPort, Place, Review, Screen, StepId, StepPage};
 
 actions!(one_step, [GoForward, GoBack]);
 
 /// The one layout: step tree on the left, one screen on the right (the summary, or one step).
 pub struct OneStepLayout {
     review: Review,
+    github: Arc<dyn GitHubPort>,
     focus: FocusHandle,
     ask: Entity<AskPanel>,
+    pr_head_check: Option<Task<()>>,
+    _pr_head_on_focus: Subscription,
 }
 
 impl OneStepLayout {
@@ -30,6 +37,8 @@ impl OneStepLayout {
         review: Review,
         source: Arc<dyn CodeSource>,
         ask: AskSetup,
+        github: Arc<dyn GitHubPort>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let request = review.highlight_request();
@@ -45,9 +54,23 @@ impl OneStepLayout {
             .ok();
         })
         .detach();
+        let pr_head_on_focus = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.check_pr_head(cx);
+            }
+        });
         let focus = cx.focus_handle();
         let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
-        Self { review, focus, ask }
+        let mut layout = Self {
+            review,
+            github,
+            focus,
+            ask,
+            pr_head_check: None,
+            _pr_head_on_focus: pr_head_on_focus,
+        };
+        layout.check_pr_head(cx);
+        layout
     }
 
     fn ask_button(
@@ -65,6 +88,26 @@ impl OneStepLayout {
                 });
             },
         ))
+    }
+
+    fn check_pr_head(&mut self, cx: &mut Context<Self>) {
+        let pr = self.review.pr().clone();
+        let github = self.github.clone();
+        self.pr_head_check = Some(cx.spawn(async move |this, cx| {
+            let tips = cx
+                .background_executor()
+                .spawn(async move { github.pull_request_tips(&pr) })
+                .await;
+            match tips {
+                Ok(tips) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.review.pr_head_is(tips.head);
+                        cx.notify();
+                    });
+                }
+                Err(error) => eprintln!("warning: could not check the PR's head: {error:#}"),
+            }
+        }));
     }
 
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
@@ -127,15 +170,46 @@ impl OneStepLayout {
             .child(progress_row)
             .child(summary_row)
             .children(step_rows)
+            .children(self.safety_net_row(cx))
+    }
+
+    fn safety_net_row(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let page = self.review.safety_net()?;
+        Some(
+            div()
+                .id("safety-net")
+                .px_3()
+                .py_1()
+                .cursor_pointer()
+                .when_current(self.review.screen() == &Screen::SafetyNet)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.review.go_to_safety_net();
+                    cx.notify();
+                }))
+                .child(format!("{} ({})", SafetyNetView::TITLE, page.pieces.len())),
+        )
     }
 
     fn screen(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(page) = self.review.current_step() else {
-            let button =
-                self.ask_button("ask-tour".into(), Place::Tour, "the whole tour".into(), cx);
-            return summary_screen(self.review.title(), self.review.summary(), button)
-                .into_any_element();
-        };
+        match self.review.screen() {
+            Screen::Summary => {
+                let button =
+                    self.ask_button("ask-tour".into(), Place::Tour, "the whole tour".into(), cx);
+                summary_screen(self.review.title(), self.review.summary(), button)
+                    .into_any_element()
+            }
+            Screen::Step(_) => match self.review.current_step() {
+                Some(page) => self.step_screen(page, cx).into_any_element(),
+                None => div().into_any_element(),
+            },
+            Screen::SafetyNet => match self.review.safety_net() {
+                Some(page) => SafetyNetView::new(page).into_any_element(),
+                None => div().into_any_element(),
+            },
+        }
+    }
+
+    fn step_screen(&self, page: StepPage<'_>, cx: &mut Context<Self>) -> impl IntoElement {
         let step_id = StepId::from(page.step.id.as_str());
         let step_button = self.ask_button(
             format!("ask-step-{step_id}"),
@@ -165,7 +239,7 @@ impl OneStepLayout {
                     .child(DiffView::new(piece.clone()))
             })
             .collect();
-        step_screen(page, step_button, pieces, cx).into_any_element()
+        step_screen(page, step_button, pieces, cx)
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
@@ -230,26 +304,31 @@ fn step_screen(
     cx: &mut Context<OneStepLayout>,
 ) -> impl IntoElement {
     let step = page.step;
-    let screen = div()
+    let id = StepId::from(step.id.as_str());
+    let fold_toggle = (page.is_folded || step.skim || page.is_ticked).then(|| {
+        FoldToggle::new(
+            page.is_folded,
+            page.pieces.len(),
+            cx.listener(move |this, _, _, cx| {
+                this.review.toggle_fold(&id);
+                cx.notify();
+            }),
+        )
+    });
+    let pieces = if page.is_folded { Vec::new() } else { pieces };
+    div()
         .flex()
         .flex_col()
         .gap_3()
-        .child(step_header(&page, cx));
-    if page.is_folded {
-        return screen.child(
-            div()
-                .text_sm()
-                .text_color(Palette::muted_text())
-                .child("Folded because it is read. Click the title to open it."),
-        );
-    }
-    screen
+        .child(step_header(&page, cx))
         .child(
             div()
                 .text_color(Palette::muted_text())
                 .child(step.why.clone()),
         )
         .child(div().flex().child(ask))
+        .child(StepNotes::of(step))
+        .children(fold_toggle)
         .children(pieces)
 }
 
@@ -260,7 +339,7 @@ fn step_header(page: &StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl Int
         .flex_1()
         .text_xl()
         .child(page.step.title.clone());
-    let title = if page.is_ticked {
+    let title = if page.is_ticked || page.step.skim {
         let id = id.clone();
         title
             .cursor_pointer()
@@ -318,12 +397,19 @@ impl Render for OneStepLayout {
             .child(self.sidebar(cx))
             .child(
                 div()
-                    .id("screen")
                     .flex_1()
                     .h_full()
-                    .overflow_y_scroll()
-                    .p_6()
-                    .child(self.screen(cx)),
+                    .flex()
+                    .flex_col()
+                    .children(self.review.old_head().map(OldHeadNote::new))
+                    .child(
+                        div()
+                            .id("screen")
+                            .flex_1()
+                            .overflow_y_scroll()
+                            .p_6()
+                            .child(self.screen(cx)),
+                    ),
             )
             .when(self.ask.read(cx).is_open(), |row| {
                 row.child(self.ask.clone())

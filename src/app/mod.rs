@@ -10,13 +10,18 @@ use gpui::{App, AppContext, Bounds, Focusable, KeyBinding, WindowBounds, WindowO
 use gpui_platform::application;
 
 use crate::code_source::CodeSource;
-use crate::viewer::Review;
+use crate::viewer::{GitHubPort, Review};
 pub use components::ask_panel::AskSetup;
 use components::palette::{Appearance, Palette};
 use layouts::one_step::{GoBack, GoForward, OneStepLayout};
 
 /// Blocks until the window is closed.
-pub fn run(review: Review, source: Arc<dyn CodeSource>, ask: AskSetup) {
+pub fn run(
+    review: Review,
+    source: Arc<dyn CodeSource>,
+    ask: AskSetup,
+    github: Arc<dyn GitHubPort>,
+) {
     application().run(move |cx: &mut App| {
         let typing_is_not_navigation = format!("{} && !AskInput", OneStepLayout::KEY_CONTEXT);
         cx.bind_keys([
@@ -32,7 +37,7 @@ pub fn run(review: Review, source: Arc<dyn CodeSource>, ask: AskSetup) {
         };
         cx.open_window(options, |window, cx| {
             Palette::set_active(Appearance::of_window(window.appearance()));
-            let layout = cx.new(|cx| OneStepLayout::new(review, source, ask, cx));
+            let layout = cx.new(|cx| OneStepLayout::new(review, source, ask, github, window, cx));
             layout.update(cx, |_, cx| {
                 cx.observe_window_appearance(window, |_, window, cx| {
                     Palette::set_active(Appearance::of_window(window.appearance()));

@@ -1,0 +1,59 @@
+use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
+
+use crate::tour::Step;
+
+use super::palette::Palette;
+
+/// The check hint and the TLDR the tour writer put on a step.
+#[derive(IntoElement)]
+pub struct StepNotes {
+    check: Option<String>,
+    tldr: Vec<String>,
+}
+
+impl StepNotes {
+    pub fn of(step: &Step) -> Self {
+        Self {
+            check: step.check.clone(),
+            tldr: step.tldr.clone(),
+        }
+    }
+}
+
+impl RenderOnce for StepNotes {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let check = self.check.map(|check| {
+            div()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .border_1()
+                .border_color(Palette::border())
+                .bg(Palette::current())
+                .child(format!("Check: {check}"))
+        });
+        let tldr = (!self.tldr.is_empty()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(Palette::muted_text())
+                        .child("TLDR"),
+                )
+                .children(
+                    self.tldr
+                        .into_iter()
+                        .map(|line| div().child(format!("• {line}"))),
+                )
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(check)
+            .children(tldr)
+    }
+}

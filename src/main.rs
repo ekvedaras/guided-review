@@ -1,7 +1,7 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-
-use std::sync::Arc;
 
 use guided_review::app::AskSetup;
 use guided_review::claude_cli::ClaudeCli;
@@ -166,7 +166,8 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
         head: Sha::new(&tour.head),
     };
     let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = pick_code_source(&GitHub::from_env(), pr, &pinned, &current_dir)?;
+    let github = GitHub::from_env();
+    let source = pick_code_source(&github, pr, &pinned, &current_dir)?;
     let review = Review::open(tour, source.as_ref(), ReviewStateFile::for_pr(&home, pr))?;
 
     let ask = AskSetup {
@@ -175,6 +176,6 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
         clone: LocalGit::find(&pr.repo, &current_dir)?.map(|clone| clone.root().to_path_buf()),
         settings: Config::load()?.ask_settings(),
     };
-    guided_review::app::run(review, source.into(), ask);
+    guided_review::app::run(review, source.into(), ask, Arc::new(github));
     Ok(())
 }
