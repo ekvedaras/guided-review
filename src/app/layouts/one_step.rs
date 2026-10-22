@@ -67,6 +67,7 @@ pub struct OneStepLayout {
 impl OneStepLayout {
     pub const KEY_CONTEXT: &str = "OneStepLayout";
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         review: Review,
         source: Arc<dyn CodeSource>,
