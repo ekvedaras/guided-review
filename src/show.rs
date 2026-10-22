@@ -21,14 +21,18 @@ impl Show<'_> {
             .ids
             .iter()
             .map(|id| {
-                self.find(id).ok_or_else(|| {
-                    anyhow::anyhow!("unknown piece id `{id}`; run `outline` to list the piece ids")
-                })
+                let pieces = self.find(id);
+                if pieces.is_empty() {
+                    anyhow::bail!("unknown piece id `{id}`; run `outline` to list the piece ids");
+                }
+                Ok(pieces)
             })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .into_iter()
+            .flatten();
 
         let mut out = String::new();
-        for (index, (file, piece)) in found.into_iter().enumerate() {
+        for (index, (file, piece)) in found.enumerate() {
             if index > 0 {
                 out.push('\n');
             }
@@ -37,13 +41,22 @@ impl Show<'_> {
         Ok(out)
     }
 
-    fn find(&self, id: &str) -> Option<(&ChangedFile, &Piece)> {
-        self.files.iter().find_map(|file| {
+    /// A piece id names one piece; a file path names every piece of that file.
+    fn find(&self, id: &str) -> Vec<(&ChangedFile, &Piece)> {
+        let exact = self.files.iter().find_map(|file| {
             file.pieces
                 .iter()
                 .find(|piece| piece.id.to_string() == id)
                 .map(|piece| (file, piece))
-        })
+        });
+        if let Some(found) = exact {
+            return vec![found];
+        }
+        self.files
+            .iter()
+            .filter(|file| file.path == id)
+            .flat_map(|file| file.pieces.iter().map(move |piece| (file, piece)))
+            .collect()
     }
 
     fn write_piece(

@@ -166,3 +166,19 @@ around, at head (lines 7-13):
 "
     );
 }
+
+#[test]
+fn show_of_a_file_path_prints_every_piece_of_that_file() {
+    let (repo, github) = order_pr();
+
+    let run = GuidedReview::new(&repo, &github).run(&["show", PR, "app/Order.php"]);
+
+    assert_eq!(
+        run.stdout_with(&[]),
+        "\
+app/Order.php#Order::total  method  modified  +1 −1
+-12: \x20       $base = 1;
++12: \x20       $base = 2;
+"
+    );
+}
