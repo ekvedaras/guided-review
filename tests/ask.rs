@@ -63,7 +63,9 @@ fn shop() -> Shop {
 }
 
 fn order_step() -> Place {
-    Place::Step(StepId::from("order"))
+    Place::Step {
+        step: StepId::from("order"),
+    }
 }
 
 fn start(launcher: &FakeAgentLauncher, resume: Option<&str>) -> Box<dyn AgentPort> {

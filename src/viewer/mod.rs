@@ -2,6 +2,7 @@
 //! Views read its state and send it user actions; tests drive it the same way.
 
 mod agent_event;
+mod agent_pool;
 mod ask;
 mod ask_context;
 mod comments;
@@ -24,6 +25,7 @@ mod thread_actions;
 mod threads;
 
 pub use agent_event::AgentEvent;
+pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
@@ -40,7 +42,7 @@ pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists, RefreshWriter,
-    ThreadNotCreated, ViewedFile, ViewedState, ViewedSyncUnavailable,
+    ThreadNotCreated, TurnStopper, ViewedFile, ViewedState, ViewedSyncUnavailable,
 };
 pub use reactions::{Reaction, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};

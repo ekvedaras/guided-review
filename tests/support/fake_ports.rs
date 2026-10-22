@@ -6,7 +6,7 @@ use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, GitHubPort,
     PendingReviewExists, Reaction, ReactionCount, ReviewThread, ReviewVerdict, SendMode, Side,
-    ThreadNotCreated, ViewedFile, ViewedState, ViewedSyncUnavailable,
+    ThreadNotCreated, TurnStopper, ViewedFile, ViewedState, ViewedSyncUnavailable,
 };
 
 /// What the app core sent out, in order, across both fakes.
@@ -346,6 +346,19 @@ impl AgentPort for FakeAgent {
         self.sent.push(format!("agent: {message}"));
         let turn = self.turns.pop_front().unwrap_or_default();
         turn.iter().for_each(|line| on_line(line));
+        Ok(())
+    }
+
+    fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
+        Arc::new(FakeTurnStopper(self.sent.clone()))
+    }
+}
+
+struct FakeTurnStopper(SentLog);
+
+impl TurnStopper for FakeTurnStopper {
+    fn stop_turn(&self) -> anyhow::Result<()> {
+        self.0.push("agent: stop the turn".to_string());
         Ok(())
     }
 }

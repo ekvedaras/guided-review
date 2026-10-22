@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::ReviewVerdict;
@@ -210,6 +211,14 @@ pub trait AgentPort: Send {
     /// Sends one message and blocks until the answer to it is complete,
     /// passing every stream line to `on_line` as it arrives.
     fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
+
+    /// Stops the turn `ask` is waiting on, from another thread. The turn then ends as usual
+    /// and the conversation stays live for the next question.
+    fn turn_stopper(&self) -> Arc<dyn TurnStopper>;
+}
+
+pub trait TurnStopper: Send + Sync {
+    fn stop_turn(&self) -> anyhow::Result<()>;
 }
 
 /// Starts the local AI on the tour skill to Refresh the tour of a PR. Blocks until it is done.

@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"It returns"}},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"control_response","response":{"subtype":"success","request_id":"stop-1","response":{"still_queued":[]}}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"parent_tool_use_id":null,"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673","stop_reason":"end_turn"}

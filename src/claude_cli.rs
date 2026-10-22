@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
@@ -8,7 +9,7 @@ use serde_json::{Value, json};
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
-use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter};
+use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
@@ -62,7 +63,7 @@ impl AgentLauncher for ClaudeCli {
         let stdout = BufReader::new(child.stdout.take().context("no stdout on claude")?);
         Ok(Box::new(ClaudeConversation {
             child,
-            stdin,
+            stdin: Arc::new(Mutex::new(stdin)),
             stdout,
         }))
     }
@@ -70,15 +71,15 @@ impl AgentLauncher for ClaudeCli {
 
 struct ClaudeConversation {
     child: Child,
-    stdin: ChildStdin,
+    /// Shared with the turn stopper, which writes while `ask` waits for the answer.
+    stdin: Arc<Mutex<ChildStdin>>,
     stdout: BufReader<ChildStdout>,
 }
 
 impl AgentPort for ClaudeConversation {
     fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
         let input = json!({"type": "user", "message": {"role": "user", "content": message}});
-        writeln!(self.stdin, "{input}").context("claude is no longer running")?;
-        self.stdin.flush()?;
+        write_line(&self.stdin, &input)?;
         let mut line = String::new();
         loop {
             line.clear();
@@ -92,6 +93,38 @@ impl AgentPort for ClaudeConversation {
             }
         }
     }
+
+    fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
+        Arc::new(ClaudeTurnStopper {
+            stdin: self.stdin.clone(),
+        })
+    }
+}
+
+/// Asks claude to stop the turn over its control channel. Unlike SIGINT, which ends the whole
+/// process, this keeps the conversation live; the turn ends with a normal `result` line.
+struct ClaudeTurnStopper {
+    stdin: Arc<Mutex<ChildStdin>>,
+}
+
+impl TurnStopper for ClaudeTurnStopper {
+    fn stop_turn(&self) -> anyhow::Result<()> {
+        let interrupt = json!({
+            "type": "control_request",
+            "request_id": "stop-turn",
+            "request": {"subtype": "interrupt"},
+        });
+        write_line(&self.stdin, &interrupt)
+    }
+}
+
+fn write_line(stdin: &Mutex<ChildStdin>, json: &Value) -> anyhow::Result<()> {
+    let mut stdin = stdin
+        .lock()
+        .map_err(|_| anyhow::anyhow!("claude input is broken"))?;
+    writeln!(stdin, "{json}").context("claude is no longer running")?;
+    stdin.flush()?;
+    Ok(())
 }
 
 impl Drop for ClaudeConversation {

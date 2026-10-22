@@ -923,7 +923,9 @@ impl OneStepLayout {
         let step_id = StepId::from(page.step.id.as_str());
         let step_button = self.ask_button(
             format!("ask-step-{step_id}"),
-            Place::Step(step_id.clone()),
+            Place::Step {
+                step: step_id.clone(),
+            },
             page.step.title.clone(),
             cx,
         );

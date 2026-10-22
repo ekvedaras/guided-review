@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use crate::config::AskSettings;
 
-use super::ask::Place;
+use super::ask::{Ask, Place};
 use super::ask_context;
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
@@ -369,6 +369,126 @@ impl Review {
     /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
     pub fn ask_context(&self, place: &Place) -> Option<String> {
         ask_context::context_for(&self.tour, &self.files, &self.links(), place)
+    }
+
+    /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
+    pub fn code_changed_since(&self, ask: &Ask) -> bool {
+        if ask.head == self.tour.head {
+            return false;
+        }
+        let Some(record) = self.repin_record() else {
+            return false;
+        };
+        let moved = |piece: &str| record.status_of(piece) != Some(RepinStatus::Same);
+        match &ask.place {
+            Place::Tour => false,
+            Place::Step { step } => {
+                record.gone_count(step) > 0
+                    || self.step(step).is_some_and(|step| {
+                        step.pieces
+                            .iter()
+                            .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
+                            .any(|part| moved(&part.piece.id.to_string()))
+                    })
+            }
+            Place::Piece { piece, .. } => moved(piece),
+            Place::Lines { pieces, .. } => pieces.iter().any(|piece| moved(piece)),
+        }
+    }
+
+    /// Puts the Ask's latest answer into the comment box on its lines, after any text already
+    /// there. The reviewer edits and sends it; nothing goes to GitHub here.
+    pub fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
+        if matches!(ask.place, Place::Tour | Place::Step { .. }) {
+            return Err(CommentRefusal::NoLines);
+        }
+        if ask.head != self.tour.head {
+            return Err(CommentRefusal::AskIsOnOlderCode);
+        }
+        if self.old_head().is_some() {
+            return Err(CommentRefusal::TourIsOld);
+        }
+        let selected = self.lines_of(&ask.place).ok_or(CommentRefusal::NoLines)?;
+        if !selected.take_comment() {
+            return Err(CommentRefusal::NotInsideHunk);
+        }
+        let place = CommentPlace::of(&selected);
+        self.state.open_draft(place.clone());
+        let written = self
+            .state
+            .draft_at(&place)
+            .map(|draft| draft.body.trim_end().to_string())
+            .unwrap_or_default();
+        let answer = ask.latest_answer().unwrap_or_default();
+        let body = if written.is_empty() {
+            answer.to_string()
+        } else {
+            format!("{written}\n\n{answer}")
+        };
+        self.state.write_draft(&place, &body);
+        self.save_viewer_sections()
+            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
+        Ok(place)
+    }
+
+    /// The rows an Ask about lines or a piece is on, in its step at the tour head.
+    fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
+        let (step, only_piece) = match place {
+            Place::Tour | Place::Step { .. } => return None,
+            Place::Piece { step, piece } => (Some(step), Some(piece)),
+            Place::Lines { step, .. } => (step.as_ref(), None),
+        };
+        let pieces = match step {
+            Some(id) => {
+                let links = self.links();
+                let display = self.display(&links);
+                StepPage::of(self.step(id)?, &self.tour, &self.files, &display, false).pieces
+            }
+            None => self.safety_net()?.pieces,
+        };
+        let rows: Vec<DiffLine> = pieces
+            .iter()
+            .filter(|shown| only_piece.is_none_or(|id| shown.id.to_string() == *id))
+            .flat_map(|shown| shown.lines().cloned())
+            .collect();
+        let (start, end) = match place {
+            Place::Lines { start, end, .. } => (start.clone(), end.clone()),
+            _ => (
+                rows.first()?.location.clone(),
+                rows.last()?.location.clone(),
+            ),
+        };
+        let mut selection = RowSelection::start_at(start);
+        selection.extend_to(end);
+        selection.resolve(&rows)
+    }
+
+    /// The place an Ask about selected rows is about: the rows and the pieces holding them.
+    pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
+        let (step, pieces) = match &self.screen {
+            Screen::Step(id) => (
+                Some(id.clone()),
+                self.current_step()
+                    .map(|page| page.pieces)
+                    .unwrap_or_default(),
+            ),
+            _ => (
+                None,
+                self.safety_net()
+                    .map(|page| page.pieces)
+                    .unwrap_or_default(),
+            ),
+        };
+        Place::Lines {
+            step,
+            start: selected.first().clone(),
+            end: selected.last().clone(),
+            pieces: pieces
+                .iter()
+                .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
+                .map(|piece| piece.id.to_string())
+                .collect(),
+        }
     }
 
     pub fn agent_launch(

@@ -4,18 +4,29 @@ use serde::{Deserialize, Serialize};
 
 use super::StepId;
 use super::agent_event::AgentEvent;
-use super::ports::AgentPort;
+use super::ports::{AgentLaunch, AgentPort, TurnStopper};
+use super::step_page::LineLocation;
 
 /// The place in a tour an Ask is about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Place {
     Tour,
-    Step(StepId),
+    Step {
+        step: StepId,
+    },
     /// All lines of one piece, as shown in `step`.
     Piece {
         step: StepId,
         piece: String,
+    },
+    /// Rows the reviewer selected, top to bottom, in a step or (`step: None`) the safety net.
+    Lines {
+        step: Option<StepId>,
+        start: LineLocation,
+        end: LineLocation,
+        /// The pieces the rows belong to, to tell when a re-pin changed them.
+        pieces: Vec<String>,
     },
 }
 
@@ -34,6 +45,9 @@ pub enum Author {
 pub struct Message {
     pub author: Author,
     pub text: String,
+    /// The reviewer stopped the AI before it finished this answer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
 }
 
 /// A chat with the AI about one place. Pinned to the tour head it was asked at.
@@ -51,6 +65,17 @@ pub struct Ask {
     pub activity: Option<String>,
     #[serde(skip)]
     pub failure: Option<String>,
+}
+
+impl Ask {
+    /// The AI's last answer, the one "Use as comment" takes.
+    pub fn latest_answer(&self) -> Option<&str> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|message| message.author == Author::Ai && !message.text.is_empty())
+            .map(|message| message.text.as_str())
+    }
 }
 
 /// Where Asks are kept between runs. The per-PR state file implements it; the viewer never
@@ -120,10 +145,12 @@ impl Asks {
         ask.messages.push(Message {
             author: Author::Reviewer,
             text: question.to_string(),
+            stopped: false,
         });
         ask.messages.push(Message {
             author: Author::Ai,
             text: String::new(),
+            stopped: false,
         });
         let message = if is_first && ask.session_id.is_none() {
             format!("{context}\n\nQuestion: {question}")
@@ -132,6 +159,27 @@ impl Asks {
         };
         self.save(id);
         message
+    }
+
+    /// How to start the AI for this Ask: an Ask answered before continues its session.
+    pub fn launch_for(&self, id: AskId, launch: AgentLaunch) -> AgentLaunch {
+        AgentLaunch {
+            resume: self.get(id).and_then(|ask| ask.session_id.clone()),
+            ..launch
+        }
+    }
+
+    /// The answer so far stays, marked as stopped; the AI ends the turn and keeps the session.
+    pub fn stop_turn(&mut self, id: AskId, stopper: &dyn TurnStopper) {
+        let Some(ask) = self.ask_mut(id) else { return };
+        if let Some(answer) = ask.messages.last_mut().filter(|m| m.author == Author::Ai) {
+            answer.stopped = true;
+        }
+        ask.activity = None;
+        if let Err(error) = stopper.stop_turn() {
+            ask.failure = Some(format!("could not stop the AI: {error:#}"));
+        }
+        self.save(id);
     }
 
     pub fn apply_line(&mut self, id: AskId, line: &str) {

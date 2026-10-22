@@ -74,6 +74,10 @@ pub enum CommentRefusal {
     /// numbers belong to the old code.
     CodeMoved,
     NotInsideHunk,
+    /// An Ask about a step or the whole tour has no lines a comment could sit on.
+    NoLines,
+    /// The Ask was answered about an older head; its lines may sit elsewhere now.
+    AskIsOnOlderCode,
     /// Someone started a pending review since the last look, so "Comment now" is off.
     PendingReviewExists,
     NoAccess(String),
@@ -85,6 +89,10 @@ impl fmt::Display for CommentRefusal {
             Self::TourIsOld => f.write_str("Update tour to comment"),
             Self::CodeMoved => f.write_str("Code moved, place the comment again"),
             Self::NotInsideHunk => f.write_str("GitHub takes comments only on lines of the diff"),
+            Self::NoLines => f.write_str("Only an Ask about lines can become a comment"),
+            Self::AskIsOnOlderCode => {
+                f.write_str("This Ask is about older code: select the lines again to comment")
+            }
             Self::PendingReviewExists => {
                 f.write_str("There is a pending review now: add the comment to it")
             }
