@@ -19,7 +19,7 @@ use crate::viewer::{
 };
 
 use super::palette::{Colors, TEXT_FONT};
-use super::text_input::TextDraft;
+use super::text_input::{DraftKey, Lines, TextDraft};
 
 /// Everything the panel needs to talk to the AI, built once at startup.
 pub struct AskSetup {
@@ -377,12 +377,10 @@ impl AskPanel {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        match keystroke.key.as_str() {
-            "enter" => self.send(cx),
-            "escape" => self.close(window, cx),
-            _ => {
-                self.draft.edit(keystroke);
-            }
+        match self.draft.on_key(keystroke, Lines::Single) {
+            DraftKey::Submit => self.send(cx),
+            DraftKey::Cancel => self.close(window, cx),
+            DraftKey::Edited | DraftKey::Ignored => {}
         }
         cx.notify();
     }

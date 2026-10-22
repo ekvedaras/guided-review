@@ -6,7 +6,7 @@ use gpui::{
 use crate::viewer::{JumpKind, JumpTarget};
 
 use super::palette::{Colors, TEXT_FONT};
-use super::text_input::TextDraft;
+use super::text_input::{DraftKey, Lines, TextDraft};
 
 const VISIBLE_ROWS: usize = 12;
 
@@ -76,15 +76,16 @@ impl JumpPalette {
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         match keystroke.key.as_str() {
-            "enter" => self.pick(window, cx),
-            "escape" => self.close(window, cx),
             "down" => self.selected = (self.selected + 1).min(self.targets.len().saturating_sub(1)),
             "up" => self.selected = self.selected.saturating_sub(1),
-            _ => {
-                if self.draft.edit(keystroke) {
+            _ => match self.draft.on_key(keystroke, Lines::Single) {
+                DraftKey::Submit => self.pick(window, cx),
+                DraftKey::Cancel => self.close(window, cx),
+                DraftKey::Edited => {
                     cx.emit(JumpEvent::QueryChanged(self.draft.text().to_string()));
                 }
-            }
+                DraftKey::Ignored => {}
+            },
         }
         cx.notify();
     }

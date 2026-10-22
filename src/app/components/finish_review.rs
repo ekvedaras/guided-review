@@ -9,7 +9,7 @@ use gpui::{
 use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
 
 use super::palette::Colors;
-use super::text_input::TextDraft;
+use super::text_input::{DraftKey, Lines, TextDraft};
 
 /// Sends the review and calls back with how it went. The layout owns the review and the network.
 pub type OnFinish =
@@ -135,19 +135,11 @@ fn on_key(
     if ui.read(cx).is_busy {
         return;
     }
-    if keystroke.key == "escape" {
-        return update(ui, cx, |ui| ui.is_open = false);
-    }
     let mut edited = TextDraft::with_text(body);
-    let changed = match keystroke.key.as_str() {
-        "enter" => {
-            edited.newline();
-            true
-        }
-        _ => edited.edit(keystroke),
-    };
-    if changed {
-        on_body_edit(edited.text().to_string(), cx);
+    match edited.on_key(keystroke, Lines::Multi) {
+        DraftKey::Cancel => update(ui, cx, |ui| ui.is_open = false),
+        DraftKey::Edited => on_body_edit(edited.text().to_string(), cx),
+        DraftKey::Submit | DraftKey::Ignored => {}
     }
 }
 

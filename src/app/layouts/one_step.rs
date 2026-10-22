@@ -13,7 +13,9 @@ use std::sync::Arc;
 use crate::app::components::ask_panel::{
     AskPanel, AskSetup, UseAsComment, ask_button, lines_label,
 };
-use crate::app::components::comment_composer::{CommentComposer, OnCompose, QueuedCommentNote};
+use crate::app::components::comment_composer::{
+    CommentComposer, ComposerKey, OnCompose, QueuedCommentNote,
+};
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     DiffRow, OnImageComment, OnMoreContext, OnOpenInIde, OnRowGesture, PieceHeader, RowGesture,
@@ -27,7 +29,6 @@ use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
-use crate::app::components::text_input::TextDraft;
 use crate::app::components::thread_view::{
     OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
@@ -348,29 +349,18 @@ impl OneStepLayout {
         else {
             return;
         };
-        let mut body = TextDraft::with_text(&draft.body);
-        let keystroke = &event.keystroke;
-        match keystroke.key.as_str() {
-            "escape" => {
-                return self
-                    .session
-                    .update(cx, |session, cx| session.stop_composing(cx));
-            }
-            "enter" if keystroke.modifiers.platform => {
-                return self.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::AddToReview, cx)
-                });
-            }
-            "enter" => body.newline(),
-            _ => {
-                if !body.edit(keystroke) {
-                    return;
-                }
-            }
+        match CommentComposer::on_key(&draft.body, &event.keystroke) {
+            ComposerKey::Stop => self
+                .session
+                .update(cx, |session, cx| session.stop_composing(cx)),
+            ComposerKey::Send => self.session.update(cx, |session, cx| {
+                session.send_comment(place, SendMode::AddToReview, cx)
+            }),
+            ComposerKey::Typed(body) => self
+                .session
+                .update(cx, |session, cx| session.type_in_comment(&place, &body, cx)),
+            ComposerKey::Ignored => {}
         }
-        self.session.update(cx, |session, cx| {
-            session.type_in_comment(&place, body.text(), cx)
-        });
     }
 
     fn on_compose(

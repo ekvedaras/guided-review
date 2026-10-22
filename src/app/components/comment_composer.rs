@@ -8,12 +8,21 @@ use gpui::{
 use crate::viewer::{CommentDraft, CommentPlace, QueuedComment};
 
 use super::palette::Colors;
-use super::text_input::TextDraft;
+use super::text_input::{DraftKey, Lines, TextDraft};
 
 pub type OnCompose = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// The box a comment is written in, under the last selected row. It shows the text and buttons;
-/// the layout feeds it the keys, so one place decides what typing does.
+/// What a key meant for the comment being written.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ComposerKey {
+    Send,
+    Stop,
+    Typed(String),
+    Ignored,
+}
+
+/// The box a comment is written in, under the last selected row. It shows the text and buttons,
+/// and says what a key means for the comment.
 #[derive(IntoElement)]
 pub struct CommentComposer {
     draft: CommentDraft,
@@ -32,6 +41,16 @@ pub struct CommentComposer {
 
 impl CommentComposer {
     pub const KEY_CONTEXT: &str = "CommentInput";
+
+    pub fn on_key(body: &str, keystroke: &gpui::Keystroke) -> ComposerKey {
+        let mut draft = TextDraft::with_text(body);
+        match draft.on_key(keystroke, Lines::Multi) {
+            DraftKey::Submit => ComposerKey::Send,
+            DraftKey::Cancel => ComposerKey::Stop,
+            DraftKey::Edited => ComposerKey::Typed(draft.text().to_string()),
+            DraftKey::Ignored => ComposerKey::Ignored,
+        }
+    }
 
     #[allow(clippy::too_many_arguments)]
     pub fn new(

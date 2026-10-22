@@ -12,7 +12,7 @@ use crate::viewer::{
 
 use super::markdown_view::MarkdownView;
 use super::palette::Colors;
-use super::text_input::TextDraft;
+use super::text_input::{DraftKey, Lines, TextDraft};
 
 type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -253,31 +253,21 @@ impl ThreadElement {
                 if ui.read(cx).is_busy {
                     return;
                 }
-                match keystroke.key.as_str() {
-                    "escape" => on_reply_draft(ReplyDraftChange::Discard, cx),
-                    "enter" if keystroke.modifiers.platform => {
-                        send_reply(
-                            &ui,
-                            &on_action,
-                            &thread_id,
-                            body.clone(),
-                            SendMode::AddToReview,
-                            cx,
-                        );
+                let mut edited = TextDraft::with_text(&body);
+                match edited.on_key(keystroke, Lines::Multi) {
+                    DraftKey::Cancel => on_reply_draft(ReplyDraftChange::Discard, cx),
+                    DraftKey::Submit => send_reply(
+                        &ui,
+                        &on_action,
+                        &thread_id,
+                        body.clone(),
+                        SendMode::AddToReview,
+                        cx,
+                    ),
+                    DraftKey::Edited => {
+                        on_reply_draft(ReplyDraftChange::Edit(edited.text().to_string()), cx);
                     }
-                    key => {
-                        let mut edited = TextDraft::with_text(&body);
-                        let changed = match key {
-                            "enter" => {
-                                edited.newline();
-                                true
-                            }
-                            _ => edited.edit(keystroke),
-                        };
-                        if changed {
-                            on_reply_draft(ReplyDraftChange::Edit(edited.text().to_string()), cx);
-                        }
-                    }
+                    DraftKey::Ignored => {}
                 }
             }
         };
