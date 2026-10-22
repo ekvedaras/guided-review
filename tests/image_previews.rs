@@ -94,8 +94,12 @@ impl Pull {
     }
 
     fn open(&self, source: &CountingSource) -> Review {
+        self.open_at(&self.head, source)
+    }
+
+    fn open_at(&self, head: &str, source: &CountingSource) -> Review {
         let tour: Tour = serde_json::from_value(json!({
-            "pr": PR, "base": self.base, "head": self.head, "title": "Images", "summary": [],
+            "pr": PR, "base": self.base, "head": head, "title": "Images", "summary": [],
             "steps": [{"id": "pics", "title": "Pictures", "why": "because",
                 "pieces": [{"file": self.path}], "children": []}],
         }))
@@ -329,4 +333,28 @@ fn github_names_a_blob_and_its_size_without_sending_the_bytes() {
         request.contains("accept: application/vnd.github.object+json"),
         "{request}"
     );
+}
+
+#[test]
+fn a_preview_loaded_for_another_head_is_dropped() {
+    let (before, after) = (
+        png_of(64, 64, [255, 0, 0, 255]),
+        png_of(128, 96, [0, 0, 255, 255]),
+    );
+    let pull = Pull::changing("logo.png", Some(&before), Some(&after));
+    let source = pull.source();
+    let old_review = pull.open(&source);
+    let stale = old_review
+        .image_preview_requests()
+        .remove(0)
+        .load(&source, &pull.cache());
+
+    pull.repo
+        .write_bytes("logo.png", &png_of(8, 8, [0, 255, 0, 255]));
+    let newer_head = pull.repo.commit("newer head");
+    let mut new_review = pull.open_at(&newer_head, &source);
+    new_review.set_image_preview(stale);
+
+    assert!(new_review.image_preview("logo.png").is_none());
+    assert_eq!(new_review.image_preview_requests().len(), 1);
 }

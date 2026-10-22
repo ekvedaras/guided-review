@@ -93,6 +93,8 @@ pub struct ImagePreview {
     pub path: String,
     pub is_svg: bool,
     status: FileStatus,
+    base_sha: Sha,
+    head_sha: Sha,
     /// `None` for an added image.
     pub base: Option<ImageSide>,
     /// `None` for a deleted image.
@@ -100,6 +102,10 @@ pub struct ImagePreview {
 }
 
 impl ImagePreview {
+    pub(super) fn is_of(&self, base: &Sha, head: &Sha) -> bool {
+        self.base_sha == *base && self.head_sha == *head
+    }
+
     pub fn mark(&self) -> Option<&'static str> {
         match self.status {
             FileStatus::Added => Some("added"),
@@ -155,6 +161,8 @@ impl ImagePreviewRequest {
             path: self.path.clone(),
             is_svg: image_facts::is_svg_path(&self.path),
             status: self.status,
+            base_sha: self.base.clone(),
+            head_sha: self.head.clone(),
             base: has_base.then(|| load_side(source, cache, &self.base, &self.base_path)),
             head: has_head.then(|| load_side(source, cache, &self.head, &self.path)),
         }

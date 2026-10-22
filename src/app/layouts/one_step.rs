@@ -475,10 +475,12 @@ impl OneStepLayout {
                     })
                     .await;
                 this.update(cx, |this, cx| {
-                    this.loading_images.remove(&preview.path);
-                    this.image_pictures
-                        .insert(preview.path.clone(), Rc::new(pictures));
-                    this.review.set_image_preview(preview);
+                    let path = preview.path.clone();
+                    if !this.review.set_image_preview(preview) {
+                        return;
+                    }
+                    this.loading_images.remove(&path);
+                    this.image_pictures.insert(path, Rc::new(pictures));
                     cx.notify();
                 })
                 .ok();

@@ -232,8 +232,13 @@ impl Review {
         requests
     }
 
-    pub fn set_image_preview(&mut self, preview: ImagePreview) {
+    /// A preview loaded for another base or head, e.g. before a re-open, is dropped. Says whether it was kept.
+    pub fn set_image_preview(&mut self, preview: ImagePreview) -> bool {
+        if !preview.is_of(&self.base, &self.head) {
+            return false;
+        }
         self.image_previews.insert(preview.path.clone(), preview);
+        true
     }
 
     pub fn image_preview(&self, path: &str) -> Option<&ImagePreview> {
