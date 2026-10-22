@@ -34,7 +34,7 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{AskAt, PageRow, SelectedRows, StepHeading};
 use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
 use crate::code_source::CodeSource;
-use crate::ide::{Ide, IdeLaunch};
+use crate::ide::Ide;
 use crate::viewer::{
     Ask, CommentPlace, GitHubPort, LineLocation, MoreContext, Place, QueuedComment, Review, Screen,
     SendMode, StepId, ThreadView,
@@ -532,14 +532,15 @@ impl OneStepLayout {
         let launch = ide.launch(Path::new(&at.path), at.line);
         Some(
             tool_button(Colors::active(cx), key, "Open in IDE")
-                .on_click(cx.listener(move |_, _, _, cx| run_launch(&launch, cx))),
+                .on_click(cx.listener(move |_, _, _, cx| launch.run(|url| cx.open_url(url)))),
         )
     }
 
     fn open_line_in_ide(&self) -> Option<OnOpenInIde> {
         let ide = self.ide.clone()?;
         Some(Rc::new(move |at: &LineLocation, cx: &mut App| {
-            run_launch(&ide.launch(Path::new(&at.path), at.line), cx)
+            ide.launch(Path::new(&at.path), at.line)
+                .run(|url| cx.open_url(url))
         }))
     }
 
@@ -1051,19 +1052,5 @@ impl Render for OneStepLayout {
             })
             .child(self.jump.clone())
             .children(frame_painted_marker)
-    }
-}
-
-fn run_launch(launch: &IdeLaunch, cx: &mut App) {
-    match launch {
-        IdeLaunch::Url(url) => cx.open_url(url),
-        IdeLaunch::Shell(command) => {
-            if let Err(error) = std::process::Command::new("sh")
-                .args(["-c", command])
-                .spawn()
-            {
-                eprintln!("could not run the IDE command: {error}");
-            }
-        }
     }
 }

@@ -71,3 +71,22 @@ fn a_local_clone_says_where_it_is_and_the_github_source_says_it_has_none() {
         None
     );
 }
+
+#[test]
+fn running_a_url_launch_hands_the_url_to_the_opener() {
+    let ide = ide("idea://open?file={path}&line={line}", "/code/shop");
+    let mut opened = Vec::new();
+
+    ide.launch(Path::new("a.php"), 2)
+        .run(|url| opened.push(url.to_string()));
+
+    assert_eq!(opened, ["idea://open?file=/code/shop/a.php&line=2"]);
+}
+
+#[test]
+fn running_a_shell_launch_does_not_use_the_url_opener() {
+    let ide = ide("true {path}:{line}", "/code/shop");
+
+    ide.launch(Path::new("a.php"), 2)
+        .run(|_| panic!("a shell command is not a URL"));
+}

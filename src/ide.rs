@@ -33,6 +33,23 @@ pub enum IdeLaunch {
     Shell(String),
 }
 
+impl IdeLaunch {
+    /// A URL is handed to `open_url`, because only the caller knows the system's opener.
+    pub fn run(&self, open_url: impl FnOnce(&str)) {
+        match self {
+            Self::Url(url) => open_url(url),
+            Self::Shell(command) => {
+                if let Err(error) = std::process::Command::new("sh")
+                    .args(["-c", command])
+                    .spawn()
+                {
+                    eprintln!("could not run the IDE command: {error}");
+                }
+            }
+        }
+    }
+}
+
 /// Open in IDE exists only with a local clone and a template; a `None` of this hides the button.
 #[derive(Debug, Clone)]
 pub struct Ide {
