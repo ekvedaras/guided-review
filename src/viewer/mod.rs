@@ -25,6 +25,7 @@ mod suggestion;
 mod thread_actions;
 mod threads;
 mod typing_save;
+mod viewed_sync;
 
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
@@ -52,7 +53,6 @@ pub use reactions::{Reaction, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{
     OldHead, ReadProgress, RepinRunning, Review, SafetyNetSize, Screen, SidebarEntry, StepId,
-    SyncOutcome, SyncRequest,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
@@ -65,3 +65,4 @@ pub use thread_actions::{
 };
 pub use threads::{ReviewThread, ThreadComment, ThreadView};
 pub use typing_save::TypingSave;
+pub use viewed_sync::{SyncOutcome, SyncRequest};

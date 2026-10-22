@@ -29,7 +29,7 @@ use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
-use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
+use super::ports::AgentLaunch;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -42,6 +42,7 @@ use super::thread_actions::{
 };
 use super::threads::{self, ReviewThread, ThreadPlacement};
 use super::typing_save::{SaveOrder, TypingSave};
+use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::repin::RepinStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -123,8 +124,7 @@ pub struct Review {
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
     highlights: Highlights,
-    /// Why viewed sync is switched off for this session; the app shows it as a banner.
-    sync_off_because: Option<String>,
+    viewed_sync: ViewedSync,
     repin_running: bool,
     files_at_head: FilesAtHead,
     more_context: HashMap<MoreContext, usize>,
@@ -191,7 +191,7 @@ impl Review {
             state_file,
             fold_flipped: BTreeSet::new(),
             highlights: Highlights::default(),
-            sync_off_because: None,
+            viewed_sync: ViewedSync::default(),
             repin_running: false,
             files_at_head: FilesAtHead::default(),
             more_context: HashMap::new(),
@@ -1125,17 +1125,11 @@ impl Review {
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
-        let head = Sha::new(&self.tour.head);
-        self.state.tick(id, &head);
+        self.state.tick(id, &self.head);
         self.fold_flipped.remove(id);
-        if self.sync_off_because.is_none() {
-            let coverage = self.coverage();
-            for file in coverage.files_of(id) {
-                if coverage.is_fully_ticked(file, |step| self.is_ticked(step)) {
-                    self.state.want_viewed(file, true);
-                }
-            }
-        }
+        let coverage = self.coverage();
+        self.viewed_sync
+            .wish_after_tick(&mut self.state, &coverage, id);
         self.save_viewer_sections()
     }
 
@@ -1143,11 +1137,9 @@ impl Review {
         self.refuse_changes_while_repinning()?;
         self.state.untick(id);
         self.fold_flipped.remove(id);
-        if self.sync_off_because.is_none() {
-            for file in self.coverage().files_of(id) {
-                self.state.want_viewed(file, false);
-            }
-        }
+        let coverage = self.coverage();
+        self.viewed_sync
+            .wish_after_untick(&mut self.state, &coverage, id);
         self.save_viewer_sections()
     }
 
@@ -1181,149 +1173,38 @@ impl Review {
 
     /// The banner text while viewed sync is off; ticks keep working without it.
     pub fn sync_banner(&self) -> Option<&str> {
-        self.sync_off_because.as_deref()
+        self.viewed_sync.banner()
     }
 
     /// Drives the "not synced" dot.
     pub fn not_synced(&self) -> bool {
-        self.sync_off_because.is_none() && !self.state.unsent_viewed().is_empty()
+        self.viewed_sync.not_synced(&self.state)
     }
 
-    /// Everything the network part of a sync needs, owned, so it can run on a background thread.
     pub fn sync_request(&self) -> SyncRequest {
-        let baseline_wishes = self
-            .state
-            .github_baseline_due()
-            .then(|| self.baseline_wishes());
-        SyncRequest {
-            pr: self.pr.clone(),
-            tour_head: Sha::new(&self.tour.head),
-            unsent: self.state.unsent_viewed().clone(),
-            baseline_wishes,
-            is_off: self.sync_off_because.is_some(),
-        }
-    }
-
-    /// After a re-pin: viewed for every file whose steps are all still ticked, and the queued
-    /// "not viewed" edits for the rest. Queued "viewed" edits are dropped: the ticks say it again
-    /// where it is still true.
-    fn baseline_wishes(&self) -> BTreeMap<String, bool> {
-        let coverage = self.coverage();
-        let is_fully_ticked =
-            |path: &str| coverage.is_fully_ticked(path, |step| self.is_ticked(step));
-        let still_viewed = coverage
-            .files_by_step
-            .values()
-            .flatten()
-            .filter(|path| is_fully_ticked(path))
-            .map(|path| (path.clone(), true));
-        let still_not_viewed = self
-            .state
-            .unsent_viewed()
-            .iter()
-            .filter(|(path, viewed)| !**viewed && !is_fully_ticked(path))
-            .map(|(path, _)| (path.clone(), false));
-        still_viewed.chain(still_not_viewed).collect()
+        self.viewed_sync
+            .request(&self.state, &self.coverage(), &self.pr, &self.head)
     }
 
     /// An error means something stays queued or unread; the next sync tries again.
     pub fn apply_sync(&mut self, outcome: SyncOutcome) -> anyhow::Result<()> {
-        if self.sync_off_because.is_some() {
+        if self.viewed_sync.is_off() {
             return Ok(());
         }
-        match (&outcome.baseline_wishes, &outcome.on_github) {
-            (Some(wishes), Some(on_github)) => {
-                self.state.take_github_baseline(on_github, wishes);
-                for (path, viewed) in &outcome.sent {
-                    self.state.sent_viewed(path, *viewed);
-                }
-            }
-            (Some(_), None) => {}
-            (None, on_github) => {
-                for (path, viewed) in &outcome.sent {
-                    self.state.sent_viewed(path, *viewed);
-                }
-                if let Some(on_github) = on_github {
-                    self.pull_viewed(on_github);
-                }
-            }
+        let coverage = self.coverage();
+        let (unticked, error) =
+            self.viewed_sync
+                .take_in(&mut self.state, &coverage, &self.head, outcome);
+        for step in &unticked {
+            self.fold_flipped.remove(step);
         }
         let saved = self.save_viewer_sections();
-        match outcome.error.map(Err).unwrap_or(Ok(())).and(saved) {
-            Err(error) => match error.downcast_ref::<ViewedSyncUnavailable>() {
-                Some(unavailable) => {
-                    self.sync_off_because = Some(unavailable.to_string());
-                    Ok(())
-                }
-                None => Err(error),
-            },
-            ok => ok,
-        }
+        self.viewed_sync
+            .settle(error.map(Err).unwrap_or(Ok(())).and(saved))
     }
 
-    /// Reacts only to files whose state changed since the last sync, and never to files with an
-    /// unsent local change: those win.
-    fn pull_viewed(&mut self, on_github: &BTreeMap<String, bool>) {
-        let unsent = self.state.unsent_viewed().clone();
-        let is_viewed = |path: &str| {
-            unsent
-                .get(path)
-                .or_else(|| on_github.get(path))
-                .copied()
-                .unwrap_or(false)
-        };
-        let changed: Vec<(&String, bool)> = on_github
-            .iter()
-            .filter(|(path, now)| {
-                !unsent.contains_key(*path) && self.state.was_viewed_on_github(path) != **now
-            })
-            .map(|(path, now)| (path, *now))
-            .collect();
-
-        let coverage = self.coverage();
-        let head = Sha::new(&self.tour.head);
-        for (path, _) in changed.iter().filter(|(_, now)| !now) {
-            for step in coverage.steps_holding(path) {
-                self.state.untick(step);
-                self.fold_flipped.remove(step);
-            }
-        }
-        for (path, _) in changed.iter().filter(|(_, now)| *now) {
-            for step in coverage.steps_holding(path) {
-                let files = coverage.files_of(step);
-                if !self.is_ticked(step) && files.iter().all(|file| is_viewed(file)) {
-                    self.state.tick(step, &head);
-                }
-            }
-        }
-        for (path, now) in on_github.iter() {
-            if !unsent.contains_key(path) {
-                self.state.saw_on_github(path, *now);
-            }
-        }
-    }
-
-    /// A step holds a file when it shows any lines of it; a file is partly unheld when the
-    /// safety net still has lines of it.
     fn coverage(&self) -> Coverage {
-        let mut coverage = Coverage::default();
-        for step in self.tour.steps() {
-            let paths = step
-                .pieces
-                .iter()
-                .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
-                .map(|part| part.piece.id.path.clone());
-            coverage
-                .files_by_step
-                .entry(StepId::from(step.id.as_str()))
-                .or_default()
-                .extend(paths);
-        }
-        coverage.partly_unheld = coverage::safety_net(&self.tour, &self.files)
-            .into_iter()
-            .map(|part| part.piece.id.path.clone())
-            .collect();
-        coverage
+        Coverage::of(&self.tour, &self.files)
     }
 
     /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
@@ -1381,142 +1262,4 @@ fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a str> {
         .read_tick(step)
         .or_else(|| state.read_before(step))
         .map(|tick| tick.head.as_str())
-}
-
-/// Which files each step holds, and which files have changes no step holds.
-#[derive(Default)]
-struct Coverage {
-    files_by_step: BTreeMap<StepId, BTreeSet<String>>,
-    partly_unheld: BTreeSet<String>,
-}
-
-impl Coverage {
-    fn files_of(&self, step: &StepId) -> &BTreeSet<String> {
-        static NONE: BTreeSet<String> = BTreeSet::new();
-        self.files_by_step.get(step).unwrap_or(&NONE)
-    }
-
-    fn steps_holding<'a>(&'a self, path: &'a str) -> impl Iterator<Item = &'a StepId> {
-        self.files_by_step
-            .iter()
-            .filter(move |(_, files)| files.contains(path))
-            .map(|(step, _)| step)
-    }
-
-    /// A file counts as read only when no change of it is left outside the steps.
-    fn is_fully_ticked(&self, path: &str, is_ticked: impl Fn(&StepId) -> bool) -> bool {
-        !self.partly_unheld.contains(path) && self.steps_holding(path).all(is_ticked)
-    }
-}
-
-pub struct SyncRequest {
-    pr: PullRequestUrl,
-    tour_head: Sha,
-    unsent: BTreeMap<String, bool>,
-    /// Set for the first sync after a re-pin; it replaces `unsent`.
-    baseline_wishes: Option<BTreeMap<String, bool>>,
-    is_off: bool,
-}
-
-/// What the network part of a sync learned and did; the review takes it in with `apply_sync`.
-pub struct SyncOutcome {
-    sent: Vec<(String, bool)>,
-    on_github: Option<BTreeMap<String, bool>>,
-    baseline_wishes: Option<BTreeMap<String, bool>>,
-    error: Option<anyhow::Error>,
-}
-
-impl SyncOutcome {
-    fn nothing() -> Self {
-        Self {
-            sent: Vec::new(),
-            on_github: None,
-            baseline_wishes: None,
-            error: None,
-        }
-    }
-}
-
-impl SyncRequest {
-    /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(self, github: &dyn GitHubPort) -> SyncOutcome {
-        let pr = &self.pr;
-        if self.is_off {
-            return SyncOutcome::nothing();
-        }
-        match github.pull_request_tips(pr) {
-            Ok(tips) if tips.head == self.tour_head => {}
-            Ok(_) => return SyncOutcome::nothing(),
-            Err(error) => {
-                return SyncOutcome {
-                    error: Some(error),
-                    ..SyncOutcome::nothing()
-                };
-            }
-        }
-        match self.baseline_wishes {
-            Some(wishes) => Self::take_baseline(github, pr, wishes),
-            None => {
-                let mut outcome = SyncOutcome::nothing();
-                outcome.error = push(github, pr, &self.unsent, &mut outcome.sent).err();
-                match read_viewed(github, pr) {
-                    Ok(on_github) => outcome.on_github = Some(on_github),
-                    Err(error) => outcome.error = outcome.error.or(Some(error)),
-                }
-                outcome
-            }
-        }
-    }
-
-    /// GitHub is read first, so only wishes it does not already match are pushed.
-    fn take_baseline(
-        github: &dyn GitHubPort,
-        pr: &PullRequestUrl,
-        wishes: BTreeMap<String, bool>,
-    ) -> SyncOutcome {
-        let on_github = match read_viewed(github, pr) {
-            Ok(on_github) => on_github,
-            Err(error) => {
-                return SyncOutcome {
-                    error: Some(error),
-                    ..SyncOutcome::nothing()
-                };
-            }
-        };
-        let differing: BTreeMap<String, bool> = wishes
-            .iter()
-            .filter(|(path, viewed)| on_github.get(*path).copied().unwrap_or(false) != **viewed)
-            .map(|(path, viewed)| (path.clone(), *viewed))
-            .collect();
-        let mut outcome = SyncOutcome::nothing();
-        outcome.error = push(github, pr, &differing, &mut outcome.sent).err();
-        outcome.on_github = Some(on_github);
-        outcome.baseline_wishes = Some(wishes);
-        outcome
-    }
-}
-
-/// Stops at the first failure; what was not sent stays queued.
-fn push(
-    github: &dyn GitHubPort,
-    pr: &PullRequestUrl,
-    wishes: &BTreeMap<String, bool>,
-    sent: &mut Vec<(String, bool)>,
-) -> anyhow::Result<()> {
-    for (path, viewed) in wishes {
-        github.set_file_viewed(pr, path, *viewed)?;
-        sent.push((path.clone(), *viewed));
-    }
-    Ok(())
-}
-
-fn read_viewed(
-    github: &dyn GitHubPort,
-    pr: &PullRequestUrl,
-) -> anyhow::Result<BTreeMap<String, bool>> {
-    Ok(github
-        .viewed_files(pr)?
-        .into_iter()
-        .map(|file| (file.path, file.state == ViewedState::Viewed))
-        .collect())
 }
