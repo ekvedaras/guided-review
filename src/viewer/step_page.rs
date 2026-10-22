@@ -47,6 +47,9 @@ pub struct DiffLine {
     /// Empty until the file's highlights are ready.
     pub spans: Vec<Span>,
     pub github_link: GitHubLink,
+    /// The row belongs to the "change since your read" view, whose removed rows are lines of the
+    /// head the step was read at, not of the PR's base.
+    pub is_in_change_since_read: bool,
 }
 
 impl DiffLine {
@@ -81,7 +84,7 @@ impl DiffLine {
     /// The one rule for a comment button and for a selection: whether GitHub takes a comment on this row.
     /// Rows of other views (for example removed lines of an older head) must be refused here.
     pub fn takes_comment(&self) -> bool {
-        self.is_inside_hunk()
+        !self.is_in_change_since_read && self.is_inside_hunk()
     }
 }
 
@@ -260,6 +263,7 @@ impl PieceDiff {
         );
         // Removed lines are numbered at the read head, so the PR base's colours do not fit them.
         for row in diff.hunks.iter_mut().flat_map(|hunk| hunk.rows.iter_mut()) {
+            row.is_in_change_since_read = true;
             if row.location.side == Side::Base {
                 row.spans.clear();
             }

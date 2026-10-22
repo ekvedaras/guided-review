@@ -322,6 +322,28 @@ fn a_step_read_before_shows_only_what_changed_since_its_tick_and_a_toggle_shows_
 }
 
 #[test]
+fn no_row_of_the_change_since_the_read_takes_a_comment_but_the_full_diff_rows_do() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.tick(&["total"]);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+    let total: StepId = "total".into();
+    let takes_comment = |review: &Review| -> Vec<bool> {
+        review.current_step().unwrap().pieces[0]
+            .lines()
+            .map(|line| line.takes_comment())
+            .collect()
+    };
+
+    review.go_to(&total);
+    assert_eq!(takes_comment(&review), [false, false]);
+
+    review.toggle_full_diff(&total);
+    assert_eq!(takes_comment(&review), [true, true]);
+}
+
+#[test]
 fn a_ticked_step_whose_pieces_stayed_the_same_shows_no_change_since_it_was_read() {
     let shop = Shop::with_tour_at_first_head();
     shop.tick(&["keep"]);

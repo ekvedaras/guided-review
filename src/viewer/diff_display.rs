@@ -350,6 +350,7 @@ impl FileLines<'_> {
                 .highlights
                 .spans(side, &self.file.path, line.number)
                 .to_vec(),
+            is_in_change_since_read: false,
         }
     }
 }
