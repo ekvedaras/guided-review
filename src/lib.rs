@@ -1,4 +1,6 @@
 pub mod app;
+pub mod ask_store;
+pub mod claude_cli;
 pub mod code_source;
 pub mod config;
 pub mod coverage;
