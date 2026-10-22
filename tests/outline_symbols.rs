@@ -48,8 +48,8 @@ interface Priced {
     assert_eq!(
         pieces,
         [
-            "#total  function  added  +3 −0  function total(items: number[]): number",
-            "#Cart  class  added  +4 −0  abstract class Cart",
+            "#total  function  added  +4 −0  function total(items: number[]): number",
+            "#Cart  class  added  +5 −0  abstract class Cart",
             "#Cart::add  method  added  +3 −0  add(item: string): void",
             "#Priced  interface  added  +3 −0  interface Priced",
         ]
@@ -74,7 +74,7 @@ enum Status {
     assert_eq!(
         pieces,
         [
-            "#Money  type  added  +3 −0  type Money = { cents: number; }",
+            "#Money  type  added  +4 −0  type Money = { cents: number; }",
             "#Status  enum  added  +4 −0  enum Status",
         ]
     );
@@ -96,7 +96,7 @@ const format = (cents: number): string => `${cents}`;
     assert_eq!(
         pieces,
         [
-            "#CartView  component  added  +4 −0  const CartView = ({ items }: Props) =>",
+            "#CartView  component  added  +5 −0  const CartView = ({ items }: Props) =>",
             "#format  function  added  +1 −0  const format = (cents: number): string =>",
         ]
     );

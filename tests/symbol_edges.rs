@@ -285,3 +285,54 @@ app/Order.php  modified  +1 −0
 "
     );
 }
+
+#[test]
+fn typescript_imports_and_docblocks_of_exported_symbols_follow_the_same_rules() {
+    let cart = |import: &str, docblock: &str, total: &str| {
+        format!(
+            "{import}\n\n{docblock}\nexport function total(items: number[]): number {{\n  return {total};\n}}\n"
+        )
+    };
+    let rows = rows_of_change(
+        &[(
+            "src/cart.ts",
+            &cart("import { a } from './a';", "/** Old. */", "1"),
+        )],
+        &[(
+            "src/cart.ts",
+            &cart("import { b } from './b';", "/** New. */", "1"),
+        )],
+    );
+
+    assert_eq!(
+        rows,
+        "\
+src/cart.ts  modified  +2 −2
+  #imports  imports  modified  +1 −1
+  #total  function  modified  +1 −1  function total(items: number[]): number
+"
+    );
+}
+
+#[test]
+fn typescript_renames_and_layout_only_changes_are_found() {
+    let rows = rows_of_change(
+        &[(
+            "src/cart.tsx",
+            "export function total(a: number) {\n  return a+1;\n}\n\nexport function tax(a: number) {\n  return a;\n}\n",
+        )],
+        &[(
+            "src/cart.tsx",
+            "export function total(a: number) {\n  return a + 1;\n}\n\nexport function vat(a: number) {\n  return a;\n}\n",
+        )],
+    );
+
+    assert_eq!(
+        rows,
+        "\
+src/cart.tsx  modified  +2 −2
+  #total  function  modified  +1 −1  format  function total(a: number)
+  #vat  function  modified  +1 −1  function vat(a: number)
+"
+    );
+}
