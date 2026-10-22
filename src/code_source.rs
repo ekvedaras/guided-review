@@ -36,7 +36,7 @@ impl fmt::Display for FileStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Line {
     pub number: usize,
     pub text: String,

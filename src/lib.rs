@@ -6,3 +6,4 @@ pub mod outline;
 pub mod php;
 pub mod pieces;
 pub mod pull_request;
+pub mod show;

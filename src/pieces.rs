@@ -110,6 +110,8 @@ pub struct Piece {
     pub removed: usize,
     pub signature: Option<String>,
     pub diff_hash: DiffHash,
+    pub removed_lines: Vec<Line>,
+    pub added_lines: Vec<Line>,
 }
 
 #[derive(Debug)]
@@ -161,6 +163,8 @@ fn whole_file_piece(diff: &FileDiff) -> Piece {
         removed: removed.len(),
         signature: None,
         diff_hash: DiffHash::of(&removed, &added),
+        removed_lines: diff.removed.clone(),
+        added_lines: diff.added.clone(),
     }
 }
 
@@ -214,6 +218,8 @@ fn cut_php(
                 removed: change.removed.len(),
                 signature: in_head.or(in_base).map(|symbol| symbol.signature.clone()),
                 diff_hash: DiffHash::of(&change.removed, &change.added),
+                removed_lines: change.removed.iter().copied().cloned().collect(),
+                added_lines: change.added.iter().copied().cloned().collect(),
             };
             (position, piece)
         })
