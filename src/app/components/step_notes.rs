@@ -5,7 +5,7 @@ use crate::tour::Step;
 use super::palette::Palette;
 
 /// The check hint and the TLDR the tour writer put on a step.
-#[derive(IntoElement)]
+#[derive(IntoElement, Clone, Hash)]
 pub struct StepNotes {
     check: Option<String>,
     tldr: Vec<String>,
@@ -17,6 +17,10 @@ impl StepNotes {
             check: step.check.clone(),
             tldr: step.tldr.clone(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.check.is_none() && self.tldr.is_empty()
     }
 }
 

@@ -320,6 +320,7 @@ impl Review {
             &page.pieces,
             &self.thread_fold_flipped,
             &self.files_at_head,
+            self.state.reply_drafts(),
         );
         if let Some(record) = self.repin_record() {
             self.mark_repin_status(&mut page.pieces);
@@ -588,6 +589,7 @@ impl Review {
                 &page.pieces,
                 &self.thread_fold_flipped,
                 &self.files_at_head,
+                self.state.reply_drafts(),
             );
             page
         })
@@ -828,6 +830,11 @@ impl Review {
 
     pub fn is_selecting(&self) -> bool {
         self.selection.is_some()
+    }
+
+    /// The drag in progress, for a view that knows its rows and draws them without building the page.
+    pub fn row_selection(&self) -> Option<&RowSelection> {
+        self.selection.as_ref()
     }
 
     /// The rows being dragged over, for drawing them.

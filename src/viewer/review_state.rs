@@ -256,6 +256,10 @@ impl ReviewState {
         self.finish_body = from.finish_body.clone();
     }
 
+    pub(super) fn reply_drafts(&self) -> &BTreeMap<String, String> {
+        &self.reply_drafts
+    }
+
     pub(super) fn reply_draft(&self, thread_id: &str) -> Option<&str> {
         self.reply_drafts.get(thread_id).map(String::as_str)
     }

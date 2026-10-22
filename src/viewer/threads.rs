@@ -92,6 +92,8 @@ pub struct ThreadView {
     /// The lines of the head the thread is on, for showing suggestions against them.
     /// Empty unless a comment holds a suggestion.
     pub commented_lines: Vec<String>,
+    /// The reply being written in this thread; `Some` means the reply box is open.
+    pub reply_draft: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -163,6 +165,7 @@ pub(super) fn views(
     shown: &[PieceDiff],
     flipped: &BTreeSet<String>,
     files_at_head: &FilesAtHead,
+    reply_drafts: &BTreeMap<String, String>,
 ) -> Vec<ThreadView> {
     threads
         .iter()
@@ -172,6 +175,7 @@ pub(super) fn views(
                 .anchor()
                 .filter(|anchor| shown.iter().any(|piece| hangs_under_a_row(piece, anchor))),
             commented_lines: commented_lines(thread, files_at_head),
+            reply_draft: reply_drafts.get(&thread.id).cloned(),
             thread: thread.clone(),
         })
         .collect()

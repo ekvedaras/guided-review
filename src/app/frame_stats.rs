@@ -7,12 +7,14 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui::{IntoElement, Pixels, ScrollHandle, Styled, canvas, point, px};
+use gpui::{IntoElement, ListState, Pixels, Styled, Window, canvas, px};
 
-pub const ENV: &str = "GUIDED_REVIEW_FRAME_STATS";
+const ENV: &str = "GUIDED_REVIEW_FRAME_STATS";
 const LOG_EVERY: Duration = Duration::from_secs(5);
 const FRAME_BUDGET: Duration = Duration::from_micros(16_667);
-pub const SCROLL_SPEED_PER_FRAME: Pixels = px(40.);
+/// An interval this long means at least one 60 Hz frame was skipped; vsync jitter stays below it.
+const DROPPED_FRAME_INTERVAL: Duration = Duration::from_millis(25);
+const SCROLL_SPEED_PER_FRAME: Pixels = px(40.);
 /// Frames to let a new screen lay out, draw its first diagram strips and settle before the measured scroll.
 const SETTLE_FRAMES: u32 = 20;
 /// Caps a screen's run, so the slow baseline of a huge step still ends in minutes.
@@ -74,7 +76,7 @@ impl fmt::Display for FrameReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} frames | work p50 {} p90 {} p99 {} max {} | interval p50 {} p90 {} p99 {} max {} | over 16.7 ms: work {}, interval {}",
+            "{} frames | work p50 {} p90 {} p99 {} max {} | interval p50 {} p90 {} p99 {} max {} | work over 16.7ms {}, intervals over 25ms {}",
             self.work.count,
             ms(self.work.p50),
             ms(self.work.p90),
@@ -84,8 +86,8 @@ impl fmt::Display for FrameReport {
             ms(self.intervals.p90),
             ms(self.intervals.p99),
             ms(self.intervals.max),
-            self.work.over_budget,
-            self.intervals.over_budget,
+            self.work.over(FRAME_BUDGET),
+            self.intervals.over(DROPPED_FRAME_INTERVAL),
         )
     }
 }
@@ -97,7 +99,7 @@ struct Percentiles {
     p90: Duration,
     p99: Duration,
     max: Duration,
-    over_budget: usize,
+    samples: Vec<Duration>,
 }
 
 impl Percentiles {
@@ -113,8 +115,15 @@ impl Percentiles {
             p90: at(0.9),
             p99: at(0.99),
             max: *samples.last().expect("not empty"),
-            over_budget: samples.iter().filter(|d| **d > FRAME_BUDGET).count(),
+            samples,
         }
+    }
+
+    fn over(&self, limit: Duration) -> usize {
+        self.samples
+            .iter()
+            .filter(|sample| **sample > limit)
+            .count()
     }
 }
 
@@ -170,23 +179,35 @@ impl FrameStats {
     }
 
     /// One frame of the scroll script. Returns what the layout must do next.
-    pub fn scroll_script_frame(&mut self, screen: &dyn ScrollableScreen) -> ScriptMove {
+    /// The window is raised at each screen, since gpui throttles an inactive window to 30 fps.
+    pub fn scroll_script_frame(
+        &mut self,
+        screen: &dyn ScrollableScreen,
+        window: &Window,
+    ) -> ScriptMove {
         let script = &mut self.script;
         if !script.code_arrived {
             return ScriptMove::Wait;
         }
         if script.settle_frames < SETTLE_FRAMES {
+            if script.settle_frames == 0 {
+                window.activate_window();
+            }
             script.settle_frames += 1;
             if script.settle_frames == SETTLE_FRAMES {
                 self.clock.borrow_mut().take_report();
             }
             return ScriptMove::Wait;
         }
-        if !screen.is_at_end() && script.scroll_frames < MAX_SCROLL_FRAMES {
+        let scrolled = screen.scrolled();
+        let has_moved = script.last_scrolled != Some(scrolled);
+        if has_moved && script.scroll_frames < MAX_SCROLL_FRAMES {
+            script.last_scrolled = Some(scrolled);
             screen.scroll_down(SCROLL_SPEED_PER_FRAME);
             script.scroll_frames += 1;
             return ScriptMove::Wait;
         }
+        script.last_scrolled = None;
         script.settle_frames = 0;
         script.scroll_frames = 0;
         ScriptMove::ScreenDone(self.clock.borrow_mut().take_report())
@@ -198,6 +219,7 @@ struct ScrollScript {
     code_arrived: bool,
     settle_frames: u32,
     scroll_frames: u32,
+    last_scrolled: Option<Pixels>,
 }
 
 pub enum ScriptMove {
@@ -208,17 +230,16 @@ pub enum ScriptMove {
 /// The scroll script's handle on whatever scrolls the screen.
 pub trait ScrollableScreen {
     fn scroll_down(&self, by: Pixels);
-    fn is_at_end(&self) -> bool;
+    /// How far down it is; the script stops when a scroll step no longer moves it.
+    fn scrolled(&self) -> Pixels;
 }
 
-impl ScrollableScreen for ScrollHandle {
+impl ScrollableScreen for ListState {
     fn scroll_down(&self, by: Pixels) {
-        let offset = self.offset();
-        let lowest = -self.max_offset().y;
-        self.set_offset(point(offset.x, (offset.y - by).max(lowest)));
+        self.scroll_by(by);
     }
 
-    fn is_at_end(&self) -> bool {
-        self.offset().y <= -self.max_offset().y
+    fn scrolled(&self) -> Pixels {
+        -self.scroll_px_offset_for_scrollbar().y
     }
 }

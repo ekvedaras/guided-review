@@ -4,6 +4,8 @@
 pub mod components;
 mod frame_stats;
 mod layouts;
+mod page_rows;
+mod sidebar_rows;
 
 use std::sync::Arc;
 

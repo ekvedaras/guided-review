@@ -16,6 +16,16 @@ impl RowSelection {
         }
     }
 
+    /// Where the mouse went down.
+    pub fn anchor(&self) -> &LineLocation {
+        &self.anchor
+    }
+
+    /// Where the mouse is now.
+    pub fn head(&self) -> &LineLocation {
+        &self.head
+    }
+
     /// A row of another file cannot join: a comment has one file.
     pub fn extend_to(&mut self, row: LineLocation) {
         if row.path == self.anchor.path {

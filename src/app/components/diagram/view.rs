@@ -32,6 +32,16 @@ impl Diagrams {
         self.draw_svgs(cx);
     }
 
+    /// A list does not lay out rows off screen, so the strips of a scrolled-away diagram cannot say they
+    /// left; the layout says it for them.
+    pub fn leave_screen(&mut self, window: &mut Window) {
+        for strip in self.memory.strips() {
+            if let Some(bitmap) = self.memory.set_on_screen(strip.index(), false) {
+                window.drop_image(bitmap).ok();
+            }
+        }
+    }
+
     fn draw_svgs(&mut self, cx: &mut Context<Self>) {
         for job in self.memory.svgs_to_draw() {
             cx.spawn(async move |this, cx| {
