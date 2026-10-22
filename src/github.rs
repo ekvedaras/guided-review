@@ -8,8 +8,9 @@ use serde::Deserialize;
 use crate::code_source::{CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentPlace, PendingReviewExists, ReviewThread, Side, ThreadComment, ThreadNotCreated,
-    ViewedFile, ViewedState, ViewedSyncUnavailable,
+    CommentPlace, PendingReviewExists, Reaction, ReactionCount, ReviewThread, ReviewVerdict,
+    SendMode, Side, ThreadComment, ThreadNotCreated, ViewedFile, ViewedState,
+    ViewedSyncUnavailable,
 };
 
 #[derive(Clone)]
@@ -337,6 +338,153 @@ impl GitHub {
         Ok(())
     }
 
+    pub fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerDidAuthor } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not tell who wrote {pr}"))?;
+        data["repository"]["pullRequest"]["viewerDidAuthor"]
+            .as_bool()
+            .with_context(|| format!("GitHub did not say who wrote {pr}"))
+    }
+
+    fn pending_review_id(&self, pr: &PullRequestUrl) -> anyhow::Result<Option<String>> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        reviews(states: PENDING, first: 10) { nodes { id viewerDidAuthor } }
+                    } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not look for a pending review on {pr}"))?;
+        Ok(data["repository"]["pullRequest"]["reviews"]["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|review| review["viewerDidAuthor"].as_bool() == Some(true))
+            .and_then(|review| review["id"].as_str())
+            .map(str::to_string))
+    }
+
+    /// A reply joins the viewer's pending review. With `CommentNow` the review it ended up in is sent at once.
+    /// GitHub starts a pending review when there is none; that case has not run against real GitHub.
+    pub fn reply_to_thread(
+        &self,
+        pr: &PullRequestUrl,
+        thread_id: &str,
+        body: &str,
+        mode: SendMode,
+    ) -> anyhow::Result<()> {
+        let mut input = serde_json::json!({"pullRequestReviewThreadId": thread_id, "body": body});
+        if let Some(review_id) = self.pending_review_id(pr)? {
+            input["pullRequestReviewId"] = review_id.into();
+        }
+        let data = self
+            .graphql(
+                "mutation($input: AddPullRequestReviewThreadReplyInput!) {
+                    addPullRequestReviewThreadReply(input: $input) {
+                        comment { pullRequestReview { id state } }
+                    }
+                }",
+                serde_json::json!({"input": input}),
+            )
+            .map_err(one_pending_review_error)
+            .context("could not reply")?;
+        let review = &data["addPullRequestReviewThreadReply"]["comment"]["pullRequestReview"];
+        if mode == SendMode::CommentNow && review["state"] == "PENDING" {
+            let review_id = review["id"].as_str().unwrap_or_default();
+            self.submit_pending_review(review_id, ReviewVerdict::Comment, "")
+                .context("could not post the reply")?;
+        }
+        Ok(())
+    }
+
+    fn submit_pending_review(
+        &self,
+        review_id: &str,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.graphql(
+            "mutation($input: SubmitPullRequestReviewInput!) {
+                submitPullRequestReview(input: $input) { clientMutationId }
+            }",
+            serde_json::json!({"input": {
+                "pullRequestReviewId": review_id,
+                "event": verdict.github_name(),
+                "body": body,
+            }}),
+        )?;
+        Ok(())
+    }
+
+    pub fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
+        let mutation = if resolved {
+            "resolveReviewThread"
+        } else {
+            "unresolveReviewThread"
+        };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            serde_json::json!({"input": {"threadId": thread_id}}),
+        )
+        .with_context(|| format!("could not change the thread {thread_id}"))?;
+        Ok(())
+    }
+
+    pub fn set_reaction(
+        &self,
+        comment_id: &str,
+        reaction: Reaction,
+        on: bool,
+    ) -> anyhow::Result<()> {
+        let mutation = if on { "addReaction" } else { "removeReaction" };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            serde_json::json!({"input": {"subjectId": comment_id, "content": reaction.github_name()}}),
+        )
+        .context("could not change the reaction")?;
+        Ok(())
+    }
+
+    /// Sends the viewer's pending review, or a new review with just the verdict and body when there is none.
+    pub fn submit_review(
+        &self,
+        pr: &PullRequestUrl,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(review_id) = self.pending_review_id(pr)? {
+            return self
+                .submit_pending_review(&review_id, verdict, body)
+                .context("could not send the review");
+        }
+        self.graphql(
+            "mutation($input: AddPullRequestReviewInput!) {
+                addPullRequestReview(input: $input) { clientMutationId }
+            }",
+            serde_json::json!({"input": {
+                "pullRequestId": self.pull_request_id(pr)?,
+                "event": verdict.github_name(),
+                "body": body,
+            }}),
+        )
+        .context("could not send the review")?;
+        Ok(())
+    }
+
     fn get(&self, path: &str, accept: &str) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
         let mut request = ureq::get(format!("{}/{path}", self.api))
             .header("Accept", accept)
@@ -460,7 +608,7 @@ const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $numb
     reviewThreads(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes { id isResolved isOutdated path line startLine originalLine originalStartLine diffSide subjectType
-        comments(first: 50) { nodes { url body originalCommit { oid } author { login __typename } } } }
+        comments(first: 50) { nodes { id url body reactionGroups { content viewerHasReacted reactors { totalCount } } originalCommit { oid } author { login __typename } } } }
     }
   } }
 }";
@@ -526,11 +674,26 @@ pub(crate) fn parse_review_threads(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct CommentJson {
+        id: String,
         url: String,
+        #[serde(default)]
+        reaction_groups: Vec<ReactionGroupJson>,
         body: String,
         original_commit: Option<CommitJson>,
         /// GitHub answers `null` for a deleted account.
         author: Option<AuthorJson>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReactionGroupJson {
+        content: String,
+        viewer_has_reacted: bool,
+        reactors: ReactorsJson,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReactorsJson {
+        total_count: usize,
     }
     #[derive(Deserialize)]
     struct CommitJson {
@@ -592,8 +755,21 @@ pub(crate) fn parse_review_threads(
                         author: comment
                             .author
                             .map_or_else(|| "ghost".to_string(), |author| author.login),
+                        id: comment.id,
                         body: comment.body,
                         url: comment.url,
+                        reactions: comment
+                            .reaction_groups
+                            .into_iter()
+                            .filter(|group| group.reactors.total_count > 0)
+                            .filter_map(|group| {
+                                Some(ReactionCount {
+                                    reaction: Reaction::from_github_name(&group.content)?,
+                                    count: group.reactors.total_count,
+                                    viewer_has_reacted: group.viewer_has_reacted,
+                                })
+                            })
+                            .collect(),
                     })
                     .collect(),
             })

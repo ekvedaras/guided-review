@@ -17,6 +17,7 @@ use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     DiffView, OnMoreContext, OnOpenInIde, RowGesture, RowSelecting, threads_by_piece,
 };
+use crate::app::components::finish_review::{FinishReviewDialog, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
@@ -25,12 +26,13 @@ use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
 use crate::app::components::text_input::TextDraft;
-use crate::app::components::thread_view::ThreadElement;
+use crate::app::components::thread_view::{OnThreadAction, ThreadElement};
 use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
-    CommentPlace, CommentResult, GitHubPort, LineLocation, MoreContext, Place, Review, Screen,
-    SendMode, StepId, StepPage, ThreadView, TourRefresher, TourUpdater, UpdatedTour,
+    CommentPlace, CommentResult, FinishResult, GitHubPort, LineLocation, MoreContext, Place,
+    Review, Screen, SendMode, StepId, StepPage, ThreadView, TourRefresher, TourUpdater,
+    UpdatedTour,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -347,23 +349,28 @@ impl OneStepLayout {
         }));
     }
 
+    /// What the finish dialog needs from GitHub: whether a pending review exists and who wrote the PR.
     fn pull_pending_review(&mut self, cx: &mut Context<Self>) {
         let pr = self.review.pr().clone();
         let github = self.github.clone();
         self.pending_review_check = Some(cx.spawn(async move |this, cx| {
-            let exists = cx
+            let (exists, authored) = cx
                 .background_executor()
-                .spawn(async move { github.has_pending_review(&pr) })
+                .spawn(async move { (github.has_pending_review(&pr), github.viewer_authored(&pr)) })
                 .await;
-            match exists {
-                Ok(exists) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.review.pending_review_is(exists);
-                        cx.notify();
-                    });
+            let _ = this.update(cx, |this, cx| {
+                match exists {
+                    Ok(exists) => this.review.pending_review_is(exists),
+                    Err(error) => {
+                        eprintln!("warning: could not look for a pending review: {error:#}")
+                    }
                 }
-                Err(error) => eprintln!("warning: could not look for a pending review: {error:#}"),
-            }
+                match authored {
+                    Ok(authored) => this.review.viewer_authorship_is(authored),
+                    Err(error) => eprintln!("warning: could not tell who wrote the PR: {error:#}"),
+                }
+                cx.notify();
+            });
         }));
     }
 
@@ -573,6 +580,7 @@ impl OneStepLayout {
                 is_focused,
                 self.sending_comments.contains(place),
                 can_comment_now,
+                self.review.can_suggest_change(place),
                 problem,
                 self.on_compose(place, cx, |this, place, window, cx| {
                     this.composing = Some(place);
@@ -586,12 +594,79 @@ impl OneStepLayout {
                     this.send_comment(place, SendMode::CommentNow, cx)
                 }),
                 self.on_compose(place, cx, |this, place, _, cx| {
+                    if let Err(error) = this.review.suggest_change(&place) {
+                        eprintln!("could not save the suggestion: {error:#}");
+                    }
+                    cx.notify();
+                }),
+                self.on_compose(place, cx, |this, place, _, cx| {
                     this.discard_comment(&place, cx)
                 }),
             );
             (place.end.clone(), composer.into_any_element())
         });
         queued.into_iter().chain(composers).collect()
+    }
+
+    /// Runs a thread action in the background, then shows the threads as GitHub has them.
+    fn on_thread_action(&self, cx: &mut Context<Self>) -> OnThreadAction {
+        let layout = cx.entity();
+        Rc::new(move |action, on_done, cx| {
+            let (request, github) = layout.update(cx, |this, _| {
+                (
+                    this.review.thread_action_request(action),
+                    this.github.clone(),
+                )
+            });
+            let layout = layout.clone();
+            cx.spawn(async move |cx| {
+                let outcome = cx
+                    .background_executor()
+                    .spawn(async move { request.run(github.as_ref()) })
+                    .await;
+                cx.update(|cx| {
+                    let result = layout.update(cx, |this, cx| {
+                        let result = this.review.apply_thread_action(outcome);
+                        cx.notify();
+                        result
+                    });
+                    on_done(&result, cx);
+                });
+            })
+            .detach();
+        })
+    }
+
+    /// Sends the review in the background and shows the answer in the dialog.
+    fn on_finish_review(&self, cx: &mut Context<Self>) -> OnFinish {
+        let layout = cx.entity();
+        Rc::new(move |verdict, body, on_done, cx| {
+            let started = layout.update(cx, |this, _| {
+                this.review
+                    .finish_review_request(verdict, &body)
+                    .map(|request| (request, this.github.clone()))
+            });
+            let (request, github) = match started {
+                Ok(started) => started,
+                Err(refusal) => return on_done(&FinishResult::Refused(refusal), cx),
+            };
+            let layout = layout.clone();
+            cx.spawn(async move |cx| {
+                let outcome = cx
+                    .background_executor()
+                    .spawn(async move { request.run(github.as_ref()) })
+                    .await;
+                cx.update(|cx| {
+                    let result = layout.update(cx, |this, cx| {
+                        let result = this.review.apply_finish(outcome);
+                        cx.notify();
+                        result
+                    });
+                    on_done(&result, cx);
+                });
+            })
+            .detach();
+        })
     }
 
     /// Threads under a line come with their line, the rest go after the code.
@@ -606,10 +681,12 @@ impl OneStepLayout {
             let id = view.thread.id.clone();
             let element = ThreadElement::new(
                 view.clone(),
+                self.review.can_comment_now(),
                 cx.listener(move |this, _, _, cx| {
                     this.review.toggle_thread_fold(&id);
                     cx.notify();
                 }),
+                self.on_thread_action(cx),
             )
             .into_any_element();
             match &view.anchor {
@@ -697,6 +774,11 @@ impl OneStepLayout {
                 .text_color(Palette::muted_text())
                 .child("● not synced with GitHub yet")
         });
+        let finish_dialog = FinishReviewDialog::new(
+            self.review.can_approve_or_request_changes(),
+            self.review.approve_warning(),
+            self.on_finish_review(cx),
+        );
         let step_rows = self.review.sidebar().into_iter().map(|entry| {
             let id: StepId = entry.id.clone();
             div()
@@ -728,6 +810,7 @@ impl OneStepLayout {
             .border_color(Palette::border())
             .text_sm()
             .child(progress_row)
+            .child(finish_dialog)
             .children(sync_row)
             .children(not_synced_row)
             .child(summary_row)

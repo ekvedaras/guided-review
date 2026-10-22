@@ -5,7 +5,7 @@ use gpui::{
     div, px,
 };
 
-use crate::viewer::{Block, Capture, Markdown, Run, highlight_snippet};
+use crate::viewer::{Block, Capture, Markdown, Run, SuggestionDiff, highlight_snippet};
 
 use super::palette::{CODE_FONT, Palette};
 
@@ -15,6 +15,8 @@ use super::palette::{CODE_FONT, Palette};
 pub struct MarkdownView {
     key: SharedString,
     markdown: Markdown,
+    /// The lines the comment is on, so a suggestion block shows as a diff against them.
+    commented_lines: Vec<String>,
 }
 
 impl MarkdownView {
@@ -22,14 +24,80 @@ impl MarkdownView {
         Self {
             key: key.into(),
             markdown,
+            commented_lines: Vec::new(),
         }
+    }
+
+    pub fn on_lines(mut self, commented_lines: Vec<String>) -> Self {
+        self.commented_lines = commented_lines;
+        self
     }
 }
 
 impl RenderOnce for MarkdownView {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        blocks(&self.markdown.blocks, &self.key, window, cx)
+        if self.commented_lines.is_empty() {
+            return blocks(&self.markdown.blocks, &self.key, window, cx);
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(
+                self.markdown
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .map(|(index, block)| match block {
+                        Block::Code {
+                            language: Some(language),
+                            text,
+                        } if language == "suggestion" => {
+                            suggestion_view(&SuggestionDiff::of(&self.commented_lines, text))
+                        }
+                        _ => block_element(block, &format!("{}-{index}", self.key), window, cx),
+                    }),
+            )
+            .into_any_element()
     }
+}
+
+fn suggestion_view(diff: &SuggestionDiff) -> AnyElement {
+    let rows = |lines: &[String], sign: &'static str, background: gpui::Rgba| {
+        lines
+            .iter()
+            .map(|line| {
+                div()
+                    .flex()
+                    .gap_2()
+                    .bg(background)
+                    .whitespace_nowrap()
+                    .min_h(px(14.))
+                    .child(div().flex_none().w(px(12.)).child(sign))
+                    .child(line.clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    div()
+        .flex()
+        .flex_col()
+        .rounded_md()
+        .border_1()
+        .border_color(Palette::border())
+        .font_family(CODE_FONT)
+        .text_sm()
+        .overflow_hidden()
+        .child(
+            div()
+                .px_2()
+                .py_1()
+                .bg(Palette::sidebar())
+                .text_color(Palette::muted_text())
+                .child("Suggested change"),
+        )
+        .children(rows(&diff.removed, "-", Palette::removed_line()))
+        .children(rows(&diff.added, "+", Palette::added_line()))
+        .into_any_element()
 }
 
 fn blocks(items: &[Block], key: &str, window: &mut Window, cx: &mut App) -> AnyElement {

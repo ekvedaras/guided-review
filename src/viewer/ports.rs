@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use super::comments::CommentPlace;
+use super::comments::{CommentPlace, SendMode};
+use super::finish_review::ReviewVerdict;
+use super::reactions::Reaction;
 use super::threads::ReviewThread;
 use crate::github::GitHub;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
@@ -36,6 +38,30 @@ pub trait GitHubPort: Send + Sync {
         &self,
         pr: &PullRequestUrl,
         place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()>;
+
+    /// Whether the viewer wrote the PR. GitHub refuses their approval or change request.
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
+
+    /// Adds a reply to the pending review, or with `CommentNow` posts it at once.
+    fn reply_to_thread(
+        &self,
+        pr: &PullRequestUrl,
+        thread_id: &str,
+        body: &str,
+        mode: SendMode,
+    ) -> anyhow::Result<()>;
+
+    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()>;
+
+    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()>;
+
+    /// Sends the pending review, or a new review when there is none.
+    fn submit_review(
+        &self,
+        pr: &PullRequestUrl,
+        verdict: ReviewVerdict,
         body: &str,
     ) -> anyhow::Result<()>;
 }
@@ -127,6 +153,37 @@ impl GitHubPort for GitHub {
         body: &str,
     ) -> anyhow::Result<()> {
         GitHub::comment_now(self, pr, place, body)
+    }
+
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        GitHub::viewer_authored(self, pr)
+    }
+
+    fn reply_to_thread(
+        &self,
+        pr: &PullRequestUrl,
+        thread_id: &str,
+        body: &str,
+        mode: SendMode,
+    ) -> anyhow::Result<()> {
+        GitHub::reply_to_thread(self, pr, thread_id, body, mode)
+    }
+
+    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
+        GitHub::set_thread_resolved(self, thread_id, resolved)
+    }
+
+    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
+        GitHub::set_reaction(self, comment_id, reaction, on)
+    }
+
+    fn submit_review(
+        &self,
+        pr: &PullRequestUrl,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        GitHub::submit_review(self, pr, verdict, body)
     }
 }
 

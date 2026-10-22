@@ -20,6 +20,9 @@ use super::comments::{
     Origin, Outcome, QueuedComment, SendMode,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
+use super::finish_review::{
+    ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
+};
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::jump::{self, JumpTarget};
@@ -27,7 +30,13 @@ use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
-use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
+use super::step_page::{
+    DiffLine, LineLocation, PieceDiff, SafetyNetPage, Side, SinceRead, StepPage,
+};
+use super::suggestion::suggestion_block;
+use super::thread_actions::{
+    ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
+};
 use super::threads::{self, ReviewThread, ThreadPlacement};
 use crate::repin::RepinStatus;
 
@@ -117,6 +126,8 @@ pub struct Review {
     selection: Option<RowSelection>,
     /// Unknown until GitHub answers; "Comment now" is only offered when it is known to be `false`.
     has_pending_review: Option<bool>,
+    /// Unknown until GitHub answers; Approve and Request changes are only offered when it is known to be `false`.
+    viewer_did_author: Option<bool>,
 }
 
 impl Review {
@@ -175,6 +186,7 @@ impl Review {
             full_diff_shown: BTreeSet::new(),
             selection: None,
             has_pending_review: None,
+            viewer_did_author: None,
         })
     }
 
@@ -268,6 +280,7 @@ impl Review {
             self.threads.in_step(id),
             &page.pieces,
             &self.thread_fold_flipped,
+            &self.files_at_head,
         );
         if let Some(record) = self.repin_record() {
             self.mark_repin_status(&mut page.pieces);
@@ -414,6 +427,7 @@ impl Review {
                 self.threads.in_safety_net(),
                 &page.pieces,
                 &self.thread_fold_flipped,
+                &self.files_at_head,
             );
             page
         })
@@ -482,6 +496,115 @@ impl Review {
     /// "Comment now" shows only when there is surely no pending review.
     pub fn can_comment_now(&self) -> bool {
         self.has_pending_review == Some(false)
+    }
+
+    /// Reply, resolve, unresolve or react, and show the threads as GitHub has them after.
+    /// The app runs `thread_action_request` in the background and then `apply_thread_action`.
+    pub fn act_on_thread(
+        &mut self,
+        action: ThreadAction,
+        github: &dyn GitHubPort,
+    ) -> ThreadActionResult {
+        let outcome = self.thread_action_request(action).run(github);
+        self.apply_thread_action(outcome)
+    }
+
+    pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
+        ThreadActionRequest {
+            pr: self.pr.clone(),
+            action,
+        }
+    }
+
+    pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
+        match (&outcome.result, &outcome.action) {
+            (ThreadActionResult::Done, ThreadAction::Reply { mode, .. }) => {
+                self.has_pending_review = Some(*mode == SendMode::AddToReview);
+            }
+            (
+                ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),
+                ThreadAction::Reply { .. },
+            ) => self.has_pending_review = Some(true),
+            _ => {}
+        }
+        if let Some(threads) = &outcome.threads {
+            self.set_threads(threads);
+        }
+        outcome.result
+    }
+
+    /// Blocking; the app runs it in the background on open and on focus.
+    pub fn pull_viewer_authorship(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        self.viewer_authorship_is(github.viewer_authored(&self.pr)?);
+        Ok(())
+    }
+
+    pub fn viewer_authorship_is(&mut self, authored: bool) {
+        self.viewer_did_author = Some(authored);
+    }
+
+    /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.
+    pub fn can_approve_or_request_changes(&self) -> bool {
+        self.viewer_did_author == Some(false)
+    }
+
+    /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
+    pub fn approve_warning(&self) -> Option<ApproveWarning> {
+        let progress = self.progress();
+        let unread_safety_net_pieces = coverage::safety_net(&self.tour, &self.files)
+            .iter()
+            .map(|part| part.piece.id.to_string())
+            .collect::<BTreeSet<_>>()
+            .len();
+        let warning = ApproveWarning {
+            unread_steps: progress.total - progress.read,
+            unread_safety_net_pieces,
+        };
+        (warning.unread_steps + warning.unread_safety_net_pieces > 0).then_some(warning)
+    }
+
+    pub fn finish_review_request(
+        &self,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> Result<FinishRequest, FinishRefusal> {
+        let judges = verdict != ReviewVerdict::Comment;
+        if judges && !self.can_approve_or_request_changes() {
+            return Err(FinishRefusal::OwnPullRequest);
+        }
+        let has_text = !body.trim().is_empty();
+        let needs_text = match verdict {
+            ReviewVerdict::Approve => false,
+            ReviewVerdict::RequestChanges => true,
+            ReviewVerdict::Comment => self.has_pending_review != Some(true),
+        };
+        if needs_text && !has_text {
+            return Err(FinishRefusal::BodyNeeded(verdict));
+        }
+        Ok(FinishRequest {
+            pr: self.pr.clone(),
+            verdict,
+            body: body.trim().to_string(),
+        })
+    }
+
+    pub fn finish_review(
+        &mut self,
+        verdict: ReviewVerdict,
+        body: &str,
+        github: &dyn GitHubPort,
+    ) -> FinishResult {
+        match self.finish_review_request(verdict, body) {
+            Ok(request) => self.apply_finish(request.run(github)),
+            Err(refusal) => FinishResult::Refused(refusal),
+        }
+    }
+
+    pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
+        if outcome.result == FinishResult::Sent {
+            self.has_pending_review = Some(false);
+        }
+        outcome.result
     }
 
     pub fn begin_selection(&mut self, row: LineLocation) {
@@ -564,6 +687,44 @@ impl Review {
         self.state.drop_draft(place);
         self.state.drop_queued(place);
         self.save_viewer_sections()
+    }
+
+    /// "Suggest change" shows only when the range starts and ends on lines of the head:
+    /// a suggestion replaces lines that stay. Removed rows in between are left out of it.
+    pub fn can_suggest_change(&self, place: &CommentPlace) -> bool {
+        place.start.side == Side::Head && place.end.side == Side::Head
+    }
+
+    /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
+    /// `None` when the lines cannot be suggested on or there is no draft.
+    pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
+        let Some(typed) = self.state.draft_at(place).map(|draft| draft.body.clone()) else {
+            return Ok(None);
+        };
+        if !self.can_suggest_change(place) {
+            return Ok(None);
+        }
+        let rows = self.rows_of(place).unwrap_or_default();
+        let kept_lines: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.location.side == Side::Head)
+            .map(|row| row.text.as_str())
+            .collect();
+        let block = suggestion_block(&kept_lines);
+        let body = if typed.trim().is_empty() {
+            block
+        } else {
+            format!("{}\n\n{block}", typed.trim_end())
+        };
+        self.edit_draft(place, &body)?;
+        Ok(Some(body))
+    }
+
+    fn rows_of(&self, place: &CommentPlace) -> Option<Vec<DiffLine>> {
+        let mut selection = RowSelection::start_at(place.start.clone());
+        selection.extend_to(place.end.clone());
+        let rows = selection.resolve(&self.screen_lines())?;
+        Some(rows.lines().to_vec())
     }
 
     /// `None` when there is no such draft.

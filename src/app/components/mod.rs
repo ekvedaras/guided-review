@@ -2,6 +2,7 @@ pub mod ask_panel;
 pub mod comment_composer;
 pub mod diagram;
 pub mod diff_view;
+pub mod finish_review;
 pub mod fold_toggle;
 pub mod jump_palette;
 pub mod markdown_view;

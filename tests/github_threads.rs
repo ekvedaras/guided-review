@@ -6,7 +6,8 @@ use std::thread;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    CommentPlace, LineLocation, PendingReviewExists, Side, ThreadNotCreated,
+    CommentPlace, LineLocation, PendingReviewExists, Reaction, ReactionCount, ReviewVerdict,
+    SendMode, Side, ThreadNotCreated,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
@@ -54,11 +55,11 @@ fn page(has_next: bool, cursor: &str, nodes: &str) -> String {
 }
 
 const LINE_THREAD: &str = r#"{"id":"T1","isResolved":true,"isOutdated":false,"path":"a.php","line":227,"startLine":167,"originalLine":179,"originalStartLine":167,"diffSide":"LEFT","subjectType":"LINE","comments":{"nodes":[
-  {"url":"https://github.com/acme/shop/pull/7#r1","body":"named arguments","originalCommit":{"oid":"9d6f"},"author":{"login":"alice","__typename":"User"}},
-  {"url":"https://github.com/acme/shop/pull/7#r2","body":"done","originalCommit":{"oid":"9d6f"},"author":{"login":"review-bot","__typename":"Bot"}}]}}"#;
+  {"id":"C1","url":"https://github.com/acme/shop/pull/7#r1","body":"named arguments","reactionGroups":[{"content":"HEART","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}],"originalCommit":{"oid":"9d6f"},"author":{"login":"alice","__typename":"User"}},
+  {"id":"C2","url":"https://github.com/acme/shop/pull/7#r2","body":"done","originalCommit":{"oid":"9d6f"},"author":{"login":"review-bot","__typename":"Bot"}}]}}"#;
 
 const OUTDATED_FILE_THREAD: &str = r#"{"id":"T2","isResolved":false,"isOutdated":true,"path":"b.php","line":null,"startLine":null,"originalLine":435,"originalStartLine":null,"diffSide":"RIGHT","subjectType":"FILE","comments":{"nodes":[
-  {"url":"https://github.com/acme/shop/pull/7#r3","body":"gone","originalCommit":null,"author":null}]}}"#;
+  {"id":"C3","url":"https://github.com/acme/shop/pull/7#r3","body":"gone","originalCommit":null,"author":null}]}}"#;
 
 #[test]
 fn review_threads_are_read_over_graphql_page_by_page() {
@@ -90,6 +91,15 @@ fn review_threads_are_read_over_graphql_page_by_page() {
     assert_eq!(
         line.comments[0].url,
         "https://github.com/acme/shop/pull/7#r1"
+    );
+    assert_eq!(line.comments[0].id, "C1");
+    assert_eq!(
+        line.comments[0].reactions,
+        [ReactionCount {
+            reaction: Reaction::Heart,
+            count: 2,
+            viewer_has_reacted: true
+        }]
     );
     assert!(file.is_outdated && file.is_file_comment);
     assert_eq!((file.line, file.original_line), (None, Some(435)));
@@ -244,4 +254,149 @@ fn only_a_pending_review_the_viewer_wrote_counts() {
     assert!(github.has_pending_review(&pr()).unwrap());
     assert!(!github.has_pending_review(&pr()).unwrap());
     assert!(!github.has_pending_review(&pr()).unwrap());
+}
+
+const OK: &str = r#"{"data":{"x":{"clientMutationId":null}}}"#;
+const NO_PENDING: &str = r#"{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[]}}}}}"#;
+const PENDING: &str = r#"{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[{"id":"REVIEW_7","viewerDidAuthor":true}]}}}}}"#;
+
+#[test]
+fn a_thread_is_resolved_and_unresolved_by_its_id() {
+    let (url, asked) = serve_graphql(vec![OK.into(), OK.into()]);
+    let github = GitHub::at(&url);
+
+    github.set_thread_resolved("T1", true).unwrap();
+    github.set_thread_resolved("T1", false).unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert!(
+        asked[0]["query"]
+            .as_str()
+            .unwrap()
+            .contains("resolveReviewThread(input")
+    );
+    assert!(
+        asked[1]["query"]
+            .as_str()
+            .unwrap()
+            .contains("unresolveReviewThread(input")
+    );
+    assert_eq!(asked[1]["variables"]["input"]["threadId"], "T1");
+}
+
+#[test]
+fn a_reaction_is_added_and_removed_with_githubs_content_name() {
+    let (url, asked) = serve_graphql(vec![OK.into(), OK.into()]);
+    let github = GitHub::at(&url);
+
+    github.set_reaction("C1", Reaction::ThumbsUp, true).unwrap();
+    github
+        .set_reaction("C1", Reaction::ThumbsUp, false)
+        .unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert!(
+        asked[0]["query"]
+            .as_str()
+            .unwrap()
+            .contains("addReaction(input")
+    );
+    assert!(
+        asked[1]["query"]
+            .as_str()
+            .unwrap()
+            .contains("removeReaction(input")
+    );
+    assert_eq!(
+        asked[0]["variables"]["input"],
+        serde_json::json!({"subjectId": "C1", "content": "THUMBS_UP"})
+    );
+}
+
+#[test]
+fn the_pending_review_is_sent_with_the_verdict_and_body() {
+    let (url, asked) = serve_graphql(vec![PENDING.into(), OK.into()]);
+
+    GitHub::at(&url)
+        .submit_review(&pr(), ReviewVerdict::RequestChanges, "fix it")
+        .unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert!(
+        asked[1]["query"]
+            .as_str()
+            .unwrap()
+            .contains("submitPullRequestReview(input")
+    );
+    assert_eq!(
+        asked[1]["variables"]["input"],
+        serde_json::json!({"pullRequestReviewId": "REVIEW_7", "event": "REQUEST_CHANGES", "body": "fix it"})
+    );
+}
+
+#[test]
+fn without_a_pending_review_a_new_review_carries_the_verdict() {
+    let (url, asked) = serve_graphql(vec![NO_PENDING.into(), PULL_ID.into(), OK.into()]);
+
+    GitHub::at(&url)
+        .submit_review(&pr(), ReviewVerdict::Approve, "")
+        .unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert!(
+        asked[2]["query"]
+            .as_str()
+            .unwrap()
+            .contains("addPullRequestReview(input")
+    );
+    assert_eq!(
+        asked[2]["variables"]["input"],
+        serde_json::json!({"pullRequestId": "PR_1", "event": "APPROVE", "body": ""})
+    );
+}
+
+#[test]
+fn a_reply_now_sends_the_review_it_started() {
+    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"REVIEW_8","state":"PENDING"}}}}}"#;
+    let (url, asked) = serve_graphql(vec![NO_PENDING.into(), replied.into(), OK.into()]);
+
+    GitHub::at(&url)
+        .reply_to_thread(&pr(), "T1", "because", SendMode::CommentNow)
+        .unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert_eq!(
+        asked[1]["variables"]["input"],
+        serde_json::json!({"pullRequestReviewThreadId": "T1", "body": "because"})
+    );
+    assert_eq!(
+        asked[2]["variables"]["input"]["pullRequestReviewId"],
+        "REVIEW_8"
+    );
+    assert_eq!(asked[2]["variables"]["input"]["event"], "COMMENT");
+}
+
+#[test]
+fn a_reply_into_the_pending_review_is_not_sent() {
+    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
+    let (url, asked) = serve_graphql(vec![PENDING.into(), replied.into()]);
+
+    GitHub::at(&url)
+        .reply_to_thread(&pr(), "T1", "because", SendMode::AddToReview)
+        .unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert_eq!(asked.len(), 2);
+    assert_eq!(
+        asked[1]["variables"]["input"]["pullRequestReviewId"],
+        "REVIEW_7"
+    );
+}
+
+#[test]
+fn the_pr_author_is_read_from_viewer_did_author() {
+    let answer = r#"{"data":{"repository":{"pullRequest":{"viewerDidAuthor":true}}}}"#;
+    let (url, _) = serve_graphql(vec![answer.into()]);
+
+    assert!(GitHub::at(&url).viewer_authored(&pr()).unwrap());
 }

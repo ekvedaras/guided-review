@@ -20,11 +20,13 @@ pub struct CommentComposer {
     is_focused: bool,
     is_sending: bool,
     can_comment_now: bool,
+    can_suggest_change: bool,
     /// What stops the comment, or what went wrong with the last send.
     problem: Option<String>,
     on_focus: OnCompose,
     on_add_to_review: OnCompose,
     on_comment_now: OnCompose,
+    on_suggest_change: OnCompose,
     on_discard: OnCompose,
 }
 
@@ -37,10 +39,12 @@ impl CommentComposer {
         is_focused: bool,
         is_sending: bool,
         can_comment_now: bool,
+        can_suggest_change: bool,
         problem: Option<String>,
         on_focus: OnCompose,
         on_add_to_review: OnCompose,
         on_comment_now: OnCompose,
+        on_suggest_change: OnCompose,
         on_discard: OnCompose,
     ) -> Self {
         Self {
@@ -48,10 +52,12 @@ impl CommentComposer {
             is_focused,
             is_sending,
             can_comment_now,
+            can_suggest_change,
             problem,
             on_focus,
             on_add_to_review,
             on_comment_now,
+            on_suggest_change,
             on_discard,
         }
     }
@@ -82,21 +88,25 @@ impl RenderOnce for CommentComposer {
         } else {
             body.text().to_string()
         };
-        let buttons = (!self.is_sending).then(|| {
-            div()
-                .flex()
-                .gap_2()
-                .child(button(
-                    "add-to-review",
-                    "Add to review",
-                    self.on_add_to_review,
-                ))
-                .children(
-                    self.can_comment_now
-                        .then(|| button("comment-now", "Comment now", self.on_comment_now)),
-                )
-                .child(button("discard-comment", "Discard", self.on_discard))
-        });
+        let buttons =
+            (!self.is_sending).then(|| {
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(button(
+                        "add-to-review",
+                        "Add to review",
+                        self.on_add_to_review,
+                    ))
+                    .children(
+                        self.can_comment_now
+                            .then(|| button("comment-now", "Comment now", self.on_comment_now)),
+                    )
+                    .children(self.can_suggest_change.then(|| {
+                        button("suggest-change", "Suggest change", self.on_suggest_change)
+                    }))
+                    .child(button("discard-comment", "Discard", self.on_discard))
+            });
         div()
             .id(id)
             .flex()

@@ -4,7 +4,8 @@ use crate::coverage;
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
-use super::diff_display::DiffDisplay;
+use super::diff_display::{DiffDisplay, FilesAtHead};
+use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
 
@@ -29,11 +30,35 @@ pub struct ReviewThread {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadComment {
+    /// GitHub's node id, which reactions are added to.
+    pub id: String,
     pub author: String,
     pub is_bot: bool,
     pub body: String,
     /// The comment on the PR conversation page.
     pub url: String,
+    /// Only the reactions someone made; `reaction_summary` fills in the rest.
+    pub reactions: Vec<ReactionCount>,
+}
+
+impl ThreadComment {
+    /// All eight reactions in GitHub's order, with zero for the ones nobody used.
+    pub fn reaction_summary(&self) -> Vec<ReactionCount> {
+        Reaction::ALL
+            .into_iter()
+            .map(|reaction| {
+                self.reactions
+                    .iter()
+                    .find(|count| count.reaction == reaction)
+                    .copied()
+                    .unwrap_or(ReactionCount {
+                        reaction,
+                        count: 0,
+                        viewer_has_reacted: false,
+                    })
+            })
+            .collect()
+    }
 }
 
 impl ReviewThread {
@@ -64,6 +89,9 @@ pub struct ThreadView {
     /// The shown line it hangs under; `None` for threads shown after the code (outdated, file comments,
     /// and threads on lines that only the safety net could not show).
     pub anchor: Option<LineLocation>,
+    /// The lines of the head the thread is on, for showing suggestions against them.
+    /// Empty unless a comment holds a suggestion.
+    pub commented_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -134,6 +162,7 @@ pub(super) fn views(
     threads: &[ReviewThread],
     shown: &[PieceDiff],
     flipped: &BTreeSet<String>,
+    files_at_head: &FilesAtHead,
 ) -> Vec<ThreadView> {
     threads
         .iter()
@@ -142,9 +171,23 @@ pub(super) fn views(
             anchor: thread
                 .anchor()
                 .filter(|anchor| shown.iter().any(|piece| hangs_under_a_row(piece, anchor))),
+            commented_lines: commented_lines(thread, files_at_head),
             thread: thread.clone(),
         })
         .collect()
+}
+
+fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Vec<String> {
+    let has_suggestion = thread
+        .comments
+        .iter()
+        .any(|comment| comment.body.contains("```suggestion"));
+    match (has_suggestion, thread.is_outdated, thread.side, thread.line) {
+        (true, false, Side::Head, Some(last)) => {
+            files_at_head.lines(&thread.path, thread.start_line.unwrap_or(last), last)
+        }
+        _ => Vec::new(),
+    }
 }
 
 pub(super) fn uncovered(tour: &Tour, files: &[ChangedFile]) -> bool {

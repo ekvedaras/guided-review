@@ -51,6 +51,20 @@ pub struct FilesAtHead {
     files: HashMap<String, Vec<String>>,
 }
 
+impl FilesAtHead {
+    /// Lines `first` to `last` (1-based, both included) of a file at head; none when the file was not read.
+    pub(super) fn lines(&self, path: &str, first: usize, last: usize) -> Vec<String> {
+        self.files.get(path).map_or_else(Vec::new, |lines| {
+            lines
+                .iter()
+                .skip(first.saturating_sub(1))
+                .take((last + 1).saturating_sub(first))
+                .cloned()
+                .collect()
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Edge {
     Above,

@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, GitHubPort,
-    PendingReviewExists, ReviewThread, Side, ThreadNotCreated, ViewedFile, ViewedState,
-    ViewedSyncUnavailable,
+    PendingReviewExists, Reaction, ReactionCount, ReviewThread, ReviewVerdict, SendMode, Side,
+    ThreadNotCreated, ViewedFile, ViewedState, ViewedSyncUnavailable,
 };
 
 /// What the app core sent out, in order, across both fakes.
@@ -35,6 +35,10 @@ pub struct FakeGitHub {
     cannot_reach_github: AtomicBool,
     /// Says "one pending review per user" to the next `comment_now`, as if one appeared meanwhile.
     pending_review_appears_on_comment_now: AtomicBool,
+    viewer_is_author: AtomicBool,
+    /// What the reviewer changed since: GitHub shows it on the next read of the threads.
+    resolved_now: Mutex<BTreeMap<String, bool>>,
+    reacted_now: Mutex<BTreeMap<(String, Reaction), bool>>,
 }
 
 impl FakeGitHub {
@@ -50,7 +54,15 @@ impl FakeGitHub {
             answers_thread_null: AtomicBool::new(false),
             cannot_reach_github: AtomicBool::new(false),
             pending_review_appears_on_comment_now: AtomicBool::new(false),
+            viewer_is_author: AtomicBool::new(false),
+            resolved_now: Mutex::default(),
+            reacted_now: Mutex::default(),
         }
+    }
+
+    pub fn with_viewer_as_pull_author(self) -> Self {
+        self.viewer_is_author.store(true, Ordering::SeqCst);
+        self
     }
 
     /// A pending review started on the GitHub web page.
@@ -163,7 +175,97 @@ impl GitHubPort for FakeGitHub {
 
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
         self.sent.push(format!("github: threads of {pr}"));
-        Ok(self.threads.clone())
+        let resolved = self.resolved_now.lock().unwrap();
+        let reacted = self.reacted_now.lock().unwrap();
+        let mut threads = self.threads.clone();
+        for thread in &mut threads {
+            if let Some(is_resolved) = resolved.get(&thread.id) {
+                thread.is_resolved = *is_resolved;
+            }
+            for comment in &mut thread.comments {
+                for ((comment_id, reaction), on) in reacted.iter() {
+                    if *comment_id != comment.id {
+                        continue;
+                    }
+                    comment
+                        .reactions
+                        .retain(|count| count.reaction != *reaction);
+                    comment.reactions.push(ReactionCount {
+                        reaction: *reaction,
+                        count: usize::from(*on),
+                        viewer_has_reacted: *on,
+                    });
+                }
+            }
+        }
+        Ok(threads)
+    }
+
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        self.sent.push(format!("github: author of {pr}"));
+        Ok(self.viewer_is_author.load(Ordering::SeqCst))
+    }
+
+    fn reply_to_thread(
+        &self,
+        _pr: &PullRequestUrl,
+        thread_id: &str,
+        body: &str,
+        mode: SendMode,
+    ) -> anyhow::Result<()> {
+        self.sent
+            .push(format!("github: reply to {thread_id} {mode:?} {body:?}"));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        if mode == SendMode::AddToReview {
+            self.has_pending_review.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
+    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
+        let verb = if resolved { "resolve" } else { "unresolve" };
+        self.sent.push(format!("github: {verb} {thread_id}"));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        self.resolved_now
+            .lock()
+            .unwrap()
+            .insert(thread_id.to_string(), resolved);
+        Ok(())
+    }
+
+    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
+        let verb = if on { "react" } else { "unreact" };
+        self.sent.push(format!(
+            "github: {verb} {} on {comment_id}",
+            reaction.github_name()
+        ));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        self.reacted_now
+            .lock()
+            .unwrap()
+            .insert((comment_id.to_string(), reaction), on);
+        Ok(())
+    }
+
+    fn submit_review(
+        &self,
+        _pr: &PullRequestUrl,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.sent
+            .push(format!("github: submit {} {body:?}", verdict.github_name()));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        self.has_pending_review.store(false, Ordering::SeqCst);
+        Ok(())
     }
 
     fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
