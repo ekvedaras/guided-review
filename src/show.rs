@@ -1,9 +1,10 @@
 use std::fmt::Write;
 
 use crate::code_source::{CodeSource, FileStatus, Line};
-use crate::php::Symbols;
+use crate::language::Language;
 use crate::pieces::{ChangedFile, Piece};
 use crate::pull_request::Sha;
+use crate::symbols::Symbols;
 
 pub struct Show<'a> {
     pub source: &'a dyn CodeSource,
@@ -77,9 +78,11 @@ impl Show<'_> {
         let code = self.source.file_at(self.head, &file.path)?;
         let lines: Vec<&str> = code.lines().collect();
         let span = match &piece.id.symbol {
-            Some(symbol) => Symbols::find(&code)
-                .named(symbol)
-                .map(|symbol| (symbol.first_line, symbol.last_line)),
+            Some(symbol) => Language::for_path(&file.path).and_then(|language| {
+                Symbols::find(&code, language)
+                    .named(symbol)
+                    .map(|symbol| (symbol.first_line, symbol.last_line))
+            }),
             None => Some((1, lines.len())),
         };
         let Some(span) = span else {

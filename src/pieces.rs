@@ -4,8 +4,9 @@ use sha2::{Digest, Sha256};
 
 use crate::code_source::{CodeSource, FileDiff, FileStatus, Line};
 use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
-use crate::php::{Symbol, Symbols};
+use crate::language::Language;
 use crate::pull_request::Sha;
+use crate::symbols::{Symbol, Symbols};
 
 /// `app/Foo.php#Foo::handle`, or just `app/Foo.php` for a whole-file piece.
 /// Symbol paths never hold `#`, `@` or `/`, so a sub-part can later be appended
@@ -41,6 +42,10 @@ pub enum PieceKind {
     Interface,
     Trait,
     Enum,
+    TypeAlias,
+    Const,
+    Component,
+    Test,
     Method,
     Function,
     Top,
@@ -55,6 +60,10 @@ impl fmt::Display for PieceKind {
             Self::Interface => "interface",
             Self::Trait => "trait",
             Self::Enum => "enum",
+            Self::TypeAlias => "type",
+            Self::Const => "const",
+            Self::Component => "component",
+            Self::Test => "test",
             Self::Method => "method",
             Self::Function => "function",
             Self::Top => "top",
@@ -167,10 +176,9 @@ fn cut_by_symbols(
     head: &Sha,
     diff: &FileDiff,
 ) -> anyhow::Result<Vec<Piece>> {
-    let symbol_pieces = if diff.path().ends_with(".php") {
-        cut_php(source, base, head, diff)?
-    } else {
-        Vec::new()
+    let symbol_pieces = match Language::for_path(diff.path()) {
+        Some(language) => cut_symbols(source, base, head, diff, language)?,
+        None => Vec::new(),
     };
     Ok(if symbol_pieces.is_empty() {
         vec![whole_file_piece(diff)]
@@ -249,14 +257,15 @@ fn whole_file_piece(diff: &FileDiff) -> Piece {
 
 const TOP: &str = "(top)";
 
-fn cut_php(
+fn cut_symbols(
     source: &dyn CodeSource,
     base: &Sha,
     head: &Sha,
     diff: &FileDiff,
+    language: Language,
 ) -> anyhow::Result<Vec<Piece>> {
-    let base_symbols = symbols_at(source, base, diff.old_path.as_deref())?;
-    let head_symbols = symbols_at(source, head, diff.new_path.as_deref())?;
+    let base_symbols = symbols_at(source, base, diff.old_path.as_deref(), language)?;
+    let head_symbols = symbols_at(source, head, diff.new_path.as_deref(), language)?;
 
     let mut changes: Vec<SymbolChange> = Vec::new();
     for line in &diff.removed {
@@ -308,10 +317,15 @@ fn cut_php(
     Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
 }
 
-fn symbols_at(source: &dyn CodeSource, sha: &Sha, path: Option<&str>) -> anyhow::Result<Symbols> {
+fn symbols_at(
+    source: &dyn CodeSource,
+    sha: &Sha,
+    path: Option<&str>,
+    language: Language,
+) -> anyhow::Result<Symbols> {
     Ok(match path {
-        Some(path) => Symbols::find(&source.file_at(sha, path)?),
-        None => Symbols::find(""),
+        Some(path) => Symbols::find(&source.file_at(sha, path)?, language),
+        None => Symbols::find("", language),
     })
 }
 

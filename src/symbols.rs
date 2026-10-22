@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
+use crate::language::Language;
 use crate::pieces::PieceKind;
 
 pub struct Symbol {
@@ -22,17 +23,16 @@ impl Symbol {
 pub struct Symbols(Vec<Symbol>);
 
 impl Symbols {
-    pub fn find(source: &str) -> Self {
-        let language = tree_sitter_php::LANGUAGE_PHP.into();
+    pub fn find(source: &str, language: Language) -> Self {
+        let grammar = language.grammar();
         let mut parser = Parser::new();
         parser
-            .set_language(&language)
-            .expect("PHP grammar matches tree-sitter");
+            .set_language(&grammar)
+            .expect("grammar matches tree-sitter");
         let Some(tree) = parser.parse(source, None) else {
             return Self(Vec::new());
         };
-        let query = Query::new(&language, include_str!("../queries/php/symbols.scm"))
-            .expect("valid PHP query");
+        let query = Query::new(&grammar, language.symbol_query()).expect("valid symbol query");
 
         let mut found: Vec<(Node, &str, PieceKind)> = Vec::new();
         let mut cursor = QueryCursor::new();
@@ -42,6 +42,7 @@ impl Symbols {
             let mut definition = None;
             for capture in found_match.captures() {
                 match query.capture_names()[capture.index as usize] {
+                    helper if helper.starts_with('_') => {}
                     "name" => name = &source[capture.node.byte_range()],
                     kind => definition = Some((capture.node, kind_of(kind))),
                 }
@@ -55,15 +56,15 @@ impl Symbols {
         let mut symbols = Vec::new();
         let mut enclosing: Vec<(Node, String)> = Vec::new();
         for (node, name, kind) in found {
-            while enclosing
-                .last()
-                .is_some_and(|(outer, _)| outer.end_byte() < node.end_byte())
-            {
+            let name = name.replace(['#', '@', '/'], "_");
+            while enclosing.last().is_some_and(|(outer, _)| {
+                outer.end_byte() < node.end_byte() || outer.byte_range() == node.byte_range()
+            }) {
                 enclosing.pop();
             }
             let path = match enclosing.last() {
                 Some((_, outer_path)) => format!("{outer_path}::{name}"),
-                None => name.to_string(),
+                None => name,
             };
             symbols.push(Symbol {
                 path: path.clone(),
@@ -95,9 +96,13 @@ fn kind_of(capture: &str) -> PieceKind {
         "interface" => PieceKind::Interface,
         "trait" => PieceKind::Trait,
         "enum" => PieceKind::Enum,
+        "type_alias" => PieceKind::TypeAlias,
+        "const" => PieceKind::Const,
+        "component" => PieceKind::Component,
+        "test" => PieceKind::Test,
         "method" => PieceKind::Method,
         "function" => PieceKind::Function,
-        other => unreachable!("unknown capture @{other} in queries/php/symbols.scm"),
+        other => unreachable!("unknown capture @{other} in the symbol queries under queries/"),
     }
 }
 
@@ -106,11 +111,9 @@ fn signature_of(node: Node, source: &str) -> String {
     let mut children = node.walk();
     let start = node
         .children(&mut children)
-        .find(|child| child.kind() != "attribute_list" && child.kind() != "comment")
+        .find(|child| !matches!(child.kind(), "attribute_list" | "decorator" | "comment"))
         .map_or(node.start_byte(), |child| child.start_byte());
-    let end = node
-        .child_by_field_name("body")
-        .map_or(node.end_byte(), |body| body.start_byte());
+    let end = body_of(node).map_or(node.end_byte(), |body| body.start_byte());
     let mut declaration = String::new();
     let mut from = start;
     for comment in comments_inside(node) {
@@ -122,6 +125,26 @@ fn signature_of(node: Node, source: &str) -> String {
     declaration.push_str(&source[from..end.max(from)]);
     let declaration = declaration.trim_end().trim_end_matches(';');
     declaration.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Arrow functions and test callbacks keep their body further down:
+/// `const Cart = () => {}`, `it("works", () => {})`.
+fn body_of(node: Node) -> Option<Node> {
+    node.child_by_field_name("body").or_else(|| {
+        if node.kind() == "expression_statement" {
+            let arguments = node.named_child(0)?.child_by_field_name("arguments")?;
+            let callback = arguments
+                .named_child(u32::try_from(arguments.named_child_count().checked_sub(1)?).ok()?)?;
+            return callback.child_by_field_name("body");
+        }
+        let mut children = node.walk();
+        let declarator = node
+            .children(&mut children)
+            .find(|child| child.kind() == "variable_declarator")?;
+        declarator
+            .child_by_field_name("value")?
+            .child_by_field_name("body")
+    })
 }
 
 fn comments_inside(node: Node) -> Vec<Range<usize>> {
