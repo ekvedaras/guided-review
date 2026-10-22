@@ -3,6 +3,7 @@ use std::fmt;
 use sha2::{Digest, Sha256};
 
 use crate::code_source::{CodeSource, FileDiff, FileStatus, Line};
+use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
 use crate::php::{Symbol, Symbols};
 use crate::pull_request::Sha;
 
@@ -44,6 +45,7 @@ pub enum PieceKind {
     Function,
     Top,
     File,
+    Hunk,
 }
 
 impl fmt::Display for PieceKind {
@@ -57,6 +59,7 @@ impl fmt::Display for PieceKind {
             Self::Function => "function",
             Self::Top => "top",
             Self::File => "file",
+            Self::Hunk => "hunk",
         })
     }
 }
@@ -74,6 +77,19 @@ impl fmt::Display for PieceStatus {
             Self::Added => "added",
             Self::Modified => "modified",
             Self::Deleted => "deleted",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PieceMark {
+    Generated,
+}
+
+impl fmt::Display for PieceMark {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Generated => "generated",
         })
     }
 }
@@ -109,6 +125,7 @@ pub struct Piece {
     pub added: usize,
     pub removed: usize,
     pub signature: Option<String>,
+    pub marks: Vec<PieceMark>,
     pub diff_hash: DiffHash,
     pub removed_lines: Vec<Line>,
     pub added_lines: Vec<Line>,
@@ -124,19 +141,14 @@ pub struct ChangedFile {
 }
 
 pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Vec<ChangedFile>> {
-    source
-        .diff(base, head)?
+    let diffs = source.diff(base, head)?;
+    let generated = generated_files(source, head);
+    diffs
         .into_iter()
         .map(|diff| {
-            let symbol_pieces = if diff.path().ends_with(".php") && !diff.binary {
-                cut_php(source, base, head, &diff)?
-            } else {
-                Vec::new()
-            };
-            let pieces = if symbol_pieces.is_empty() {
-                vec![whole_file_piece(&diff)]
-            } else {
-                symbol_pieces
+            let pieces = match cut_by_file_rules(&diff, &generated) {
+                Some(pieces) => pieces,
+                None => cut_by_symbols(source, base, head, &diff)?,
             };
             Ok(ChangedFile {
                 path: diff.path().to_string(),
@@ -145,6 +157,70 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
                 removed: diff.removed.len(),
                 pieces,
             })
+        })
+        .collect()
+}
+
+fn cut_by_symbols(
+    source: &dyn CodeSource,
+    base: &Sha,
+    head: &Sha,
+    diff: &FileDiff,
+) -> anyhow::Result<Vec<Piece>> {
+    let symbol_pieces = if diff.path().ends_with(".php") {
+        cut_php(source, base, head, diff)?
+    } else {
+        Vec::new()
+    };
+    Ok(if symbol_pieces.is_empty() {
+        vec![whole_file_piece(diff)]
+    } else {
+        symbol_pieces
+    })
+}
+
+/// Every file-level decision, made before any symbol is looked for.
+/// `None` means the file is a normal source file and symbols decide its pieces.
+fn cut_by_file_rules(diff: &FileDiff, generated: &GeneratedFiles) -> Option<Vec<Piece>> {
+    if generated.contains(diff.path()) {
+        let mut piece = whole_file_piece(diff);
+        piece.marks.push(PieceMark::Generated);
+        return Some(vec![piece]);
+    }
+    if diff.binary || diff.status() == FileStatus::Deleted {
+        return Some(vec![whole_file_piece(diff)]);
+    }
+    if is_cut_per_hunk(diff.path()) && !diff.hunks.is_empty() {
+        return Some(hunk_pieces(diff));
+    }
+    None
+}
+
+fn generated_files(source: &dyn CodeSource, head: &Sha) -> GeneratedFiles {
+    let attributes_at_head = source.file_at(head, ".gitattributes").unwrap_or_default();
+    GeneratedFiles::new(&attributes_at_head)
+}
+
+fn hunk_pieces(diff: &FileDiff) -> Vec<Piece> {
+    diff.hunks
+        .iter()
+        .enumerate()
+        .map(|(index, hunk)| {
+            let removed: Vec<&Line> = hunk.removed.iter().collect();
+            let added: Vec<&Line> = hunk.added.iter().collect();
+            Piece {
+                id: PieceId {
+                    path: diff.path().to_string(),
+                    symbol: Some(format!("hunk-{}", index + 1)),
+                },
+                kind: PieceKind::Hunk,
+                status: diff.status().into(),
+                added: added.len(),
+                removed: removed.len(),
+                signature: Some(hunk.header.clone()),
+                marks: Vec::new(),
+                diff_hash: DiffHash::of(&removed, &added),
+            }
         })
         .collect()
 }
@@ -162,6 +238,7 @@ fn whole_file_piece(diff: &FileDiff) -> Piece {
         added: added.len(),
         removed: removed.len(),
         signature: None,
+        marks: Vec::new(),
         diff_hash: DiffHash::of(&removed, &added),
         removed_lines: diff.removed.clone(),
         added_lines: diff.added.clone(),
@@ -217,6 +294,7 @@ fn cut_php(
                 added: change.added.len(),
                 removed: change.removed.len(),
                 signature: in_head.or(in_base).map(|symbol| symbol.signature.clone()),
+                marks: Vec::new(),
                 diff_hash: DiffHash::of(&change.removed, &change.added),
                 removed_lines: change.removed.iter().copied().cloned().collect(),
                 added_lines: change.added.iter().copied().cloned().collect(),

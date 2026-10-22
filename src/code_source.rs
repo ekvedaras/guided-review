@@ -15,6 +15,15 @@ pub struct FileDiff {
     pub binary: bool,
     pub removed: Vec<Line>,
     pub added: Vec<Line>,
+    pub hunks: Vec<Hunk>,
+}
+
+#[derive(Debug)]
+pub struct Hunk {
+    /// `@@ -2 +2 @@`
+    pub header: String,
+    pub removed: Vec<Line>,
+    pub added: Vec<Line>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +80,12 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
     for raw in patch.lines() {
         if old_left > 0 || new_left > 0 {
             let file = files.last_mut().expect("hunk inside a file");
+            let hunk = file.hunks.last_mut().expect("hunk header before its lines");
             if let Some(text) = raw.strip_prefix('-') {
+                hunk.removed.push(Line {
+                    number: old_line,
+                    text: text.to_string(),
+                });
                 file.removed.push(Line {
                     number: old_line,
                     text: text.to_string(),
@@ -79,6 +93,10 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
                 old_line += 1;
                 old_left -= 1;
             } else if let Some(text) = raw.strip_prefix('+') {
+                hunk.added.push(Line {
+                    number: new_line,
+                    text: text.to_string(),
+                });
                 file.added.push(Line {
                     number: new_line,
                     text: text.to_string(),
@@ -118,6 +136,11 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
         } else if let Some((old, new)) = hunk_ranges(raw) {
             (old_line, old_left) = old;
             (new_line, new_left) = new;
+            file.hunks.push(Hunk {
+                header: hunk_header(raw),
+                removed: Vec::new(),
+                added: Vec::new(),
+            });
         }
     }
     files
@@ -171,6 +194,14 @@ fn unquote(path: &str) -> String {
         }
     }
     out
+}
+
+/// `@@ -2 +2 @@`: the hunk header without git's trailing function context.
+fn hunk_header(raw: &str) -> String {
+    match raw.split_once(" @@") {
+        Some((ranges, _)) => format!("{ranges} @@"),
+        None => raw.to_string(),
+    }
 }
 
 /// `@@ -start[,count] +start[,count] @@` → ((old start, old count), (new start, new count))

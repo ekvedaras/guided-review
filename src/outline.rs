@@ -46,6 +46,9 @@ impl fmt::Display for Outline<'_> {
                     piece.added,
                     piece.removed
                 )?;
+                for mark in &piece.marks {
+                    write!(f, "  {mark}")?;
+                }
                 if let Some(signature) = &piece.signature {
                     write!(f, "  {signature}")?;
                 }
