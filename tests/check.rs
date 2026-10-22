@@ -129,7 +129,7 @@ fn changes_no_step_covers_are_warnings() {
     assert_eq!(
         run.stdout,
         "\
-warning: no step covers README.md
+warning: no step covers README.md#hunk-1
 warning: no step covers app/Services/Pricing.php#(top)
 warning: no step covers app/Services/Pricing.php#Pricing
 warning: no step covers app/Services/Pricing.php#Pricing::discount
@@ -163,7 +163,7 @@ fn rest_covers_only_changes_under_its_folder() {
 
     assert_eq!(
         shop.check().stdout,
-        "warning: no step covers README.md\n0 errors, 1 warning\n"
+        "warning: no step covers README.md#hunk-1\n0 errors, 1 warning\n"
     );
 }
 
@@ -212,4 +212,43 @@ warning: 8 top-level steps, nest details to keep it to 7
 0 errors, 5 warnings
 "
     );
+}
+
+#[test]
+fn hunk_pieces_are_valid_pointer_targets_and_cover_their_hunk() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let lines = |word: &str| {
+        (1..=9)
+            .map(|n| match n {
+                2 | 8 => format!("{word} {n}\n"),
+                _ => format!("line {n}\n"),
+            })
+            .collect::<String>()
+    };
+    repo.write("ci.yml", &lines("old"));
+    let base = repo.commit("base");
+    repo.write("ci.yml", &lines("new"));
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+    let path = repo.home().join(".guided-review/tours/acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let write = |pieces: Value| {
+        std::fs::write(&path, tour(vec![step("ci", pieces)]).to_string()).unwrap();
+        GuidedReview::new(&repo, &github).run(&["check", PR])
+    };
+
+    let partial = write(json!([{"file": "ci.yml", "symbol": "hunk-1"}]));
+    assert_eq!(
+        partial.stdout,
+        "warning: no step covers ci.yml#hunk-2\n0 errors, 1 warning\n"
+    );
+
+    let unknown = write(json!([{"file": "ci.yml", "symbol": "hunk-3"}]));
+    assert!(!unknown.success);
+
+    let both = write(json!([
+        {"file": "ci.yml", "symbol": "hunk-1"},
+        {"file": "ci.yml", "symbol": "hunk-2"},
+    ]));
+    assert_eq!(both.stdout, "0 errors, 0 warnings\n");
 }
