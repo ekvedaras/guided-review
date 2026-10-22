@@ -4,8 +4,11 @@ use crate::pull_request::Sha;
 
 pub trait CodeSource {
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String>;
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>>;
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>>;
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha>;
+    /// True when the checked-out files are exactly `head`, so they can be opened in an IDE.
+    fn working_tree_is_at(&self, head: &Sha) -> bool;
 }
 
 #[derive(Debug, Default)]
@@ -69,7 +72,7 @@ impl FileDiff {
     }
 }
 
-/// Parses `git diff -U0` output.
+/// Parses `git diff` output. Context lines are skipped, so any `-U<n>` works.
 pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut old_line = 0;
@@ -102,6 +105,11 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
                     text: text.to_string(),
                 });
                 new_line += 1;
+                new_left -= 1;
+            } else if raw.starts_with(' ') || raw.is_empty() {
+                old_line += 1;
+                new_line += 1;
+                old_left -= 1;
                 new_left -= 1;
             }
             continue;

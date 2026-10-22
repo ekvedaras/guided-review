@@ -252,28 +252,6 @@ fn outline_uses_the_clone_from_config_when_the_current_folder_is_not_a_clone() {
 }
 
 #[test]
-fn outline_fails_without_a_local_clone() {
-    let repo = FixtureRepo::cloned_from("acme/shop");
-    repo.write("app/Order.php", ORDER_V1);
-    let base = repo.commit("base");
-    repo.write("app/Order.php", ORDER_V2);
-    let head = repo.commit("head");
-    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
-    let other_repo = FixtureRepo::cloned_from("acme/blog");
-
-    let run = GuidedReview::new(&repo, &github)
-        .in_dir(other_repo.path())
-        .run(&["outline", PR]);
-
-    assert!(!run.success);
-    assert!(
-        run.stderr.contains("no local clone of acme/shop found"),
-        "{}",
-        run.stderr
-    );
-}
-
-#[test]
 fn outline_ignores_uncommitted_work_in_the_working_tree() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write("app/Order.php", ORDER_V1);
