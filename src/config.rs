@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
 
 /// `~/.guided-review/config.toml`
@@ -12,20 +13,67 @@ pub struct Config {
     /// `"owner/repo" = "~/path/to/clone"`
     #[serde(default)]
     clones: BTreeMap<String, String>,
+    #[serde(default)]
+    ask_model: Option<String>,
+    #[serde(default)]
+    ask_effort: Option<String>,
+    /// `idea://open?file={path}&line={line}` or a shell command such as `code --goto {path}:{line}`.
+    #[serde(default)]
+    ide: Option<String>,
+}
+
+/// Which model answers an Ask, and how hard it thinks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskSettings {
+    pub model: String,
+    pub effort: String,
+}
+
+impl Default for AskSettings {
+    fn default() -> Self {
+        Self {
+            model: "opus".to_string(),
+            effort: "medium".to_string(),
+        }
+    }
+}
+
+impl AskSettings {
+    pub fn from_config_text(text: &str) -> anyhow::Result<Self> {
+        Ok(Config::from_text(text)?.ask_settings())
+    }
 }
 
 impl Config {
+    pub fn from_text(text: &str) -> anyhow::Result<Self> {
+        Self::parse(text, "the config")
+    }
+
+    fn parse(text: &str, source: &str) -> anyhow::Result<Self> {
+        toml::from_str(text).with_context(|| format!("could not read {source}"))
+    }
+
+    pub fn ide_template(&self) -> Option<IdeTemplate> {
+        self.ide.clone().map(IdeTemplate::new)
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         let Some(home) = std::env::home_dir() else {
             return Ok(Self::default());
         };
         let path = home.join(".guided-review/config.toml");
         match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                toml::from_str(&text).with_context(|| format!("could not read {}", path.display()))
-            }
+            Ok(text) => Self::parse(&text, &path.display().to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error).with_context(|| format!("could not read {}", path.display())),
+        }
+    }
+
+    pub fn ask_settings(&self) -> AskSettings {
+        let default = AskSettings::default();
+        AskSettings {
+            model: self.ask_model.clone().unwrap_or(default.model),
+            effort: self.ask_effort.clone().unwrap_or(default.effort),
         }
     }
 

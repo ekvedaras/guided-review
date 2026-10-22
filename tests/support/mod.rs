@@ -1,3 +1,8 @@
+#[allow(dead_code)]
+pub mod app_path;
+#[allow(dead_code)]
+pub mod fake_ports;
+
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -42,6 +47,13 @@ impl FixtureRepo {
         std::fs::write(file, content).unwrap();
     }
 
+    #[allow(dead_code)]
+    pub fn write_bytes(&self, path: &str, content: &[u8]) {
+        let file = self.root.path().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, content).unwrap();
+    }
+
     pub fn commit(&self, message: &str) -> String {
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "--allow-empty", "-m", message]);
@@ -77,6 +89,7 @@ pub struct GuidedReview<'a> {
     repo: &'a FixtureRepo,
     github: &'a FakeGitHub,
     current_dir: PathBuf,
+    env: Vec<(String, PathBuf)>,
 }
 
 impl<'a> GuidedReview<'a> {
@@ -85,7 +98,14 @@ impl<'a> GuidedReview<'a> {
             repo,
             github,
             current_dir: repo.path().to_path_buf(),
+            env: Vec::new(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_env(mut self, name: &str, value: &Path) -> Self {
+        self.env.push((name.to_string(), value.to_path_buf()));
+        self
     }
 
     pub fn in_dir(mut self, dir: &Path) -> Self {
@@ -96,7 +116,9 @@ impl<'a> GuidedReview<'a> {
     pub fn run(&self, args: &[&str]) -> Run {
         let empty_gh_config = self.repo.home().join(".config/gh");
         std::fs::create_dir_all(&empty_gh_config).unwrap();
-        let output = cargo_bin_cmd!("guided-review")
+        let mut command = cargo_bin_cmd!("guided-review");
+        command.envs(self.env.iter().map(|(name, value)| (name, value)));
+        let output = command
             .args(args)
             .current_dir(&self.current_dir)
             .env("HOME", self.repo.home())
@@ -174,4 +196,21 @@ impl FakeGitHub {
 
         Self { url }
     }
+}
+
+#[allow(dead_code)]
+/// A real PNG of one flat colour, so the code under test can read its size.
+pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(width, height, image::Rgba(rgba))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+#[allow(dead_code)]
+pub fn svg_of(width: u32, height: u32) -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">\n<rect width=\"{width}\" height=\"{height}\" fill=\"red\"/>\n</svg>\n"
+    )
 }

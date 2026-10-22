@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Credit balance is too low","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}

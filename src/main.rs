@@ -1,12 +1,25 @@
-use anyhow::Context;
+use std::path::Path;
+use std::sync::Arc;
+
 use clap::{Parser, Subcommand};
 
-use guided_review::code_source::CodeSource;
-use guided_review::github::GitHub;
-use guided_review::local_git::LocalGit;
+use guided_review::app::AskSetup;
+use guided_review::claude_cli::{
+    ClaudeCli, ClaudeEvalWriter, ClaudeRefreshWriter, ClaudeTourJudge,
+};
+use guided_review::config::Config;
+use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
+use guided_review::ide::Ide;
+use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::show::Show;
+use guided_review::test_pairing::SubjectCandidates;
+use guided_review::timestamp::UtcTimestamp;
+use guided_review::tour::Tour;
+use guided_review::tour_check;
+use guided_review::viewer::{Asks, RefreshBrief, Review, TourRefresher, TourRepinner, repin_tour};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -19,34 +32,246 @@ struct Cli {
 enum Command {
     /// Print the diff pieces of a PR, grouped by file, without code
     Outline { pr: PullRequestUrl },
+    /// Print where the tour file of a PR lives
+    TourPath { pr: PullRequestUrl },
+    /// Print the diff of the given pieces
+    Show {
+        pr: PullRequestUrl,
+        /// Piece ids as printed by `outline`: `<file>#<symbol>` or `<file>`
+        #[arg(required = true)]
+        ids: Vec<String>,
+        /// Also print each piece's code as it is at head
+        #[arg(long)]
+        around: bool,
+    },
+    /// Pin the tour file of a PR to its commits, then list its errors and warnings
+    Check { pr: PullRequestUrl },
+    /// Move the tour to the PR's new head and print what became of each piece
+    Repin { pr: PullRequestUrl },
+    /// Print what a Refresh of the tour has to do; `--done` clears the marks once it is done
+    Refresh {
+        pr: PullRequestUrl,
+        #[arg(long)]
+        done: bool,
+    },
+    /// Open the app on the tour of a PR
+    Open { pr: PullRequestUrl },
+    /// Score the /tour skill on the test set; `eval add` adds a PR to it
+    Eval {
+        #[command(subcommand)]
+        action: Option<EvalAction>,
+        /// Judge the tours already on disk instead of writing new ones
+        #[arg(long)]
+        existing_tours: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvalAction {
+    /// Add a PR with the reviewer note on what a good tour of it shows
+    Add {
+        pr: PullRequestUrl,
+        #[arg(long)]
+        note: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Outline { pr } => outline(&pr),
+        Command::Show { pr, ids, around } => show(&pr, &ids, around),
+        Command::TourPath { pr } => tour_path(&pr),
+        Command::Check { pr } => check(&pr),
+        Command::Repin { pr } => repin_command(&pr),
+        Command::Refresh { pr, done } => refresh(&pr, done),
+        Command::Open { pr } => open(&pr),
+        Command::Eval {
+            action: Some(EvalAction::Add { pr, note }),
+            ..
+        } => eval_add(&pr, &note),
+        Command::Eval {
+            action: None,
+            existing_tours,
+        } => eval(existing_tours),
     }
 }
 
+fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    println!("{}", Tour::path_for(&home_folder()?, pr).display());
+    Ok(())
+}
+
 fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let tips = GitHub::from_env().pull_request_tips(pr)?;
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    let source = LocalGit::find(&pr.repo, &current_dir)?.with_context(|| {
-        format!(
-            "no local clone of {} found; run this inside one, or add it under [clones] in ~/.guided-review/config.toml",
-            pr.repo
-        )
-    })?;
-    source.require_commits(&[&tips.base_branch_tip, &tips.head])?;
-    let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-    let files = pieces::cut(&source, &base, &tips.head)?;
+    let code = OpenedPr::new(pr)?.at_live_tips()?;
+    let (base, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
         Outline {
             pr,
             base: &base,
-            head: &tips.head,
-            files: &files
+            head: &code.tips.head,
+            files: &files,
+            worktree_at_head: code.source.working_tree_is_at(&code.tips.head),
+            subjects: &SubjectCandidates::find(code.source.as_ref(), &code.tips.head, &files),
         }
+    );
+    Ok(())
+}
+
+fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()> {
+    let code = OpenedPr::new(pr)?.at_live_tips()?;
+    let (_, files) = code.pieces_since_merge_base()?;
+    print!(
+        "{}",
+        Show {
+            source: code.source.as_ref(),
+            head: &code.tips.head,
+            files: &files,
+            ids,
+            around
+        }
+        .render()?
+    );
+    Ok(())
+}
+
+fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let opened = OpenedPr::new(pr)?;
+    let tour_path = opened.tour_path();
+    let mut tour = Tour::load(&tour_path)?;
+
+    let code = opened.at_live_tips()?;
+    if tour.head.is_empty() {
+        tour.pin(pr, &code.merge_base()?, &code.tips.head);
+    } else {
+        if tour.pr.is_empty() {
+            tour.pr = pr.to_string();
+        }
+        if tour.head != code.tips.head {
+            println!("warning: PR has new commits; run `guided-review repin`");
+        }
+    }
+    tour.save(&tour_path)?;
+    let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
+
+    let report = tour_check::check(&tour, &files);
+    print!("{report}");
+    if !report.errors.is_empty() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let opened = OpenedPr::new(pr)?;
+    let tour_path = opened.tour_path();
+    // Fails before any network call when there is no tour yet.
+    Tour::load(&tour_path)?;
+
+    let code = opened.at_live_tips()?;
+    let base = code.merge_base()?;
+    let (_, result) = repin_tour(
+        &tour_path,
+        &opened.state_file(),
+        code.source.as_ref(),
+        &base,
+        &code.tips.head,
+    )?;
+    print!("{result}");
+    Ok(())
+}
+
+fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
+    let opened = OpenedPr::new(pr)?;
+    let state_file = opened.state_file();
+    if done {
+        state_file.update(|state| state.finish_refresh())?;
+        println!("refresh done: marks cleared");
+        return Ok(());
+    }
+    let tour = Tour::load(&opened.tour_path())?;
+    let code = opened.at_pinned_tips(&tour)?;
+    let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
+    print!(
+        "{}",
+        RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())
+    );
+    Ok(())
+}
+
+fn eval_add(pr: &PullRequestUrl, note: &str) -> anyhow::Result<()> {
+    let home = home_folder()?;
+    EvalStore::in_home(&home).add(pr, note)?;
+    println!("added {pr} to the test set");
+    Ok(())
+}
+
+fn eval(existing_tours: bool) -> anyhow::Result<()> {
+    let home = home_folder()?;
+    let report = Eval {
+        store: &EvalStore::in_home(&home),
+        home: &home,
+        writer: &ClaudeEvalWriter::new(),
+        judge: &ClaudeTourJudge::new(),
+        skill: &Skill::bundled(),
+    }
+    .run(
+        if existing_tours {
+            TourSource::ExistingTours
+        } else {
+            TourSource::WriteNew
+        },
+        &UtcTimestamp::now().to_string(),
+    )?;
+    print!("{report}");
+    if report.has_failures() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let opened = OpenedPr::new(pr)?;
+    let tour_path = opened.tour_path();
+    if !tour_path.exists() {
+        anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
+    }
+    let tour = Tour::load(&tour_path)?;
+    let code = opened.at_pinned_tips(&tour)?;
+    let review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
+
+    let clone = code.source.local_clone().map(Path::to_path_buf);
+    let config = Config::load()?;
+    let pick_code_source = opened.code_source_picker();
+
+    let ask = AskSetup {
+        asks: Asks::load(Arc::new(opened.state_file()))?,
+        launcher: Arc::new(ClaudeCli::new()),
+        clone: clone.clone(),
+        settings: config.ask_settings(),
+    };
+    let refresher = TourRefresher {
+        home: opened.home.clone(),
+        pr: pr.clone(),
+        pick_code_source: pick_code_source.clone(),
+        writer: Arc::new(ClaudeRefreshWriter::new(
+            clone.clone().unwrap_or_else(|| opened.home.clone()),
+        )),
+    };
+    let repinner = TourRepinner {
+        home: opened.home,
+        pr: pr.clone(),
+        pick_code_source,
+    };
+    let ide = Ide::for_clone(clone, config.ide_template());
+    guided_review::app::run(
+        review,
+        code.source.into(),
+        ask,
+        ide,
+        Arc::new(opened.github),
+        repinner,
+        refresher,
     );
     Ok(())
 }

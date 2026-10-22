@@ -10,6 +10,14 @@ pub struct RepoName {
 }
 
 impl RepoName {
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn new(owner: &str, name: &str) -> Self {
         Self {
             owner: owner.to_string(),
@@ -42,7 +50,7 @@ impl fmt::Display for RepoName {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PullRequestUrl {
     pub repo: RepoName,
     pub number: u64,
@@ -69,13 +77,33 @@ impl FromStr for PullRequestUrl {
     }
 }
 
+impl PullRequestUrl {
+    /// `owner/repo#number`
+    pub fn short(&self) -> String {
+        format!("{}#{}", self.repo, self.number)
+    }
+}
+
 impl fmt::Display for PullRequestUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "https://github.com/{}/pull/{}", self.repo, self.number)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Empty when not known yet: a tour that was never pinned, a state file from before shas were kept.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct Sha(String);
 
 impl Sha {
@@ -85,6 +113,10 @@ impl Sha {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

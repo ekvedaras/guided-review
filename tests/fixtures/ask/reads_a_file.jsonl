@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me look."}},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"app/Order.php"}}]},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"It returns two."}},"session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673"}
+{"type":"result","subtype":"success","is_error":false,"result":"It returns two.","session_id":"7f2cd173-4eda-4770-aeb2-c82977b1b673","stop_reason":"end_turn"}

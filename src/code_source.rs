@@ -1,11 +1,36 @@
 use std::fmt;
+use std::path::Path;
 
 use crate::pull_request::Sha;
 
-pub trait CodeSource {
+pub trait CodeSource: Send + Sync {
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String>;
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>>;
+    /// What a file is at `sha`, without reading it: the blob id names its content, so equal ids are equal bytes.
+    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo>;
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>>;
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha>;
+    /// True when the checked-out files are exactly `head`, so they can be opened in an IDE.
+    fn working_tree_is_at(&self, head: &Sha) -> bool;
+    /// The clone this source reads, so a file can be opened in an IDE. `None` for GitHub.
+    fn local_clone(&self) -> Option<&Path> {
+        None
+    }
+
+    /// Says which files will be read next, so a source that can fetch them together does.
+    fn read_ahead(&self, _files: &[FileAt]) {}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobInfo {
+    pub id: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileAt {
+    pub sha: Sha,
+    pub path: String,
 }
 
 #[derive(Debug, Default)]
@@ -15,6 +40,33 @@ pub struct FileDiff {
     pub binary: bool,
     pub removed: Vec<Line>,
     pub added: Vec<Line>,
+    pub hunks: Vec<Hunk>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Hunk {
+    /// `@@ -2 +2 @@`
+    pub header: String,
+    /// As git writes it: the first added line, or the line above the cut when nothing was added.
+    pub head_start: usize,
+    pub removed: Vec<Line>,
+    pub added: Vec<Line>,
+}
+
+impl Hunk {
+    /// The last unchanged line at head above this hunk; 0 at the top of the file.
+    pub fn head_line_above(&self) -> usize {
+        if self.added.is_empty() {
+            self.head_start
+        } else {
+            self.head_start - 1
+        }
+    }
+
+    /// The first unchanged line at head below this hunk.
+    pub fn head_line_below(&self) -> usize {
+        self.head_line_above() + self.added.len() + 1
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +88,7 @@ impl fmt::Display for FileStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Line {
     pub number: usize,
     pub text: String,
@@ -60,7 +112,7 @@ impl FileDiff {
     }
 }
 
-/// Parses `git diff -U0` output.
+/// Parses `git diff` output. Context lines are skipped, so any `-U<n>` works.
 pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut old_line = 0;
@@ -71,7 +123,12 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
     for raw in patch.lines() {
         if old_left > 0 || new_left > 0 {
             let file = files.last_mut().expect("hunk inside a file");
+            let hunk = file.hunks.last_mut().expect("hunk header before its lines");
             if let Some(text) = raw.strip_prefix('-') {
+                hunk.removed.push(Line {
+                    number: old_line,
+                    text: text.to_string(),
+                });
                 file.removed.push(Line {
                     number: old_line,
                     text: text.to_string(),
@@ -79,11 +136,20 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
                 old_line += 1;
                 old_left -= 1;
             } else if let Some(text) = raw.strip_prefix('+') {
+                hunk.added.push(Line {
+                    number: new_line,
+                    text: text.to_string(),
+                });
                 file.added.push(Line {
                     number: new_line,
                     text: text.to_string(),
                 });
                 new_line += 1;
+                new_left -= 1;
+            } else if raw.starts_with(' ') || raw.is_empty() {
+                old_line += 1;
+                new_line += 1;
+                old_left -= 1;
                 new_left -= 1;
             }
             continue;
@@ -118,6 +184,12 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
         } else if let Some((old, new)) = hunk_ranges(raw) {
             (old_line, old_left) = old;
             (new_line, new_left) = new;
+            file.hunks.push(Hunk {
+                header: hunk_header(raw),
+                head_start: new.0,
+                removed: Vec::new(),
+                added: Vec::new(),
+            });
         }
     }
     files
@@ -171,6 +243,14 @@ fn unquote(path: &str) -> String {
         }
     }
     out
+}
+
+/// `@@ -2 +2 @@`: the hunk header without git's trailing function context.
+fn hunk_header(raw: &str) -> String {
+    match raw.split_once(" @@") {
+        Some((ranges, _)) => format!("{ranges} @@"),
+        None => raw.to_string(),
+    }
 }
 
 /// `@@ -start[,count] +start[,count] @@` → ((old start, old count), (new start, new count))
