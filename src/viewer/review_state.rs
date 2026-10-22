@@ -19,6 +19,12 @@ pub struct ReviewState {
     read_ticks: BTreeMap<StepId, ReadTick>,
     #[serde(default)]
     asks: Vec<Ask>,
+    /// Per file, whether GitHub said viewed at the last sync. A pull reacts to changes against it.
+    #[serde(default)]
+    viewed_on_github: BTreeMap<String, bool>,
+    /// Viewed changes GitHub has not taken yet, newest wish per file.
+    #[serde(default)]
+    unsent_viewed: BTreeMap<String, bool>,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -42,6 +48,40 @@ impl ReviewState {
 
     pub fn untick(&mut self, step: &StepId) {
         self.read_ticks.remove(step);
+    }
+
+    pub(super) fn was_viewed_on_github(&self, path: &str) -> bool {
+        self.viewed_on_github.get(path).copied().unwrap_or(false)
+    }
+
+    pub(super) fn saw_on_github(&mut self, path: &str, viewed: bool) {
+        self.viewed_on_github.insert(path.to_string(), viewed);
+    }
+
+    /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
+    pub(super) fn want_viewed(&mut self, path: &str, viewed: bool) {
+        if self.was_viewed_on_github(path) == viewed {
+            self.unsent_viewed.remove(path);
+        } else {
+            self.unsent_viewed.insert(path.to_string(), viewed);
+        }
+    }
+
+    pub(super) fn unsent_viewed(&self) -> &BTreeMap<String, bool> {
+        &self.unsent_viewed
+    }
+
+    pub(super) fn sent_viewed(&mut self, path: &str, viewed: bool) {
+        self.saw_on_github(path, viewed);
+        if self.unsent_viewed.get(path) == Some(&viewed) {
+            self.unsent_viewed.remove(path);
+        }
+    }
+
+    pub(super) fn take_viewer_sections(&mut self, from: &ReviewState) {
+        self.read_ticks = from.read_ticks.clone();
+        self.viewed_on_github = from.viewed_on_github.clone();
+        self.unsent_viewed = from.unsent_viewed.clone();
     }
 
     pub fn read_tick(&self, step: &StepId) -> Option<&ReadTick> {

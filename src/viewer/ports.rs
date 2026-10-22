@@ -7,11 +7,51 @@ use crate::pull_request::{PullRequestTips, PullRequestUrl};
 /// so the app can run them in the background and tests can put a fake behind it.
 pub trait GitHubPort: Send + Sync {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips>;
+
+    /// Every changed file of the PR with the viewer's viewed state, all pages of it.
+    /// Fails with `ViewedSyncUnavailable` when there is no token or it may not do this.
+    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>>;
+
+    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()>;
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewedState {
+    Viewed,
+    Unviewed,
+    /// Viewed once, then changed by a new commit. Counts as not viewed.
+    Dismissed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewedFile {
+    pub path: String,
+    pub state: ViewedState,
+}
+
+/// No token, or GitHub refused it. The app keeps working with viewed sync switched off.
+#[derive(Debug)]
+pub struct ViewedSyncUnavailable(pub String);
+
+impl std::fmt::Display for ViewedSyncUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ViewedSyncUnavailable {}
 
 impl GitHubPort for GitHub {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
         GitHub::pull_request_tips(self, pr)
+    }
+
+    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
+        GitHub::viewed_files(self, pr)
+    }
+
+    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
+        GitHub::set_file_viewed(self, pr, path, viewed)
     }
 }
 

@@ -15,7 +15,12 @@ pub use agent_event::AgentEvent;
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use github_link::GitHubLink;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span};
-pub use ports::{AgentLaunch, AgentLauncher, AgentPort, GitHubPort};
-pub use review::{OldHead, ReadProgress, Review, Screen, SidebarEntry, StepId};
+pub use ports::{
+    AgentLaunch, AgentLauncher, AgentPort, GitHubPort, ViewedFile, ViewedState,
+    ViewedSyncUnavailable,
+};
+pub use review::{
+    OldHead, ReadProgress, Review, Screen, SidebarEntry, StepId, SyncOutcome, SyncRequest,
+};
 pub use review_state::{ReadTick, ReviewState, ReviewStateFile};
 pub use step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, Side, StepPage};

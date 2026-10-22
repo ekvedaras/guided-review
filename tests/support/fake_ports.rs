@@ -1,8 +1,12 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
-use guided_review::viewer::{AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, GitHubPort};
+use guided_review::viewer::{
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, GitHubPort, ViewedFile, ViewedState,
+    ViewedSyncUnavailable,
+};
 
 /// What the app core sent out, in order, across both fakes.
 #[derive(Clone, Default)]
@@ -21,6 +25,9 @@ impl SentLog {
 pub struct FakeGitHub {
     pub sent: SentLog,
     pub tips: (Sha, Sha),
+    viewed: Mutex<BTreeMap<String, ViewedState>>,
+    pushes_fail: AtomicBool,
+    refuses_with: Mutex<Option<String>>,
 }
 
 impl FakeGitHub {
@@ -28,6 +35,38 @@ impl FakeGitHub {
         Self {
             sent: sent.clone(),
             tips: (Sha::new(base_branch_tip), Sha::new(head)),
+            viewed: Mutex::default(),
+            pushes_fail: AtomicBool::new(false),
+            refuses_with: Mutex::default(),
+        }
+    }
+
+    pub fn viewing(self, path: &str, state: ViewedState) -> Self {
+        self.set_viewed(path, state);
+        self
+    }
+
+    /// A change made on the GitHub web page.
+    pub fn set_viewed(&self, path: &str, state: ViewedState) {
+        self.viewed.lock().unwrap().insert(path.to_string(), state);
+    }
+
+    pub fn viewed_state(&self, path: &str) -> ViewedState {
+        self.viewed.lock().unwrap()[path]
+    }
+
+    pub fn pushes_fail(&self, fail: bool) {
+        self.pushes_fail.store(fail, Ordering::SeqCst);
+    }
+
+    pub fn refuse_everything(&self, reason: &str) {
+        *self.refuses_with.lock().unwrap() = Some(reason.to_string());
+    }
+
+    fn check_access(&self) -> anyhow::Result<()> {
+        match self.refuses_with.lock().unwrap().clone() {
+            Some(reason) => Err(ViewedSyncUnavailable(reason).into()),
+            None => Ok(()),
         }
     }
 }
@@ -39,6 +78,37 @@ impl GitHubPort for FakeGitHub {
             base_branch_tip: self.tips.0.clone(),
             head: self.tips.1.clone(),
         })
+    }
+
+    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
+        self.sent.push(format!("github: viewed files of {pr}"));
+        self.check_access()?;
+        Ok(self
+            .viewed
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(path, state)| ViewedFile {
+                path: path.clone(),
+                state: *state,
+            })
+            .collect())
+    }
+
+    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
+        self.sent
+            .push(format!("github: viewed={viewed} {path} of {pr}"));
+        self.check_access()?;
+        if self.pushes_fail.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        let state = if viewed {
+            ViewedState::Viewed
+        } else {
+            ViewedState::Unviewed
+        };
+        self.set_viewed(path, state);
+        Ok(())
     }
 }
 

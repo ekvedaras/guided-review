@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
 use crate::app::components::diff_view::DiffView;
@@ -17,6 +18,8 @@ use crate::app::components::step_notes::StepNotes;
 use crate::code_source::CodeSource;
 use crate::viewer::{GitHubPort, Place, Review, Screen, StepId, StepPage};
 
+const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
+
 actions!(one_step, [GoForward, GoBack]);
 
 /// The one layout: step tree on the left, one screen on the right (the summary, or one step).
@@ -26,7 +29,10 @@ pub struct OneStepLayout {
     focus: FocusHandle,
     ask: Entity<AskPanel>,
     pr_head_check: Option<Task<()>>,
-    _pr_head_on_focus: Subscription,
+    push_debounce: Option<Task<()>>,
+    is_syncing: bool,
+    sync_again: bool,
+    _focus_subscription: Subscription,
 }
 
 impl OneStepLayout {
@@ -54,9 +60,10 @@ impl OneStepLayout {
             .ok();
         })
         .detach();
-        let pr_head_on_focus = cx.observe_window_activation(window, |this, window, cx| {
+        let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.check_pr_head(cx);
+                this.sync(cx);
             }
         });
         let focus = cx.focus_handle();
@@ -67,9 +74,13 @@ impl OneStepLayout {
             focus,
             ask,
             pr_head_check: None,
-            _pr_head_on_focus: pr_head_on_focus,
+            push_debounce: None,
+            is_syncing: false,
+            sync_again: false,
+            _focus_subscription: focus_subscription,
         };
         layout.check_pr_head(cx);
+        layout.sync(cx);
         layout
     }
 
@@ -110,6 +121,42 @@ impl OneStepLayout {
         }));
     }
 
+    /// Pushes what is queued and pulls what changed on GitHub, off the UI thread.
+    fn sync(&mut self, cx: &mut Context<Self>) {
+        if self.is_syncing {
+            self.sync_again = true;
+            return;
+        }
+        self.is_syncing = true;
+        let request = self.review.sync_request();
+        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { request.run(github.as_ref(), &pr) })
+                .await;
+            this.update(cx, |this, cx| {
+                if let Err(error) = this.review.apply_sync(outcome) {
+                    eprintln!("could not sync with GitHub: {error:#}");
+                }
+                this.is_syncing = false;
+                if std::mem::take(&mut this.sync_again) {
+                    this.sync(cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn sync_after_debounce(&mut self, cx: &mut Context<Self>) {
+        self.push_debounce = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(PUSH_DEBOUNCE).await;
+            this.update(cx, |this, cx| this.sync(cx)).ok();
+        }));
+    }
+
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
         if self.review.go_forward() {
             cx.notify();
@@ -140,6 +187,20 @@ impl OneStepLayout {
             .pb_2()
             .text_color(Palette::muted_text())
             .child(format!("Read {} of {}", progress.read, progress.total));
+        let sync_row = self.review.sync_banner().map(|reason| {
+            div()
+                .px_3()
+                .pb_2()
+                .text_color(Palette::muted_text())
+                .child(format!("Not syncing with GitHub: {reason}"))
+        });
+        let not_synced_row = self.review.not_synced().then(|| {
+            div()
+                .px_3()
+                .pb_2()
+                .text_color(Palette::muted_text())
+                .child("● not synced with GitHub yet")
+        });
         let step_rows = self.review.sidebar().into_iter().map(|entry| {
             let id: StepId = entry.id.clone();
             div()
@@ -168,6 +229,8 @@ impl OneStepLayout {
             .border_color(Palette::border())
             .text_sm()
             .child(progress_row)
+            .children(sync_row)
+            .children(not_synced_row)
             .child(summary_row)
             .children(step_rows)
             .children(self.safety_net_row(cx))
@@ -251,6 +314,7 @@ impl OneStepLayout {
         if let Err(error) = saved {
             eprintln!("could not save the read tick: {error:#}");
         }
+        self.sync_after_debounce(cx);
         cx.notify();
     }
 }

@@ -1,15 +1,20 @@
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use serde::Deserialize;
 
 use crate::code_source::{CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use crate::viewer::{ViewedFile, ViewedState, ViewedSyncUnavailable};
 
 #[derive(Clone)]
 pub struct GitHub {
     api: String,
     token: Option<String>,
+    /// GraphQL mutations address a PR by node id, so it is looked up once per PR.
+    pull_request_ids: Arc<Mutex<HashMap<String, String>>>,
 }
 
 #[derive(Deserialize)]
@@ -23,12 +28,49 @@ struct CommitRefJson {
     sha: String,
 }
 
+#[derive(Deserialize)]
+struct FilesPageJson {
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfoJson,
+    nodes: Vec<FileNodeJson>,
+}
+
+#[derive(Deserialize)]
+struct PageInfoJson {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: String,
+}
+
+#[derive(Deserialize)]
+struct FileNodeJson {
+    path: String,
+    #[serde(rename = "viewerViewedState")]
+    viewer_viewed_state: String,
+}
+
+fn pull_request_variables(pr: &PullRequestUrl, after: &serde_json::Value) -> serde_json::Value {
+    let repo = pr.repo.to_string();
+    let (owner, name) = repo.split_once('/').expect("a repo name is owner/name");
+    serde_json::json!({"owner": owner, "name": name, "number": pr.number, "after": after})
+}
+
+fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
+}
+
 impl GitHub {
     pub fn from_env() -> Self {
         Self {
             api: std::env::var("GUIDED_REVIEW_GITHUB_API")
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
             token: token_from_gh_cli().or_else(|| std::env::var("GITHUB_TOKEN").ok()),
+            pull_request_ids: Arc::default(),
         }
     }
 
@@ -44,6 +86,134 @@ impl GitHub {
             base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })
+    }
+
+    pub fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
+        let mut files = Vec::new();
+        let mut after = serde_json::Value::Null;
+        loop {
+            let data = self.graphql(
+                "query($owner: String!, $name: String!, $number: Int!, $after: String) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        id
+                        files(first: 100, after: $after) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { path viewerViewedState }
+                        }
+                    } }
+                }",
+                pull_request_variables(pr, &after),
+            )?;
+            let pull = &data["repository"]["pullRequest"];
+            if let Some(id) = pull["id"].as_str() {
+                self.remember_pull_request_id(pr, id);
+            }
+            let page: FilesPageJson = serde_json::from_value(pull["files"].clone())
+                .with_context(|| format!("could not read the files of {pr} from GitHub"))?;
+            files.extend(page.nodes.into_iter().map(|file| ViewedFile {
+                path: file.path,
+                state: match file.viewer_viewed_state.as_str() {
+                    "VIEWED" => ViewedState::Viewed,
+                    "DISMISSED" => ViewedState::Dismissed,
+                    _ => ViewedState::Unviewed,
+                },
+            }));
+            if !page.page_info.has_next_page {
+                return Ok(files);
+            }
+            after = page.page_info.end_cursor.into();
+        }
+    }
+
+    pub fn set_file_viewed(
+        &self,
+        pr: &PullRequestUrl,
+        path: &str,
+        viewed: bool,
+    ) -> anyhow::Result<()> {
+        let mutation = if viewed {
+            "markFileAsViewed"
+        } else {
+            "unmarkFileAsViewed"
+        };
+        let pull_request_id = self.pull_request_id(pr)?;
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            serde_json::json!({"input": {"pullRequestId": pull_request_id, "path": path}}),
+        )
+        .with_context(|| format!("could not change the viewed state of {path} in {pr}"))?;
+        Ok(())
+    }
+
+    fn pull_request_id(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+        if let Some(id) = self.pull_request_ids.lock().unwrap().get(&pr.to_string()) {
+            return Ok(id.clone());
+        }
+        let data = self.graphql(
+            "query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } }
+            }",
+            pull_request_variables(pr, &serde_json::Value::Null),
+        )?;
+        let id = data["repository"]["pullRequest"]["id"]
+            .as_str()
+            .with_context(|| format!("GitHub did not know {pr}"))?
+            .to_string();
+        self.remember_pull_request_id(pr, &id);
+        Ok(id)
+    }
+
+    fn remember_pull_request_id(&self, pr: &PullRequestUrl, id: &str) {
+        self.pull_request_ids
+            .lock()
+            .unwrap()
+            .insert(pr.to_string(), id.to_string());
+    }
+
+    /// Returns the `data` of the answer. A missing or refused token is `ViewedSyncUnavailable`.
+    fn graphql(
+        &self,
+        query: &str,
+        variables: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let token = self.token.as_ref().ok_or_else(|| {
+            ViewedSyncUnavailable("no GitHub token: run `gh auth login` or set GITHUB_TOKEN".into())
+        })?;
+        let response = ureq::post(format!("{}/graphql", self.api))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("User-Agent", "guided-review")
+            .send_json(serde_json::json!({"query": query, "variables": variables}));
+        let mut answer: serde_json::Value = match response {
+            Ok(mut response) => response.body_mut().read_json()?,
+            Err(ureq::Error::StatusCode(401 | 403)) => {
+                return Err(ViewedSyncUnavailable(
+                    "GitHub refused the token: it needs the `repo` scope".into(),
+                )
+                .into());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if let Some(errors) = answer.get("errors") {
+            let refused = errors.as_array().is_some_and(|errors| {
+                errors.iter().any(|error| {
+                    matches!(
+                        error["type"].as_str(),
+                        Some("FORBIDDEN" | "INSUFFICIENT_SCOPES")
+                    )
+                })
+            });
+            if refused {
+                return Err(ViewedSyncUnavailable(
+                    "GitHub refused the token: it needs the `repo` scope".into(),
+                )
+                .into());
+            }
+            anyhow::bail!("GitHub answered with errors: {errors}");
+        }
+        Ok(answer["data"].take())
     }
 
     fn get(&self, path: &str, accept: &str) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
