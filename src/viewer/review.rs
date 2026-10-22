@@ -895,7 +895,7 @@ impl Review {
     /// "Suggest change" shows only when the range starts and ends on lines of the head:
     /// a suggestion replaces lines that stay. Removed rows in between are left out of it.
     pub fn can_suggest_change(&self, place: &CommentPlace) -> bool {
-        place.start.side == Side::Head && place.end.side == Side::Head
+        !place.is_file_comment() && place.start.side == Side::Head && place.end.side == Side::Head
     }
 
     /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
