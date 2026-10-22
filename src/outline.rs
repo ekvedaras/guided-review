@@ -4,6 +4,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::test_pairing::SubjectCandidates;
 
+const MAX_SIGNATURE_CHARS: usize = 100;
 const SMALL_PR_CHANGED_LINES: usize = 300;
 
 pub struct Outline<'a> {
@@ -68,7 +69,7 @@ impl fmt::Display for Outline<'_> {
                     write!(f, "  {mark}")?;
                 }
                 if let Some(signature) = &piece.signature {
-                    write!(f, "  {signature}")?;
+                    write!(f, "  {}", short(signature))?;
                 }
                 writeln!(f)?;
                 if let Some(candidates) = self.subjects.of(&piece.id) {
@@ -88,4 +89,18 @@ impl fmt::Display for Outline<'_> {
 
 fn counted(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
+}
+
+/// Multi-line parameter lists arrive joined with stray spaces around the brackets;
+/// `show` has the full code.
+fn short(signature: &str) -> String {
+    let tidy = signature
+        .replace("( ", "(")
+        .replace(", )", ")")
+        .replace(" )", ")");
+    if tidy.chars().count() <= MAX_SIGNATURE_CHARS {
+        return tidy;
+    }
+    let kept: String = tidy.chars().take(MAX_SIGNATURE_CHARS - 1).collect();
+    format!("{kept}…")
 }

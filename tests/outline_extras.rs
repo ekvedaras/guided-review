@@ -332,3 +332,21 @@ fn imports_and_top_pieces_are_never_offered_as_subjects() {
         ["    subjects: app/Order.php#Order::total (name), app/Order.php#Order::tax (name)"]
     );
 }
+
+#[test]
+fn long_signatures_are_cut_to_about_a_hundred_characters() {
+    let method = |amount: u8| {
+        format!(
+            "<?php\n\nclass Order\n{{\n    public function place(\n        string $firstArgumentWithALongName,\n        string $secondArgumentWithALongName,\n        string $thirdArgumentWithALongName,\n    ): int {{\n        return {amount};\n    }}\n}}\n"
+        )
+    };
+    let section = pieces_section(
+        &[("app/Order.php", &method(1))],
+        &[("app/Order.php", &method(2))],
+    );
+
+    assert_eq!(
+        section[1],
+        "  #Order::place  method  modified  +1 −1  public function place(string $firstArgumentWithALongName, string $secondArgumentWithALongName, stri…"
+    );
+}

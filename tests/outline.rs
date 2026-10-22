@@ -371,7 +371,7 @@ class Order
 
     assert!(
         run.stdout_with(&[]).ends_with(
-            "  #Order::place  method  modified  +1 −1  public function place( Cart $cart, string $url = 'https://shop.test', ): void\n"
+            "  #Order::place  method  modified  +1 −1  public function place(Cart $cart, string $url = 'https://shop.test'): void\n"
         ),
         "{}",
         run.stdout
