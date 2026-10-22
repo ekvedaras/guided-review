@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
+use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{DiffView, OnMoreContext, threads_by_piece};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::old_head_note::OldHeadNote;
@@ -30,6 +31,7 @@ actions!(one_step, [GoForward, GoBack]);
 pub struct OneStepLayout {
     review: Review,
     github: Arc<dyn GitHubPort>,
+    diagrams: Entity<Diagrams>,
     focus: FocusHandle,
     ask: Entity<AskPanel>,
     pr_head_check: Option<Task<()>>,
@@ -79,11 +81,14 @@ impl OneStepLayout {
                 this.pull_threads(cx);
             }
         });
+        let diagrams = cx.new(|_| Diagrams::default());
+        cx.observe(&diagrams, |_, _, cx| cx.notify()).detach();
         let focus = cx.focus_handle();
         let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
         let mut layout = Self {
             review,
             github,
+            diagrams,
             focus,
             ask,
             pr_head_check: None,
@@ -324,7 +329,8 @@ impl OneStepLayout {
         )
     }
 
-    fn screen(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn screen(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.show_diagram(window, cx);
         match self.review.screen() {
             Screen::Summary => {
                 let button =
@@ -346,6 +352,19 @@ impl OneStepLayout {
                 None => div().into_any_element(),
             },
         }
+    }
+
+    fn show_diagram(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let page = match self.review.screen() {
+            Screen::Step(_) => self.review.current_step(),
+            _ => None,
+        };
+        let diagram = page
+            .as_ref()
+            .filter(|page| !page.is_folded)
+            .and_then(|page| page.step.diagram.as_deref());
+        self.diagrams
+            .update(cx, |diagrams, cx| diagrams.show(diagram, window, cx));
     }
 
     fn step_screen(&self, page: StepPage<'_>, cx: &mut Context<Self>) -> impl IntoElement {
@@ -384,9 +403,12 @@ impl OneStepLayout {
                     )
             })
             .collect();
+        let diagram = (!page.is_folded && page.step.diagram.is_some())
+            .then(|| DiagramView::new(self.diagrams.clone()));
         step_screen(
             page,
             step_button,
+            diagram,
             pieces,
             self.review.ignores_whitespace(),
             after_code,
@@ -460,6 +482,7 @@ fn summary_screen(title: &str, summary: &[String], ask: impl IntoElement) -> imp
 fn step_screen(
     page: StepPage<'_>,
     ask: impl IntoElement,
+    diagram: Option<DiagramView>,
     pieces: Vec<impl IntoElement>,
     ignores_whitespace: bool,
     after_code: Vec<AnyElement>,
@@ -492,6 +515,7 @@ fn step_screen(
                 .text_color(Palette::muted_text())
                 .child(step.why.clone()),
         )
+        .children(diagram)
         .child(div().flex().child(ask))
         .child(StepNotes::of(step))
         .child(whitespace_toggle(ignores_whitespace, cx))
@@ -570,7 +594,7 @@ impl Focusable for OneStepLayout {
 }
 
 impl Render for OneStepLayout {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
@@ -595,7 +619,7 @@ impl Render for OneStepLayout {
                             .flex_1()
                             .overflow_y_scroll()
                             .p_6()
-                            .child(self.screen(cx)),
+                            .child(self.screen(window, cx)),
                     ),
             )
             .when(self.ask.read(cx).is_open(), |row| {

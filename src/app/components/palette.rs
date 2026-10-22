@@ -7,8 +7,10 @@ use crate::viewer::Capture;
 /// GPUI has no usable default font outside Zed, so every text names its family.
 pub const TEXT_FONT: &str = "Helvetica Neue";
 pub const CODE_FONT: &str = "Menlo";
+/// Diagrams measure their text with this file, so it must hold `TEXT_FONT`.
+pub const TEXT_FONT_FILE: &str = "/System/Library/Fonts/HelveticaNeue.ttc";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Appearance {
     Light,
     Dark,
@@ -35,6 +37,10 @@ pub struct Colors {
     pub current: Rgba,
     pub removed_line: Rgba,
     pub added_line: Rgba,
+    pub accent: Rgba,
+    pub warning: Rgba,
+    pub success: Rgba,
+    pub danger: Rgba,
     code: CodeColors,
 }
 
@@ -66,6 +72,10 @@ impl Colors {
             current: rgb(0xddf4ff),
             removed_line: rgb(0xffebe9),
             added_line: rgb(0xe6ffec),
+            accent: rgb(0x0969da),
+            warning: rgb(0x9a6700),
+            success: rgb(0x1a7f37),
+            danger: rgb(0xcf222e),
             code: CodeColors {
                 keyword: rgb(0xcf222e),
                 string: rgb(0x0a3069),
@@ -94,6 +104,10 @@ impl Colors {
             current: rgb(0x14304f),
             removed_line: rgb(0x3b1c21),
             added_line: rgb(0x12301d),
+            accent: rgb(0x58a6ff),
+            warning: rgb(0xd29922),
+            success: rgb(0x3fb950),
+            danger: rgb(0xf85149),
             code: CodeColors {
                 keyword: rgb(0xff7b72),
                 string: rgb(0xa5d6ff),
