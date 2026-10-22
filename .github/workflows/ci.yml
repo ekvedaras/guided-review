@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  stack-top:
+    # Only the top of a PR stack holds every layer, and the stack merges all-or-nothing,
+    # so the expensive macOS run is spent there only.
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      is-top: ${{ steps.top.outputs.is-top }}
+    steps:
+      - id: top
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "is-top=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          above=$(gh pr list --repo "${{ github.repository }}" --state open --base "$HEAD_REF" --json number --jq 'length')
+          if [ "$above" = "0" ]; then echo "is-top=true"; else echo "is-top=false"; fi >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: stack-top
+    if: needs.stack-top.outputs.is-top == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
