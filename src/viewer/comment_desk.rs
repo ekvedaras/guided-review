@@ -21,27 +21,53 @@ use super::thread_actions::{
 #[derive(Default)]
 pub(super) struct CommentDesk {
     selection: Option<RowSelection>,
-    /// Unknown until GitHub answers; "Comment now" is only offered when it is known to be `false`.
-    has_pending_review: Option<bool>,
-    /// Unknown until GitHub answers; Approve and Request changes are only offered when it is known to be `false`.
-    viewer_did_author: Option<bool>,
+    /// "Comment now" is only offered when GitHub is known to have none.
+    pending_review: PendingReview,
+    /// Approve and Request changes are only offered when the PR is known to be someone else's.
+    authorship: PullRequestAuthorship,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum PendingReview {
+    #[default]
+    Unknown,
+    Absent,
+    Exists,
+}
+
+impl PendingReview {
+    fn exists(exists: bool) -> Self {
+        if exists { Self::Exists } else { Self::Absent }
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum PullRequestAuthorship {
+    #[default]
+    Unknown,
+    OwnedByViewer,
+    OwnedBySomeoneElse,
 }
 
 impl CommentDesk {
     pub(super) fn pending_review_is(&mut self, exists: bool) {
-        self.has_pending_review = Some(exists);
+        self.pending_review = PendingReview::exists(exists);
     }
 
     pub(super) fn can_comment_now(&self) -> bool {
-        self.has_pending_review == Some(false)
+        self.pending_review == PendingReview::Absent
     }
 
     pub(super) fn viewer_authorship_is(&mut self, authored: bool) {
-        self.viewer_did_author = Some(authored);
+        self.authorship = if authored {
+            PullRequestAuthorship::OwnedByViewer
+        } else {
+            PullRequestAuthorship::OwnedBySomeoneElse
+        };
     }
 
     pub(super) fn can_approve_or_request_changes(&self) -> bool {
-        self.viewer_did_author == Some(false)
+        self.authorship == PullRequestAuthorship::OwnedBySomeoneElse
     }
 
     pub(super) fn begin_selection(&mut self, row: LineLocation) {
@@ -186,7 +212,7 @@ impl CommentDesk {
         let place = request.draft.place.clone();
         match how {
             Outcome::Sent => {
-                self.has_pending_review = Some(request.mode == SendMode::AddToReview);
+                self.pending_review = PendingReview::exists(request.mode == SendMode::AddToReview);
                 leave(state, &request.origin, &place);
                 CommentResult::Sent
             }
@@ -195,13 +221,13 @@ impl CommentDesk {
                 CommentResult::Queued(reason)
             }
             Outcome::Rejected(reason) => {
-                self.has_pending_review = Some(true);
+                self.pending_review = PendingReview::Exists;
                 keep_as_draft(state, &request);
                 CommentResult::Rejected(reason)
             }
             Outcome::Refused(refusal) => {
                 if refusal == CommentRefusal::PendingReviewExists {
-                    self.has_pending_review = Some(true);
+                    self.pending_review = PendingReview::Exists;
                     if let Some(queued) = state.queued_at(&place) {
                         queued.mode = SendMode::AddToReview;
                     }
@@ -237,7 +263,7 @@ impl CommentDesk {
                     thread_id, mode, ..
                 },
             ) => {
-                self.has_pending_review = Some(*mode == SendMode::AddToReview);
+                self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
                 state.drop_reply(thread_id);
                 true
             }
@@ -245,7 +271,7 @@ impl CommentDesk {
                 ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),
                 ThreadAction::Reply { .. },
             ) => {
-                self.has_pending_review = Some(true);
+                self.pending_review = PendingReview::Exists;
                 false
             }
             _ => false,
@@ -266,7 +292,7 @@ impl CommentDesk {
         let needs_text = match verdict {
             ReviewVerdict::Approve => false,
             ReviewVerdict::RequestChanges => true,
-            ReviewVerdict::Comment => self.has_pending_review != Some(true),
+            ReviewVerdict::Comment => self.pending_review != PendingReview::Exists,
         };
         if needs_text && !has_text {
             return Err(FinishRefusal::BodyNeeded(verdict));
@@ -284,7 +310,7 @@ impl CommentDesk {
         outcome: FinishOutcome,
     ) -> FinishResult {
         if outcome.result == FinishResult::Sent {
-            self.has_pending_review = Some(false);
+            self.pending_review = PendingReview::Absent;
             state.write_finish_body("");
         }
         outcome.result
