@@ -220,6 +220,8 @@ fn hunk_pieces(diff: &FileDiff) -> Vec<Piece> {
                 signature: Some(hunk.header.clone()),
                 marks: Vec::new(),
                 diff_hash: DiffHash::of(&removed, &added),
+                removed_lines: hunk.removed.clone(),
+                added_lines: hunk.added.clone(),
             }
         })
         .collect()
