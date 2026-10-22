@@ -17,18 +17,32 @@ use super::review::StepId;
 /// existed still loads.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ReviewState {
-    #[serde(default)]
-    read_ticks: BTreeMap<StepId, ReadTick>,
+    #[serde(flatten)]
+    viewer: ViewerSections,
+    #[serde(flatten)]
+    typed: TypedText,
     #[serde(default)]
     asks: Vec<Ask>,
+    #[serde(default)]
+    last_repin: Option<RepinRecord>,
+    /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
+    #[serde(flatten)]
+    unknown_sections: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The sections the viewer owns and writes back whole, with `typed` beside it (serde cannot
+/// flatten one flattened struct into another); the Asks and the re-pin record are written by
+/// others, so a save of these never touches them.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct ViewerSections {
+    #[serde(default)]
+    read_ticks: BTreeMap<StepId, ReadTick>,
     /// Per file, whether GitHub said viewed at the last sync. A pull reacts to changes against it.
     #[serde(default)]
     viewed_on_github: BTreeMap<String, bool>,
     /// Viewed changes GitHub has not taken yet, newest wish per file.
     #[serde(default)]
     unsent_viewed: BTreeMap<String, bool>,
-    #[serde(default)]
-    last_repin: Option<RepinRecord>,
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
     #[serde(default)]
     read_before: BTreeMap<StepId, ReadTick>,
@@ -36,21 +50,9 @@ pub struct ReviewState {
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
     github_baseline_due: bool,
-    /// Comment text not sent yet; each one is an open comment box.
-    #[serde(default)]
-    comment_drafts: Vec<CommentDraft>,
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
     comment_queue: Vec<QueuedComment>,
-    /// Reply text not sent yet, by thread id; each one is an open reply box.
-    #[serde(default)]
-    reply_drafts: BTreeMap<String, String>,
-    /// The body of the review being finished, not sent yet.
-    #[serde(default)]
-    finish_body: String,
-    /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
-    #[serde(flatten)]
-    unknown_sections: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,15 +161,15 @@ impl ReviewState {
             .filter(|step| step.has_changed_or_new_piece())
         {
             let id = StepId::from(step.step.as_str());
-            if let Some(tick) = self.read_ticks.remove(&id) {
-                self.read_before.insert(id, tick);
+            if let Some(tick) = self.viewer.read_ticks.remove(&id) {
+                self.viewer.read_before.insert(id, tick);
             }
         }
         self.last_repin = Some(match self.last_repin.take() {
             Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
             _ => record,
         });
-        self.github_baseline_due = true;
+        self.viewer.github_baseline_due = true;
     }
 
     /// A Refresh answered what the re-pin left open, so its marks go.
@@ -180,11 +182,11 @@ impl ReviewState {
     }
 
     pub fn read_before(&self, step: &StepId) -> Option<&ReadTick> {
-        self.read_before.get(step)
+        self.viewer.read_before.get(step)
     }
 
     pub fn github_baseline_due(&self) -> bool {
-        self.github_baseline_due
+        self.viewer.github_baseline_due
     }
 
     /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
@@ -193,18 +195,18 @@ impl ReviewState {
         on_github: &BTreeMap<String, bool>,
         wishes: &BTreeMap<String, bool>,
     ) {
-        self.viewed_on_github = on_github.clone();
-        self.unsent_viewed = wishes
+        self.viewer.viewed_on_github = on_github.clone();
+        self.viewer.unsent_viewed = wishes
             .iter()
             .filter(|(path, viewed)| self.was_viewed_on_github(path) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
-        self.github_baseline_due = false;
+        self.viewer.github_baseline_due = false;
     }
 
     pub fn tick(&mut self, step: &StepId, head: &Sha) {
-        self.read_before.remove(step);
-        self.read_ticks.insert(
+        self.viewer.read_before.remove(step);
+        self.viewer.read_ticks.insert(
             step.clone(),
             ReadTick {
                 head: head.to_string(),
@@ -213,110 +215,107 @@ impl ReviewState {
     }
 
     pub fn untick(&mut self, step: &StepId) {
-        self.read_ticks.remove(step);
+        self.viewer.read_ticks.remove(step);
     }
 
     pub(super) fn was_viewed_on_github(&self, path: &str) -> bool {
-        self.viewed_on_github.get(path).copied().unwrap_or(false)
+        self.viewer
+            .viewed_on_github
+            .get(path)
+            .copied()
+            .unwrap_or(false)
     }
 
     pub(super) fn saw_on_github(&mut self, path: &str, viewed: bool) {
-        self.viewed_on_github.insert(path.to_string(), viewed);
+        self.viewer
+            .viewed_on_github
+            .insert(path.to_string(), viewed);
     }
 
     /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
     pub(super) fn want_viewed(&mut self, path: &str, viewed: bool) {
         if self.was_viewed_on_github(path) == viewed {
-            self.unsent_viewed.remove(path);
+            self.viewer.unsent_viewed.remove(path);
         } else {
-            self.unsent_viewed.insert(path.to_string(), viewed);
+            self.viewer.unsent_viewed.insert(path.to_string(), viewed);
         }
     }
 
     pub(super) fn unsent_viewed(&self) -> &BTreeMap<String, bool> {
-        &self.unsent_viewed
+        &self.viewer.unsent_viewed
     }
 
     pub(super) fn sent_viewed(&mut self, path: &str, viewed: bool) {
         self.saw_on_github(path, viewed);
-        if self.unsent_viewed.get(path) == Some(&viewed) {
-            self.unsent_viewed.remove(path);
+        if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
+            self.viewer.unsent_viewed.remove(path);
         }
     }
 
     pub(super) fn take_viewer_sections(&mut self, from: &ReviewState) {
-        self.read_ticks = from.read_ticks.clone();
-        self.viewed_on_github = from.viewed_on_github.clone();
-        self.unsent_viewed = from.unsent_viewed.clone();
-        self.read_before = from.read_before.clone();
-        self.github_baseline_due = from.github_baseline_due;
-        self.comment_drafts = from.comment_drafts.clone();
-        self.comment_queue = from.comment_queue.clone();
-        self.reply_drafts = from.reply_drafts.clone();
-        self.finish_body = from.finish_body.clone();
+        self.viewer = from.viewer.clone();
+        self.typed = from.typed.clone();
     }
 
     pub(super) fn typed_text(&self) -> TypedText {
-        TypedText {
-            comment_drafts: self.comment_drafts.clone(),
-            reply_drafts: self.reply_drafts.clone(),
-            finish_body: self.finish_body.clone(),
-        }
+        self.typed.clone()
     }
 
     pub(super) fn take_typed_text(&mut self, typed: TypedText) {
-        self.comment_drafts = typed.comment_drafts;
-        self.reply_drafts = typed.reply_drafts;
-        self.finish_body = typed.finish_body;
+        self.typed = typed;
     }
 
     pub(super) fn reply_drafts(&self) -> &BTreeMap<String, String> {
-        &self.reply_drafts
+        &self.typed.reply_drafts
     }
 
     pub(super) fn reply_draft(&self, thread_id: &str) -> Option<&str> {
-        self.reply_drafts.get(thread_id).map(String::as_str)
+        self.typed.reply_drafts.get(thread_id).map(String::as_str)
     }
 
     pub(super) fn open_reply(&mut self, thread_id: &str) {
-        self.reply_drafts.entry(thread_id.to_string()).or_default();
+        self.typed
+            .reply_drafts
+            .entry(thread_id.to_string())
+            .or_default();
     }
 
     pub(super) fn write_reply(&mut self, thread_id: &str, text: &str) {
-        if let Some(draft) = self.reply_drafts.get_mut(thread_id) {
+        if let Some(draft) = self.typed.reply_drafts.get_mut(thread_id) {
             *draft = text.to_string();
         }
     }
 
     pub(super) fn drop_reply(&mut self, thread_id: &str) {
-        self.reply_drafts.remove(thread_id);
+        self.typed.reply_drafts.remove(thread_id);
     }
 
     pub(super) fn finish_body(&self) -> &str {
-        &self.finish_body
+        &self.typed.finish_body
     }
 
     pub(super) fn write_finish_body(&mut self, text: &str) {
-        self.finish_body = text.to_string();
+        self.typed.finish_body = text.to_string();
     }
 
     pub(super) fn comment_drafts(&self) -> &[CommentDraft] {
-        &self.comment_drafts
+        &self.typed.comment_drafts
     }
 
     pub(super) fn comment_queue(&self) -> &[QueuedComment] {
-        &self.comment_queue
+        &self.viewer.comment_queue
     }
 
     pub(super) fn draft_at(&self, place: &CommentPlace) -> Option<&CommentDraft> {
-        self.comment_drafts
+        self.typed
+            .comment_drafts
             .iter()
             .find(|draft| &draft.place == place)
     }
 
     pub(super) fn open_draft(&mut self, place: CommentPlace, head: &Sha) {
         if self.draft_at(&place).is_none() {
-            self.comment_drafts.push(CommentDraft {
+            self.typed.comment_drafts.push(CommentDraft {
                 place,
                 body: String::new(),
                 written_at: head.to_string(),
@@ -325,43 +324,61 @@ impl ReviewState {
     }
 
     pub(super) fn write_draft(&mut self, place: &CommentPlace, body: &str) {
-        if let Some(draft) = self.comment_drafts.iter_mut().find(|d| &d.place == place) {
+        if let Some(draft) = self
+            .typed
+            .comment_drafts
+            .iter_mut()
+            .find(|d| &d.place == place)
+        {
             draft.body = body.to_string();
         }
     }
 
     pub(super) fn drop_draft(&mut self, place: &CommentPlace) -> Option<CommentDraft> {
-        let at = self.comment_drafts.iter().position(|d| &d.place == place)?;
-        Some(self.comment_drafts.remove(at))
+        let at = self
+            .typed
+            .comment_drafts
+            .iter()
+            .position(|d| &d.place == place)?;
+        Some(self.typed.comment_drafts.remove(at))
     }
 
     pub(super) fn queue_comment(&mut self, queued: QueuedComment) {
-        self.comment_queue.push(queued);
+        self.viewer.comment_queue.push(queued);
     }
 
     pub(super) fn queued_at(&mut self, place: &CommentPlace) -> Option<&mut QueuedComment> {
-        self.comment_queue
+        self.viewer
+            .comment_queue
             .iter_mut()
             .find(|queued| &queued.draft.place == place)
     }
 
     pub(super) fn drop_queued(&mut self, place: &CommentPlace) -> Option<QueuedComment> {
         let at = self
+            .viewer
             .comment_queue
             .iter()
             .position(|queued| &queued.draft.place == place)?;
-        Some(self.comment_queue.remove(at))
+        Some(self.viewer.comment_queue.remove(at))
     }
 
     pub fn read_tick(&self, step: &StepId) -> Option<&ReadTick> {
-        self.read_ticks.get(step)
+        self.viewer.read_ticks.get(step)
     }
 }
 
 /// The text boxes of the viewer: what is saved while typing.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TypedText {
+    /// Comment text not sent yet; each one is an open comment box.
+    #[serde(default)]
     comment_drafts: Vec<CommentDraft>,
+    /// Reply text not sent yet, by thread id; each one is an open reply box.
+    #[serde(default)]
     reply_drafts: BTreeMap<String, String>,
+    /// The body of the review being finished, not sent yet.
+    #[serde(default)]
     finish_body: String,
 }
 
