@@ -245,12 +245,7 @@ pub struct RestTaken<'a> {
 pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken<'a>> {
     let steps = tour.steps();
     let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
-    let named: HashSet<String> = pointers
-        .iter()
-        .filter_map(|pointer| pointer.named_pieces(files))
-        .flatten()
-        .map(|piece| piece.id.to_string())
-        .collect();
+    let seen = Seen::named_by(&pointers, files);
     let mut taken_by_earlier: HashSet<String> = HashSet::new();
 
     let mut all = Vec::new();
@@ -268,7 +263,7 @@ pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken
             let mut took_any = false;
             for piece in &file.pieces {
                 let id = piece.id.to_string();
-                if !named.contains(&id) && taken_by_earlier.insert(id) {
+                if seen.unseen(piece).is_some() && taken_by_earlier.insert(id) {
                     taken.pieces += 1;
                     took_any = true;
                 }

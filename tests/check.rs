@@ -348,7 +348,10 @@ fn rest_takes_the_changed_lines_a_line_range_left() {
         step("others", json!([{"rest": ""}])),
     ]);
 
-    assert_eq!(run.stdout, "0 errors, 0 warnings\n");
+    assert_eq!(
+        run.stdout,
+        "note: rest \"\" takes 1 piece in 1 file: ci.yml\n0 errors, 0 warnings\n"
+    );
 }
 
 #[test]
@@ -376,7 +379,7 @@ fn a_line_range_on_a_file_the_tool_can_parse_warns_to_use_file_and_symbol() {
 
     assert_eq!(
         shop.check().stdout,
-        "warning: step \"order\": app/Order.php lines 1-10: the tool can parse this file, use file + symbol\n0 errors, 1 warning\n"
+        "warning: step \"order\": app/Order.php lines 1-10: the tool can parse this file, use file + symbol\nnote: rest \"\" takes 4 pieces in 2 files: README.md, app/Services/Pricing.php\n0 errors, 1 warning\n"
     );
 }
 
