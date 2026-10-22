@@ -110,6 +110,7 @@ fn unknown_piece_id_is_an_error_and_fails_the_check() {
         "\
 error: step \"pricing\": unknown piece app/Order.php#Order::nope
 error: step \"pricing\": unknown piece app/Missing.php
+note: rest \"\" takes 5 pieces in 3 files: README.md, app/Order.php, app/Services/Pricing.php
 2 errors, 0 warnings
 "
     );
@@ -163,7 +164,7 @@ fn rest_covers_only_changes_under_its_folder() {
 
     assert_eq!(
         shop.check().stdout,
-        "warning: no step covers README.md#hunk-1\n0 errors, 1 warning\n"
+        "warning: no step covers README.md#hunk-1\nnote: rest \"app/Services\" takes 3 pieces in 1 file: app/Services/Pricing.php\n0 errors, 1 warning\n"
     );
 }
 
@@ -177,7 +178,10 @@ fn rest_covers_changes_in_steps_nested_anywhere() {
         step("docs", json!([{"file": "README.md"}])),
     ]));
 
-    assert_eq!(shop.check().stdout, "0 errors, 0 warnings\n");
+    assert_eq!(
+        shop.check().stdout,
+        "note: rest \"app\" takes 3 pieces in 1 file: app/Services/Pricing.php\n0 errors, 0 warnings\n"
+    );
 }
 
 #[test]
@@ -209,6 +213,7 @@ warning: step \"crowded\": 15 pieces, split it into steps of at most 8
 warning: summary has 4 bullets, keep it to 3
 warning: summary bullet has 16 words, keep it to about 12: this bullet has far too many words in it to be a quick read for anyone
 warning: 8 top-level steps, nest details to keep it to 7
+note: rest \"\" takes 2 pieces in 2 files: README.md, app/Order.php
 0 errors, 5 warnings
 "
     );
@@ -372,5 +377,16 @@ fn a_line_range_on_a_file_the_tool_can_parse_warns_to_use_file_and_symbol() {
     assert_eq!(
         shop.check().stdout,
         "warning: step \"order\": app/Order.php lines 1-10: the tool can parse this file, use file + symbol\n0 errors, 1 warning\n"
+    );
+}
+
+#[test]
+fn rest_lists_what_it_took() {
+    let shop = Shop::with_pull();
+    shop.write_tour(covering_everything());
+
+    assert_eq!(
+        shop.check().stdout,
+        "note: rest \"\" takes 5 pieces in 3 files: README.md, app/Order.php, app/Services/Pricing.php\n0 errors, 0 warnings\n"
     );
 }

@@ -233,3 +233,51 @@ fn is_under(path: &str, folder: &str) -> bool {
             .strip_prefix(folder)
             .is_some_and(|rest| rest.starts_with('/'))
 }
+
+/// What one `rest` pointer took: the changes under its folder that no other pointer names
+/// and no earlier `rest` pointer took.
+pub struct RestTaken<'a> {
+    pub folder: &'a str,
+    pub pieces: usize,
+    pub files: Vec<&'a str>,
+}
+
+pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken<'a>> {
+    let steps = tour.steps();
+    let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
+    let named: HashSet<String> = pointers
+        .iter()
+        .filter_map(|pointer| pointer.named_pieces(files))
+        .flatten()
+        .map(|piece| piece.id.to_string())
+        .collect();
+    let mut taken_by_earlier: HashSet<String> = HashSet::new();
+
+    let mut all = Vec::new();
+    for pointer in pointers {
+        let PieceRef::Rest { rest } = pointer else {
+            continue;
+        };
+        let folder = rest.trim_matches('/');
+        let mut taken = RestTaken {
+            folder,
+            pieces: 0,
+            files: Vec::new(),
+        };
+        for file in files.iter().filter(|file| is_under(&file.path, folder)) {
+            let mut took_any = false;
+            for piece in &file.pieces {
+                let id = piece.id.to_string();
+                if !named.contains(&id) && taken_by_earlier.insert(id) {
+                    taken.pieces += 1;
+                    took_any = true;
+                }
+            }
+            if took_any {
+                taken.files.push(&file.path);
+            }
+        }
+        all.push(taken);
+    }
+    all
+}

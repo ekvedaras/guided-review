@@ -10,6 +10,7 @@ pub const MAX_WORDS_PER_BULLET: usize = 12;
 pub const MAX_WHY_LINES: usize = 2;
 pub const MAX_PIECES_PER_STEP: usize = 8;
 pub const MAX_TOP_LEVEL_STEPS: usize = 7;
+const MAX_FILES_LISTED: usize = 3;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -48,6 +49,7 @@ pub enum Warning {
 pub struct Report {
     pub errors: Vec<Error>,
     pub warnings: Vec<Warning>,
+    pub rest_notes: Vec<String>,
 }
 
 pub fn check(tour: &Tour, files: &[ChangedFile]) -> Report {
@@ -81,12 +83,34 @@ pub fn check(tour: &Tour, files: &[ChangedFile]) -> Report {
             });
         }
     }
+    report.rest_notes = coverage::rest_taken(tour, files)
+        .iter()
+        .map(rest_note)
+        .collect();
     if tour.steps.len() > MAX_TOP_LEVEL_STEPS {
         report
             .warnings
             .push(Warning::TooManyTopLevelSteps(tour.steps.len()));
     }
     report
+}
+
+fn rest_note(taken: &coverage::RestTaken) -> String {
+    let listed: Vec<&str> = taken.files.iter().copied().take(MAX_FILES_LISTED).collect();
+    let more = taken.files.len() - listed.len();
+    format!(
+        "rest \"{}\" takes {} in {}{}{}{}",
+        taken.folder,
+        counted(taken.pieces, "piece"),
+        counted(taken.files.len(), "file"),
+        if listed.is_empty() { "" } else { ": " },
+        listed.join(", "),
+        if more > 0 {
+            format!(", +{more} more")
+        } else {
+            String::new()
+        }
+    )
 }
 
 fn check_step(step: &Step, files: &[ChangedFile], report: &mut Report) {
@@ -181,6 +205,9 @@ impl fmt::Display for Report {
         }
         for warning in &self.warnings {
             writeln!(f, "warning: {warning}")?;
+        }
+        for note in &self.rest_notes {
+            writeln!(f, "note: {note}")?;
         }
         writeln!(
             f,
