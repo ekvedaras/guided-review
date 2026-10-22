@@ -27,7 +27,8 @@ pub use ports::{
     ViewedSyncUnavailable,
 };
 pub use review::{
-    OldHead, ReadProgress, Review, Screen, SidebarEntry, StepId, SyncOutcome, SyncRequest,
+    OldHead, ReadProgress, RepinRunning, Review, Screen, SidebarEntry, StepId, SyncOutcome,
+    SyncRequest,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use step_page::{

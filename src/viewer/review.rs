@@ -98,6 +98,7 @@ pub struct Review {
     highlights: Highlights,
     /// Why viewed sync is switched off for this session; the app shows it as a banner.
     sync_off_because: Option<String>,
+    repin_running: bool,
     files_at_head: FilesAtHead,
     more_context: HashMap<MoreContext, usize>,
     ignores_whitespace: bool,
@@ -156,6 +157,7 @@ impl Review {
             fold_flipped: BTreeSet::new(),
             highlights: Highlights::default(),
             sync_off_because: None,
+            repin_running: false,
             files_at_head: FilesAtHead::default(),
             more_context: HashMap::new(),
             ignores_whitespace: false,
@@ -493,7 +495,18 @@ impl Review {
     }
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
+    /// The re-pin writes the state file from another thread and this review is replaced when it
+    /// is done, so from now on nothing it holds may be saved over the re-pin's record.
+    pub fn start_repin(&mut self) {
+        self.repin_running = true;
+    }
+
+    pub fn repin_failed(&mut self) {
+        self.repin_running = false;
+    }
+
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
@@ -512,6 +525,7 @@ impl Review {
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
         self.state.untick(id);
         self.fold_flipped.remove(id);
         if self.sync_off_because.is_none() {
@@ -706,8 +720,16 @@ impl Review {
     /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
     /// these are written into a freshly loaded file.
     fn save_viewer_sections(&self) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
         self.state_file
             .update(|saved| saved.take_viewer_sections(&self.state))
+    }
+
+    fn refuse_changes_while_repinning(&self) -> anyhow::Result<()> {
+        match self.repin_running {
+            true => Err(RepinRunning.into()),
+            false => Ok(()),
+        }
     }
 
     fn step_by(&mut self, offset: isize) -> bool {
@@ -726,6 +748,18 @@ impl Review {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct RepinRunning;
+
+impl std::fmt::Display for RepinRunning {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter
+            .write_str("the tour is being updated to the new commits; try again when it is done")
+    }
+}
+
+impl std::error::Error for RepinRunning {}
 
 /// The head a step was last read at: its tick, or the tick a re-pin took away.
 fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a str> {

@@ -508,3 +508,35 @@ fn update_tour_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     assert_eq!(Tour::load(&shop.tour_path()).unwrap().head, second_head);
     assert_eq!(ticked(&updated.review), ["keep"]);
 }
+
+#[test]
+fn ticks_on_the_open_review_are_refused_while_a_re_pin_runs_so_they_cannot_overwrite_its_record() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.tick(&["total", "keep"]);
+    let second_head = shop.commit_second_head();
+    let mut review = shop.open();
+
+    review.start_repin();
+    shop.repin_onto(&second_head);
+    let refused = [review.tick(&"total".into()), review.untick(&"keep".into())];
+
+    assert!(refused.iter().all(Result::is_err));
+    assert_eq!(ticked(&review), ["total", "keep"]);
+    assert_eq!(ticked(&shop.open()), ["keep"]);
+    assert_eq!(
+        state_on_disk(&shop)["read_before"],
+        json!({"total": {"head": shop.first_head}})
+    );
+}
+
+#[test]
+fn ticks_count_again_once_a_re_pin_failed() {
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+
+    review.start_repin();
+    review.repin_failed();
+    review.tick(&"total".into()).unwrap();
+
+    assert_eq!(ticked(&shop.open()), ["total"]);
+}

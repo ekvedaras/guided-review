@@ -120,12 +120,13 @@ impl OneStepLayout {
         self.pull_threads(cx);
     }
 
-    /// Runs only on the button. The old `Review` is replaced, so its ticks cannot overwrite the new state.
+    /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
     fn update_tour(&mut self, cx: &mut Context<Self>) {
         if self.tour_update == TourUpdate::Running {
             return;
         }
         self.tour_update = TourUpdate::Running;
+        self.review.start_repin();
         let (updater, github) = (self.updater.clone(), self.github.clone());
         cx.spawn(async move |this, cx| {
             let updated = cx
@@ -144,7 +145,10 @@ impl OneStepLayout {
                         this.diagrams = Self::new_diagrams(cx);
                         this.start_background_work(updated.source, cx);
                     }
-                    Err(error) => this.tour_update = TourUpdate::Failed(format!("{error:#}")),
+                    Err(error) => {
+                        this.review.repin_failed();
+                        this.tour_update = TourUpdate::Failed(format!("{error:#}"));
+                    }
                 }
                 cx.notify();
             })
