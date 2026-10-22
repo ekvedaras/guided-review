@@ -72,7 +72,9 @@ impl RenderOnce for DiffView {
             .hunks
             .into_iter()
             .enumerate()
-            .flat_map(|(index, hunk)| hunk_rows(&id, index, hunk, &self.on_more_context, &mut threads))
+            .flat_map(|(index, hunk)| {
+                hunk_rows(&id, index, hunk, &self.on_more_context, &mut threads)
+            })
             .collect();
         div()
             .flex()

@@ -93,16 +93,11 @@ impl ThreadPlacement {
             .collect();
         let mut homes: BTreeMap<Home, Vec<ReviewThread>> = BTreeMap::new();
         for thread in threads {
-            let on_a_line = thread.anchor().and_then(|anchor| {
-                steps
-                    .iter()
-                    .find(|(_, parts)| parts.iter().any(|part| holds(part, &anchor)))
-            });
-            let home = on_a_line
-                .or_else(|| {
-                    steps.iter().find(|(_, parts)| {
-                        parts.iter().any(|part| part.piece.id.path == thread.path)
-                    })
+            let home = steps
+                .iter()
+                .find(|(_, parts)| match thread.anchor() {
+                    Some(anchor) => parts.iter().any(|part| holds(part, &anchor)),
+                    None => parts.iter().any(|part| part.piece.id.path == thread.path),
                 })
                 .map_or(Home::SafetyNet, |(id, _)| Home::Step(id.clone()));
             homes.entry(home).or_default().push(thread.clone());

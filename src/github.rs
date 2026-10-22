@@ -234,7 +234,9 @@ impl GitHub {
         loop {
             let data = self
                 .graphql(REVIEW_THREADS_QUERY, pull_request_variables(pr, &after))
-                .with_context(|| format!("could not read the review threads of {pr} from GitHub"))?;
+                .with_context(|| {
+                    format!("could not read the review threads of {pr} from GitHub")
+                })?;
             let page = parse_review_threads(&serde_json::json!({"data": data}))?;
             threads.extend(page.threads);
             match page.next_cursor {
