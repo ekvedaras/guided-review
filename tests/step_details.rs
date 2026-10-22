@@ -7,6 +7,7 @@ use guided_review::tour::Tour;
 use guided_review::viewer::{PieceDiff, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
 use support::FixtureRepo;
+use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, SentLog};
 
 struct Shop {

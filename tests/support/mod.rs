@@ -1,4 +1,6 @@
 #[allow(dead_code)]
+pub mod app_path;
+#[allow(dead_code)]
 pub mod fake_ports;
 
 use std::io::{BufRead, BufReader, Write};

@@ -142,6 +142,7 @@ pub struct CommentRequest {
     pub(super) draft: CommentDraft,
     pub(super) mode: SendMode,
     tour_head: Sha,
+    pr: PullRequestUrl,
 }
 
 pub struct CommentOutcome {
@@ -157,22 +158,30 @@ pub(super) enum Outcome {
 }
 
 impl CommentRequest {
-    pub(super) fn new(origin: Origin, draft: CommentDraft, mode: SendMode, tour_head: Sha) -> Self {
+    pub(super) fn new(
+        origin: Origin,
+        draft: CommentDraft,
+        mode: SendMode,
+        tour_head: Sha,
+        pr: PullRequestUrl,
+    ) -> Self {
         Self {
             origin,
             draft,
             mode,
             tour_head,
+            pr,
         }
     }
 
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
-    pub fn run(self, github: &dyn GitHubPort, pr: &PullRequestUrl) -> CommentOutcome {
-        let how = self.send(github, pr);
+    pub fn run(self, github: &dyn GitHubPort) -> CommentOutcome {
+        let how = self.send(github);
         CommentOutcome { request: self, how }
     }
 
-    fn send(&self, github: &dyn GitHubPort, pr: &PullRequestUrl) -> Outcome {
+    fn send(&self, github: &dyn GitHubPort) -> Outcome {
+        let pr = &self.pr;
         if !self.draft.is_placed_at(&self.tour_head) {
             return Outcome::Refused(CommentRefusal::CodeMoved);
         }

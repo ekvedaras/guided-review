@@ -279,13 +279,6 @@ impl Review {
         &self.pr
     }
 
-    /// Blocking; the app runs it in the background on open and on focus.
-    pub fn check_pr_head(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let tips = github.pull_request_tips(&self.pr)?;
-        self.pr_head_is(tips.head);
-        Ok(())
-    }
-
     pub fn pr_head_is(&mut self, head: Sha) {
         self.pr_head = Some(head);
     }
@@ -631,13 +624,6 @@ impl Review {
             .collect()
     }
 
-    /// Blocking; the app runs it in the background on open and on focus.
-    pub fn pull_threads(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let threads = github.review_threads(&self.pr)?;
-        self.set_threads(&threads);
-        Ok(())
-    }
-
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
         self.pulled_threads = threads.to_vec();
         self.place_threads();
@@ -662,12 +648,6 @@ impl Review {
         }
     }
 
-    /// Blocking; the app runs it in the background on open and on focus.
-    pub fn pull_pending_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        self.has_pending_review = Some(github.has_pending_review(&self.pr)?);
-        Ok(())
-    }
-
     pub fn pending_review_is(&mut self, exists: bool) {
         self.has_pending_review = Some(exists);
     }
@@ -675,17 +655,6 @@ impl Review {
     /// "Comment now" shows only when there is surely no pending review.
     pub fn can_comment_now(&self) -> bool {
         self.has_pending_review == Some(false)
-    }
-
-    /// Reply, resolve, unresolve or react, and show the threads as GitHub has them after.
-    /// The app runs `thread_action_request` in the background and then `apply_thread_action`.
-    pub fn act_on_thread(
-        &mut self,
-        action: ThreadAction,
-        github: &dyn GitHubPort,
-    ) -> ThreadActionResult {
-        let outcome = self.thread_action_request(action).run(github);
-        self.apply_thread_action(outcome)
     }
 
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
@@ -749,12 +718,6 @@ impl Review {
         outcome.result
     }
 
-    /// Blocking; the app runs it in the background on open and on focus.
-    pub fn pull_viewer_authorship(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        self.viewer_authorship_is(github.viewer_authored(&self.pr)?);
-        Ok(())
-    }
-
     pub fn viewer_authorship_is(&mut self, authored: bool) {
         self.viewer_did_author = Some(authored);
     }
@@ -802,18 +765,6 @@ impl Review {
             verdict,
             body: body.trim().to_string(),
         })
-    }
-
-    pub fn finish_review(
-        &mut self,
-        verdict: ReviewVerdict,
-        body: &str,
-        github: &dyn GitHubPort,
-    ) -> FinishResult {
-        match self.finish_review_request(verdict, body) {
-            Ok(request) => self.apply_finish(request.run(github)),
-            Err(refusal) => FinishResult::Refused(refusal),
-        }
     }
 
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
@@ -1009,6 +960,7 @@ impl Review {
             draft,
             mode,
             Sha::new(&self.tour.head),
+            self.pr.clone(),
         ))
     }
 
@@ -1020,33 +972,8 @@ impl Review {
             queued.draft.clone(),
             queued.mode,
             Sha::new(&self.tour.head),
+            self.pr.clone(),
         ))
-    }
-
-    /// Runs the whole send here and now; the app runs `CommentRequest::run` in the background
-    /// and then `apply_comment` instead.
-    pub fn send_comment(
-        &mut self,
-        place: &CommentPlace,
-        mode: SendMode,
-        github: &dyn GitHubPort,
-    ) -> anyhow::Result<Option<CommentResult>> {
-        let Some(request) = self.comment_request(place, mode) else {
-            return Ok(None);
-        };
-        let outcome = request.run(github, &self.pr);
-        self.apply_comment(outcome).map(Some)
-    }
-
-    /// Sends the queue oldest first and stops at the first comment that does not go.
-    pub fn send_queued_comments(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        while let Some(request) = self.queued_comment_request() {
-            let outcome = request.run(github, &self.pr);
-            if self.apply_comment(outcome)? != CommentResult::Sent {
-                break;
-            }
-        }
-        Ok(())
     }
 
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
@@ -1269,6 +1196,7 @@ impl Review {
             .github_baseline_due()
             .then(|| self.baseline_wishes());
         SyncRequest {
+            pr: self.pr.clone(),
             tour_head: Sha::new(&self.tour.head),
             unsent: self.state.unsent_viewed().clone(),
             baseline_wishes,
@@ -1296,13 +1224,6 @@ impl Review {
             .filter(|(path, viewed)| !**viewed && !is_fully_ticked(path))
             .map(|(path, _)| (path.clone(), false));
         still_viewed.chain(still_not_viewed).collect()
-    }
-
-    /// Runs the whole sync here and now; the app runs `SyncRequest::run` in the background
-    /// and then `apply_sync` instead.
-    pub fn sync(&mut self, github: &dyn GitHubPort, pr: &PullRequestUrl) -> anyhow::Result<()> {
-        let outcome = self.sync_request().run(github, pr);
-        self.apply_sync(outcome)
     }
 
     /// An error means something stays queued or unread; the next sync tries again.
@@ -1489,6 +1410,7 @@ impl Coverage {
 }
 
 pub struct SyncRequest {
+    pr: PullRequestUrl,
     tour_head: Sha,
     unsent: BTreeMap<String, bool>,
     /// Set for the first sync after a re-pin; it replaces `unsent`.
@@ -1517,7 +1439,8 @@ impl SyncOutcome {
 
 impl SyncRequest {
     /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(self, github: &dyn GitHubPort, pr: &PullRequestUrl) -> SyncOutcome {
+    pub fn run(self, github: &dyn GitHubPort) -> SyncOutcome {
+        let pr = &self.pr;
         if self.is_off {
             return SyncOutcome::nothing();
         }

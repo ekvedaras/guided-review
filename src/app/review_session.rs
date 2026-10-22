@@ -313,10 +313,10 @@ impl ReviewSession {
         };
         self.sending_comments.insert(place.clone());
         self.comment_problems.remove(&place);
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let github = self.github.clone();
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref(), &pr),
+            move || request.run(github.as_ref()),
             move |this, outcome, cx| {
                 let is_sent = this.change_session(cx, |session| {
                     session.sending_comments.remove(&place);
@@ -566,10 +566,10 @@ impl ReviewSession {
         }
         self.is_syncing = true;
         let request = self.review.sync_request();
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let github = self.github.clone();
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref(), &pr),
+            move || request.run(github.as_ref()),
             |this, outcome, cx| {
                 if let Err(error) = this.change(cx, |review| review.apply_sync(outcome)) {
                     eprintln!("could not sync with GitHub: {error:#}");
@@ -636,10 +636,10 @@ impl ReviewSession {
             return;
         };
         self.is_retrying_comments = true;
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let github = self.github.clone();
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref(), &pr),
+            move || request.run(github.as_ref()),
             |this, outcome, cx| {
                 this.is_retrying_comments = false;
                 match this.change(cx, |review| review.apply_comment(outcome)) {

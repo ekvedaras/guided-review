@@ -13,6 +13,7 @@ use guided_review::viewer::{
 };
 use serde_json::json;
 use support::FixtureRepo;
+use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, SentLog};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -427,7 +428,7 @@ fn after_a_re_pin_github_viewed_state_is_the_new_baseline_and_still_ticked_files
     let github_before = FakeGitHub::with_pull("main-tip", &shop.first_head, &sent)
         .viewing("old.txt", ViewedState::Viewed);
     let mut review = shop.open();
-    review.sync(&github_before, &shop.pr()).unwrap();
+    review.sync(&github_before).unwrap();
     review.tick(&"readme".into()).unwrap();
     review.tick(&"config".into()).unwrap();
     review.untick(&"old".into()).unwrap();
@@ -442,7 +443,7 @@ fn after_a_re_pin_github_viewed_state_is_the_new_baseline_and_still_ticked_files
         .viewing("app/Pricing.php", ViewedState::Unviewed);
     let mut review = shop.open();
 
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(ticked(&review), ["readme"]);
     assert_eq!(github.viewed_state("readme.txt"), ViewedState::Viewed);
@@ -451,7 +452,7 @@ fn after_a_re_pin_github_viewed_state_is_the_new_baseline_and_still_ticked_files
     assert!(!review.not_synced());
 
     github.set_viewed("readme.txt", ViewedState::Unviewed);
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(ticked(&review), Vec::<String>::new());
 }
 

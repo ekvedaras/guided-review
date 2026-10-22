@@ -11,6 +11,7 @@ use guided_review::viewer::{
     CommentRefusal, CommentResult, ImageCache, ImageSide, Review, ReviewStateFile, SendMode,
 };
 use serde_json::json;
+use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, SentLog};
 use support::{FixtureRepo, png_of, svg_of};
 

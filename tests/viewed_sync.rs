@@ -7,6 +7,7 @@ use guided_review::tour::Tour;
 use guided_review::viewer::{Review, ReviewStateFile, ViewedState};
 use serde_json::json;
 use support::FixtureRepo;
+use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, SentLog};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -95,14 +96,14 @@ fn a_file_is_marked_viewed_once_every_step_holding_it_is_ticked() {
     let shop = Shop::with_pull();
     let github = all_unviewed(&shop);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     review.tick(&"a-only".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(github.viewed_state("a.txt"), ViewedState::Unviewed);
 
     review.tick(&"a-and-b".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(github.viewed_state("a.txt"), ViewedState::Viewed);
     assert_eq!(github.viewed_state("b.txt"), ViewedState::Viewed);
     assert!(!review.not_synced());
@@ -114,11 +115,11 @@ fn unticking_a_step_unmarks_its_files() {
     let github = all_unviewed(&shop);
     let mut review = shop.open();
     review.tick(&"c-only".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Viewed);
 
     review.untick(&"c-only".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Unviewed);
 }
@@ -130,7 +131,7 @@ fn a_file_with_changes_no_ticked_step_holds_is_never_marked_viewed() {
     let mut review = shop.open();
 
     review.tick(&"total".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(github.viewed_state("app/Order.php"), ViewedState::Unviewed);
 }
@@ -141,9 +142,9 @@ fn ticking_a_step_does_not_unmark_a_file_viewed_on_github() {
     let github = all_unviewed(&shop);
     github.set_viewed("a.txt", ViewedState::Viewed);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     review.tick(&"a-and-b".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(github.viewed_state("a.txt"), ViewedState::Viewed);
 }
@@ -153,14 +154,14 @@ fn a_file_viewed_on_github_ticks_every_step_whose_files_are_all_viewed() {
     let shop = Shop::with_pull();
     let github = all_unviewed(&shop);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     github.set_viewed("a.txt", ViewedState::Viewed);
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(ticked(&review), ["a-only"]);
 
     github.set_viewed("b.txt", ViewedState::Viewed);
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(ticked(&review), ["a-only", "a-and-b"]);
 }
 
@@ -172,11 +173,11 @@ fn a_file_not_viewed_any_more_unticks_every_step_holding_it() {
     github.set_viewed("b.txt", ViewedState::Viewed);
     github.set_viewed("c.txt", ViewedState::Viewed);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(ticked(&review), ["a-only", "a-and-b", "c-only"]);
 
     github.set_viewed("a.txt", ViewedState::Dismissed);
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(ticked(&review), ["c-only"]);
 }
@@ -187,10 +188,10 @@ fn only_changes_on_github_react_so_a_step_untcked_here_stays_unticked() {
     let github = all_unviewed(&shop);
     github.set_viewed("c.txt", ViewedState::Viewed);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     review.untick(&"c-only".into()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(ticked(&review), Vec::<String>::new());
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Unviewed);
@@ -201,12 +202,12 @@ fn a_step_without_files_never_ticks_from_github() {
     let shop = Shop::with_pull();
     let github = all_unviewed(&shop);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     for path in ["a.txt", "b.txt", "c.txt", "app/Order.php"] {
         github.set_viewed(path, ViewedState::Viewed);
     }
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert!(!ticked(&review).contains(&"talk".to_string()));
 }
@@ -219,14 +220,14 @@ fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
     let mut review = shop.open();
     review.tick(&"c-only".into()).unwrap();
 
-    assert!(review.sync(&github, &shop.pr()).is_err());
+    assert!(review.sync(&github).is_err());
     assert!(review.not_synced());
     drop(review);
 
     github.pushes_fail(false);
     let mut review = shop.open();
     assert!(review.not_synced());
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert!(!review.not_synced());
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Viewed);
 }
@@ -236,17 +237,17 @@ fn a_queued_local_edit_beats_what_github_says() {
     let shop = Shop::with_pull();
     let github = all_unviewed(&shop);
     let mut review = shop.open();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     github.pushes_fail(true);
     review.tick(&"c-only".into()).unwrap();
     github.set_viewed("c.txt", ViewedState::Unviewed);
     github.set_viewed("a.txt", ViewedState::Viewed);
 
-    assert!(review.sync(&github, &shop.pr()).is_err());
+    assert!(review.sync(&github).is_err());
 
     assert_eq!(ticked(&review), ["a-only", "c-only"]);
     github.pushes_fail(false);
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Viewed);
 }
 
@@ -258,12 +259,12 @@ fn without_access_sync_switches_off_with_a_banner_and_ticks_still_work() {
     let mut review = shop.open();
     assert_eq!(review.sync_banner(), None);
 
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(review.sync_banner(), Some("GitHub refused the token"));
 
     review.tick(&"c-only".into()).unwrap();
     let calls_before = shop.sent.entries().len();
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
     assert_eq!(ticked(&review), ["c-only"]);
     assert_eq!(shop.sent.entries().len(), calls_before);
     assert!(!review.not_synced());
@@ -278,7 +279,7 @@ fn nothing_syncs_while_the_tour_is_not_at_the_pull_request_head() {
     let mut review = shop.open();
     review.tick(&"c-only".into()).unwrap();
 
-    review.sync(&github, &shop.pr()).unwrap();
+    review.sync(&github).unwrap();
 
     assert_eq!(ticked(&review), ["c-only"]);
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Unviewed);

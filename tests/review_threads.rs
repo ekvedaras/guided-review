@@ -9,6 +9,7 @@ use guided_review::viewer::{
 };
 use serde_json::{Value, json};
 use support::FixtureRepo;
+use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, SentLog};
 
 struct Shop {
