@@ -1,13 +1,44 @@
 use gpui::{
-    AnyElement, App, ElementId, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
+    AnyElement, App, BorrowAppContext, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
     InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, UnderlineStyle, Window,
     div, px,
 };
 
+use std::collections::HashSet;
+
+use gpui::Global;
+
 use crate::viewer::{Block, Capture, Markdown, Run, SuggestionDiff, highlight_snippet};
 
 use super::palette::{CODE_FONT, Palette};
+
+/// The `<details>` the reader opened, by the key of the body they are in. Kept in one place, not in each
+/// body, so the layout can see them: an open one makes its row taller.
+#[derive(Default)]
+pub struct OpenDetails(HashSet<String>);
+
+impl Global for OpenDetails {}
+
+impl OpenDetails {
+    fn toggle(&mut self, key: &str) {
+        if !self.0.remove(key) {
+            self.0.insert(key.to_string());
+        }
+    }
+
+    /// The open ones whose key starts with `prefix`, in a fixed order.
+    pub fn open_under(&self, prefix: &str) -> Vec<String> {
+        let mut open: Vec<String> = self
+            .0
+            .iter()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect();
+        open.sort();
+        open
+    }
+}
 
 /// A comment body: the one component every place that shows GitHub markdown uses.
 /// `key` tells this body's `<details>` folds apart from the folds of other bodies.
@@ -172,12 +203,10 @@ fn details(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let is_open = window.use_keyed_state(
-        ElementId::Name(format!("details-{key}").into()),
-        cx,
-        |_, _| false,
-    );
-    let open = *is_open.read(cx);
+    let open = cx
+        .try_global::<OpenDetails>()
+        .is_some_and(|details| details.0.contains(key));
+    let toggled_key = key.to_string();
     let title = if summary.is_empty() {
         vec![Run {
             text: "Details".into(),
@@ -192,10 +221,11 @@ fn details(
         .gap_2()
         .cursor_pointer()
         .on_click(move |_, _, cx| {
-            is_open.update(cx, |open, cx| {
-                *open = !*open;
-                cx.notify();
-            })
+            if !cx.has_global::<OpenDetails>() {
+                cx.set_global(OpenDetails::default());
+            }
+            cx.update_global::<OpenDetails, _>(|details, _| details.toggle(&toggled_key));
+            cx.refresh_windows();
         })
         .child(div().flex_none().child(if open { "▾" } else { "▸" }))
         .child(

@@ -7,8 +7,8 @@
 //! freely (colours, ask counts, the drag selection), but whatever changes its height must be in its key.
 //! Rows on screen are measured on every frame anyway, so the key matters for the rows off screen.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
@@ -17,6 +17,7 @@ use gpui::SharedString;
 
 use crate::app::components::ask_panel::lines_label;
 use crate::app::components::diff_view::DiffRowLine;
+use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::repin::RepinStatus;
 use crate::viewer::{
@@ -97,10 +98,19 @@ pub enum PageRow {
     Thread {
         view: Rc<ThreadView>,
         is_under_a_line: bool,
+        /// Of the reply box, if open; its text is read from the review when drawn.
+        reply_lines: Option<usize>,
+        /// The `<details>` of its comments that are open.
+        open_details: Vec<String>,
     },
     QueuedComment(Rc<QueuedComment>),
-    /// A comment box; its text is read from the review when drawn.
-    Composer(Rc<CommentPlace>),
+    /// A comment box; its text is read from the review when drawn, so only its line count is a part of the row.
+    Composer {
+        place: Rc<CommentPlace>,
+        text_lines: usize,
+        problem: Option<String>,
+        is_sending: bool,
+    },
     /// The ask button under the last of the lines that have Asks.
     AskMarker(Rc<AskAt>),
     PieceEnd,
@@ -165,18 +175,40 @@ impl PageRow {
             Self::Thread {
                 view,
                 is_under_a_line,
+                reply_lines,
+                open_details,
             } => {
                 view.thread.id.hash(&mut hasher);
                 view.is_folded.hash(&mut hasher);
-                view.thread.comments.len().hash(&mut hasher);
-                view.reply_draft.hash(&mut hasher);
+                for comment in &view.thread.comments {
+                    comment.id.hash(&mut hasher);
+                    comment.body.hash(&mut hasher);
+                    for count in &comment.reactions {
+                        count.reaction.hash(&mut hasher);
+                        count.count.hash(&mut hasher);
+                        count.viewer_has_reacted.hash(&mut hasher);
+                    }
+                }
+                view.commented_lines.hash(&mut hasher);
+                reply_lines.hash(&mut hasher);
+                open_details.hash(&mut hasher);
                 is_under_a_line.hash(&mut hasher);
             }
             Self::QueuedComment(queued) => {
                 queued.draft.place.hash(&mut hasher);
                 queued.failed_because.hash(&mut hasher);
             }
-            Self::Composer(place) => place.hash(&mut hasher),
+            Self::Composer {
+                place,
+                text_lines,
+                problem,
+                is_sending,
+            } => {
+                place.hash(&mut hasher);
+                text_lines.hash(&mut hasher);
+                problem.hash(&mut hasher);
+                is_sending.hash(&mut hasher);
+            }
             Self::Diagram
             | Self::WhitespaceToggle { .. }
             | Self::SafetyNetIntro
@@ -244,11 +276,13 @@ impl PageRows {
     }
 
     /// `asked_lines` are the `Place::Lines` of this screen that have Asks.
-    pub fn of(review: &Review, asked_lines: Vec<Place>) -> Self {
+    pub fn of(review: &Review, asked_lines: Vec<Place>, facts: &RowFacts) -> Self {
         let screen = review.screen().clone();
         let mut builder = RowsBuilder {
             rows: Vec::new(),
             under_lines: Vec::new(),
+            facts,
+            review,
         };
         let mut diagram = None;
         match &screen {
@@ -417,14 +451,11 @@ impl UnderLine {
         }
     }
 
-    fn into_row(self) -> PageRow {
+    fn into_row(self, review: &Review, facts: &RowFacts) -> PageRow {
         match self {
-            Self::Thread(view) => PageRow::Thread {
-                view: Rc::new(view),
-                is_under_a_line: true,
-            },
+            Self::Thread(view) => thread_row(view, true, facts),
             Self::Queued(queued) => PageRow::QueuedComment(Rc::new(queued)),
-            Self::Composer(place) => PageRow::Composer(Rc::new(place)),
+            Self::Composer(place) => composer_row(place, review, facts),
             Self::AskMarker(ask) => PageRow::AskMarker(Rc::new(ask)),
         }
     }
@@ -454,13 +485,22 @@ fn under_lines(review: &Review, asked_lines: &[Place]) -> Vec<UnderLine> {
     queued.chain(composers).chain(markers).collect()
 }
 
-struct RowsBuilder {
+/// What the layout knows that changes the height of rows and the review does not.
+pub struct RowFacts<'a> {
+    pub comment_problems: &'a HashMap<CommentPlace, String>,
+    pub sending_comments: &'a HashSet<CommentPlace>,
+    pub open_details: &'a OpenDetails,
+}
+
+struct RowsBuilder<'a> {
     rows: Vec<PageRow>,
+    facts: &'a RowFacts<'a>,
+    review: &'a Review,
     /// Taken out as their row is placed; what no row takes is dropped.
     under_lines: Vec<UnderLine>,
 }
 
-impl RowsBuilder {
+impl RowsBuilder<'_> {
     /// Returns the diagram the step shows.
     fn step_rows(&mut self, page: StepPage<'_>, review: &Review) -> Option<SharedString> {
         let step = page.step;
@@ -535,13 +575,19 @@ impl RowsBuilder {
             };
             self.piece_rows(piece, Some(ask), shows_change_since_read, review);
         }
-        self.rows
-            .extend(after_code.into_iter().map(thread_after_code));
+        self.rows.extend(
+            after_code
+                .into_iter()
+                .map(|view| thread_row(view, false, self.facts)),
+        );
         diagram
     }
 
     fn safety_net_rows(&mut self, page: SafetyNetPage, review: &Review) {
         self.rows.push(PageRow::SafetyNetIntro);
+        self.rows.push(PageRow::WhitespaceToggle {
+            is_on: review.ignores_whitespace(),
+        });
         let (under_a_line, after_code): (Vec<_>, Vec<_>) = page
             .threads
             .into_iter()
@@ -550,8 +596,11 @@ impl RowsBuilder {
         for piece in page.pieces {
             self.piece_rows(piece, None, false, review);
         }
-        self.rows
-            .extend(after_code.into_iter().map(thread_after_code));
+        self.rows.extend(
+            after_code
+                .into_iter()
+                .map(|view| thread_row(view, false, self.facts)),
+        );
     }
 
     fn add_threads_under_lines(&mut self, threads: Vec<ThreadView>) {
@@ -625,7 +674,9 @@ impl RowsBuilder {
             .into_iter()
             .partition(|item| item.at().is_some_and(&is_here));
         self.under_lines = later;
-        self.rows.extend(here.into_iter().map(UnderLine::into_row));
+        let (review, facts) = (self.review, self.facts);
+        self.rows
+            .extend(here.into_iter().map(|item| item.into_row(review, facts)));
     }
 }
 
@@ -637,16 +688,136 @@ fn repin_label(status: RepinStatus) -> Option<&'static str> {
     }
 }
 
-fn thread_after_code(view: ThreadView) -> PageRow {
+fn thread_row(view: ThreadView, is_under_a_line: bool, facts: &RowFacts) -> PageRow {
     PageRow::Thread {
+        reply_lines: view.reply_draft.as_deref().map(line_count),
+        open_details: facts
+            .open_details
+            .open_under(&format!("thread-{}-", view.thread.id)),
         view: Rc::new(view),
-        is_under_a_line: false,
+        is_under_a_line,
     }
+}
+
+fn composer_row(place: CommentPlace, review: &Review, facts: &RowFacts) -> PageRow {
+    let text = review
+        .comment_drafts()
+        .iter()
+        .find(|draft| draft.place == place)
+        .map_or("", |draft| draft.body.as_str());
+    PageRow::Composer {
+        text_lines: line_count(text),
+        problem: facts.comment_problems.get(&place).cloned(),
+        is_sending: facts.sending_comments.contains(&place),
+        place: Rc::new(place),
+    }
+}
+
+/// Typing only changes a box's height when its line count changes.
+pub fn line_count(text: &str) -> usize {
+    text.split('\n').count()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::viewer::{Reaction, ReactionCount, ReviewThread, Side, ThreadComment};
+
+    fn thread_view() -> ThreadView {
+        ThreadView {
+            thread: ReviewThread {
+                id: "T1".into(),
+                is_resolved: false,
+                is_outdated: false,
+                path: "a.rs".into(),
+                line: Some(1),
+                start_line: None,
+                side: Side::Head,
+                is_file_comment: false,
+                original_line: Some(1),
+                original_start_line: None,
+                original_commit: None,
+                comments: vec![ThreadComment {
+                    id: "C1".into(),
+                    author: "alice".into(),
+                    is_bot: false,
+                    body: "why?".into(),
+                    url: String::new(),
+                    reactions: Vec::new(),
+                }],
+            },
+            is_folded: false,
+            anchor: None,
+            commented_lines: Vec::new(),
+            reply_draft: None,
+        }
+    }
+
+    fn thread_key(view: ThreadView, reply_lines: Option<usize>, open: Vec<String>) -> RowKey {
+        PageRow::Thread {
+            view: Rc::new(view),
+            is_under_a_line: true,
+            reply_lines,
+            open_details: open,
+        }
+        .key()
+    }
+
+    #[test]
+    fn a_thread_row_is_measured_again_when_a_reaction_a_body_or_a_details_changes_its_height() {
+        let plain = thread_key(thread_view(), None, Vec::new());
+
+        let mut reacted = thread_view();
+        reacted.thread.comments[0].reactions = vec![ReactionCount {
+            reaction: Reaction::Heart,
+            count: 1,
+            viewer_has_reacted: true,
+        }];
+        let mut edited = thread_view();
+        edited.thread.comments[0].body = "why?\n\nreally".into();
+
+        assert_ne!(plain, thread_key(reacted, None, Vec::new()));
+        assert_ne!(plain, thread_key(edited, None, Vec::new()));
+        assert_ne!(
+            plain,
+            thread_key(thread_view(), None, vec!["thread-T1-0-2".into()])
+        );
+        assert_ne!(plain, thread_key(thread_view(), Some(1), Vec::new()));
+        assert_ne!(
+            thread_key(thread_view(), Some(1), Vec::new()),
+            thread_key(thread_view(), Some(2), Vec::new())
+        );
+    }
+
+    #[test]
+    fn typing_inside_a_line_leaves_the_thread_row_as_it_was() {
+        let mut typed = thread_view();
+        typed.reply_draft = Some("because".into());
+        let mut typed_more = thread_view();
+        typed_more.reply_draft = Some("because it".into());
+
+        assert_eq!(
+            thread_key(typed, Some(line_count("because")), Vec::new()),
+            thread_key(typed_more, Some(line_count("because it")), Vec::new())
+        );
+    }
+
+    fn composer_key(text: &str, problem: Option<&str>) -> RowKey {
+        PageRow::Composer {
+            place: Rc::new(CommentPlace::on_file("a.rs")),
+            text_lines: line_count(text),
+            problem: problem.map(str::to_string),
+            is_sending: false,
+        }
+        .key()
+    }
+
+    #[test]
+    fn a_comment_box_row_changes_with_its_line_count_and_its_problem_only() {
+        assert_eq!(composer_key("a", None), composer_key("a longer one", None));
+        assert_ne!(composer_key("a", None), composer_key("a\nb", None));
+        assert_ne!(composer_key("a", None), composer_key("a", Some("rejected")));
+    }
 
     fn keys(ids: &[u64]) -> Vec<RowKey> {
         ids.iter().copied().map(RowKey).collect()

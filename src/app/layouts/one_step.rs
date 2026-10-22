@@ -25,6 +25,7 @@ use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFi
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::image_row::{ImagePictures, ImageRow};
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
+use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
 use crate::app::components::palette::{Palette, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
@@ -34,7 +35,9 @@ use crate::app::components::thread_view::{
     OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
 use crate::app::frame_stats::{FrameStats, FrameStatsMode, ScriptMove};
-use crate::app::page_rows::{AskAt, PageRow, PageRows, RowsChange, SelectedRows, StepHeading};
+use crate::app::page_rows::{
+    AskAt, PageRow, PageRows, RowFacts, RowsChange, SelectedRows, StepHeading, line_count,
+};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
@@ -45,6 +48,7 @@ use crate::viewer::{
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
+const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Rows laid out beyond the visible part, so a fast scroll does not show a blank edge.
 const LIST_OVERDRAW: f32 = 300.;
 
@@ -109,6 +113,8 @@ pub struct OneStepLayout {
     /// `None` hides every Open in IDE button.
     ide: Option<Ide>,
     _use_as_comment_subscription: Subscription,
+    _details_subscription: Subscription,
+    typing_save: Option<Task<()>>,
     _asked_lines_subscription: Subscription,
 }
 
@@ -172,7 +178,20 @@ impl OneStepLayout {
                 .update(cx, |this, cx| this.on_row_gesture(gesture, at, cx))
                 .ok();
         });
-        let rows = PageRows::of(&review, Vec::new());
+        if !cx.has_global::<OpenDetails>() {
+            cx.set_global(OpenDetails::default());
+        }
+        let details_subscription =
+            cx.observe_global::<OpenDetails>(|this, cx| this.review_changed(cx));
+        let rows = PageRows::of(
+            &review,
+            Vec::new(),
+            &RowFacts {
+                comment_problems: &HashMap::new(),
+                sending_comments: &HashSet::new(),
+                open_details: cx.global::<OpenDetails>(),
+            },
+        );
         let screen_list = ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW));
         let mut layout = Self {
             sidebar: SidebarRows::of(&review),
@@ -196,6 +215,8 @@ impl OneStepLayout {
             ask,
             jump,
             ide,
+            _details_subscription: details_subscription,
+            typing_save: None,
             pr_head_check: None,
             threads_pull: None,
             push_debounce: None,
@@ -222,6 +243,11 @@ impl OneStepLayout {
             })
             .detach();
         }
+        cx.on_app_quit(|this, _| {
+            this.save_typing_now();
+            async {}
+        })
+        .detach();
         layout.start_background_work(source, cx);
         layout
     }
@@ -242,7 +268,15 @@ impl OneStepLayout {
     /// changed, so the reader keeps their place unless the screen changed.
     fn review_changed(&mut self, cx: &mut Context<Self>) {
         let started = Instant::now();
-        let rows = PageRows::of(&self.review, self.asked_lines(cx));
+        let rows = PageRows::of(
+            &self.review,
+            self.asked_lines(cx),
+            &RowFacts {
+                comment_problems: &self.comment_problems,
+                sending_comments: &self.sending_comments,
+                open_details: cx.global::<OpenDetails>(),
+            },
+        );
         match rows.change_from(&self.rows) {
             RowsChange::OtherScreen => self.screen_list.reset(rows.len()),
             RowsChange::Spliced { old, new_count } => self.screen_list.splice(old, new_count),
@@ -319,6 +353,7 @@ impl OneStepLayout {
             return;
         }
         self.tour_update = TourUpdate::Running;
+        self.save_typing_now();
         self.review.start_repin();
         let (updater, github) = (self.updater.clone(), self.github.clone());
         cx.spawn(async move |this, cx| {
@@ -350,6 +385,7 @@ impl OneStepLayout {
             return;
         }
         self.tour_refresh = TourUpdate::Running;
+        self.save_typing_now();
         let refresher = self.refresher.clone();
         cx.spawn(async move |this, cx| {
             let refreshed = cx
@@ -373,6 +409,7 @@ impl OneStepLayout {
 
     fn reopen(&mut self, updated: UpdatedTour, cx: &mut Context<Self>) {
         let screen = self.review.screen().clone();
+        self.save_typing_now();
         self.review = updated.review;
         self.source = updated.source.clone();
         self.image_pictures.clear();
@@ -630,7 +667,6 @@ impl OneStepLayout {
             self.review.image_preview(path).cloned(),
             self.image_pictures.get(path).cloned(),
             on_comment,
-            Vec::new(),
         )
     }
 
@@ -657,7 +693,10 @@ impl OneStepLayout {
         let mut body = TextDraft::with_text(&draft.body);
         let keystroke = &event.keystroke;
         match keystroke.key.as_str() {
-            "escape" => self.composing = None,
+            "escape" => {
+                self.composing = None;
+                return cx.notify();
+            }
             "enter" if keystroke.modifiers.platform => {
                 return self.send_comment(place, SendMode::AddToReview, cx);
             }
@@ -668,10 +707,52 @@ impl OneStepLayout {
                 }
             }
         }
-        if let Err(error) = self.review.edit_draft(&place, body.text()) {
-            eprintln!("could not save the comment text: {error:#}");
+        let lines_before = line_count(&draft.body);
+        if let Err(error) = self.review.type_in_draft(&place, body.text()) {
+            eprintln!("could not keep the comment text: {error:#}");
         }
-        self.review_changed(cx);
+        self.typed(lines_before != line_count(body.text()), cx);
+    }
+
+    /// Typing only redraws; the rows are built again when a box got a line more or less.
+    fn typed(&mut self, box_changed_height: bool, cx: &mut Context<Self>) {
+        self.save_typing_soon(cx);
+        if box_changed_height {
+            self.review_changed(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    fn save_typing_soon(&mut self, cx: &mut Context<Self>) {
+        self.typing_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(TYPING_SAVE_DEBOUNCE).await;
+            this.update(cx, |this, cx| this.save_typing(cx)).ok();
+        }));
+    }
+
+    fn save_typing(&mut self, cx: &mut Context<Self>) {
+        self.typing_save = None;
+        let Some(save) = self.review.typing_save() else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = save.run() {
+                    eprintln!("could not save the text: {error:#}");
+                }
+            })
+            .detach();
+    }
+
+    /// For when the file is about to be read or the app to end: what was typed goes to disk now.
+    fn save_typing_now(&mut self) {
+        self.typing_save = None;
+        if let Some(save) = self.review.typing_save() {
+            if let Err(error) = save.run() {
+                eprintln!("could not save the text: {error:#}");
+            }
+        }
     }
 
     fn send_comment(&mut self, place: CommentPlace, mode: SendMode, cx: &mut Context<Self>) {
@@ -861,10 +942,16 @@ impl OneStepLayout {
         let (layout, thread_id) = (cx.entity(), thread_id.to_string());
         Rc::new(move |change, cx| {
             layout.update(cx, |this, cx| {
+                if let ReplyDraftChange::Edit(text) = change {
+                    let lines_before = this.review.reply_draft(&thread_id).map(line_count);
+                    if let Err(error) = this.review.type_in_reply(&thread_id, &text) {
+                        eprintln!("could not keep the reply text: {error:#}");
+                    }
+                    return this.typed(lines_before != Some(line_count(&text)), cx);
+                }
                 let saved = match change {
                     ReplyDraftChange::Open => this.review.open_reply(&thread_id),
-                    ReplyDraftChange::Edit(text) => this.review.edit_reply(&thread_id, &text),
-                    ReplyDraftChange::Discard => this.review.discard_reply(&thread_id),
+                    _ => this.review.discard_reply(&thread_id),
                 };
                 if let Err(error) = saved {
                     eprintln!("could not save the reply text: {error:#}");
@@ -878,10 +965,10 @@ impl OneStepLayout {
         let layout = cx.entity();
         Rc::new(move |text, cx| {
             layout.update(cx, |this, cx| {
-                if let Err(error) = this.review.edit_finish_body(&text) {
-                    eprintln!("could not save the review text: {error:#}");
+                if let Err(error) = this.review.type_in_finish_body(&text) {
+                    eprintln!("could not keep the review text: {error:#}");
                 }
-                cx.notify();
+                this.typed(false, cx);
             });
         })
     }
@@ -923,7 +1010,7 @@ impl OneStepLayout {
         ThreadElement::new(
             view.clone(),
             self.review.can_comment_now(),
-            view.reply_draft.clone(),
+            self.review.reply_draft(&view.thread.id).map(str::to_string),
             self.on_reply_draft(&view.thread.id, cx),
             cx.listener(move |this, _, _, cx| {
                 this.review.toggle_thread_fold(&id);
@@ -1171,6 +1258,7 @@ impl OneStepLayout {
             PageRow::Thread {
                 view,
                 is_under_a_line,
+                ..
             } => {
                 let thread = self.thread_element(&view, cx);
                 if is_under_a_line {
@@ -1182,7 +1270,7 @@ impl OneStepLayout {
             PageRow::QueuedComment(queued) => piece_row()
                 .child(self.queued_comment(&queued, cx))
                 .into_any_element(),
-            PageRow::Composer(place) => piece_row()
+            PageRow::Composer { place, .. } => piece_row()
                 .children(self.composer(&place, cx))
                 .into_any_element(),
             PageRow::AskMarker(ask) => piece_row()

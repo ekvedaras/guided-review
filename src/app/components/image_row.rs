@@ -123,8 +123,6 @@ pub struct ImageRow {
     preview: Option<ImagePreview>,
     pictures: Option<Rc<ImagePictures>>,
     on_comment: OnImageComment,
-    /// The comment boxes and queued comments on the file, shown under the pictures.
-    file_comments: Vec<AnyElement>,
 }
 
 impl ImageRow {
@@ -133,14 +131,12 @@ impl ImageRow {
         preview: Option<ImagePreview>,
         pictures: Option<Rc<ImagePictures>>,
         on_comment: OnImageComment,
-        file_comments: Vec<AnyElement>,
     ) -> Self {
         Self {
             path,
             preview,
             pictures,
             on_comment,
-            file_comments,
         }
     }
 }
@@ -196,7 +192,6 @@ impl RenderOnce for ImageRow {
                     .on_click(move |_, window, cx| on_comment(window, cx))
                     .child("Comment on this image"),
             )
-            .children(self.file_comments)
             .into_any_element()
     }
 }
