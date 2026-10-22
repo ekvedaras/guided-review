@@ -5,8 +5,9 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::app::AskSetup;
-use guided_review::claude_cli::{ClaudeCli, ClaudeTourWriter};
+use guided_review::claude_cli::{ClaudeCli, ClaudeEvalWriter, ClaudeTourJudge, ClaudeTourWriter};
 use guided_review::config::Config;
+use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
 use guided_review::ide::Ide;
 use guided_review::outline::Outline;
@@ -55,6 +56,24 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
+    /// Score the /tour skill on the test set; `eval add` adds a PR to it
+    Eval {
+        #[command(subcommand)]
+        action: Option<EvalAction>,
+        /// Judge the tours already on disk instead of writing new ones
+        #[arg(long)]
+        existing_tours: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvalAction {
+    /// Add a PR with the reviewer note on what a good tour of it shows
+    Add {
+        pr: PullRequestUrl,
+        #[arg(long)]
+        note: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -65,6 +84,14 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
+        Command::Eval {
+            action: Some(EvalAction::Add { pr, note }),
+            ..
+        } => eval_add(&pr, &note),
+        Command::Eval {
+            action: None,
+            existing_tours,
+        } => eval(existing_tours),
     }
 }
 
@@ -188,6 +215,66 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
         RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())
     );
     Ok(())
+}
+
+
+fn eval_add(pr: &PullRequestUrl, note: &str) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    EvalStore::in_home(&home).add(pr, note)?;
+    println!("added {pr} to the test set");
+    Ok(())
+}
+
+fn eval(existing_tours: bool) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let report = Eval {
+        store: &EvalStore::in_home(&home),
+        home: &home,
+        writer: &ClaudeEvalWriter::new(),
+        judge: &ClaudeTourJudge::new(),
+        skill: &Skill::bundled(),
+    }
+    .run(
+        if existing_tours {
+            TourSource::ExistingTours
+        } else {
+            TourSource::WriteNew
+        },
+        &utc_timestamp(),
+    )?;
+    print!("{report}");
+    if report.has_failures() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn utc_timestamp() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let (days, time) = ((seconds / 86_400) as i64, seconds % 86_400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}-{:02}-{:02}",
+        time / 3600,
+        time % 3600 / 60,
+        time % 60
+    )
 }
 
 fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
