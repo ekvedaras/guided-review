@@ -25,8 +25,8 @@ use super::finish_review::{
 };
 use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
-use super::jump::{self, JumpTarget};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
+use super::jump::{self, JumpTarget};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};

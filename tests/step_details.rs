@@ -48,7 +48,7 @@ impl Shop {
             &config(&[(3, "key3: three"), (20, "key20: twenty")]),
         );
         repo.write("README.md", "hello\nworld\n");
-        std::fs::write(repo.path().join("logo.png"), [0u8, 159, 146, 150, 0, 1]).unwrap();
+        std::fs::write(repo.path().join("data.bin"), [0u8, 159, 146, 150, 0, 1]).unwrap();
         repo.git(&["mv", "notes/old.txt", "notes/new.txt"]);
         repo.write("notes/new.txt", "one\ntwo\nthree\nfour\nfive\nSIX\n");
         let head = repo.commit("head");
@@ -119,7 +119,7 @@ fn the_safety_net_comes_after_the_last_step_and_lists_every_change_no_step_cover
             "app/Order.php#Order::discount",
             "config.yml#hunk-1",
             "config.yml#hunk-2",
-            "logo.png",
+            "data.bin",
             "notes/new.txt"
         ]
     );
@@ -145,7 +145,7 @@ fn with_every_change_in_a_step_there_is_no_safety_net() {
 #[test]
 fn a_line_range_shows_only_its_lines_and_leaves_the_rest_of_the_file_to_the_safety_net() {
     let mut review = Shop::with_pull().open(vec![
-        step("code", json!([{"file": "app/Order.php"}, {"file": "README.md"}, {"file": "logo.png"}, {"file": "notes/new.txt"}])),
+        step("code", json!([{"file": "app/Order.php"}, {"file": "README.md"}, {"file": "data.bin"}, {"file": "notes/new.txt"}])),
         step("config", json!([{"file": "config.yml", "lines": [1, 10]}])),
     ]);
     review.go_to(&"config".into());
@@ -162,7 +162,7 @@ fn a_line_range_shows_only_its_lines_and_leaves_the_rest_of_the_file_to_the_safe
 #[test]
 fn a_line_range_that_cuts_through_a_piece_leaves_the_lines_outside_it_to_the_safety_net() {
     let mut review = Shop::with_pull().open(vec![
-        step("code", json!([{"file": "README.md"}, {"file": "logo.png"}, {"file": "config.yml"}, {"file": "notes/new.txt"}])),
+        step("code", json!([{"file": "README.md"}, {"file": "data.bin"}, {"file": "config.yml"}, {"file": "notes/new.txt"}])),
         step("order", json!([{"file": "app/Order.php", "lines": [1, 10]}])),
     ]);
     review.go_to(&"order".into());
@@ -232,7 +232,7 @@ fn a_binary_file_is_one_row_with_a_link_to_it_on_github() {
     let shop = Shop::with_pull();
     let mut review = shop.open(vec![step(
         "logo",
-        json!([{"file": "logo.png"}, {"file": "README.md"}]),
+        json!([{"file": "data.bin"}, {"file": "README.md"}]),
     )]);
     review.go_forward();
 
@@ -242,7 +242,7 @@ fn a_binary_file_is_one_row_with_a_link_to_it_on_github() {
     assert_eq!(
         logo.binary_file.as_ref().map(ToString::to_string),
         Some(format!(
-            "https://github.com/acme/shop/blob/{}/logo.png",
+            "https://github.com/acme/shop/blob/{}/data.bin",
             shop.head
         ))
     );

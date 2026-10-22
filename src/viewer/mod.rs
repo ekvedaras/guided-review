@@ -10,8 +10,8 @@ mod diff_display;
 mod finish_review;
 mod github_link;
 mod highlight;
-mod jump;
 mod image_preview;
+mod jump;
 mod markdown;
 mod new_commits;
 mod ports;
@@ -38,8 +38,8 @@ pub use finish_review::{
 };
 pub use github_link::GitHubLink;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
-pub use jump::{JumpKind, JumpTarget};
 pub use image_preview::{ImageCache, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage};
+pub use jump::{JumpKind, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
 pub use ports::{

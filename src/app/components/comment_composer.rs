@@ -137,7 +137,9 @@ impl RenderOnce for CommentComposer {
 }
 
 fn describe(place: &CommentPlace) -> String {
-    if place.is_single_line() {
+    if place.is_file_comment() {
+        format!("Comment on {}", place.path())
+    } else if place.is_single_line() {
         format!("Comment on {} line {}", place.path(), place.end.line)
     } else {
         format!(

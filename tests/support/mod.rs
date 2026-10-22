@@ -45,6 +45,7 @@ impl FixtureRepo {
         std::fs::write(file, content).unwrap();
     }
 
+    #[allow(dead_code)]
     pub fn write_bytes(&self, path: &str, content: &[u8]) {
         let file = self.root.path().join(path);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -195,6 +196,7 @@ impl FakeGitHub {
     }
 }
 
+#[allow(dead_code)]
 /// A real PNG of one flat colour, so the code under test can read its size.
 pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
     let mut bytes = std::io::Cursor::new(Vec::new());
@@ -204,6 +206,7 @@ pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
     bytes.into_inner()
 }
 
+#[allow(dead_code)]
 pub fn svg_of(width: u32, height: u32) -> String {
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">\n<rect width=\"{width}\" height=\"{height}\" fill=\"red\"/>\n</svg>\n"

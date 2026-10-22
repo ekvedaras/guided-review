@@ -17,10 +17,12 @@ use crate::app::components::ask_panel::{
 use crate::app::components::comment_composer::{CommentComposer, OnCompose, QueuedCommentNote};
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    DiffView, OnMoreContext, OnOpenInIde, RowGesture, RowSelecting, threads_by_piece,
+    DiffView, OnImageComment, OnMoreContext, OnOpenInIde, RowGesture, RowSelecting,
+    threads_by_piece,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
+use crate::app::components::image_row::{ImagePictures, ImageRow};
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
 use crate::app::components::palette::{Palette, TEXT_FONT};
@@ -34,9 +36,9 @@ use crate::app::components::thread_view::{
 use crate::code_source::CodeSource;
 use crate::ide::{Ide, IdeLaunch};
 use crate::viewer::{
-    Ask, CommentPlace, CommentResult, FinishResult, GitHubPort, LineLocation, MoreContext, Place,
-    Review, Screen, SendMode, StepId, StepPage, ThreadView, TourRefresher, TourUpdater,
-    UpdatedTour,
+    Ask, CommentPlace, CommentResult, FinishResult, GitHubPort, ImageCache, LineLocation,
+    MoreContext, PieceDiff, Place, Review, Screen, SendMode, StepId, StepPage, ThreadView,
+    TourRefresher, TourUpdater, UpdatedTour,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -61,6 +63,10 @@ pub struct Collaborators {
 pub struct OneStepLayout {
     review: Review,
     github: Arc<dyn GitHubPort>,
+    source: Arc<dyn CodeSource>,
+    image_cache: ImageCache,
+    image_pictures: HashMap<String, Rc<ImagePictures>>,
+    loading_images: HashSet<String>,
     diagrams: Entity<Diagrams>,
     updater: Arc<TourUpdater>,
     tour_update: TourUpdate,
@@ -137,6 +143,10 @@ impl OneStepLayout {
         let mut layout = Self {
             review,
             github,
+            source: source.clone(),
+            image_cache: ImageCache::under(&std::env::home_dir().unwrap_or_default()),
+            image_pictures: HashMap::new(),
+            loading_images: HashSet::new(),
             diagrams,
             updater: tour_work.updater,
             tour_update: TourUpdate::Idle,
@@ -262,6 +272,9 @@ impl OneStepLayout {
     fn reopen(&mut self, updated: UpdatedTour, cx: &mut Context<Self>) {
         let screen = self.review.screen().clone();
         self.review = updated.review;
+        self.source = updated.source.clone();
+        self.image_pictures.clear();
+        self.loading_images.clear();
         if let Screen::Step(id) = screen {
             self.review.go_to(&id);
         }
@@ -432,6 +445,81 @@ impl OneStepLayout {
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
         cx.notify();
+    }
+
+    fn begin_file_comment(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match self.review.begin_file_comment(path) {
+            Ok(place) => {
+                self.composing = Some(place);
+                window.focus(&self.focus, cx);
+            }
+            Err(refusal) => self.selection_notice = Some(refusal.to_string()),
+        }
+        cx.notify();
+    }
+
+    /// Loads the pictures of the screen once each, off the main thread, and only for the screen shown.
+    fn load_images(&mut self, cx: &mut Context<Self>) {
+        for request in self.review.image_preview_requests() {
+            if !self.loading_images.insert(request.path().to_string()) {
+                continue;
+            }
+            let (source, cache) = (self.source.clone(), self.image_cache.clone());
+            cx.spawn(async move |this, cx| {
+                let (preview, pictures) = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let preview = request.load(source.as_ref(), &cache);
+                        let pictures = ImagePictures::of(&preview);
+                        (preview, pictures)
+                    })
+                    .await;
+                this.update(cx, |this, cx| {
+                    this.loading_images.remove(&preview.path);
+                    this.image_pictures
+                        .insert(preview.path.clone(), Rc::new(pictures));
+                    this.review.set_image_preview(preview);
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        }
+    }
+
+    /// The picture of an image piece. The comments on the whole file are taken out of `under_lines`
+    /// because no row holds them.
+    fn image_row(
+        &self,
+        piece: &PieceDiff,
+        under_lines: &mut Vec<(LineLocation, AnyElement)>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !piece.is_image {
+            return None;
+        }
+        let path = piece.id.path.clone();
+        let (on_file, rest): (Vec<_>, Vec<_>) = std::mem::take(under_lines)
+            .into_iter()
+            .partition(|(location, _)| location.path == path && location.line == 0);
+        *under_lines = rest;
+        let layout = cx.entity();
+        let comment_path = path.clone();
+        let on_comment: OnImageComment = Rc::new(move |window, cx| {
+            layout.update(cx, |this, cx| {
+                this.begin_file_comment(&comment_path, window, cx)
+            })
+        });
+        Some(
+            ImageRow::new(
+                path.clone(),
+                self.review.image_preview(&path).cloned(),
+                self.image_pictures.get(&path).cloned(),
+                on_comment,
+                on_file.into_iter().map(|(_, element)| element).collect(),
+            )
+            .into_any_element(),
+        )
     }
 
     fn on_comment_key(
@@ -950,7 +1038,13 @@ impl OneStepLayout {
                     let (mut under_lines, after_code) = self.thread_elements(&page.threads, cx);
                     under_lines.extend(self.comment_elements(cx));
                     under_lines.extend(self.ask_markers(None, cx));
+                    let image_rows = page
+                        .pieces
+                        .iter()
+                        .map(|piece| self.image_row(piece, &mut under_lines, cx))
+                        .collect();
                     SafetyNetView::new(page, self.on_more_context(cx))
+                        .with_image_rows(image_rows)
                         .with_row_selecting(self.row_selecting(cx))
                         .with_threads(under_lines, after_code)
                         .with_open_in_ide(self.open_line_in_ide())
@@ -989,6 +1083,11 @@ impl OneStepLayout {
         under_lines.extend(self.comment_elements(cx));
         under_lines.extend(self.ask_markers(Some(&step_id), cx));
         let selecting = self.row_selecting(cx);
+        let mut image_rows: Vec<_> = page
+            .pieces
+            .iter()
+            .map(|piece| self.image_row(piece, &mut under_lines, cx))
+            .collect();
         let mut threads_of_piece = threads_by_piece(&page.pieces, under_lines).into_iter();
         let shows_change_since_read = page
             .since_read
@@ -997,7 +1096,8 @@ impl OneStepLayout {
         let pieces: Vec<_> = page
             .pieces
             .iter()
-            .map(|piece| {
+            .enumerate()
+            .map(|(index, piece)| {
                 let threads = threads_of_piece.next().unwrap_or_default();
                 let place = Place::Piece {
                     step: step_id.clone(),
@@ -1027,6 +1127,7 @@ impl OneStepLayout {
                     )
                     .child(
                         DiffView::new(piece.clone(), on_more_context.clone())
+                            .with_image_row(image_rows[index].take())
                             .with_row_selecting(selecting.clone())
                             .with_threads(threads)
                             .with_open_in_ide(self.open_line_in_ide())
@@ -1282,6 +1383,7 @@ impl Render for OneStepLayout {
         } else {
             Self::KEY_CONTEXT.to_string()
         };
+        self.load_images(cx);
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)

@@ -29,6 +29,8 @@ pub enum RowGesture {
     Over,
 }
 
+pub type OnImageComment = Rc<dyn Fn(&mut Window, &mut App)>;
+
 pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut App)>;
 
 /// The rows a drag selects and how to tell the layout what the mouse does on rows.
@@ -49,6 +51,8 @@ pub struct DiffView {
     is_change_since_read: bool,
     selecting: Option<RowSelecting>,
     open_in_ide: Option<OnOpenInIde>,
+    /// The picture of an image file, shown above its text diff when it has one (an SVG).
+    image_row: Option<AnyElement>,
 }
 
 impl DiffView {
@@ -60,12 +64,18 @@ impl DiffView {
             is_change_since_read: false,
             selecting: None,
             open_in_ide: None,
+            image_row: None,
         }
     }
 
     /// Cmd-click on a line number opens that line in the IDE; without it the click always opens GitHub.
     pub fn with_open_in_ide(mut self, open_in_ide: Option<OnOpenInIde>) -> Self {
         self.open_in_ide = open_in_ide;
+        self
+    }
+
+    pub fn with_image_row(mut self, image_row: Option<AnyElement>) -> Self {
+        self.image_row = image_row;
         self
     }
 
@@ -172,6 +182,7 @@ impl RenderOnce for DiffView {
                 )
             })
             .children(self.piece.binary_file.map(BinaryFileRow::new))
+            .children(self.image_row)
             .children(only_whitespace)
             .children(hunks)
     }

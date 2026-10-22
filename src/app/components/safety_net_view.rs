@@ -14,6 +14,8 @@ pub struct SafetyNetView {
     other_threads: Vec<AnyElement>,
     selecting: Option<RowSelecting>,
     open_in_ide: Option<OnOpenInIde>,
+    /// One per piece, `Some` for the pieces that are pictures.
+    image_rows: Vec<Option<AnyElement>>,
 }
 
 impl SafetyNetView {
@@ -27,11 +29,17 @@ impl SafetyNetView {
             other_threads: Vec::new(),
             selecting: None,
             open_in_ide: None,
+            image_rows: Vec::new(),
         }
     }
 
     pub fn with_open_in_ide(mut self, open_in_ide: Option<OnOpenInIde>) -> Self {
         self.open_in_ide = open_in_ide;
+        self
+    }
+
+    pub fn with_image_rows(mut self, image_rows: Vec<Option<AnyElement>>) -> Self {
+        self.image_rows = image_rows;
         self
     }
 
@@ -67,8 +75,14 @@ impl RenderOnce for SafetyNetView {
                 threads_by_piece(&self.page.pieces, self.line_threads)
                     .into_iter()
                     .zip(self.page.pieces)
-                    .map(|(threads, piece)| {
+                    .zip(
+                        self.image_rows
+                            .into_iter()
+                            .chain(std::iter::repeat_with(|| None)),
+                    )
+                    .map(|((threads, piece), image_row)| {
                         let view = DiffView::new(piece, self.on_more_context.clone())
+                            .with_image_row(image_row)
                             .with_threads(threads)
                             .with_open_in_ide(self.open_in_ide.clone());
                         match self.selecting.clone() {

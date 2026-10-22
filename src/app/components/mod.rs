@@ -4,6 +4,7 @@ pub mod diagram;
 pub mod diff_view;
 pub mod finish_review;
 pub mod fold_toggle;
+pub mod image_row;
 pub mod jump_palette;
 pub mod markdown_view;
 pub mod new_commits_banner;
