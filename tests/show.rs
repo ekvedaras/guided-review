@@ -184,7 +184,7 @@ app/Order.php#Order::total  method  modified  +1 −1
 }
 
 #[test]
-fn show_prints_lines_in_line_order_when_a_blank_line_change_joins_the_piece() {
+fn show_prints_hunks_in_line_order_when_a_blank_line_change_joins_the_piece() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "app/Order.php",
@@ -204,9 +204,94 @@ fn show_prints_lines_in_line_order_when_a_blank_line_change_joins_the_piece() {
         run.stdout_with(&[]),
         "\
 app/Order.php#Order::total  method  modified  +2 −1
--7: \x20       return 1;
 +5: 
+-7: \x20       return 1;
 +8: \x20       return 2;
 "
+    );
+}
+
+fn service_pr(base_source: &str, head_source: &str) -> (FixtureRepo, FakeGitHub) {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("app/Service.php", base_source);
+    let base = repo.commit("base");
+    repo.write("app/Service.php", head_source);
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+    (repo, github)
+}
+
+#[test]
+fn show_prints_each_hunk_of_a_piece_with_its_removed_and_added_lines_together() {
+    let method = |first: &str, second: &str| {
+        format!(
+            "<?php\n\nclass Service\n{{\n    public function run(): int\n    {{\n        $a = {first};\n        $keep = 0;\n        $b = {second};\n\n        return $a + $b;\n    }}\n}}\n"
+        )
+    };
+    let (repo, github) = service_pr(&method("1", "1"), &method("2", "2"));
+
+    let run = GuidedReview::new(&repo, &github).run(&["show", PR, "app/Service.php#Service::run"]);
+
+    assert_eq!(
+        run.stdout_with(&[]),
+        "\
+app/Service.php#Service::run  method  modified  +2 −2
+-7: \x20       $a = 1;
++7: \x20       $a = 2;
+-9: \x20       $b = 1;
++9: \x20       $b = 2;
+"
+    );
+}
+
+#[test]
+fn show_around_imports_prints_the_lines_around_them_at_head() {
+    let source = |import: &str| {
+        format!(
+            "<?php\n\nnamespace App;\n\nuse App\\A;\n{import}\nuse App\\C;\n\nclass Service\n{{\n}}\n"
+        )
+    };
+    let (repo, github) = service_pr(&source("use App\\B;"), &source("use App\\Bee;"));
+
+    let run =
+        GuidedReview::new(&repo, &github).run(&["show", "--around", PR, "app/Service.php#imports"]);
+
+    assert_eq!(
+        run.stdout_with(&[]),
+        "\
+app/Service.php#imports  imports  modified  +1 −1
+-6: use App\\B;
++6: use App\\Bee;
+
+around, at head (lines 3-9):
+3: namespace App;
+4: 
+5: use App\\A;
+6: use App\\Bee;
+7: use App\\C;
+8: 
+9: class Service
+"
+    );
+}
+
+#[test]
+fn show_around_top_prints_the_lines_around_it_at_head() {
+    let source = |strict: &str| {
+        format!(
+            "<?php\n\ndeclare(strict_types={strict});\n\nnamespace App;\n\nclass Service\n{{\n}}\n"
+        )
+    };
+    let (repo, github) = service_pr(&source("0"), &source("1"));
+
+    let run =
+        GuidedReview::new(&repo, &github).run(&["show", "--around", PR, "app/Service.php#(top)"]);
+
+    assert!(run.success, "{}", run.stderr);
+    assert!(
+        run.stdout
+            .contains("around, at head (lines 1-6):\n1: <?php\n2: \n3: declare(strict_types=1);\n"),
+        "{}",
+        run.stdout
     );
 }

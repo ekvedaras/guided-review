@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::code_source::{CodeSource, FileStatus, Line};
+use crate::code_source::{CodeSource, FileStatus, Hunk, Line};
 use crate::language::Language;
 use crate::pieces::{ChangedFile, Piece, PieceKind};
 use crate::pull_request::Sha;
@@ -70,8 +70,27 @@ impl Show<'_> {
             "{}  {}  {}  +{} −{}",
             piece.id, piece.kind, piece.status, piece.added, piece.removed
         )?;
-        write_lines(out, '-', &piece.removed_lines);
-        write_lines(out, '+', &piece.added_lines);
+        let hunks = hunks_of(file, piece);
+        if hunks.is_empty() {
+            write_lines(out, '-', piece.removed_lines.iter());
+            write_lines(out, '+', piece.added_lines.iter());
+        }
+        for hunk in &hunks {
+            write_lines(
+                out,
+                '-',
+                hunk.removed
+                    .iter()
+                    .filter(|line| holds(&piece.removed_lines, line)),
+            );
+            write_lines(
+                out,
+                '+',
+                hunk.added
+                    .iter()
+                    .filter(|line| holds(&piece.added_lines, line)),
+            );
+        }
         if self.around {
             self.write_around(out, file, piece)?;
         }
@@ -91,12 +110,14 @@ impl Show<'_> {
         let code = self.source.file_at(self.head, &file.path)?;
         let lines: Vec<&str> = code.lines().collect();
         let span = match (&piece.id.symbol, piece.kind) {
-            (_, PieceKind::Hunk) => hunk_at_head(piece).map(|(first, last)| {
-                (
-                    first.saturating_sub(LINES_AROUND_A_HUNK).max(1),
-                    last + LINES_AROUND_A_HUNK,
-                )
-            }),
+            (_, PieceKind::Hunk | PieceKind::Imports | PieceKind::Top) => {
+                hunks_span_at_head(&hunks_of(file, piece)).map(|(first, last)| {
+                    (
+                        first.saturating_sub(LINES_AROUND_A_HUNK).max(1),
+                        last + LINES_AROUND_A_HUNK,
+                    )
+                })
+            }
             (Some(symbol), _) => Language::for_path(&file.path).and_then(|language| {
                 Symbols::find(&code, language)
                     .named(symbol)
@@ -120,25 +141,39 @@ impl Show<'_> {
 
 const LINES_AROUND_A_HUNK: usize = 3;
 
-/// A hunk that only removes lines sits after the head line its header names (`+9,0`).
-fn hunk_at_head(piece: &Piece) -> Option<(usize, usize)> {
-    let added = piece.added_lines.iter().map(|line| line.number);
-    match (added.clone().min(), added.max()) {
-        (Some(first), Some(last)) => Some((first, last)),
-        _ => {
-            let header = piece.signature.as_deref()?;
-            let after = header.split_once('+')?.1;
-            let start: usize = after
-                .split(|c: char| !c.is_ascii_digit())
-                .next()?
-                .parse()
-                .ok()?;
-            Some((start.max(1), start.max(1)))
-        }
-    }
+/// The hunks that hold the piece's lines, in file order. A hunk that only removes lines sits
+/// after the head line above its cut.
+fn hunks_of<'a>(file: &'a ChangedFile, piece: &Piece) -> Vec<&'a Hunk> {
+    file.hunks
+        .iter()
+        .filter(|hunk| {
+            hunk.removed
+                .iter()
+                .any(|line| holds(&piece.removed_lines, line))
+                || hunk
+                    .added
+                    .iter()
+                    .any(|line| holds(&piece.added_lines, line))
+        })
+        .collect()
 }
 
-fn write_lines(out: &mut String, sign: char, lines: &[Line]) {
+fn holds(lines: &[Line], line: &Line) -> bool {
+    lines.iter().any(|held| held.number == line.number)
+}
+
+fn hunks_span_at_head(hunks: &[&Hunk]) -> Option<(usize, usize)> {
+    let spans = hunks.iter().map(|hunk| match hunk.added.as_slice() {
+        [] => (hunk.head_line_above().max(1), hunk.head_line_above().max(1)),
+        [first, .., last] => (first.number, last.number),
+        [only] => (only.number, only.number),
+    });
+    let first = spans.clone().map(|(first, _)| first).min()?;
+    let last = spans.map(|(_, last)| last).max()?;
+    Some((first, last))
+}
+
+fn write_lines<'a>(out: &mut String, sign: char, lines: impl Iterator<Item = &'a Line>) {
     for line in lines {
         let _ = writeln!(out, "{sign}{}: {}", line.number, line.text);
     }
