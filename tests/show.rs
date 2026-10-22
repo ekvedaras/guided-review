@@ -182,3 +182,31 @@ app/Order.php#Order::total  method  modified  +1 −1
 "
     );
 }
+
+#[test]
+fn show_prints_lines_in_line_order_when_a_blank_line_change_joins_the_piece() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write(
+        "app/Order.php",
+        "<?php\n\nclass Order\n{\n    public function total(): int\n    {\n        return 1;\n    }\n}\n",
+    );
+    let base = repo.commit("base");
+    repo.write(
+        "app/Order.php",
+        "<?php\n\nclass Order\n{\n\n    public function total(): int\n    {\n        return 2;\n    }\n}\n",
+    );
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+
+    let run = GuidedReview::new(&repo, &github).run(&["show", PR, "app/Order.php#Order::total"]);
+
+    assert_eq!(
+        run.stdout_with(&[]),
+        "\
+app/Order.php#Order::total  method  modified  +2 −1
+-7: \x20       return 1;
++5: 
++8: \x20       return 2;
+"
+    );
+}

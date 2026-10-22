@@ -403,6 +403,10 @@ fn join_blank_line_changes(changes: Vec<SymbolChange>) -> Vec<SymbolChange> {
             }
         }
     }
+    for change in &mut changes {
+        change.added.sort_by_key(|line| line.number);
+        change.removed.sort_by_key(|line| line.number);
+    }
     changes
 }
 
