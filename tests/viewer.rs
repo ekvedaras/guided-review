@@ -91,10 +91,11 @@ fn nested_tour() -> Vec<Value> {
 fn read_forward(review: &mut Review) -> Vec<String> {
     let mut seen = Vec::new();
     while review.go_forward() {
-        let Screen::Step(id) = review.screen() else {
-            panic!("going forward never reaches to the summary");
-        };
-        seen.push(id.to_string());
+        match review.screen() {
+            Screen::Step(id) => seen.push(id.to_string()),
+            Screen::SafetyNet => seen.push("safety net".to_string()),
+            Screen::Summary => panic!("going forward never reaches to the summary"),
+        }
     }
     seen
 }
@@ -105,9 +106,15 @@ fn going_forward_reads_a_parent_then_its_children_then_the_next_parent() {
 
     assert_eq!(
         read_forward(&mut review),
-        ["checkout", "pricing", "rounding", "payment", "emails"]
+        [
+            "checkout",
+            "pricing",
+            "rounding",
+            "payment",
+            "emails",
+            "safety net"
+        ]
     );
-    assert_eq!(review.screen(), &Screen::Step("emails".into()));
 }
 
 #[test]

@@ -153,6 +153,7 @@ pub struct ChangedFile {
     pub path: String,
     /// Where the file lived at base when it was renamed.
     pub old_path: Option<String>,
+    pub binary: bool,
     pub status: FileStatus,
     pub added: usize,
     pub removed: usize,
@@ -172,6 +173,7 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
             Ok(ChangedFile {
                 path: diff.path().to_string(),
                 old_path: diff.old_path.clone().filter(|old| old != diff.path()),
+                binary: diff.binary,
                 status: diff.status(),
                 added: diff.added.len(),
                 removed: diff.removed.len(),

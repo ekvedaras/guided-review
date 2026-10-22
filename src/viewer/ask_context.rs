@@ -4,6 +4,7 @@ use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
 use super::ask::Place;
+use super::github_link::GitHubLinks;
 use super::highlight::Highlights;
 use super::step_page::{PieceDiff, Side, StepPage};
 
@@ -18,7 +19,12 @@ pub(super) fn system_prompt(pr: &str) -> String {
     )
 }
 
-pub(super) fn context_for(tour: &Tour, files: &[ChangedFile], place: &Place) -> Option<String> {
+pub(super) fn context_for(
+    tour: &Tour,
+    files: &[ChangedFile],
+    links: &GitHubLinks,
+    place: &Place,
+) -> Option<String> {
     let mut text = pointers(tour);
     match place {
         Place::Tour => {
@@ -37,7 +43,9 @@ pub(super) fn context_for(tour: &Tour, files: &[ChangedFile], place: &Place) -> 
                 .into_iter()
                 .find(|step| step.id == id.to_string())?;
             step_heading(&mut text, step.title.as_str(), step.why.as_str(), "step")?;
-            for piece in StepPage::of(step, tour, files, &Highlights::default()).pieces {
+            for piece in
+                StepPage::of(step, tour, files, links, &Highlights::default(), false).pieces
+            {
                 piece_lines(&mut text, &piece)?;
             }
         }
@@ -47,7 +55,7 @@ pub(super) fn context_for(tour: &Tour, files: &[ChangedFile], place: &Place) -> 
                 .into_iter()
                 .find(|s| s.id == step.to_string())?;
             step_heading(&mut text, &step.title, &step.why, "piece")?;
-            let page = StepPage::of(step, tour, files, &Highlights::default());
+            let page = StepPage::of(step, tour, files, links, &Highlights::default(), false);
             let piece = page.pieces.iter().find(|p| p.id.to_string() == *piece)?;
             piece_lines(&mut text, piece)?;
         }
