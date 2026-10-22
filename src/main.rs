@@ -7,6 +7,7 @@ use guided_review::pick_code_source::pick_code_source;
 use guided_review::pieces;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::show::Show;
+use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
 
@@ -56,7 +57,9 @@ fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
             pr,
             base: &base,
             head: &tips.head,
-            files: &files
+            files: &files,
+            worktree_at_head: source.working_tree_is_at(&tips.head),
+            subjects: &SubjectCandidates::find(source.as_ref(), &tips.head, &files),
         }
     );
     Ok(())

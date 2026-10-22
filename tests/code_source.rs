@@ -36,8 +36,10 @@ const ORDER_OUTLINE: &str = "\
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: no
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +1 −1
+small PR: 2 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Order.php  modified  +1 −1
   #Order::total  method  modified  +1 −1  public function total(): int

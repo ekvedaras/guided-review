@@ -18,7 +18,11 @@ fn pieces_of_added_file(path: &str, content: &str) -> Vec<String> {
 
     run.stdout_with(&[(&base, "<base>"), (&head, "<head>")])
         .lines()
-        .filter(|line| line.starts_with("  ") && !line.starts_with("  #(top)"))
+        .filter(|line| {
+            line.starts_with("  ")
+                && !line.starts_with("  #(top)")
+                && !line.trim_start().starts_with("subjects:")
+        })
         .map(|line| line.trim_start().to_string())
         .collect()
 }

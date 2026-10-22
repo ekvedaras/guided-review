@@ -45,8 +45,10 @@ class Order
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +1 −1
+small PR: 2 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Order.php  modified  +1 −1
   #Order::total  method  modified  +1 −1  public function total(): int
@@ -107,8 +109,10 @@ class Order
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 2 pieces, +4 −2
+small PR: 6 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Order.php  modified  +4 −2
   #Order::discount  method  modified  +3 −1  public function discount(): int
@@ -179,8 +183,10 @@ function money(int $cents): string
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 2 files, 3 pieces, +2 −7
+small PR: 9 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Order.php  modified  +1 −6
   #Order  class  modified  +1 −1  final class Order
@@ -218,8 +224,10 @@ const ORDER_OUTLINE: &str = "\
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +1 −1
+small PR: 2 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Order.php  modified  +1 −1
   #Order::total  method  modified  +1 −1  public function total(): int
@@ -266,7 +274,7 @@ fn outline_ignores_uncommitted_work_in_the_working_tree() {
 
     assert_eq!(
         run.stdout_with(&[(&base, "<base>"), (&head, "<head>")]),
-        ORDER_OUTLINE
+        ORDER_OUTLINE.replace("worktree at head: yes", "worktree at head: no")
     );
 }
 
@@ -290,7 +298,7 @@ fn outline_compares_head_with_where_it_branched_off_the_base_branch() {
 
     assert_eq!(
         run.stdout_with(&[(&branched_from, "<base>"), (&head, "<head>")]),
-        ORDER_OUTLINE
+        ORDER_OUTLINE.replace("worktree at head: yes", "worktree at head: no")
     );
 }
 
@@ -311,8 +319,10 @@ fn outline_lists_a_non_php_file_as_one_whole_file_piece() {
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +2 −1
+small PR: 3 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 docs/setup.txt  modified  +2 −1
   docs/setup.txt  file  modified  +2 −1
@@ -460,8 +470,10 @@ fn a_renamed_php_file_without_line_changes_is_one_whole_file_piece() {
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 1 file, 1 piece, +0 −0
+small PR: 0 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Purchase.php  renamed  +0 −0
   app/Purchase.php  file  modified  +0 −0
@@ -473,6 +485,7 @@ const OUTLINE_HEADER: &str = "\
 pr: https://github.com/acme/shop/pull/7
 base: <base>
 head: <head>
+worktree at head: yes
 piece id: <file>#<symbol>, or <file> for a whole-file piece
 ";
 
@@ -500,6 +513,7 @@ fn a_deleted_php_file_is_one_piece() {
         outline_of(&repo, &base, &head),
         "\
 1 file, 1 piece, +0 −14
+small PR: 14 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Order.php  deleted  +0 −14
   app/Order.php  file  deleted  +0 −14
@@ -551,6 +565,7 @@ fn a_known_generated_file_is_one_piece_marked_generated() {
         outline_of(&repo, &base, &head),
         "\
 2 files, 2 pieces, +3 −3
+small PR: 6 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 composer.lock  modified  +2 −2
   composer.lock  file  modified  +2 −2  generated
@@ -591,6 +606,7 @@ fn a_file_marked_linguist_generated_is_one_piece_marked_generated() {
         outline_of(&repo, &base, &head),
         "\
 2 files, 2 pieces, +2 −2
+small PR: 4 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 app/Api.gen.php  modified  +1 −1
   app/Api.gen.php  file  modified  +1 −1  generated
@@ -654,6 +670,7 @@ fn a_binary_file_is_one_piece() {
         outline_of(&repo, &base, &head),
         "\
 2 files, 2 pieces, +0 −0
+small PR: 0 changed lines, under 300. Read the full diff with `guided-review show <pr-url> <every piece id>` instead of planning from this outline.
 
 assets/data.bin  modified  +0 −0
   assets/data.bin  file  modified  +0 −0
