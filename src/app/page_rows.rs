@@ -15,7 +15,6 @@ use std::rc::Rc;
 
 use gpui::SharedString;
 
-use crate::app::components::ask_panel::lines_label;
 use crate::app::components::diff_view::DiffRowLine;
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
@@ -479,7 +478,7 @@ fn under_lines(review: &Review, asked_lines: &[Place]) -> Vec<UnderLine> {
         Some(UnderLine::AskMarker(AskAt {
             id: format!("ask-lines-{}-{}-{}", end.path, start.line, end.line).into(),
             place: place.clone(),
-            label: lines_label(start, end),
+            label: place.lines_label()?,
         }))
     });
     queued.chain(composers).chain(markers).collect()

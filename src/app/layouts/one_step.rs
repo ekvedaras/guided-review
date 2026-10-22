@@ -10,9 +10,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::app::components::ask_panel::{
-    AskPanel, AskSetup, UseAsComment, ask_button, lines_label,
-};
+use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
 use crate::app::components::comment_composer::{
     CommentComposer, ComposerKey, OnCompose, QueuedCommentNote,
 };
@@ -1016,10 +1014,7 @@ impl Render for OneStepLayout {
                         )
                     }))
                     .children(self.lines_to_ask.clone().map(|place| {
-                        let label = match &place {
-                            Place::Lines { start, end, .. } => lines_label(start, end),
-                            _ => String::new(),
-                        };
+                        let label = place.lines_label().unwrap_or_default();
                         div().px_6().py_1().flex().child(self.ask_button(
                             "ask-selected-lines".into(),
                             place,

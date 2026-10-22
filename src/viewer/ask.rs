@@ -31,6 +31,19 @@ pub enum Place {
     },
 }
 
+impl Place {
+    pub fn lines_label(&self) -> Option<String> {
+        let Self::Lines { start, end, .. } = self else {
+            return None;
+        };
+        Some(if start == end {
+            format!("{} line {}", end.path, end.line)
+        } else {
+            format!("{} lines {} to {}", end.path, start.line, end.line)
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AskId(u64);

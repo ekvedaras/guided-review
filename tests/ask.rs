@@ -9,7 +9,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentLauncher, AgentPort, Asks, Author, Place, Review, ReviewStateFile, StepId,
+    AgentLauncher, AgentPort, Asks, Author, LineLocation, Place, Review, ReviewStateFile, Side,
+    StepId,
 };
 use serde_json::json;
 use support::FixtureRepo;
@@ -296,4 +297,31 @@ fn config_overrides_the_ask_model_and_effort() {
         (settings.model.as_str(), settings.effort.as_str()),
         ("sonnet", "high")
     );
+}
+
+fn lines_place(start: usize, end: usize) -> Place {
+    let at = |line| LineLocation {
+        path: "src/a.rs".into(),
+        side: Side::Head,
+        line,
+    };
+    Place::Lines {
+        step: None,
+        start: at(start),
+        end: at(end),
+        pieces: vec![],
+    }
+}
+
+#[test]
+fn a_lines_place_is_labelled_with_its_file_and_lines() {
+    assert_eq!(
+        lines_place(4, 4).lines_label().as_deref(),
+        Some("src/a.rs line 4")
+    );
+    assert_eq!(
+        lines_place(4, 9).lines_label().as_deref(),
+        Some("src/a.rs lines 4 to 9")
+    );
+    assert_eq!(Place::Tour.lines_label(), None);
 }

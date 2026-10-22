@@ -14,8 +14,8 @@ use gpui::{
 
 use crate::config::AskSettings;
 use crate::viewer::{
-    AgentLaunch, AgentLauncher, AgentPool, Ask, AskId, Asks, Author, LineLocation, Opening, Place,
-    Review, Screen, StepId, TurnStopper,
+    AgentLaunch, AgentLauncher, AgentPool, Ask, AskId, Asks, Author, Opening, Place, Review,
+    Screen, StepId, TurnStopper,
 };
 
 use super::palette::{Colors, TEXT_FONT};
@@ -566,14 +566,6 @@ impl Render for AskPanel {
                     .child(input),
             )
             .into_any_element()
-    }
-}
-
-pub fn lines_label(start: &LineLocation, end: &LineLocation) -> String {
-    if start == end {
-        format!("{} line {}", end.path, end.line)
-    } else {
-        format!("{} lines {} to {}", end.path, start.line, end.line)
     }
 }
 
