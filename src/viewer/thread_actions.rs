@@ -1,7 +1,9 @@
 use crate::pull_request::PullRequestUrl;
 
 use super::comments::{CommentRefusal, SendMode};
-use super::ports::{GitHubPort, PendingReviewExists, ViewedSyncUnavailable};
+use super::ports::{
+    PendingReviewExists, ReviewThreadsPort, ReviewWritesPort, ViewedSyncUnavailable,
+};
 use super::reactions::Reaction;
 use super::threads::ReviewThread;
 
@@ -51,7 +53,10 @@ pub struct ThreadActionOutcome {
 }
 
 impl ThreadActionRequest {
-    pub fn run(self, github: &dyn GitHubPort) -> ThreadActionOutcome {
+    pub fn run(
+        self,
+        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+    ) -> ThreadActionOutcome {
         let result = match self.perform(github) {
             Ok(()) => ThreadActionResult::Done,
             Err(error) => classify(error),
@@ -66,7 +71,10 @@ impl ThreadActionRequest {
         }
     }
 
-    fn perform(&self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+    fn perform(
+        &self,
+        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+    ) -> anyhow::Result<()> {
         if self.tour_is_old && matches!(self.action, ThreadAction::Reply { .. }) {
             return Err(TourIsOld.into());
         }

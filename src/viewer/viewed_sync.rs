@@ -5,7 +5,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::Tour;
 
-use super::ports::{GitHubPort, ViewedState, ViewedSyncUnavailable};
+use super::ports::{PullRequestTipsPort, ViewedFilesPort, ViewedState, ViewedSyncUnavailable};
 use super::review::StepId;
 use super::review_state::ReviewState;
 
@@ -276,7 +276,10 @@ impl SyncOutcome {
 
 impl SyncRequest {
     /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(self, github: &dyn GitHubPort) -> SyncOutcome {
+    pub fn run(
+        self,
+        github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
+    ) -> SyncOutcome {
         let pr = &self.pr;
         if self.is_off {
             return SyncOutcome::nothing();
@@ -307,7 +310,7 @@ impl SyncRequest {
 
     /// GitHub is read first, so only wishes it does not already match are pushed.
     fn take_baseline(
-        github: &dyn GitHubPort,
+        github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
         wishes: BTreeMap<String, bool>,
     ) -> SyncOutcome {
@@ -335,7 +338,7 @@ impl SyncRequest {
 
 /// Stops at the first failure; what was not sent stays queued.
 fn push(
-    github: &dyn GitHubPort,
+    github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
     wishes: &BTreeMap<String, bool>,
     sent: &mut Vec<(String, bool)>,
@@ -348,7 +351,7 @@ fn push(
 }
 
 fn read_viewed(
-    github: &dyn GitHubPort,
+    github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
 ) -> anyhow::Result<BTreeMap<String, bool>> {
     Ok(github

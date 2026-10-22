@@ -21,8 +21,8 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
 use guided_review::viewer::{
-    Asks, GitHubPort, PickCodeSource, RefreshBrief, Review, ReviewStateFile, TourRefresher,
-    TourRepinner, repin_tour,
+    Asks, PickCodeSource, PullRequestTipsPort, RefreshBrief, Review, ReviewStateFile,
+    TourRefresher, TourRepinner, repin_tour,
 };
 
 #[derive(Parser)]

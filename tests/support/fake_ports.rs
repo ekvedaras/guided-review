@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, GitHubPort,
-    PendingReviewExists, Reaction, ReactionCount, ReviewThread, ReviewVerdict, SendMode, Side,
-    ThreadNotCreated, TurnStopper, ViewedFile, ViewedState, ViewedSyncUnavailable,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, PendingReviewExists,
+    PullRequestTipsPort, Reaction, ReactionCount, ReviewThread, ReviewThreadsPort, ReviewVerdict,
+    ReviewWritesPort, SendMode, Side, ThreadNotCreated, TurnStopper, ViewedFile, ViewedFilesPort,
+    ViewedState, ViewedSyncUnavailable,
 };
 
 /// What the app core sent out, in order, across both fakes.
@@ -136,7 +137,7 @@ impl FakeGitHub {
     }
 }
 
-impl GitHubPort for FakeGitHub {
+impl PullRequestTipsPort for FakeGitHub {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
         self.sent.push(format!("github: tips of {pr}"));
         Ok(PullRequestTips {
@@ -144,7 +145,9 @@ impl GitHubPort for FakeGitHub {
             head: self.tips.1.clone(),
         })
     }
+}
 
+impl ViewedFilesPort for FakeGitHub {
     fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
         self.sent.push(format!("github: viewed files of {pr}"));
         self.check_access()?;
@@ -175,7 +178,9 @@ impl GitHubPort for FakeGitHub {
         self.set_viewed(path, state);
         Ok(())
     }
+}
 
+impl ReviewThreadsPort for FakeGitHub {
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
         self.sent.push(format!("github: threads of {pr}"));
         let resolved = self.resolved_now.lock().unwrap();
@@ -202,11 +207,6 @@ impl GitHubPort for FakeGitHub {
             }
         }
         Ok(threads)
-    }
-
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        self.sent.push(format!("github: author of {pr}"));
-        Ok(self.viewer_is_author.load(Ordering::SeqCst))
     }
 
     fn reply_to_thread(
@@ -255,25 +255,17 @@ impl GitHubPort for FakeGitHub {
             .insert((comment_id.to_string(), reaction), on);
         Ok(())
     }
+}
 
-    fn submit_review(
-        &self,
-        _pr: &PullRequestUrl,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        self.sent
-            .push(format!("github: submit {} {body:?}", verdict.github_name()));
-        if self.cannot_reach_github.load(Ordering::SeqCst) {
-            anyhow::bail!("network is down");
-        }
-        self.has_pending_review.store(false, Ordering::SeqCst);
-        Ok(())
-    }
-
+impl ReviewWritesPort for FakeGitHub {
     fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
         self.sent.push(format!("github: pending review of {pr}"));
         Ok(self.has_pending_review_now())
+    }
+
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        self.sent.push(format!("github: author of {pr}"));
+        Ok(self.viewer_is_author.load(Ordering::SeqCst))
     }
 
     fn add_review_thread(
@@ -322,6 +314,21 @@ impl GitHubPort for FakeGitHub {
             self.has_pending_review.store(true, Ordering::SeqCst);
             return Err(ThreadNotCreated("thread: null".into()).into());
         }
+        Ok(())
+    }
+
+    fn submit_review(
+        &self,
+        _pr: &PullRequestUrl,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.sent
+            .push(format!("github: submit {} {body:?}", verdict.github_name()));
+        if self.cannot_reach_github.load(Ordering::SeqCst) {
+            anyhow::bail!("network is down");
+        }
+        self.has_pending_review.store(false, Ordering::SeqCst);
         Ok(())
     }
 }

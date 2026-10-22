@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::pull_request::{PullRequestUrl, Sha};
 
-use super::ports::{GitHubPort, PendingReviewExists, ThreadNotCreated, ViewedSyncUnavailable};
+use super::ports::{
+    PendingReviewExists, PullRequestTipsPort, ReviewWritesPort, ThreadNotCreated,
+    ViewedSyncUnavailable,
+};
 use super::row_selection::SelectedLines;
 use super::step_page::{LineLocation, Side};
 
@@ -175,12 +178,15 @@ impl CommentRequest {
     }
 
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
-    pub fn run(self, github: &dyn GitHubPort) -> CommentOutcome {
+    pub fn run(
+        self,
+        github: &(impl PullRequestTipsPort + ReviewWritesPort + ?Sized),
+    ) -> CommentOutcome {
         let how = self.send(github);
         CommentOutcome { request: self, how }
     }
 
-    fn send(&self, github: &dyn GitHubPort) -> Outcome {
+    fn send(&self, github: &(impl PullRequestTipsPort + ReviewWritesPort + ?Sized)) -> Outcome {
         let pr = &self.pr;
         if !self.draft.is_placed_at(&self.tour_head) {
             return Outcome::Refused(CommentRefusal::CodeMoved);

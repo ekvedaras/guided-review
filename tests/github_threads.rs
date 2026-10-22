@@ -6,8 +6,8 @@ use std::thread;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    CommentPlace, GitHubPort, LineLocation, PendingReviewExists, Reaction, ReactionCount,
-    ReviewVerdict, SendMode, Side, ThreadNotCreated,
+    CommentPlace, LineLocation, PendingReviewExists, Reaction, ReactionCount, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadNotCreated,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.

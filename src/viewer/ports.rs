@@ -7,21 +7,43 @@ use super::reactions::Reaction;
 use super::threads::ReviewThread;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
-/// Everything the viewer core asks of GitHub. Core actions take it as `&dyn GitHubPort`,
-/// so the app can run them in the background and tests can put a fake behind it.
-pub trait GitHubPort: Send + Sync {
+pub trait PullRequestTipsPort: Send + Sync {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips>;
+}
 
+pub trait ViewedFilesPort: Send + Sync {
     /// Every changed file of the PR with the viewer's viewed state, all pages of it.
     /// Fails with `ViewedSyncUnavailable` when there is no token or it may not do this.
     fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>>;
 
     fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()>;
+}
 
+/// Reading review threads and acting on them: replies, resolving, reactions.
+pub trait ReviewThreadsPort: Send + Sync {
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>>;
 
+    /// Adds a reply to the pending review, or with `CommentNow` posts it at once.
+    fn reply_to_thread(
+        &self,
+        pr: &PullRequestUrl,
+        thread_id: &str,
+        body: &str,
+        mode: SendMode,
+    ) -> anyhow::Result<()>;
+
+    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()>;
+
+    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()>;
+}
+
+/// The viewer's own review: what it holds so far, new comments, and sending it.
+pub trait ReviewWritesPort: Send + Sync {
     /// Whether the viewer has a pending review on the PR, one made here or on the web.
     fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
+
+    /// Whether the viewer wrote the PR. GitHub refuses their approval or change request.
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
 
     /// Adds a thread to the pending review, or starts one. Fails with `ThreadNotCreated`
     /// when GitHub answers without a thread.
@@ -41,22 +63,6 @@ pub trait GitHubPort: Send + Sync {
         body: &str,
     ) -> anyhow::Result<()>;
 
-    /// Whether the viewer wrote the PR. GitHub refuses their approval or change request.
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
-
-    /// Adds a reply to the pending review, or with `CommentNow` posts it at once.
-    fn reply_to_thread(
-        &self,
-        pr: &PullRequestUrl,
-        thread_id: &str,
-        body: &str,
-        mode: SendMode,
-    ) -> anyhow::Result<()>;
-
-    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()>;
-
-    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()>;
-
     /// Sends the pending review, or a new review when there is none.
     fn submit_review(
         &self,
@@ -64,6 +70,18 @@ pub trait GitHubPort: Send + Sync {
         verdict: ReviewVerdict,
         body: &str,
     ) -> anyhow::Result<()>;
+}
+
+/// Everything the viewer core asks of GitHub, for the app that holds one adapter for all of it.
+/// Core actions take only the port they need, so tests can put a fake behind it.
+pub trait GitHubPort:
+    PullRequestTipsPort + ViewedFilesPort + ReviewThreadsPort + ReviewWritesPort
+{
+}
+
+impl<T> GitHubPort for T where
+    T: PullRequestTipsPort + ViewedFilesPort + ReviewThreadsPort + ReviewWritesPort
+{
 }
 
 /// GitHub answered a new thread with `thread: null` and no error. It leaves an empty pending review behind.

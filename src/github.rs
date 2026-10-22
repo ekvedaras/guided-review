@@ -8,9 +8,10 @@ use serde::Deserialize;
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentPlace, GitHubPort, PendingReviewExists, Reaction, ReactionCount, ReviewThread,
-    ReviewVerdict, SendMode, Side, ThreadComment, ThreadNotCreated, ViewedFile, ViewedState,
-    ViewedSyncUnavailable, percent_encode_path,
+    CommentPlace, PendingReviewExists, PullRequestTipsPort, Reaction, ReactionCount, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadComment,
+    ThreadNotCreated, ViewedFile, ViewedFilesPort, ViewedState, ViewedSyncUnavailable,
+    percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -260,17 +261,7 @@ impl GitHub {
     }
 }
 
-impl GitHubPort for GitHub {
-    fn add_review_thread(
-        &self,
-        pr: &PullRequestUrl,
-        place: &CommentPlace,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        self.add_thread_to_pending_review(pr, place, body)
-            .map(|_| ())
-    }
-
+impl PullRequestTipsPort for GitHub {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
         let pull: PullJson = self
             .get(
@@ -284,7 +275,9 @@ impl GitHubPort for GitHub {
             head: Sha::new(&pull.head.sha),
         })
     }
+}
 
+impl ViewedFilesPort for GitHub {
     fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
         let mut files = Vec::new();
         let mut after = serde_json::Value::Null;
@@ -339,7 +332,9 @@ impl GitHubPort for GitHub {
         .with_context(|| format!("could not change the viewed state of {path} in {pr}"))?;
         Ok(())
     }
+}
 
+impl ReviewThreadsPort for GitHub {
     /// Every review thread of the PR, over GraphQL (REST shows no resolved or outdated state).
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
         let mut threads = Vec::new();
@@ -357,66 +352,6 @@ impl GitHubPort for GitHub {
                 None => return Ok(threads),
             }
         }
-    }
-
-    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        let data = self
-            .graphql(
-                "query($owner: String!, $name: String!, $number: Int!) {
-                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-                        reviews(states: PENDING, first: 10) { nodes { viewerDidAuthor } }
-                    } }
-                }",
-                pull_request_variables(pr, &serde_json::Value::Null),
-            )
-            .with_context(|| format!("could not look for a pending review on {pr}"))?;
-        let reviews = data["repository"]["pullRequest"]["reviews"]["nodes"]
-            .as_array()
-            .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
-        Ok(reviews
-            .iter()
-            .any(|review| review["viewerDidAuthor"].as_bool() == Some(true)))
-    }
-
-    /// A thread in a new pending review, posted right away. GitHub posts nothing past an existing
-    /// pending review, so the caller checks for one first.
-    fn comment_now(
-        &self,
-        pr: &PullRequestUrl,
-        place: &CommentPlace,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        let review_id = self.add_thread_to_pending_review(pr, place, body)?;
-        let posted = self.graphql(
-            "mutation($input: SubmitPullRequestReviewInput!) {
-                submitPullRequestReview(input: $input) { clientMutationId }
-            }",
-            serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
-        );
-        if let Err(error) = posted {
-            let _ = self.graphql(
-                "mutation($input: DeletePullRequestReviewInput!) {
-                    deletePullRequestReview(input: $input) { clientMutationId }
-                }",
-                serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
-            );
-            return Err(error.context("could not post the comment"));
-        }
-        Ok(())
-    }
-
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        let data = self
-            .graphql(
-                "query($owner: String!, $name: String!, $number: Int!) {
-                    repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerDidAuthor } }
-                }",
-                pull_request_variables(pr, &serde_json::Value::Null),
-            )
-            .with_context(|| format!("could not tell who wrote {pr}"))?;
-        data["repository"]["pullRequest"]["viewerDidAuthor"]
-            .as_bool()
-            .with_context(|| format!("GitHub did not say who wrote {pr}"))
     }
 
     /// A reply joins the viewer's pending review. With `CommentNow` the review it ended up in is sent at once.
@@ -479,6 +414,78 @@ impl GitHubPort for GitHub {
             serde_json::json!({"input": {"subjectId": comment_id, "content": reaction.github_name()}}),
         )
         .context("could not change the reaction")?;
+        Ok(())
+    }
+}
+
+impl ReviewWritesPort for GitHub {
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        reviews(states: PENDING, first: 10) { nodes { viewerDidAuthor } }
+                    } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not look for a pending review on {pr}"))?;
+        let reviews = data["repository"]["pullRequest"]["reviews"]["nodes"]
+            .as_array()
+            .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
+        Ok(reviews
+            .iter()
+            .any(|review| review["viewerDidAuthor"].as_bool() == Some(true)))
+    }
+
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerDidAuthor } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not tell who wrote {pr}"))?;
+        data["repository"]["pullRequest"]["viewerDidAuthor"]
+            .as_bool()
+            .with_context(|| format!("GitHub did not say who wrote {pr}"))
+    }
+
+    fn add_review_thread(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.add_thread_to_pending_review(pr, place, body)
+            .map(|_| ())
+    }
+
+    /// A thread in a new pending review, posted right away. GitHub posts nothing past an existing
+    /// pending review, so the caller checks for one first.
+    fn comment_now(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let review_id = self.add_thread_to_pending_review(pr, place, body)?;
+        let posted = self.graphql(
+            "mutation($input: SubmitPullRequestReviewInput!) {
+                submitPullRequestReview(input: $input) { clientMutationId }
+            }",
+            serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
+        );
+        if let Err(error) = posted {
+            let _ = self.graphql(
+                "mutation($input: DeletePullRequestReviewInput!) {
+                    deletePullRequestReview(input: $input) { clientMutationId }
+                }",
+                serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
+            );
+            return Err(error.context("could not post the comment"));
+        }
         Ok(())
     }
 
