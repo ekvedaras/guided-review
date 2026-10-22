@@ -8,9 +8,9 @@ use serde::Deserialize;
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentPlace, PendingReviewExists, Reaction, ReactionCount, ReviewThread, ReviewVerdict,
-    SendMode, Side, ThreadComment, ThreadNotCreated, ViewedFile, ViewedState,
-    ViewedSyncUnavailable,
+    CommentPlace, GitHubPort, PendingReviewExists, Reaction, ReactionCount, ReviewThread,
+    ReviewVerdict, SendMode, Side, ThreadComment, ThreadNotCreated, ViewedFile, ViewedState,
+    ViewedSyncUnavailable, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -87,80 +87,6 @@ impl GitHub {
         }
     }
 
-    pub fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
-        let pull: PullJson = self
-            .get(
-                &format!("repos/{}/pulls/{}", pr.repo, pr.number),
-                "application/vnd.github+json",
-            )
-            .and_then(|mut response| Ok(response.body_mut().read_json()?))
-            .with_context(|| format!("could not read {pr} from GitHub"))?;
-        Ok(PullRequestTips {
-            base_branch_tip: Sha::new(&pull.base.sha),
-            head: Sha::new(&pull.head.sha),
-        })
-    }
-
-    pub fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
-        let mut files = Vec::new();
-        let mut after = serde_json::Value::Null;
-        loop {
-            let data = self.graphql(
-                "query($owner: String!, $name: String!, $number: Int!, $after: String) {
-                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-                        id
-                        files(first: 100, after: $after) {
-                            pageInfo { hasNextPage endCursor }
-                            nodes { path viewerViewedState }
-                        }
-                    } }
-                }",
-                pull_request_variables(pr, &after),
-            )?;
-            let pull = &data["repository"]["pullRequest"];
-            if let Some(id) = pull["id"].as_str() {
-                self.remember_pull_request_id(pr, id);
-            }
-            let page: FilesPageJson = serde_json::from_value(pull["files"].clone())
-                .with_context(|| format!("could not read the files of {pr} from GitHub"))?;
-            files.extend(page.nodes.into_iter().map(|file| ViewedFile {
-                path: file.path,
-                state: match file.viewer_viewed_state.as_str() {
-                    "VIEWED" => ViewedState::Viewed,
-                    "DISMISSED" => ViewedState::Dismissed,
-                    _ => ViewedState::Unviewed,
-                },
-            }));
-            if !page.page_info.has_next_page {
-                return Ok(files);
-            }
-            after = page.page_info.end_cursor.into();
-        }
-    }
-
-    pub fn set_file_viewed(
-        &self,
-        pr: &PullRequestUrl,
-        path: &str,
-        viewed: bool,
-    ) -> anyhow::Result<()> {
-        let mutation = if viewed {
-            "markFileAsViewed"
-        } else {
-            "unmarkFileAsViewed"
-        };
-        let pull_request_id = self.pull_request_id(pr)?;
-        self.graphql(
-            &format!(
-                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
-                capitalized(mutation)
-            ),
-            serde_json::json!({"input": {"pullRequestId": pull_request_id, "path": path}}),
-        )
-        .with_context(|| format!("could not change the viewed state of {path} in {pr}"))?;
-        Ok(())
-    }
-
     fn pull_request_id(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
         if let Some(id) = self.pull_request_ids.lock().unwrap().get(&pr.to_string()) {
             return Ok(id.clone());
@@ -229,46 +155,8 @@ impl GitHub {
         Ok(answer["data"].take())
     }
 
-    /// Every review thread of the PR, over GraphQL (REST shows no resolved or outdated state).
-    pub fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
-        let mut threads = Vec::new();
-        let mut after = serde_json::Value::Null;
-        loop {
-            let data = self
-                .graphql(REVIEW_THREADS_QUERY, pull_request_variables(pr, &after))
-                .with_context(|| {
-                    format!("could not read the review threads of {pr} from GitHub")
-                })?;
-            let page = parse_review_threads(&serde_json::json!({"data": data}))?;
-            threads.extend(page.threads);
-            match page.next_cursor {
-                Some(next) => after = next.into(),
-                None => return Ok(threads),
-            }
-        }
-    }
-
-    pub fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        let data = self
-            .graphql(
-                "query($owner: String!, $name: String!, $number: Int!) {
-                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-                        reviews(states: PENDING, first: 10) { nodes { viewerDidAuthor } }
-                    } }
-                }",
-                pull_request_variables(pr, &serde_json::Value::Null),
-            )
-            .with_context(|| format!("could not look for a pending review on {pr}"))?;
-        let reviews = data["repository"]["pullRequest"]["reviews"]["nodes"]
-            .as_array()
-            .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
-        Ok(reviews
-            .iter()
-            .any(|review| review["viewerDidAuthor"].as_bool() == Some(true)))
-    }
-
     /// Returns the id of the pending review the thread went into.
-    pub fn add_review_thread(
+    pub fn add_thread_to_pending_review(
         &self,
         pr: &PullRequestUrl,
         place: &CommentPlace,
@@ -315,47 +203,6 @@ impl GitHub {
             .to_string())
     }
 
-    /// A thread in a new pending review, posted right away. GitHub posts nothing past an existing
-    /// pending review, so the caller checks for one first.
-    pub fn comment_now(
-        &self,
-        pr: &PullRequestUrl,
-        place: &CommentPlace,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        let review_id = self.add_review_thread(pr, place, body)?;
-        let posted = self.graphql(
-            "mutation($input: SubmitPullRequestReviewInput!) {
-                submitPullRequestReview(input: $input) { clientMutationId }
-            }",
-            serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
-        );
-        if let Err(error) = posted {
-            let _ = self.graphql(
-                "mutation($input: DeletePullRequestReviewInput!) {
-                    deletePullRequestReview(input: $input) { clientMutationId }
-                }",
-                serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
-            );
-            return Err(error.context("could not post the comment"));
-        }
-        Ok(())
-    }
-
-    pub fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        let data = self
-            .graphql(
-                "query($owner: String!, $name: String!, $number: Int!) {
-                    repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerDidAuthor } }
-                }",
-                pull_request_variables(pr, &serde_json::Value::Null),
-            )
-            .with_context(|| format!("could not tell who wrote {pr}"))?;
-        data["repository"]["pullRequest"]["viewerDidAuthor"]
-            .as_bool()
-            .with_context(|| format!("GitHub did not say who wrote {pr}"))
-    }
-
     fn pending_review_id(&self, pr: &PullRequestUrl) -> anyhow::Result<Option<String>> {
         let data = self
             .graphql(
@@ -376,9 +223,205 @@ impl GitHub {
             .map(str::to_string))
     }
 
+    fn submit_pending_review(
+        &self,
+        review_id: &str,
+        verdict: ReviewVerdict,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.graphql(
+            "mutation($input: SubmitPullRequestReviewInput!) {
+                submitPullRequestReview(input: $input) { clientMutationId }
+            }",
+            serde_json::json!({"input": {
+                "pullRequestReviewId": review_id,
+                "event": verdict.github_name(),
+                "body": body,
+            }}),
+        )?;
+        Ok(())
+    }
+
+    fn get(&self, path: &str, accept: &str) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
+        let mut request = ureq::get(format!("{}/{path}", self.api))
+            .header("Accept", accept)
+            .header("User-Agent", "guided-review");
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        Ok(request.call()?)
+    }
+
+    pub fn code_source(&self, repo: &RepoName) -> GitHubCodeSource {
+        GitHubCodeSource {
+            github: self.clone(),
+            repo: repo.clone(),
+        }
+    }
+}
+
+impl GitHubPort for GitHub {
+    fn add_review_thread(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.add_thread_to_pending_review(pr, place, body)
+            .map(|_| ())
+    }
+
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
+        let pull: PullJson = self
+            .get(
+                &format!("repos/{}/pulls/{}", pr.repo, pr.number),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not read {pr} from GitHub"))?;
+        Ok(PullRequestTips {
+            base_branch_tip: Sha::new(&pull.base.sha),
+            head: Sha::new(&pull.head.sha),
+        })
+    }
+
+    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
+        let mut files = Vec::new();
+        let mut after = serde_json::Value::Null;
+        loop {
+            let data = self.graphql(
+                "query($owner: String!, $name: String!, $number: Int!, $after: String) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        id
+                        files(first: 100, after: $after) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { path viewerViewedState }
+                        }
+                    } }
+                }",
+                pull_request_variables(pr, &after),
+            )?;
+            let pull = &data["repository"]["pullRequest"];
+            if let Some(id) = pull["id"].as_str() {
+                self.remember_pull_request_id(pr, id);
+            }
+            let page: FilesPageJson = serde_json::from_value(pull["files"].clone())
+                .with_context(|| format!("could not read the files of {pr} from GitHub"))?;
+            files.extend(page.nodes.into_iter().map(|file| ViewedFile {
+                path: file.path,
+                state: match file.viewer_viewed_state.as_str() {
+                    "VIEWED" => ViewedState::Viewed,
+                    "DISMISSED" => ViewedState::Dismissed,
+                    _ => ViewedState::Unviewed,
+                },
+            }));
+            if !page.page_info.has_next_page {
+                return Ok(files);
+            }
+            after = page.page_info.end_cursor.into();
+        }
+    }
+
+    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
+        let mutation = if viewed {
+            "markFileAsViewed"
+        } else {
+            "unmarkFileAsViewed"
+        };
+        let pull_request_id = self.pull_request_id(pr)?;
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            serde_json::json!({"input": {"pullRequestId": pull_request_id, "path": path}}),
+        )
+        .with_context(|| format!("could not change the viewed state of {path} in {pr}"))?;
+        Ok(())
+    }
+
+    /// Every review thread of the PR, over GraphQL (REST shows no resolved or outdated state).
+    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
+        let mut threads = Vec::new();
+        let mut after = serde_json::Value::Null;
+        loop {
+            let data = self
+                .graphql(REVIEW_THREADS_QUERY, pull_request_variables(pr, &after))
+                .with_context(|| {
+                    format!("could not read the review threads of {pr} from GitHub")
+                })?;
+            let page = parse_review_threads(&serde_json::json!({"data": data}))?;
+            threads.extend(page.threads);
+            match page.next_cursor {
+                Some(next) => after = next.into(),
+                None => return Ok(threads),
+            }
+        }
+    }
+
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        reviews(states: PENDING, first: 10) { nodes { viewerDidAuthor } }
+                    } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not look for a pending review on {pr}"))?;
+        let reviews = data["repository"]["pullRequest"]["reviews"]["nodes"]
+            .as_array()
+            .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
+        Ok(reviews
+            .iter()
+            .any(|review| review["viewerDidAuthor"].as_bool() == Some(true)))
+    }
+
+    /// A thread in a new pending review, posted right away. GitHub posts nothing past an existing
+    /// pending review, so the caller checks for one first.
+    fn comment_now(
+        &self,
+        pr: &PullRequestUrl,
+        place: &CommentPlace,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let review_id = self.add_thread_to_pending_review(pr, place, body)?;
+        let posted = self.graphql(
+            "mutation($input: SubmitPullRequestReviewInput!) {
+                submitPullRequestReview(input: $input) { clientMutationId }
+            }",
+            serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
+        );
+        if let Err(error) = posted {
+            let _ = self.graphql(
+                "mutation($input: DeletePullRequestReviewInput!) {
+                    deletePullRequestReview(input: $input) { clientMutationId }
+                }",
+                serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
+            );
+            return Err(error.context("could not post the comment"));
+        }
+        Ok(())
+    }
+
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerDidAuthor } }
+                }",
+                pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .with_context(|| format!("could not tell who wrote {pr}"))?;
+        data["repository"]["pullRequest"]["viewerDidAuthor"]
+            .as_bool()
+            .with_context(|| format!("GitHub did not say who wrote {pr}"))
+    }
+
     /// A reply joins the viewer's pending review. With `CommentNow` the review it ended up in is sent at once.
     /// GitHub starts a pending review when there is none; that case has not run against real GitHub.
-    pub fn reply_to_thread(
+    fn reply_to_thread(
         &self,
         pr: &PullRequestUrl,
         thread_id: &str,
@@ -409,26 +452,7 @@ impl GitHub {
         Ok(())
     }
 
-    fn submit_pending_review(
-        &self,
-        review_id: &str,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        self.graphql(
-            "mutation($input: SubmitPullRequestReviewInput!) {
-                submitPullRequestReview(input: $input) { clientMutationId }
-            }",
-            serde_json::json!({"input": {
-                "pullRequestReviewId": review_id,
-                "event": verdict.github_name(),
-                "body": body,
-            }}),
-        )?;
-        Ok(())
-    }
-
-    pub fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
+    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
         let mutation = if resolved {
             "resolveReviewThread"
         } else {
@@ -445,12 +469,7 @@ impl GitHub {
         Ok(())
     }
 
-    pub fn set_reaction(
-        &self,
-        comment_id: &str,
-        reaction: Reaction,
-        on: bool,
-    ) -> anyhow::Result<()> {
+    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
         let mutation = if on { "addReaction" } else { "removeReaction" };
         self.graphql(
             &format!(
@@ -464,7 +483,7 @@ impl GitHub {
     }
 
     /// Sends the viewer's pending review, or a new review with just the verdict and body when there is none.
-    pub fn submit_review(
+    fn submit_review(
         &self,
         pr: &PullRequestUrl,
         verdict: ReviewVerdict,
@@ -487,23 +506,6 @@ impl GitHub {
         )
         .context("could not send the review")?;
         Ok(())
-    }
-
-    fn get(&self, path: &str, accept: &str) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
-        let mut request = ureq::get(format!("{}/{path}", self.api))
-            .header("Accept", accept)
-            .header("User-Agent", "guided-review");
-        if let Some(token) = &self.token {
-            request = request.header("Authorization", format!("Bearer {token}"));
-        }
-        Ok(request.call()?)
-    }
-
-    pub fn code_source(&self, repo: &RepoName) -> GitHubCodeSource {
-        GitHubCodeSource {
-            github: self.clone(),
-            repo: repo.clone(),
-        }
     }
 }
 
@@ -610,17 +612,6 @@ fn one_pending_review_error(error: anyhow::Error) -> anyhow::Error {
     } else {
         error
     }
-}
-
-pub(crate) fn percent_encode_path(path: &str) -> String {
-    path.bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                char::from(byte).to_string()
-            }
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
 }
 
 fn token_from_gh_cli() -> Option<String> {

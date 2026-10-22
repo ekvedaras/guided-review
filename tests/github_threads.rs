@@ -6,8 +6,8 @@ use std::thread;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    CommentPlace, LineLocation, PendingReviewExists, Reaction, ReactionCount, ReviewVerdict,
-    SendMode, Side, ThreadNotCreated,
+    CommentPlace, GitHubPort, LineLocation, PendingReviewExists, Reaction, ReactionCount,
+    ReviewVerdict, SendMode, Side, ThreadNotCreated,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
@@ -150,7 +150,7 @@ fn a_range_comment_is_added_as_a_thread_with_both_sides() {
     };
 
     let review = GitHub::at(&url)
-        .add_review_thread(&pr(), &place, "why?")
+        .add_thread_to_pending_review(&pr(), &place, "why?")
         .unwrap();
 
     assert_eq!(review, "REVIEW_1");

@@ -38,6 +38,7 @@ pub use finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
 pub use github_link::GitHubLink;
+pub(crate) use github_link::percent_encode_path;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{ImageCache, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage};
 pub use jump::{JumpKind, JumpTarget};

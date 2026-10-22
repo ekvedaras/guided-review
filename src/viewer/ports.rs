@@ -5,7 +5,6 @@ use super::comments::{CommentPlace, SendMode};
 use super::finish_review::ReviewVerdict;
 use super::reactions::Reaction;
 use super::threads::ReviewThread;
-use crate::github::GitHub;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
 /// Everything the viewer core asks of GitHub. Core actions take it as `&dyn GitHubPort`,
@@ -116,77 +115,6 @@ impl std::fmt::Display for ViewedSyncUnavailable {
 }
 
 impl std::error::Error for ViewedSyncUnavailable {}
-
-impl GitHubPort for GitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
-        GitHub::pull_request_tips(self, pr)
-    }
-
-    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
-        GitHub::viewed_files(self, pr)
-    }
-
-    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
-        GitHub::set_file_viewed(self, pr, path, viewed)
-    }
-
-    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
-        GitHub::review_threads(self, pr)
-    }
-
-    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        GitHub::has_pending_review(self, pr)
-    }
-
-    fn add_review_thread(
-        &self,
-        pr: &PullRequestUrl,
-        place: &CommentPlace,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        GitHub::add_review_thread(self, pr, place, body).map(|_| ())
-    }
-
-    fn comment_now(
-        &self,
-        pr: &PullRequestUrl,
-        place: &CommentPlace,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        GitHub::comment_now(self, pr, place, body)
-    }
-
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
-        GitHub::viewer_authored(self, pr)
-    }
-
-    fn reply_to_thread(
-        &self,
-        pr: &PullRequestUrl,
-        thread_id: &str,
-        body: &str,
-        mode: SendMode,
-    ) -> anyhow::Result<()> {
-        GitHub::reply_to_thread(self, pr, thread_id, body, mode)
-    }
-
-    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
-        GitHub::set_thread_resolved(self, thread_id, resolved)
-    }
-
-    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
-        GitHub::set_reaction(self, comment_id, reaction, on)
-    }
-
-    fn submit_review(
-        &self,
-        pr: &PullRequestUrl,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        GitHub::submit_review(self, pr, verdict, body)
-    }
-}
 
 /// How to start the local AI for one Ask.
 #[derive(Debug, Clone)]
