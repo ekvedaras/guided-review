@@ -413,7 +413,8 @@ impl Review {
             return Err(CommentRefusal::NotInsideHunk);
         }
         let place = CommentPlace::of(&selected);
-        self.state.open_draft(place.clone());
+        self.state
+            .open_draft(place.clone(), &Sha::new(&self.tour.head));
         let written = self
             .state
             .draft_at(&place)
