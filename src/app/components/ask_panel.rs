@@ -15,7 +15,7 @@ use gpui::{
 use crate::config::AskSettings;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, AgentPool, Ask, AskId, Asks, Author, LineLocation, Opening, Place,
-    Review, StepId, TurnStopper,
+    Review, Screen, StepId, TurnStopper,
 };
 
 use super::palette::{Colors, TEXT_FONT};
@@ -171,7 +171,7 @@ impl AskPanel {
     }
 
     /// Asks about selected lines in a step (or, with `None`, the safety net), by place.
-    pub fn line_places(&self, step: Option<&StepId>) -> Vec<(Place, usize)> {
+    fn line_places(&self, step: Option<&StepId>) -> Vec<(Place, usize)> {
         let mut places: Vec<(Place, usize)> = Vec::new();
         for ask in self.setup.asks.all() {
             let Place::Lines { step: of, .. } = &ask.place else {
@@ -188,8 +188,21 @@ impl AskPanel {
         places
     }
 
+    /// The selected lines with Asks on a screen, which get a marker under their last row.
+    pub fn asked_lines_on(&self, screen: &Screen) -> Vec<Place> {
+        let step = match screen {
+            Screen::Step(id) => Some(id),
+            Screen::SafetyNet => None,
+            Screen::Summary => return Vec::new(),
+        };
+        self.line_places(step)
+            .into_iter()
+            .map(|(place, _)| place)
+            .collect()
+    }
+
     /// The review was re-pinned or reopened: notes on old answers follow it.
-    pub fn review_changed(&mut self, review: &Review, cx: &mut Context<Self>) {
+    pub fn recheck_code_changes(&mut self, review: &Review, cx: &mut Context<Self>) {
         self.code_changed = self
             .setup
             .asks
@@ -210,7 +223,7 @@ impl AskPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.review_changed(review, cx);
+        self.recheck_code_changes(review, cx);
         self.notice = None;
         let Some(clone) = self.setup.clone.clone() else {
             return self.show_unavailable(place, label, NO_CLONE, window, cx);

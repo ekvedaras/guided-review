@@ -5,6 +5,7 @@ pub mod components;
 mod frame_stats;
 mod layouts;
 mod page_rows;
+mod review_session;
 mod sidebar_rows;
 
 use std::sync::Arc;
@@ -20,7 +21,8 @@ pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
-use layouts::one_step::{Collaborators, GoBack, GoForward, OneStepLayout, ToggleJump, TourWork};
+use layouts::one_step::{Collaborators, GoBack, GoForward, OneStepLayout, ToggleJump};
+use review_session::TourWork;
 
 /// Blocks until the window is closed.
 pub fn run(

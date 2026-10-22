@@ -21,7 +21,7 @@ const SETTLE_FRAMES: u32 = 20;
 const MAX_SCROLL_FRAMES: u32 = 1500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameStatsMode {
+enum FrameStatsMode {
     Log,
     ScrollScript,
 }
@@ -131,7 +131,7 @@ fn ms(duration: Duration) -> String {
     format!("{:.1}ms", duration.as_secs_f64() * 1000.)
 }
 
-pub struct FrameStats {
+struct FrameStats {
     mode: FrameStatsMode,
     clock: Rc<RefCell<FrameClock>>,
     last_log: Instant,
@@ -241,5 +241,57 @@ impl ScrollableScreen for ListState {
 
     fn scrolled(&self) -> Pixels {
         -self.scroll_px_offset_for_scrollbar().y
+    }
+}
+
+/// The frame stats as the session and the layout reach them; every call does nothing when they are off.
+#[derive(Clone, Default)]
+pub struct FrameStatsHook(Option<Rc<RefCell<FrameStats>>>);
+
+impl FrameStatsHook {
+    pub fn from_env() -> Self {
+        Self(FrameStatsMode::from_env().map(|mode| Rc::new(RefCell::new(FrameStats::new(mode)))))
+    }
+
+    pub fn rows_rebuilt(&self, rows: usize, took: Duration) {
+        if self.0.is_some() {
+            eprintln!(
+                "review changed: {rows} rows rebuilt in {:.1}ms",
+                took.as_secs_f64() * 1000.
+            );
+        }
+    }
+
+    pub fn code_arrived(&self) {
+        if let Some(stats) = &self.0 {
+            stats.borrow_mut().code_arrived();
+        }
+    }
+
+    /// Call at the start of the root render; put the returned marker last in the tree, so it paints last.
+    pub fn frame_started(&self) -> Option<impl IntoElement + use<>> {
+        self.0
+            .as_ref()
+            .map(|stats| stats.borrow_mut().frame_started())
+    }
+
+    pub fn report_on_quit(&self) {
+        if let Some(stats) = &self.0 {
+            stats.borrow().report_on_quit();
+        }
+    }
+
+    /// `None` unless the scroll script runs.
+    pub fn scroll_script_frame(
+        &self,
+        screen: &dyn ScrollableScreen,
+        window: &Window,
+    ) -> Option<ScriptMove> {
+        let stats = self.0.as_ref()?;
+        let mut stats = stats.borrow_mut();
+        if !stats.is_scroll_script() {
+            return None;
+        }
+        Some(stats.scroll_script_frame(screen, window))
     }
 }
