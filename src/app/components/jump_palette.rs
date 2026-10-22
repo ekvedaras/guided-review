@@ -5,7 +5,7 @@ use gpui::{
 
 use crate::viewer::{JumpKind, JumpTarget};
 
-use super::palette::{Palette, TEXT_FONT};
+use super::palette::{Colors, TEXT_FONT};
 use super::text_input::TextDraft;
 
 const VISIBLE_ROWS: usize = 12;
@@ -90,6 +90,7 @@ impl JumpPalette {
     }
 
     fn row(&self, index: usize, target: &JumpTarget, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let kind = match target.kind {
             JumpKind::Step => "step",
             JumpKind::File => "file",
@@ -106,20 +107,15 @@ impl JumpPalette {
                 this.selected = index;
                 this.pick(window, cx);
             }))
-            .child(
-                div()
-                    .w(px(48.))
-                    .text_color(Palette::muted_text())
-                    .child(kind),
-            )
+            .child(div().w(px(48.)).text_color(colors.muted_text).child(kind))
             .child(div().flex_1().child(target.label.clone()))
             .child(
                 div()
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .child(target.detail.clone()),
             );
         if index == self.selected {
-            row.bg(Palette::current())
+            row.bg(colors.current)
         } else {
             row
         }
@@ -128,6 +124,7 @@ impl JumpPalette {
 
 impl Render for JumpPalette {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
         if !self.is_open {
             return div().into_any_element();
         }
@@ -159,19 +156,19 @@ impl Render for JumpPalette {
                     .max_h(px(480.))
                     .flex()
                     .flex_col()
-                    .bg(Palette::background())
+                    .bg(colors.background)
                     .border_1()
-                    .border_color(Palette::border())
+                    .border_color(colors.border)
                     .rounded_md()
                     .shadow_lg()
                     .font_family(TEXT_FONT)
                     .text_sm()
-                    .text_color(Palette::text())
+                    .text_color(colors.text)
                     .child(
                         div()
                             .p_3()
                             .border_b_1()
-                            .border_color(Palette::border())
+                            .border_color(colors.border)
                             .child(self.draft.shown()),
                     )
                     .children(rows),

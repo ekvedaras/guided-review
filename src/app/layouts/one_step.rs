@@ -27,7 +27,7 @@ use crate::app::components::image_row::{ImagePictures, ImageRow};
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::new_commits_banner::{NewCommitsBanner, RepinProgress};
-use crate::app::components::palette::{Palette, TEXT_FONT};
+use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::{RefreshBanner, RefreshProgress};
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::text_input::TextDraft;
@@ -467,7 +467,7 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let count = self.ask.read(cx).count_at(&place);
-        ask_button(SharedString::from(key), count).on_click(cx.listener(
+        ask_button(Colors::active(cx), SharedString::from(key), count).on_click(cx.listener(
             move |this, _, window, cx| {
                 this.ask.update(cx, |panel, cx| {
                     panel.open(&this.review, place.clone(), label.clone(), window, cx)
@@ -1043,7 +1043,7 @@ impl OneStepLayout {
         let at = at?;
         let launch = ide.launch(Path::new(&at.path), at.line);
         Some(
-            tool_button(key, "Open in IDE")
+            tool_button(Colors::active(cx), key, "Open in IDE")
                 .on_click(cx.listener(move |_, _, _, cx| run_launch(&launch, cx))),
         )
     }
@@ -1068,13 +1068,14 @@ impl OneStepLayout {
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let sidebar = &self.sidebar;
         let summary_row = div()
             .id("summary")
             .px_3()
             .py_1()
             .cursor_pointer()
-            .when_current(sidebar.is_summary_current)
+            .when_current(sidebar.is_summary_current, colors)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.review.go_to_summary();
                 this.review_changed(cx);
@@ -1083,20 +1084,20 @@ impl OneStepLayout {
         let progress_row = div()
             .px_3()
             .pb_2()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .child(sidebar.progress.clone());
         let sync_row = sidebar.sync_banner.clone().map(|banner| {
             div()
                 .px_3()
                 .pb_2()
-                .text_color(Palette::muted_text())
+                .text_color(colors.muted_text)
                 .child(banner)
         });
         let not_synced_row = sidebar.not_synced.then(|| {
             div()
                 .px_3()
                 .pb_2()
-                .text_color(Palette::muted_text())
+                .text_color(colors.muted_text)
                 .child("● not synced with GitHub yet")
         });
         let finish_dialog = FinishReviewDialog::new(
@@ -1114,12 +1115,12 @@ impl OneStepLayout {
                 .pr_3()
                 .py_1()
                 .cursor_pointer()
-                .when_current(step.is_current)
+                .when_current(step.is_current, colors)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.review.go_to(&id);
                     this.review_changed(cx);
                 }))
-                .when_ticked(step.is_ticked || step.is_gone)
+                .when_ticked(step.is_ticked || step.is_gone, colors)
                 .child(step.label.clone())
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
@@ -1128,7 +1129,7 @@ impl OneStepLayout {
                 .px_3()
                 .py_1()
                 .cursor_pointer()
-                .when_current(safety_net.is_current)
+                .when_current(safety_net.is_current, colors)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.review.go_to_safety_net();
                     this.review_changed(cx);
@@ -1142,9 +1143,9 @@ impl OneStepLayout {
             .h_full()
             .overflow_y_scroll()
             .py_2()
-            .bg(Palette::sidebar())
+            .bg(colors.sidebar)
             .border_r_1()
-            .border_color(Palette::border())
+            .border_color(colors.border)
             .text_sm()
             .child(progress_row)
             .child(finish_dialog)
@@ -1175,6 +1176,7 @@ impl OneStepLayout {
         selected: Option<&SelectedRows>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let colors = Colors::active(cx);
         let Some(row) = self.rows.row(index).cloned() else {
             return div().into_any_element();
         };
@@ -1184,7 +1186,7 @@ impl OneStepLayout {
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
                 .pb_3()
-                .text_color(Palette::muted_text())
+                .text_color(colors.muted_text)
                 .child(why)
                 .into_any_element(),
             PageRow::Diagram => div()
@@ -1205,7 +1207,7 @@ impl OneStepLayout {
             PageRow::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
-            } => repin_notes(gone_pieces, text_may_be_old).into_any_element(),
+            } => repin_notes(colors, gone_pieces, text_may_be_old).into_any_element(),
             PageRow::FullDiffToggle {
                 step,
                 is_showing_full_diff,
@@ -1240,14 +1242,14 @@ impl OneStepLayout {
                 )
                 .into_any_element()
             }
-            PageRow::NoChangeSinceRead => no_change_since_read_row().into_any_element(),
-            PageRow::BinaryFile(link) => binary_file_row(link).into_any_element(),
-            PageRow::Image { path, .. } => piece_row()
+            PageRow::NoChangeSinceRead => no_change_since_read_row(colors).into_any_element(),
+            PageRow::BinaryFile(link) => binary_file_row(colors, link).into_any_element(),
+            PageRow::Image { path, .. } => piece_row(colors)
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
-            PageRow::OnlyWhitespace => only_whitespace_row().into_any_element(),
+            PageRow::OnlyWhitespace => only_whitespace_row(colors).into_any_element(),
             PageRow::HunkGap { id, more } => {
-                hunk_gap(id, more, self.on_more_context(cx)).into_any_element()
+                hunk_gap(colors, id, more, self.on_more_context(cx)).into_any_element()
             }
             PageRow::Line(line) => {
                 let is_selected = selected.is_some_and(|rows| rows.contains(index, &line.location));
@@ -1264,24 +1266,24 @@ impl OneStepLayout {
             } => {
                 let thread = self.thread_element(&view, cx);
                 if is_under_a_line {
-                    piece_row().child(thread).into_any_element()
+                    piece_row(colors).child(thread).into_any_element()
                 } else {
                     div().pb_3().child(thread).into_any_element()
                 }
             }
-            PageRow::QueuedComment(queued) => piece_row()
+            PageRow::QueuedComment(queued) => piece_row(colors)
                 .child(self.queued_comment(&queued, cx))
                 .into_any_element(),
-            PageRow::Composer { place, .. } => piece_row()
+            PageRow::Composer { place, .. } => piece_row(colors)
                 .children(self.composer(&place, cx))
                 .into_any_element(),
-            PageRow::AskMarker(ask) => piece_row()
+            PageRow::AskMarker(ask) => piece_row(colors)
                 .flex()
                 .px_2()
                 .py_1()
                 .child(self.ask_at(&ask, cx))
                 .into_any_element(),
-            PageRow::PieceEnd => piece_end().into_any_element(),
+            PageRow::PieceEnd => piece_end(colors).into_any_element(),
         }
     }
 
@@ -1311,13 +1313,13 @@ impl OneStepLayout {
 }
 
 trait TickedRow {
-    fn when_ticked(self, is_ticked: bool) -> Self;
+    fn when_ticked(self, is_ticked: bool, colors: Colors) -> Self;
 }
 
 impl<E: Styled> TickedRow for E {
-    fn when_ticked(self, is_ticked: bool) -> Self {
+    fn when_ticked(self, is_ticked: bool, colors: Colors) -> Self {
         if is_ticked {
-            self.text_color(Palette::muted_text())
+            self.text_color(colors.muted_text)
         } else {
             self
         }
@@ -1325,13 +1327,13 @@ impl<E: Styled> TickedRow for E {
 }
 
 trait CurrentRow {
-    fn when_current(self, is_current: bool) -> Self;
+    fn when_current(self, is_current: bool, colors: Colors) -> Self;
 }
 
 impl<E: Styled> CurrentRow for E {
-    fn when_current(self, is_current: bool) -> Self {
+    fn when_current(self, is_current: bool, colors: Colors) -> Self {
         if is_current {
-            self.bg(Palette::current())
+            self.bg(colors.current)
         } else {
             self
         }
@@ -1339,6 +1341,7 @@ impl<E: Styled> CurrentRow for E {
 }
 
 fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    let colors = Colors::active(cx);
     let title = div()
         .id("step-title")
         .flex_1()
@@ -1360,22 +1363,23 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
         .flex()
         .items_center()
         .gap_3()
-        .when(heading.is_gone, |row| row.text_color(Palette::muted_text()))
+        .when(heading.is_gone, |row| row.text_color(colors.muted_text))
         .child(title)
         .child(tick_button(heading.is_ticked, heading.id.clone(), cx))
 }
 
 fn whitespace_toggle(is_on: bool, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    let colors = Colors::active(cx);
     div()
         .id("ignore-whitespace")
         .px_3()
         .py_1()
         .rounded_md()
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .cursor_pointer()
         .text_sm()
-        .when_current(is_on)
+        .when_current(is_on, colors)
         .on_click(cx.listener(|this, _, _, cx| {
             this.review.toggle_ignore_whitespace();
             this.review_changed(cx);
@@ -1383,13 +1387,13 @@ fn whitespace_toggle(is_on: bool, cx: &mut Context<OneStepLayout>) -> impl IntoE
         .child("Hide whitespace")
 }
 
-fn repin_notes(gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
+fn repin_notes(colors: Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
     div()
         .pb_3()
         .flex()
         .gap_3()
         .text_sm()
-        .text_color(Palette::muted_text())
+        .text_color(colors.muted_text)
         .when(gone_pieces > 0, |row| {
             row.child(match gone_pieces {
                 1 => "1 piece gone since last version".to_string(),
@@ -1404,6 +1408,7 @@ fn full_diff_toggle(
     is_showing_full_diff: bool,
     cx: &mut Context<OneStepLayout>,
 ) -> impl IntoElement {
+    let colors = Colors::active(cx);
     let label = if is_showing_full_diff {
         "Show only the change since your read"
     } else {
@@ -1414,7 +1419,7 @@ fn full_diff_toggle(
             .id("full-diff-toggle")
             .text_sm()
             .cursor_pointer()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.review.toggle_full_diff(&step);
                 this.review_changed(cx);
@@ -1423,28 +1428,33 @@ fn full_diff_toggle(
     )
 }
 
-fn tool_button(id: impl Into<gpui::ElementId>, label: &'static str) -> Stateful<Div> {
+fn tool_button(
+    colors: Colors,
+    id: impl Into<gpui::ElementId>,
+    label: &'static str,
+) -> Stateful<Div> {
     div()
         .id(id)
         .px_2()
         .py_1()
         .cursor_pointer()
         .text_sm()
-        .text_color(Palette::muted_text())
+        .text_color(colors.muted_text)
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .rounded_md()
         .child(label)
 }
 
 fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    let colors = Colors::active(cx);
     div()
         .id("tick")
         .px_3()
         .py_1()
         .rounded_md()
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .cursor_pointer()
         .text_sm()
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
@@ -1463,6 +1473,7 @@ impl Focusable for OneStepLayout {
 
 impl Render for OneStepLayout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let key_context = if self.composing.is_some() {
             format!("{} {}", Self::KEY_CONTEXT, CommentComposer::KEY_CONTEXT)
         } else {
@@ -1502,9 +1513,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::toggle_jump))
             .size_full()
             .flex()
-            .bg(Palette::background())
+            .bg(colors.background)
             .font_family(TEXT_FONT)
-            .text_color(Palette::text())
+            .text_color(colors.text)
             .child(self.sidebar(cx))
             .child(
                 div()
@@ -1536,7 +1547,7 @@ impl Render for OneStepLayout {
                             .px_6()
                             .py_1()
                             .text_sm()
-                            .bg(Palette::current())
+                            .bg(colors.current)
                             .child(notice)
                     }))
                     .children(

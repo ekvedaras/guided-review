@@ -5,7 +5,7 @@ use gpui::{
     RenderImage, RenderOnce, StatefulInteractiveElement, Styled, Window, canvas, div, px,
 };
 
-use crate::app::components::palette::{Appearance, Palette};
+use crate::app::components::palette::{Appearance, Colors};
 
 use super::drawer::DiagramDrawer;
 use super::memory::{DiagramMemory, Showing};
@@ -116,13 +116,14 @@ impl DiagramView {
 
 impl RenderOnce for DiagramView {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let memory = &self.diagrams.read(cx).memory;
         let frame = div()
             .id("diagram")
             .overflow_x_scroll()
             .rounded_md()
             .border_1()
-            .border_color(Palette::border());
+            .border_color(colors.border);
         if let Some(svg) = memory.svg() {
             let width = svg.width();
             let strips = memory
@@ -138,7 +139,7 @@ impl RenderOnce for DiagramView {
         frame
             .p_3()
             .text_sm()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .child(note)
     }
 }

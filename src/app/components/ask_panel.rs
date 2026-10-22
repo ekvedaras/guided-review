@@ -18,7 +18,7 @@ use crate::viewer::{
     Review, StepId, TurnStopper,
 };
 
-use super::palette::{Palette, TEXT_FONT};
+use super::palette::{Colors, TEXT_FONT};
 use super::text_input::TextDraft;
 
 /// Everything the panel needs to talk to the AI, built once at startup.
@@ -375,6 +375,7 @@ impl AskPanel {
     }
 
     fn ask_block(&self, ask: &Ask, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let id = ask.id;
         let is_selected = self.selected == Some(id);
         let messages = ask.messages.iter().map(|message| {
@@ -397,16 +398,16 @@ impl AskPanel {
             .p_2()
             .border_1()
             .border_color(if is_selected {
-                Palette::text()
+                colors.text
             } else {
-                Palette::border()
+                colors.border
             })
             .rounded_md()
             .children(messages);
         if let Some(activity) = &ask.activity {
             block = block.child(
                 div()
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .child(format!("{activity}...")),
             );
         }
@@ -416,12 +417,12 @@ impl AskPanel {
         if self.code_changed.contains(&id) {
             block = block.child(
                 div()
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .child("Code changed since: this answer may be old"),
             );
         }
         let is_answering = self.pool.is_answering(id);
-        let mut actions = div().flex().gap_3().text_color(Palette::muted_text());
+        let mut actions = div().flex().gap_3().text_color(colors.muted_text);
         if is_answering {
             actions = actions.child(
                 div()
@@ -478,6 +479,7 @@ fn id_label(id: AskId) -> String {
 
 impl Render for AskPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let Some(target) = &self.target else {
             return div().into_any_element();
         };
@@ -492,7 +494,7 @@ impl Render for AskPanel {
         let input = match (self.selected, target.unavailable) {
             (_, Some(reason)) => div().text_color(red()).child(reason),
             (Some(id), None) if self.pool.is_answering(id) => div()
-                .text_color(Palette::muted_text())
+                .text_color(colors.muted_text)
                 .child("Waiting for the answer..."),
             _ => div()
                 .flex()
@@ -513,9 +515,9 @@ impl Render for AskPanel {
             .h_full()
             .flex()
             .flex_col()
-            .bg(Palette::sidebar())
+            .bg(colors.sidebar)
             .border_l_1()
-            .border_color(Palette::border())
+            .border_color(colors.border)
             .font_family(TEXT_FONT)
             .text_sm()
             .child(
@@ -524,7 +526,7 @@ impl Render for AskPanel {
                     .justify_between()
                     .p_2()
                     .border_b_1()
-                    .border_color(Palette::border())
+                    .border_color(colors.border)
                     .child(div().child(format!("Ask: {place}")))
                     .child(
                         div()
@@ -549,7 +551,7 @@ impl Render for AskPanel {
                 div()
                     .p_2()
                     .border_t_1()
-                    .border_color(Palette::border())
+                    .border_color(colors.border)
                     .child(input),
             )
             .into_any_element()
@@ -565,7 +567,7 @@ pub fn lines_label(start: &LineLocation, end: &LineLocation) -> String {
 }
 
 /// The button on a place. It shows how many Asks the place already has.
-pub fn ask_button(id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
+pub fn ask_button(colors: Colors, id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
     let label = if count == 0 {
         "Ask".to_string()
     } else {
@@ -577,9 +579,9 @@ pub fn ask_button(id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
         .py_1()
         .cursor_pointer()
         .text_sm()
-        .text_color(Palette::muted_text())
+        .text_color(colors.muted_text)
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .rounded_md()
         .child(label)
 }

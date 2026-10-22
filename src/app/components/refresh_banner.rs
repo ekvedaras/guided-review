@@ -5,7 +5,7 @@ use gpui::{
 
 use crate::viewer::RefreshBrief;
 
-use super::palette::Palette;
+use super::palette::Colors;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshProgress {
@@ -40,7 +40,8 @@ impl RefreshBanner {
 }
 
 impl RenderOnce for RefreshBanner {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let message = match &self.progress {
             RefreshProgress::Running => "Refreshing the tour with your claude…".to_string(),
             RefreshProgress::Idle | RefreshProgress::Failed(_) => format!(
@@ -64,7 +65,7 @@ impl RenderOnce for RefreshBanner {
                 .py_1()
                 .rounded_md()
                 .border_1()
-                .border_color(Palette::border())
+                .border_color(colors.border)
                 .cursor_pointer()
                 .on_click(self.on_refresh)
                 .child(button_label)
@@ -84,9 +85,9 @@ impl RenderOnce for RefreshBanner {
             .flex()
             .flex_col()
             .gap_1()
-            .bg(Palette::current())
+            .bg(colors.current)
             .border_b_1()
-            .border_color(Palette::border())
+            .border_color(colors.border)
             .text_sm()
             .child(
                 div()

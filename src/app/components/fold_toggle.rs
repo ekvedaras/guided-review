@@ -3,7 +3,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div,
 };
 
-use super::palette::Palette;
+use super::palette::Colors;
 
 type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -30,7 +30,8 @@ impl FoldToggle {
 }
 
 impl RenderOnce for FoldToggle {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let label = match (self.folded, self.piece_count) {
             (true, 1) => "Show its 1 piece".to_string(),
             (true, count) => format!("Show its {count} pieces"),
@@ -40,7 +41,7 @@ impl RenderOnce for FoldToggle {
             .id("fold-toggle")
             .text_sm()
             .cursor_pointer()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .on_click(self.on_toggle)
             .child(label)
     }

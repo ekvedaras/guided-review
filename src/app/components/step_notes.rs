@@ -2,7 +2,7 @@ use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
 use crate::tour::Step;
 
-use super::palette::Palette;
+use super::palette::Colors;
 
 /// The check hint and the TLDR the tour writer put on a step.
 #[derive(IntoElement, Clone, Hash)]
@@ -25,15 +25,16 @@ impl StepNotes {
 }
 
 impl RenderOnce for StepNotes {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let check = self.check.map(|check| {
             div()
                 .px_3()
                 .py_2()
                 .rounded_md()
                 .border_1()
-                .border_color(Palette::border())
-                .bg(Palette::current())
+                .border_color(colors.border)
+                .bg(colors.current)
                 .child(format!("Check: {check}"))
         });
         let tldr = (!self.tldr.is_empty()).then(|| {
@@ -41,12 +42,7 @@ impl RenderOnce for StepNotes {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(Palette::muted_text())
-                        .child("TLDR"),
-                )
+                .child(div().text_sm().text_color(colors.muted_text).child("TLDR"))
                 .children(
                     self.tldr
                         .into_iter()

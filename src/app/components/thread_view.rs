@@ -11,7 +11,7 @@ use crate::viewer::{
 };
 
 use super::markdown_view::MarkdownView;
-use super::palette::Palette;
+use super::palette::Colors;
 use super::text_input::TextDraft;
 
 type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -47,6 +47,7 @@ impl ThreadUi {
 }
 
 struct ReplyBox<'a> {
+    colors: Colors,
     thread_id: &'a str,
     can_reply_now: bool,
     on_action: &'a OnThreadAction,
@@ -130,13 +131,13 @@ impl ThreadElement {
     }
 }
 
-fn small_button(id: SharedString, label: &str) -> gpui::Stateful<gpui::Div> {
+fn small_button(colors: Colors, id: SharedString, label: &str) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .px_2()
         .rounded_md()
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .cursor_pointer()
         .text_sm()
         .child(label.to_string())
@@ -174,6 +175,7 @@ fn run_action(
 
 impl ThreadElement {
     fn reactions(
+        colors: Colors,
         comment: &ThreadComment,
         ui: &Entity<ThreadUi>,
         on_action: &OnThreadAction,
@@ -195,6 +197,7 @@ impl ThreadElement {
                         reaction.emoji().to_string()
                     };
                     let button = small_button(
+                        colors,
                         SharedString::from(format!(
                             "react-{}-{}",
                             comment.id,
@@ -202,7 +205,7 @@ impl ThreadElement {
                         )),
                         &label,
                     )
-                    .when_else(viewer_has_reacted, |b| b.bg(Palette::current()))
+                    .when_else(viewer_has_reacted, |b| b.bg(colors.current))
                     .when_else(count == 0, |b| b.opacity(0.5));
                     button.on_click(move |_, _, cx| {
                         let action = ThreadAction::SetReaction {
@@ -219,6 +222,7 @@ impl ThreadElement {
 
     fn reply_box(
         ReplyBox {
+            colors,
             thread_id,
             can_reply_now,
             on_action,
@@ -284,21 +288,30 @@ impl ThreadElement {
                 .gap_2()
                 .child(
                     small_button(
+                        colors,
                         SharedString::from(format!("reply-add-{id}")),
                         "Add to review",
                     )
                     .on_click(send(SendMode::AddToReview)),
                 )
                 .children(can_reply_now.then(|| {
-                    small_button(SharedString::from(format!("reply-now-{id}")), "Reply now")
-                        .on_click(send(SendMode::CommentNow))
+                    small_button(
+                        colors,
+                        SharedString::from(format!("reply-now-{id}")),
+                        "Reply now",
+                    )
+                    .on_click(send(SendMode::CommentNow))
                 }))
                 .child(
-                    small_button(SharedString::from(format!("reply-cancel-{id}")), "Cancel")
-                        .on_click({
-                            let on_reply_draft = on_reply_draft.clone();
-                            move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
-                        }),
+                    small_button(
+                        colors,
+                        SharedString::from(format!("reply-cancel-{id}")),
+                        "Cancel",
+                    )
+                    .on_click({
+                        let on_reply_draft = on_reply_draft.clone();
+                        move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
+                    }),
                 )
         });
         div()
@@ -312,8 +325,8 @@ impl ThreadElement {
             .p_2()
             .rounded_md()
             .border_1()
-            .border_color(Palette::border())
-            .bg(Palette::sidebar())
+            .border_color(colors.border)
+            .bg(colors.sidebar)
             .child(div().min_h(px(48.)).child(if is_busy {
                 reply.text().to_string()
             } else {
@@ -353,6 +366,7 @@ impl<E> WhenElse for E {}
 
 impl RenderOnce for ThreadElement {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let id = self.view.thread.id.clone();
         let ui = window.use_keyed_state(
             SharedString::from(format!("thread-ui-{id}")),
@@ -379,7 +393,7 @@ impl RenderOnce for ThreadElement {
             .flex_1()
             .cursor_pointer()
             .text_sm()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .on_click(self.on_toggle)
             .child(format!(
                 "{} {summary}",
@@ -392,7 +406,7 @@ impl RenderOnce for ThreadElement {
                 .flex_none()
                 .cursor_pointer()
                 .text_sm()
-                .text_color(Palette::muted_text())
+                .text_color(colors.muted_text)
                 .on_click(move |_, _, cx| cx.open_url(&url))
                 .child("Open on GitHub")
         });
@@ -416,7 +430,7 @@ impl RenderOnce for ThreadElement {
                                 )
                                 .on_lines(self.view.commented_lines.clone()),
                             )
-                            .child(Self::reactions(comment, &ui, &reaction_on_action))
+                            .child(Self::reactions(colors, comment, &ui, &reaction_on_action))
                     }),
             )
         });
@@ -445,15 +459,15 @@ impl RenderOnce for ThreadElement {
                 .flex()
                 .gap_2()
                 .child(
-                    small_button(SharedString::from(format!("reply-{id}")), "Reply").on_click(
-                        move |_, window, cx| {
+                    small_button(colors, SharedString::from(format!("reply-{id}")), "Reply")
+                        .on_click(move |_, window, cx| {
                             open_reply(ReplyDraftChange::Open, cx);
                             window.focus(&reply_focus, cx);
-                        },
-                    ),
+                        }),
                 )
                 .child(
                     small_button(
+                        colors,
                         SharedString::from(format!("resolve-{id}")),
                         if thread.is_resolved {
                             "Unresolve"
@@ -472,6 +486,7 @@ impl RenderOnce for ThreadElement {
                 .children(reply.as_deref().map(|text| {
                     Self::reply_box(
                         ReplyBox {
+                            colors,
                             thread_id: &id,
                             can_reply_now,
                             on_action: &on_action,
@@ -496,8 +511,8 @@ impl RenderOnce for ThreadElement {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(Palette::border())
-            .bg(Palette::background())
+            .border_color(colors.border)
+            .bg(colors.background)
             .font_family(super::palette::TEXT_FONT)
             .child(
                 div()

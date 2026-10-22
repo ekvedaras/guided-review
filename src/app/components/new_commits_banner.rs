@@ -6,7 +6,7 @@ use gpui::{
 use crate::pull_request::Sha;
 use crate::viewer::OldHead;
 
-use super::palette::Palette;
+use super::palette::Colors;
 
 type OnRepin = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -40,7 +40,8 @@ impl NewCommitsBanner {
 }
 
 impl RenderOnce for NewCommitsBanner {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let message = match &self.progress {
             RepinProgress::Running => "Updating the tour…".to_string(),
             RepinProgress::Idle | RepinProgress::Failed(_) => format!(
@@ -60,7 +61,7 @@ impl RenderOnce for NewCommitsBanner {
                 .py_1()
                 .rounded_md()
                 .border_1()
-                .border_color(Palette::border())
+                .border_color(colors.border)
                 .cursor_pointer()
                 .on_click(self.on_repin)
                 .child(button_label)
@@ -75,9 +76,9 @@ impl RenderOnce for NewCommitsBanner {
             .flex()
             .flex_col()
             .gap_1()
-            .bg(Palette::current())
+            .bg(colors.current)
             .border_b_1()
-            .border_color(Palette::border())
+            .border_color(colors.border)
             .text_sm()
             .child(
                 div()

@@ -7,7 +7,7 @@ use gpui::{
 
 use crate::viewer::{CommentDraft, CommentPlace, QueuedComment};
 
-use super::palette::Palette;
+use super::palette::Colors;
 use super::text_input::TextDraft;
 
 pub type OnCompose = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -63,14 +63,19 @@ impl CommentComposer {
     }
 }
 
-fn button(id: &'static str, label: &'static str, on_click: OnCompose) -> impl IntoElement {
+fn button(
+    colors: Colors,
+    id: &'static str,
+    label: &'static str,
+    on_click: OnCompose,
+) -> impl IntoElement {
     div()
         .id(id)
         .px_3()
         .py_1()
         .rounded_md()
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .cursor_pointer()
         .text_sm()
         .on_click(move |_, window, cx| on_click(window, cx))
@@ -78,7 +83,8 @@ fn button(id: &'static str, label: &'static str, on_click: OnCompose) -> impl In
 }
 
 impl RenderOnce for CommentComposer {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let place = &self.draft.place;
         let id = SharedString::from(format!("composer-{}-{}", place.path(), place.end.line));
         let on_focus = self.on_focus.clone();
@@ -88,25 +94,35 @@ impl RenderOnce for CommentComposer {
         } else {
             body.text().to_string()
         };
-        let buttons =
-            (!self.is_sending).then(|| {
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(button(
-                        "add-to-review",
-                        "Add to review",
-                        self.on_add_to_review,
-                    ))
-                    .children(
-                        self.can_comment_now
-                            .then(|| button("comment-now", "Comment now", self.on_comment_now)),
+        let buttons = (!self.is_sending).then(|| {
+            div()
+                .flex()
+                .gap_2()
+                .child(button(
+                    colors,
+                    "add-to-review",
+                    "Add to review",
+                    self.on_add_to_review,
+                ))
+                .children(
+                    self.can_comment_now
+                        .then(|| button(colors, "comment-now", "Comment now", self.on_comment_now)),
+                )
+                .children(self.can_suggest_change.then(|| {
+                    button(
+                        colors,
+                        "suggest-change",
+                        "Suggest change",
+                        self.on_suggest_change,
                     )
-                    .children(self.can_suggest_change.then(|| {
-                        button("suggest-change", "Suggest change", self.on_suggest_change)
-                    }))
-                    .child(button("discard-comment", "Discard", self.on_discard))
-            });
+                }))
+                .child(button(
+                    colors,
+                    "discard-comment",
+                    "Discard",
+                    self.on_discard,
+                ))
+        });
         div()
             .id(id)
             .flex()
@@ -116,14 +132,14 @@ impl RenderOnce for CommentComposer {
             .p_2()
             .rounded_md()
             .border_1()
-            .border_color(Palette::border())
-            .bg(Palette::sidebar())
+            .border_color(colors.border)
+            .bg(colors.sidebar)
             .font_family(super::palette::TEXT_FONT)
             .on_click(move |_, window, cx| on_focus(window, cx))
             .child(
                 div()
                     .text_xs()
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .child(describe(place)),
             )
             .child(div().min_h(gpui::px(48.)).child(body))
@@ -165,7 +181,8 @@ impl QueuedCommentNote {
 }
 
 impl RenderOnce for QueuedCommentNote {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let on_discard = self.on_discard;
         div()
             .flex()
@@ -175,24 +192,19 @@ impl RenderOnce for QueuedCommentNote {
             .p_2()
             .rounded_md()
             .border_1()
-            .border_color(Palette::border())
+            .border_color(colors.border)
             .text_sm()
             .child(self.queued.draft.body.clone())
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(Palette::muted_text())
-                    .child(format!(
-                        "Not sent yet, will be tried again: {}",
-                        self.queued.failed_because
-                    )),
-            )
+            .child(div().text_xs().text_color(colors.muted_text).child(format!(
+                "Not sent yet, will be tried again: {}",
+                self.queued.failed_because
+            )))
             .child(
                 div()
                     .id("discard-queued")
                     .text_xs()
                     .cursor_pointer()
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .on_click(move |_, window, cx| on_discard(window, cx))
                     .child("Discard"),
             )

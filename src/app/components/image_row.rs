@@ -11,7 +11,7 @@ use crate::image_facts::{self, PixelSize};
 use crate::viewer::{ImagePreview, ImageSide};
 
 use super::diff_view::OnImageComment;
-use super::palette::{Appearance, Colors, Palette};
+use super::palette::Colors;
 
 const PICTURE_BOX: (f32, f32) = (460., 360.);
 const CHECKER_CELL: f32 = 8.;
@@ -142,8 +142,8 @@ impl ImageRow {
 }
 
 impl RenderOnce for ImageRow {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let colors = Palette::colors();
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let Some(preview) = self.preview else {
             return div()
                 .px_2()
@@ -238,7 +238,7 @@ fn side_column(
                 .children(mark.map(|mark| div().text_color(mark_color).child(mark.to_string()))),
         )
         .child(match picture {
-            Some(picture) => drawn(picture, path, label).into_any_element(),
+            Some(picture) => drawn(picture, path, label, colors).into_any_element(),
             None => div()
                 .text_sm()
                 .text_color(colors.muted_text)
@@ -251,7 +251,7 @@ fn side_column(
         .into_any_element()
 }
 
-fn drawn(picture: &Picture, path: &SharedString, label: &str) -> impl IntoElement {
+fn drawn(picture: &Picture, path: &SharedString, label: &str, colors: Colors) -> impl IntoElement {
     let (width, height) = fitted(picture.pixels);
     div()
         .id(ElementId::from(SharedString::from(format!(
@@ -260,7 +260,7 @@ fn drawn(picture: &Picture, path: &SharedString, label: &str) -> impl IntoElemen
         .relative()
         .w(px(width))
         .h(px(height))
-        .child(checkerboard(width, height))
+        .child(checkerboard(width, height, colors))
         .child(
             img(picture.image.clone())
                 .absolute()
@@ -280,11 +280,8 @@ fn fitted(pixels: PixelSize) -> (f32, f32) {
 }
 
 /// What transparent parts of a picture show through to.
-fn checkerboard(width: f32, height: f32) -> impl IntoElement {
-    let (light, dark) = match Palette::active() {
-        Appearance::Light => (gpui::rgb(0xffffff), gpui::rgb(0xe3e3e3)),
-        Appearance::Dark => (gpui::rgb(0x2b2b2b), gpui::rgb(0x3b3b3b)),
-    };
+fn checkerboard(width: f32, height: f32, colors: Colors) -> impl IntoElement {
+    let (light, dark) = (colors.checker_light, colors.checker_dark);
     canvas(
         |_, _, _| (),
         move |bounds, (), window, _| {

@@ -11,7 +11,7 @@ use gpui::Global;
 
 use crate::viewer::{Block, Capture, Markdown, Run, SuggestionDiff, highlight_snippet};
 
-use super::palette::{CODE_FONT, Palette};
+use super::palette::{CODE_FONT, Colors};
 
 /// The `<details>` the reader opened, by the key of the body they are in. Kept in one place, not in each
 /// body, so the layout can see them: an open one makes its row taller.
@@ -67,6 +67,7 @@ impl MarkdownView {
 
 impl RenderOnce for MarkdownView {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         if self.commented_lines.is_empty() {
             return blocks(&self.markdown.blocks, &self.key, window, cx);
         }
@@ -83,9 +84,10 @@ impl RenderOnce for MarkdownView {
                         Block::Code {
                             language: Some(language),
                             text,
-                        } if language == "suggestion" => {
-                            suggestion_view(&SuggestionDiff::of(&self.commented_lines, text))
-                        }
+                        } if language == "suggestion" => suggestion_view(
+                            colors,
+                            &SuggestionDiff::of(&self.commented_lines, text),
+                        ),
                         _ => block_element(block, &format!("{}-{index}", self.key), window, cx),
                     }),
             )
@@ -93,7 +95,7 @@ impl RenderOnce for MarkdownView {
     }
 }
 
-fn suggestion_view(diff: &SuggestionDiff) -> AnyElement {
+fn suggestion_view(colors: Colors, diff: &SuggestionDiff) -> AnyElement {
     let rows = |lines: &[String], sign: &'static str, background: gpui::Rgba| {
         lines
             .iter()
@@ -114,7 +116,7 @@ fn suggestion_view(diff: &SuggestionDiff) -> AnyElement {
         .flex_col()
         .rounded_md()
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .font_family(CODE_FONT)
         .text_sm()
         .overflow_hidden()
@@ -122,12 +124,12 @@ fn suggestion_view(diff: &SuggestionDiff) -> AnyElement {
             div()
                 .px_2()
                 .py_1()
-                .bg(Palette::sidebar())
-                .text_color(Palette::muted_text())
+                .bg(colors.sidebar)
+                .text_color(colors.muted_text)
                 .child("Suggested change"),
         )
-        .children(rows(&diff.removed, "-", Palette::removed_line()))
-        .children(rows(&diff.added, "+", Palette::added_line()))
+        .children(rows(&diff.removed, "-", colors.removed_line))
+        .children(rows(&diff.added, "+", colors.added_line))
         .into_any_element()
 }
 
@@ -146,8 +148,9 @@ fn blocks(items: &[Block], key: &str, window: &mut Window, cx: &mut App) -> AnyE
 }
 
 fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) -> AnyElement {
+    let colors = Colors::active(cx);
     match block {
-        Block::Paragraph(runs) => inline_text(runs, key, 1.0).into_any_element(),
+        Block::Paragraph(runs) => inline_text(colors, runs, key, 1.0).into_any_element(),
         Block::Heading { level, text } => {
             let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0][usize::from(*level - 1).min(5)];
             let heading = text
@@ -157,7 +160,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     ..run.clone()
                 })
                 .collect::<Vec<_>>();
-            inline_text(&heading, key, scale).into_any_element()
+            inline_text(colors, &heading, key, scale).into_any_element()
         }
         Block::List {
             first_number,
@@ -183,16 +186,16 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     )))
             }))
             .into_any_element(),
-        Block::Code { language, text } => code_block(language.as_deref(), text),
+        Block::Code { language, text } => code_block(colors, language.as_deref(), text),
         Block::Quote(inner) => div()
             .pl_3()
             .border_l_2()
-            .border_color(Palette::border())
-            .text_color(Palette::muted_text())
+            .border_color(colors.border)
+            .text_color(colors.muted_text)
             .child(blocks(inner, key, window, cx))
             .into_any_element(),
         Block::Details { summary, body } => details(summary, body, key, window, cx),
-        Block::Rule => div().h(px(1.)).bg(Palette::border()).into_any_element(),
+        Block::Rule => div().h(px(1.)).bg(colors.border).into_any_element(),
     }
 }
 
@@ -203,6 +206,7 @@ fn details(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    let colors = Colors::active(cx);
     let open = cx
         .try_global::<OpenDetails>()
         .is_some_and(|details| details.0.contains(key));
@@ -231,7 +235,7 @@ fn details(
         .child(
             div()
                 .flex_1()
-                .child(inline_text(&title, &format!("{key}-summary"), 1.0)),
+                .child(inline_text(colors, &title, &format!("{key}-summary"), 1.0)),
         );
     div()
         .flex()
@@ -254,7 +258,7 @@ trait WhenOpen: ParentElement + Sized {
 
 impl<E: ParentElement> WhenOpen for E {}
 
-fn code_block(language: Option<&str>, text: &str) -> AnyElement {
+fn code_block(colors: Colors, language: Option<&str>, text: &str) -> AnyElement {
     let spans = highlight_snippet(language, text);
     div()
         .flex()
@@ -262,9 +266,9 @@ fn code_block(language: Option<&str>, text: &str) -> AnyElement {
         .px_2()
         .py_1()
         .rounded_md()
-        .bg(Palette::sidebar())
+        .bg(colors.sidebar)
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .font_family(CODE_FONT)
         .text_sm()
         .overflow_hidden()
@@ -278,7 +282,7 @@ fn code_block(language: Option<&str>, text: &str) -> AnyElement {
                     (
                         span.range.clone(),
                         HighlightStyle {
-                            color: Some(Palette::code(span.capture).into()),
+                            color: Some(colors.code(span.capture).into()),
                             ..Default::default()
                         },
                     )
@@ -292,7 +296,7 @@ fn code_block(language: Option<&str>, text: &str) -> AnyElement {
         .into_any_element()
 }
 
-fn inline_text(runs: &[Run], key: &str, scale: f32) -> AnyElement {
+fn inline_text(colors: Colors, runs: &[Run], key: &str, scale: f32) -> AnyElement {
     let mut text = String::new();
     let mut highlights = Vec::new();
     let mut links = Vec::new();
@@ -302,7 +306,7 @@ fn inline_text(runs: &[Run], key: &str, scale: f32) -> AnyElement {
         let is_styled =
             run.bold || run.italic || run.strikethrough || run.code || run.link.is_some();
         if is_styled && !range.is_empty() {
-            highlights.push((range.clone(), style_of(run)));
+            highlights.push((range.clone(), style_of(colors, run)));
         }
         if let Some(url) = &run.link {
             links.push((range, url.clone()));
@@ -322,11 +326,11 @@ fn inline_text(runs: &[Run], key: &str, scale: f32) -> AnyElement {
         .into_any_element()
 }
 
-fn style_of(run: &Run) -> HighlightStyle {
+fn style_of(colors: Colors, run: &Run) -> HighlightStyle {
     let color = if run.link.is_some() {
-        Some(Palette::code(Capture::Function).into())
+        Some(colors.code(Capture::Function).into())
     } else if run.code {
-        Some(Palette::code(Capture::String).into())
+        Some(colors.code(Capture::String).into())
     } else {
         None
     };
@@ -334,7 +338,7 @@ fn style_of(run: &Run) -> HighlightStyle {
         color,
         font_weight: run.bold.then_some(FontWeight::BOLD),
         font_style: run.italic.then_some(FontStyle::Italic),
-        background_color: run.code.then(|| Palette::sidebar().into()),
+        background_color: run.code.then(|| colors.sidebar.into()),
         underline: run.link.is_some().then(|| UnderlineStyle {
             thickness: px(1.),
             color: None,

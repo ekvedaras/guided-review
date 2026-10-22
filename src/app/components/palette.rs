@@ -1,6 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
-use gpui::{Rgba, WindowAppearance, rgb};
+use gpui::{App, Global, Rgba, WindowAppearance, rgb};
 
 use crate::viewer::Capture;
 
@@ -16,7 +14,14 @@ pub enum Appearance {
     Dark,
 }
 
+/// The window sets the active appearance at start and when macOS flips it.
+impl Global for Appearance {}
+
 impl Appearance {
+    pub fn active(cx: &App) -> Self {
+        *cx.global::<Self>()
+    }
+
     pub fn of_window(appearance: WindowAppearance) -> Self {
         match appearance {
             WindowAppearance::Light | WindowAppearance::VibrantLight => Self::Light,
@@ -41,6 +46,8 @@ pub struct Colors {
     pub warning: Rgba,
     pub success: Rgba,
     pub danger: Rgba,
+    pub checker_light: Rgba,
+    pub checker_dark: Rgba,
     code: CodeColors,
 }
 
@@ -76,6 +83,8 @@ impl Colors {
             warning: rgb(0x9a6700),
             success: rgb(0x1a7f37),
             danger: rgb(0xcf222e),
+            checker_light: rgb(0xffffff),
+            checker_dark: rgb(0xe3e3e3),
             code: CodeColors {
                 keyword: rgb(0xcf222e),
                 string: rgb(0x0a3069),
@@ -108,6 +117,8 @@ impl Colors {
             warning: rgb(0xd29922),
             success: rgb(0x3fb950),
             danger: rgb(0xf85149),
+            checker_light: rgb(0x2b2b2b),
+            checker_dark: rgb(0x3b3b3b),
             code: CodeColors {
                 keyword: rgb(0xff7b72),
                 string: rgb(0xa5d6ff),
@@ -133,6 +144,10 @@ impl Colors {
         }
     }
 
+    pub fn active(cx: &App) -> Self {
+        Self::of(Appearance::active(cx))
+    }
+
     pub fn code(&self, capture: Capture) -> Rgba {
         let code = &self.code;
         match capture {
@@ -156,57 +171,5 @@ impl Colors {
             | Capture::PunctuationDelimiter
             | Capture::PunctuationSpecial => code.punctuation,
         }
-    }
-}
-
-static DARK_IS_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-/// The colours of the appearance the window shows now, so a component asks for a colour
-/// by name and needs no theme handed down. The window sets it at start and when macOS flips.
-pub struct Palette;
-
-impl Palette {
-    pub fn set_active(appearance: Appearance) {
-        DARK_IS_ACTIVE.store(appearance == Appearance::Dark, Ordering::Relaxed);
-    }
-
-    pub fn active() -> Appearance {
-        if DARK_IS_ACTIVE.load(Ordering::Relaxed) {
-            Appearance::Dark
-        } else {
-            Appearance::Light
-        }
-    }
-
-    pub fn colors() -> Colors {
-        Colors::of(Self::active())
-    }
-
-    pub fn background() -> Rgba {
-        Self::colors().background
-    }
-    pub fn sidebar() -> Rgba {
-        Self::colors().sidebar
-    }
-    pub fn border() -> Rgba {
-        Self::colors().border
-    }
-    pub fn text() -> Rgba {
-        Self::colors().text
-    }
-    pub fn muted_text() -> Rgba {
-        Self::colors().muted_text
-    }
-    pub fn current() -> Rgba {
-        Self::colors().current
-    }
-    pub fn removed_line() -> Rgba {
-        Self::colors().removed_line
-    }
-    pub fn added_line() -> Rgba {
-        Self::colors().added_line
-    }
-    pub fn code(capture: Capture) -> Rgba {
-        Self::colors().code(capture)
     }
 }

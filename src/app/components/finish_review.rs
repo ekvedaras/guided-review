@@ -8,7 +8,7 @@ use gpui::{
 
 use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
 
-use super::palette::Palette;
+use super::palette::Colors;
 use super::text_input::TextDraft;
 
 /// Sends the review and calls back with how it went. The layout owns the review and the network.
@@ -78,13 +78,13 @@ fn label(verdict: ReviewVerdict) -> &'static str {
     }
 }
 
-fn button(id: &'static str, text: &str) -> gpui::Stateful<gpui::Div> {
+fn button(colors: Colors, id: &'static str, text: &str) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .px_2()
         .rounded_md()
         .border_1()
-        .border_color(Palette::border())
+        .border_color(colors.border)
         .cursor_pointer()
         .child(text.to_string())
 }
@@ -153,6 +153,7 @@ fn on_key(
 
 impl RenderOnce for FinishReviewDialog {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         let ui = window.use_keyed_state("finish-review-ui", cx, {
             let has_draft = !self.body.is_empty();
             move |_, cx| FinishUi::new(has_draft, cx)
@@ -176,7 +177,7 @@ impl RenderOnce for FinishReviewDialog {
 
         let open_button = {
             let (ui, focus) = (ui.clone(), focus.clone());
-            button("finish-review", "Finish review").on_click(move |_, window, cx| {
+            button(colors, "finish-review", "Finish review").on_click(move |_, window, cx| {
                 update(&ui, cx, |ui| ui.is_open = !ui.is_open);
                 window.focus(&focus, cx);
             })
@@ -209,7 +210,7 @@ impl RenderOnce for FinishReviewDialog {
                 .px_2()
                 .rounded_md()
                 .border_1()
-                .border_color(Palette::border())
+                .border_color(colors.border)
                 .cursor_pointer()
                 .child(label(choice))
                 .on_click(move |_, _, cx| {
@@ -219,7 +220,7 @@ impl RenderOnce for FinishReviewDialog {
                     })
                 });
             if choice == verdict {
-                chosen.bg(Palette::current())
+                chosen.bg(colors.current)
             } else {
                 chosen
             }
@@ -232,6 +233,7 @@ impl RenderOnce for FinishReviewDialog {
         let submit_button = {
             let (ui, on_finish, text) = (ui.clone(), self.on_finish.clone(), self.body.clone());
             button(
+                colors,
                 "submit-review",
                 if must_confirm {
                     "Approve..."
@@ -276,8 +278,8 @@ impl RenderOnce for FinishReviewDialog {
                     .p_2()
                     .rounded_md()
                     .border_1()
-                    .border_color(Palette::border())
-                    .bg(Palette::background())
+                    .border_color(colors.border)
+                    .bg(colors.background)
                     .child(body),
             )
             .children(warning_text)

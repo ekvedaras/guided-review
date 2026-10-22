@@ -10,7 +10,7 @@ use gpui::{
 
 use crate::viewer::{Capture, DiffLine, Edge, GitHubLink, LineKind, LineLocation, MoreContext};
 
-use super::palette::{CODE_FONT, Palette};
+use super::palette::{CODE_FONT, Colors};
 
 pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
 
@@ -119,10 +119,10 @@ impl DiffRow {
 }
 
 impl RenderOnce for DiffRow {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let line = self.line;
         let location = line.location.clone();
-        let colors = Palette::colors();
+        let colors = Colors::active(cx);
         let highlights = line.highlights.iter().map(|(range, capture)| {
             let style = HighlightStyle {
                 color: Some(colors.code(*capture).into()),
@@ -138,7 +138,7 @@ impl RenderOnce for DiffRow {
             .id(SharedString::from(link.to_string()))
             .flex_none()
             .cursor_pointer()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .on_click(move |event, _, cx| {
                 match (event.modifiers().secondary(), &open_in_ide, &ide_at) {
                     (true, Some(open_in_ide), Some(at)) => open_in_ide(at, cx),
@@ -151,7 +151,7 @@ impl RenderOnce for DiffRow {
             Some(on_gesture) => {
                 let at = location.clone();
                 comment_button
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .opacity(0.)
                     .group_hover("diff-row", |button| button.opacity(1.))
                     .cursor_pointer()
@@ -163,7 +163,7 @@ impl RenderOnce for DiffRow {
             }
             None => comment_button.into_any_element(),
         };
-        let row = piece_row()
+        let row = piece_row(colors)
             .group("diff-row")
             .flex()
             .overflow_hidden()
@@ -176,9 +176,9 @@ impl RenderOnce for DiffRow {
                 })
             });
         let row = match line.kind {
-            _ if self.is_selected => row.bg(Palette::current()),
-            LineKind::Removed => row.bg(Palette::removed_line()),
-            LineKind::Added => row.bg(Palette::added_line()),
+            _ if self.is_selected => row.bg(colors.current),
+            LineKind::Removed => row.bg(colors.removed_line),
+            LineKind::Added => row.bg(colors.added_line),
             LineKind::Context { .. } => row,
         };
         row.child(gutter).child(comment_button).child(code)
@@ -186,8 +186,8 @@ impl RenderOnce for DiffRow {
 }
 
 /// Every row of a piece sits between the box's side borders.
-pub fn piece_row() -> Div {
-    div().w_full().border_x_1().border_color(Palette::border())
+pub fn piece_row(colors: Colors) -> Div {
+    div().w_full().border_x_1().border_color(colors.border)
 }
 
 /// The top of a piece box: the piece's name, its re-pin label, and its buttons (open in IDE, ask).
@@ -213,17 +213,18 @@ impl PieceHeader {
 }
 
 impl RenderOnce for PieceHeader {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         div()
             .w_full()
             .flex()
             .items_center()
             .px_2()
             .gap_2()
-            .bg(Palette::sidebar())
+            .bg(colors.sidebar)
             .border_1()
             .rounded_t_md()
-            .border_color(Palette::border())
+            .border_color(colors.border)
             .text_sm()
             .child(
                 div()
@@ -234,7 +235,7 @@ impl RenderOnce for PieceHeader {
             )
             .children(
                 self.repin_label
-                    .map(|label| div().text_color(Palette::muted_text()).child(label)),
+                    .map(|label| div().text_color(colors.muted_text).child(label)),
             )
             .child(div().flex_1())
             .children(self.buttons)
@@ -242,45 +243,45 @@ impl RenderOnce for PieceHeader {
 }
 
 /// The bottom edge of a piece box, and the space before the next one.
-pub fn piece_end() -> impl IntoElement {
+pub fn piece_end(colors: Colors) -> impl IntoElement {
     div().pb_3().child(
         div()
             .h_1()
             .border_x_1()
             .border_b_1()
             .rounded_b_md()
-            .border_color(Palette::border()),
+            .border_color(colors.border),
     )
 }
 
-pub fn no_change_since_read_row() -> impl IntoElement {
-    piece_row()
+pub fn no_change_since_read_row(colors: Colors) -> impl IntoElement {
+    piece_row(colors)
         .px_2()
         .py_1()
         .text_sm()
-        .text_color(Palette::muted_text())
+        .text_color(colors.muted_text)
         .child("No change since you read it")
 }
 
-pub fn only_whitespace_row() -> impl IntoElement {
-    piece_row()
+pub fn only_whitespace_row(colors: Colors) -> impl IntoElement {
+    piece_row(colors)
         .px_2()
         .py_1()
         .text_sm()
-        .text_color(Palette::muted_text())
+        .text_color(colors.muted_text)
         .child("Only whitespace changed.")
 }
 
 /// A binary file has no lines to show, so it gets one row that sends the reviewer to GitHub.
-pub fn binary_file_row(link: GitHubLink) -> impl IntoElement {
-    piece_row().child(
+pub fn binary_file_row(colors: Colors, link: GitHubLink) -> impl IntoElement {
+    piece_row(colors).child(
         div()
             .id(SharedString::from(link.to_string()))
             .px_2()
             .py_1()
             .text_sm()
             .cursor_pointer()
-            .text_color(Palette::muted_text())
+            .text_color(colors.muted_text)
             .on_click(move |_, _, cx| cx.open_url(link.as_str()))
             .child("Binary file, open it on GitHub"),
     )
@@ -288,6 +289,7 @@ pub fn binary_file_row(link: GitHubLink) -> impl IntoElement {
 
 /// The band between hunks, like GitHub's `@@` line; clicking it shows more unchanged lines.
 pub fn hunk_gap(
+    colors: Colors,
     id: impl Into<ElementId>,
     more: Option<MoreContext>,
     on_more_context: OnMoreContext,
@@ -295,9 +297,9 @@ pub fn hunk_gap(
     let band = div()
         .id(id)
         .px_2()
-        .bg(Palette::sidebar())
+        .bg(colors.sidebar)
         .text_xs()
-        .text_color(Palette::muted_text());
+        .text_color(colors.muted_text);
     let band = match more {
         None => band.child("⋯"),
         Some(more) => {
@@ -310,5 +312,5 @@ pub fn hunk_gap(
                 .child(label)
         }
     };
-    piece_row().child(band)
+    piece_row(colors).child(band)
 }

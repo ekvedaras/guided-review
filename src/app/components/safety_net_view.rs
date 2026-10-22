@@ -1,6 +1,6 @@
 use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
-use super::palette::Palette;
+use super::palette::Colors;
 
 /// The top of the safety net: every change the tour does not show, so nothing in the PR stays hidden.
 /// Its pieces and threads follow as rows of the screen's list.
@@ -12,7 +12,8 @@ impl SafetyNetIntro {
 }
 
 impl RenderOnce for SafetyNetIntro {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
         div()
             .flex()
             .flex_col()
@@ -21,7 +22,7 @@ impl RenderOnce for SafetyNetIntro {
             .child(div().text_xl().child(Self::TITLE))
             .child(
                 div()
-                    .text_color(Palette::muted_text())
+                    .text_color(colors.muted_text)
                     .child("Changes in this PR that no step of the tour shows."),
             )
     }
