@@ -7,7 +7,9 @@ use serde::Deserialize;
 
 use crate::code_source::{CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
-use crate::viewer::{ViewedFile, ViewedState, ViewedSyncUnavailable};
+use crate::viewer::{
+    ReviewThread, Side, ThreadComment, ViewedFile, ViewedState, ViewedSyncUnavailable,
+};
 
 #[derive(Clone)]
 pub struct GitHub {
@@ -70,6 +72,15 @@ impl GitHub {
             api: std::env::var("GUIDED_REVIEW_GITHUB_API")
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
             token: token_from_gh_cli().or_else(|| std::env::var("GITHUB_TOKEN").ok()),
+            pull_request_ids: Arc::default(),
+        }
+    }
+
+    /// For a GitHub-like server at another address. GraphQL needs a token, so it gets a placeholder.
+    pub fn at(api: &str) -> Self {
+        Self {
+            api: api.to_string(),
+            token: Some("placeholder".to_string()),
             pull_request_ids: Arc::default(),
         }
     }
@@ -216,6 +227,23 @@ impl GitHub {
         Ok(answer["data"].take())
     }
 
+    /// Every review thread of the PR, over GraphQL (REST shows no resolved or outdated state).
+    pub fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
+        let mut threads = Vec::new();
+        let mut after = serde_json::Value::Null;
+        loop {
+            let data = self
+                .graphql(REVIEW_THREADS_QUERY, pull_request_variables(pr, &after))
+                .with_context(|| format!("could not read the review threads of {pr} from GitHub"))?;
+            let page = parse_review_threads(&serde_json::json!({"data": data}))?;
+            threads.extend(page.threads);
+            match page.next_cursor {
+                Some(next) => after = next.into(),
+                None => return Ok(threads),
+            }
+        }
+    }
+
     fn get(&self, path: &str, accept: &str) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
         let mut request = ureq::get(format!("{}/{path}", self.api))
             .header("Accept", accept)
@@ -317,4 +345,150 @@ fn token_from_gh_cli() -> Option<String> {
     let output = Command::new("gh").args(["auth", "token"]).output().ok()?;
     let token = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (output.status.success() && !token.is_empty()).then_some(token)
+}
+
+const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    reviewThreads(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id isResolved isOutdated path line startLine originalLine originalStartLine diffSide subjectType
+        comments(first: 50) { nodes { url body originalCommit { oid } author { login __typename } } } }
+    }
+  } }
+}";
+
+pub(crate) struct ReviewThreadsPage {
+    pub threads: Vec<ReviewThread>,
+    pub next_cursor: Option<String>,
+}
+
+pub(crate) fn parse_review_threads(
+    answer: &serde_json::Value,
+) -> anyhow::Result<ReviewThreadsPage> {
+    #[derive(Deserialize)]
+    struct Answer {
+        data: Option<Data>,
+    }
+    #[derive(Deserialize)]
+    struct Data {
+        repository: Repository,
+    }
+    #[derive(Deserialize)]
+    struct Repository {
+        #[serde(rename = "pullRequest")]
+        pull_request: PullRequest,
+    }
+    #[derive(Deserialize)]
+    struct PullRequest {
+        #[serde(rename = "reviewThreads")]
+        review_threads: Threads,
+    }
+    #[derive(Deserialize)]
+    struct Threads {
+        #[serde(rename = "pageInfo")]
+        page_info: PageInfo,
+        nodes: Vec<ThreadJson>,
+    }
+    #[derive(Deserialize)]
+    struct PageInfo {
+        #[serde(rename = "hasNextPage")]
+        has_next_page: bool,
+        #[serde(rename = "endCursor")]
+        end_cursor: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ThreadJson {
+        id: String,
+        is_resolved: bool,
+        is_outdated: bool,
+        path: String,
+        line: Option<usize>,
+        start_line: Option<usize>,
+        original_line: Option<usize>,
+        original_start_line: Option<usize>,
+        diff_side: String,
+        subject_type: String,
+        comments: Comments,
+    }
+    #[derive(Deserialize)]
+    struct Comments {
+        nodes: Vec<CommentJson>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CommentJson {
+        url: String,
+        body: String,
+        original_commit: Option<CommitJson>,
+        /// GitHub answers `null` for a deleted account.
+        author: Option<AuthorJson>,
+    }
+    #[derive(Deserialize)]
+    struct CommitJson {
+        oid: String,
+    }
+    #[derive(Deserialize)]
+    struct AuthorJson {
+        login: String,
+        #[serde(rename = "__typename")]
+        kind: String,
+    }
+
+    let answer: Answer = serde_json::from_value(answer.clone())?;
+    let threads = answer
+        .data
+        .context("GitHub answered the review threads query with an error")?
+        .repository
+        .pull_request
+        .review_threads;
+    Ok(ReviewThreadsPage {
+        next_cursor: threads
+            .page_info
+            .has_next_page
+            .then_some(threads.page_info.end_cursor)
+            .flatten(),
+        threads: threads
+            .nodes
+            .into_iter()
+            .map(|thread| ReviewThread {
+                id: thread.id,
+                is_resolved: thread.is_resolved,
+                is_outdated: thread.is_outdated,
+                path: thread.path,
+                line: thread.line,
+                start_line: thread.start_line,
+                side: if thread.diff_side == "LEFT" {
+                    Side::Base
+                } else {
+                    Side::Head
+                },
+                is_file_comment: thread.subject_type == "FILE",
+                original_line: thread.original_line,
+                original_start_line: thread.original_start_line,
+                original_commit: thread
+                    .comments
+                    .nodes
+                    .iter()
+                    .find_map(|comment| comment.original_commit.as_ref())
+                    .map(|commit| commit.oid.clone()),
+                comments: thread
+                    .comments
+                    .nodes
+                    .into_iter()
+                    .map(|comment| ThreadComment {
+                        is_bot: comment
+                            .author
+                            .as_ref()
+                            .is_some_and(|author| author.kind == "Bot"),
+                        author: comment
+                            .author
+                            .map_or_else(|| "ghost".to_string(), |author| author.login),
+                        body: comment.body,
+                        url: comment.url,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
 }

@@ -5,7 +5,9 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
 };
 
-use crate::viewer::{DiffHunk, DiffLine, Edge, GitHubLink, LineKind, MoreContext, PieceDiff};
+use crate::viewer::{
+    DiffHunk, DiffLine, Edge, GitHubLink, LineKind, LineLocation, MoreContext, PieceDiff,
+};
 
 use super::palette::{CODE_FONT, Palette};
 
@@ -17,6 +19,8 @@ pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
 pub struct DiffView {
     piece: PieceDiff,
     on_more_context: OnMoreContext,
+    /// Shown right under the row at their location.
+    threads: Vec<(LineLocation, AnyElement)>,
 }
 
 impl DiffView {
@@ -24,8 +28,31 @@ impl DiffView {
         Self {
             piece,
             on_more_context,
+            threads: Vec::new(),
         }
     }
+
+    pub fn with_threads(mut self, threads: Vec<(LineLocation, AnyElement)>) -> Self {
+        self.threads = threads;
+        self
+    }
+}
+
+/// Hands each thread to the piece that has its line. A thread whose line no piece has is dropped.
+pub fn threads_by_piece(
+    pieces: &[PieceDiff],
+    threads: Vec<(LineLocation, AnyElement)>,
+) -> Vec<Vec<(LineLocation, AnyElement)>> {
+    let mut by_piece: Vec<Vec<_>> = pieces.iter().map(|_| Vec::new()).collect();
+    for (location, element) in threads {
+        if let Some(index) = pieces
+            .iter()
+            .position(|piece| piece.lines().any(|line| line.location == location))
+        {
+            by_piece[index].push((location, element));
+        }
+    }
+    by_piece
 }
 
 impl RenderOnce for DiffView {
@@ -39,12 +66,13 @@ impl RenderOnce for DiffView {
                 .text_color(Palette::muted_text())
                 .child("Only whitespace changed.")
         });
+        let mut threads = self.threads;
         let hunks: Vec<AnyElement> = self
             .piece
             .hunks
             .into_iter()
             .enumerate()
-            .flat_map(|(index, hunk)| hunk_rows(&id, index, hunk, &self.on_more_context))
+            .flat_map(|(index, hunk)| hunk_rows(&id, index, hunk, &self.on_more_context, &mut threads))
             .collect();
         div()
             .flex()
@@ -102,6 +130,7 @@ fn hunk_rows(
     index: usize,
     hunk: DiffHunk,
     on_more_context: &OnMoreContext,
+    threads: &mut Vec<(LineLocation, AnyElement)>,
 ) -> Vec<AnyElement> {
     let mut rows = Vec::new();
     if index > 0 || hunk.more_above.is_some() {
@@ -111,11 +140,15 @@ fn hunk_rows(
             on_more_context,
         ));
     }
-    rows.extend(
-        hunk.rows
+    for line in hunk.rows {
+        let location = line.location.clone();
+        rows.push(DiffRow::new(line).into_any_element());
+        let (here, later): (Vec<_>, Vec<_>) = std::mem::take(threads)
             .into_iter()
-            .map(|line| DiffRow::new(line).into_any_element()),
-    );
+            .partition(|(at, _)| *at == location);
+        *threads = later;
+        rows.extend(here.into_iter().map(|(_, thread)| thread));
+    }
     if hunk.more_below.is_some() {
         rows.push(hunk_gap(
             ElementId::from(format!("{piece}-below-{index}")),

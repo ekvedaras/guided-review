@@ -1,8 +1,8 @@
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
+use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
-use crate::viewer::SafetyNetPage;
+use crate::viewer::{LineLocation, SafetyNetPage};
 
-use super::diff_view::{DiffView, OnMoreContext};
+use super::diff_view::{DiffView, OnMoreContext, threads_by_piece};
 use super::palette::Palette;
 
 /// Every change the tour does not show, so nothing in the PR stays hidden.
@@ -10,6 +10,8 @@ use super::palette::Palette;
 pub struct SafetyNetView {
     page: SafetyNetPage,
     on_more_context: OnMoreContext,
+    line_threads: Vec<(LineLocation, AnyElement)>,
+    other_threads: Vec<AnyElement>,
 }
 
 impl SafetyNetView {
@@ -19,7 +21,19 @@ impl SafetyNetView {
         Self {
             page,
             on_more_context,
+            line_threads: Vec::new(),
+            other_threads: Vec::new(),
         }
+    }
+
+    pub fn with_threads(
+        mut self,
+        line_threads: Vec<(LineLocation, AnyElement)>,
+        other_threads: Vec<AnyElement>,
+    ) -> Self {
+        self.line_threads = line_threads;
+        self.other_threads = other_threads;
+        self
     }
 }
 
@@ -36,10 +50,13 @@ impl RenderOnce for SafetyNetView {
                     .child("Changes in this PR that no step of the tour shows."),
             )
             .children(
-                self.page
-                    .pieces
+                threads_by_piece(&self.page.pieces, self.line_threads)
                     .into_iter()
-                    .map(|piece| DiffView::new(piece, self.on_more_context.clone())),
+                    .zip(self.page.pieces)
+                    .map(|(threads, piece)| {
+                        DiffView::new(piece, self.on_more_context.clone()).with_threads(threads)
+                    }),
             )
+            .children(self.other_threads)
     }
 }

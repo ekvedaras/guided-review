@@ -136,6 +136,19 @@ impl HighlightLanguage {
         }
     }
 
+    /// The names code fences use: a file extension or the language's own name.
+    fn for_fence(language: &str) -> Option<Self> {
+        let extension = match language.to_ascii_lowercase().as_str() {
+            "javascript" => "js",
+            "typescript" => "ts",
+            "shell" | "zsh" | "console" => "sh",
+            "yaml" => "yml",
+            "rust" => "rs",
+            other => return Self::for_path(&format!("snippet.{other}")),
+        };
+        Self::for_path(&format!("snippet.{extension}"))
+    }
+
     fn configuration(self) -> HighlightConfiguration {
         // The later pattern wins, so a grammar's own additions come after the JavaScript base they extend.
         let (name, language, highlights, injections, locals) = match self {
@@ -355,4 +368,25 @@ impl Highlights {
             .and_then(|lines| lines.get(line.wrapping_sub(1)))
             .map_or(&[], Vec::as_slice)
     }
+}
+
+/// Spans per line of a code fence in a comment. A language we cannot colour gives plain lines.
+pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
+    let line_count = text.lines().count();
+    let Some(language) = language.and_then(HighlightLanguage::for_fence) else {
+        return vec![Vec::new(); line_count];
+    };
+    // A PHP fragment without an opening tag is read as HTML, so give it one and drop its line again.
+    let needs_php_tag = language == HighlightLanguage::Php && !text.trim_start().starts_with("<?");
+    let source = if needs_php_tag {
+        format!("<?php\n{text}")
+    } else {
+        text.to_string()
+    };
+    let mut lines = highlight_file(&language.configuration(), &source);
+    if needs_php_tag {
+        lines.remove(0);
+    }
+    lines.resize(line_count, Vec::new());
+    lines
 }

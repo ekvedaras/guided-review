@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use super::threads::ReviewThread;
 use crate::github::GitHub;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
@@ -13,6 +14,8 @@ pub trait GitHubPort: Send + Sync {
     fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>>;
 
     fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()>;
+
+    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,10 @@ impl GitHubPort for GitHub {
 
     fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
         GitHub::set_file_viewed(self, pr, path, viewed)
+    }
+
+    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
+        GitHub::review_threads(self, pr)
     }
 }
 

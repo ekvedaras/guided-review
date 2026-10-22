@@ -5,6 +5,8 @@ use crate::coverage::{self, PiecePart};
 use crate::pieces::{ChangedFile, PieceId};
 use crate::tour::{Step, Tour};
 
+use super::threads::ThreadView;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     Base,
@@ -75,6 +77,7 @@ pub struct StepPage<'a> {
     pub is_ticked: bool,
     /// Skim and ticked steps show their text but keep their pieces closed.
     pub is_folded: bool,
+    pub threads: Vec<ThreadView>,
 }
 
 impl<'a> StepPage<'a> {
@@ -96,6 +99,7 @@ impl<'a> StepPage<'a> {
             pieces,
             is_ticked: false,
             is_folded,
+            threads: Vec::new(),
         }
     }
 }
@@ -103,6 +107,7 @@ impl<'a> StepPage<'a> {
 /// The changes no step shows. Computed from the tour and the diff, never stored.
 pub struct SafetyNetPage {
     pub pieces: Vec<PieceDiff>,
+    pub threads: Vec<ThreadView>,
 }
 
 impl SafetyNetPage {
@@ -112,6 +117,7 @@ impl SafetyNetPage {
                 .into_iter()
                 .map(|part| PieceDiff::of(part, files, display))
                 .collect(),
+            threads: Vec::new(),
         }
     }
 }

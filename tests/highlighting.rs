@@ -199,3 +199,22 @@ fn other_common_languages_are_coloured_too() {
         assert!(!line.spans.is_empty(), "{} is plain", line.location.path);
     }
 }
+
+#[test]
+fn a_php_code_fence_without_an_opening_tag_is_still_coloured() {
+    let lines =
+        guided_review::viewer::highlight_snippet(Some("php"), "$total = 1;\nreturn $total;");
+
+    assert_eq!(lines.len(), 2);
+    assert!(lines.iter().all(|spans| !spans.is_empty()));
+}
+
+#[test]
+fn a_code_fence_in_a_language_we_cannot_colour_stays_plain() {
+    let lines = guided_review::viewer::highlight_snippet(Some("brainfuck"), "+++\n---");
+    assert_eq!(lines, vec![vec![], vec![]]);
+    assert_eq!(
+        guided_review::viewer::highlight_snippet(None, "a"),
+        vec![vec![]]
+    );
+}

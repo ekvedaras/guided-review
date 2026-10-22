@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, GitHubPort, ViewedFile, ViewedState,
-    ViewedSyncUnavailable,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, GitHubPort, ReviewThread, ViewedFile,
+    ViewedState, ViewedSyncUnavailable,
 };
 
 /// What the app core sent out, in order, across both fakes.
@@ -28,6 +28,7 @@ pub struct FakeGitHub {
     viewed: Mutex<BTreeMap<String, ViewedState>>,
     pushes_fail: AtomicBool,
     refuses_with: Mutex<Option<String>>,
+    pub threads: Vec<ReviewThread>,
 }
 
 impl FakeGitHub {
@@ -38,6 +39,7 @@ impl FakeGitHub {
             viewed: Mutex::default(),
             pushes_fail: AtomicBool::new(false),
             refuses_with: Mutex::default(),
+            threads: Vec::new(),
         }
     }
 
@@ -109,6 +111,11 @@ impl GitHubPort for FakeGitHub {
         };
         self.set_viewed(path, state);
         Ok(())
+    }
+
+    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
+        self.sent.push(format!("github: threads of {pr}"));
+        Ok(self.threads.clone())
     }
 }
 

@@ -21,6 +21,7 @@ use super::highlight::{HighlightRequest, Highlights};
 use super::ports::{AgentLaunch, GitHubPort, ViewedState, ViewedSyncUnavailable};
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::step_page::{SafetyNetPage, StepPage};
+use super::threads::{self, ReviewThread, ThreadPlacement};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -53,6 +54,7 @@ pub struct SidebarEntry<'a> {
     pub depth: usize,
     pub is_current: bool,
     pub is_ticked: bool,
+    pub thread_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +80,11 @@ pub struct Review {
     files: Vec<ChangedFile>,
     /// Summary, then parent, its children, the next parent (from the big picture to the details),
     /// then the safety net when it holds anything.
-    reading_order: Vec<Screen>,
+    steps_in_reading_order: Vec<Screen>,
+    has_uncovered_changes: bool,
+    threads: ThreadPlacement,
+    /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
+    thread_fold_flipped: BTreeSet<String>,
     screen: Screen,
     state: ReviewState,
     state_file: ReviewStateFile,
@@ -108,12 +114,8 @@ impl Review {
             .steps()
             .into_iter()
             .map(|step| Screen::Step(StepId::from(step.id.as_str())));
-        let safety_net =
-            (!coverage::safety_net(&tour, &files).is_empty()).then_some(Screen::SafetyNet);
-        let reading_order = std::iter::once(Screen::Summary)
-            .chain(steps)
-            .chain(safety_net)
-            .collect();
+        let steps_in_reading_order = std::iter::once(Screen::Summary).chain(steps).collect();
+        let has_uncovered_changes = threads::uncovered(&tour, &files);
         Ok(Self {
             tour,
             pr,
@@ -121,7 +123,10 @@ impl Review {
             head,
             pr_head: None,
             files,
-            reading_order,
+            steps_in_reading_order,
+            has_uncovered_changes,
+            threads: ThreadPlacement::default(),
+            thread_fold_flipped: BTreeSet::new(),
             screen: Screen::Summary,
             state,
             state_file,
@@ -214,6 +219,12 @@ impl Review {
         let display = self.display(&links);
         let mut page = StepPage::of(step, &self.tour, &self.files, &display, self.is_folded(id));
         page.is_ticked = self.is_ticked(id);
+        let shown: Vec<_> = step
+            .pieces
+            .iter()
+            .flat_map(|pointer| pointer.shown_parts(&self.tour, &self.files))
+            .collect();
+        page.threads = threads::views(self.threads.in_step(id), &shown, &self.thread_fold_flipped);
         Some(page)
     }
 
@@ -247,6 +258,7 @@ impl Review {
             depth: usize,
             current: Option<&StepId>,
             state: &ReviewState,
+            threads: &ThreadPlacement,
             into: &mut Vec<SidebarEntry<'a>>,
         ) {
             for step in steps {
@@ -254,11 +266,12 @@ impl Review {
                 into.push(SidebarEntry {
                     is_current: current == Some(&id),
                     is_ticked: state.read_tick(&id).is_some(),
+                    thread_count: threads.in_step(&id).len(),
                     id,
                     title: &step.title,
                     depth,
                 });
-                walk(&step.children, depth + 1, current, state, into);
+                walk(&step.children, depth + 1, current, state, threads, into);
             }
         }
         let current = match &self.screen {
@@ -266,15 +279,29 @@ impl Review {
             Screen::Summary | Screen::SafetyNet => None,
         };
         let mut entries = Vec::new();
-        walk(&self.tour.steps, 0, current, &self.state, &mut entries);
+        walk(
+            &self.tour.steps,
+            0,
+            current,
+            &self.state,
+            &self.threads,
+            &mut entries,
+        );
         entries
     }
 
     /// `None` when every change is in a step.
     pub fn safety_net(&self) -> Option<SafetyNetPage> {
-        self.reading_order.contains(&Screen::SafetyNet).then(|| {
+        self.reading_order().contains(&Screen::SafetyNet).then(|| {
             let links = self.links();
-            SafetyNetPage::of(&self.tour, &self.files, &self.display(&links))
+            let mut page = SafetyNetPage::of(&self.tour, &self.files, &self.display(&links));
+            let shown = coverage::safety_net(&self.tour, &self.files);
+            page.threads = threads::views(
+                self.threads.in_safety_net(),
+                &shown,
+                &self.thread_fold_flipped,
+            );
+            page
         })
     }
 
@@ -285,6 +312,32 @@ impl Review {
             more_context: &self.more_context,
             ignores_whitespace: self.ignores_whitespace,
             links,
+        }
+    }
+
+    fn reading_order(&self) -> Vec<Screen> {
+        let has_safety_net = self.has_uncovered_changes || !self.threads.in_safety_net().is_empty();
+        self.steps_in_reading_order
+            .iter()
+            .cloned()
+            .chain(has_safety_net.then_some(Screen::SafetyNet))
+            .collect()
+    }
+
+    /// Blocking; the app runs it in the background on open and on focus.
+    pub fn pull_threads(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        let threads = github.review_threads(&self.pr)?;
+        self.set_threads(&threads);
+        Ok(())
+    }
+
+    pub fn set_threads(&mut self, threads: &[ReviewThread]) {
+        self.threads = ThreadPlacement::of(&self.tour, &self.files, threads);
+    }
+
+    pub fn toggle_thread_fold(&mut self, thread_id: &str) {
+        if !self.thread_fold_flipped.remove(thread_id) {
+            self.thread_fold_flipped.insert(thread_id.to_string());
         }
     }
 
@@ -310,7 +363,7 @@ impl Review {
     }
 
     fn go_to_screen(&mut self, screen: Screen) {
-        if self.reading_order.contains(&screen) {
+        if self.reading_order().contains(&screen) {
             self.screen = screen;
         }
     }
@@ -331,7 +384,7 @@ impl Review {
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        if !self.reading_order.contains(&Screen::Step(id.clone())) {
+        if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
         let head = Sha::new(&self.tour.head);
@@ -380,7 +433,8 @@ impl Review {
 
     /// Only steps of this tour count: ticks of steps a refresh removed stay in the file but not here.
     pub fn progress(&self) -> ReadProgress {
-        let steps = self.reading_order.iter().filter_map(|screen| match screen {
+        let reading_order = self.reading_order();
+        let steps = reading_order.iter().filter_map(|screen| match screen {
             Screen::Step(id) => Some(id),
             Screen::Summary | Screen::SafetyNet => None,
         });
@@ -513,12 +567,12 @@ impl Review {
     }
 
     fn step_by(&mut self, offset: isize) -> bool {
-        let next = self
-            .reading_order
+        let reading_order = self.reading_order();
+        let next = reading_order
             .iter()
             .position(|screen| screen == &self.screen)
             .and_then(|position| position.checked_add_signed(offset))
-            .and_then(|position| self.reading_order.get(position));
+            .and_then(|position| reading_order.get(position));
         match next {
             Some(screen) => {
                 self.screen = screen.clone();

@@ -10,15 +10,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
-use crate::app::components::diff_view::DiffView;
-use crate::app::components::diff_view::OnMoreContext;
+use crate::app::components::diff_view::{DiffView, OnMoreContext, threads_by_piece};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::old_head_note::OldHeadNote;
 use crate::app::components::palette::{Palette, TEXT_FONT};
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
+use crate::app::components::thread_view::ThreadElement;
 use crate::code_source::CodeSource;
-use crate::viewer::{GitHubPort, MoreContext, Place, Review, Screen, StepId, StepPage};
+use crate::viewer::{
+    GitHubPort, LineLocation, MoreContext, Place, Review, Screen, StepId, StepPage, ThreadView,
+};
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
@@ -31,6 +33,7 @@ pub struct OneStepLayout {
     focus: FocusHandle,
     ask: Entity<AskPanel>,
     pr_head_check: Option<Task<()>>,
+    threads_pull: Option<Task<()>>,
     push_debounce: Option<Task<()>>,
     is_syncing: bool,
     sync_again: bool,
@@ -73,6 +76,7 @@ impl OneStepLayout {
             if window.is_window_active() {
                 this.check_pr_head(cx);
                 this.sync(cx);
+                this.pull_threads(cx);
             }
         });
         let focus = cx.focus_handle();
@@ -83,6 +87,7 @@ impl OneStepLayout {
             focus,
             ask,
             pr_head_check: None,
+            threads_pull: None,
             push_debounce: None,
             is_syncing: false,
             sync_again: false,
@@ -90,6 +95,7 @@ impl OneStepLayout {
         };
         layout.check_pr_head(cx);
         layout.sync(cx);
+        layout.pull_threads(cx);
         layout
     }
 
@@ -166,6 +172,52 @@ impl OneStepLayout {
         }));
     }
 
+    fn pull_threads(&mut self, cx: &mut Context<Self>) {
+        let pr = self.review.pr().clone();
+        let github = self.github.clone();
+        self.threads_pull = Some(cx.spawn(async move |this, cx| {
+            let threads = cx
+                .background_executor()
+                .spawn(async move { github.review_threads(&pr) })
+                .await;
+            match threads {
+                Ok(threads) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.review.set_threads(&threads);
+                        cx.notify();
+                    });
+                }
+                Err(error) => eprintln!("warning: could not read the review threads: {error:#}"),
+            }
+        }));
+    }
+
+    /// Threads under a line come with their line, the rest go after the code.
+    fn thread_elements(
+        &self,
+        views: &[ThreadView],
+        cx: &mut Context<Self>,
+    ) -> (Vec<(LineLocation, AnyElement)>, Vec<AnyElement>) {
+        let mut under_lines = Vec::new();
+        let mut after_code = Vec::new();
+        for view in views {
+            let id = view.thread.id.clone();
+            let element = ThreadElement::new(
+                view.clone(),
+                cx.listener(move |this, _, _, cx| {
+                    this.review.toggle_thread_fold(&id);
+                    cx.notify();
+                }),
+            )
+            .into_any_element();
+            match &view.anchor {
+                Some(location) => under_lines.push((location.clone(), element)),
+                None => after_code.push(element),
+            }
+        }
+        (under_lines, after_code)
+    }
+
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
         if self.review.go_forward() {
             cx.notify();
@@ -224,7 +276,10 @@ impl OneStepLayout {
                     cx.notify();
                 }))
                 .when_ticked(entry.is_ticked)
-                .child(entry.title.to_string())
+                .child(match entry.thread_count {
+                    0 => entry.title.to_string(),
+                    count => format!("{} ({count} 💬)", entry.title),
+                })
         });
         div()
             .id("sidebar")
@@ -258,7 +313,14 @@ impl OneStepLayout {
                     this.review.go_to_safety_net();
                     cx.notify();
                 }))
-                .child(format!("{} ({})", SafetyNetView::TITLE, page.pieces.len())),
+                .child(match page.threads.len() {
+                    0 => format!("{} ({})", SafetyNetView::TITLE, page.pieces.len()),
+                    threads => format!(
+                        "{} ({}, {threads} 💬)",
+                        SafetyNetView::TITLE,
+                        page.pieces.len()
+                    ),
+                }),
         )
     }
 
@@ -275,7 +337,12 @@ impl OneStepLayout {
                 None => div().into_any_element(),
             },
             Screen::SafetyNet => match self.review.safety_net() {
-                Some(page) => SafetyNetView::new(page, self.on_more_context(cx)).into_any_element(),
+                Some(page) => {
+                    let (under_lines, after_code) = self.thread_elements(&page.threads, cx);
+                    SafetyNetView::new(page, self.on_more_context(cx))
+                        .with_threads(under_lines, after_code)
+                        .into_any_element()
+                }
                 None => div().into_any_element(),
             },
         }
@@ -290,10 +357,13 @@ impl OneStepLayout {
             cx,
         );
         let on_more_context = self.on_more_context(cx);
+        let (under_lines, after_code) = self.thread_elements(&page.threads, cx);
+        let mut threads_of_piece = threads_by_piece(&page.pieces, under_lines).into_iter();
         let pieces: Vec<_> = page
             .pieces
             .iter()
             .map(|piece| {
+                let threads = threads_of_piece.next().unwrap_or_default();
                 let place = Place::Piece {
                     step: step_id.clone(),
                     piece: piece.id.to_string(),
@@ -309,7 +379,9 @@ impl OneStepLayout {
                     .flex_col()
                     .gap_1()
                     .child(div().flex().justify_end().child(button))
-                    .child(DiffView::new(piece.clone(), on_more_context.clone()))
+                    .child(
+                        DiffView::new(piece.clone(), on_more_context.clone()).with_threads(threads),
+                    )
             })
             .collect();
         step_screen(
@@ -317,6 +389,7 @@ impl OneStepLayout {
             step_button,
             pieces,
             self.review.ignores_whitespace(),
+            after_code,
             cx,
         )
     }
@@ -389,6 +462,7 @@ fn step_screen(
     ask: impl IntoElement,
     pieces: Vec<impl IntoElement>,
     ignores_whitespace: bool,
+    after_code: Vec<AnyElement>,
     cx: &mut Context<OneStepLayout>,
 ) -> impl IntoElement {
     let step = page.step;
@@ -403,7 +477,11 @@ fn step_screen(
             }),
         )
     });
-    let pieces = if page.is_folded { Vec::new() } else { pieces };
+    let (pieces, after_code) = if page.is_folded {
+        (Vec::new(), Vec::new())
+    } else {
+        (pieces, after_code)
+    };
     div()
         .flex()
         .flex_col()
@@ -419,6 +497,7 @@ fn step_screen(
         .child(whitespace_toggle(ignores_whitespace, cx))
         .children(fold_toggle)
         .children(pieces)
+        .children(after_code)
 }
 
 fn step_header(page: &StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl IntoElement {

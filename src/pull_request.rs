@@ -10,6 +10,14 @@ pub struct RepoName {
 }
 
 impl RepoName {
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn new(owner: &str, name: &str) -> Self {
         Self {
             owner: owner.to_string(),
