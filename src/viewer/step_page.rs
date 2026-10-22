@@ -1,8 +1,8 @@
 use super::diff_display::{DiffDisplay, DiffHunk};
 use super::github_link::GitHubLink;
 use super::highlight::Span;
-use crate::coverage::{self, PiecePart};
 use crate::code_source::Line;
+use crate::coverage::{self, PiecePart};
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::repin::RepinStatus;
@@ -235,7 +235,10 @@ impl PieceDiff {
         // Its own key, so asking for more lines here does not widen the same piece in the full diff.
         let since_id = PieceId {
             path: piece.id.path.clone(),
-            symbol: Some(format!("{}@since-read", piece.id.symbol.as_deref().unwrap_or(""))),
+            symbol: Some(format!(
+                "{}@since-read",
+                piece.id.symbol.as_deref().unwrap_or("")
+            )),
         };
         diff.hunks = display.hunks(
             &since_id,

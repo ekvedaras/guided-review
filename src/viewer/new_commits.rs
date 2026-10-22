@@ -1,10 +1,13 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::code_source::CodeSource;
-use crate::pull_request::Sha;
+use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use crate::repin::{Repin, repin};
 use crate::tour::Tour;
 
+use super::ports::GitHubPort;
+use super::review::Review;
 use super::review_state::{RepinRecord, ReviewStateFile};
 
 /// Re-pin as both the CLI and the app run it: the tour moves to the new commits, and the
@@ -23,4 +26,42 @@ pub fn repin_tour(
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
     state_file.update(|state| state.record_repin(record, &result))?;
     Ok((tour, result))
+}
+
+/// Finds the code source that can read the given tips, fetching what is missing.
+pub type PickCodeSource =
+    Arc<dyn Fn(&PullRequestTips) -> anyhow::Result<Box<dyn CodeSource>> + Send + Sync>;
+
+/// The "Update tour" button's work: what the CLI's `repin` does, then a fresh `Review` on the result.
+pub struct TourUpdater {
+    pub home: PathBuf,
+    pub pr: PullRequestUrl,
+    pub pick_code_source: PickCodeSource,
+}
+
+pub struct UpdatedTour {
+    pub review: Review,
+    pub source: Arc<dyn CodeSource>,
+}
+
+impl TourUpdater {
+    /// Blocks on the network and on git; the app runs it off the main thread.
+    pub fn run(&self, github: &dyn GitHubPort) -> anyhow::Result<UpdatedTour> {
+        let tips = github.pull_request_tips(&self.pr)?;
+        let source = (self.pick_code_source)(&tips)?;
+        let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
+        let state_file = ReviewStateFile::for_pr(&self.home, &self.pr);
+        let (tour, _) = repin_tour(
+            &crate::tour::Tour::path_for(&self.home, &self.pr),
+            &state_file,
+            source.as_ref(),
+            &base,
+            &tips.head,
+        )?;
+        let review = Review::open(tour, source.as_ref(), state_file)?;
+        Ok(UpdatedTour {
+            review,
+            source: source.into(),
+        })
+    }
 }

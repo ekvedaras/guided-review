@@ -1,10 +1,12 @@
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
     RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
 };
 
+use crate::repin::RepinStatus;
 use crate::viewer::{
     DiffHunk, DiffLine, Edge, GitHubLink, LineKind, LineLocation, MoreContext, PieceDiff,
 };
@@ -21,6 +23,7 @@ pub struct DiffView {
     on_more_context: OnMoreContext,
     /// Shown right under the row at their location.
     threads: Vec<(LineLocation, AnyElement)>,
+    is_change_since_read: bool,
 }
 
 impl DiffView {
@@ -29,7 +32,14 @@ impl DiffView {
             piece,
             on_more_context,
             threads: Vec::new(),
+            is_change_since_read: false,
         }
+    }
+
+    /// In that view a piece without lines was not touched since the reviewer read the step.
+    pub fn in_change_since_read(mut self, is_change_since_read: bool) -> Self {
+        self.is_change_since_read = is_change_since_read;
+        self
     }
 
     pub fn with_threads(mut self, threads: Vec<(LineLocation, AnyElement)>) -> Self {
@@ -66,6 +76,9 @@ impl RenderOnce for DiffView {
                 .text_color(Palette::muted_text())
                 .child("Only whitespace changed.")
         });
+        let no_change_since_read = self.is_change_since_read
+            && self.piece.hunks.is_empty()
+            && self.piece.binary_file.is_none();
         let mut threads = self.threads;
         let hunks: Vec<AnyElement> = self
             .piece
@@ -91,12 +104,37 @@ impl RenderOnce for DiffView {
                     .border_b_1()
                     .border_color(Palette::border())
                     .text_sm()
-                    .font_family(CODE_FONT)
-                    .child(id.clone()),
+                    .flex()
+                    .gap_2()
+                    .child(div().font_family(CODE_FONT).child(id.clone()))
+                    .children(
+                        self.piece
+                            .repin_status
+                            .and_then(repin_label)
+                            .map(|label| div().text_color(Palette::muted_text()).child(label)),
+                    ),
             )
+            .when(no_change_since_read, |view| {
+                view.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .text_sm()
+                        .text_color(Palette::muted_text())
+                        .child("No change since you read it"),
+                )
+            })
             .children(self.piece.binary_file.map(BinaryFileRow::new))
             .children(only_whitespace)
             .children(hunks)
+    }
+}
+
+fn repin_label(status: RepinStatus) -> Option<&'static str> {
+    match status {
+        RepinStatus::Changed => Some("changed"),
+        RepinStatus::New => Some("new"),
+        RepinStatus::Same | RepinStatus::Gone => None,
     }
 }
 

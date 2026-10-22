@@ -16,7 +16,7 @@ use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{Asks, Review, ReviewStateFile, repin_tour};
+use guided_review::viewer::{Asks, Review, ReviewStateFile, TourUpdater, repin_tour};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -176,6 +176,14 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
         clone: LocalGit::find(&pr.repo, &current_dir)?.map(|clone| clone.root().to_path_buf()),
         settings: Config::load()?.ask_settings(),
     };
-    guided_review::app::run(review, source.into(), ask, Arc::new(github));
+    let updater = TourUpdater {
+        home,
+        pr: pr.clone(),
+        pick_code_source: {
+            let (github, pr) = (github.clone(), pr.clone());
+            Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
+        },
+    };
+    guided_review::app::run(review, source.into(), ask, Arc::new(github), updater);
     Ok(())
 }

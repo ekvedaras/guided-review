@@ -10,7 +10,7 @@ use gpui::{App, AppContext, Bounds, Focusable, KeyBinding, WindowBounds, WindowO
 use gpui_platform::application;
 
 use crate::code_source::CodeSource;
-use crate::viewer::{GitHubPort, Review};
+use crate::viewer::{GitHubPort, Review, TourUpdater};
 pub use components::ask_panel::AskSetup;
 use components::palette::{Appearance, Palette};
 use layouts::one_step::{GoBack, GoForward, OneStepLayout};
@@ -21,6 +21,7 @@ pub fn run(
     source: Arc<dyn CodeSource>,
     ask: AskSetup,
     github: Arc<dyn GitHubPort>,
+    updater: TourUpdater,
 ) {
     application().run(move |cx: &mut App| {
         let typing_is_not_navigation = format!("{} && !AskInput", OneStepLayout::KEY_CONTEXT);
@@ -37,7 +38,9 @@ pub fn run(
         };
         cx.open_window(options, |window, cx| {
             Palette::set_active(Appearance::of_window(window.appearance()));
-            let layout = cx.new(|cx| OneStepLayout::new(review, source, ask, github, window, cx));
+            let updater = Arc::new(updater);
+            let layout =
+                cx.new(|cx| OneStepLayout::new(review, source, ask, github, updater, window, cx));
             layout.update(cx, |_, cx| {
                 cx.observe_window_appearance(window, |_, window, cx| {
                     Palette::set_active(Appearance::of_window(window.appearance()));

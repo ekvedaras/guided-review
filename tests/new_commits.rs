@@ -270,7 +270,7 @@ fn lines_of(review: &Review, step: &str) -> Vec<String> {
     let page = review.current_step().unwrap();
     assert_eq!(page.step.id, step);
     for piece in &page.pieces {
-        for line in &piece.lines {
+        for line in piece.lines() {
             let sign = match line.location.side {
                 Side::Base => "-",
                 Side::Head => "+",
@@ -296,7 +296,7 @@ fn a_step_read_before_shows_only_what_changed_since_its_tick_and_a_toggle_shows_
     assert!(!since_read.showing_full_diff);
     assert_eq!(lines_of(&review, "total"), ["-return 2;", "+return 3;"]);
     let page = review.current_step().unwrap();
-    let removed = &page.pieces[0].lines[0];
+    let removed = page.pieces[0].lines().next().unwrap();
     assert!(
         removed
             .github_link
@@ -379,7 +379,7 @@ fn a_hunk_read_before_shows_only_the_changes_since_that_land_inside_it() {
     let per_piece: Vec<(String, usize)> = page
         .pieces
         .iter()
-        .map(|piece| (piece.id.to_string(), piece.lines.len()))
+        .map(|piece| (piece.id.to_string(), piece.lines().count()))
         .collect();
     assert_eq!(
         per_piece,
@@ -449,5 +449,35 @@ fn two_re_pins_without_a_refresh_read_as_one_from_the_first_head() {
     assert_eq!(
         record["gone_by_step"],
         json!({"tax": ["app/Order.php#Order::tax"]})
+    );
+}
+
+#[test]
+fn the_change_since_read_is_built_from_hunks_with_context_around_its_changes() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.tick(&["total"]);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+    review.set_files_at_head(review.files_at_head_request().read(&shop.source()));
+    review.go_to(&"total".into());
+
+    let page = review.current_step().unwrap();
+
+    let piece = &page.pieces[0];
+    assert_eq!(piece.hunks.len(), 1);
+    let changed: Vec<_> = piece.lines().filter(|line| line.is_change()).collect();
+    assert_eq!(changed.len(), 2);
+    assert!(piece.lines().any(|line| !line.is_change()));
+    assert!(
+        piece
+            .lines()
+            .all(|line| line.location.path == "app/Order.php")
+    );
+    assert!(
+        changed
+            .iter()
+            .all(|line| line.github_link.as_str().contains(&shop.first_head)
+                || line.github_link.as_str().contains(&second_head))
     );
 }

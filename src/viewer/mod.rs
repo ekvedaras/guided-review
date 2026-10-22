@@ -21,7 +21,7 @@ pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreCont
 pub use github_link::GitHubLink;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use markdown::{Block, Markdown, Run};
-pub use new_commits::repin_tour;
+pub use new_commits::{PickCodeSource, TourUpdater, UpdatedTour, repin_tour};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubPort, ViewedFile, ViewedState,
     ViewedSyncUnavailable,

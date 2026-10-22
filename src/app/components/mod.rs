@@ -3,7 +3,7 @@ pub mod diagram;
 pub mod diff_view;
 pub mod fold_toggle;
 pub mod markdown_view;
-pub mod old_head_note;
+pub mod new_commits_banner;
 pub mod palette;
 pub mod safety_net_view;
 pub mod step_notes;

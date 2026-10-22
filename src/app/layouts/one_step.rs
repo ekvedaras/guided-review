@@ -13,7 +13,7 @@ use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{DiffView, OnMoreContext, threads_by_piece};
 use crate::app::components::fold_toggle::FoldToggle;
-use crate::app::components::old_head_note::OldHeadNote;
+use crate::app::components::new_commits_banner::{NewCommitsBanner, TourUpdate};
 use crate::app::components::palette::{Palette, TEXT_FONT};
 use crate::app::components::safety_net_view::SafetyNetView;
 use crate::app::components::step_notes::StepNotes;
@@ -21,6 +21,7 @@ use crate::app::components::thread_view::ThreadElement;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     GitHubPort, LineLocation, MoreContext, Place, Review, Screen, StepId, StepPage, ThreadView,
+    TourUpdater,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -32,6 +33,8 @@ pub struct OneStepLayout {
     review: Review,
     github: Arc<dyn GitHubPort>,
     diagrams: Entity<Diagrams>,
+    updater: Arc<TourUpdater>,
+    tour_update: TourUpdate,
     focus: FocusHandle,
     ask: Entity<AskPanel>,
     pr_head_check: Option<Task<()>>,
@@ -45,17 +48,55 @@ pub struct OneStepLayout {
 impl OneStepLayout {
     pub const KEY_CONTEXT: &str = "OneStepLayout";
 
-    /// The step shows plain code at once; the colours follow when the background pass is done.
     pub fn new(
         review: Review,
         source: Arc<dyn CodeSource>,
         ask: AskSetup,
         github: Arc<dyn GitHubPort>,
+        updater: Arc<TourUpdater>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let request = review.highlight_request();
-        let files_at_head_request = review.files_at_head_request();
+        let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.check_pr_head(cx);
+                this.sync(cx);
+                this.pull_threads(cx);
+            }
+        });
+        let diagrams = Self::new_diagrams(cx);
+        let focus = cx.focus_handle();
+        let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
+        let mut layout = Self {
+            review,
+            github,
+            diagrams,
+            updater,
+            tour_update: TourUpdate::Idle,
+            focus,
+            ask,
+            pr_head_check: None,
+            threads_pull: None,
+            push_debounce: None,
+            is_syncing: false,
+            sync_again: false,
+            _focus_subscription: focus_subscription,
+        };
+        layout.start_background_work(source, cx);
+        layout
+    }
+
+    fn new_diagrams(cx: &mut Context<Self>) -> Entity<Diagrams> {
+        let diagrams = cx.new(|_| Diagrams::default());
+        cx.observe(&diagrams, |_, _, cx| cx.notify()).detach();
+        diagrams
+    }
+
+    /// What a freshly opened review needs: the step shows plain code at once, the colours and
+    /// the context lines follow from the background, then the PR head, viewed marks and threads.
+    fn start_background_work(&mut self, source: Arc<dyn CodeSource>, cx: &mut Context<Self>) {
+        let request = self.review.highlight_request();
+        let files_at_head_request = self.review.files_at_head_request();
         cx.spawn(async move |this, cx| {
             let (files_at_head, highlights) = cx
                 .background_executor()
@@ -74,34 +115,42 @@ impl OneStepLayout {
             .ok();
         })
         .detach();
-        let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
-            if window.is_window_active() {
-                this.check_pr_head(cx);
-                this.sync(cx);
-                this.pull_threads(cx);
-            }
-        });
-        let diagrams = cx.new(|_| Diagrams::default());
-        cx.observe(&diagrams, |_, _, cx| cx.notify()).detach();
-        let focus = cx.focus_handle();
-        let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
-        let mut layout = Self {
-            review,
-            github,
-            diagrams,
-            focus,
-            ask,
-            pr_head_check: None,
-            threads_pull: None,
-            push_debounce: None,
-            is_syncing: false,
-            sync_again: false,
-            _focus_subscription: focus_subscription,
-        };
-        layout.check_pr_head(cx);
-        layout.sync(cx);
-        layout.pull_threads(cx);
-        layout
+        self.check_pr_head(cx);
+        self.sync(cx);
+        self.pull_threads(cx);
+    }
+
+    /// Runs only on the button. The old `Review` is replaced, so its ticks cannot overwrite the new state.
+    fn update_tour(&mut self, cx: &mut Context<Self>) {
+        if self.tour_update == TourUpdate::Running {
+            return;
+        }
+        self.tour_update = TourUpdate::Running;
+        let (updater, github) = (self.updater.clone(), self.github.clone());
+        cx.spawn(async move |this, cx| {
+            let updated = cx
+                .background_executor()
+                .spawn(async move { updater.run(github.as_ref()) })
+                .await;
+            this.update(cx, |this, cx| {
+                match updated {
+                    Ok(updated) => {
+                        let screen = this.review.screen().clone();
+                        this.review = updated.review;
+                        if let Screen::Step(id) = screen {
+                            this.review.go_to(&id);
+                        }
+                        this.tour_update = TourUpdate::Idle;
+                        this.diagrams = Self::new_diagrams(cx);
+                        this.start_background_work(updated.source, cx);
+                    }
+                    Err(error) => this.tour_update = TourUpdate::Failed(format!("{error:#}")),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn ask_button(
@@ -280,7 +329,7 @@ impl OneStepLayout {
                     this.review.go_to(&id);
                     cx.notify();
                 }))
-                .when_ticked(entry.is_ticked)
+                .when_ticked(entry.is_ticked || entry.is_gone)
                 .child(match entry.thread_count {
                     0 => entry.title.to_string(),
                     count => format!("{} ({count} 💬)", entry.title),
@@ -378,6 +427,10 @@ impl OneStepLayout {
         let on_more_context = self.on_more_context(cx);
         let (under_lines, after_code) = self.thread_elements(&page.threads, cx);
         let mut threads_of_piece = threads_by_piece(&page.pieces, under_lines).into_iter();
+        let shows_change_since_read = page
+            .since_read
+            .as_ref()
+            .is_some_and(|since| !since.showing_full_diff);
         let pieces: Vec<_> = page
             .pieces
             .iter()
@@ -399,7 +452,9 @@ impl OneStepLayout {
                     .gap_1()
                     .child(div().flex().justify_end().child(button))
                     .child(
-                        DiffView::new(piece.clone(), on_more_context.clone()).with_threads(threads),
+                        DiffView::new(piece.clone(), on_more_context.clone())
+                            .with_threads(threads)
+                            .in_change_since_read(shows_change_since_read),
                     )
             })
             .collect();
@@ -505,10 +560,45 @@ fn step_screen(
     } else {
         (pieces, after_code)
     };
+    let full_diff_toggle = page.since_read.as_ref().map(|since| {
+        let id = StepId::from(step.id.as_str());
+        let label = if since.showing_full_diff {
+            "Show only the change since your read"
+        } else {
+            "Show the full diff"
+        };
+        div()
+            .id("full-diff-toggle")
+            .text_sm()
+            .cursor_pointer()
+            .text_color(Palette::muted_text())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.review.toggle_full_diff(&id);
+                cx.notify();
+            }))
+            .child(label)
+    });
+    let repin_notes = (page.gone_pieces > 0 || page.text_may_be_old).then(|| {
+        div()
+            .flex()
+            .gap_3()
+            .text_sm()
+            .text_color(Palette::muted_text())
+            .when(page.gone_pieces > 0, |row| {
+                row.child(match page.gone_pieces {
+                    1 => "1 piece gone since last version".to_string(),
+                    count => format!("{count} pieces gone since last version"),
+                })
+            })
+            .when(page.text_may_be_old, |row| row.child("Text may be old"))
+    });
     div()
         .flex()
         .flex_col()
         .gap_3()
+        .when(page.is_gone, |column| {
+            column.text_color(Palette::muted_text())
+        })
         .child(step_header(&page, cx))
         .child(
             div()
@@ -519,6 +609,8 @@ fn step_screen(
         .child(div().flex().child(ask))
         .child(StepNotes::of(step))
         .child(whitespace_toggle(ignores_whitespace, cx))
+        .children(repin_notes)
+        .children(full_diff_toggle)
         .children(fold_toggle)
         .children(pieces)
         .children(after_code)
@@ -612,7 +704,13 @@ impl Render for OneStepLayout {
                     .h_full()
                     .flex()
                     .flex_col()
-                    .children(self.review.old_head().map(OldHeadNote::new))
+                    .children(self.review.old_head().map(|old_head| {
+                        NewCommitsBanner::new(
+                            old_head,
+                            self.tour_update.clone(),
+                            cx.listener(|this, _, _, cx| this.update_tour(cx)),
+                        )
+                    }))
                     .child(
                         div()
                             .id("screen")
