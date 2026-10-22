@@ -748,10 +748,10 @@ impl OneStepLayout {
     /// For when the file is about to be read or the app to end: what was typed goes to disk now.
     fn save_typing_now(&mut self) {
         self.typing_save = None;
-        if let Some(save) = self.review.typing_save() {
-            if let Err(error) = save.run() {
-                eprintln!("could not save the text: {error:#}");
-            }
+        if let Some(save) = self.review.typing_save()
+            && let Err(error) = save.run()
+        {
+            eprintln!("could not save the text: {error:#}");
         }
     }
 
