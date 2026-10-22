@@ -1,15 +1,17 @@
+use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, Context, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, actions, div,
-    px,
+    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
+    Window, actions, div, px,
 };
 
 use std::sync::Arc;
 
+use crate::app::components::ask_panel::{AskPanel, AskSetup, ask_button};
 use crate::app::components::diff_view::DiffView;
 use crate::app::components::palette::{Palette, TEXT_FONT};
 use crate::code_source::CodeSource;
-use crate::viewer::{Review, Screen, StepId, StepPage};
+use crate::viewer::{Place, Review, Screen, StepId, StepPage};
 
 actions!(one_step, [GoForward, GoBack]);
 
@@ -17,13 +19,19 @@ actions!(one_step, [GoForward, GoBack]);
 pub struct OneStepLayout {
     review: Review,
     focus: FocusHandle,
+    ask: Entity<AskPanel>,
 }
 
 impl OneStepLayout {
     pub const KEY_CONTEXT: &str = "OneStepLayout";
 
     /// The step shows plain code at once; the colours follow when the background pass is done.
-    pub fn new(review: Review, source: Arc<dyn CodeSource>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        review: Review,
+        source: Arc<dyn CodeSource>,
+        ask: AskSetup,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let request = review.highlight_request();
         cx.spawn(async move |this, cx| {
             let highlights = cx
@@ -37,10 +45,26 @@ impl OneStepLayout {
             .ok();
         })
         .detach();
-        Self {
-            review,
-            focus: cx.focus_handle(),
-        }
+        let focus = cx.focus_handle();
+        let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
+        Self { review, focus, ask }
+    }
+
+    fn ask_button(
+        &self,
+        key: String,
+        place: Place,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let count = self.ask.read(cx).count_at(&place);
+        ask_button(SharedString::from(key), count).on_click(cx.listener(
+            move |this, _, window, cx| {
+                this.ask.update(cx, |panel, cx| {
+                    panel.open(&this.review, place.clone(), label.clone(), window, cx)
+                });
+            },
+        ))
     }
 
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
@@ -106,10 +130,42 @@ impl OneStepLayout {
     }
 
     fn screen(&self, cx: &mut Context<Self>) -> AnyElement {
-        match self.review.current_step() {
-            None => summary_screen(self.review.title(), self.review.summary()).into_any_element(),
-            Some(page) => step_screen(page, cx).into_any_element(),
-        }
+        let Some(page) = self.review.current_step() else {
+            let button =
+                self.ask_button("ask-tour".into(), Place::Tour, "the whole tour".into(), cx);
+            return summary_screen(self.review.title(), self.review.summary(), button)
+                .into_any_element();
+        };
+        let step_id = StepId::from(page.step.id.as_str());
+        let step_button = self.ask_button(
+            format!("ask-step-{step_id}"),
+            Place::Step(step_id.clone()),
+            page.step.title.clone(),
+            cx,
+        );
+        let pieces: Vec<_> = page
+            .pieces
+            .iter()
+            .map(|piece| {
+                let place = Place::Piece {
+                    step: step_id.clone(),
+                    piece: piece.id.to_string(),
+                };
+                let button = self.ask_button(
+                    format!("ask-piece-{step_id}-{}", piece.id),
+                    place,
+                    piece.id.to_string(),
+                    cx,
+                );
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().flex().justify_end().child(button))
+                    .child(DiffView::new(piece.clone()))
+            })
+            .collect();
+        step_screen(page, step_button, pieces, cx).into_any_element()
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
@@ -153,12 +209,13 @@ impl<E: Styled> CurrentRow for E {
     }
 }
 
-fn summary_screen(title: &str, summary: &[String]) -> impl IntoElement {
+fn summary_screen(title: &str, summary: &[String], ask: impl IntoElement) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
         .gap_3()
         .child(div().text_2xl().child(title.to_string()))
+        .child(div().flex().child(ask))
         .children(
             summary
                 .iter()
@@ -166,7 +223,12 @@ fn summary_screen(title: &str, summary: &[String]) -> impl IntoElement {
         )
 }
 
-fn step_screen(page: StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+fn step_screen(
+    page: StepPage<'_>,
+    ask: impl IntoElement,
+    pieces: Vec<impl IntoElement>,
+    cx: &mut Context<OneStepLayout>,
+) -> impl IntoElement {
     let step = page.step;
     let screen = div()
         .flex()
@@ -187,7 +249,8 @@ fn step_screen(page: StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl Into
                 .text_color(Palette::muted_text())
                 .child(step.why.clone()),
         )
-        .children(page.pieces.into_iter().map(DiffView::new))
+        .child(div().flex().child(ask))
+        .children(pieces)
 }
 
 fn step_header(page: &StepPage<'_>, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
@@ -262,5 +325,8 @@ impl Render for OneStepLayout {
                     .p_6()
                     .child(self.screen(cx)),
             )
+            .when(self.ask.read(cx).is_open(), |row| {
+                row.child(self.ask.clone())
+            })
     }
 }

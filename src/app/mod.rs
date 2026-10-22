@@ -11,17 +11,19 @@ use gpui_platform::application;
 
 use crate::code_source::CodeSource;
 use crate::viewer::Review;
+pub use components::ask_panel::AskSetup;
 use components::palette::{Appearance, Palette};
 use layouts::one_step::{GoBack, GoForward, OneStepLayout};
 
 /// Blocks until the window is closed.
-pub fn run(review: Review, source: Arc<dyn CodeSource>) {
+pub fn run(review: Review, source: Arc<dyn CodeSource>, ask: AskSetup) {
     application().run(move |cx: &mut App| {
+        let typing_is_not_navigation = format!("{} && !AskInput", OneStepLayout::KEY_CONTEXT);
         cx.bind_keys([
-            KeyBinding::new("right", GoForward, Some(OneStepLayout::KEY_CONTEXT)),
-            KeyBinding::new("j", GoForward, Some(OneStepLayout::KEY_CONTEXT)),
-            KeyBinding::new("left", GoBack, Some(OneStepLayout::KEY_CONTEXT)),
-            KeyBinding::new("k", GoBack, Some(OneStepLayout::KEY_CONTEXT)),
+            KeyBinding::new("right", GoForward, Some(&typing_is_not_navigation)),
+            KeyBinding::new("j", GoForward, Some(&typing_is_not_navigation)),
+            KeyBinding::new("left", GoBack, Some(&typing_is_not_navigation)),
+            KeyBinding::new("k", GoBack, Some(&typing_is_not_navigation)),
         ]);
         let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
         let options = WindowOptions {
@@ -30,7 +32,7 @@ pub fn run(review: Review, source: Arc<dyn CodeSource>) {
         };
         cx.open_window(options, |window, cx| {
             Palette::set_active(Appearance::of_window(window.appearance()));
-            let layout = cx.new(|cx| OneStepLayout::new(review, source, cx));
+            let layout = cx.new(|cx| OneStepLayout::new(review, source, ask, cx));
             layout.update(cx, |_, cx| {
                 cx.observe_window_appearance(window, |_, window, cx| {
                     Palette::set_active(Appearance::of_window(window.appearance()));

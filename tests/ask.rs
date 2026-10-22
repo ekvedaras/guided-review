@@ -8,7 +8,9 @@ use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{AgentLauncher, AgentPort, Asks, Author, Place, Review, StepId};
+use guided_review::viewer::{
+    AgentLauncher, AgentPort, Asks, Author, Place, Review, ReviewStateFile, StepId,
+};
 use serde_json::json;
 use support::FixtureRepo;
 use support::fake_ports::{FakeAgentLauncher, FakeAskStore, SentLog};
@@ -50,8 +52,12 @@ fn shop() -> Shop {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
+    let state_file = ReviewStateFile::for_pr(
+        repo.home(),
+        &"https://github.com/acme/shop/pull/7".parse().unwrap(),
+    );
     Shop {
-        review: Review::open(tour, &source).unwrap(),
+        review: Review::open(tour, &source, state_file).unwrap(),
         head,
     }
 }

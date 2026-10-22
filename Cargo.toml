@@ -8,6 +8,7 @@ description = "Turn a PR diff into a top-down guided review"
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
+futures = "0.3"
 globset = "0.4.20"
 gpui = { git = "https://github.com/zed-industries/zed", rev = "d38a754e1b6399a9a6ef26bbbdd95417b57eb988", package = "gpui" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d38a754e1b6399a9a6ef26bbbdd95417b57eb988", package = "gpui_platform", features = ["font-kit", "runtime_shaders"] }

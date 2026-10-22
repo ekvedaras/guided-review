@@ -19,7 +19,7 @@ pub enum Place {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AskId(u64);
 
@@ -195,10 +195,10 @@ impl Asks {
             .filter(|ask| !ask.messages.is_empty())
             .cloned()
             .collect();
-        if let Err(error) = self.store.save(&kept) {
-            if let Some(ask) = self.ask_mut(id) {
-                ask.failure = Some(format!("could not save the Ask: {error:#}"));
-            }
+        if let Err(error) = self.store.save(&kept)
+            && let Some(ask) = self.ask_mut(id)
+        {
+            ask.failure = Some(format!("could not save the Ask: {error:#}"));
         }
     }
 }

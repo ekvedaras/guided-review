@@ -33,6 +33,10 @@ impl LocalGit {
         Ok(Some(configured))
     }
 
+    pub fn root(&self) -> &Path {
+        &self.repo
+    }
+
     /// Fetches what is missing into `refs/guided-review/<n>` only; branches and files stay as they are.
     pub fn fetch_missing_commits(
         &self,
