@@ -978,9 +978,8 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let fold_label = match (description.folded_blocks, description.can_fold) {
             (0, false) => None,
-            (0, true) => Some("Show less".to_string()),
-            (1, _) => Some("Show the rest (1 more block)".to_string()),
-            (hidden, _) => Some(format!("Show the rest ({hidden} more blocks)")),
+            (0, true) => Some("Show less"),
+            _ => Some("Show the whole description"),
         };
         let fold = fold_label.map(|label| {
             button(
@@ -1004,6 +1003,7 @@ impl OneStepLayout {
             .child(eyebrow(colors, "PR description"))
             .child(
                 div()
+                    .w_full()
                     .px_4()
                     .py_3()
                     .rounded_md()
