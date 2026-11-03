@@ -44,8 +44,7 @@ use crate::code_source::CodeSource;
 use crate::ide::Ide;
 use crate::viewer::{
     Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
-    Place, PrDescription, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId,
-    ThreadView,
+    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
 };
 
 actions!(one_step, [GoForward, GoBack, ToggleJump, CopySelection]);
@@ -970,32 +969,12 @@ impl OneStepLayout {
         }
     }
 
-    fn pr_description(
-        &self,
-        description: &PrDescription,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn pr_description(&self, description: &Markdown, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let fold_label = match (description.folded_blocks, description.can_fold) {
-            (0, false) => None,
-            (0, true) => Some("Show less"),
-            _ => Some("Show the whole description"),
-        };
-        let fold = fold_label.map(|label| {
-            button(
-                colors,
-                "pr-description-fold",
-                ButtonKind::Ghost,
-                ButtonSize::Small,
-            )
-            .child(label)
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, Review::toggle_pr_description);
-            }))
-        });
         div()
             .pt_2()
             .pb_4()
+            .w_full()
             .max_w(READING_WIDTH)
             .flex()
             .flex_col()
@@ -1003,7 +982,6 @@ impl OneStepLayout {
             .child(eyebrow(colors, "PR description"))
             .child(
                 div()
-                    .w_full()
                     .px_4()
                     .py_3()
                     .rounded_md()
@@ -1011,13 +989,7 @@ impl OneStepLayout {
                     .border_color(colors.subtle_border)
                     .bg(colors.surface)
                     .text_sm()
-                    .child(MarkdownView::new(
-                        "pr-description",
-                        Markdown {
-                            blocks: description.shown_blocks.clone(),
-                        },
-                    ))
-                    .children(fold.map(|fold| div().pt_2().flex().child(fold))),
+                    .child(MarkdownView::new("pr-description", description.clone())),
             )
     }
 

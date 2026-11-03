@@ -1,4 +1,6 @@
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{
+    CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeStream,
+};
 
 /// The part of GitHub-flavoured markdown that review comments use, as a tree the views can draw.
 /// Everything else (tables, raw HTML other than `<details>`, `<img>`, `<br>`, `<a>`) shows as plain text.
@@ -47,11 +49,102 @@ impl Markdown {
     pub fn parse(source: &str) -> Self {
         let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
         let mut builder = Builder::default();
-        for event in Parser::new_ext(source, options) {
+        for event in TextMergeStream::new(Parser::new_ext(source, options)) {
             builder.event(event);
         }
         builder.finish()
     }
+
+    /// For text shown under a title of its own: its headings rank one level lower.
+    pub fn nested_one_level(self) -> Self {
+        Self {
+            blocks: self
+                .blocks
+                .into_iter()
+                .map(Block::nested_one_level)
+                .collect(),
+        }
+    }
+}
+
+impl Block {
+    fn nested_one_level(self) -> Self {
+        let nested = |blocks: Vec<Block>| blocks.into_iter().map(Block::nested_one_level).collect();
+        match self {
+            Self::Heading { level, text } => Self::Heading {
+                level: (level + 1).min(6),
+                text,
+            },
+            Self::List {
+                first_number,
+                items,
+            } => Self::List {
+                first_number,
+                items: items.into_iter().map(nested).collect(),
+            },
+            Self::Quote(blocks) => Self::Quote(nested(blocks)),
+            Self::Details { summary, body } => Self::Details {
+                summary,
+                body: nested(body),
+            },
+            other => other,
+        }
+    }
+}
+
+/// GitHub links bare `http(s)://` URLs in text; pulldown-cmark only links `<url>`.
+fn split_bare_urls(text: &str) -> Vec<(&str, bool)> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    while let Some(start) = bare_url_start(rest) {
+        let candidate = &rest[start..];
+        let length = bare_url_length(candidate);
+        if length == 0 {
+            parts.push((&rest[..start + 1], false));
+            rest = &rest[start + 1..];
+            continue;
+        }
+        if start > 0 {
+            parts.push((&rest[..start], false));
+        }
+        parts.push((&candidate[..length], true));
+        rest = &candidate[length..];
+    }
+    if !rest.is_empty() {
+        parts.push((rest, false));
+    }
+    parts
+}
+
+fn bare_url_start(text: &str) -> Option<usize> {
+    [text.find("https://"), text.find("http://")]
+        .into_iter()
+        .flatten()
+        .min()
+}
+
+/// Up to the first space or `<`, less trailing punctuation and any `)` it did not open; 0 when
+/// nothing follows the scheme.
+fn bare_url_length(candidate: &str) -> usize {
+    let scheme = if candidate.starts_with("https://") {
+        8
+    } else {
+        7
+    };
+    let mut end = candidate
+        .find(|c: char| c.is_whitespace() || c == '<')
+        .unwrap_or(candidate.len());
+    loop {
+        let url = &candidate[..end];
+        let opened = url.matches('(').count();
+        let closed = url.matches(')').count();
+        match url.chars().last() {
+            Some(c) if ".,;:!?'\"*_~".contains(c) => end -= c.len_utf8(),
+            Some(')') if closed > opened => end -= 1,
+            _ => break,
+        }
+    }
+    if end > scheme { end } else { 0 }
 }
 
 enum Frame {
@@ -401,11 +494,22 @@ impl Builder {
         if text.is_empty() {
             return;
         }
-        self.runs.push(Run {
-            text: text.to_string(),
-            code,
-            ..self.style_run()
-        });
+        let style = self.style_run();
+        if code || style.link.is_some() {
+            self.runs.push(Run {
+                text: text.to_string(),
+                code,
+                ..style
+            });
+            return;
+        }
+        for (part, is_url) in split_bare_urls(text) {
+            self.runs.push(Run {
+                text: part.to_string(),
+                link: is_url.then(|| part.to_string()),
+                ..style.clone()
+            });
+        }
     }
 
     fn finish(mut self) -> Markdown {

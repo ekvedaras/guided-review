@@ -20,8 +20,8 @@ use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CodeLink, CommentPlace, JumpKind, JumpTarget, LineKind, LineLocation, MoreContext, NextScreen,
-    PieceDiff, Place, PrDescription, QueuedComment, Review, RowSelection, SafetyNetPage, Screen,
+    CodeLink, CommentPlace, JumpKind, JumpTarget, LineKind, LineLocation, Markdown, MoreContext,
+    NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen,
     StepId, StepPage, ThreadView,
 };
 
@@ -89,7 +89,7 @@ pub struct PieceHeading {
 pub enum PageRow {
     SummaryTitle(SharedString),
     SummaryBullet(SharedString),
-    PrDescription(Rc<PrDescription>),
+    PrDescription(Rc<Markdown>),
     StepHeading(Rc<StepHeading>),
     StepWhy(SharedString),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.

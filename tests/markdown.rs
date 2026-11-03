@@ -125,3 +125,81 @@ fn html_comments_and_unknown_tags_leave_only_their_text() {
         .collect();
     assert_eq!(text, "hi there");
 }
+
+fn linked(markdown: &Markdown) -> Vec<(String, Option<String>)> {
+    paragraph_runs(&markdown.blocks[0])
+        .iter()
+        .map(|run| (run.text.clone(), run.link.clone()))
+        .collect()
+}
+
+fn link(text: &str) -> (String, Option<String>) {
+    (text.to_string(), Some(text.to_string()))
+}
+
+fn unlinked(text: &str) -> (String, Option<String>) {
+    (text.to_string(), None)
+}
+
+#[test]
+fn a_bare_url_is_a_link_without_the_punctuation_after_it() {
+    let markdown =
+        Markdown::parse("Slack: https://acme.slack.com/archives/C01/p17?ts=1_2 (see it).");
+
+    assert_eq!(
+        linked(&markdown),
+        [
+            unlinked("Slack: "),
+            link("https://acme.slack.com/archives/C01/p17?ts=1_2"),
+            unlinked(" (see it)."),
+        ]
+    );
+}
+
+#[test]
+fn an_angle_bracket_url_is_a_link() {
+    let markdown = Markdown::parse("Docs <https://x.test/d>.");
+
+    assert_eq!(linked(&markdown)[1], link("https://x.test/d"));
+}
+
+#[test]
+fn a_url_in_code_or_inside_a_link_stays_as_it_is() {
+    let in_code = Markdown::parse("run `curl https://x.test/a`");
+    let in_link = Markdown::parse("[see https://x.test/a](https://x.test/b)");
+
+    assert_eq!(linked(&in_code)[1], unlinked("curl https://x.test/a"));
+    assert_eq!(
+        linked(&in_link),
+        [(
+            "see https://x.test/a".to_string(),
+            Some("https://x.test/b".to_string())
+        )]
+    );
+}
+
+#[test]
+fn a_url_keeps_a_closing_parenthesis_it_opened() {
+    let markdown = Markdown::parse("see https://x.test/Rust_(language)");
+
+    assert_eq!(linked(&markdown)[1], link("https://x.test/Rust_(language)"));
+}
+
+#[test]
+fn headings_nested_one_level_down_shrink_and_stop_at_the_smallest() {
+    let markdown = Markdown::parse("# Top\n\n###### Least\n\n> ## Quoted").nested_one_level();
+
+    let levels: Vec<u8> = markdown
+        .blocks
+        .iter()
+        .map(|block| match block {
+            Block::Heading { level, .. } => *level,
+            Block::Quote(inner) => match &inner[0] {
+                Block::Heading { level, .. } => *level,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(levels, [2, 6, 3]);
+}

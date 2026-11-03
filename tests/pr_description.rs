@@ -68,10 +68,24 @@ fn the_pr_description_shows_under_the_summary_as_markdown() {
 
     let description = review.pr_description().unwrap();
     assert_eq!(
-        paragraph_texts(&description.shown_blocks),
+        paragraph_texts(&description.blocks),
         ["Fixes totals.", "See the ticket."]
     );
-    assert_eq!(description.folded_blocks, 0);
+}
+
+#[test]
+fn headings_of_the_pr_description_rank_under_the_tours_own() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+
+    review
+        .set_pr_description("## What\n\nFixes totals.")
+        .unwrap();
+
+    assert!(matches!(
+        review.pr_description().unwrap().blocks[0],
+        Block::Heading { level: 3, .. }
+    ));
 }
 
 #[test]
@@ -92,30 +106,9 @@ fn the_last_pr_description_shows_at_once_on_the_next_open() {
     let review = shop.open();
 
     assert_eq!(
-        paragraph_texts(&review.pr_description().unwrap().shown_blocks),
+        paragraph_texts(&review.pr_description().unwrap().blocks),
         ["Fixes totals."]
     );
-}
-
-#[test]
-fn a_long_pr_description_shows_its_start_until_the_reader_unfolds_it() {
-    let shop = Shop::with_pull();
-    let mut review = shop.open();
-    let paragraphs: Vec<String> = (1..=7).map(|n| format!("Part {n}.")).collect();
-    review.set_pr_description(&paragraphs.join("\n\n")).unwrap();
-
-    let folded = review.pr_description().unwrap();
-    assert_eq!(
-        paragraph_texts(&folded.shown_blocks),
-        ["Part 1.", "Part 2.", "Part 3.", "Part 4."]
-    );
-    assert_eq!(folded.folded_blocks, 3);
-
-    review.toggle_pr_description();
-    let unfolded = review.pr_description().unwrap();
-    assert_eq!(paragraph_texts(&unfolded.shown_blocks), paragraphs);
-    assert_eq!(unfolded.folded_blocks, 0);
-    assert!(unfolded.can_fold);
 }
 
 #[test]
