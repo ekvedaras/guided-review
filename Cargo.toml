@@ -31,9 +31,16 @@ tree-sitter-php = "0.25.1"
 tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-yaml = "0.7.2"
+unicode-segmentation = "1.12"
 ureq = { version = "3.4.2", features = ["json"] }
 usvg = { version = "0.46", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"
 tempfile = "3.27.0"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
