@@ -151,7 +151,7 @@ impl RenderOnce for CommentComposer {
             .rounded_md()
             .border_1()
             .border_color(colors.border)
-            .bg(colors.sidebar)
+            .bg(colors.surface)
             .font_family(super::palette::TEXT_FONT)
             .on_click(move |_, window, cx| on_focus(window, cx))
             .child(

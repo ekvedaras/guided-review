@@ -1,9 +1,11 @@
 pub mod ask_panel;
+pub mod button;
 pub mod comment_composer;
 pub mod diagram;
 pub mod diff_view;
 pub mod finish_review;
 pub mod fold_toggle;
+pub mod icon;
 pub mod image_row;
 pub mod jump_palette;
 pub mod markdown_view;
@@ -16,3 +18,4 @@ pub mod step_notes;
 pub mod text_box;
 pub mod text_input;
 pub mod thread_view;
+pub mod title_bar;

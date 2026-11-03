@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Div, ElementId, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    StyledText, Window, div, px,
+    App, Div, ElementId, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, RenderOnce, Rgba, SharedString, Stateful, StatefulInteractiveElement, Styled,
+    StyledText, TextLayout, Window, div, px,
 };
 
 use crate::viewer::{Capture, DiffLine, Edge, GitHubLink, LineKind, LineLocation, MoreContext};
@@ -30,6 +30,16 @@ pub type OnOpenInIde = Rc<dyn Fn(&LineLocation, &mut App)>;
 
 pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut App)>;
 
+/// The mouse on a row's code text: down starts a text selection there, a move with the button held
+/// carries it on. Spots are byte offsets in the row's code.
+pub type OnCodeGesture = Rc<dyn Fn(RowGesture, usize, &mut Window, &mut App)>;
+
+/// How a row takes part in the text selection: what of it is selected, and where its mouse goes.
+pub struct CodeSelectionHooks {
+    pub selected: Option<Range<usize>>,
+    pub on_gesture: OnCodeGesture,
+}
+
 // Our own diff view (Zed's is GPL), drawn as rows of a piece box: the header band, one row per line
 // grouped in hunks like on GitHub, the bands between hunks, and the box's bottom edge. Each row is one
 // item of the screen's list, so only the rows on screen are drawn.
@@ -51,6 +61,10 @@ pub struct DiffRowLine {
 }
 
 impl DiffRowLine {
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
     pub fn of(line: DiffLine) -> Self {
         let number = line.location.line.to_string();
         let (base_number, head_number, sign) = match line.kind {
@@ -89,6 +103,7 @@ pub struct DiffRow {
     /// Without it the row takes no comment.
     on_gesture: Option<OnRowGesture>,
     open_in_ide: Option<OnOpenInIde>,
+    code_selection: Option<CodeSelectionHooks>,
 }
 
 impl DiffRow {
@@ -98,7 +113,13 @@ impl DiffRow {
             is_selected: false,
             on_gesture: None,
             open_in_ide: None,
+            code_selection: None,
         }
+    }
+
+    pub fn with_code_selection(mut self, hooks: CodeSelectionHooks) -> Self {
+        self.code_selection = Some(hooks);
+        self
     }
 
     /// Cmd-click on the gutter opens the line in the IDE; a plain click opens it on GitHub.
@@ -123,22 +144,62 @@ impl RenderOnce for DiffRow {
         let line = self.line;
         let location = line.location.clone();
         let colors = Colors::active(cx);
-        let highlights = line.highlights.iter().map(|(range, capture)| {
-            let style = HighlightStyle {
-                color: Some(colors.code(*capture).into()),
-                ..Default::default()
-            };
-            (range.clone(), style)
-        });
+        let highlights: Vec<_> = line
+            .highlights
+            .iter()
+            .map(|(range, capture)| {
+                let style = HighlightStyle {
+                    color: Some(colors.code(*capture).into()),
+                    ..Default::default()
+                };
+                (range.clone(), style)
+            })
+            .collect();
+        let selected = self
+            .code_selection
+            .as_ref()
+            .and_then(|hooks| hooks.selected.clone());
+        let highlights = match selected {
+            Some(selected) => with_selection(highlights, selected, colors.text_selection),
+            None => highlights,
+        };
         let code = StyledText::new(line.code.clone()).with_highlights(highlights);
+        let code_layout = code.layout().clone();
+        let code = div().flex_1().min_w_0().child(code);
+        let code = match self.code_selection.map(|hooks| hooks.on_gesture) {
+            Some(on_gesture) => {
+                let (on_press, on_move) = (on_gesture.clone(), on_gesture);
+                let (press_layout, move_layout) = (code_layout.clone(), code_layout);
+                code.cursor_text()
+                    .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                        let byte = byte_at(&press_layout, event.position);
+                        on_press(RowGesture::Press, byte, window, cx)
+                    })
+                    .on_mouse_move(move |event, window, cx| {
+                        if event.pressed_button == Some(MouseButton::Left) {
+                            let byte = byte_at(&move_layout, event.position);
+                            on_move(RowGesture::Over, byte, window, cx)
+                        }
+                    })
+            }
+            None => code,
+        };
         let link = line.github_link.clone();
         let ide_at = line.open_at.clone();
         let open_in_ide = self.open_in_ide.clone();
+        let gutter_background = match line.kind {
+            _ if self.is_selected => colors.current,
+            LineKind::Removed => colors.removed_gutter,
+            LineKind::Added => colors.added_gutter,
+            LineKind::Context { .. } => colors.background,
+        };
         let gutter = div()
             .id(SharedString::from(link.to_string()))
             .flex_none()
             .cursor_pointer()
+            .bg(gutter_background)
             .text_color(colors.muted_text)
+            .hover(|gutter| gutter.text_color(colors.accent))
             .on_click(move |event, _, cx| {
                 match (event.modifiers().secondary(), &open_in_ide, &ide_at) {
                     (true, Some(open_in_ide), Some(at)) => open_in_ide(at, cx),
@@ -185,6 +246,48 @@ impl RenderOnce for DiffRow {
     }
 }
 
+fn byte_at(layout: &TextLayout, position: gpui::Point<gpui::Pixels>) -> usize {
+    layout
+        .index_for_position(position)
+        .unwrap_or_else(|closest| closest)
+}
+
+/// Lays the selection's background over the syntax colours, which must stay sorted and apart.
+fn with_selection(
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    selected: Range<usize>,
+    background: Rgba,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let selection_style = HighlightStyle {
+        background_color: Some(background.into()),
+        ..Default::default()
+    };
+    let mut cut: Vec<usize> = vec![selected.start, selected.end];
+    for (range, _) in &highlights {
+        cut.push(range.start);
+        cut.push(range.end);
+    }
+    cut.sort_unstable();
+    cut.dedup();
+    cut.windows(2)
+        .filter_map(|bounds| {
+            let piece = bounds[0]..bounds[1];
+            let syntax = highlights
+                .iter()
+                .find(|(range, _)| range.start <= piece.start && piece.end <= range.end)
+                .map(|(_, style)| *style);
+            let is_selected = selected.start <= piece.start && piece.end <= selected.end;
+            let style = match (syntax, is_selected) {
+                (Some(style), true) => style.highlight(selection_style),
+                (Some(style), false) => style,
+                (None, true) => selection_style,
+                (None, false) => return None,
+            };
+            Some((piece, style))
+        })
+        .collect()
+}
+
 /// Every row of a piece sits between the box's side borders.
 pub fn piece_row(colors: Colors) -> Div {
     div().w_full().border_x_1().border_color(colors.border)
@@ -215,30 +318,91 @@ impl PieceHeader {
 impl RenderOnce for PieceHeader {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
+        let name = PieceName::of(&self.piece);
+        let symbol = name.symbol.map(|symbol| {
+            div()
+                .flex_none()
+                .text_color(colors.accent)
+                .child(SharedString::from(symbol.to_string()))
+        });
         div()
             .w_full()
+            .h(px(34.))
             .flex()
             .items_center()
-            .px_2()
+            .px_3()
             .gap_2()
-            .bg(colors.sidebar)
+            .bg(colors.surface)
             .border_1()
             .rounded_t_md()
             .border_color(colors.border)
             .text_sm()
             .child(
                 div()
-                    .py_1()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .overflow_hidden()
+                    .whitespace_nowrap()
                     .font_family(CODE_FONT)
-                    .child(self.piece),
+                    .child(
+                        div()
+                            .flex()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_color(colors.muted_text)
+                                    .text_ellipsis_start()
+                                    .overflow_hidden()
+                                    .child(SharedString::from(name.folder.to_string())),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(SharedString::from(name.file.to_string())),
+                            ),
+                    )
+                    .children(symbol),
             )
-            .children(
-                self.repin_label
-                    .map(|label| div().text_color(colors.muted_text).child(label)),
-            )
-            .child(div().flex_1())
+            .children(self.repin_label.map(|label| {
+                div()
+                    .flex_none()
+                    .px_1p5()
+                    .rounded_md()
+                    .bg(colors.warning_background)
+                    .text_xs()
+                    .text_color(colors.warning)
+                    .child(label)
+            }))
             .children(self.buttons)
+    }
+}
+
+/// A piece id, `<file>#<symbol>` or `<file>`, cut where the eye looks: the file name and the symbol.
+struct PieceName<'a> {
+    /// With its trailing slash, or empty.
+    folder: &'a str,
+    file: &'a str,
+    symbol: Option<&'a str>,
+}
+
+impl<'a> PieceName<'a> {
+    fn of(piece: &'a str) -> Self {
+        let (path, symbol) = match piece.split_once('#') {
+            Some((path, symbol)) => (path, Some(symbol)),
+            None => (piece, None),
+        };
+        let file_start = path.rfind('/').map_or(0, |slash| slash + 1);
+        Self {
+            folder: &path[..file_start],
+            file: &path[file_start..],
+            symbol,
+        }
     }
 }
 
@@ -297,7 +461,7 @@ pub fn hunk_gap(
     let band = div()
         .id(id)
         .px_2()
-        .bg(colors.sidebar)
+        .bg(colors.surface)
         .text_xs()
         .text_color(colors.muted_text);
     let band = match more {

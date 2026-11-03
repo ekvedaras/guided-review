@@ -1,10 +1,12 @@
+use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, EventEmitter, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
+    Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::viewer::{JumpKind, JumpTarget};
 
+use super::markdown_view::InlineMarkdown;
 use super::palette::{Colors, TEXT_FONT};
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -100,35 +102,120 @@ impl JumpPalette {
 
     fn row(&self, index: usize, target: &JumpTarget, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
+        let is_selected = index == self.selected;
         let kind = match target.kind {
-            JumpKind::Step => "step",
-            JumpKind::File => "file",
-            JumpKind::Symbol => "symbol",
+            JumpKind::Step => "Step",
+            JumpKind::File => "File",
+            JumpKind::Symbol => "Symbol",
         };
-        let row = div()
+        let label = match target.kind {
+            JumpKind::Step => div()
+                .min_w_0()
+                .truncate()
+                .child(InlineMarkdown::new(
+                    format!("jump-label-{index}"),
+                    &target.label,
+                ))
+                .into_any_element(),
+            JumpKind::File | JumpKind::Symbol => {
+                code_label(colors, &target.label).into_any_element()
+            }
+        };
+        let detail = (!target.detail.is_empty()).then(|| {
+            div()
+                .flex_shrink(1.)
+                .min_w(px(80.))
+                .max_w(px(260.))
+                .truncate()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(InlineMarkdown::new(
+                    format!("jump-detail-{index}"),
+                    &target.detail,
+                ))
+        });
+        div()
             .id(SharedString::from(format!("jump-{index}")))
+            .mx_2()
+            .px_2()
+            .h(px(32.))
             .flex()
-            .gap_2()
-            .px_3()
-            .py_1()
+            .items_center()
+            .gap_3()
+            .rounded_md()
+            .overflow_hidden()
             .cursor_pointer()
+            .map(|row| {
+                if is_selected {
+                    row.bg(colors.current)
+                } else {
+                    row.hover(|row| row.bg(colors.hover))
+                }
+            })
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.selected = index;
                 this.pick(window, cx);
             }))
-            .child(div().w(px(48.)).text_color(colors.muted_text).child(kind))
-            .child(div().flex_1().child(target.label.clone()))
             .child(
                 div()
-                    .text_color(colors.muted_text)
-                    .child(target.detail.clone()),
-            );
-        if index == self.selected {
-            row.bg(colors.current)
-        } else {
-            row
-        }
+                    .flex_none()
+                    .w(px(52.))
+                    .text_xs()
+                    .text_color(if is_selected {
+                        colors.accent
+                    } else {
+                        colors.muted_text
+                    })
+                    .child(kind),
+            )
+            .child(div().flex_1().min_w_0().overflow_hidden().child(label))
+            .children(detail)
     }
+}
+
+/// A file or symbol target as `folder/` dim, then the file name, then the symbol, so the end of a
+/// long path is what stays readable.
+fn code_label(colors: Colors, label: &str) -> impl IntoElement {
+    let (path, symbol) = match label.split_once('#') {
+        Some((path, symbol)) => (path, Some(symbol)),
+        None => (label, None),
+    };
+    let file_start = path.rfind('/').map_or(0, |slash| slash + 1);
+    let (folder, file) = path.split_at(file_start);
+    let symbol_name = symbol.map(|symbol| symbol.rsplit("::").next().unwrap_or(symbol));
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .whitespace_nowrap()
+        .children(symbol_name.map(|name| {
+            div()
+                .flex_none()
+                .font_weight(FontWeight::MEDIUM)
+                .child(SharedString::from(name.to_string()))
+        }))
+        .child(
+            div()
+                .flex()
+                .min_w_0()
+                .overflow_hidden()
+                .when(symbol.is_some(), |path| path.text_xs())
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis_start()
+                        .text_color(colors.muted_text)
+                        .child(SharedString::from(folder.to_string())),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .when(symbol.is_some(), |file| file.text_color(colors.muted_text))
+                        .child(SharedString::from(file.to_string())),
+                ),
+        )
 }
 
 impl Render for JumpPalette {
@@ -152,34 +239,68 @@ impl Render for JumpPalette {
             .left_0()
             .size_full()
             .flex()
+            .items_start()
             .justify_center()
+            .bg(gpui::rgba(0x00000066))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.close(window, cx)),
+            )
             .child(
                 div()
                     .id("jump-palette")
                     .key_context(Self::KEY_CONTEXT)
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_key_down(cx.listener(Self::on_key_down))
                     .mt(px(80.))
-                    .w(px(640.))
+                    .w(px(720.))
                     .h_auto()
-                    .max_h(px(480.))
                     .flex()
                     .flex_col()
+                    .overflow_hidden()
                     .bg(colors.background)
                     .border_1()
                     .border_color(colors.border)
-                    .rounded_md()
+                    .rounded_lg()
                     .shadow_lg()
                     .font_family(TEXT_FONT)
                     .text_sm()
                     .text_color(colors.text)
                     .child(
                         div()
-                            .p_3()
+                            .px_4()
+                            .py_3()
+                            .text_base()
                             .border_b_1()
                             .border_color(colors.border)
                             .child(self.query_box(cx)),
                     )
-                    .children(rows),
+                    .child(div().py_2().flex().flex_col().children(rows).when(
+                        self.targets.is_empty(),
+                        |list| {
+                            list.child(
+                                div().px_4().py_3().text_color(colors.muted_text).child(
+                                    "Nothing matches. Try part of a file, symbol or step name.",
+                                ),
+                            )
+                        },
+                    ))
+                    .child(
+                        div()
+                            .px_4()
+                            .py_2()
+                            .flex()
+                            .gap_4()
+                            .border_t_1()
+                            .border_color(colors.subtle_border)
+                            .bg(colors.surface)
+                            .rounded_b_md()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child("↑ ↓  move")
+                            .child("↵  open")
+                            .child("esc  close"),
+                    ),
             )
             .into_any_element()
     }

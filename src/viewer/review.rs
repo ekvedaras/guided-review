@@ -86,6 +86,25 @@ pub struct ReadProgress {
     pub total: usize,
 }
 
+/// Where the open screen sits in the reading order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadingPlace {
+    /// Counted among the steps from 1; `None` on the summary and the safety net.
+    pub step_number: Option<usize>,
+    pub step_count: usize,
+    pub has_previous: bool,
+    pub next: Option<NextScreen>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NextScreen {
+    /// Its title is markdown.
+    Step {
+        title: String,
+    },
+    SafetyNet,
+}
+
 /// What the sidebar counts for the safety net, cheap enough to ask on every change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SafetyNetSize {
@@ -1065,6 +1084,34 @@ impl Review {
         match self.repin_running {
             true => Err(RepinRunning.into()),
             false => Ok(()),
+        }
+    }
+
+    pub fn reading_place(&self) -> ReadingPlace {
+        let reading_order = self.reading_order();
+        let position = reading_order
+            .iter()
+            .position(|screen| screen == &self.screen);
+        let is_step = |screen: &&Screen| matches!(screen, Screen::Step(_));
+        let next = position
+            .and_then(|position| reading_order.get(position + 1))
+            .and_then(|screen| match screen {
+                Screen::Step(id) => Some(NextScreen::Step {
+                    title: self.step(id)?.title.clone(),
+                }),
+                Screen::SafetyNet => Some(NextScreen::SafetyNet),
+                Screen::Summary => None,
+            });
+        ReadingPlace {
+            step_number: match (&self.screen, position) {
+                (Screen::Step(_), Some(position)) => {
+                    Some(reading_order[..=position].iter().filter(is_step).count())
+                }
+                _ => None,
+            },
+            step_count: reading_order.iter().filter(is_step).count(),
+            has_previous: position.is_some_and(|position| position > 0),
+            next,
         }
     }
 

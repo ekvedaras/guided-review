@@ -3,12 +3,12 @@
 
 use gpui::SharedString;
 
-use crate::app::components::safety_net_view::SafetyNetIntro;
-use crate::viewer::{ApproveWarning, Review, Screen, StepId};
+use crate::viewer::{ApproveWarning, ReadProgress, Review, Screen, StepId};
 
 pub struct SidebarStep {
     pub id: StepId,
     pub label: SharedString,
+    pub thread_count: usize,
     pub depth: usize,
     pub is_current: bool,
     pub is_ticked: bool,
@@ -17,12 +17,13 @@ pub struct SidebarStep {
 }
 
 pub struct SidebarSafetyNet {
-    pub label: SharedString,
+    pub pieces: usize,
+    pub thread_count: usize,
     pub is_current: bool,
 }
 
 pub struct SidebarRows {
-    pub progress: SharedString,
+    pub progress: ReadProgress,
     /// Approve and Request changes show only on someone else's PR.
     pub can_judge: bool,
     pub approve_warning: Option<ApproveWarning>,
@@ -40,11 +41,8 @@ impl SidebarRows {
             .sidebar()
             .into_iter()
             .map(|entry| SidebarStep {
-                label: match entry.thread_count {
-                    0 => entry.title.to_string(),
-                    count => format!("{} ({count} 💬)", entry.title),
-                }
-                .into(),
+                label: entry.title.to_string().into(),
+                thread_count: entry.thread_count,
                 id: entry.id,
                 depth: entry.depth,
                 is_current: entry.is_current,
@@ -53,17 +51,14 @@ impl SidebarRows {
             })
             .collect();
         let safety_net = review.safety_net_size().map(|size| SidebarSafetyNet {
-            label: match size.threads {
-                0 => format!("{} ({})", SafetyNetIntro::TITLE, size.pieces),
-                threads => format!("{} ({}, {threads} 💬)", SafetyNetIntro::TITLE, size.pieces),
-            }
-            .into(),
+            pieces: size.pieces,
+            thread_count: size.threads,
             is_current: review.screen() == &Screen::SafetyNet,
         });
         Self {
             can_judge: review.can_approve_or_request_changes(),
             approve_warning: review.approve_warning(),
-            progress: format!("Read {} of {}", progress.read, progress.total).into(),
+            progress,
             sync_banner: review
                 .sync_banner()
                 .map(|reason| format!("Not syncing with GitHub: {reason}").into()),

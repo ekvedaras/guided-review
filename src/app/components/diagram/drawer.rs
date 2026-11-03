@@ -128,7 +128,7 @@ fn measured_with_app_font() -> SvgEnvironment {
 fn host_theme(appearance: Appearance, colors: &Colors) -> HostTheme {
     let roles = [
         (ThemeRole::Canvas, colors.background),
-        (ThemeRole::Surface, colors.sidebar),
+        (ThemeRole::Surface, colors.surface),
         (ThemeRole::SurfaceAlt, colors.current),
         (ThemeRole::SurfaceMuted, colors.background),
         (ThemeRole::Text, colors.text),
@@ -138,10 +138,10 @@ fn host_theme(appearance: Appearance, colors: &Colors) -> HostTheme {
         (ThemeRole::EdgeLabelBackground, colors.background),
         (ThemeRole::ClusterBackground, colors.background),
         (ThemeRole::ClusterBorder, colors.border),
-        (ThemeRole::NoteBackground, colors.sidebar),
+        (ThemeRole::NoteBackground, colors.surface),
         (ThemeRole::NoteBorder, colors.warning),
         (ThemeRole::NoteText, colors.text),
-        (ThemeRole::ActorBackground, colors.sidebar),
+        (ThemeRole::ActorBackground, colors.surface),
         (ThemeRole::ActorBorder, colors.accent),
         (ThemeRole::ActorText, colors.text),
         (ThemeRole::ActivationBackground, colors.border),

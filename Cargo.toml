@@ -35,6 +35,15 @@ unicode-segmentation = "1.12"
 ureq = { version = "3.4.2", features = ["json"] }
 usvg = { version = "0.46", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+
+[features]
+# Saves pictures of every screen when GUIDED_REVIEW_SNAPSHOTS names a folder.
+snapshots = ["gpui_platform/test-support"]
+
 [dev-dependencies]
 assert_cmd = "2.2.2"
 tempfile = "3.27.0"

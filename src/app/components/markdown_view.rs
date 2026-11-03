@@ -124,7 +124,7 @@ fn suggestion_view(colors: Colors, diff: &SuggestionDiff) -> AnyElement {
             div()
                 .px_2()
                 .py_1()
-                .bg(colors.sidebar)
+                .bg(colors.surface)
                 .text_color(colors.muted_text)
                 .child("Suggested change"),
         )
@@ -266,7 +266,7 @@ fn code_block(colors: Colors, language: Option<&str>, text: &str) -> AnyElement 
         .px_2()
         .py_1()
         .rounded_md()
-        .bg(colors.sidebar)
+        .bg(colors.surface)
         .border_1()
         .border_color(colors.border)
         .font_family(CODE_FONT)
@@ -390,7 +390,7 @@ fn style_of(colors: Colors, run: &Run) -> HighlightStyle {
         color,
         font_weight: run.bold.then_some(FontWeight::BOLD),
         font_style: run.italic.then_some(FontStyle::Italic),
-        background_color: run.code.then(|| colors.sidebar.into()),
+        background_color: run.code.then(|| colors.surface.into()),
         underline: run.link.is_some().then(|| UnderlineStyle {
             thickness: px(1.),
             color: None,

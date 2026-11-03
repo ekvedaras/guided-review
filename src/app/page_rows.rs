@@ -20,9 +20,9 @@ use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CommentPlace, GitHubLink, JumpKind, JumpTarget, LineKind, LineLocation, MoreContext, PieceDiff,
-    Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen, StepId, StepPage,
-    ThreadView,
+    CommentPlace, GitHubLink, JumpKind, JumpTarget, LineKind, LineLocation, MoreContext,
+    NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen,
+    StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -35,11 +35,45 @@ pub struct AskAt {
 pub struct StepHeading {
     pub id: StepId,
     pub title: SharedString,
+    /// "Step 3 of 10"; `None` when the step is not in the reading order.
+    pub number: Option<(usize, usize)>,
     pub is_ticked: bool,
     /// A step whose pieces all went away in a re-pin.
     pub is_gone: bool,
     /// Skim and ticked steps fold by a click on their title.
     pub folds_on_title_click: bool,
+}
+
+/// The controls over a screen's pieces, in one row.
+pub struct Toolbar {
+    pub ask: Option<AskAt>,
+    pub fold: Option<FoldControl>,
+    pub full_diff: Option<FullDiffControl>,
+    /// `None` while the pieces are folded away, as whitespace changes nothing then.
+    pub ignores_whitespace: Option<bool>,
+}
+
+#[derive(Hash)]
+pub struct FoldControl {
+    pub step: StepId,
+    pub is_folded: bool,
+    pub piece_count: usize,
+}
+
+#[derive(Hash)]
+pub struct FullDiffControl {
+    pub step: StepId,
+    pub is_showing_full_diff: bool,
+}
+
+/// The way on at the end of a screen.
+#[derive(Hash)]
+pub struct ScreenFooter {
+    /// The step that is ticked on the way on: the open step, if not read yet.
+    pub ticks: Option<StepId>,
+    pub has_previous: bool,
+    pub next: Option<NextScreen>,
+    pub is_summary: bool,
 }
 
 pub struct PieceHeading {
@@ -59,24 +93,12 @@ pub enum PageRow {
     StepWhy(SharedString),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
     Diagram,
-    Ask(Rc<AskAt>),
     StepNotes(StepNotes),
-    WhitespaceToggle {
-        is_on: bool,
-    },
     RepinNotes {
         gone_pieces: usize,
         text_may_be_old: bool,
     },
-    FullDiffToggle {
-        step: StepId,
-        is_showing_full_diff: bool,
-    },
-    FoldToggle {
-        step: StepId,
-        is_folded: bool,
-        piece_count: usize,
-    },
+    Toolbar(Rc<Toolbar>),
     SafetyNetIntro,
     PieceHeader(Rc<PieceHeading>),
     /// In the change since the read, a piece without lines was not touched since.
@@ -113,6 +135,7 @@ pub enum PageRow {
     /// The ask button under the last of the lines that have Asks.
     AskMarker(Rc<AskAt>),
     PieceEnd,
+    ScreenFooter(Rc<ScreenFooter>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,8 +152,16 @@ impl PageRow {
             Self::StepHeading(heading) => {
                 heading.id.to_string().hash(&mut hasher);
                 heading.title.hash(&mut hasher);
+                heading.number.hash(&mut hasher);
             }
-            Self::Ask(ask) | Self::AskMarker(ask) => ask.id.hash(&mut hasher),
+            Self::AskMarker(ask) => ask.id.hash(&mut hasher),
+            Self::Toolbar(toolbar) => {
+                toolbar.ask.as_ref().map(|ask| &ask.id).hash(&mut hasher);
+                toolbar.fold.hash(&mut hasher);
+                toolbar.full_diff.hash(&mut hasher);
+                toolbar.ignores_whitespace.hash(&mut hasher);
+            }
+            Self::ScreenFooter(footer) => footer.hash(&mut hasher),
             Self::StepNotes(notes) => notes.hash(&mut hasher),
             Self::RepinNotes {
                 gone_pieces,
@@ -138,19 +169,6 @@ impl PageRow {
             } => {
                 gone_pieces.hash(&mut hasher);
                 text_may_be_old.hash(&mut hasher);
-            }
-            Self::FullDiffToggle {
-                step,
-                is_showing_full_diff,
-            } => {
-                step.to_string().hash(&mut hasher);
-                is_showing_full_diff.hash(&mut hasher);
-            }
-            Self::FoldToggle {
-                step, is_folded, ..
-            } => {
-                step.to_string().hash(&mut hasher);
-                is_folded.hash(&mut hasher);
             }
             Self::PieceHeader(heading) => {
                 heading.piece.hash(&mut hasher);
@@ -209,7 +227,6 @@ impl PageRow {
                 is_sending.hash(&mut hasher);
             }
             Self::Diagram
-            | Self::WhitespaceToggle { .. }
             | Self::SafetyNetIntro
             | Self::NoChangeSinceRead
             | Self::OnlyWhitespace
@@ -416,17 +433,33 @@ fn changed_span(old: &[RowKey], new: &[RowKey]) -> RowsChange {
 
 fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
     rows.push(PageRow::SummaryTitle(review.title().to_string().into()));
-    rows.push(PageRow::Ask(Rc::new(AskAt {
-        id: "ask-tour".into(),
-        place: Place::Tour,
-        label: "the whole tour".into(),
-    })));
     rows.extend(
         review
             .summary()
             .iter()
-            .map(|bullet| PageRow::SummaryBullet(format!("• {bullet}").into())),
+            .map(|bullet| PageRow::SummaryBullet(bullet.to_string().into())),
     );
+    rows.push(PageRow::Toolbar(Rc::new(Toolbar {
+        ask: Some(AskAt {
+            id: "ask-tour".into(),
+            place: Place::Tour,
+            label: "the whole tour".into(),
+        }),
+        fold: None,
+        full_diff: None,
+        ignores_whitespace: None,
+    })));
+    rows.push(screen_footer(review, None));
+}
+
+fn screen_footer(review: &Review, ticks: Option<StepId>) -> PageRow {
+    let place = review.reading_place();
+    PageRow::ScreenFooter(Rc::new(ScreenFooter {
+        ticks,
+        has_previous: place.has_previous,
+        next: place.next,
+        is_summary: review.screen() == &Screen::Summary,
+    }))
 }
 
 /// What hangs under a row of code, in this order: threads, queued comments, comment boxes, ask markers.
@@ -504,9 +537,11 @@ impl RowsBuilder<'_> {
     fn step_rows(&mut self, page: StepPage<'_>, review: &Review) -> Option<SharedString> {
         let step = page.step;
         let id = StepId::from(step.id.as_str());
+        let place = review.reading_place();
         self.rows.push(PageRow::StepHeading(Rc::new(StepHeading {
             id: id.clone(),
             title: step.title.clone().into(),
+            number: place.step_number.map(|number| (number, place.step_count)),
             is_ticked: page.is_ticked,
             is_gone: page.is_gone,
             folds_on_title_click: page.is_ticked || step.skim,
@@ -517,41 +552,43 @@ impl RowsBuilder<'_> {
             .as_ref()
             .filter(|_| !page.is_folded)
             .map(|source| SharedString::from(source.clone()));
-        if diagram.is_some() {
-            self.rows.push(PageRow::Diagram);
-        }
-        self.rows.push(PageRow::Ask(Rc::new(AskAt {
-            id: format!("ask-step-{id}").into(),
-            place: Place::Step { step: id.clone() },
-            label: step.title.clone(),
-        })));
         let notes = StepNotes::of(step);
         if !notes.is_empty() {
             self.rows.push(PageRow::StepNotes(notes));
         }
-        self.rows.push(PageRow::WhitespaceToggle {
-            is_on: review.ignores_whitespace(),
-        });
+        if diagram.is_some() {
+            self.rows.push(PageRow::Diagram);
+        }
         if page.gone_pieces > 0 || page.text_may_be_old {
             self.rows.push(PageRow::RepinNotes {
                 gone_pieces: page.gone_pieces,
                 text_may_be_old: page.text_may_be_old,
             });
         }
-        if let Some(since) = &page.since_read {
-            self.rows.push(PageRow::FullDiffToggle {
-                step: id.clone(),
-                is_showing_full_diff: since.showing_full_diff,
-            });
-        }
-        if page.is_folded || step.skim || page.is_ticked {
-            self.rows.push(PageRow::FoldToggle {
+        self.rows.push(PageRow::Toolbar(Rc::new(Toolbar {
+            ask: Some(AskAt {
+                id: format!("ask-step-{id}").into(),
+                place: Place::Step { step: id.clone() },
+                label: step.title.clone(),
+            }),
+            fold: (page.is_folded || step.skim || page.is_ticked).then(|| FoldControl {
                 step: id.clone(),
                 is_folded: page.is_folded,
                 piece_count: page.pieces.len(),
-            });
-        }
+            }),
+            full_diff: page
+                .since_read
+                .as_ref()
+                .filter(|_| !page.is_folded)
+                .map(|since| FullDiffControl {
+                    step: id.clone(),
+                    is_showing_full_diff: since.showing_full_diff,
+                }),
+            ignores_whitespace: (!page.is_folded).then(|| review.ignores_whitespace()),
+        })));
+        let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
         if page.is_folded {
+            self.rows.push(footer);
             return diagram;
         }
         let shows_change_since_read = page
@@ -579,14 +616,18 @@ impl RowsBuilder<'_> {
                 .into_iter()
                 .map(|view| thread_row(view, false, self.facts)),
         );
+        self.rows.push(footer);
         diagram
     }
 
     fn safety_net_rows(&mut self, page: SafetyNetPage, review: &Review) {
         self.rows.push(PageRow::SafetyNetIntro);
-        self.rows.push(PageRow::WhitespaceToggle {
-            is_on: review.ignores_whitespace(),
-        });
+        self.rows.push(PageRow::Toolbar(Rc::new(Toolbar {
+            ask: None,
+            fold: None,
+            full_diff: None,
+            ignores_whitespace: Some(review.ignores_whitespace()),
+        })));
         let (under_a_line, after_code): (Vec<_>, Vec<_>) = page
             .threads
             .into_iter()
@@ -600,6 +641,7 @@ impl RowsBuilder<'_> {
                 .into_iter()
                 .map(|view| thread_row(view, false, self.facts)),
         );
+        self.rows.push(screen_footer(review, None));
     }
 
     fn add_threads_under_lines(&mut self, threads: Vec<ThreadView>) {

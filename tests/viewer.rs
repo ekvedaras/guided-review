@@ -4,7 +4,7 @@ mod support;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{Review, ReviewStateFile, Screen, Side};
+use guided_review::viewer::{NextScreen, ReadingPlace, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
 use support::FixtureRepo;
 
@@ -128,6 +128,43 @@ fn going_back_walks_back_to_the_summary() {
     assert!(review.go_back());
     assert_eq!(review.screen(), &Screen::Summary);
     assert!(!review.go_back());
+}
+
+#[test]
+fn the_reading_place_numbers_the_step_and_names_the_screen_after_it() {
+    let mut review = Shop::with_pull().open(nested_tour());
+    let next_step = |id: &str| {
+        Some(NextScreen::Step {
+            title: format!("Title of {id}"),
+        })
+    };
+
+    assert_eq!(
+        review.reading_place(),
+        ReadingPlace {
+            step_number: None,
+            step_count: 5,
+            has_previous: false,
+            next: next_step("checkout"),
+        }
+    );
+    review.go_forward();
+    review.go_forward();
+    assert_eq!(
+        review.reading_place(),
+        ReadingPlace {
+            step_number: Some(2),
+            step_count: 5,
+            has_previous: true,
+            next: next_step("rounding"),
+        }
+    );
+    review.go_to(&"emails".into());
+    assert_eq!(review.reading_place().step_number, Some(5));
+    assert_eq!(review.reading_place().next, Some(NextScreen::SafetyNet));
+    review.go_forward();
+    assert_eq!(review.reading_place().step_number, None);
+    assert_eq!(review.reading_place().next, None);
 }
 
 fn sidebar_lines(review: &Review) -> Vec<String> {

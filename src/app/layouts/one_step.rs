@@ -1,25 +1,30 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ListOffset, ListState, MouseButton, ParentElement, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
+    AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable,
+    FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
+    Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
+    Window, actions, div, list, px, relative,
 };
 
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::app::code_selection::{CodeSelection, CodeSpot};
 use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
+use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
 use crate::app::components::comment_composer::{
     CommentComposer, ComposerActions, OnCompose, QueuedCommentNote,
 };
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    DiffRow, OnImageComment, OnMoreContext, OnOpenInIde, OnRowGesture, PieceHeader, RowGesture,
-    binary_file_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end, piece_row,
+    CodeSelectionHooks, DiffRow, OnImageComment, OnMoreContext, OnOpenInIde, OnRowGesture,
+    PieceHeader, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
+    only_whitespace_row, piece_end, piece_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
+use crate::app::components::icon::{Icon, icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::markdown_view::{InlineMarkdown, MarkdownView};
@@ -27,21 +32,24 @@ use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
-use crate::app::components::sidebar_row::sidebar_row;
+use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::thread_view::{
     OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
+use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
-use crate::app::page_rows::{AskAt, PageRow, SelectedRows, StepHeading};
+use crate::app::page_rows::{AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, Toolbar};
 use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
 use crate::code_source::CodeSource;
 use crate::ide::Ide;
 use crate::viewer::{
-    Ask, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, Place, QueuedComment,
-    Review, Screen, SendMode, StepId, ThreadView,
+    Ask, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen, Place,
+    QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
 };
 
-actions!(one_step, [GoForward, GoBack, ToggleJump]);
+actions!(one_step, [GoForward, GoBack, ToggleJump, CopySelection]);
+
+type OnCodeSpot = Rc<dyn Fn(RowGesture, CodeSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
@@ -65,11 +73,15 @@ pub struct OneStepLayout {
     /// The comment being written takes keys with this one.
     composer_focus: FocusHandle,
     ask: Entity<AskPanel>,
+    code_selection: Option<CodeSelection>,
+    on_code_gesture: OnCodeSpot,
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
     /// The rows of the last drag, to ask the AI about.
     lines_to_ask: Option<Place>,
     frame_stats: FrameStatsHook,
+    #[cfg(feature = "snapshots")]
+    snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
     /// `None` hides every Open in IDE button.
     ide: Option<Ide>,
@@ -151,6 +163,17 @@ impl OneStepLayout {
                 .update(cx, |this, cx| this.on_row_gesture(gesture, at, cx))
                 .ok();
         });
+        let layout_handle = cx.weak_entity();
+        let on_code_gesture: OnCodeSpot = Rc::new(move |gesture, at, window, cx| {
+            layout_handle
+                .update(cx, |this, cx| {
+                    if gesture == RowGesture::Press {
+                        window.focus(&this.focus, cx);
+                    }
+                    this.on_code_gesture(gesture, at, cx)
+                })
+                .ok();
+        });
         cx.on_app_quit(|this, _| {
             this.frame_stats.report_on_quit();
             async {}
@@ -164,9 +187,13 @@ impl OneStepLayout {
             focus,
             composer_focus: cx.focus_handle(),
             ask,
+            code_selection: None,
+            on_code_gesture,
             selection_notice: None,
             lines_to_ask: None,
             frame_stats,
+            #[cfg(feature = "snapshots")]
+            snapshots: crate::app::snapshots::Snapshots::from_env(),
             jump,
             ide,
             _session_subscriptions: session_subscriptions,
@@ -239,6 +266,28 @@ impl OneStepLayout {
         window.request_animation_frame();
     }
 
+    #[cfg(feature = "snapshots")]
+    fn run_snapshots(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::app::snapshots::SnapshotMove;
+        let Some(snapshots) = self.snapshots.as_mut() else {
+            return;
+        };
+        match snapshots.frame(window) {
+            SnapshotMove::Wait => {}
+            SnapshotMove::ScrollToEnd => self.screen_list.scroll_to(ListOffset {
+                item_ix: self.screen_list.item_count(),
+                offset_in_item: px(0.),
+            }),
+            SnapshotMove::NextScreen => {
+                let has_next = self.change_review(cx, Review::go_forward);
+                if !has_next {
+                    cx.quit();
+                }
+            }
+            SnapshotMove::Done => cx.quit(),
+        }
+    }
+
     fn ask_button(
         &self,
         key: String,
@@ -270,7 +319,45 @@ impl OneStepLayout {
         });
     }
 
+    fn on_code_gesture(&mut self, gesture: RowGesture, at: CodeSpot, cx: &mut Context<Self>) {
+        match gesture {
+            RowGesture::Press => {
+                let screen = self.session.read(cx).review().screen().clone();
+                self.code_selection = Some(CodeSelection::start(screen, at));
+            }
+            RowGesture::Over => match &mut self.code_selection {
+                Some(selection) if selection.is_dragging() => selection.drag_to(at),
+                _ => return,
+            },
+        }
+        cx.notify();
+    }
+
+    fn copy_selection(&mut self, _: &CopySelection, _: &mut Window, cx: &mut Context<Self>) {
+        let session = self.session.read(cx);
+        let Some(selection) = self
+            .code_selection
+            .as_ref()
+            .filter(|selection| selection.is_on(session.review().screen()))
+        else {
+            return;
+        };
+        let rows = session.rows();
+        let text = selection.text(|row| match rows.row(row)? {
+            PageRow::Line(line) => Some(line.code()),
+            _ => None,
+        });
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
     fn end_row_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(selection) = &mut self.code_selection
+            && selection.is_dragging()
+            && !selection.end_drag()
+        {
+            self.code_selection = None;
+            cx.notify();
+        }
         let ended = self.session.update(cx, |session, cx| {
             let review = session.review();
             if !review.is_selecting() {
@@ -548,31 +635,30 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
-        let summary_row = sidebar_row(colors, "summary", 0, sidebar.is_summary_current)
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, Review::go_to_summary);
-            }))
-            .child("Summary");
-        let progress_row = div()
-            .px_3()
-            .pb_2()
-            .text_color(colors.muted_text)
-            .child(sidebar.progress.clone());
-        let sync_row = sidebar.sync_banner.clone().map(|banner| {
-            div()
-                .px_3()
-                .pb_2()
-                .text_color(colors.muted_text)
-                .child(banner)
-        });
-        let not_synced_row = sidebar.not_synced.then(|| {
-            div()
-                .px_3()
-                .pb_2()
-                .text_color(colors.muted_text)
-                .child("● not synced with GitHub yet")
-        });
+        let progress = sidebar.progress;
+        let summary_row = sidebar_row(
+            colors,
+            "summary",
+            0,
+            sidebar.is_summary_current,
+            RowMark::Page,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.change_review(cx, Review::go_to_summary);
+        }))
+        .child("Summary");
+        let sync_notices = sidebar
+            .sync_banner
+            .clone()
+            .into_iter()
+            .chain(
+                sidebar
+                    .not_synced
+                    .then(|| SharedString::from("Not synced with GitHub yet")),
+            )
+            .map(|notice| div().text_xs().text_color(colors.warning).child(notice));
         let finish_dialog = FinishReviewDialog::new(
+            progress.total > 0 && progress.read == progress.total,
             sidebar.can_judge,
             sidebar.approve_warning,
             session.review().finish_body().to_string(),
@@ -581,46 +667,156 @@ impl OneStepLayout {
         );
         let step_rows = sidebar.steps.iter().map(|step| {
             let id: StepId = step.id.clone();
+            let mark = if step.is_gone {
+                RowMark::Gone
+            } else if step.is_ticked {
+                RowMark::Read
+            } else {
+                RowMark::Unread
+            };
             sidebar_row(
                 colors,
                 SharedString::from(format!("step-{id}")),
                 step.depth,
                 step.is_current,
+                mark,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| review.go_to(&id));
             }))
-            .when_ticked(step.is_ticked || step.is_gone, colors)
-            .child(InlineMarkdown::new(
+            .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
                 format!("sidebar-{}", step.id),
                 &step.label,
-            ))
+            )))
+            .children(count_badge(colors, step.thread_count))
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
-            sidebar_row(colors, "safety-net", 0, safety_net.is_current)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.change_review(cx, Review::go_to_safety_net);
-                }))
-                .child(safety_net.label.clone())
+            sidebar_row(
+                colors,
+                "safety-net",
+                0,
+                safety_net.is_current,
+                RowMark::Page,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, Review::go_to_safety_net);
+            }))
+            .child(div().flex_1().child(SafetyNetIntro::TITLE))
+            .child(
+                div()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(colors.muted_text)
+                    .child(match safety_net.pieces {
+                        1 => "1 piece".to_string(),
+                        pieces => format!("{pieces} pieces"),
+                    }),
+            )
+            .children(count_badge(colors, safety_net.thread_count))
         });
+        let header = div()
+            .flex_none()
+            .px_4()
+            .pt_4()
+            .pb_3()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .border_b_1()
+            .border_color(colors.subtle_border)
+            .child(progress_meter(colors, progress))
+            .child(finish_dialog)
+            .children(sync_notices);
         div()
-            .id("sidebar")
-            .w(px(280.))
+            .w(px(300.))
             .flex_none()
             .h_full()
-            .overflow_y_scroll()
-            .py_2()
+            .flex()
+            .flex_col()
             .bg(colors.sidebar)
             .border_r_1()
             .border_color(colors.border)
             .text_sm()
-            .child(progress_row)
-            .child(finish_dialog)
-            .children(sync_row)
-            .children(not_synced_row)
-            .child(summary_row)
-            .children(step_rows)
-            .children(safety_net_row)
+            .child(
+                TitleBarArea::new("sidebar-title-bar", colors.sidebar).child(
+                    div()
+                        .pl(px(TRAFFIC_LIGHTS_WIDTH))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors.muted_text)
+                        .child("Guided review"),
+                ),
+            )
+            .child(header)
+            .child(
+                div()
+                    .id("sidebar-steps")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .py_2()
+                    .flex()
+                    .flex_col()
+                    .gap_px()
+                    .child(summary_row)
+                    .children(step_rows)
+                    .children(safety_net_row),
+            )
+            .child(key_hints(colors))
+    }
+
+    /// The PR this review is of, and the window-wide actions.
+    fn title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let review = self.session.read(cx).review();
+        let pr = review.pr().clone();
+        let title = review.title().to_string();
+        let jump = button(
+            colors,
+            "title-bar-jump",
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+        )
+        .child(icon(Icon::Search, colors.muted_text))
+        .child("Jump")
+        .child(div().pl_1().text_color(colors.muted_text).child("⌘K"))
+        .on_click(cx.listener(|this, _, window, cx| this.toggle_jump(&ToggleJump, window, cx)));
+        let pr_link = pr.to_string();
+        let github = button(
+            colors,
+            "title-bar-github",
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+        )
+        .child(icon(Icon::ExternalLink, colors.muted_text))
+        .child("GitHub")
+        .on_click(move |_, _, cx| cx.open_url(&pr_link));
+        TitleBarArea::new("title-bar", colors.background).child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .px_4()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_sm()
+                .child(icon(Icon::PullRequest, colors.success))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(colors.muted_text)
+                        .child(pr.short()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(InlineMarkdown::new("title-bar-title", &title)),
+                )
+                .child(div().flex_1())
+                .child(jump)
+                .child(github),
+        )
     }
 
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
@@ -654,20 +850,41 @@ impl OneStepLayout {
         };
         match row {
             PageRow::SummaryTitle(title) => div()
-                .pb_3()
-                .text_2xl()
-                .child(InlineMarkdown::new("summary-title", &title))
+                .pb_4()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(eyebrow(colors, "Summary"))
+                .child(
+                    div()
+                        .text_2xl()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(InlineMarkdown::new("summary-title", &title)),
+                )
                 .into_any_element(),
             PageRow::SummaryBullet(bullet) => div()
-                .pb_3()
-                .child(InlineMarkdown::new(
+                .pb_2()
+                .flex()
+                .items_start()
+                .gap_3()
+                .max_w(READING_WIDTH)
+                .child(
+                    div()
+                        .flex_none()
+                        .h(px(24.))
+                        .flex()
+                        .items_center()
+                        .child(div().size(px(6.)).rounded_full().bg(colors.accent)),
+                )
+                .child(div().flex_1().child(InlineMarkdown::new(
                     format!("summary-bullet-{index}"),
                     &bullet,
-                ))
+                )))
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
-                .pb_3()
+                .pb_4()
+                .max_w(READING_WIDTH)
                 .text_color(colors.muted_text)
                 .child(MarkdownView::new(
                     format!("step-why-{index}"),
@@ -675,42 +892,16 @@ impl OneStepLayout {
                 ))
                 .into_any_element(),
             PageRow::Diagram => div()
-                .pb_3()
+                .pb_4()
                 .child(DiagramView::new(self.diagrams.clone()))
                 .into_any_element(),
-            PageRow::Ask(ask) => div()
-                .pb_3()
-                .flex()
-                .child(self.ask_at(&ask, cx))
-                .into_any_element(),
-            PageRow::StepNotes(notes) => div().pb_3().child(notes).into_any_element(),
-            PageRow::WhitespaceToggle { is_on } => div()
-                .pb_3()
-                .flex()
-                .child(whitespace_toggle(is_on, cx))
-                .into_any_element(),
+            PageRow::StepNotes(notes) => div().pb_4().child(notes).into_any_element(),
             PageRow::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
             } => repin_notes(colors, gone_pieces, text_may_be_old).into_any_element(),
-            PageRow::FullDiffToggle {
-                step,
-                is_showing_full_diff,
-            } => full_diff_toggle(step, is_showing_full_diff, cx).into_any_element(),
-            PageRow::FoldToggle {
-                step,
-                is_folded,
-                piece_count,
-            } => div()
-                .pb_3()
-                .child(FoldToggle::new(
-                    is_folded,
-                    piece_count,
-                    cx.listener(move |this, _, _, cx| {
-                        this.change_review(cx, |review| review.toggle_fold(&step));
-                    }),
-                ))
-                .into_any_element(),
+            PageRow::Toolbar(toolbar) => self.toolbar(&toolbar, cx).into_any_element(),
+            PageRow::ScreenFooter(footer) => screen_footer(&footer, cx).into_any_element(),
             PageRow::SafetyNetIntro => SafetyNetIntro.into_any_element(),
             PageRow::PieceHeader(heading) => {
                 let ide = self.ide_button(
@@ -737,8 +928,20 @@ impl OneStepLayout {
             }
             PageRow::Line(line) => {
                 let is_selected = selected.is_some_and(|rows| rows.contains(index, &line.location));
+                let code_selection = self
+                    .code_selection
+                    .as_ref()
+                    .filter(|selection| selection.is_on(self.session.read(cx).review().screen()))
+                    .and_then(|selection| selection.range_on(index, line.code().len()));
+                let on_code_gesture = self.on_code_gesture.clone();
                 DiffRow::new(line)
                     .selected(is_selected)
+                    .with_code_selection(CodeSelectionHooks {
+                        selected: code_selection,
+                        on_gesture: Rc::new(move |gesture, byte, window, cx| {
+                            on_code_gesture(gesture, CodeSpot { row: index, byte }, window, cx)
+                        }),
+                    })
                     .with_gestures(self.on_row_gesture.clone())
                     .with_open_in_ide(self.open_line_in_ide())
                     .into_any_element()
@@ -771,6 +974,53 @@ impl OneStepLayout {
         }
     }
 
+    fn toolbar(&self, toolbar: &Toolbar, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let fold = toolbar.fold.as_ref().map(|fold| {
+            let step = fold.step.clone();
+            FoldToggle::new(
+                fold.is_folded,
+                fold.piece_count,
+                cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| review.toggle_fold(&step));
+                }),
+            )
+        });
+        let full_diff = toolbar.full_diff.as_ref().map(|control| {
+            let step = control.step.clone();
+            toggle_button(
+                colors,
+                "full-diff-toggle",
+                control.is_showing_full_diff,
+                ButtonSize::Small,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| review.toggle_full_diff(&step));
+            }))
+            .child("Full diff, not only the change since your read")
+        });
+        let whitespace = toolbar.ignores_whitespace.map(|is_on| {
+            toggle_button(colors, "ignore-whitespace", is_on, ButtonSize::Small)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.change_review(cx, Review::toggle_ignore_whitespace);
+                }))
+                .child("Hide whitespace")
+        });
+        let ask = toolbar.ask.as_ref().map(|ask| self.ask_at(ask, cx));
+        div()
+            .w_full()
+            .pb_3()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .children(fold)
+            .children(full_diff)
+            .child(div().flex_1())
+            .children(whitespace)
+            .children(ask)
+    }
+
     fn ask_at(&self, ask: &AskAt, cx: &mut Context<Self>) -> Stateful<Div> {
         self.ask_button(ask.id.to_string(), ask.place.clone(), ask.label.clone(), cx)
     }
@@ -787,40 +1037,23 @@ impl OneStepLayout {
     }
 }
 
-trait TickedRow {
-    fn when_ticked(self, is_ticked: bool, colors: Colors) -> Self;
-}
+/// Keeps prose at a readable line length on a wide window; code still takes the full width.
+const READING_WIDTH: Pixels = px(760.);
 
-impl<E: Styled> TickedRow for E {
-    fn when_ticked(self, is_ticked: bool, colors: Colors) -> Self {
-        if is_ticked {
-            self.text_color(colors.muted_text)
-        } else {
-            self
-        }
-    }
-}
-
-trait CurrentRow {
-    fn when_current(self, is_current: bool, colors: Colors) -> Self;
-}
-
-impl<E: Styled> CurrentRow for E {
-    fn when_current(self, is_current: bool, colors: Colors) -> Self {
-        if is_current {
-            self.bg(colors.current)
-        } else {
-            self
-        }
-    }
+fn eyebrow(colors: Colors, text: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(colors.muted_text)
+        .child(text.into().to_uppercase())
 }
 
 fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
     let colors = Colors::active(cx);
     let title = div()
         .id("step-title")
-        .flex_1()
-        .text_xl()
+        .text_2xl()
+        .font_weight(FontWeight::SEMIBOLD)
         .child(InlineMarkdown::new("step-title", &heading.title));
     let title = if heading.folds_on_title_click {
         let id = heading.id.clone();
@@ -832,71 +1065,134 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
     } else {
         title
     };
+    let eyebrow_text = match (heading.number, heading.is_gone) {
+        (_, true) => "Gone since the last version".to_string(),
+        (Some((number, count)), false) => format!("Step {number} of {count}"),
+        (None, false) => "Step".to_string(),
+    };
     div()
-        .pb_3()
+        .w_full()
+        .pb_2()
         .flex()
-        .items_center()
-        .gap_3()
+        .items_end()
+        .gap_4()
         .when(heading.is_gone, |row| row.text_color(colors.muted_text))
-        .child(title)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(eyebrow(colors, eyebrow_text))
+                .child(title),
+        )
         .child(tick_button(heading.is_ticked, heading.id.clone(), cx))
 }
 
-fn whitespace_toggle(is_on: bool, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
-    let colors = Colors::active(cx);
-    div()
-        .id("ignore-whitespace")
-        .px_3()
-        .py_1()
-        .rounded_md()
-        .border_1()
-        .border_color(colors.border)
-        .cursor_pointer()
-        .text_sm()
-        .when_current(is_on, colors)
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, Review::toggle_ignore_whitespace);
-        }))
-        .child("Hide whitespace")
-}
-
 fn repin_notes(colors: Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
+    let note = |text: String| {
+        div()
+            .px_2()
+            .py_0p5()
+            .rounded_md()
+            .bg(colors.warning_background)
+            .text_color(colors.warning)
+            .child(text)
+    };
     div()
         .pb_3()
         .flex()
-        .gap_3()
-        .text_sm()
-        .text_color(colors.muted_text)
+        .gap_2()
+        .text_xs()
         .when(gone_pieces > 0, |row| {
-            row.child(match gone_pieces {
+            row.child(note(match gone_pieces {
                 1 => "1 piece gone since last version".to_string(),
                 count => format!("{count} pieces gone since last version"),
-            })
+            }))
         })
-        .when(text_may_be_old, |row| row.child("Text may be old"))
+        .when(text_may_be_old, |row| {
+            row.child(note("The text may describe an older version".to_string()))
+        })
 }
 
-fn full_diff_toggle(
-    step: StepId,
-    is_showing_full_diff: bool,
-    cx: &mut Context<OneStepLayout>,
-) -> impl IntoElement {
+fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
     let colors = Colors::active(cx);
-    let label = if is_showing_full_diff {
-        "Show only the change since your read"
-    } else {
-        "Show the full diff"
+    let previous = footer.has_previous.then(|| {
+        button(
+            colors,
+            "footer-previous",
+            ButtonKind::Ghost,
+            ButtonSize::Regular,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.change_review(cx, Review::go_back);
+        }))
+        .child("← Previous")
+    });
+    let next_label = footer.next.as_ref().map(|next| match next {
+        NextScreen::Step { title } => title.clone(),
+        NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_string(),
+    });
+    let action = match (&footer.ticks, footer.next.is_some(), footer.is_summary) {
+        (_, true, true) => Some("Start the tour →"),
+        (Some(_), true, false) => Some("Mark as read and go on →"),
+        (Some(_), false, _) => Some("Mark as read"),
+        (None, true, false) => Some("Next →"),
+        (None, false, _) => None,
     };
-    div().pb_3().flex().child(
+    let primary = action.map(|label| {
+        let ticks = footer.ticks.clone();
+        button(
+            colors,
+            "footer-next",
+            ButtonKind::Primary,
+            ButtonSize::Regular,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if let Some(id) = &ticks {
+                this.toggle_tick(id, cx);
+            }
+            this.change_review(cx, Review::go_forward);
+        }))
+        .child(label)
+    });
+    let up_next = next_label.map(|title| {
         div()
-            .id("full-diff-toggle")
+            .flex()
+            .gap_1()
             .text_sm()
-            .cursor_pointer()
             .text_color(colors.muted_text)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.toggle_full_diff(&step));
-            }))
-            .child(label),
+            .child("Up next:")
+            .child(
+                div()
+                    .text_color(colors.text)
+                    .child(InlineMarkdown::new("footer-up-next", &title)),
+            )
+    });
+    let the_end = (footer.next.is_none()).then(|| {
+        div()
+            .text_sm()
+            .text_color(colors.muted_text)
+            .child(if footer.ticks.is_some() {
+                "This is the last step."
+            } else {
+                "That was the last step. Finish the review in the sidebar."
+            })
+    });
+    div().pt_4().pb_10().child(
+        div()
+            .pt_4()
+            .border_t_1()
+            .border_color(colors.subtle_border)
+            .flex()
+            .items_center()
+            .gap_3()
+            .children(previous)
+            .child(div().flex_1())
+            .children(up_next)
+            .children(the_end)
+            .children(primary),
     )
 }
 
@@ -905,36 +1201,108 @@ fn tool_button(
     id: impl Into<gpui::ElementId>,
     label: &'static str,
 ) -> Stateful<Div> {
-    div()
-        .id(id)
-        .px_2()
-        .py_1()
-        .cursor_pointer()
-        .text_sm()
-        .text_color(colors.muted_text)
-        .border_1()
-        .border_color(colors.border)
-        .rounded_md()
-        .child(label)
+    button(colors, id, ButtonKind::Ghost, ButtonSize::Small).child(label)
 }
 
 fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
     let colors = Colors::active(cx);
-    div()
-        .id("tick")
-        .px_3()
-        .py_1()
-        .rounded_md()
-        .border_1()
-        .border_color(colors.border)
-        .cursor_pointer()
-        .text_sm()
+    let kind = if is_ticked {
+        ButtonKind::Done
+    } else {
+        ButtonKind::Secondary
+    };
+    button(colors, "tick", kind, ButtonSize::Regular)
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
         .child(if is_ticked {
             "✓ Read"
         } else {
             "Mark as read"
         })
+}
+
+fn progress_meter(colors: Colors, progress: ReadProgress) -> impl IntoElement {
+    let share = if progress.total == 0 {
+        0.
+    } else {
+        progress.read as f32 / progress.total as f32
+    };
+    let is_done = progress.total > 0 && progress.read == progress.total;
+    div()
+        .flex()
+        .flex_col()
+        .gap_1p5()
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .child(div().font_weight(FontWeight::MEDIUM).child(format!(
+                    "{} of {} steps read",
+                    progress.read, progress.total
+                )))
+                .child(
+                    div()
+                        .text_color(colors.muted_text)
+                        .child(format!("{}%", (share * 100.).round())),
+                ),
+        )
+        .child(
+            div()
+                .h(px(4.))
+                .w_full()
+                .rounded_full()
+                .bg(colors.subtle_border)
+                .child(
+                    div()
+                        .h_full()
+                        .w(relative(share))
+                        .rounded_full()
+                        .bg(if is_done {
+                            colors.success
+                        } else {
+                            colors.accent
+                        }),
+                ),
+        )
+}
+
+fn key_hints(colors: Colors) -> impl IntoElement {
+    let hint = |keys: &'static [&'static str], what: &'static str| {
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .children(keys.iter().map(|key| key_cap(colors, key)))
+            .child(div().pl_1().child(what))
+    };
+    div()
+        .flex_none()
+        .px_4()
+        .py_2()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .border_t_1()
+        .border_color(colors.subtle_border)
+        .text_xs()
+        .text_color(colors.muted_text)
+        .child(hint(&["←", "→"], "previous / next screen"))
+        .child(hint(&["⌘", "K"], "jump to a step, file or symbol"))
+}
+
+fn key_cap(colors: Colors, key: &'static str) -> impl IntoElement {
+    div()
+        .min_w(px(18.))
+        .h(px(18.))
+        .px_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(colors.border)
+        .bg(colors.surface)
+        .text_color(colors.text)
+        .child(key)
 }
 
 impl Focusable for OneStepLayout {
@@ -954,6 +1322,8 @@ impl Render for OneStepLayout {
         };
         let frame_painted_marker = self.frame_stats.frame_started();
         self.run_scroll_script(window, cx);
+        #[cfg(feature = "snapshots")]
+        self.run_snapshots(window, cx);
         self.show_diagram(window, cx);
         let session = self.session.read(cx);
         let selected = Rc::new(
@@ -978,6 +1348,19 @@ impl Render for OneStepLayout {
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this
+                        .code_selection
+                        .as_ref()
+                        .is_some_and(|selection| !selection.is_dragging())
+                    {
+                        this.code_selection = None;
+                        cx.notify();
+                    }
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),
@@ -989,6 +1372,7 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::toggle_jump))
+            .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
             .bg(colors.background)
@@ -1001,6 +1385,7 @@ impl Render for OneStepLayout {
                     .h_full()
                     .flex()
                     .flex_col()
+                    .child(self.title_bar(cx))
                     .children(old_head.clone().map(|old_head| {
                         NewCommitsBanner::new(
                             old_head,
@@ -1024,7 +1409,8 @@ impl Render for OneStepLayout {
                             .px_6()
                             .py_1()
                             .text_sm()
-                            .bg(colors.current)
+                            .bg(colors.warning_background)
+                            .text_color(colors.warning)
                             .child(notice)
                     }))
                     .children(

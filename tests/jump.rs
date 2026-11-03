@@ -99,6 +99,18 @@ fn a_query_matches_letters_in_order_ignoring_case() {
 }
 
 #[test]
+fn letters_scattered_inside_words_match_nothing() {
+    let review = open(shop_tour());
+
+    assert!(labels(&review, "rdtl").is_empty());
+    assert_eq!(
+        labels(&review, "otals"),
+        ["Step Order totals go up"],
+        "a run found whole in the text matches anywhere"
+    );
+}
+
+#[test]
 fn the_closest_match_comes_first() {
     let review = open(shop_tour());
 

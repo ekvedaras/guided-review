@@ -1,10 +1,11 @@
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
+    App, ClickEvent, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, Styled, Window, div,
 };
 
 use crate::viewer::RefreshBrief;
 
+use super::button::{ButtonKind, ButtonSize, button};
 use super::palette::Colors;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,16 +60,14 @@ impl RenderOnce for RefreshBanner {
             RefreshProgress::Idle | RefreshProgress::Running => "Refresh",
         };
         let button = (self.progress != RefreshProgress::Running).then(|| {
-            div()
-                .id("refresh-tour")
-                .px_3()
-                .py_1()
-                .rounded_md()
-                .border_1()
-                .border_color(colors.border)
-                .cursor_pointer()
-                .on_click(self.on_refresh)
-                .child(button_label)
+            button(
+                colors,
+                "refresh-tour",
+                ButtonKind::Primary,
+                ButtonSize::Small,
+            )
+            .on_click(self.on_refresh)
+            .child(button_label)
         });
         let redo_hint = self.brief.redo_hint().map(|hint| {
             div().child(SharedString::from(format!(
@@ -76,7 +75,11 @@ impl RenderOnce for RefreshBanner {
             )))
         });
         let error = match &self.progress {
-            RefreshProgress::Failed(error) => Some(div().child(SharedString::from(error.clone()))),
+            RefreshProgress::Failed(error) => Some(
+                div()
+                    .text_color(colors.danger)
+                    .child(SharedString::from(error.clone())),
+            ),
             RefreshProgress::Idle | RefreshProgress::Running => None,
         };
         div()
@@ -85,7 +88,7 @@ impl RenderOnce for RefreshBanner {
             .flex()
             .flex_col()
             .gap_1()
-            .bg(colors.current)
+            .bg(colors.warning_background)
             .border_b_1()
             .border_color(colors.border)
             .text_sm()

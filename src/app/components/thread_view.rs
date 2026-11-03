@@ -315,7 +315,7 @@ impl ThreadElement {
             .rounded_md()
             .border_1()
             .border_color(colors.border)
-            .bg(colors.sidebar)
+            .bg(colors.surface)
             .child(div().min_h(px(48.)).child(text))
             .children(buttons)
             .into_any_element()

@@ -1,4 +1,4 @@
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
+use gpui::{App, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
 use crate::tour::Step;
 
@@ -32,21 +32,34 @@ impl RenderOnce for StepNotes {
             div()
                 .px_3()
                 .py_2()
+                .flex()
+                .flex_col()
+                .gap_1()
                 .rounded_md()
-                .border_1()
-                .border_color(colors.border)
+                .border_l_2()
+                .border_color(colors.accent)
                 .bg(colors.current)
-                .child(InlineMarkdown::new(
-                    "step-check",
-                    &format!("Check: {check}"),
-                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors.accent)
+                        .child("WHAT TO CHECK"),
+                )
+                .child(InlineMarkdown::new("step-check", &check))
         });
         let tldr = (!self.tldr.is_empty()).then(|| {
             div()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().text_sm().text_color(colors.muted_text).child("TLDR"))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors.muted_text)
+                        .child("TLDR"),
+                )
                 .children(self.tldr.into_iter().enumerate().map(|(index, line)| {
                     div().child(InlineMarkdown::new(
                         format!("step-tldr-{index}"),
@@ -55,9 +68,10 @@ impl RenderOnce for StepNotes {
                 }))
         });
         div()
+            .max_w(gpui::px(760.))
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_3()
             .children(check)
             .children(tldr)
     }

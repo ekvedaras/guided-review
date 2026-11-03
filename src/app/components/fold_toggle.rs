@@ -1,8 +1,8 @@
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div,
+    App, ClickEvent, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement, Window,
 };
 
+use super::button::{ButtonKind, ButtonSize, button};
 use super::palette::Colors;
 
 type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -33,15 +33,16 @@ impl RenderOnce for FoldToggle {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let label = match (self.folded, self.piece_count) {
-            (true, 1) => "Show its 1 piece".to_string(),
-            (true, count) => format!("Show its {count} pieces"),
-            (false, _) => "Fold the pieces".to_string(),
+            (true, 1) => "▸ Show its 1 piece".to_string(),
+            (true, count) => format!("▸ Show its {count} pieces"),
+            (false, _) => "▾ Fold the pieces".to_string(),
         };
-        div()
-            .id("fold-toggle")
-            .text_sm()
-            .cursor_pointer()
-            .text_color(colors.muted_text)
+        let kind = if self.folded {
+            ButtonKind::Secondary
+        } else {
+            ButtonKind::Ghost
+        };
+        button(colors, "fold-toggle", kind, ButtonSize::Small)
             .on_click(self.on_toggle)
             .child(label)
     }

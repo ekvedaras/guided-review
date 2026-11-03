@@ -87,7 +87,7 @@ pub(super) fn rank(targets: Vec<JumpTarget>, query: &str) -> Vec<JumpTarget> {
     let mut scored: Vec<(usize, usize, JumpTarget)> = targets
         .into_iter()
         .filter_map(|target| {
-            let looseness = looseness(&target.label.to_lowercase(), &query)?;
+            let looseness = looseness(&target.label, &query)?;
             Some((looseness, target.label.chars().count(), target))
         })
         .collect();
@@ -96,17 +96,38 @@ pub(super) fn rank(targets: Vec<JumpTarget>, query: &str) -> Vec<JumpTarget> {
 }
 
 /// Characters between the first and last matched letter that the query does not spell:
-/// 0 is an exact run. `None` when the letters do not appear in order.
+/// 0 is an exact run. The query spells the text in runs, and every run but one found
+/// whole in the text starts a word, so letters scattered over a long path match nothing.
+/// `None` when it does not spell the text so.
 fn looseness(text: &str, query: &[char]) -> Option<usize> {
-    let letters: Vec<char> = text.chars().collect();
+    let original: Vec<char> = text.chars().collect();
+    let letters: Vec<char> = text.to_lowercase().chars().collect();
+    if original.len() != letters.len() {
+        return None;
+    }
+    let query_text: String = query.iter().collect();
+    if text.to_lowercase().contains(&query_text) {
+        return Some(0);
+    }
+    let starts_word = |at: usize| {
+        at == 0 || {
+            let (before, here) = (original[at - 1], original[at]);
+            !before.is_alphanumeric() || (before.is_lowercase() && here.is_uppercase())
+        }
+    };
     (0..letters.len())
-        .filter(|&start| letters[start] == query[0])
+        .filter(|&start| letters[start] == query[0] && starts_word(start))
         .filter_map(|start| {
-            let mut next = start;
-            for wanted in query {
-                next += letters[next..].iter().position(|c| c == wanted)? + 1;
+            let mut last = start;
+            for wanted in &query[1..] {
+                last = if letters.get(last + 1) == Some(wanted) {
+                    last + 1
+                } else {
+                    (last + 1..letters.len())
+                        .find(|&at| letters[at] == *wanted && starts_word(at))?
+                };
             }
-            Some(next - start - query.len())
+            Some(last + 1 - start - query.len())
         })
         .min()
 }

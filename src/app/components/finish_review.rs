@@ -2,11 +2,12 @@ use std::rc::Rc;
 
 use gpui::{
     App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px, red,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
 
+use super::button::{ButtonKind, ButtonSize, button, toggle_button};
 use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -45,6 +46,8 @@ impl FinishUi {
 /// The "Finish review" button and the form it opens: Comment, Approve or Request changes, with a body.
 #[derive(IntoElement)]
 pub struct FinishReviewDialog {
+    /// Then finishing is what the reader does next, so its button is the primary one.
+    is_everything_read: bool,
     can_judge: bool,
     warning: Option<ApproveWarning>,
     body: String,
@@ -54,6 +57,7 @@ pub struct FinishReviewDialog {
 
 impl FinishReviewDialog {
     pub fn new(
+        is_everything_read: bool,
         can_judge: bool,
         warning: Option<ApproveWarning>,
         body: String,
@@ -61,6 +65,7 @@ impl FinishReviewDialog {
         on_finish: OnFinish,
     ) -> Self {
         Self {
+            is_everything_read,
             can_judge,
             warning,
             body,
@@ -76,17 +81,6 @@ fn label(verdict: ReviewVerdict) -> &'static str {
         ReviewVerdict::Approve => "Approve",
         ReviewVerdict::RequestChanges => "Request changes",
     }
-}
-
-fn button(colors: Colors, id: &'static str, text: &str) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .px_2()
-        .rounded_md()
-        .border_1()
-        .border_color(colors.border)
-        .cursor_pointer()
-        .child(text.to_string())
 }
 
 fn update(ui: &Entity<FinishUi>, cx: &mut App, change: impl FnOnce(&mut FinishUi)) {
@@ -159,18 +153,32 @@ impl RenderOnce for FinishReviewDialog {
 
         let open_button = {
             let (ui, focus) = (ui.clone(), focus.clone());
-            button(colors, "finish-review", "Finish review").on_click(move |_, window, cx| {
-                update(&ui, cx, |ui| ui.is_open = !ui.is_open);
-                window.focus(&focus, cx);
-            })
+            let open_button = if is_open {
+                toggle_button(colors, "finish-review", true, ButtonSize::Regular)
+            } else if self.is_everything_read {
+                button(
+                    colors,
+                    "finish-review",
+                    ButtonKind::Primary,
+                    ButtonSize::Regular,
+                )
+            } else {
+                button(
+                    colors,
+                    "finish-review",
+                    ButtonKind::Secondary,
+                    ButtonSize::Regular,
+                )
+            };
+            open_button
+                .justify_center()
+                .child("Finish review")
+                .on_click(move |_, window, cx| {
+                    update(&ui, cx, |ui| ui.is_open = !ui.is_open);
+                    window.focus(&focus, cx);
+                })
         };
-        let wrapper = div()
-            .px_3()
-            .pb_2()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(open_button);
+        let wrapper = div().flex().flex_col().gap_2().child(open_button);
         if !is_open {
             return wrapper.into_any_element();
         }
@@ -184,28 +192,19 @@ impl RenderOnce for FinishReviewDialog {
         .filter(|verdict| self.can_judge || *verdict == ReviewVerdict::Comment)
         .map(|choice| {
             let ui = ui.clone();
-            let chosen = div()
-                .id(SharedString::from(format!(
-                    "verdict-{}",
-                    choice.github_name()
-                )))
-                .px_2()
-                .rounded_md()
-                .border_1()
-                .border_color(colors.border)
-                .cursor_pointer()
-                .child(label(choice))
-                .on_click(move |_, _, cx| {
-                    update(&ui, cx, |ui| {
-                        ui.verdict = choice;
-                        ui.is_confirming_approval = false;
-                    })
-                });
-            if choice == verdict {
-                chosen.bg(colors.current)
-            } else {
-                chosen
-            }
+            toggle_button(
+                colors,
+                SharedString::from(format!("verdict-{}", choice.github_name())),
+                choice == verdict,
+                ButtonSize::Small,
+            )
+            .child(label(choice))
+            .on_click(move |_, _, cx| {
+                update(&ui, cx, |ui| {
+                    ui.verdict = choice;
+                    ui.is_confirming_approval = false;
+                })
+            })
         });
 
         let unread_warning = (verdict == ReviewVerdict::Approve)
@@ -217,12 +216,15 @@ impl RenderOnce for FinishReviewDialog {
             button(
                 colors,
                 "submit-review",
-                if must_confirm {
-                    "Approve..."
-                } else {
-                    "Submit review"
-                },
+                ButtonKind::Primary,
+                ButtonSize::Regular,
             )
+            .justify_center()
+            .child(if must_confirm {
+                "Approve..."
+            } else {
+                "Submit review"
+            })
             .on_click(move |_: &ClickEvent, _, cx| {
                 if must_confirm {
                     update(&ui, cx, |ui| ui.is_confirming_approval = true);
@@ -232,7 +234,7 @@ impl RenderOnce for FinishReviewDialog {
             })
         };
         let warning_text = unread_warning.filter(|_| is_confirming).map(|warning| {
-            div().text_sm().text_color(red()).child(format!(
+            div().text_sm().text_color(colors.danger).child(format!(
                 "Not read yet: {} step{} and {} safety net piece{}. Approve anyway?",
                 warning.unread_steps,
                 if warning.unread_steps == 1 { "" } else { "s" },
@@ -255,12 +257,19 @@ impl RenderOnce for FinishReviewDialog {
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.background)
+                    .text_sm()
                     .child(body),
             )
             .children(warning_text)
-            .children(problem.map(|problem| div().text_sm().text_color(red()).child(problem)))
+            .children(
+                problem.map(|problem| div().text_sm().text_color(colors.danger).child(problem)),
+            )
             .child(if is_busy {
-                div().child("Sending...").into_any_element()
+                div()
+                    .text_sm()
+                    .text_color(colors.muted_text)
+                    .child("Sending...")
+                    .into_any_element()
             } else {
                 submit_button.into_any_element()
             })

@@ -547,7 +547,7 @@ impl Render for AskPanel {
             .h_full()
             .flex()
             .flex_col()
-            .bg(colors.sidebar)
+            .bg(colors.surface)
             .border_l_1()
             .border_color(colors.border)
             .font_family(TEXT_FONT)
@@ -597,15 +597,11 @@ pub fn ask_button(colors: Colors, id: impl Into<ElementId>, count: usize) -> Sta
     } else {
         format!("Ask \u{25cf} {count}")
     };
-    div()
-        .id(id)
-        .px_2()
-        .py_1()
-        .cursor_pointer()
-        .text_sm()
-        .text_color(colors.muted_text)
-        .border_1()
-        .border_color(colors.border)
-        .rounded_md()
-        .child(label)
+    super::button::button(
+        colors,
+        id,
+        super::button::ButtonKind::Secondary,
+        super::button::ButtonSize::Small,
+    )
+    .child(label)
 }
