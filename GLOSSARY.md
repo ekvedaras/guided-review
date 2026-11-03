@@ -4,6 +4,8 @@
 
 **Summary**: The short text at the start of a tour. At most three bullets that say what the PR does.
 
+**PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
+
 **Step**: One stop in a tour. It holds diff pieces, a diagram, or both, and a short text that says what they do and why they come at this point. A step can have child steps: the details of that step. The reader sees a step first, then its child steps.
 
 **Check hint**: A one-line note on a risky step that tells the reviewer what to verify.

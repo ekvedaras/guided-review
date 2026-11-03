@@ -19,6 +19,11 @@ pub trait ViewedFilesPort: Send + Sync {
     fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()>;
 }
 
+pub trait PullRequestDescriptionPort: Send + Sync {
+    /// The PR's body as markdown; empty when it has none.
+    fn pull_request_description(&self, pr: &PullRequestUrl) -> anyhow::Result<String>;
+}
+
 /// Reading review threads and acting on them: replies, resolving, reactions.
 pub trait ReviewThreadsPort: Send + Sync {
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>>;
@@ -75,12 +80,20 @@ pub trait ReviewWritesPort: Send + Sync {
 /// Everything the viewer core asks of GitHub, for the app that holds one adapter for all of it.
 /// Core actions take only the port they need, so tests can put a fake behind it.
 pub trait GitHubPort:
-    PullRequestTipsPort + ViewedFilesPort + ReviewThreadsPort + ReviewWritesPort
+    PullRequestTipsPort
+    + PullRequestDescriptionPort
+    + ViewedFilesPort
+    + ReviewThreadsPort
+    + ReviewWritesPort
 {
 }
 
 impl<T> GitHubPort for T where
-    T: PullRequestTipsPort + ViewedFilesPort + ReviewThreadsPort + ReviewWritesPort
+    T: PullRequestTipsPort
+        + PullRequestDescriptionPort
+        + ViewedFilesPort
+        + ReviewThreadsPort
+        + ReviewWritesPort
 {
 }
 

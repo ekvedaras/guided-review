@@ -44,7 +44,8 @@ use crate::code_source::CodeSource;
 use crate::ide::Ide;
 use crate::viewer::{
     Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
-    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
+    Place, PrDescription, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId,
+    ThreadView,
 };
 
 actions!(one_step, [GoForward, GoBack, ToggleJump, CopySelection]);
@@ -873,6 +874,9 @@ impl OneStepLayout {
                     &bullet,
                 )))
                 .into_any_element(),
+            PageRow::PrDescription(description) => {
+                self.pr_description(&description, cx).into_any_element()
+            }
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
                 .pb_4()
@@ -964,6 +968,57 @@ impl OneStepLayout {
                 .into_any_element(),
             PageRow::PieceEnd => piece_end(colors).into_any_element(),
         }
+    }
+
+    fn pr_description(
+        &self,
+        description: &PrDescription,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let fold_label = match (description.folded_blocks, description.can_fold) {
+            (0, false) => None,
+            (0, true) => Some("Show less".to_string()),
+            (1, _) => Some("Show the rest (1 more block)".to_string()),
+            (hidden, _) => Some(format!("Show the rest ({hidden} more blocks)")),
+        };
+        let fold = fold_label.map(|label| {
+            button(
+                colors,
+                "pr-description-fold",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+            .child(label)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, Review::toggle_pr_description);
+            }))
+        });
+        div()
+            .pt_2()
+            .pb_4()
+            .max_w(READING_WIDTH)
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(eyebrow(colors, "PR description"))
+            .child(
+                div()
+                    .px_4()
+                    .py_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(colors.subtle_border)
+                    .bg(colors.surface)
+                    .text_sm()
+                    .child(MarkdownView::new(
+                        "pr-description",
+                        Markdown {
+                            blocks: description.shown_blocks.clone(),
+                        },
+                    ))
+                    .children(fold.map(|fold| div().pt_2().flex().child(fold))),
+            )
     }
 
     fn toolbar(&self, toolbar: &Toolbar, cx: &mut Context<Self>) -> impl IntoElement {

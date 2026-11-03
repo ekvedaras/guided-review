@@ -8,10 +8,10 @@ use serde::Deserialize;
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentPlace, PendingReviewExists, PullRequestTipsPort, Reaction, ReactionCount, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadComment,
-    ThreadNotCreated, ViewedFile, ViewedFilesPort, ViewedState, ViewedSyncUnavailable,
-    percent_encode_path,
+    CommentPlace, PendingReviewExists, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
+    ReactionCount, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    Side, ThreadComment, ThreadNotCreated, ViewedFile, ViewedFilesPort, ViewedState,
+    ViewedSyncUnavailable, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -26,6 +26,11 @@ pub struct GitHub {
 struct PullJson {
     base: CommitRefJson,
     head: CommitRefJson,
+}
+
+#[derive(Deserialize)]
+struct PullBodyJson {
+    body: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -274,6 +279,19 @@ impl PullRequestTipsPort for GitHub {
             base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })
+    }
+}
+
+impl PullRequestDescriptionPort for GitHub {
+    fn pull_request_description(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+        let pull: PullBodyJson = self
+            .get(
+                &format!("repos/{}/pulls/{}", pr.repo, pr.number),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not read the description of {pr} from GitHub"))?;
+        Ok(pull.body.unwrap_or_default())
     }
 }
 

@@ -21,8 +21,8 @@ use crate::app::components::step_notes::StepNotes;
 use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, JumpKind, JumpTarget, LineKind, LineLocation, MoreContext, NextScreen,
-    PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen, StepId, StepPage,
-    ThreadView,
+    PieceDiff, Place, PrDescription, QueuedComment, Review, RowSelection, SafetyNetPage, Screen,
+    StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -89,6 +89,7 @@ pub struct PieceHeading {
 pub enum PageRow {
     SummaryTitle(SharedString),
     SummaryBullet(SharedString),
+    PrDescription(Rc<PrDescription>),
     StepHeading(Rc<StepHeading>),
     StepWhy(SharedString),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
@@ -157,6 +158,7 @@ impl PageRow {
                 heading.title.hash(&mut hasher);
                 heading.number.hash(&mut hasher);
             }
+            Self::PrDescription(description) => description.hash(&mut hasher),
             Self::AskMarker(ask) => ask.id.hash(&mut hasher),
             Self::Toolbar(toolbar) => {
                 toolbar.ask.as_ref().map(|ask| &ask.id).hash(&mut hasher);
@@ -444,6 +446,11 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
             .summary()
             .iter()
             .map(|bullet| PageRow::SummaryBullet(bullet.to_string().into())),
+    );
+    rows.extend(
+        review
+            .pr_description()
+            .map(|description| PageRow::PrDescription(Rc::new(description))),
     );
     rows.push(PageRow::Toolbar(Rc::new(Toolbar {
         ask: Some(AskAt {

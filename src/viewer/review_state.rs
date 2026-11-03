@@ -53,6 +53,9 @@ struct ViewerSections {
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
     comment_queue: Vec<QueuedComment>,
+    /// The PR's body at the last pull, so the summary shows it before GitHub answers.
+    #[serde(default)]
+    pr_description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +250,19 @@ impl ReviewState {
         if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
             self.viewer.unsent_viewed.remove(path);
         }
+    }
+
+    pub(super) fn pr_description(&self) -> &str {
+        &self.viewer.pr_description
+    }
+
+    /// Whether it differs from the one kept.
+    pub(super) fn saw_pr_description(&mut self, body: &str) -> bool {
+        let is_new = self.viewer.pr_description != body;
+        if is_new {
+            self.viewer.pr_description = body.to_string();
+        }
+        is_new
     }
 
     pub(super) fn take_viewer_sections(&mut self, from: &ReviewState) {

@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, PendingReviewExists,
-    PullRequestTipsPort, Reaction, ReactionCount, ReviewThread, ReviewThreadsPort, ReviewVerdict,
-    ReviewWritesPort, SendMode, ThreadNotCreated, TurnStopper, ViewedFile, ViewedFilesPort,
-    ViewedState, ViewedSyncUnavailable,
+    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionCount, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, ThreadNotCreated, TurnStopper,
+    ViewedFile, ViewedFilesPort, ViewedState, ViewedSyncUnavailable,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -206,6 +206,12 @@ impl PullRequestTipsPort for FakeGitHub {
             base_branch_tip: self.tips.0.clone(),
             head: self.tips.1.clone(),
         })
+    }
+}
+
+impl PullRequestDescriptionPort for FakeGitHub {
+    fn pull_request_description(&self, _pr: &PullRequestUrl) -> anyhow::Result<String> {
+        Ok(String::new())
     }
 }
 

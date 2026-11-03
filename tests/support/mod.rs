@@ -161,11 +161,23 @@ pub struct FakeGitHub {
 
 impl FakeGitHub {
     pub fn serving_pull(github_repo: &str, number: u32, base_sha: &str, head_sha: &str) -> Self {
+        Self::serving_pull_described(github_repo, number, base_sha, head_sha, "null")
+    }
+
+    /// `body_json` is the JSON value of the PR's `body`: a quoted string, or `null`.
+    pub fn serving_pull_described(
+        github_repo: &str,
+        number: u32,
+        base_sha: &str,
+        head_sha: &str,
+        body_json: &str,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let pull_path = format!("/repos/{github_repo}/pulls/{number}");
-        let pull_json =
-            format!(r#"{{"base":{{"sha":"{base_sha}"}},"head":{{"sha":"{head_sha}"}}}}"#);
+        let pull_json = format!(
+            r#"{{"base":{{"sha":"{base_sha}"}},"head":{{"sha":"{head_sha}"}},"body":{body_json}}}"#
+        );
 
         thread::spawn(move || {
             for stream in listener.incoming() {

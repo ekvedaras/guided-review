@@ -32,6 +32,7 @@ use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
 use super::ports::AgentLaunch;
+use super::pr_description::PrDescription;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -149,6 +150,7 @@ pub struct Review {
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
+    pr_description_is_unfolded: bool,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     saves: Arc<SaveOrder>,
@@ -205,6 +207,7 @@ impl Review {
             repin_running: false,
             changes_since,
             full_diff_shown: BTreeSet::new(),
+            pr_description_is_unfolded: false,
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
             saves: Arc::default(),
@@ -297,6 +300,23 @@ impl Review {
 
     pub fn summary(&self) -> &[String] {
         &self.tour.summary
+    }
+
+    /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
+    pub fn pr_description(&self) -> Option<PrDescription> {
+        PrDescription::of(self.state.pr_description(), self.pr_description_is_unfolded)
+    }
+
+    /// Kept in the state file only when it changed, since every window focus pulls it again.
+    pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
+        if self.state.saw_pr_description(body) {
+            self.save_viewer_sections()?;
+        }
+        Ok(())
+    }
+
+    pub fn toggle_pr_description(&mut self) {
+        self.pr_description_is_unfolded = !self.pr_description_is_unfolded;
     }
 
     pub fn current_step(&self) -> Option<StepPage<'_>> {

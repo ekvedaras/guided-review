@@ -17,6 +17,7 @@ mod jump;
 mod markdown;
 mod new_commits;
 mod ports;
+mod pr_description;
 mod reactions;
 mod refresh;
 mod review;
@@ -48,10 +49,12 @@ pub use jump::{JumpKind, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists, PullRequestTipsPort,
-    RefreshWriter, ReviewThreadsPort, ReviewWritesPort, ThreadNotCreated, TurnStopper, ViewedFile,
-    ViewedFilesPort, ViewedState, ViewedSyncUnavailable,
+    AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists,
+    PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, ReviewThreadsPort,
+    ReviewWritesPort, ThreadNotCreated, TurnStopper, ViewedFile, ViewedFilesPort, ViewedState,
+    ViewedSyncUnavailable,
 };
+pub use pr_description::PrDescription;
 pub use reactions::{Reaction, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{

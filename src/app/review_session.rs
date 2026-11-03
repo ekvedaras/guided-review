@@ -68,6 +68,7 @@ pub struct ReviewSession {
     sync_again: bool,
     pr_head_check: Option<Task<()>>,
     threads_pull: Option<Task<()>>,
+    pr_description_pull: Option<Task<()>>,
     push_debounce: Option<Task<()>>,
     pending_review_check: Option<Task<()>>,
     typing_save: Option<Task<()>>,
@@ -138,6 +139,7 @@ impl ReviewSession {
             sync_again: false,
             pr_head_check: None,
             threads_pull: None,
+            pr_description_pull: None,
             push_debounce: None,
             pending_review_check: None,
             typing_save: None,
@@ -540,6 +542,7 @@ impl ReviewSession {
 
     fn pull_from_github(&mut self, cx: &mut Context<Self>) {
         self.check_pr_head(cx);
+        self.pull_pr_description(cx);
         self.sync(cx);
         self.pull_threads(cx);
         self.pull_pending_review(cx);
@@ -588,6 +591,21 @@ impl ReviewSession {
             cx.background_executor().timer(PUSH_DEBOUNCE).await;
             this.update(cx, |this, cx| this.sync(cx)).ok();
         }));
+    }
+
+    fn pull_pr_description(&mut self, cx: &mut Context<Self>) {
+        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        self.pr_description_pull = Some(self.run_off_thread(
+            cx,
+            move || github.pull_request_description(&pr),
+            |this, body, cx| {
+                let set = body
+                    .and_then(|body| this.change(cx, |review| review.set_pr_description(&body)));
+                if let Err(error) = set {
+                    eprintln!("warning: could not read the PR's description: {error:#}");
+                }
+            },
+        ));
     }
 
     fn pull_threads(&mut self, cx: &mut Context<Self>) {
