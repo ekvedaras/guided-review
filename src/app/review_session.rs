@@ -69,6 +69,7 @@ pub struct ReviewSession {
     pr_head_check: Option<Task<()>>,
     threads_pull: Option<Task<()>>,
     pr_description_pull: Option<Task<()>>,
+    working_copy_check: Option<Task<()>>,
     push_debounce: Option<Task<()>>,
     pending_review_check: Option<Task<()>>,
     typing_save: Option<Task<()>>,
@@ -140,6 +141,7 @@ impl ReviewSession {
             pr_head_check: None,
             threads_pull: None,
             pr_description_pull: None,
+            working_copy_check: None,
             push_debounce: None,
             pending_review_check: None,
             typing_save: None,
@@ -542,6 +544,7 @@ impl ReviewSession {
 
     fn pull_from_github(&mut self, cx: &mut Context<Self>) {
         self.check_pr_head(cx);
+        self.check_working_copy(cx);
         self.pull_pr_description(cx);
         self.sync(cx);
         self.pull_threads(cx);
@@ -591,6 +594,18 @@ impl ReviewSession {
             cx.background_executor().timer(PUSH_DEBOUNCE).await;
             this.update(cx, |this, cx| this.sync(cx)).ok();
         }));
+    }
+
+    /// The reviewer may check out another branch while the app is open; focus is when to notice.
+    fn check_working_copy(&mut self, cx: &mut Context<Self>) {
+        let (source, head) = (self.source.clone(), self.review.head().clone());
+        self.working_copy_check = Some(self.run_off_thread(
+            cx,
+            move || source.working_tree_is_at(&head),
+            |this, is_at, cx| {
+                this.change(cx, |review| review.working_copy_is_at_tour_head(is_at));
+            },
+        ));
     }
 
     fn pull_pr_description(&mut self, cx: &mut Context<Self>) {

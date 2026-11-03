@@ -238,7 +238,9 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     }
     let tour = Tour::load(&tour_path)?;
     let code = opened.at_pinned_tips(&tour)?;
-    let review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
+    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
+    let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
+    review.working_copy_is_at_tour_head(working_copy_is_at_tour_head);
 
     let clone = code.source.local_clone().map(Path::to_path_buf);
     let config = Config::load()?;

@@ -33,7 +33,7 @@ pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub(crate) use code_link::percent_encode_path;
-pub use code_link::{CodeLink, CodeOpener, Destination};
+pub use code_link::{CodeLink, CodeOpener, Destination, NotInIde};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,

@@ -4,7 +4,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use guided_review::config::Config;
-use guided_review::ide::{Ide, IdeLaunch};
+use guided_review::ide::{Ide, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use support::FixtureRepo;
@@ -49,8 +49,14 @@ fn without_a_template_or_a_local_clone_there_is_no_open_in_ide() {
     let no_template = Config::from_text("").unwrap();
     let with_template = Config::from_text("ide = \"idea://open?file={path}\"").unwrap();
 
-    assert!(Ide::for_clone(Some("/code/shop".into()), no_template.ide_template()).is_none());
-    assert!(Ide::for_clone(None, with_template.ide_template()).is_none());
+    assert_eq!(
+        Ide::for_clone(Some("/code/shop".into()), no_template.ide_template()).err(),
+        Some(NoIde::NoTemplate)
+    );
+    assert_eq!(
+        Ide::for_clone(None, with_template.ide_template()).err(),
+        Some(NoIde::NoClone)
+    );
 }
 
 #[test]

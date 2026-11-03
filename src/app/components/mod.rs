@@ -19,3 +19,4 @@ pub mod text_box;
 pub mod text_input;
 pub mod thread_view;
 pub mod title_bar;
+pub mod tooltip;

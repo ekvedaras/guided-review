@@ -8,7 +8,8 @@ use gpui::{
     StyledText, TextLayout, Window, div, px,
 };
 
-use crate::app::code_links::{open_code, open_code_label};
+use crate::app::code_links::{open_code, open_code_hint, open_code_label};
+use crate::app::components::tooltip::tooltip;
 use crate::viewer::{Capture, CodeLink, DiffLine, Edge, LineKind, LineLocation, MoreContext};
 
 use super::palette::{CODE_FONT, Colors};
@@ -188,6 +189,10 @@ impl RenderOnce for DiffRow {
             .bg(gutter_background)
             .text_color(colors.muted_text)
             .hover(|gutter| gutter.text_color(colors.accent))
+            .tooltip(tooltip({
+                let link = link.clone();
+                move |cx| open_code_hint(&link, cx)
+            }))
             .on_click(move |_, _, cx| open_code(&link, cx))
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
@@ -435,6 +440,10 @@ pub fn binary_file_row(
             .text_sm()
             .cursor_pointer()
             .text_color(colors.muted_text)
+            .tooltip(tooltip({
+                let link = link.clone();
+                move |cx| open_code_hint(&link, cx)
+            }))
             .on_click(move |_, _, cx| open_code(&link, cx))
             .child(label),
     )

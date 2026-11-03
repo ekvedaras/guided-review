@@ -50,6 +50,13 @@ impl IdeLaunch {
     }
 }
 
+/// What keeps code from opening in the IDE at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoIde {
+    NoTemplate,
+    NoClone,
+}
+
 /// Code opens in the IDE only with a local clone and a template; without one it opens on GitHub.
 #[derive(Debug, Clone)]
 pub struct Ide {
@@ -58,10 +65,13 @@ pub struct Ide {
 }
 
 impl Ide {
-    pub fn for_clone(clone_root: Option<PathBuf>, template: Option<IdeTemplate>) -> Option<Self> {
-        Some(Self {
-            template: template?,
-            clone_root: clone_root?,
+    pub fn for_clone(
+        clone_root: Option<PathBuf>,
+        template: Option<IdeTemplate>,
+    ) -> Result<Self, NoIde> {
+        Ok(Self {
+            template: template.ok_or(NoIde::NoTemplate)?,
+            clone_root: clone_root.ok_or(NoIde::NoClone)?,
         })
     }
 

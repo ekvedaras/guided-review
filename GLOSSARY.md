@@ -28,7 +28,7 @@
 
 **Page**: The content of one screen, laid out for reading: a step page holds the step's text, its pieces and their threads; the safety net page holds the uncovered pieces.
 
-**Code link**: A link to a file or a line of the PR's code: a diff line, a piece, or a link in the tour's text. The viewer opens it in the reviewer's IDE when the file is in the working copy of a local clone, else on GitHub. Removed lines and deleted files always open on GitHub, at base.
+**Code link**: A link to a file or a line of the PR's code: a diff line, a piece, or a link in the tour's text. The viewer opens it in the reviewer's IDE when the file is in the working copy of a local clone that is checked out clean at the tour's head, else on GitHub, and says why. Removed lines and deleted files always open on GitHub, at base.
 
 **Re-pin**: Moving a tour to the PR's new head after new commits, with no AI. Each diff piece becomes same, changed, gone or new. Steps with changed pieces lose their read tick.
 

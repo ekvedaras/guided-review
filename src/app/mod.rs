@@ -23,7 +23,7 @@ use gpui::{
 use gpui_platform::application;
 
 use crate::code_source::CodeSource;
-use crate::ide::Ide;
+use crate::ide::{Ide, NoIde};
 use crate::viewer::{GitHubPort, Review, TourRefresher, TourRepinner};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -41,7 +41,7 @@ pub fn run(
     review: Review,
     source: Arc<dyn CodeSource>,
     ask: AskSetup,
-    ide: Option<Ide>,
+    ide: Result<Ide, NoIde>,
     github: Arc<dyn GitHubPort>,
     repinner: TourRepinner,
     refresher: TourRefresher,

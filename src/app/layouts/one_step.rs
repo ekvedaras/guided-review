@@ -9,7 +9,9 @@ use gpui::{
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::app::code_links::{open_code, open_code_label, use_code_opener};
+use crate::app::code_links::{
+    open_code, open_code_hint, open_code_label, open_link, use_code_opener,
+};
 use crate::app::code_selection::{CodeSelection, CodeSpot};
 use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
 use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
@@ -37,11 +39,12 @@ use crate::app::components::thread_view::{
     OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
+use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, Toolbar};
 use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
 use crate::code_source::CodeSource;
-use crate::ide::Ide;
+use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
     Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
@@ -55,7 +58,7 @@ type OnCodeSpot = Rc<dyn Fn(RowGesture, CodeSpot, &mut Window, &mut App)>;
 pub struct Collaborators {
     pub github: Arc<dyn GitHubPort>,
     /// `None` opens all code on GitHub.
-    pub ide: Option<Ide>,
+    pub ide: Result<Ide, NoIde>,
     pub tour_work: TourWork,
 }
 
@@ -84,7 +87,7 @@ pub struct OneStepLayout {
     snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
     /// `None` opens all code on GitHub.
-    ide: Option<Ide>,
+    ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
     _use_as_comment_subscription: Subscription,
     _asked_lines_subscription: Subscription,
@@ -125,7 +128,10 @@ impl OneStepLayout {
             )
         });
         let session_subscriptions = [
-            cx.observe(&session, |_, _, cx| cx.notify()),
+            cx.observe(&session, |this, _, cx| {
+                this.use_code_opener_of_review(cx);
+                cx.notify()
+            }),
             cx.subscribe(&session, |this, _, SessionEvent::Reopened, cx| {
                 this.reopened(cx)
             }),
@@ -223,7 +229,6 @@ impl OneStepLayout {
 
     /// The re-pin or Refresh opened a new review: diagrams and notes on old answers follow it.
     fn reopened(&mut self, cx: &mut Context<Self>) {
-        self.use_code_opener_of_review(cx);
         let ask = self.ask.clone();
         self.session.update(cx, |session, cx| {
             ask.update(cx, |panel, cx| {
@@ -605,11 +610,13 @@ impl OneStepLayout {
 
     fn open_code_button(key: String, link: &CodeLink, cx: &mut Context<Self>) -> Stateful<Div> {
         let link = link.clone();
+        let hint = link.clone();
         tool_button(Colors::active(cx), key, open_code_label(&link, cx))
+            .tooltip(tooltip(move |cx| open_code_hint(&hint, cx)))
             .on_click(move |_, _, cx| open_code(&link, cx))
     }
 
-    /// The opener follows the review's head, which a re-pin moves.
+    /// The opener follows the review: a re-pin moves its head, a focus re-checks the clone.
     fn use_code_opener_of_review(&self, cx: &mut Context<Self>) {
         let opener = self.session.read(cx).review().code_opener(self.ide.clone());
         use_code_opener(opener, cx);
@@ -781,7 +788,7 @@ impl OneStepLayout {
         )
         .child(icon(Icon::ExternalLink, colors.muted_text))
         .child("GitHub")
-        .on_click(move |_, _, cx| cx.open_url(&pr_link));
+        .on_click(move |_, _, cx| open_link(&pr_link, cx));
         TitleBarArea::new("title-bar", colors.background).child(
             div()
                 .flex_1()

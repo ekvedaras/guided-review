@@ -10,6 +10,7 @@ use std::process::Command;
 use std::thread;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use guided_review::ide::NoIde;
 use guided_review::viewer::{CodeLink, Destination, Review};
 use tempfile::TempDir;
 
@@ -231,8 +232,8 @@ pub fn svg_of(width: u32, height: u32) -> String {
 /// Where `link` opens on GitHub, for a review with no IDE.
 #[allow(dead_code)]
 pub fn on_github(review: &Review, link: &CodeLink) -> String {
-    match review.code_opener(None).destination(link) {
-        Destination::Browser(url) => url,
-        Destination::Ide(launch) => panic!("opens in the IDE without one: {launch:?}"),
+    match review.code_opener(Err(NoIde::NoTemplate)).destination(link) {
+        Destination::GitHub { url, .. } => url,
+        other => panic!("code opens on GitHub without an IDE, not {other:?}"),
     }
 }

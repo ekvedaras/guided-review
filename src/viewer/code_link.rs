@@ -1,7 +1,8 @@
+use std::fmt;
 use std::path::Path;
 
 use crate::code_source::FileStatus;
-use crate::ide::{Ide, IdeLaunch};
+use crate::ide::{Ide, IdeLaunch, NoIde};
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, RepoName, Sha};
 
@@ -12,8 +13,8 @@ use super::step_page::{LineLocation, Side};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CodeLink {
     on_github: String,
-    /// `None` when the working copy cannot have this line: it was removed, or its file deleted.
-    in_working_copy: Option<WorkingCopyLine>,
+    /// `Err` when the working copy cannot have this line.
+    in_working_copy: Result<WorkingCopyLine, NotInIde>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -22,10 +23,44 @@ struct WorkingCopyLine {
     line: usize,
 }
 
+/// Why code opens on GitHub and not in the IDE.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NotInIde {
+    NoIdeTemplate,
+    NoClone(RepoName),
+    /// Its lines may sit elsewhere than the tour shows them.
+    CloneNotAtTourHead,
+    NotInWorkingCopy,
+    /// A removed line, or a line of a deleted file: only the base has it.
+    RemovedLine,
+}
+
+impl fmt::Display for NotInIde {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoIdeTemplate => f.write_str("no ide template in ~/.guided-review/config.toml"),
+            Self::NoClone(repo) => {
+                write!(f, "no clone set for {repo} in ~/.guided-review/config.toml")
+            }
+            Self::CloneNotAtTourHead => {
+                f.write_str("the clone is not checked out clean at the tour's head")
+            }
+            Self::NotInWorkingCopy => f.write_str("the clone's working copy has no such file"),
+            Self::RemovedLine => f.write_str("removed lines exist only at the PR's base"),
+        }
+    }
+}
+
 /// Where opening a code link, or any link of the text, takes the reader.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Destination {
     Ide(IdeLaunch),
+    /// Code that could not open in the IDE.
+    GitHub {
+        url: String,
+        because: NotInIde,
+    },
+    /// A link that is not to the PR's code.
     Browser(String),
 }
 
@@ -34,68 +69,102 @@ impl Destination {
     pub fn open(&self, open_url: impl FnOnce(&str)) {
         match self {
             Self::Ide(launch) => launch.run(open_url),
-            Self::Browser(url) => open_url(url),
+            Self::GitHub { url, .. } | Self::Browser(url) => open_url(url),
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
             Self::Ide(_) => "Open in IDE",
-            Self::Browser(_) => "Open on GitHub",
+            Self::GitHub { .. } => "Open on GitHub",
+            Self::Browser(_) => "Open link",
+        }
+    }
+
+    /// For a tooltip: why code opens on GitHub.
+    pub fn explanation(&self) -> Option<String> {
+        match self {
+            Self::GitHub { because, .. } => Some(format!("Opens on GitHub: {because}")),
+            Self::Ide(_) | Self::Browser(_) => None,
         }
     }
 }
 
 /// The one place that decides where code opens: in the reviewer's IDE when the file is in the
-/// working copy of a local clone, else on GitHub.
+/// working copy of a local clone checked out at the tour's head, else on GitHub.
 #[derive(Debug, Clone)]
 pub struct CodeOpener {
-    ide: Option<Ide>,
+    ide: Result<Ide, NoIde>,
+    working_copy_is_at_tour_head: bool,
     repo: RepoName,
     head: Sha,
 }
 
 impl CodeOpener {
-    pub(super) fn new(ide: Option<Ide>, pr: &PullRequestUrl, head: &Sha) -> Self {
+    pub(super) fn new(
+        ide: Result<Ide, NoIde>,
+        working_copy_is_at_tour_head: bool,
+        pr: &PullRequestUrl,
+        head: &Sha,
+    ) -> Self {
         Self {
             ide,
+            working_copy_is_at_tour_head,
             repo: pr.repo.clone(),
             head: head.clone(),
         }
     }
 
     pub fn destination(&self, link: &CodeLink) -> Destination {
-        link.in_working_copy
-            .as_ref()
-            .and_then(|at| self.in_ide(&at.path, at.line))
-            .unwrap_or_else(|| Destination::Browser(link.on_github.clone()))
+        self.code_destination(link.in_working_copy.clone(), &link.on_github)
     }
 
     /// For links in markdown text: a GitHub link to a file of this repo, or a repo-relative path,
     /// is a code link; every other link opens as it is written.
     pub fn destination_of_url(&self, url: &str) -> Destination {
         if let Some(at) = self.github_blob(url) {
-            return self
-                .in_ide(&at.path, at.line)
-                .unwrap_or_else(|| Destination::Browser(url.to_string()));
+            return self.code_destination(Ok(at), url);
         }
         match repo_relative(url) {
-            Some(at) => self.in_ide(&at.path, at.line).unwrap_or_else(|| {
-                Destination::Browser(format!(
+            Some(at) => {
+                let on_github = format!(
                     "{}#L{}",
                     blob_url(&self.repo, &self.head, &at.path),
                     at.line
-                ))
-            }),
+                );
+                self.code_destination(Ok(at), &on_github)
+            }
             None => Destination::Browser(url.to_string()),
         }
     }
 
-    fn in_ide(&self, path: &str, line: usize) -> Option<Destination> {
-        let ide = self.ide.as_ref()?;
-        let path = Path::new(path);
-        ide.holds(path)
-            .then(|| Destination::Ide(ide.launch(path, line)))
+    fn code_destination(
+        &self,
+        in_working_copy: Result<WorkingCopyLine, NotInIde>,
+        on_github: &str,
+    ) -> Destination {
+        match in_working_copy.and_then(|at| self.ide_launch(&at)) {
+            Ok(launch) => Destination::Ide(launch),
+            Err(because) => Destination::GitHub {
+                url: on_github.to_string(),
+                because,
+            },
+        }
+    }
+
+    fn ide_launch(&self, at: &WorkingCopyLine) -> Result<IdeLaunch, NotInIde> {
+        let ide = self.ide.as_ref().map_err(|missing| match missing {
+            NoIde::NoTemplate => NotInIde::NoIdeTemplate,
+            NoIde::NoClone => NotInIde::NoClone(self.repo.clone()),
+        })?;
+        if !self.working_copy_is_at_tour_head {
+            return Err(NotInIde::CloneNotAtTourHead);
+        }
+        let path = Path::new(&at.path);
+        if !ide.holds(path) {
+            return Err(NotInIde::NotInWorkingCopy);
+        }
+        Ok(ide.launch(path, at.line))
     }
 
     /// `https://github.com/{owner}/{repo}/blob/{ref}/{path}#L{n}`; a ref with a slash in it is
@@ -157,11 +226,11 @@ impl CodeLinks<'_> {
         let (at, in_working_copy) = match location.side {
             Side::Base => (
                 self.blob(self.base, file.old_path.as_deref().unwrap_or(&file.path)),
-                None,
+                Err(NotInIde::RemovedLine),
             ),
             Side::Head => (
                 self.blob(self.head, &file.path),
-                Some(WorkingCopyLine {
+                Ok(WorkingCopyLine {
                     path: file.path.clone(),
                     line: location.line,
                 }),
@@ -178,11 +247,11 @@ impl CodeLinks<'_> {
         match file.status {
             FileStatus::Deleted => CodeLink {
                 on_github: self.blob(self.base, &file.path),
-                in_working_copy: None,
+                in_working_copy: Err(NotInIde::RemovedLine),
             },
             _ => CodeLink {
                 on_github: self.blob(self.head, &file.path),
-                in_working_copy: Some(WorkingCopyLine {
+                in_working_copy: Ok(WorkingCopyLine {
                     path: file.path.clone(),
                     line: 1,
                 }),

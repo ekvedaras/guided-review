@@ -43,7 +43,7 @@ use super::thread_actions::{
 use super::threads::{self, ReviewThread, ThreadPlacement};
 use super::typing_save::{SaveOrder, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
-use crate::ide::Ide;
+use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -150,6 +150,8 @@ pub struct Review {
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
+    /// Until told, the clone's lines are not trusted to be the tour's.
+    working_copy_is_at_tour_head: bool,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     saves: Arc<SaveOrder>,
@@ -206,6 +208,7 @@ impl Review {
             repin_running: false,
             changes_since,
             full_diff_shown: BTreeSet::new(),
+            working_copy_is_at_tour_head: false,
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
             saves: Arc::default(),
@@ -922,8 +925,13 @@ impl Review {
     }
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
-    pub fn code_opener(&self, ide: Option<Ide>) -> CodeOpener {
-        CodeOpener::new(ide, &self.pr, &self.head)
+    pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
+        CodeOpener::new(ide, self.working_copy_is_at_tour_head, &self.pr, &self.head)
+    }
+
+    /// Asked of the clone on open and on each focus, not on each click.
+    pub fn working_copy_is_at_tour_head(&mut self, is_at: bool) {
+        self.working_copy_is_at_tour_head = is_at;
     }
 
     fn links(&self) -> CodeLinks<'_> {

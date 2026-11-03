@@ -6,6 +6,7 @@ use gpui::{
     red,
 };
 
+use crate::app::code_links::open_link;
 use crate::viewer::{
     Markdown, ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment, ThreadView,
 };
@@ -392,7 +393,7 @@ impl RenderOnce for ThreadElement {
                 .cursor_pointer()
                 .text_sm()
                 .text_color(colors.muted_text)
-                .on_click(move |_, _, cx| cx.open_url(&url))
+                .on_click(move |_, _, cx| open_link(&url, cx))
                 .child("Open on GitHub")
         });
         let comments = (!self.view.is_folded).then(|| {

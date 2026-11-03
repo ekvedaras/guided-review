@@ -44,6 +44,15 @@ impl PartialEq for RepoName {
     }
 }
 
+impl Eq for RepoName {}
+
+impl std::hash::Hash for RepoName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.owner.to_ascii_lowercase().hash(state);
+        self.name.to_ascii_lowercase().hash(state);
+    }
+}
+
 impl fmt::Display for RepoName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.owner, self.name)
