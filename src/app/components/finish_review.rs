@@ -1,15 +1,15 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
-    red,
+    App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px, red,
 };
 
 use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
 
 use super::palette::Colors;
-use super::text_input::{DraftKey, Lines, TextDraft};
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 /// Sends the review and calls back with how it went. The layout owns the review and the network.
 pub type OnFinish =
@@ -124,23 +124,16 @@ fn submit(ui: &Entity<FinishUi>, body: String, on_finish: &OnFinish, cx: &mut Ap
     );
 }
 
-fn on_key(
+fn body_box(
     ui: &Entity<FinishUi>,
+    focus: &FocusHandle,
     body: &str,
     on_body_edit: &OnBodyEdit,
-    event: &KeyDownEvent,
-    cx: &mut App,
-) {
-    let keystroke = &event.keystroke;
-    if ui.read(cx).is_busy {
-        return;
-    }
-    let mut edited = TextDraft::with_text(body);
-    match edited.on_key(keystroke, Lines::Multi) {
-        DraftKey::Cancel => update(ui, cx, |ui| ui.is_open = false),
-        DraftKey::Edited => on_body_edit(edited.text().to_string(), cx),
-        DraftKey::Submit | DraftKey::Ignored => {}
-    }
+) -> TextBox {
+    let (on_cancel, on_body_edit) = (ui.clone(), on_body_edit.clone());
+    TextBox::new("finish-review-body-text", focus, body, Lines::Multi)
+        .on_edit(move |body, _, cx| on_body_edit(body, cx))
+        .on_cancel(move |_, cx| update(&on_cancel, cx, |ui| ui.is_open = false))
 }
 
 impl RenderOnce for FinishReviewDialog {
@@ -157,15 +150,12 @@ impl RenderOnce for FinishReviewDialog {
             state.is_busy,
             state.is_confirming_approval,
         );
-        let (body, problem, focus) = (
-            if state.is_busy {
-                self.body.clone()
-            } else {
-                TextDraft::with_text(&self.body).shown()
-            },
-            state.problem.clone(),
-            state.focus.clone(),
-        );
+        let (problem, focus) = (state.problem.clone(), state.focus.clone());
+        let body = if is_busy {
+            div().child(self.body.clone()).into_any_element()
+        } else {
+            body_box(&ui, &focus, &self.body, &self.on_body_edit).into_any_element()
+        };
 
         let open_button = {
             let (ui, focus) = (ui.clone(), focus.clone());
@@ -241,8 +231,6 @@ impl RenderOnce for FinishReviewDialog {
                 }
             })
         };
-        let (key_ui, key_body, on_body_edit) =
-            (ui.clone(), self.body.clone(), self.on_body_edit.clone());
         let warning_text = unread_warning.filter(|_| is_confirming).map(|warning| {
             div().text_sm().text_color(red()).child(format!(
                 "Not read yet: {} step{} and {} safety net piece{}. Approve anyway?",
@@ -261,11 +249,6 @@ impl RenderOnce for FinishReviewDialog {
             .child(
                 div()
                     .id("finish-review-body")
-                    .key_context("CommentInput")
-                    .track_focus(&focus)
-                    .on_key_down(move |event, _, cx| {
-                        on_key(&key_ui, &key_body, &on_body_edit, event, cx)
-                    })
                     .min_h(px(64.))
                     .p_2()
                     .rounded_md()

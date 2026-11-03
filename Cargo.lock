@@ -2338,6 +2338,7 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-typescript",
  "tree-sitter-yaml",
+ "unicode-segmentation",
  "ureq",
  "usvg 0.46.0",
 ]

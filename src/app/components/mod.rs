@@ -13,5 +13,6 @@ pub mod refresh_banner;
 pub mod safety_net_view;
 pub mod sidebar_row;
 pub mod step_notes;
+pub mod text_box;
 pub mod text_input;
 pub mod thread_view;

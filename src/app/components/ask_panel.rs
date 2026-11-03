@@ -19,7 +19,8 @@ use crate::viewer::{
 };
 
 use super::palette::{Colors, TEXT_FONT};
-use super::text_input::{DraftKey, Lines, TextDraft};
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 /// Everything the panel needs to talk to the AI, built once at startup.
 pub struct AskSetup {
@@ -109,7 +110,7 @@ pub struct AskPanel {
     setup: AskSetup,
     target: Option<Target>,
     selected: Option<AskId>,
-    draft: TextDraft,
+    question: String,
     pool: AgentPool,
     workers: HashMap<AskId, Worker>,
     /// Asks a re-pin changed the code under, as of the review last shown.
@@ -117,7 +118,9 @@ pub struct AskPanel {
     /// Why the last question did not go out.
     notice: Option<&'static str>,
     from_workers: UnboundedSender<(AskId, WorkerMessage)>,
+    /// The panel's, so escape closes it when no question can be typed.
     focus: FocusHandle,
+    question_focus: FocusHandle,
     layout_focus: FocusHandle,
 }
 
@@ -151,13 +154,14 @@ impl AskPanel {
             setup,
             target: None,
             selected: None,
-            draft: TextDraft::default(),
+            question: String::new(),
             pool: AgentPool::default(),
             workers: HashMap::new(),
             code_changed: HashSet::new(),
             notice: None,
             from_workers,
             focus: cx.focus_handle(),
+            question_focus: cx.focus_handle(),
             layout_focus,
         }
     }
@@ -248,11 +252,11 @@ impl AskPanel {
             launch,
             unavailable: None,
         });
-        self.draft.clear();
+        self.question.clear();
         if let Some(id) = self.selected {
             self.ensure_worker(id);
         }
-        window.focus(&self.focus, cx);
+        window.focus(&self.question_focus, cx);
         cx.notify();
     }
 
@@ -322,7 +326,7 @@ impl AskPanel {
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
-        let question = self.draft.text().trim().to_string();
+        let question = self.question.trim().to_string();
         let (Some(id), Some(target)) = (self.selected, &self.target) else {
             return;
         };
@@ -336,7 +340,7 @@ impl AskPanel {
         }
         self.notice = None;
         let message = self.setup.asks.begin_turn(id, &question, &context);
-        self.draft.clear();
+        self.question.clear();
         let delivered = self
             .workers
             .get(&id)
@@ -376,13 +380,27 @@ impl AskPanel {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        match self.draft.on_key(keystroke, Lines::Single) {
-            DraftKey::Submit => self.send(cx),
-            DraftKey::Cancel => self.close(window, cx),
-            DraftKey::Edited | DraftKey::Ignored => {}
+        if event.keystroke.key == "escape" {
+            self.close(window, cx);
         }
-        cx.notify();
+    }
+
+    fn question_box(&self, cx: &mut Context<Self>) -> TextBox {
+        let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
+        TextBox::new(
+            "ask-question",
+            &self.question_focus,
+            &self.question,
+            Lines::Single,
+        )
+        .on_edit(move |question, _, cx| {
+            on_edit.update(cx, |this, cx| {
+                this.question = question;
+                cx.notify();
+            })
+        })
+        .on_submit(move |_, cx| on_submit.update(cx, |this, cx| this.send(cx)))
+        .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
     fn ask_block(&self, ask: &Ask, cx: &mut Context<Self>) -> impl IntoElement {
@@ -466,7 +484,7 @@ impl AskPanel {
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = Some(id);
-                        this.draft.clear();
+                        this.question.clear();
                         this.notice = None;
                         this.ensure_worker(id);
                         cx.notify();
@@ -502,19 +520,22 @@ impl Render for AskPanel {
             .into_iter()
             .map(|ask| self.ask_block(ask, cx).into_any_element())
             .collect();
-        let input = match (self.selected, target.unavailable) {
-            (_, Some(reason)) => div().text_color(red()).child(reason),
-            (Some(id), None) if self.pool.is_answering(id) => div()
-                .text_color(colors.muted_text)
-                .child("Waiting for the answer..."),
-            _ => div()
+        let is_answering = self.selected.is_some_and(|id| self.pool.is_answering(id));
+        let input = match target.unavailable {
+            Some(reason) => div().text_color(red()).child(reason),
+            None => div()
                 .flex()
                 .flex_col()
+                .children(is_answering.then(|| {
+                    div()
+                        .text_color(colors.muted_text)
+                        .child("Waiting for the answer...")
+                }))
                 .children(
                     self.notice
                         .map(|notice| div().text_color(red()).child(notice)),
                 )
-                .child(self.draft.shown()),
+                .child(self.question_box(cx)),
         };
         div()
             .id("ask-panel")

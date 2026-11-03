@@ -21,6 +21,7 @@ pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
+use components::text_box;
 use layouts::one_step::{Collaborators, GoBack, GoForward, OneStepLayout, ToggleJump};
 use review_session::TourWork;
 
@@ -36,12 +37,14 @@ pub fn run(
 ) {
     application().run(move |cx: &mut App| {
         let typing_is_not_navigation = format!(
-            "{} && !{} && !{} && !{}",
+            "{} && !{} && !{} && !{} && !{}",
             OneStepLayout::KEY_CONTEXT,
             AskPanel::KEY_CONTEXT,
             JumpPalette::KEY_CONTEXT,
-            CommentComposer::KEY_CONTEXT
+            CommentComposer::KEY_CONTEXT,
+            text_box::TYPING_CONTEXT
         );
+        text_box::bind_keys(cx);
         cx.bind_keys([
             KeyBinding::new("right", GoForward, Some(&typing_is_not_navigation)),
             KeyBinding::new("j", GoForward, Some(&typing_is_not_navigation)),

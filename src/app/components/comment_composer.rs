@@ -1,83 +1,68 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
+    App, FocusHandle, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, Styled, Window, div, red,
 };
 
 use crate::viewer::{CommentDraft, CommentPlace, QueuedComment};
 
 use super::palette::Colors;
-use super::text_input::{DraftKey, Lines, TextDraft};
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 pub type OnCompose = Rc<dyn Fn(&mut Window, &mut App)>;
+pub type OnType = Rc<dyn Fn(String, &mut Window, &mut App)>;
 
-/// What a key meant for the comment being written.
-#[derive(Debug, PartialEq, Eq)]
-pub enum ComposerKey {
-    Send,
-    Stop,
-    Typed(String),
-    Ignored,
+/// What the composer's text and buttons do; the layout owns the review they change.
+pub struct ComposerActions {
+    pub on_focus: OnCompose,
+    pub on_type: OnType,
+    /// Escape: the draft stays, the box stops taking keys.
+    pub on_stop: OnCompose,
+    pub on_add_to_review: OnCompose,
+    pub on_comment_now: OnCompose,
+    pub on_suggest_change: OnCompose,
+    pub on_discard: OnCompose,
 }
 
-/// The box a comment is written in, under the last selected row. It shows the text and buttons,
-/// and says what a key means for the comment.
+/// The box a comment is written in, under the last selected row: the text and the buttons.
 #[derive(IntoElement)]
 pub struct CommentComposer {
     draft: CommentDraft,
-    is_focused: bool,
+    focus: FocusHandle,
+    is_composing: bool,
     is_sending: bool,
     can_comment_now: bool,
     can_suggest_change: bool,
     /// What stops the comment, or what went wrong with the last send.
     problem: Option<String>,
-    on_focus: OnCompose,
-    on_add_to_review: OnCompose,
-    on_comment_now: OnCompose,
-    on_suggest_change: OnCompose,
-    on_discard: OnCompose,
+    actions: ComposerActions,
 }
 
 impl CommentComposer {
     pub const KEY_CONTEXT: &str = "CommentInput";
 
-    pub fn on_key(body: &str, keystroke: &gpui::Keystroke) -> ComposerKey {
-        let mut draft = TextDraft::with_text(body);
-        match draft.on_key(keystroke, Lines::Multi) {
-            DraftKey::Submit => ComposerKey::Send,
-            DraftKey::Cancel => ComposerKey::Stop,
-            DraftKey::Edited => ComposerKey::Typed(draft.text().to_string()),
-            DraftKey::Ignored => ComposerKey::Ignored,
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         draft: CommentDraft,
-        is_focused: bool,
+        focus: FocusHandle,
+        is_composing: bool,
         is_sending: bool,
         can_comment_now: bool,
         can_suggest_change: bool,
         problem: Option<String>,
-        on_focus: OnCompose,
-        on_add_to_review: OnCompose,
-        on_comment_now: OnCompose,
-        on_suggest_change: OnCompose,
-        on_discard: OnCompose,
+        actions: ComposerActions,
     ) -> Self {
         Self {
             draft,
-            is_focused,
+            focus,
+            is_composing,
             is_sending,
             can_comment_now,
             can_suggest_change,
             problem,
-            on_focus,
-            on_add_to_review,
-            on_comment_now,
-            on_suggest_change,
-            on_discard,
+            actions,
         }
     }
 }
@@ -106,42 +91,56 @@ impl RenderOnce for CommentComposer {
         let colors = Colors::active(cx);
         let place = &self.draft.place;
         let id = SharedString::from(format!("composer-{}-{}", place.path(), place.end.line));
-        let on_focus = self.on_focus.clone();
-        let body = TextDraft::with_text(&self.draft.body);
-        let body = if self.is_focused {
-            body.shown()
+        let actions = self.actions;
+        let on_focus = actions.on_focus.clone();
+        let body = if self.is_composing && !self.is_sending {
+            let (on_type, on_submit, on_stop) = (
+                actions.on_type.clone(),
+                actions.on_add_to_review.clone(),
+                actions.on_stop.clone(),
+            );
+            TextBox::new(
+                SharedString::from(format!("{id}-text")),
+                &self.focus,
+                &self.draft.body,
+                Lines::Multi,
+            )
+            .on_edit(move |body, window, cx| on_type(body, window, cx))
+            .on_submit(move |window, cx| on_submit(window, cx))
+            .on_cancel(move |window, cx| on_stop(window, cx))
+            .into_any_element()
         } else {
-            body.text().to_string()
+            div().child(self.draft.body.clone()).into_any_element()
         };
-        let buttons = (!self.is_sending).then(|| {
-            div()
-                .flex()
-                .gap_2()
-                .child(button(
-                    colors,
-                    "add-to-review",
-                    "Add to review",
-                    self.on_add_to_review,
-                ))
-                .children(
-                    self.can_comment_now
-                        .then(|| button(colors, "comment-now", "Comment now", self.on_comment_now)),
-                )
-                .children(self.can_suggest_change.then(|| {
-                    button(
+        let buttons =
+            (!self.is_sending).then(|| {
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(button(
                         colors,
-                        "suggest-change",
-                        "Suggest change",
-                        self.on_suggest_change,
-                    )
-                }))
-                .child(button(
-                    colors,
-                    "discard-comment",
-                    "Discard",
-                    self.on_discard,
-                ))
-        });
+                        "add-to-review",
+                        "Add to review",
+                        actions.on_add_to_review,
+                    ))
+                    .children(self.can_comment_now.then(|| {
+                        button(colors, "comment-now", "Comment now", actions.on_comment_now)
+                    }))
+                    .children(self.can_suggest_change.then(|| {
+                        button(
+                            colors,
+                            "suggest-change",
+                            "Suggest change",
+                            actions.on_suggest_change,
+                        )
+                    }))
+                    .child(button(
+                        colors,
+                        "discard-comment",
+                        "Discard",
+                        actions.on_discard,
+                    ))
+            });
         div()
             .id(id)
             .flex()

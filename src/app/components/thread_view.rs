@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
-    Window, div, px, red,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    red,
 };
 
 use crate::viewer::{
@@ -12,7 +12,8 @@ use crate::viewer::{
 
 use super::markdown_view::MarkdownView;
 use super::palette::Colors;
-use super::text_input::{DraftKey, Lines, TextDraft};
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -231,12 +232,12 @@ impl ThreadElement {
             focus,
             is_busy,
         }: ReplyBox,
-        reply: &TextDraft,
+        reply: &str,
     ) -> AnyElement {
         let thread_id = thread_id.to_string();
         let send = {
             let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
-            let body = reply.text().to_string();
+            let body = reply.to_string();
             move |mode: SendMode| {
                 let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
                 let body = body.clone();
@@ -245,31 +246,32 @@ impl ThreadElement {
                 }
             }
         };
-        let on_key = {
-            let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
-            let (body, on_reply_draft) = (reply.text().to_string(), on_reply_draft.clone());
-            move |event: &KeyDownEvent, _: &mut Window, cx: &mut App| {
-                let keystroke = &event.keystroke;
-                if ui.read(cx).is_busy {
-                    return;
-                }
-                let mut edited = TextDraft::with_text(&body);
-                match edited.on_key(keystroke, Lines::Multi) {
-                    DraftKey::Cancel => on_reply_draft(ReplyDraftChange::Discard, cx),
-                    DraftKey::Submit => send_reply(
-                        &ui,
-                        &on_action,
-                        &thread_id,
-                        body.clone(),
-                        SendMode::AddToReview,
-                        cx,
-                    ),
-                    DraftKey::Edited => {
-                        on_reply_draft(ReplyDraftChange::Edit(edited.text().to_string()), cx);
-                    }
-                    DraftKey::Ignored => {}
-                }
-            }
+        let text = if is_busy {
+            div().child(reply.to_string()).into_any_element()
+        } else {
+            let (ui, on_action, submitted_thread) =
+                (ui.clone(), on_action.clone(), thread_id.clone());
+            let (on_edit, on_cancel) = (on_reply_draft.clone(), on_reply_draft.clone());
+            let body = reply.to_string();
+            TextBox::new(
+                SharedString::from(format!("reply-text-{thread_id}")),
+                focus,
+                reply,
+                Lines::Multi,
+            )
+            .on_edit(move |text, _, cx| on_edit(ReplyDraftChange::Edit(text), cx))
+            .on_submit(move |_, cx| {
+                send_reply(
+                    &ui,
+                    &on_action,
+                    &submitted_thread,
+                    body.clone(),
+                    SendMode::AddToReview,
+                    cx,
+                )
+            })
+            .on_cancel(move |_, cx| on_cancel(ReplyDraftChange::Discard, cx))
+            .into_any_element()
         };
         let id = thread_id;
         let buttons = (!is_busy).then(|| {
@@ -306,9 +308,6 @@ impl ThreadElement {
         });
         div()
             .id(SharedString::from(format!("reply-box-{id}")))
-            .key_context("CommentInput")
-            .track_focus(focus)
-            .on_key_down(on_key)
             .flex()
             .flex_col()
             .gap_2()
@@ -317,11 +316,7 @@ impl ThreadElement {
             .border_1()
             .border_color(colors.border)
             .bg(colors.sidebar)
-            .child(div().min_h(px(48.)).child(if is_busy {
-                reply.text().to_string()
-            } else {
-                reply.shown()
-            }))
+            .child(div().min_h(px(48.)).child(text))
             .children(buttons)
             .into_any_element()
     }
@@ -485,7 +480,7 @@ impl RenderOnce for ThreadElement {
                             focus: &focus,
                             is_busy,
                         },
-                        &TextDraft::with_text(text),
+                        text,
                     )
                 }))
                 .child(buttons.when_else(is_busy, |row| row.opacity(0.5)))

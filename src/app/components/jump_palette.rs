@@ -6,7 +6,8 @@ use gpui::{
 use crate::viewer::{JumpKind, JumpTarget};
 
 use super::palette::{Colors, TEXT_FONT};
-use super::text_input::{DraftKey, Lines, TextDraft};
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 const VISIBLE_ROWS: usize = 12;
 
@@ -20,7 +21,7 @@ pub enum JumpEvent {
 /// It knows nothing of the review; its owner answers `QueryChanged` with new targets.
 pub struct JumpPalette {
     is_open: bool,
-    draft: TextDraft,
+    query: String,
     targets: Vec<JumpTarget>,
     selected: usize,
     focus: FocusHandle,
@@ -35,7 +36,7 @@ impl JumpPalette {
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
             is_open: false,
-            draft: TextDraft::default(),
+            query: String::new(),
             targets: Vec::new(),
             selected: 0,
             focus: cx.focus_handle(),
@@ -49,7 +50,7 @@ impl JumpPalette {
 
     pub fn open(&mut self, targets: Vec<JumpTarget>, window: &mut Window, cx: &mut Context<Self>) {
         self.is_open = true;
-        self.draft.clear();
+        self.query.clear();
         self.set_targets(targets);
         window.focus(&self.focus, cx);
         cx.notify();
@@ -73,21 +74,28 @@ impl JumpPalette {
         }
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        match keystroke.key.as_str() {
+    /// Up and down pick a target; the query box takes every other key.
+    fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        match event.keystroke.key.as_str() {
             "down" => self.selected = (self.selected + 1).min(self.targets.len().saturating_sub(1)),
             "up" => self.selected = self.selected.saturating_sub(1),
-            _ => match self.draft.on_key(keystroke, Lines::Single) {
-                DraftKey::Submit => self.pick(window, cx),
-                DraftKey::Cancel => self.close(window, cx),
-                DraftKey::Edited => {
-                    cx.emit(JumpEvent::QueryChanged(self.draft.text().to_string()));
-                }
-                DraftKey::Ignored => {}
-            },
+            _ => return,
         }
         cx.notify();
+    }
+
+    fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
+        let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
+        TextBox::new("jump-query", &self.focus, &self.query, Lines::Single)
+            .on_edit(move |query, _, cx| {
+                on_edit.update(cx, |this, cx| {
+                    this.query = query.clone();
+                    cx.emit(JumpEvent::QueryChanged(query));
+                    cx.notify();
+                })
+            })
+            .on_submit(move |window, cx| on_submit.update(cx, |this, cx| this.pick(window, cx)))
+            .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
     fn row(&self, index: usize, target: &JumpTarget, cx: &mut Context<Self>) -> impl IntoElement {
@@ -149,7 +157,6 @@ impl Render for JumpPalette {
                 div()
                     .id("jump-palette")
                     .key_context(Self::KEY_CONTEXT)
-                    .track_focus(&self.focus)
                     .on_key_down(cx.listener(Self::on_key_down))
                     .mt(px(80.))
                     .w(px(640.))
@@ -170,7 +177,7 @@ impl Render for JumpPalette {
                             .p_3()
                             .border_b_1()
                             .border_color(colors.border)
-                            .child(self.draft.shown()),
+                            .child(self.query_box(cx)),
                     )
                     .children(rows),
             )
