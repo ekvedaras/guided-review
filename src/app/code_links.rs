@@ -29,12 +29,12 @@ pub fn open_code_label(link: &CodeLink, cx: &App) -> &'static str {
     cx.global::<ActiveCodeOpener>().0.destination(link).label()
 }
 
-/// For a tooltip on what opens `link`: where it goes and, for GitHub, why not the IDE.
+/// For a tooltip on what opens `link`: where it goes, why not the IDE, or what to mind there.
 pub fn open_code_hint(link: &CodeLink, cx: &App) -> SharedString {
-    let destination = cx.global::<ActiveCodeOpener>().0.destination(link);
-    destination
+    cx.global::<ActiveCodeOpener>()
+        .0
+        .destination(link)
         .explanation()
-        .unwrap_or_else(|| destination.label().to_string())
         .into()
 }
 

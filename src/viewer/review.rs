@@ -150,7 +150,7 @@ pub struct Review {
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
-    /// Until told, the clone's lines are not trusted to be the tour's.
+    /// Until told, code opens in the IDE with a note that its lines may differ.
     working_copy_is_at_tour_head: bool,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,

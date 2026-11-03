@@ -28,8 +28,6 @@ struct WorkingCopyLine {
 pub enum NotInIde {
     NoIdeTemplate,
     NoClone(RepoName),
-    /// Its lines may sit elsewhere than the tour shows them.
-    CloneNotAtTourHead,
     NotInWorkingCopy,
     /// A removed line, or a line of a deleted file: only the base has it.
     RemovedLine,
@@ -42,11 +40,25 @@ impl fmt::Display for NotInIde {
             Self::NoClone(repo) => {
                 write!(f, "no clone set for {repo} in ~/.guided-review/config.toml")
             }
-            Self::CloneNotAtTourHead => {
-                f.write_str("the clone is not checked out clean at the tour's head")
-            }
             Self::NotInWorkingCopy => f.write_str("the clone's working copy has no such file"),
             Self::RemovedLine => f.write_str("removed lines exist only at the PR's base"),
+        }
+    }
+}
+
+/// Why code that opens in the IDE may not look there as the tour shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdeCaveat {
+    /// Checked out at another commit, or with uncommitted changes: its lines may have moved.
+    CloneNotAtTourHead,
+}
+
+impl fmt::Display for IdeCaveat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CloneNotAtTourHead => {
+                f.write_str("clone is not at the tour head, lines may differ")
+            }
         }
     }
 }
@@ -54,12 +66,12 @@ impl fmt::Display for NotInIde {
 /// Where opening a code link, or any link of the text, takes the reader.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Destination {
-    Ide(IdeLaunch),
-    /// Code that could not open in the IDE.
-    GitHub {
-        url: String,
-        because: NotInIde,
+    Ide {
+        launch: IdeLaunch,
+        caveat: Option<IdeCaveat>,
     },
+    /// Code that could not open in the IDE.
+    GitHub { url: String, because: NotInIde },
     /// A link that is not to the PR's code.
     Browser(String),
 }
@@ -68,30 +80,34 @@ impl Destination {
     /// A URL is handed to `open_url`, because only the caller knows the system's opener.
     pub fn open(&self, open_url: impl FnOnce(&str)) {
         match self {
-            Self::Ide(launch) => launch.run(open_url),
+            Self::Ide { launch, .. } => launch.run(open_url),
             Self::GitHub { url, .. } | Self::Browser(url) => open_url(url),
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Ide(_) => "Open in IDE",
+            Self::Ide { .. } => "Open in IDE",
             Self::GitHub { .. } => "Open on GitHub",
             Self::Browser(_) => "Open link",
         }
     }
 
-    /// For a tooltip: why code opens on GitHub.
-    pub fn explanation(&self) -> Option<String> {
+    /// For a tooltip: where it opens, and what to know about that.
+    pub fn explanation(&self) -> String {
         match self {
-            Self::GitHub { because, .. } => Some(format!("Opens on GitHub: {because}")),
-            Self::Ide(_) | Self::Browser(_) => None,
+            Self::Ide {
+                caveat: Some(caveat),
+                ..
+            } => format!("{} ({caveat})", self.label()),
+            Self::GitHub { because, .. } => format!("Opens on GitHub: {because}"),
+            Self::Ide { caveat: None, .. } | Self::Browser(_) => self.label().to_string(),
         }
     }
 }
 
 /// The one place that decides where code opens: in the reviewer's IDE when the file is in the
-/// working copy of a local clone checked out at the tour's head, else on GitHub.
+/// working copy of a local clone, else on GitHub.
 #[derive(Debug, Clone)]
 pub struct CodeOpener {
     ide: Result<Ide, NoIde>,
@@ -144,7 +160,11 @@ impl CodeOpener {
         on_github: &str,
     ) -> Destination {
         match in_working_copy.and_then(|at| self.ide_launch(&at)) {
-            Ok(launch) => Destination::Ide(launch),
+            Ok(launch) => Destination::Ide {
+                launch,
+                caveat: (!self.working_copy_is_at_tour_head)
+                    .then_some(IdeCaveat::CloneNotAtTourHead),
+            },
             Err(because) => Destination::GitHub {
                 url: on_github.to_string(),
                 because,
@@ -157,9 +177,6 @@ impl CodeOpener {
             NoIde::NoTemplate => NotInIde::NoIdeTemplate,
             NoIde::NoClone => NotInIde::NoClone(self.repo.clone()),
         })?;
-        if !self.working_copy_is_at_tour_head {
-            return Err(NotInIde::CloneNotAtTourHead);
-        }
         let path = Path::new(&at.path);
         if !ide.holds(path) {
             return Err(NotInIde::NotInWorkingCopy);

@@ -9,7 +9,9 @@ use guided_review::ide::{Ide, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
-use guided_review::viewer::{CodeOpener, Destination, NotInIde, Review, ReviewStateFile, Side};
+use guided_review::viewer::{
+    CodeOpener, Destination, IdeCaveat, NotInIde, Review, ReviewStateFile, Side,
+};
 use serde_json::json;
 use support::FixtureRepo;
 
@@ -67,7 +69,10 @@ impl Shop {
     }
 
     fn in_ide(&self, path: &str, line: usize) -> Destination {
-        Destination::Ide(self.ide().unwrap().launch(Path::new(path), line))
+        Destination::Ide {
+            launch: self.ide().unwrap().launch(Path::new(path), line),
+            caveat: None,
+        }
     }
 
     fn on_github(&self, sha: &str, rest: &str, because: NotInIde) -> Destination {
@@ -137,16 +142,56 @@ fn without_an_ide_every_line_opens_on_github_at_the_tours_commits_and_says_why()
 }
 
 #[test]
-fn a_clone_checked_out_at_another_commit_opens_on_github_since_its_lines_may_have_moved() {
+fn a_clone_checked_out_at_another_commit_still_opens_in_the_ide_with_a_caveat() {
     let shop = Shop::with_pull();
     shop.repo.branch_from("main", &shop.base);
     let review = shop.open();
 
-    let opener = review.code_opener(shop.ide());
+    let destination = line_destination(&review, &review.code_opener(shop.ide()), Side::Head);
 
     assert_eq!(
-        line_destination(&review, &opener, Side::Head),
-        shop.on_github(&shop.head, "app/Order.php#L2", NotInIde::CloneNotAtTourHead)
+        destination,
+        Destination::Ide {
+            launch: shop.ide().unwrap().launch(Path::new("app/Order.php"), 2),
+            caveat: Some(IdeCaveat::CloneNotAtTourHead),
+        }
+    );
+    assert_eq!(
+        destination.explanation(),
+        "Open in IDE (clone is not at the tour head, lines may differ)"
+    );
+}
+
+#[test]
+fn a_clone_with_uncommitted_changes_still_opens_in_the_ide_with_a_caveat() {
+    let shop = Shop::with_pull();
+    shop.repo
+        .write("app/Order.php", "<?php\n// mine\nreturn 2;\n");
+    let review = shop.open();
+
+    let destination = line_destination(&review, &review.code_opener(shop.ide()), Side::Head);
+
+    assert!(matches!(
+        destination,
+        Destination::Ide {
+            caveat: Some(IdeCaveat::CloneNotAtTourHead),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_destination_explains_itself_for_a_tooltip() {
+    let shop = Shop::with_pull();
+    let review = shop.open();
+
+    let in_ide = line_destination(&review, &review.code_opener(shop.ide()), Side::Head);
+    let removed = line_destination(&review, &review.code_opener(shop.ide()), Side::Base);
+
+    assert_eq!(in_ide.explanation(), "Open in IDE");
+    assert_eq!(
+        removed.explanation(),
+        "Opens on GitHub: removed lines exist only at the PR's base"
     );
 }
 
@@ -272,7 +317,10 @@ fn a_shell_ide_launch_and_a_url_launch_are_both_ide_destinations() {
 
     assert!(matches!(
         opener.destination_of_url("app/Order.php#L2"),
-        Destination::Ide(IdeLaunch::Shell(_))
+        Destination::Ide {
+            launch: IdeLaunch::Shell(_),
+            ..
+        }
     ));
 }
 
@@ -285,9 +333,5 @@ fn a_github_destination_says_why_in_words() {
     assert_eq!(
         NotInIde::NoIdeTemplate.to_string(),
         "no ide template in ~/.guided-review/config.toml"
-    );
-    assert_eq!(
-        NotInIde::CloneNotAtTourHead.to_string(),
-        "the clone is not checked out clean at the tour's head"
     );
 }
