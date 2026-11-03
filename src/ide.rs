@@ -50,7 +50,7 @@ impl IdeLaunch {
     }
 }
 
-/// Open in IDE exists only with a local clone and a template; a `None` of this hides the button.
+/// Code opens in the IDE only with a local clone and a template; without one it opens on GitHub.
 #[derive(Debug, Clone)]
 pub struct Ide {
     template: IdeTemplate,
@@ -63,6 +63,11 @@ impl Ide {
             template: template?,
             clone_root: clone_root?,
         })
+    }
+
+    /// Whether the working copy has the file; it may be on another branch than the PR.
+    pub fn holds(&self, path: &Path) -> bool {
+        self.clone_root.join(path).is_file()
     }
 
     /// `path` is relative to the clone root.

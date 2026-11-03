@@ -12,9 +12,9 @@ use guided_review::viewer::{
     Review, ReviewStateFile, Side, StepId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
-use support::FixtureRepo;
 use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, SentLog};
+use support::{FixtureRepo, on_github};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -301,13 +301,10 @@ fn a_step_read_before_shows_only_what_changed_since_its_tick_and_a_toggle_shows_
     assert_eq!(lines_of(&review, "total"), ["-return 2;", "+return 3;"]);
     let page = review.current_step().unwrap();
     let removed = page.pieces[0].lines().next().unwrap();
+    let removed_on_github = on_github(&review, &removed.code_link);
     assert!(
-        removed
-            .github_link
-            .as_str()
-            .contains(&format!("/blob/{}/app/Order.php#L7", shop.first_head)),
-        "{}",
-        removed.github_link
+        removed_on_github.contains(&format!("/blob/{}/app/Order.php#L7", shop.first_head)),
+        "{removed_on_github}"
     );
 
     review.toggle_full_diff(&total);
@@ -503,8 +500,8 @@ fn the_change_since_read_is_built_from_hunks_with_context_around_its_changes() {
     assert!(
         changed
             .iter()
-            .all(|line| line.github_link.as_str().contains(&shop.first_head)
-                || line.github_link.as_str().contains(&second_head))
+            .map(|line| on_github(&review, &line.code_link))
+            .all(|url| url.contains(&shop.first_head) || url.contains(&second_head))
     );
 }
 

@@ -150,17 +150,6 @@ fn a_symbol_target_names_its_file_and_step() {
 }
 
 #[test]
-fn a_piece_opens_in_the_ide_at_its_first_changed_line_at_head() {
-    let mut review = open(shop_tour());
-    review.jump_to(&review.jump_targets("Order::total")[0].clone());
-
-    let page = review.current_step().unwrap();
-    let at = page.pieces[0].open_at().unwrap();
-
-    assert_eq!((at.path.as_str(), at.line), ("app/Order.php", 7));
-}
-
-#[test]
 fn picking_a_target_in_a_folded_step_unfolds_it_for_the_session() {
     let mut review = open(shop_tour());
     let skim = "totals".into();
@@ -201,23 +190,4 @@ fn files_only_the_safety_net_shows_are_jump_targets() {
 
     review.jump_to(&readme);
     assert_eq!(review.screen(), &Screen::SafetyNet);
-}
-
-#[test]
-fn a_line_opens_in_the_ide_when_it_exists_at_head() {
-    let mut review = open(shop_tour());
-    review.jump_to(&review.jump_targets("Order::total")[0].clone());
-
-    let page = review.current_step().unwrap();
-    let opens: Vec<_> = page.pieces[0]
-        .lines()
-        .map(|line| (line.is_change(), line.open_at().map(|at| at.line)))
-        .collect();
-
-    assert!(opens.contains(&(true, Some(7))));
-    assert!(
-        opens
-            .iter()
-            .any(|(is_change, at)| *is_change && at.is_none())
-    );
 }

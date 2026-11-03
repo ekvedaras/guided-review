@@ -6,8 +6,8 @@ use crate::tour::Tour;
 use std::collections::HashMap;
 
 use super::ask::Place;
+use super::code_link::CodeLinks;
 use super::diff_display::{DiffDisplay, FilesAtHead};
-use super::github_link::GitHubLinks;
 use super::highlight::Highlights;
 use super::row_selection::RowSelection;
 use super::step_page::{DiffLine, PieceDiff, SafetyNetPage, Side, StepPage};
@@ -26,7 +26,7 @@ pub(super) fn system_prompt(pr: &str) -> String {
 pub(super) fn context_for(
     tour: &Tour,
     files: &[ChangedFile],
-    links: &GitHubLinks,
+    links: &CodeLinks,
     place: &Place,
 ) -> Option<String> {
     let mut text = pointers(tour);

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::code_link::CodeLink;
 use super::diff_display::{DiffDisplay, DiffHunk};
-use super::github_link::GitHubLink;
 use super::highlight::Span;
 use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
@@ -18,7 +18,7 @@ pub enum Side {
     Head,
 }
 
-/// Where a shown line lives. Comments, GitHub links and "open in IDE" all start from this.
+/// Where a shown line lives. Comments and code links start from this.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LineLocation {
     /// GitHub addresses both sides of a renamed file by its new path.
@@ -46,7 +46,8 @@ pub struct DiffLine {
     pub text: String,
     /// Empty until the file's highlights are ready.
     pub spans: Vec<Span>,
-    pub github_link: GitHubLink,
+    /// Opened through the `CodeOpener`.
+    pub code_link: CodeLink,
     /// The row belongs to the "change since your read" view, whose removed rows are lines of the
     /// head the step was read at, not of the PR's base.
     pub is_in_change_since_read: bool,
@@ -62,11 +63,6 @@ impl DiffLine {
                 (LineKind::Context { base_line, .. }, Side::Base) => base_line == location.line,
                 _ => self.location.side == location.side && self.location.line == location.line,
             }
-    }
-
-    /// Removed lines are not in the files at head, so an IDE has nothing to open for them.
-    pub fn open_at(&self) -> Option<&LineLocation> {
-        (self.location.side == Side::Head).then_some(&self.location)
     }
 
     pub fn is_change(&self) -> bool {
@@ -100,7 +96,7 @@ pub struct PieceDiff {
     /// Its changes are all hidden because whitespace is ignored.
     pub changes_only_whitespace: bool,
     /// Set for a binary file: it has no lines, only this one row.
-    pub binary_file: Option<GitHubLink>,
+    pub binary_file: Option<CodeLink>,
     /// The file is a picture; the app shows it from `Review::image_preview`.
     pub is_image: bool,
     /// What the last re-pin did to this piece; `None` when the tour was not re-pinned.
@@ -179,11 +175,13 @@ impl SafetyNetPage {
 
 impl PieceDiff {
     /// Where an IDE opens this piece: the first added line, or the first removed one when nothing was added.
-    pub fn open_at(&self) -> Option<&LineLocation> {
+    /// The first line at head, which the working copy has; a piece of only removed lines opens at its first.
+    pub fn code_link(&self) -> Option<&CodeLink> {
         self.lines()
             .find(|line| line.location.side == Side::Head)
             .or(self.lines().next())
-            .map(|line| &line.location)
+            .map(|line| &line.code_link)
+            .or(self.binary_file.as_ref())
     }
 
     pub(super) fn of(part: PiecePart, files: &[ChangedFile], display: &DiffDisplay) -> Self {

@@ -10,6 +10,7 @@ use std::process::Command;
 use std::thread;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use guided_review::viewer::{CodeLink, Destination, Review};
 use tempfile::TempDir;
 
 pub struct FixtureRepo {
@@ -213,4 +214,13 @@ pub fn svg_of(width: u32, height: u32) -> String {
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">\n<rect width=\"{width}\" height=\"{height}\" fill=\"red\"/>\n</svg>\n"
     )
+}
+
+/// Where `link` opens on GitHub, for a review with no IDE.
+#[allow(dead_code)]
+pub fn on_github(review: &Review, link: &CodeLink) -> String {
+    match review.code_opener(None).destination(link) {
+        Destination::Browser(url) => url,
+        Destination::Ide(launch) => panic!("opens in the IDE without one: {launch:?}"),
+    }
 }

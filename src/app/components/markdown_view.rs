@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use gpui::Global;
 
+use crate::app::code_links::open_link;
 use crate::viewer::{Block, Capture, Markdown, Run, SuggestionDiff, highlight_snippet};
 
 use super::palette::{CODE_FONT, Colors};
@@ -374,7 +375,7 @@ fn styled_runs(colors: Colors, runs: &[Run], key: &str) -> AnyElement {
     }
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
     InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
-        .on_click(ranges, move |index, _, cx| cx.open_url(&urls[index]))
+        .on_click(ranges, move |index, _, cx| open_link(&urls[index], cx))
         .into_any_element()
 }
 

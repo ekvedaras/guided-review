@@ -6,9 +6,9 @@ use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{PieceDiff, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
-use support::FixtureRepo;
 use support::app_path::AppPath;
 use support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use support::{FixtureRepo, on_github};
 
 struct Shop {
     repo: FixtureRepo,
@@ -203,7 +203,7 @@ fn every_line_links_to_the_same_line_on_github_at_the_tours_commits() {
         .pieces
         .iter()
         .flat_map(|piece| piece.lines())
-        .map(|line| line.github_link.to_string())
+        .map(|line| on_github(&review, &line.code_link))
         .collect();
     assert_eq!(
         links,
@@ -241,7 +241,9 @@ fn a_binary_file_is_one_row_with_a_link_to_it_on_github() {
     let logo = &page.pieces[0];
     assert!(logo.lines().next().is_none());
     assert_eq!(
-        logo.binary_file.as_ref().map(ToString::to_string),
+        logo.binary_file
+            .as_ref()
+            .map(|link| on_github(&review, link)),
         Some(format!(
             "https://github.com/acme/shop/blob/{}/data.bin",
             shop.head

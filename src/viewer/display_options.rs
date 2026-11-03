@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::pull_request::Sha;
 
+use super::code_link::CodeLinks;
 use super::diff_display::{DiffDisplay, FilesAtHead, MoreContext};
-use super::github_link::GitHubLinks;
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
 
@@ -61,7 +61,7 @@ impl DisplayOptions {
         true
     }
 
-    pub(super) fn display<'a>(&'a self, links: &'a GitHubLinks<'a>) -> DiffDisplay<'a> {
+    pub(super) fn display<'a>(&'a self, links: &'a CodeLinks<'a>) -> DiffDisplay<'a> {
         DiffDisplay {
             highlights: &self.highlights,
             files_at_head: &self.files_at_head,

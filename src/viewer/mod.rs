@@ -5,12 +5,12 @@ mod agent_event;
 mod agent_pool;
 mod ask;
 mod ask_context;
+mod code_link;
 mod comment_desk;
 mod comments;
 mod diff_display;
 mod display_options;
 mod finish_review;
-mod github_link;
 mod highlight;
 mod image_preview;
 mod jump;
@@ -32,6 +32,8 @@ mod viewed_sync;
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
+pub(crate) use code_link::percent_encode_path;
+pub use code_link::{CodeLink, CodeOpener, Destination};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
@@ -40,8 +42,6 @@ pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreCont
 pub use finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
-pub use github_link::GitHubLink;
-pub(crate) use github_link::percent_encode_path;
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{ImageCache, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage};
 pub use jump::{JumpKind, JumpTarget};

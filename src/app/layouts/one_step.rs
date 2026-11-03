@@ -6,10 +6,10 @@ use gpui::{
     Window, actions, div, list, px, relative,
 };
 
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::app::code_links::{open_code, open_code_label, use_code_opener};
 use crate::app::code_selection::{CodeSelection, CodeSpot};
 use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
 use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
@@ -18,9 +18,9 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeSelectionHooks, DiffRow, OnImageComment, OnMoreContext, OnOpenInIde, OnRowGesture,
-    PieceHeader, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
-    only_whitespace_row, piece_end, piece_row,
+    CodeSelectionHooks, DiffRow, OnImageComment, OnMoreContext, OnRowGesture, PieceHeader,
+    RowGesture, binary_file_row, hunk_gap, no_change_since_read_row, only_whitespace_row,
+    piece_end, piece_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -43,8 +43,8 @@ use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, Tour
 use crate::code_source::CodeSource;
 use crate::ide::Ide;
 use crate::viewer::{
-    Ask, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen, Place,
-    QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
+    Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
+    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
 };
 
 actions!(one_step, [GoForward, GoBack, ToggleJump, CopySelection]);
@@ -54,7 +54,7 @@ type OnCodeSpot = Rc<dyn Fn(RowGesture, CodeSpot, &mut Window, &mut App)>;
 /// What the layout talks to outside the window.
 pub struct Collaborators {
     pub github: Arc<dyn GitHubPort>,
-    /// `None` hides every Open in IDE button.
+    /// `None` opens all code on GitHub.
     pub ide: Option<Ide>,
     pub tour_work: TourWork,
 }
@@ -83,7 +83,7 @@ pub struct OneStepLayout {
     #[cfg(feature = "snapshots")]
     snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
-    /// `None` hides every Open in IDE button.
+    /// `None` opens all code on GitHub.
     ide: Option<Ide>,
     _session_subscriptions: [Subscription; 2],
     _use_as_comment_subscription: Subscription,
@@ -179,6 +179,8 @@ impl OneStepLayout {
             async {}
         })
         .detach();
+        let opener = session.read(cx).review().code_opener(ide.clone());
+        use_code_opener(opener, cx);
         Self {
             screen_list: session.read(cx).screen_list().clone(),
             session,
@@ -221,6 +223,7 @@ impl OneStepLayout {
 
     /// The re-pin or Refresh opened a new review: diagrams and notes on old answers follow it.
     fn reopened(&mut self, cx: &mut Context<Self>) {
+        self.use_code_opener_of_review(cx);
         let ask = self.ask.clone();
         self.session.update(cx, |session, cx| {
             ask.update(cx, |panel, cx| {
@@ -600,27 +603,16 @@ impl OneStepLayout {
         });
     }
 
-    fn ide_button(
-        &self,
-        key: String,
-        at: Option<&LineLocation>,
-        cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
-        let ide = self.ide.as_ref()?;
-        let at = at?;
-        let launch = ide.launch(Path::new(&at.path), at.line);
-        Some(
-            tool_button(Colors::active(cx), key, "Open in IDE")
-                .on_click(cx.listener(move |_, _, _, cx| launch.run(|url| cx.open_url(url)))),
-        )
+    fn open_code_button(key: String, link: &CodeLink, cx: &mut Context<Self>) -> Stateful<Div> {
+        let link = link.clone();
+        tool_button(Colors::active(cx), key, open_code_label(&link, cx))
+            .on_click(move |_, _, cx| open_code(&link, cx))
     }
 
-    fn open_line_in_ide(&self) -> Option<OnOpenInIde> {
-        let ide = self.ide.clone()?;
-        Some(Rc::new(move |at: &LineLocation, cx: &mut App| {
-            ide.launch(Path::new(&at.path), at.line)
-                .run(|url| cx.open_url(url))
-        }))
+    /// The opener follows the review's head, which a re-pin moves.
+    fn use_code_opener_of_review(&self, cx: &mut Context<Self>) {
+        let opener = self.session.read(cx).review().code_opener(self.ide.clone());
+        use_code_opener(opener, cx);
     }
 
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
@@ -904,21 +896,22 @@ impl OneStepLayout {
             PageRow::ScreenFooter(footer) => screen_footer(&footer, cx).into_any_element(),
             PageRow::SafetyNetIntro => SafetyNetIntro.into_any_element(),
             PageRow::PieceHeader(heading) => {
-                let ide = self.ide_button(
-                    format!("ide-piece-{}", heading.piece),
-                    heading.open_at.as_ref(),
-                    cx,
-                );
+                let open_code = heading.code_link.as_ref().map(|link| {
+                    Self::open_code_button(format!("open-piece-{}", heading.piece), link, cx)
+                });
                 let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
                 PieceHeader::new(
                     heading.piece.clone(),
                     heading.repin_label,
-                    ide.into_iter().chain(ask).collect(),
+                    open_code.into_iter().chain(ask).collect(),
                 )
                 .into_any_element()
             }
             PageRow::NoChangeSinceRead => no_change_since_read_row(colors).into_any_element(),
-            PageRow::BinaryFile(link) => binary_file_row(colors, link).into_any_element(),
+            PageRow::BinaryFile { piece, link } => {
+                binary_file_row(colors, format!("binary-{piece}").into(), link, cx)
+                    .into_any_element()
+            }
             PageRow::Image { path, .. } => piece_row(colors)
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
@@ -943,7 +936,6 @@ impl OneStepLayout {
                         }),
                     })
                     .with_gestures(self.on_row_gesture.clone())
-                    .with_open_in_ide(self.open_line_in_ide())
                     .into_any_element()
             }
             PageRow::Thread {

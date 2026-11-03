@@ -5,7 +5,7 @@ use crate::code_source::{CodeSource, FileAt, FileStatus, Line};
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::Sha;
 
-use super::github_link::GitHubLinks;
+use super::code_link::CodeLinks;
 use super::highlight::Highlights;
 use super::step_page::{DiffLine, LineKind, LineLocation, Side};
 
@@ -104,7 +104,7 @@ pub(super) struct DiffDisplay<'a> {
     pub files_at_head: &'a FilesAtHead,
     pub more_context: &'a HashMap<MoreContext, usize>,
     pub ignores_whitespace: bool,
-    pub links: &'a GitHubLinks<'a>,
+    pub links: &'a CodeLinks<'a>,
 }
 
 impl DiffDisplay<'_> {
@@ -289,7 +289,7 @@ struct FileLines<'a> {
     at_head: Option<&'a [String]>,
     changed_at_head: BTreeSet<usize>,
     highlights: &'a Highlights,
-    links: &'a GitHubLinks<'a>,
+    links: &'a CodeLinks<'a>,
     /// A line range shows no unchanged lines outside it.
     within: Option<RangeInclusive<usize>>,
 }
@@ -366,7 +366,7 @@ impl FileLines<'_> {
             line: line.number,
         };
         DiffLine {
-            github_link: self.links.to_line(self.file, &location),
+            code_link: self.links.to_line(self.file, &location),
             location,
             kind,
             text: line.text.clone(),

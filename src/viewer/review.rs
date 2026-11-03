@@ -17,6 +17,7 @@ use crate::config::AskSettings;
 
 use super::ask::{Ask, Place};
 use super::ask_context;
+use super::code_link::{CodeLinks, CodeOpener};
 use super::comment_desk::CommentDesk;
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
@@ -27,7 +28,6 @@ use super::display_options::DisplayOptions;
 use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
-use super::github_link::GitHubLinks;
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
@@ -42,6 +42,7 @@ use super::thread_actions::{
 use super::threads::{self, ReviewThread, ThreadPlacement};
 use super::typing_save::{SaveOrder, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
+use crate::ide::Ide;
 use crate::repin::RepinStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -335,7 +336,7 @@ impl Review {
                 showing_full_diff,
             });
             if !showing_full_diff {
-                let links_from_read_head = GitHubLinks {
+                let links_from_read_head = CodeLinks {
                     pr: &self.pr,
                     base: &read_head,
                     head: &self.head,
@@ -593,7 +594,7 @@ impl Review {
             })
     }
 
-    fn display<'a>(&'a self, links: &'a GitHubLinks<'a>) -> DiffDisplay<'a> {
+    fn display<'a>(&'a self, links: &'a CodeLinks<'a>) -> DiffDisplay<'a> {
         self.display_options.display(links)
     }
 
@@ -904,8 +905,13 @@ impl Review {
         Ok(result)
     }
 
-    fn links(&self) -> GitHubLinks<'_> {
-        GitHubLinks {
+    /// Opens code links and the links of the tour's text at the commits this review reads.
+    pub fn code_opener(&self, ide: Option<Ide>) -> CodeOpener {
+        CodeOpener::new(ide, &self.pr, &self.head)
+    }
+
+    fn links(&self) -> CodeLinks<'_> {
+        CodeLinks {
             pr: &self.pr,
             base: &self.base,
             head: &self.head,

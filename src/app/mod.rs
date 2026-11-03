@@ -2,6 +2,7 @@
 //! around a `viewer::Review`, so a new layout later is one new file in `layouts`.
 
 mod assets;
+mod code_links;
 mod code_selection;
 pub mod components;
 mod dock_icon;

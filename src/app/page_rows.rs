@@ -20,9 +20,9 @@ use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CommentPlace, GitHubLink, JumpKind, JumpTarget, LineKind, LineLocation, MoreContext,
-    NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen,
-    StepId, StepPage, ThreadView,
+    CodeLink, CommentPlace, JumpKind, JumpTarget, LineKind, LineLocation, MoreContext, NextScreen,
+    PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen, StepId, StepPage,
+    ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -82,7 +82,7 @@ pub struct PieceHeading {
     pub ask: Option<AskAt>,
     /// "changed" or "new" after a re-pin.
     pub repin_label: Option<&'static str>,
-    pub open_at: Option<LineLocation>,
+    pub code_link: Option<CodeLink>,
 }
 
 #[derive(Clone)]
@@ -103,7 +103,10 @@ pub enum PageRow {
     PieceHeader(Rc<PieceHeading>),
     /// In the change since the read, a piece without lines was not touched since.
     NoChangeSinceRead,
-    BinaryFile(GitHubLink),
+    BinaryFile {
+        piece: SharedString,
+        link: CodeLink,
+    },
     /// The pictures of an image file; comments on the whole file hang under it.
     Image {
         path: SharedString,
@@ -174,7 +177,10 @@ impl PageRow {
                 heading.piece.hash(&mut hasher);
                 heading.repin_label.hash(&mut hasher);
             }
-            Self::BinaryFile(link) => link.as_str().hash(&mut hasher),
+            Self::BinaryFile { piece, link } => {
+                piece.hash(&mut hasher);
+                link.hash(&mut hasher);
+            }
             Self::Image { path, is_loaded } => {
                 path.hash(&mut hasher);
                 is_loaded.hash(&mut hasher);
@@ -668,13 +674,16 @@ impl RowsBuilder<'_> {
             path: piece.id.path.clone(),
             ask,
             repin_label: piece.repin_status.and_then(repin_label),
-            open_at: piece.open_at().cloned(),
+            code_link: piece.code_link().cloned(),
         })));
         if no_change_since_read {
             self.rows.push(PageRow::NoChangeSinceRead);
         }
         if let Some(link) = piece.binary_file {
-            self.rows.push(PageRow::BinaryFile(link));
+            self.rows.push(PageRow::BinaryFile {
+                piece: id.clone().into(),
+                link,
+            });
         }
         if piece.is_image {
             let path = piece.id.path.clone();

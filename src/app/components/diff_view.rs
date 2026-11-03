@@ -8,7 +8,8 @@ use gpui::{
     StyledText, TextLayout, Window, div, px,
 };
 
-use crate::viewer::{Capture, DiffLine, Edge, GitHubLink, LineKind, LineLocation, MoreContext};
+use crate::app::code_links::{open_code, open_code_label};
+use crate::viewer::{Capture, CodeLink, DiffLine, Edge, LineKind, LineLocation, MoreContext};
 
 use super::palette::{CODE_FONT, Colors};
 
@@ -24,9 +25,6 @@ pub enum RowGesture {
 }
 
 pub type OnImageComment = Rc<dyn Fn(&mut Window, &mut App)>;
-
-/// Opens a line of the head in the reviewer's IDE.
-pub type OnOpenInIde = Rc<dyn Fn(&LineLocation, &mut App)>;
 
 pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut App)>;
 
@@ -53,9 +51,7 @@ pub struct DiffRowLine {
     code: SharedString,
     /// Cut to char boundaries already; coloured when drawn, so a theme switch needs no rebuild.
     highlights: Vec<(Range<usize>, Capture)>,
-    github_link: GitHubLink,
-    /// `None` for removed lines: the files at head do not have them.
-    open_at: Option<LineLocation>,
+    code_link: CodeLink,
     /// Rows outside GitHub's hunks, and rows of the change since the read, take no comment.
     takes_comment: bool,
 }
@@ -83,18 +79,17 @@ impl DiffRowLine {
             .collect();
         Self {
             takes_comment: line.takes_comment(),
-            open_at: line.open_at().cloned(),
             gutter: format!("{base_number:>5} {head_number:>5} {sign} ").into(),
             code: line.text.into(),
             highlights,
-            github_link: line.github_link,
+            code_link: line.code_link,
             location: line.location,
             kind: line.kind,
         }
     }
 }
 
-/// One line of a piece: a gutter that opens the line on GitHub, the "+" that starts a comment, and the
+/// One line of a piece: a gutter that opens the line in the IDE or on GitHub, the "+" that starts a comment, and the
 /// code as one styled text.
 #[derive(IntoElement)]
 pub struct DiffRow {
@@ -102,7 +97,6 @@ pub struct DiffRow {
     is_selected: bool,
     /// Without it the row takes no comment.
     on_gesture: Option<OnRowGesture>,
-    open_in_ide: Option<OnOpenInIde>,
     code_selection: Option<CodeSelectionHooks>,
 }
 
@@ -112,19 +106,12 @@ impl DiffRow {
             line,
             is_selected: false,
             on_gesture: None,
-            open_in_ide: None,
             code_selection: None,
         }
     }
 
     pub fn with_code_selection(mut self, hooks: CodeSelectionHooks) -> Self {
         self.code_selection = Some(hooks);
-        self
-    }
-
-    /// Cmd-click on the gutter opens the line in the IDE; a plain click opens it on GitHub.
-    pub fn with_open_in_ide(mut self, open_in_ide: Option<OnOpenInIde>) -> Self {
-        self.open_in_ide = open_in_ide;
         self
     }
 
@@ -184,9 +171,7 @@ impl RenderOnce for DiffRow {
             }
             None => code,
         };
-        let link = line.github_link.clone();
-        let ide_at = line.open_at.clone();
-        let open_in_ide = self.open_in_ide.clone();
+        let link = line.code_link.clone();
         let gutter_background = match line.kind {
             _ if self.is_selected => colors.current,
             LineKind::Removed => colors.removed_gutter,
@@ -194,18 +179,16 @@ impl RenderOnce for DiffRow {
             LineKind::Context { .. } => colors.background,
         };
         let gutter = div()
-            .id(SharedString::from(link.to_string()))
+            .id(SharedString::from(format!(
+                "gutter-{}-{:?}-{}",
+                location.path, location.side, location.line
+            )))
             .flex_none()
             .cursor_pointer()
             .bg(gutter_background)
             .text_color(colors.muted_text)
             .hover(|gutter| gutter.text_color(colors.accent))
-            .on_click(move |event, _, cx| {
-                match (event.modifiers().secondary(), &open_in_ide, &ide_at) {
-                    (true, Some(open_in_ide), Some(at)) => open_in_ide(at, cx),
-                    _ => cx.open_url(link.as_str()),
-                }
-            })
+            .on_click(move |_, _, cx| open_code(&link, cx))
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self.on_gesture.clone().filter(|_| line.takes_comment) {
@@ -293,7 +276,7 @@ pub fn piece_row(colors: Colors) -> Div {
     div().w_full().border_x_1().border_color(colors.border)
 }
 
-/// The top of a piece box: the piece's name, its re-pin label, and its buttons (open in IDE, ask).
+/// The top of a piece box: the piece's name, its re-pin label, and its buttons (open the code, ask).
 #[derive(IntoElement)]
 pub struct PieceHeader {
     piece: SharedString,
@@ -436,18 +419,24 @@ pub fn only_whitespace_row(colors: Colors) -> impl IntoElement {
         .child("Only whitespace changed.")
 }
 
-/// A binary file has no lines to show, so it gets one row that sends the reviewer to GitHub.
-pub fn binary_file_row(colors: Colors, link: GitHubLink) -> impl IntoElement {
+/// A binary file has no lines to show, so it gets one row that opens the file.
+pub fn binary_file_row(
+    colors: Colors,
+    id: SharedString,
+    link: CodeLink,
+    cx: &App,
+) -> impl IntoElement {
+    let label = format!("Binary file. {}", open_code_label(&link, cx));
     piece_row(colors).child(
         div()
-            .id(SharedString::from(link.to_string()))
+            .id(id)
             .px_2()
             .py_1()
             .text_sm()
             .cursor_pointer()
             .text_color(colors.muted_text)
-            .on_click(move |_, _, cx| cx.open_url(link.as_str()))
-            .child("Binary file, open it on GitHub"),
+            .on_click(move |_, _, cx| open_code(&link, cx))
+            .child(label),
     )
 }
 
