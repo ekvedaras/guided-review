@@ -1,9 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyDownEvent, ListOffset, ListState, MouseButton, ParentElement, Render,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription, Window, actions, div,
-    list, px,
+    IntoElement, ListOffset, ListState, MouseButton, ParentElement, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
 };
 
 use std::path::Path;
@@ -12,7 +11,7 @@ use std::sync::Arc;
 
 use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
 use crate::app::components::comment_composer::{
-    CommentComposer, ComposerKey, OnCompose, QueuedCommentNote,
+    CommentComposer, ComposerActions, OnCompose, QueuedCommentNote,
 };
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
@@ -23,6 +22,7 @@ use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFi
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
+use crate::app::components::markdown_view::{InlineMarkdown, MarkdownView};
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
@@ -37,8 +37,8 @@ use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, Tour
 use crate::code_source::CodeSource;
 use crate::ide::Ide;
 use crate::viewer::{
-    Ask, CommentPlace, GitHubPort, LineLocation, MoreContext, Place, QueuedComment, Review, Screen,
-    SendMode, StepId, ThreadView,
+    Ask, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, Place, QueuedComment,
+    Review, Screen, SendMode, StepId, ThreadView,
 };
 
 actions!(one_step, [GoForward, GoBack, ToggleJump]);
@@ -62,6 +62,8 @@ pub struct OneStepLayout {
     on_row_gesture: OnRowGesture,
     diagrams: Entity<Diagrams>,
     focus: FocusHandle,
+    /// The comment being written takes keys with this one.
+    composer_focus: FocusHandle,
     ask: Entity<AskPanel>,
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
@@ -160,6 +162,7 @@ impl OneStepLayout {
             on_row_gesture,
             diagrams,
             focus,
+            composer_focus: cx.focus_handle(),
             ask,
             selection_notice: None,
             lines_to_ask: None,
@@ -287,7 +290,7 @@ impl OneStepLayout {
         };
         self.lines_to_ask = lines_to_ask;
         match finished {
-            Ok(Some(_)) => window.focus(&self.focus, cx),
+            Ok(Some(_)) => window.focus(&self.composer_focus, cx),
             Ok(None) => {}
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
@@ -303,7 +306,7 @@ impl OneStepLayout {
             begun
         });
         match begun {
-            Ok(_) => window.focus(&self.focus, cx),
+            Ok(_) => window.focus(&self.composer_focus, cx),
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
         cx.notify();
@@ -325,41 +328,6 @@ impl OneStepLayout {
             session.image_pictures(path),
             on_comment,
         )
-    }
-
-    fn on_comment_key(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.focus.is_focused(window) {
-            return;
-        }
-        let session = self.session.read(cx);
-        let Some(place) = session.composing().cloned() else {
-            return;
-        };
-        let Some(draft) = session
-            .review()
-            .comment_drafts()
-            .iter()
-            .find(|d| d.place == place)
-        else {
-            return;
-        };
-        match CommentComposer::on_key(&draft.body, &event.keystroke) {
-            ComposerKey::Stop => self
-                .session
-                .update(cx, |session, cx| session.stop_composing(cx)),
-            ComposerKey::Send => self.session.update(cx, |session, cx| {
-                session.send_comment(place, SendMode::AddToReview, cx)
-            }),
-            ComposerKey::Typed(body) => self
-                .session
-                .update(cx, |session, cx| session.type_in_comment(&place, &body, cx)),
-            ComposerKey::Ignored => {}
-        }
     }
 
     fn on_compose(
@@ -385,7 +353,7 @@ impl OneStepLayout {
         match used {
             Ok(_) => {
                 self.selection_notice = None;
-                window.focus(&self.focus, cx);
+                window.focus(&self.composer_focus, cx);
             }
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
@@ -414,37 +382,60 @@ impl OneStepLayout {
         let can_comment_now = review.can_comment_now();
         let can_suggest_change = review.can_suggest_change(place);
         let problem = session.comment_problem(place);
+        let on_type = {
+            let (layout, place) = (cx.entity(), place.clone());
+            Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
+                layout.update(cx, |this, cx| {
+                    this.session
+                        .update(cx, |session, cx| session.type_in_comment(&place, &body, cx))
+                })
+            })
+        };
+        let actions = ComposerActions {
+            on_focus: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session
+                    .update(cx, |session, cx| session.compose(place, cx));
+                window.focus(&this.composer_focus, cx);
+            }),
+            on_type,
+            on_stop: self.on_compose(place, cx, |this, _, window, cx| {
+                this.session
+                    .update(cx, |session, cx| session.stop_composing(cx));
+                window.focus(&this.focus, cx);
+            }),
+            on_add_to_review: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session.update(cx, |session, cx| {
+                    session.send_comment(place, SendMode::AddToReview, cx)
+                });
+                window.focus(&this.focus, cx);
+            }),
+            on_comment_now: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session.update(cx, |session, cx| {
+                    session.send_comment(place, SendMode::CommentNow, cx)
+                });
+                window.focus(&this.focus, cx);
+            }),
+            on_suggest_change: self.on_compose(place, cx, |this, place, window, cx| {
+                if let Err(error) = this.change_review(cx, |review| review.suggest_change(&place)) {
+                    eprintln!("could not save the suggestion: {error:#}");
+                }
+                window.focus(&this.composer_focus, cx);
+            }),
+            on_discard: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session
+                    .update(cx, |session, cx| session.discard_comment(&place, cx));
+                window.focus(&this.focus, cx);
+            }),
+        };
         Some(CommentComposer::new(
             draft,
+            self.composer_focus.clone(),
             is_composing,
             is_sending,
             can_comment_now,
             can_suggest_change,
             problem,
-            self.on_compose(place, cx, |this, place, window, cx| {
-                this.session
-                    .update(cx, |session, cx| session.compose(place, cx));
-                window.focus(&this.focus, cx);
-            }),
-            self.on_compose(place, cx, |this, place, _, cx| {
-                this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::AddToReview, cx)
-                })
-            }),
-            self.on_compose(place, cx, |this, place, _, cx| {
-                this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::CommentNow, cx)
-                })
-            }),
-            self.on_compose(place, cx, |this, place, _, cx| {
-                if let Err(error) = this.change_review(cx, |review| review.suggest_change(&place)) {
-                    eprintln!("could not save the suggestion: {error:#}");
-                }
-            }),
-            self.on_compose(place, cx, |this, place, _, cx| {
-                this.session
-                    .update(cx, |session, cx| session.discard_comment(&place, cx))
-            }),
+            actions,
         ))
     }
 
@@ -600,7 +591,10 @@ impl OneStepLayout {
                 this.change_review(cx, |review| review.go_to(&id));
             }))
             .when_ticked(step.is_ticked || step.is_gone, colors)
-            .child(step.label.clone())
+            .child(InlineMarkdown::new(
+                format!("sidebar-{}", step.id),
+                &step.label,
+            ))
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
             sidebar_row(colors, "safety-net", 0, safety_net.is_current)
@@ -659,13 +653,26 @@ impl OneStepLayout {
             return div().into_any_element();
         };
         match row {
-            PageRow::SummaryTitle(title) => div().pb_3().text_2xl().child(title).into_any_element(),
-            PageRow::SummaryBullet(bullet) => div().pb_3().child(bullet).into_any_element(),
+            PageRow::SummaryTitle(title) => div()
+                .pb_3()
+                .text_2xl()
+                .child(InlineMarkdown::new("summary-title", &title))
+                .into_any_element(),
+            PageRow::SummaryBullet(bullet) => div()
+                .pb_3()
+                .child(InlineMarkdown::new(
+                    format!("summary-bullet-{index}"),
+                    &bullet,
+                ))
+                .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
                 .pb_3()
                 .text_color(colors.muted_text)
-                .child(why)
+                .child(MarkdownView::new(
+                    format!("step-why-{index}"),
+                    Markdown::parse(&why),
+                ))
                 .into_any_element(),
             PageRow::Diagram => div()
                 .pb_3()
@@ -814,7 +821,7 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
         .id("step-title")
         .flex_1()
         .text_xl()
-        .child(heading.title.clone());
+        .child(InlineMarkdown::new("step-title", &heading.title));
     let title = if heading.folds_on_title_click {
         let id = heading.id.clone();
         title
@@ -971,7 +978,6 @@ impl Render for OneStepLayout {
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::on_comment_key))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),

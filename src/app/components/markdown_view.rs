@@ -296,7 +296,63 @@ fn code_block(colors: Colors, language: Option<&str>, text: &str) -> AnyElement 
         .into_any_element()
 }
 
+/// Tour text the writer wrote: a title, a bullet, a note. One line of runs that takes its size and colour
+/// from the element around it.
+#[derive(IntoElement)]
+pub struct InlineMarkdown {
+    key: SharedString,
+    runs: Vec<Run>,
+}
+
+impl InlineMarkdown {
+    pub fn new(key: impl Into<SharedString>, source: &str) -> Self {
+        Self {
+            key: key.into(),
+            runs: runs_of(&Markdown::parse(source).blocks),
+        }
+    }
+}
+
+impl RenderOnce for InlineMarkdown {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        styled_runs(Colors::active(cx), &self.runs, &self.key)
+    }
+}
+
+fn runs_of(blocks: &[Block]) -> Vec<Run> {
+    let mut runs: Vec<Run> = Vec::new();
+    for block in blocks {
+        let block_runs = match block {
+            Block::Paragraph(runs) | Block::Heading { text: runs, .. } => runs.clone(),
+            Block::Details { summary, .. } => summary.clone(),
+            Block::Quote(inner) => runs_of(inner),
+            Block::List { items, .. } => items.iter().flat_map(|item| runs_of(item)).collect(),
+            Block::Code { text, .. } => vec![Run {
+                text: text.clone(),
+                code: true,
+                ..Run::default()
+            }],
+            Block::Rule => Vec::new(),
+        };
+        if !runs.is_empty() && !block_runs.is_empty() {
+            runs.push(Run {
+                text: " ".into(),
+                ..Run::default()
+            });
+        }
+        runs.extend(block_runs);
+    }
+    runs
+}
+
 fn inline_text(colors: Colors, runs: &[Run], key: &str, scale: f32) -> AnyElement {
+    div()
+        .text_size(gpui::rems(scale))
+        .child(styled_runs(colors, runs, key))
+        .into_any_element()
+}
+
+fn styled_runs(colors: Colors, runs: &[Run], key: &str) -> AnyElement {
     let mut text = String::new();
     let mut highlights = Vec::new();
     let mut links = Vec::new();
@@ -313,16 +369,12 @@ fn inline_text(colors: Colors, runs: &[Run], key: &str, scale: f32) -> AnyElemen
         }
     }
     let styled = StyledText::new(text).with_highlights(highlights);
-    let element = div().text_size(gpui::rems(scale));
     if links.is_empty() {
-        return element.child(styled).into_any_element();
+        return styled.into_any_element();
     }
     let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
-    element
-        .child(
-            InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
-                .on_click(ranges, move |index, _, cx| cx.open_url(&urls[index])),
-        )
+    InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
+        .on_click(ranges, move |index, _, cx| cx.open_url(&urls[index]))
         .into_any_element()
 }
 
@@ -349,5 +401,20 @@ fn style_of(colors: Colors, run: &Run) -> HighlightStyle {
             color: None,
         }),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tour_text_keeps_its_bold_and_code_and_drops_the_markers() {
+        let runs = runs_of(&Markdown::parse("**Too little stock** joins `Reason`").blocks);
+
+        let text: String = runs.iter().map(|run| run.text.as_str()).collect();
+        assert_eq!(text, "Too little stock joins Reason");
+        assert!(runs[0].bold);
+        assert!(runs.last().is_some_and(|run| run.code));
     }
 }
