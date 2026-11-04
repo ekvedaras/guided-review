@@ -72,13 +72,14 @@ impl CodeSelection {
     }
 
     /// The selected text, a line per row; `code_of` gives a row's code, `None` for rows without code.
+    /// An end inside a letter takes the whole letter.
     pub fn text<'a>(&self, code_of: impl Fn(usize) -> Option<&'a str>) -> String {
         let (start, end) = self.ends();
         (start.row..=end.row)
             .filter_map(|row| {
                 let code = code_of(row)?;
                 let range = self.range_on(row, code.len()).unwrap_or(0..0);
-                code.get(range)
+                code.get(code.floor_char_boundary(range.start)..code.ceil_char_boundary(range.end))
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -109,6 +110,14 @@ mod tests {
             selection.text(|row| code.get(row).copied()),
             "a = 1;\nlet b = 2;\nlet c"
         );
+    }
+
+    #[test]
+    fn a_drag_ending_inside_a_letter_copies_the_whole_letter_and_keeps_the_row() {
+        let code = ["ąb", "cė"];
+        let selection = dragged(spot(0, 1), spot(1, 2));
+
+        assert_eq!(selection.text(|row| code.get(row).copied()), "ąb\ncė");
     }
 
     #[test]
