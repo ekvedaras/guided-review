@@ -39,13 +39,15 @@ impl RowSelection {
         let position = |at: &LineLocation| shown.iter().position(|row| &row.location == at);
         let (anchor, head) = (position(&self.anchor)?, position(&self.head)?);
         let (first, last) = (anchor.min(head), anchor.max(head));
-        Some(SelectedLines {
-            lines: shown[first..=last]
+        SelectedLines::new(
+            shown
                 .iter()
+                .skip(first)
+                .take(last - first + 1)
                 .filter(|row| row.location.path == self.anchor.path)
                 .cloned()
                 .collect(),
-        })
+        )
     }
 }
 
@@ -54,19 +56,28 @@ impl RowSelection {
 #[derive(Debug, Clone)]
 pub struct SelectedLines {
     lines: Vec<DiffLine>,
+    first: LineLocation,
+    last: LineLocation,
 }
 
 impl SelectedLines {
+    /// `None` for no rows, so a selection always has a first and a last.
+    fn new(lines: Vec<DiffLine>) -> Option<Self> {
+        let first = lines.first()?.location.clone();
+        let last = lines.last()?.location.clone();
+        Some(Self { lines, first, last })
+    }
+
     pub fn lines(&self) -> &[DiffLine] {
         &self.lines
     }
 
     pub fn first(&self) -> &LineLocation {
-        &self.lines[0].location
+        &self.first
     }
 
     pub fn last(&self) -> &LineLocation {
-        &self.lines[self.lines.len() - 1].location
+        &self.last
     }
 
     pub fn contains(&self, location: &LineLocation) -> bool {

@@ -93,9 +93,9 @@ fn the_judge_runs_without_tools_and_its_answer_is_read_into_five_verdicts() {
         })
         .unwrap();
 
-    assert_eq!(verdicts.get(Rule::Order).score, Score::Pass);
-    assert_eq!(verdicts.get(Rule::Grouping).score, Score::Partial);
-    assert_eq!(verdicts.get(Rule::Diagram).reason, "none");
+    assert_eq!(verdicts.get(Rule::Order).unwrap().score, Score::Pass);
+    assert_eq!(verdicts.get(Rule::Grouping).unwrap().score, Score::Partial);
+    assert_eq!(verdicts.get(Rule::Diagram).unwrap().reason, "none");
     let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
     assert!(args.contains("--tools"), "{args}");
     assert!(!args.contains("dangerously"), "{args}");

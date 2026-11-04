@@ -7,6 +7,7 @@ use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
+use crate::json::at;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
 use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
@@ -88,7 +89,8 @@ impl AgentPort for ClaudeConversation {
             }
             let line = line.trim_end();
             on_line(line);
-            if serde_json::from_str::<Value>(line).is_ok_and(|json| json["type"] == "result") {
+            if serde_json::from_str::<Value>(line).is_ok_and(|json| at(&json, "/type") == "result")
+            {
                 return Ok(());
             }
         }
@@ -307,8 +309,11 @@ fn run_headless(mut command: Command, prompt: &str) -> anyhow::Result<String> {
             String::from_utf8_lossy(&output.stderr)
         )
     })?;
-    let text = answer["result"].as_str().unwrap_or_default().to_string();
-    if answer["is_error"].as_bool().unwrap_or(false) || !output.status.success() {
+    let text = at(&answer, "/result")
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    if at(&answer, "/is_error").as_bool().unwrap_or(false) || !output.status.success() {
         bail!("claude failed: {text}");
     }
     Ok(text)

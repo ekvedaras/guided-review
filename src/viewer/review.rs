@@ -1163,9 +1163,13 @@ impl Review {
             });
         ReadingPlace {
             step_number: match (&self.screen, position) {
-                (Screen::Step(_), Some(position)) => {
-                    Some(reading_order[..=position].iter().filter(is_step).count())
-                }
+                (Screen::Step(_), Some(position)) => Some(
+                    reading_order
+                        .iter()
+                        .take(position + 1)
+                        .filter(is_step)
+                        .count(),
+                ),
                 _ => None,
             },
             step_count: reading_order.iter().filter(is_step).count(),

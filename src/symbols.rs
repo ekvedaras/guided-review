@@ -80,11 +80,14 @@ impl Symbols {
             let mut name = "";
             let mut definition = None;
             for capture in found_match.captures() {
-                match query.capture_names()[capture.index as usize] {
+                let Some(&capture_name) = query.capture_names().get(capture.index as usize) else {
+                    continue;
+                };
+                match capture_name {
                     helper if helper.starts_with('_') => {}
                     "name" => name = text_of(capture.node, source),
-                    capture_name => {
-                        if let Some(kind) = kind_of(capture_name) {
+                    other => {
+                        if let Some(kind) = kind_of(other) {
                             definition = Some((capture.node, kind));
                         }
                     }

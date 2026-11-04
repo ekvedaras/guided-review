@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::json::at;
+
 /// What the AI did, as the viewer cares about it. Nothing above this file sees JSON.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
@@ -15,7 +17,7 @@ impl AgentEvent {
         let Ok(json) = serde_json::from_str::<Value>(line) else {
             return Vec::new();
         };
-        match json["type"].as_str() {
+        match at(&json, "/type").as_str() {
             Some("stream_event") => text_delta(&json).into_iter().collect(),
             Some("assistant") => tool_uses(&json),
             Some("result") => vec![outcome(&json)],
@@ -25,17 +27,17 @@ impl AgentEvent {
 }
 
 fn text_delta(json: &Value) -> Option<AgentEvent> {
-    let delta = &json["event"]["delta"];
-    (delta["type"] == "text_delta")
-        .then(|| AgentEvent::TextDelta(delta["text"].as_str().unwrap_or_default().to_string()))
+    let delta = at(json, "/event/delta");
+    (at(delta, "/type") == "text_delta")
+        .then(|| AgentEvent::TextDelta(at(delta, "/text").as_str().unwrap_or_default().to_string()))
 }
 
 fn tool_uses(json: &Value) -> Vec<AgentEvent> {
-    json["message"]["content"]
+    at(json, "/message/content")
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|block| block["type"] == "tool_use")
+        .filter(|block| at(block, "/type") == "tool_use")
         .map(|block| AgentEvent::ToolUse {
             summary: describe_tool_use(block),
         })
@@ -43,11 +45,11 @@ fn tool_uses(json: &Value) -> Vec<AgentEvent> {
 }
 
 fn describe_tool_use(block: &Value) -> String {
-    let name = block["name"].as_str().unwrap_or("tool");
-    let input = &block["input"];
+    let name = at(block, "/name").as_str().unwrap_or("tool");
+    let input = at(block, "/input");
     let target = ["file_path", "path", "pattern", "command"]
         .iter()
-        .find_map(|key| input[key].as_str());
+        .find_map(|key| input.get(key).and_then(Value::as_str));
     match target {
         Some(target) => format!("{name} {target}"),
         None => name.to_string(),
@@ -55,16 +57,19 @@ fn describe_tool_use(block: &Value) -> String {
 }
 
 fn outcome(json: &Value) -> AgentEvent {
-    if json["is_error"] == true {
+    if at(json, "/is_error") == true {
         AgentEvent::Error(
-            json["result"]
+            at(json, "/result")
                 .as_str()
                 .unwrap_or("the AI failed")
                 .to_string(),
         )
     } else {
         AgentEvent::Done {
-            session_id: json["session_id"].as_str().unwrap_or_default().to_string(),
+            session_id: at(json, "/session_id")
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
         }
     }
 }

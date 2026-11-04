@@ -293,7 +293,10 @@ fn with_selection(
     cut.dedup();
     cut.windows(2)
         .filter_map(|bounds| {
-            let piece = bounds[0]..bounds[1];
+            let &[start, end] = bounds else {
+                return None;
+            };
+            let piece = start..end;
             let syntax = highlights
                 .iter()
                 .find(|(range, _)| range.start <= piece.start && piece.end <= range.end)

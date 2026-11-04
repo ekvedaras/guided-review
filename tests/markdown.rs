@@ -134,7 +134,7 @@ fn html_comments_and_unknown_tags_leave_only_their_text() {
 }
 
 fn linked(markdown: &Markdown) -> Vec<(String, Option<String>)> {
-    paragraph_runs(&markdown.blocks[0])
+    paragraph_runs(markdown.blocks.first().unwrap())
         .iter()
         .map(|run| (run.text.clone(), run.link.clone()))
         .collect()

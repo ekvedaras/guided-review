@@ -620,19 +620,23 @@ struct SymbolChange<'a> {
 }
 
 impl<'a> SymbolChange<'a> {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "the index is the position just found or the entry just pushed"
+    )]
     fn entry_for<'c>(changes: &'c mut Vec<Self>, path: &'a str, slot: Slot) -> &'c mut Self {
-        let index = match changes.iter().position(|change| change.slot == slot) {
-            Some(index) => index,
-            None => {
-                changes.push(Self {
-                    path,
-                    slot,
-                    removed: Vec::new(),
-                    added: Vec::new(),
-                });
-                changes.len() - 1
-            }
-        };
+        let index = changes
+            .iter()
+            .position(|change| change.slot == slot)
+            .unwrap_or(changes.len());
+        if index == changes.len() {
+            changes.push(Self {
+                path,
+                slot,
+                removed: Vec::new(),
+                added: Vec::new(),
+            });
+        }
         &mut changes[index]
     }
 

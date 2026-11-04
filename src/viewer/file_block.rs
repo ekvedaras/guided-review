@@ -71,7 +71,7 @@ impl FileBlock {
         self.starts
             .iter()
             .find(|start| start.at == *location)
-            .map(|start| (&self.pieces[start.piece], start.is_resumed))
+            .and_then(|start| Some((self.pieces.get(start.piece)?, start.is_resumed)))
     }
 
     /// Pieces as the box shows them: those without rows first, then by where they first start.
@@ -81,9 +81,9 @@ impl FileBlock {
                 .iter()
                 .position(|start| start.piece == index && !start.is_resumed)
         };
-        let mut order: Vec<usize> = (0..self.pieces.len()).collect();
-        order.sort_by_key(|&index| first_start(index));
-        order.into_iter().map(|index| &self.pieces[index]).collect()
+        let mut order: Vec<(usize, &PieceDiff)> = self.pieces.iter().enumerate().collect();
+        order.sort_by_key(|&(index, _)| first_start(index));
+        order.into_iter().map(|(_, piece)| piece).collect()
     }
 
     /// Pieces that own no row with code on it: their label goes above the rows.
@@ -226,13 +226,16 @@ fn placed_rows(hunk: &DiffHunk, piece: usize) -> Vec<PlacedRow<'_>> {
         .map(|(index, row)| {
             let place = match row.kind {
                 LineKind::Removed => Place {
-                    head_line: hunk.rows[..index]
+                    head_line: hunk
+                        .rows
                         .iter()
+                        .take(index)
                         .rev()
                         .find_map(head_line)
                         .or_else(|| {
-                            hunk.rows[index..]
+                            hunk.rows
                                 .iter()
+                                .skip(index)
                                 .find_map(head_line)
                                 .map(|line| line - 1)
                         })

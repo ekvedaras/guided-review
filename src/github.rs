@@ -3,9 +3,10 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use anyhow::Context;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
+use crate::json::at;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
     CommentPlace, PendingReviewExists, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
@@ -109,7 +110,7 @@ impl GitHub {
             }",
             pull_request_variables(pr, &serde_json::Value::Null),
         )?;
-        let id = data["repository"]["pullRequest"]["id"]
+        let id = at(&data, "/repository/pullRequest/id")
             .as_str()
             .with_context(|| format!("GitHub did not know {pr}"))?
             .to_string();
@@ -161,7 +162,10 @@ impl GitHub {
             }
             anyhow::bail!("GitHub answered with errors: {errors}");
         }
-        Ok(answer["data"].take())
+        Ok(answer
+            .get_mut("data")
+            .map(serde_json::Value::take)
+            .unwrap_or_default())
     }
 
     /// Returns the id of the pending review the thread went into.
@@ -171,22 +175,23 @@ impl GitHub {
         place: &CommentPlace,
         body: &str,
     ) -> anyhow::Result<String> {
-        let mut input = serde_json::json!({
-            "pullRequestId": self.pull_request_id(pr)?,
-            "path": place.path(),
-            "body": body,
-        });
-        if place.is_file_comment() {
-            input["subjectType"] = "FILE".into();
-        } else {
-            input["line"] = place.end.line.into();
-            input["side"] = graphql_side(place.end.side).into();
-            input["subjectType"] = "LINE".into();
-            if !place.is_single_line() {
-                input["startLine"] = place.start.line.into();
-                input["startSide"] = graphql_side(place.start.side).into();
+        let pull_request_id = self.pull_request_id(pr)?;
+        let input = if place.is_file_comment() {
+            ReviewThreadInput {
+                subject_type: "FILE",
+                ..ReviewThreadInput::new(&pull_request_id, place.path(), body)
             }
-        }
+        } else {
+            let is_range = !place.is_single_line();
+            ReviewThreadInput {
+                subject_type: "LINE",
+                line: Some(place.end.line),
+                side: Some(graphql_side(place.end.side)),
+                start_line: is_range.then_some(place.start.line),
+                start_side: is_range.then(|| graphql_side(place.start.side)),
+                ..ReviewThreadInput::new(&pull_request_id, place.path(), body)
+            }
+        };
         let data = self
             .graphql(
                 "mutation($input: AddPullRequestReviewThreadInput!) {
@@ -197,7 +202,7 @@ impl GitHub {
                 serde_json::json!({"input": input}),
             )
             .map_err(one_pending_review_error)?;
-        let thread = &data["addPullRequestReviewThread"]["thread"];
+        let thread = at(&data, "/addPullRequestReviewThread/thread");
         if thread.is_null() {
             return Err(ThreadNotCreated(format!(
                 "GitHub took no comment on {} line {}",
@@ -206,7 +211,7 @@ impl GitHub {
             ))
             .into());
         }
-        Ok(thread["comments"]["nodes"][0]["pullRequestReview"]["id"]
+        Ok(at(thread, "/comments/nodes/0/pullRequestReview/id")
             .as_str()
             .unwrap_or_default()
             .to_string())
@@ -223,12 +228,12 @@ impl GitHub {
                 pull_request_variables(pr, &serde_json::Value::Null),
             )
             .with_context(|| format!("could not look for a pending review on {pr}"))?;
-        Ok(data["repository"]["pullRequest"]["reviews"]["nodes"]
+        Ok(at(&data, "/repository/pullRequest/reviews/nodes")
             .as_array()
             .into_iter()
             .flatten()
-            .find(|review| review["viewerDidAuthor"].as_bool() == Some(true))
-            .and_then(|review| review["id"].as_str())
+            .find(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true))
+            .and_then(|review| at(review, "/id").as_str())
             .map(str::to_string))
     }
 
@@ -315,11 +320,11 @@ impl ViewedFilesPort for GitHub {
                 }",
                 pull_request_variables(pr, &after),
             )?;
-            let pull = &data["repository"]["pullRequest"];
-            if let Some(id) = pull["id"].as_str() {
+            let pull = at(&data, "/repository/pullRequest");
+            if let Some(id) = at(pull, "/id").as_str() {
                 self.remember_pull_request_id(pr, id);
             }
-            let page: FilesPageJson = serde_json::from_value(pull["files"].clone())
+            let page: FilesPageJson = serde_json::from_value(at(pull, "/files").clone())
                 .with_context(|| format!("could not read the files of {pr} from GitHub"))?;
             files.extend(page.nodes.into_iter().map(|file| ViewedFile {
                 path: file.path,
@@ -384,10 +389,11 @@ impl ReviewThreadsPort for GitHub {
         body: &str,
         mode: SendMode,
     ) -> anyhow::Result<()> {
-        let mut input = serde_json::json!({"pullRequestReviewThreadId": thread_id, "body": body});
-        if let Some(review_id) = self.pending_review_id(pr)? {
-            input["pullRequestReviewId"] = review_id.into();
-        }
+        let input = ReplyInput {
+            pull_request_review_thread_id: thread_id,
+            body,
+            pull_request_review_id: self.pending_review_id(pr)?,
+        };
         let data = self
             .graphql(
                 "mutation($input: AddPullRequestReviewThreadReplyInput!) {
@@ -399,9 +405,12 @@ impl ReviewThreadsPort for GitHub {
             )
             .map_err(one_pending_review_error)
             .context("could not reply")?;
-        let review = &data["addPullRequestReviewThreadReply"]["comment"]["pullRequestReview"];
-        if mode == SendMode::CommentNow && review["state"] == "PENDING" {
-            let review_id = review["id"].as_str().unwrap_or_default();
+        let review = at(
+            &data,
+            "/addPullRequestReviewThreadReply/comment/pullRequestReview",
+        );
+        if mode == SendMode::CommentNow && at(review, "/state") == "PENDING" {
+            let review_id = at(review, "/id").as_str().unwrap_or_default();
             self.submit_pending_review(review_id, ReviewVerdict::Comment, "")
                 .context("could not post the reply")?;
         }
@@ -451,12 +460,12 @@ impl ReviewWritesPort for GitHub {
                 pull_request_variables(pr, &serde_json::Value::Null),
             )
             .with_context(|| format!("could not look for a pending review on {pr}"))?;
-        let reviews = data["repository"]["pullRequest"]["reviews"]["nodes"]
+        let reviews = at(&data, "/repository/pullRequest/reviews/nodes")
             .as_array()
             .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
         Ok(reviews
             .iter()
-            .any(|review| review["viewerDidAuthor"].as_bool() == Some(true)))
+            .any(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true)))
     }
 
     fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
@@ -468,7 +477,7 @@ impl ReviewWritesPort for GitHub {
                 pull_request_variables(pr, &serde_json::Value::Null),
             )
             .with_context(|| format!("could not tell who wrote {pr}"))?;
-        data["repository"]["pullRequest"]["viewerDidAuthor"]
+        at(&data, "/repository/pullRequest/viewerDidAuthor")
             .as_bool()
             .with_context(|| format!("GitHub did not say who wrote {pr}"))
     }
@@ -625,6 +634,47 @@ impl CodeSource for GitHubCodeSource {
     fn working_tree_is_at(&self, _head: &Sha) -> bool {
         false
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewThreadInput<'a> {
+    pull_request_id: &'a str,
+    path: &'a str,
+    body: &'a str,
+    subject_type: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    side: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start_side: Option<&'static str>,
+}
+
+impl<'a> ReviewThreadInput<'a> {
+    fn new(pull_request_id: &'a str, path: &'a str, body: &'a str) -> Self {
+        Self {
+            pull_request_id,
+            path,
+            body,
+            subject_type: "LINE",
+            line: None,
+            side: None,
+            start_line: None,
+            start_side: None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplyInput<'a> {
+    pull_request_review_thread_id: &'a str,
+    body: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pull_request_review_id: Option<String>,
 }
 
 fn graphql_side(side: Side) -> &'static str {

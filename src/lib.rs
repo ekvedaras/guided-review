@@ -9,6 +9,7 @@ pub mod file_rules;
 pub mod github;
 pub mod ide;
 pub mod image_facts;
+pub mod json;
 pub mod language;
 pub mod local_git;
 pub mod opened_pr;

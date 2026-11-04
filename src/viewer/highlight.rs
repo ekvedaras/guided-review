@@ -273,6 +273,9 @@ fn highlight_file(configuration: &HighlightConfiguration, source: &str) -> Vec<V
                 let Some(&capture) = open.last() else {
                     continue;
                 };
+                let Some(capture) = Capture::ALL.get(capture).copied() else {
+                    continue;
+                };
                 let mut at = start;
                 while at < end {
                     let line = line_starts.partition_point(|&line_start| line_start <= at) - 1;
@@ -280,10 +283,15 @@ fn highlight_file(configuration: &HighlightConfiguration, source: &str) -> Vec<V
                         .get(line + 1)
                         .map_or(source.len(), |&next| next - 1);
                     let stop = end.min(line_end);
+                    let (Some(&line_start), Some(spans)) =
+                        (line_starts.get(line), lines.get_mut(line))
+                    else {
+                        break;
+                    };
                     if stop > at {
-                        lines[line].push(Span {
-                            range: at - line_starts[line]..stop - line_starts[line],
-                            capture: Capture::ALL[capture],
+                        spans.push(Span {
+                            range: at - line_start..stop - line_start,
+                            capture,
                         });
                     }
                     at = stop.max(line_end) + 1;

@@ -132,8 +132,13 @@ impl Show<'_> {
         let (first, last) = (span.0, span.1.min(lines.len()));
 
         writeln!(out, "\naround, at head (lines {first}-{last}):")?;
-        for number in first..=last {
-            writeln!(out, "{number}: {}", lines[number - 1])?;
+        for (index, line) in lines
+            .iter()
+            .enumerate()
+            .take(last)
+            .skip(first.saturating_sub(1))
+        {
+            writeln!(out, "{}: {line}", index + 1)?;
         }
         Ok(())
     }

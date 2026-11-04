@@ -89,7 +89,9 @@ impl Shop {
     }
 
     fn pointers(&self) -> Vec<Value> {
-        self.tour_on_disk()["steps"][0]["pieces"]
+        self.tour_on_disk()
+            .pointer("/steps/0/pieces")
+            .unwrap()
             .as_array()
             .unwrap()
             .clone()

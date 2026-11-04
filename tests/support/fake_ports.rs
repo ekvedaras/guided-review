@@ -195,7 +195,7 @@ impl FakeGitHub {
     }
 
     pub fn viewed_state(&self, path: &str) -> ViewedState {
-        self.viewed.lock().unwrap()[path]
+        *self.viewed.lock().unwrap().get(path).unwrap()
     }
 }
 

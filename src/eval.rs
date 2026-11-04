@@ -86,8 +86,12 @@ impl Verdicts {
         Self(pairs.into_iter().collect())
     }
 
-    pub fn get(&self, rule: Rule) -> &Verdict {
-        &self.0[&rule]
+    pub fn get(&self, rule: Rule) -> Option<&Verdict> {
+        self.0.get(&rule)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Rule, &Verdict)> {
+        self.0.iter().map(|(rule, verdict)| (*rule, verdict))
     }
 }
 
@@ -349,8 +353,7 @@ impl fmt::Display for Report {
         )?;
         for (pr, verdicts) in &self.record.prs {
             writeln!(f, "{}", short_pr(pr))?;
-            for rule in Rule::ALL {
-                let verdict = verdicts.get(rule);
+            for (rule, verdict) in verdicts.iter() {
                 writeln!(f, "  {rule}: {} - {}", verdict.score, verdict.reason)?;
             }
         }
@@ -370,8 +373,10 @@ impl fmt::Display for Report {
             let Some(before) = previous.prs.get(pr) else {
                 continue;
             };
-            for rule in Rule::ALL {
-                let (was, now) = (before.get(rule), verdicts.get(rule));
+            for (rule, now) in verdicts.iter() {
+                let Some(was) = before.get(rule) else {
+                    continue;
+                };
                 if was.score != now.score {
                     changes += 1;
                     writeln!(

@@ -454,10 +454,11 @@ impl PageRows {
 
 fn changed_span(old: &[RowKey], new: &[RowKey]) -> RowsChange {
     let same_start = old.iter().zip(new).take_while(|(a, b)| a == b).count();
-    let same_end = old[same_start..]
+    let same_end = old
         .iter()
+        .skip(same_start)
         .rev()
-        .zip(new[same_start..].iter().rev())
+        .zip(new.iter().skip(same_start).rev())
         .take_while(|(a, b)| a == b)
         .count();
     let old_changed = same_start..old.len() - same_end;

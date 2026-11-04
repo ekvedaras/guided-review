@@ -109,22 +109,28 @@ fn looseness(text: &str, query: &[char]) -> Option<usize> {
     if text.to_lowercase().contains(&query_text) {
         return Some(0);
     }
+    let (first_letter, rest_of_query) = query.split_first()?;
     let starts_word = |at: usize| {
-        at == 0 || {
-            let (before, here) = (original[at - 1], original[at]);
-            !before.is_alphanumeric() || (before.is_lowercase() && here.is_uppercase())
-        }
+        at == 0
+            || match (original.get(at - 1), original.get(at)) {
+                (Some(before), Some(here)) => {
+                    !before.is_alphanumeric() || (before.is_lowercase() && here.is_uppercase())
+                }
+                _ => false,
+            }
     };
-    (0..letters.len())
-        .filter(|&start| letters[start] == query[0] && starts_word(start))
-        .filter_map(|start| {
+    letters
+        .iter()
+        .enumerate()
+        .filter(|&(start, letter)| letter == first_letter && starts_word(start))
+        .filter_map(|(start, _)| {
             let mut last = start;
-            for wanted in &query[1..] {
+            for wanted in rest_of_query {
                 last = if letters.get(last + 1) == Some(wanted) {
                     last + 1
                 } else {
                     (last + 1..letters.len())
-                        .find(|&at| letters[at] == *wanted && starts_word(at))?
+                        .find(|&at| letters.get(at) == Some(wanted) && starts_word(at))?
                 };
             }
             Some(last + 1 - start - query.len())

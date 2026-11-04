@@ -115,7 +115,14 @@ fn github_with_thread(pull: &Pull, thread: ReviewThread) -> FakeGitHub {
 }
 
 fn shown_thread(review: &Review) -> ReviewThread {
-    review.current_step().unwrap().threads[0].thread.clone()
+    review
+        .current_step()
+        .unwrap()
+        .threads
+        .first()
+        .unwrap()
+        .thread
+        .clone()
 }
 
 fn row(review: &Review, text: &str) -> LineLocation {

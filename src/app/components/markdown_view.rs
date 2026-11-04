@@ -153,7 +153,10 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
     match block {
         Block::Paragraph(runs) => inline_text(colors, runs, key, 1.0).into_any_element(),
         Block::Heading { level, text } => {
-            let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0][usize::from(*level - 1).min(5)];
+            let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0]
+                .get(usize::from(*level - 1))
+                .copied()
+                .unwrap_or(1.0);
             let heading = text
                 .iter()
                 .map(|run| Run {
@@ -389,7 +392,11 @@ fn styled_runs(colors: Colors, runs: &[Run], key: &str) -> AnyElement {
     } else {
         let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
         InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
-            .on_click(ranges, move |index, _, cx| open_link(&urls[index], cx))
+            .on_click(ranges, move |index, _, cx| {
+                if let Some(url) = urls.get(index) {
+                    open_link(url, cx);
+                }
+            })
             .into_any_element()
     };
     match backgrounds {

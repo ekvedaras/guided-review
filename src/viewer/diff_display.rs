@@ -237,12 +237,11 @@ impl DiffDisplay<'_> {
         if self.ignores_whitespace {
             let mut next_removed = 0;
             for line in &added {
-                let rest = &removed[next_removed..];
-                if let Some(offset) = rest
-                    .iter()
-                    .position(|old| without_whitespace(&old.text) == without_whitespace(&line.text))
-                {
-                    same_as_removed.insert(line.number, rest[offset].number);
+                let rest = removed.get(next_removed..).unwrap_or_default();
+                if let Some((offset, old)) = rest.iter().enumerate().find(|(_, old)| {
+                    without_whitespace(&old.text) == without_whitespace(&line.text)
+                }) {
+                    same_as_removed.insert(line.number, old.number);
                     next_removed += offset + 1;
                 }
             }
