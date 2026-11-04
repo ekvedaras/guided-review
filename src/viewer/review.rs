@@ -929,8 +929,11 @@ impl Review {
     }
 
     fn rows_of(&self, place: &CommentPlace) -> Option<Vec<DiffLine>> {
-        let mut selection = RowSelection::start_at(place.start.clone());
-        selection.extend_to(place.end.clone());
+        let CommentPlace::Lines { start, end } = place else {
+            return None;
+        };
+        let mut selection = RowSelection::start_at(start.clone());
+        selection.extend_to(end.clone());
         let rows = selection.resolve(&self.screen_lines())?;
         Some(rows.lines().to_vec())
     }

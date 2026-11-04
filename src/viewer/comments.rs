@@ -10,47 +10,76 @@ use super::ports::{
     ViewedSyncUnavailable,
 };
 use super::row_selection::SelectedLines;
-use super::step_page::{LineLocation, Side};
+use super::step_page::LineLocation;
 
-/// The lines a comment is on: one line, or a range that may cross hunks and sides.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct CommentPlace {
-    pub start: LineLocation,
-    pub end: LineLocation,
+/// Where a comment sits: on a whole file, or on one line or a range that may cross hunks and sides.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+pub enum CommentPlace {
+    /// GitHub takes this for a picture.
+    File(FilePath),
+    Lines {
+        start: LineLocation,
+        end: LineLocation,
+    },
 }
 
 impl CommentPlace {
     pub fn of(selected: &SelectedLines) -> Self {
-        Self {
+        Self::Lines {
             start: selected.first().clone(),
             end: selected.last().clone(),
         }
     }
 
-    /// A comment on a whole file, which GitHub takes for a picture. It has no line: line 0 never exists.
     pub fn on_file(path: &FilePath) -> Self {
-        let file = LineLocation {
-            path: path.clone(),
-            side: Side::Head,
-            line: 0,
-        };
-        Self {
-            start: file.clone(),
-            end: file,
-        }
+        Self::File(path.clone())
     }
 
     pub fn is_file_comment(&self) -> bool {
-        self.end.line == 0
+        matches!(self, Self::File(_))
     }
 
     pub fn path(&self) -> &str {
-        self.end.path.as_str()
+        match self {
+            Self::File(path) => path.as_str(),
+            Self::Lines { end, .. } => end.path.as_str(),
+        }
     }
 
     pub fn is_single_line(&self) -> bool {
-        self.start == self.end
+        matches!(self, Self::Lines { start, end } if start == end)
     }
+}
+
+impl<'de> Deserialize<'de> for CommentPlace {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match StoredPlace::deserialize(deserializer)? {
+            StoredPlace::Current(CurrentPlace::File(path)) => Self::File(path),
+            // Before places had kinds, a file comment was a place on line 0, which no line has.
+            StoredPlace::Before { end, .. } if end.line == 0 => Self::File(end.path),
+            StoredPlace::Current(CurrentPlace::Lines { start, end })
+            | StoredPlace::Before { start, end } => Self::Lines { start, end },
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredPlace {
+    Current(CurrentPlace),
+    Before {
+        start: LineLocation,
+        end: LineLocation,
+    },
+}
+
+#[derive(Deserialize)]
+enum CurrentPlace {
+    File(FilePath),
+    Lines {
+        start: LineLocation,
+        end: LineLocation,
+    },
 }
 
 /// Text the reviewer is writing and has not sent. Kept in the state file on every edit.
@@ -58,15 +87,26 @@ impl CommentPlace {
 pub struct CommentDraft {
     pub place: CommentPlace,
     pub body: String,
-    /// The tour head whose line numbers `place` uses. Empty in files from before it was kept,
+    /// The tour head whose line numbers `place` uses. `None` in files from before it was kept,
     /// which are taken as current.
-    #[serde(default)]
-    pub written_at: Sha,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "head_or_none"
+    )]
+    pub written_at: Option<Sha>,
+}
+
+/// Files from before `written_at` was optional hold an empty text for "unknown".
+fn head_or_none<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Sha>, D::Error> {
+    Ok(Option::<Sha>::deserialize(deserializer)?.filter(|sha| !sha.is_empty()))
 }
 
 impl CommentDraft {
     pub fn is_placed_at(&self, head: &Sha) -> bool {
-        self.written_at.is_empty() || self.written_at == *head
+        self.written_at.as_ref().is_none_or(|at| at == head)
     }
 }
 

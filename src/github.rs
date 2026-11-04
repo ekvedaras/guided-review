@@ -177,20 +177,21 @@ impl GitHub {
         body: &str,
     ) -> anyhow::Result<Option<String>> {
         let pull_request_id = self.pull_request_id(pr)?;
-        let input = if place.is_file_comment() {
-            ReviewThreadInput {
+        let input = match place {
+            CommentPlace::File(path) => ReviewThreadInput {
                 subject_type: "FILE",
-                ..ReviewThreadInput::new(&pull_request_id, place.path(), body)
-            }
-        } else {
-            let is_range = !place.is_single_line();
-            ReviewThreadInput {
-                subject_type: "LINE",
-                line: Some(place.end.line),
-                side: Some(graphql_side(place.end.side)),
-                start_line: is_range.then_some(place.start.line),
-                start_side: is_range.then(|| graphql_side(place.start.side)),
-                ..ReviewThreadInput::new(&pull_request_id, place.path(), body)
+                ..ReviewThreadInput::new(&pull_request_id, path.as_str(), body)
+            },
+            CommentPlace::Lines { start, end } => {
+                let is_range = start != end;
+                ReviewThreadInput {
+                    subject_type: "LINE",
+                    line: Some(end.line),
+                    side: Some(graphql_side(end.side)),
+                    start_line: is_range.then_some(start.line),
+                    start_side: is_range.then(|| graphql_side(start.side)),
+                    ..ReviewThreadInput::new(&pull_request_id, end.path.as_str(), body)
+                }
             }
         };
         let data = self
@@ -205,10 +206,13 @@ impl GitHub {
             .map_err(one_pending_review_error)?;
         let thread = at(&data, "/addPullRequestReviewThread/thread");
         if thread.is_null() {
+            let line = match place {
+                CommentPlace::File(_) => String::new(),
+                CommentPlace::Lines { end, .. } => format!(" line {}", end.line),
+            };
             return Err(ThreadNotCreated(format!(
-                "GitHub took no comment on {} line {}",
-                place.path(),
-                place.end.line
+                "GitHub took no comment on {}{line}",
+                place.path()
             ))
             .into());
         }

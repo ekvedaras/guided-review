@@ -427,7 +427,10 @@ fn use_as_comment_fills_a_comment_box_on_the_asked_lines_with_the_answer() {
 
     let comment = review.use_as_comment(asks.get(id).unwrap()).unwrap();
 
-    assert_eq!((comment.start.line, comment.end.line), (7, 7));
+    let guided_review::viewer::CommentPlace::Lines { start, end } = &comment else {
+        panic!("a comment on lines is not on a file");
+    };
+    assert_eq!((start.line, end.line), (7, 7));
     assert!(!comment.is_single_line());
     let drafts = shop.open().comment_drafts().to_vec();
     assert_eq!(drafts.len(), 1);

@@ -326,12 +326,12 @@ impl ReviewState {
             .find(|draft| &draft.place == place)
     }
 
-    pub(super) fn open_draft(&mut self, place: CommentPlace, head: &Sha) {
+    pub(super) fn open_draft(&mut self, place: CommentPlace, head: Option<&Sha>) {
         if self.draft_at(&place).is_none() {
             self.typed.comment_drafts.push(CommentDraft {
                 place,
                 body: String::new(),
-                written_at: head.clone(),
+                written_at: head.cloned(),
             });
         }
     }

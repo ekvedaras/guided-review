@@ -145,7 +145,7 @@ fn pr() -> PullRequestUrl {
 #[test]
 fn a_range_comment_is_added_as_a_thread_with_both_sides() {
     let (url, asked) = serve_graphql(vec![PULL_ID.into(), THREAD_ADDED.into()]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Base, 10),
         end: location(Side::Head, 12),
     };
@@ -168,7 +168,7 @@ fn a_range_comment_is_added_as_a_thread_with_both_sides() {
 #[test]
 fn a_single_line_comment_sends_no_start() {
     let (url, asked) = serve_graphql(vec![PULL_ID.into(), THREAD_ADDED.into()]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };
@@ -187,7 +187,7 @@ fn a_null_thread_without_errors_is_a_failure() {
         PULL_ID.into(),
         r#"{"data":{"addPullRequestReviewThread":{"thread":null}}}"#.into(),
     ]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };
@@ -205,7 +205,7 @@ fn github_saying_one_pending_review_per_user_is_told_apart() {
         PULL_ID.into(),
         r#"{"errors":[{"message":"User can only have one pending review per pull request"}],"data":null}"#.into(),
     ]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };
@@ -224,7 +224,7 @@ fn comment_now_submits_the_review_the_thread_went_into() {
         THREAD_ADDED.into(),
         r#"{"data":{"submitPullRequestReview":{"clientMutationId":null}}}"#.into(),
     ]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };
@@ -248,7 +248,7 @@ fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
         PENDING.into(),
         OK.into(),
     ]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };
@@ -268,7 +268,7 @@ fn comment_now_whose_review_cannot_be_found_says_where_the_comment_is_and_sends_
         THREAD_ADDED_WITHOUT_REVIEW.into(),
         NO_PENDING.into(),
     ]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };
@@ -293,7 +293,7 @@ fn a_comment_now_that_could_not_be_posted_or_taken_back_says_it_waits_in_the_pen
         failed.into(),
         failed.into(),
     ]);
-    let place = CommentPlace {
+    let place = CommentPlace::Lines {
         start: location(Side::Head, 5),
         end: location(Side::Head, 5),
     };

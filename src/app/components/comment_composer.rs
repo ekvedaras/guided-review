@@ -93,7 +93,10 @@ impl RenderOnce for CommentComposer {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let place = &self.draft.place;
-        let id = SharedString::from(format!("composer-{}-{}", place.path(), place.end.line));
+        let id = SharedString::from(match place {
+            CommentPlace::File(path) => format!("composer-{path}-file"),
+            CommentPlace::Lines { end, .. } => format!("composer-{}-{}", end.path, end.line),
+        });
         let actions = self.actions;
         let on_focus = Rc::clone(&actions.on_focus);
         let body = if self.is_composing && !self.is_sending {
@@ -178,17 +181,15 @@ impl RenderOnce for CommentComposer {
 }
 
 fn describe(place: &CommentPlace) -> String {
-    if place.is_file_comment() {
-        format!("Comment on {}", place.path())
-    } else if place.is_single_line() {
-        format!("Comment on {} line {}", place.path(), place.end.line)
-    } else {
-        format!(
+    match place {
+        CommentPlace::File(path) => format!("Comment on {path}"),
+        CommentPlace::Lines { start, end } if start == end => {
+            format!("Comment on {} line {}", end.path, end.line)
+        }
+        CommentPlace::Lines { start, end } => format!(
             "Comment on {} lines {} to {}",
-            place.path(),
-            place.start.line,
-            place.end.line
-        )
+            end.path, start.line, end.line
+        ),
     }
 }
 

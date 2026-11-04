@@ -125,7 +125,10 @@ fn a_click_on_one_row_opens_a_comment_box_on_that_line() {
     let place = comment_on(&mut review, "line ten");
 
     assert!(place.is_single_line());
-    assert_eq!((place.end.line, place.path()), (10, "notes.txt"));
+    let CommentPlace::Lines { end, .. } = &place else {
+        panic!("a click is on lines");
+    };
+    assert_eq!((end.line, place.path()), (10, "notes.txt"));
     assert_eq!(review.comment_drafts().len(), 1);
 }
 
@@ -158,7 +161,10 @@ fn dragging_upwards_selects_the_same_rows() {
         .unwrap()
         .unwrap();
 
-    assert_eq!((place.start.line, place.end.line), (10, 30));
+    let CommentPlace::Lines { start, end } = &place else {
+        panic!("a drag is on lines");
+    };
+    assert_eq!((start.line, end.line), (10, 30));
 }
 
 #[test]
@@ -234,13 +240,11 @@ fn a_range_from_a_removed_line_to_an_added_one_goes_left_to_right() {
             body: "renamed".into()
         }
     );
+    let CommentPlace::Lines { start, end } = &place else {
+        panic!("a drag is on lines");
+    };
     assert_eq!(
-        (
-            place.start.side,
-            place.start.line,
-            place.end.side,
-            place.end.line
-        ),
+        (start.side, start.line, end.side, end.line),
         (Side::Base, 10, Side::Head, 10)
     );
 }
@@ -481,4 +485,53 @@ fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
     assert_eq!(repinned.queued_comments().len(), 1);
     assert_eq!(repinned.queued_comments()[0].draft.body, "later please");
     assert_eq!(pull.sent.github_calls().len(), before);
+}
+
+#[test]
+fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_and_saves_the_new_shape()
+ {
+    let pull = Pull::new();
+    let state_path = pull
+        .repo
+        .home()
+        .join(".guided-review/state/acme/shop/7.json");
+    let location = |line: u32| json!({"path": "notes.txt", "side": "Head", "line": line});
+    let written = json!({
+        "comment_drafts": [
+            {
+                "place": {"start": location(0), "end": location(0)},
+                "body": "about the file",
+                "written_at": ""
+            },
+            {
+                "place": {"start": location(10), "end": location(12)},
+                "body": "about the lines",
+                "written_at": pull.head
+            }
+        ]
+    });
+    std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+    std::fs::write(&state_path, written.to_string()).unwrap();
+
+    let mut review = pull.open();
+    let file = CommentPlace::File(guided_review::file_path::FilePath::new("notes.txt").unwrap());
+    let drafts = review.comment_drafts().to_vec();
+    assert_eq!(drafts.len(), 2);
+    assert_eq!(drafts[0].place, file);
+    assert_eq!(drafts[0].written_at, None);
+    assert!(drafts[1].written_at.is_some());
+    assert!(matches!(drafts[1].place, CommentPlace::Lines { .. }));
+
+    review.edit_draft(&file, "about the file, edited").unwrap();
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    let saved_drafts = &saved["comment_drafts"];
+    assert_eq!(saved_drafts[0]["place"], json!({"File": "notes.txt"}));
+    assert!(saved_drafts[0].get("written_at").is_none());
+    assert!(saved_drafts[1]["place"].get("Lines").is_some());
+    let reopened = pull.open();
+    assert_eq!(reopened.comment_drafts()[0].place, file);
+    assert_eq!(reopened.comment_drafts()[0].written_at, None);
+    assert_eq!(reopened.comment_drafts()[1], drafts[1]);
 }

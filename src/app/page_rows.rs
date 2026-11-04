@@ -526,13 +526,13 @@ enum UnderLine {
 }
 
 impl UnderLine {
-    fn at(&self) -> Option<&LineLocation> {
+    fn at(&self) -> Option<LineLocation> {
         match self {
-            Self::Thread(view) => view.anchor.as_ref(),
-            Self::Queued(queued) => Some(&queued.draft.place.end),
-            Self::Composer(place) => Some(&place.end),
+            Self::Thread(view) => view.anchor.clone(),
+            Self::Queued(queued) => Some(line_of(&queued.draft.place)),
+            Self::Composer(place) => Some(line_of(place)),
             Self::AskMarker(ask) => match &ask.place {
-                Place::Lines { end, .. } => Some(end),
+                Place::Lines { end, .. } => Some(end.clone()),
                 _ => None,
             },
         }
@@ -548,6 +548,18 @@ impl UnderLine {
     }
 }
 
+/// The line a comment hangs under; a file comment hangs under the file, which has line 0.
+fn line_of(place: &CommentPlace) -> LineLocation {
+    match place {
+        CommentPlace::File(path) => LineLocation {
+            path: path.clone(),
+            side: Side::Head,
+            line: 0,
+        },
+        CommentPlace::Lines { end, .. } => end.clone(),
+    }
+}
+
 /// What hangs under the rows of a screen, by the line it hangs under, each with its place in the order it shows.
 #[derive(Default)]
 struct UnderLines {
@@ -560,7 +572,7 @@ impl UnderLines {
         let mut by_line: HashMap<LineLocation, Vec<(usize, UnderLine)>> = HashMap::new();
         for (order, item) in items.into_iter().enumerate() {
             if let Some(at) = item.at() {
-                by_line.entry(at.clone()).or_default().push((order, item));
+                by_line.entry(at).or_default().push((order, item));
             }
         }
         Self { by_line }
@@ -973,9 +985,13 @@ mod tests {
             side,
             line,
         };
-        UnderLine::Composer(CommentPlace {
-            start: at.clone(),
-            end: at,
+        UnderLine::Composer(if line == 0 && side == Side::Head {
+            CommentPlace::File(at.path)
+        } else {
+            CommentPlace::Lines {
+                start: at.clone(),
+                end: at,
+            }
         })
     }
 

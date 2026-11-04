@@ -110,7 +110,7 @@ impl CommentDesk {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::of(&selected);
-        state.open_draft(place.clone(), head);
+        state.open_draft(place.clone(), Some(head));
         Ok(Some(place))
     }
 
@@ -125,7 +125,7 @@ impl CommentDesk {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::on_file(path);
-        state.open_draft(place.clone(), head);
+        state.open_draft(place.clone(), Some(head));
         Ok(place)
     }
 
@@ -138,7 +138,7 @@ impl CommentDesk {
         text: &str,
     ) -> CommentPlace {
         let place = CommentPlace::of(selected);
-        state.open_draft(place.clone(), head);
+        state.open_draft(place.clone(), Some(head));
         append_to_draft(state, &place, text);
         place
     }
@@ -146,7 +146,7 @@ impl CommentDesk {
     /// "Suggest change" shows only when the range starts and ends on lines of the head:
     /// a suggestion replaces lines that stay. Removed rows in between are left out of it.
     pub(super) fn can_suggest_change(place: &CommentPlace) -> bool {
-        !place.is_file_comment() && place.start.side == Side::Head && place.end.side == Side::Head
+        matches!(place, CommentPlace::Lines { start, end } if start.side == Side::Head && end.side == Side::Head)
     }
 
     /// Adds a suggestion block of the commented rows to the draft. `None` when the lines cannot be
@@ -366,7 +366,7 @@ fn keep_as_draft(state: &mut ReviewState, request: &CommentRequest) {
     let place = &request.draft.place;
     if request.origin == Origin::Queue {
         state.drop_queued(place);
-        state.open_draft(place.clone(), &request.draft.written_at);
+        state.open_draft(place.clone(), request.draft.written_at.as_ref());
         state.write_draft(place, &request.draft.body);
     }
 }
