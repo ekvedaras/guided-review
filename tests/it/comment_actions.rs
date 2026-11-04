@@ -8,9 +8,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction, ReactionChange,
-    ReactionCount, Resolution, Review, ReviewStateFile, ReviewThread, SendMode, Side,
-    SuggestionDiff, ThreadAction, ThreadActionResult, ThreadComment,
+    CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
+    ReactionChange, ReactionCount, Resolution, Review, ReviewStateFile, ReviewThread, SendMode,
+    Side, SuggestionDiff, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -75,7 +75,7 @@ impl Pull {
 
 fn comment(id: &str, body: &str) -> ThreadComment {
     ThreadComment {
-        id: id.into(),
+        id: CommentId::new(id),
         author: "alice".into(),
         is_bot: false,
         body: body.into(),
@@ -86,7 +86,7 @@ fn comment(id: &str, body: &str) -> ThreadComment {
 
 fn thread_on_line_ten(comments: Vec<ThreadComment>) -> ReviewThread {
     ReviewThread {
-        id: "T1".into(),
+        id: ThreadId::new("T1"),
         is_resolved: false,
         is_outdated: false,
         path: file_path("notes.txt"),
@@ -147,14 +147,14 @@ fn resolving_a_thread_tells_github_and_shows_it_resolved() {
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
         },
         &github,
     );
 
     assert_eq!(result, ThreadActionResult::Done);
     assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
-        thread_id: "T1".into(),
+        thread_id: ThreadId::new("T1"),
         resolution: Resolution::Resolved
     }));
     assert!(shown_thread(&review).is_resolved);
@@ -171,13 +171,13 @@ fn unresolving_a_thread_tells_github_and_shows_it_open() {
 
     review.act_on_thread(
         ThreadAction::Unresolve {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
         },
         &github,
     );
 
     assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
-        thread_id: "T1".into(),
+        thread_id: ThreadId::new("T1"),
         resolution: Resolution::Unresolved
     }));
     assert!(!shown_thread(&review).is_resolved);
@@ -192,7 +192,7 @@ fn a_reaction_is_added_and_removed_on_a_click() {
 
     review.act_on_thread(
         ThreadAction::SetReaction {
-            comment_id: "C1".into(),
+            comment_id: CommentId::new("C1"),
             reaction: Reaction::Rocket,
             change: ReactionChange::Add,
         },
@@ -216,7 +216,7 @@ fn a_reaction_is_added_and_removed_on_a_click() {
 
     review.act_on_thread(
         ThreadAction::SetReaction {
-            comment_id: "C1".into(),
+            comment_id: CommentId::new("C1"),
             reaction: Reaction::Rocket,
             change: ReactionChange::Remove,
         },
@@ -230,7 +230,7 @@ fn a_reaction_is_added_and_removed_on_a_click() {
             .filter(|call| matches!(call, GitHubCall::SetReaction { .. }))
             .collect::<Vec<_>>(),
         [ReactionChange::Add, ReactionChange::Remove].map(|change| GitHubCall::SetReaction {
-            comment_id: "C1".into(),
+            comment_id: CommentId::new("C1"),
             reaction: Reaction::Rocket,
             change
         })
@@ -266,23 +266,27 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
     let mut review = pull.open();
     review.pull_pending_review(&github).unwrap();
     assert!(review.can_comment_now());
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
 
     let now = review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::CommentNow,
         },
         &github,
     );
     assert_eq!(now, ThreadActionResult::Done);
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "and also").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "and also")
+        .unwrap();
 
     let added = review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -301,12 +305,14 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
         .with_web_pending_review();
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::CommentNow,
         },
         &github,
@@ -337,7 +343,7 @@ fn a_failed_action_says_why_and_changes_nothing() {
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
         },
         &github,
     );
@@ -356,7 +362,7 @@ fn threads_that_could_not_be_read_again_after_an_action_are_named_until_a_read_g
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
         },
         &github,
     );
@@ -448,12 +454,17 @@ fn a_reply_being_written_is_saved_and_comes_back_after_reopening() {
     let pull = Pull::new();
     let mut review = pull.open();
 
-    review.open_reply("T1").unwrap();
-    review.edit_reply("T1", "because it was slow").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .edit_reply(&ThreadId::new("T1"), "because it was slow")
+        .unwrap();
 
     let reopened = pull.open();
-    assert_eq!(reopened.reply_draft("T1"), Some("because it was slow"));
-    assert_eq!(reopened.reply_draft("T2"), None);
+    assert_eq!(
+        reopened.reply_draft(&ThreadId::new("T1")),
+        Some("because it was slow")
+    );
+    assert_eq!(reopened.reply_draft(&ThreadId::new("T2")), None);
 }
 
 #[test]
@@ -462,22 +473,22 @@ fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
-    review.open_reply("T1").unwrap();
-    review.edit_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review.edit_reply(&ThreadId::new("T1"), "because").unwrap();
 
     review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
         },
         &github,
     );
-    assert_eq!(pull.open().reply_draft("T1"), None);
+    assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
 
-    review.open_reply("T1").unwrap();
-    review.edit_reply("T1", "again").unwrap();
-    review.discard_reply("T1").unwrap();
-    assert_eq!(pull.open().reply_draft("T1"), None);
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review.edit_reply(&ThreadId::new("T1"), "again").unwrap();
+    review.discard_reply(&ThreadId::new("T1")).unwrap();
+    assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
 }
 
 #[test]
@@ -485,19 +496,22 @@ fn a_failed_reply_keeps_its_draft() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.edit_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review.edit_reply(&ThreadId::new("T1"), "because").unwrap();
     github.inject(GitHubFault::ConnectionLost);
 
     review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
         },
         &github,
     );
 
-    assert_eq!(pull.open().reply_draft("T1"), Some("because"));
+    assert_eq!(
+        pull.open().reply_draft(&ThreadId::new("T1")),
+        Some("because")
+    );
 }
 
 #[test]
@@ -506,12 +520,12 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pr_head_is(Sha::new("newer-head"));
-    review.open_reply("T1").unwrap();
-    review.edit_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review.edit_reply(&ThreadId::new("T1"), "because").unwrap();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -529,7 +543,11 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
             .any(|call| matches!(call, GitHubCall::Reply { .. })),
         "nothing was sent"
     );
-    assert_eq!(review.reply_draft("T1"), Some("because"), "the text stays");
+    assert_eq!(
+        review.reply_draft(&ThreadId::new("T1")),
+        Some("because"),
+        "the text stays"
+    );
 }
 
 #[test]
@@ -537,21 +555,23 @@ fn typed_text_reaches_the_file_only_when_its_save_runs_off_the_ui_thread() {
     let pull = Pull::new();
     let mut review = pull.open();
     let place = drag(&mut review, "line 9", "line ten");
-    review.open_reply("T1").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
 
     review.type_in_draft(&place, "use a name").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
     review.type_in_finish_body("overall fine").unwrap();
 
     let before = pull.open();
-    assert_eq!(before.reply_draft("T1"), Some(""));
+    assert_eq!(before.reply_draft(&ThreadId::new("T1")), Some(""));
     assert_eq!(before.finish_body(), "");
-    assert_eq!(review.reply_draft("T1"), Some("because"));
+    assert_eq!(review.reply_draft(&ThreadId::new("T1")), Some("because"));
 
     review.typing_save().unwrap().run().unwrap();
 
     let after = pull.open();
-    assert_eq!(after.reply_draft("T1"), Some("because"));
+    assert_eq!(after.reply_draft(&ThreadId::new("T1")), Some("because"));
     assert_eq!(after.finish_body(), "overall fine");
     assert_eq!(after.comment_drafts()[0].body, "use a name");
     assert!(review.typing_save().is_none());
@@ -561,26 +581,33 @@ fn typed_text_reaches_the_file_only_when_its_save_runs_off_the_ui_thread() {
 fn a_typing_save_that_a_later_save_overtook_is_dropped() {
     let pull = Pull::new();
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
     let stale = review.typing_save().unwrap();
 
-    review.discard_reply("T1").unwrap();
+    review.discard_reply(&ThreadId::new("T1")).unwrap();
     stale.run().unwrap();
 
-    assert_eq!(pull.open().reply_draft("T1"), None);
+    assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
 }
 
 #[test]
 fn a_save_made_at_once_takes_the_typed_text_with_it() {
     let pull = Pull::new();
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
 
-    review.open_reply("T2").unwrap();
+    review.open_reply(&ThreadId::new("T2")).unwrap();
 
-    assert_eq!(pull.open().reply_draft("T1"), Some("because"));
+    assert_eq!(
+        pull.open().reply_draft(&ThreadId::new("T1")),
+        Some("because")
+    );
     assert!(review.typing_save().is_none());
 }
 
@@ -599,8 +626,10 @@ fn break_saves(pull: &Pull) -> PathBuf {
 fn typed_text_whose_save_failed_is_saved_again_by_the_next_save() {
     let pull = Pull::new();
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
     let lock = break_saves(&pull);
 
     assert!(review.typing_save().unwrap().run().is_err());
@@ -611,7 +640,10 @@ fn typed_text_whose_save_failed_is_saved_again_by_the_next_save() {
 
     std::fs::remove_dir(&lock).unwrap();
     review.typing_save().unwrap().run().unwrap();
-    assert_eq!(pull.open().reply_draft("T1"), Some("because"));
+    assert_eq!(
+        pull.open().reply_draft(&ThreadId::new("T1")),
+        Some("because")
+    );
     assert_eq!(review.problems(), []);
 }
 
@@ -637,13 +669,15 @@ fn a_reply_sends_its_draft_as_last_typed() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "becau").unwrap();
-    review.type_in_reply("T1", "because").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review.type_in_reply(&ThreadId::new("T1"), "becau").unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -661,13 +695,13 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.open_reply("T1").unwrap();
-    review.type_in_reply("T1", "  ").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review.type_in_reply(&ThreadId::new("T1"), "  ").unwrap();
     let calls_before = pull.sent.github_calls();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
-            thread_id: "T1".into(),
+            thread_id: ThreadId::new("T1"),
             mode: SendMode::CommentNow,
         },
         &github,

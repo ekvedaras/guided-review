@@ -14,6 +14,7 @@ use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::ports::Viewed;
 use super::review::StepId;
+use super::threads::ThreadId;
 
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
 /// not the tour writer's. Every section defaults to empty, so a file written before a section
@@ -279,28 +280,28 @@ impl ReviewState {
         self.typed = typed;
     }
 
-    pub(super) fn reply_drafts(&self) -> &BTreeMap<String, String> {
+    pub(super) fn reply_drafts(&self) -> &BTreeMap<ThreadId, String> {
         &self.typed.reply_drafts
     }
 
-    pub(super) fn reply_draft(&self, thread_id: &str) -> Option<&str> {
+    pub(super) fn reply_draft(&self, thread_id: &ThreadId) -> Option<&str> {
         self.typed.reply_drafts.get(thread_id).map(String::as_str)
     }
 
-    pub(super) fn open_reply(&mut self, thread_id: &str) {
+    pub(super) fn open_reply(&mut self, thread_id: &ThreadId) {
         self.typed
             .reply_drafts
-            .entry(thread_id.to_owned())
+            .entry(thread_id.clone())
             .or_default();
     }
 
-    pub(super) fn write_reply(&mut self, thread_id: &str, text: &str) {
+    pub(super) fn write_reply(&mut self, thread_id: &ThreadId, text: &str) {
         if let Some(draft) = self.typed.reply_drafts.get_mut(thread_id) {
             text.clone_into(draft);
         }
     }
 
-    pub(super) fn drop_reply(&mut self, thread_id: &str) {
+    pub(super) fn drop_reply(&mut self, thread_id: &ThreadId) {
         self.typed.reply_drafts.remove(thread_id);
     }
 
@@ -390,7 +391,7 @@ pub struct TypedText {
     comment_drafts: Vec<CommentDraft>,
     /// Reply text not sent yet, by thread id; each one is an open reply box.
     #[serde(default)]
-    reply_drafts: BTreeMap<String, String>,
+    reply_drafts: BTreeMap<ThreadId, String>,
     /// The body of the review being finished, not sent yet.
     #[serde(default)]
     finish_body: String,

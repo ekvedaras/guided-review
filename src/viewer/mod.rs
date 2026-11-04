@@ -78,6 +78,6 @@ pub use sync_state::SyncState;
 pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-pub use threads::{ReviewThread, ThreadComment, ThreadView};
+pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};

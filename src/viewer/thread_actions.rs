@@ -4,7 +4,7 @@ use super::comment_desk::TourFreshness;
 use super::comments::{CommentRefusal, SendMode};
 use super::ports::{GitHubError, Resolution, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
-use super::threads::ReviewThread;
+use super::threads::{CommentId, ReviewThread, ThreadId};
 
 /// What the reviewer does to a thread that is already on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,18 +12,18 @@ pub enum ThreadAction {
     /// Sends the thread's reply draft as it is saved when the request is made, so a key typed
     /// just before sending is in it.
     Reply {
-        thread_id: String,
+        thread_id: ThreadId,
         mode: SendMode,
     },
     Resolve {
-        thread_id: String,
+        thread_id: ThreadId,
     },
     Unresolve {
-        thread_id: String,
+        thread_id: ThreadId,
     },
     /// Adds the viewer's reaction to a comment, or takes it back.
     SetReaction {
-        comment_id: String,
+        comment_id: CommentId,
         reaction: Reaction,
         change: ReactionChange,
     },

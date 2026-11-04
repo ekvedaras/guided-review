@@ -52,7 +52,7 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
-    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
+    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
 };
 
 actions!(
@@ -565,8 +565,8 @@ impl OneStepLayout {
     }
 
     /// Reply text goes to the core, which saves it, so it survives scrolling and restarts.
-    fn on_reply_draft(&self, thread_id: &str) -> OnReplyDraft {
-        let (session, thread_id) = (self.session.clone(), thread_id.to_owned());
+    fn on_reply_draft(&self, thread_id: &ThreadId) -> OnReplyDraft {
+        let (session, thread_id) = (self.session.clone(), thread_id.clone());
         Rc::new(move |change, cx| {
             session.update(cx, |session, cx| {
                 // A refused or failed save is one of the review's problems, which the sidebar shows.

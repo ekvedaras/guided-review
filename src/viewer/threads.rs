@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::sync::Arc;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::coverage;
 use crate::file_path::FilePath;
@@ -12,10 +15,53 @@ use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
 use crate::line_number::LineNumber;
 
+/// GitHub's node id of a review thread.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ThreadId(Arc<str>);
+
+/// GitHub's node id of one comment in a review thread, which reactions are added to.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CommentId(Arc<str>);
+
+macro_rules! github_node_id {
+    ($id:ident) => {
+        impl $id {
+            pub fn new(id: &str) -> Self {
+                Self(id.into())
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $id {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl Serialize for $id {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(&self.0)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $id {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Ok(Self::new(&String::deserialize(deserializer)?))
+            }
+        }
+    };
+}
+
+github_node_id!(ThreadId);
+github_node_id!(CommentId);
+
 /// A review thread as GitHub holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewThread {
-    pub id: String,
+    pub id: ThreadId,
     pub is_resolved: bool,
     pub is_outdated: bool,
     pub path: FilePath,
@@ -33,8 +79,7 @@ pub struct ReviewThread {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadComment {
-    /// GitHub's node id, which reactions are added to.
-    pub id: String,
+    pub id: CommentId,
     pub author: String,
     pub is_bot: bool,
     pub body: String,
@@ -166,9 +211,9 @@ fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
 pub(super) fn views(
     threads: &[ReviewThread],
     shown: &[PieceDiff],
-    flipped: &BTreeSet<String>,
+    flipped: &BTreeSet<ThreadId>,
     files_at_head: &FilesAtHead,
-    reply_drafts: &BTreeMap<String, String>,
+    reply_drafts: &BTreeMap<ThreadId, String>,
 ) -> Vec<ThreadView> {
     threads
         .iter()

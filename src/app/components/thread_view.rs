@@ -10,7 +10,7 @@ use gpui::{
 use crate::app::code_links::open_link;
 use crate::viewer::{
     ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment,
-    ThreadView,
+    ThreadId, ThreadView,
 };
 
 use super::markdown_view::{MarkdownView, parsed_markdown};
@@ -52,7 +52,7 @@ impl ThreadUi {
 
 struct ReplyBox<'a> {
     colors: Colors,
-    thread_id: &'a str,
+    thread_id: &'a ThreadId,
     can_reply_now: bool,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
@@ -241,7 +241,7 @@ impl ThreadElement {
         }: ReplyBox,
         reply: &str,
     ) -> AnyElement {
-        let thread_id = thread_id.to_owned();
+        let thread_id = thread_id.clone();
         let send = {
             let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
             move |mode: SendMode| {
@@ -329,12 +329,12 @@ impl ThreadElement {
 fn send_reply(
     ui: &Entity<ThreadUi>,
     on_action: &OnThreadAction,
-    thread_id: &str,
+    thread_id: &ThreadId,
     mode: SendMode,
     cx: &mut App,
 ) {
     let action = ThreadAction::Reply {
-        thread_id: thread_id.to_owned(),
+        thread_id: thread_id.clone(),
         mode,
     };
     run_action(action, ui, on_action, cx);

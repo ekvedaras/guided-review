@@ -40,7 +40,7 @@ use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRe
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{self, ReviewThread, ThreadPlacement};
+use super::threads::{self, ReviewThread, ThreadId, ThreadPlacement};
 use super::typing_save::{Saves, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::file_path::FilePath;
@@ -123,7 +123,7 @@ pub struct Review {
     pulled_threads: Vec<ReviewThread>,
     threads: ThreadPlacement,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
-    thread_fold_flipped: BTreeSet<String>,
+    thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
     state: ReviewState,
     state_file: ReviewStateFile,
@@ -689,9 +689,9 @@ impl Review {
         self.threads = ThreadPlacement::of(&self.tour, &self.files, &self.pulled_threads, &display);
     }
 
-    pub fn toggle_thread_fold(&mut self, thread_id: &str) {
+    pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
         if !self.thread_fold_flipped.remove(thread_id) {
-            self.thread_fold_flipped.insert(thread_id.to_owned());
+            self.thread_fold_flipped.insert(thread_id.clone());
         }
     }
 
@@ -720,22 +720,22 @@ impl Review {
         CommentDesk::thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
     }
 
-    pub fn reply_draft(&self, thread_id: &str) -> Option<&str> {
+    pub fn reply_draft(&self, thread_id: &ThreadId) -> Option<&str> {
         self.state.reply_draft(thread_id)
     }
 
     /// Opens the reply box; the text typed in it is saved by `edit_reply`.
-    pub fn open_reply(&mut self, thread_id: &str) -> anyhow::Result<()> {
+    pub fn open_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
         self.state.open_reply(thread_id);
         self.save_viewer_sections()
     }
 
-    pub fn edit_reply(&mut self, thread_id: &str, text: &str) -> anyhow::Result<()> {
+    pub fn edit_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
         self.state.write_reply(thread_id, text);
         self.save_viewer_sections()
     }
 
-    pub fn discard_reply(&mut self, thread_id: &str) -> anyhow::Result<()> {
+    pub fn discard_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
         self.state.drop_reply(thread_id);
         self.save_viewer_sections()
     }
@@ -900,7 +900,7 @@ impl Review {
         Ok(())
     }
 
-    pub fn type_in_reply(&mut self, thread_id: &str, text: &str) -> anyhow::Result<()> {
+    pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
         self.state.write_reply(thread_id, text);
         self.saves.typed();

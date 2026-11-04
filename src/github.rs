@@ -11,10 +11,10 @@ use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentPlace, GitHubError, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
-    ReactionChange, ReactionCount, Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict,
-    ReviewWritesPort, SendMode, Side, ThreadComment, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState, percent_encode_path,
+    CommentId, CommentPlace, GitHubError, PullRequestDescriptionPort, PullRequestTipsPort,
+    Reaction, ReactionChange, ReactionCount, Resolution, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadComment, ThreadId, Viewed, ViewedFile,
+    ViewedFilesPort, ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -426,12 +426,12 @@ impl ReviewThreadsPort for GitHub {
     fn reply_to_thread(
         &self,
         pr: &PullRequestUrl,
-        thread_id: &str,
+        thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
     ) -> Result<(), GitHubError> {
         let input = ReplyInput {
-            pull_request_review_thread_id: thread_id,
+            pull_request_review_thread_id: thread_id.as_str(),
             body,
             pull_request_review_id: self.pending_review_id(pr)?,
         };
@@ -461,7 +461,7 @@ impl ReviewThreadsPort for GitHub {
 
     fn set_thread_resolved(
         &self,
-        thread_id: &str,
+        thread_id: &ThreadId,
         resolution: Resolution,
     ) -> Result<(), GitHubError> {
         let mutation = match resolution {
@@ -481,7 +481,7 @@ impl ReviewThreadsPort for GitHub {
 
     fn set_reaction(
         &self,
-        comment_id: &str,
+        comment_id: &CommentId,
         reaction: Reaction,
         change: ReactionChange,
     ) -> Result<(), GitHubError> {
@@ -883,7 +883,7 @@ pub(crate) fn parse_review_threads(
             .nodes
             .into_iter()
             .map(|thread| ReviewThread {
-                id: thread.id,
+                id: ThreadId::new(&thread.id),
                 is_resolved: thread.is_resolved,
                 is_outdated: thread.is_outdated,
                 path: thread.path,
@@ -915,7 +915,7 @@ pub(crate) fn parse_review_threads(
                         author: comment
                             .author
                             .map_or_else(|| "ghost".to_owned(), |author| author.login),
-                        id: comment.id,
+                        id: CommentId::new(&comment.id),
                         body: comment.body,
                         url: comment.url,
                         reactions: comment

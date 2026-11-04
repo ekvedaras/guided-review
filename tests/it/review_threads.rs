@@ -6,7 +6,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Review, ReviewStateFile, ReviewThread, SafetyNetSize, Screen, Side, ThreadComment, ThreadView,
+    CommentId, Review, ReviewStateFile, ReviewThread, SafetyNetSize, Screen, Side, ThreadComment,
+    ThreadId, ThreadView,
 };
 use serde_json::{Value, json};
 
@@ -86,7 +87,7 @@ fn step(id: &str, pieces: Value) -> Value {
 
 fn comment(author: &str, is_bot: bool, body: &str) -> ThreadComment {
     ThreadComment {
-        id: format!("C_{body}"),
+        id: CommentId::new(&format!("C_{body}")),
         reactions: Vec::new(),
         author: author.into(),
         is_bot,
@@ -98,7 +99,7 @@ fn comment(author: &str, is_bot: bool, body: &str) -> ThreadComment {
 fn thread(id: &str, path: &str, side: Side, number: usize) -> ReviewThread {
     let line = line(number);
     ReviewThread {
-        id: id.into(),
+        id: ThreadId::new(id),
         is_resolved: false,
         is_outdated: false,
         path: file_path(path),
@@ -273,9 +274,9 @@ fn resolved_and_bot_threads_start_folded_and_a_toggle_flips_them() {
             .collect::<Vec<_>>()
     };
     assert_eq!(folded(&review), [true, true]);
-    review.toggle_thread_fold("done");
+    review.toggle_thread_fold(&ThreadId::new("done"));
     assert_eq!(folded(&review), [false, true]);
-    review.toggle_thread_fold("done");
+    review.toggle_thread_fold(&ThreadId::new("done"));
     assert_eq!(folded(&review), [true, true]);
 
     review.go_to(&"config".into());

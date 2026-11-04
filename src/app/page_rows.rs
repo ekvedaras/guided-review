@@ -981,7 +981,9 @@ pub fn line_count(text: &str) -> usize {
 mod tests {
     use super::*;
     use crate::line_number::LineNumber;
-    use crate::viewer::{Reaction, ReactionCount, ReviewThread, Side, ThreadComment};
+    use crate::viewer::{
+        CommentId, Reaction, ReactionCount, ReviewThread, Side, ThreadComment, ThreadId,
+    };
     use std::sync::Arc;
 
     #[test]
@@ -1067,7 +1069,7 @@ mod tests {
     fn thread_view() -> ThreadView {
         ThreadView {
             thread: ReviewThread {
-                id: "T1".into(),
+                id: ThreadId::new("T1"),
                 is_resolved: false,
                 is_outdated: false,
                 path: FilePath::new("a.rs").unwrap(),
@@ -1079,7 +1081,7 @@ mod tests {
                 original_start_line: None,
                 original_commit: None,
                 comments: vec![ThreadComment {
-                    id: "C1".into(),
+                    id: CommentId::new("C1"),
                     author: "alice".into(),
                     is_bot: false,
                     body: "why?".into(),

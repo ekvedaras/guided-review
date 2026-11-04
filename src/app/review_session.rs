@@ -20,7 +20,7 @@ use crate::code_source::CodeSource;
 use crate::viewer::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
     ImageCache, LineLocation, OldHead, Place, RefreshBrief, RepinnedTour, Review, ReviewVerdict,
-    Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, TourRefresher,
+    Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, TourRefresher,
     TourRepinner, WorkingCopy,
 };
 
@@ -286,7 +286,7 @@ impl ReviewSession {
         self.typed(&kept, BoxHeight::of(lines_before, text), cx);
     }
 
-    pub fn type_in_reply(&mut self, thread_id: &str, text: &str, cx: &mut Context<Self>) {
+    pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str, cx: &mut Context<Self>) {
         let lines_before = self.review.reply_draft(thread_id).map(line_count);
         let kept = self.review.type_in_reply(thread_id, text);
         self.typed(&kept, BoxHeight::of(lines_before, text), cx);

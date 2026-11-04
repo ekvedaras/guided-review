@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::ReviewVerdict;
 use super::reactions::{Reaction, ReactionChange};
-use super::threads::ReviewThread;
+use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
@@ -40,20 +40,20 @@ pub trait ReviewThreadsPort: Send + Sync {
     fn reply_to_thread(
         &self,
         pr: &PullRequestUrl,
-        thread_id: &str,
+        thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
     ) -> Result<(), GitHubError>;
 
     fn set_thread_resolved(
         &self,
-        thread_id: &str,
+        thread_id: &ThreadId,
         resolution: Resolution,
     ) -> Result<(), GitHubError>;
 
     fn set_reaction(
         &self,
-        comment_id: &str,
+        comment_id: &CommentId,
         reaction: Reaction,
         change: ReactionChange,
     ) -> Result<(), GitHubError>;

@@ -8,8 +8,8 @@ use crate::support::file_path;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    CommentPlace, GitHubError, LineLocation, Reaction, ReactionChange, ReactionCount, Resolution,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
+    CommentId, CommentPlace, GitHubError, LineLocation, Reaction, ReactionChange, ReactionCount,
+    Resolution, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadId,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
@@ -76,7 +76,7 @@ fn review_threads_are_read_over_graphql_page_by_page() {
     let [on_line, file] = threads.as_slice() else {
         panic!("expected two threads, got {threads:?}");
     };
-    assert_eq!(on_line.id, "T1");
+    assert_eq!(on_line.id, ThreadId::new("T1"));
     assert!(on_line.is_resolved && !on_line.is_outdated && !on_line.is_file_comment);
     assert_eq!(
         (
@@ -100,7 +100,7 @@ fn review_threads_are_read_over_graphql_page_by_page() {
         on_line.comments[0].url,
         "https://github.com/acme/shop/pull/7#r1"
     );
-    assert_eq!(on_line.comments[0].id, "C1");
+    assert_eq!(on_line.comments[0].id, CommentId::new("C1"));
     assert_eq!(
         on_line.comments[0].reactions,
         [ReactionCount {
@@ -227,7 +227,7 @@ fn github_saying_one_pending_review_per_user_is_told_apart() {
 #[test]
 fn no_token_is_no_github_access() {
     let error = GitHub::without_token_at("http://127.0.0.1:9")
-        .set_thread_resolved("T1", Resolution::Resolved)
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap_err();
 
     assert!(matches!(error, GitHubError::NoAccess(_)));
@@ -240,7 +240,7 @@ fn a_token_github_refuses_is_no_github_access() {
     ]);
 
     let error = GitHub::at(&url)
-        .set_thread_resolved("T1", Resolution::Resolved)
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap_err();
 
     assert!(matches!(error, GitHubError::NoAccess(_)));
@@ -348,7 +348,7 @@ fn a_reply_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
     ]);
 
     GitHub::at(&url)
-        .reply_to_thread(&pr(), "T1", "because", SendMode::CommentNow)
+        .reply_to_thread(&pr(), &ThreadId::new("T1"), "because", SendMode::CommentNow)
         .unwrap();
 
     assert_eq!(
@@ -386,10 +386,10 @@ fn a_thread_is_resolved_and_unresolved_by_its_id() {
     let github = GitHub::at(&url);
 
     github
-        .set_thread_resolved("T1", Resolution::Resolved)
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap();
     github
-        .set_thread_resolved("T1", Resolution::Unresolved)
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Unresolved)
         .unwrap();
 
     let asked = asked_as_json(&asked);
@@ -414,10 +414,18 @@ fn a_reaction_is_added_and_removed_with_githubs_content_name() {
     let github = GitHub::at(&url);
 
     github
-        .set_reaction("C1", Reaction::ThumbsUp, ReactionChange::Add)
+        .set_reaction(
+            &CommentId::new("C1"),
+            Reaction::ThumbsUp,
+            ReactionChange::Add,
+        )
         .unwrap();
     github
-        .set_reaction("C1", Reaction::ThumbsUp, ReactionChange::Remove)
+        .set_reaction(
+            &CommentId::new("C1"),
+            Reaction::ThumbsUp,
+            ReactionChange::Remove,
+        )
         .unwrap();
 
     let asked = asked_as_json(&asked);
@@ -487,7 +495,7 @@ fn a_reply_now_sends_the_review_it_started() {
     let (url, asked) = serve_graphql(vec![NO_PENDING.into(), replied.into(), OK.into()]);
 
     GitHub::at(&url)
-        .reply_to_thread(&pr(), "T1", "because", SendMode::CommentNow)
+        .reply_to_thread(&pr(), &ThreadId::new("T1"), "because", SendMode::CommentNow)
         .unwrap();
 
     let asked = asked_as_json(&asked);
@@ -508,7 +516,12 @@ fn a_reply_into_the_pending_review_is_not_sent() {
     let (url, asked) = serve_graphql(vec![PENDING.into(), replied.into()]);
 
     GitHub::at(&url)
-        .reply_to_thread(&pr(), "T1", "because", SendMode::AddToReview)
+        .reply_to_thread(
+            &pr(),
+            &ThreadId::new("T1"),
+            "because",
+            SendMode::AddToReview,
+        )
         .unwrap();
 
     let asked = asked_as_json(&asked);

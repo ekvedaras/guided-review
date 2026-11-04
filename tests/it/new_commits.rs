@@ -10,7 +10,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    PieceDiff, Problem, Review, ReviewStateFile, Side, StepId, TourRepinner, ViewedState,
+    PieceDiff, Problem, Review, ReviewStateFile, Side, StepId, ThreadId, TourRepinner, ViewedState,
     repin_tour,
 };
 use serde_json::json;
@@ -554,10 +554,14 @@ fn ticks_on_the_open_review_are_refused_while_a_re_pin_runs_so_they_cannot_overw
 fn text_typed_while_a_re_pin_runs_is_named_as_not_kept_until_the_re_pin_ends() {
     let shop = Shop::with_tour_at_first_head();
     let mut review = shop.open();
-    review.open_reply("T1").unwrap();
+    review.open_reply(&ThreadId::new("T1")).unwrap();
 
     review.start_repin();
-    assert!(review.type_in_reply("T1", "because").is_err());
+    assert!(
+        review
+            .type_in_reply(&ThreadId::new("T1"), "because")
+            .is_err()
+    );
 
     assert_eq!(review.problems(), [Problem::ChangeNotKeptWhileRepinning]);
     review.repin_failed();

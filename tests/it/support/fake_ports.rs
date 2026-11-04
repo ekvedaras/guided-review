@@ -6,10 +6,10 @@ use super::file_path;
 use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, GitHubError,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentId, CommentPlace, GitHubError,
     PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
     Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -46,16 +46,16 @@ pub enum GitHubCall {
         body: String,
     },
     Reply {
-        thread_id: String,
+        thread_id: ThreadId,
         body: String,
         mode: SendMode,
     },
     SetResolved {
-        thread_id: String,
+        thread_id: ThreadId,
         resolution: Resolution,
     },
     SetReaction {
-        comment_id: String,
+        comment_id: CommentId,
         reaction: Reaction,
         change: ReactionChange,
     },
@@ -109,8 +109,8 @@ pub struct FakeGitHub {
     faults: Mutex<Vec<GitHubFault>>,
     viewer_is_author: AtomicBool,
     /// What the reviewer changed since: GitHub shows it on the next read of the threads.
-    resolved_now: Mutex<BTreeMap<String, bool>>,
-    reacted_now: Mutex<BTreeMap<(String, Reaction), bool>>,
+    resolved_now: Mutex<BTreeMap<ThreadId, bool>>,
+    reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
 }
 
 impl FakeGitHub {
@@ -294,12 +294,12 @@ impl ReviewThreadsPort for FakeGitHub {
     fn reply_to_thread(
         &self,
         _pr: &PullRequestUrl,
-        thread_id: &str,
+        thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
     ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::Reply {
-            thread_id: thread_id.to_owned(),
+            thread_id: thread_id.clone(),
             body: body.to_owned(),
             mode,
         });
@@ -312,35 +312,35 @@ impl ReviewThreadsPort for FakeGitHub {
 
     fn set_thread_resolved(
         &self,
-        thread_id: &str,
+        thread_id: &ThreadId,
         resolution: Resolution,
     ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::SetResolved {
-            thread_id: thread_id.to_owned(),
+            thread_id: thread_id.clone(),
             resolution,
         });
         self.fail_if_connection_lost()?;
         self.resolved_now
             .lock()
             .unwrap()
-            .insert(thread_id.to_owned(), resolution == Resolution::Resolved);
+            .insert(thread_id.clone(), resolution == Resolution::Resolved);
         Ok(())
     }
 
     fn set_reaction(
         &self,
-        comment_id: &str,
+        comment_id: &CommentId,
         reaction: Reaction,
         change: ReactionChange,
     ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::SetReaction {
-            comment_id: comment_id.to_owned(),
+            comment_id: comment_id.clone(),
             reaction,
             change,
         });
         self.fail_if_connection_lost()?;
         self.reacted_now.lock().unwrap().insert(
-            (comment_id.to_owned(), reaction),
+            (comment_id.clone(), reaction),
             change == ReactionChange::Add,
         );
         Ok(())
