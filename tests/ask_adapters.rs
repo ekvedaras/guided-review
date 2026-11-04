@@ -4,6 +4,10 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -44,10 +48,10 @@ done
 fn launch(cwd: &Path, resume: Option<&str>) -> AgentLaunch {
     AgentLaunch {
         cwd: cwd.to_path_buf(),
-        model: "opus".to_string(),
-        effort: "medium".to_string(),
-        system_prompt: "be read-only".to_string(),
-        resume: resume.map(str::to_string),
+        model: "opus".to_owned(),
+        effort: "medium".to_owned(),
+        system_prompt: "be read-only".to_owned(),
+        resume: resume.map(str::to_owned),
     }
 }
 
@@ -60,10 +64,10 @@ fn claude_is_started_read_only_in_the_clone_and_answers_follow_ups_in_the_same_p
     let mut agent = launcher.start(&launch(clone.path(), None)).unwrap();
     let mut lines = Vec::new();
     agent
-        .ask("first", &mut |line| lines.push(line.to_string()))
+        .ask("first", &mut |line| lines.push(line.to_owned()))
         .unwrap();
     agent
-        .ask("second", &mut |line| lines.push(line.to_string()))
+        .ask("second", &mut |line| lines.push(line.to_owned()))
         .unwrap();
 
     assert_eq!(lines.len(), 4);
@@ -136,7 +140,7 @@ fn asks_go_into_the_per_pr_state_file_next_to_whatever_else_it_holds() {
     std::fs::write(&file, r#"{"read_ticks":{"order":{"head":"abc"}}}"#).unwrap();
     let store = Arc::new(ReviewStateFile::for_pr(home.path(), &pr));
 
-    let mut asks = Asks::load(store.clone()).unwrap();
+    let mut asks = Asks::load(Arc::<ReviewStateFile>::clone(&store)).unwrap();
     let id = asks.start(Place::Tour, &Sha::new("head1"));
     asks.begin_turn(id, "What is this?", "context");
 

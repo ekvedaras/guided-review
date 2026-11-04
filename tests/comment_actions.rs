@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -131,7 +138,7 @@ fn row(review: &Review, text: &str) -> LineLocation {
         .unwrap()
         .pieces
         .iter()
-        .flat_map(|piece| piece.lines())
+        .flat_map(guided_review::viewer::PieceDiff::lines)
         .find(|line| line.text == text)
         .unwrap_or_else(|| panic!("no row shows {text:?}"))
         .location
@@ -382,13 +389,13 @@ fn suggest_change_is_not_offered_when_removed_lines_are_selected() {
 
     assert!(!review.can_suggest_change(&place));
     assert_eq!(review.suggest_change(&place).unwrap(), None);
-    assert!(review.comment_drafts()[0].body.is_empty());
+    assert_eq!(review.comment_drafts()[0].body, "");
 }
 
 #[test]
 fn a_suggestion_shows_as_the_commented_lines_out_and_the_new_text_in() {
     let diff = SuggestionDiff::of(
-        &["line 9".to_string(), "line ten".to_string()],
+        &["line 9".to_owned(), "line ten".to_owned()],
         "line nine\nline 10\n",
     );
 
@@ -398,10 +405,10 @@ fn a_suggestion_shows_as_the_commented_lines_out_and_the_new_text_in() {
 
 #[test]
 fn an_empty_suggestion_deletes_the_lines() {
-    let diff = SuggestionDiff::of(&["line ten".to_string()], "");
+    let diff = SuggestionDiff::of(&["line ten".to_owned()], "");
 
     assert_eq!(diff.removed, ["line ten"]);
-    assert!(diff.added.is_empty());
+    assert_eq!(diff.added, [] as [String; 0]);
 }
 
 #[test]

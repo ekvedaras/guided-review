@@ -24,7 +24,7 @@ impl Global for OpenDetails {}
 impl OpenDetails {
     fn toggle(&mut self, key: &str) {
         if !self.0.remove(key) {
-            self.0.insert(key.to_string());
+            self.0.insert(key.to_owned());
         }
     }
 
@@ -86,7 +86,7 @@ impl RenderOnce for MarkdownView {
                             language: Some(language),
                             text,
                         } if language == "suggestion" => suggestion_view(
-                            colors,
+                            &colors,
                             &SuggestionDiff::of(&self.commented_lines, text),
                         ),
                         _ => block_element(block, &format!("{}-{index}", self.key), window, cx),
@@ -96,7 +96,7 @@ impl RenderOnce for MarkdownView {
     }
 }
 
-fn suggestion_view(colors: Colors, diff: &SuggestionDiff) -> AnyElement {
+fn suggestion_view(colors: &Colors, diff: &SuggestionDiff) -> AnyElement {
     let rows = |lines: &[String], sign: &'static str, background: gpui::Rgba| {
         lines
             .iter()
@@ -151,7 +151,7 @@ fn blocks(items: &[Block], key: &str, window: &mut Window, cx: &mut App) -> AnyE
 fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) -> AnyElement {
     let colors = Colors::active(cx);
     match block {
-        Block::Paragraph(runs) => inline_text(colors, runs, key, 1.0).into_any_element(),
+        Block::Paragraph(runs) => inline_text(&colors, runs, key, 1.0).into_any_element(),
         Block::Heading { level, text } => {
             let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0]
                 .get(usize::from(*level - 1))
@@ -164,7 +164,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     ..run.clone()
                 })
                 .collect::<Vec<_>>();
-            inline_text(colors, &heading, key, scale).into_any_element()
+            inline_text(&colors, &heading, key, scale).into_any_element()
         }
         Block::List {
             first_number,
@@ -176,7 +176,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
             .children(items.iter().enumerate().map(|(index, item)| {
                 let marker = match first_number {
                     Some(first) => format!("{}.", first + index as u64),
-                    None => "•".to_string(),
+                    None => "•".to_owned(),
                 };
                 div()
                     .flex()
@@ -190,7 +190,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     )))
             }))
             .into_any_element(),
-        Block::Code { language, text } => code_block(colors, language.as_deref(), text),
+        Block::Code { language, text } => code_block(&colors, language.as_deref(), text),
         Block::Quote(inner) => div()
             .pl_3()
             .border_l_2()
@@ -214,7 +214,7 @@ fn details(
     let open = cx
         .try_global::<OpenDetails>()
         .is_some_and(|details| details.0.contains(key));
-    let toggled_key = key.to_string();
+    let toggled_key = key.to_owned();
     let title = if summary.is_empty() {
         vec![Run {
             text: "Details".into(),
@@ -237,7 +237,7 @@ fn details(
         })
         .child(div().flex_none().child(if open { "▾" } else { "▸" }))
         .child(div().flex_1().min_w_0().child(inline_text(
-            colors,
+            &colors,
             &title,
             &format!("{key}-summary"),
             1.0,
@@ -263,7 +263,7 @@ trait WhenOpen: ParentElement + Sized {
 
 impl<E: ParentElement> WhenOpen for E {}
 
-fn code_block(colors: Colors, language: Option<&str>, text: &str) -> AnyElement {
+fn code_block(colors: &Colors, language: Option<&str>, text: &str) -> AnyElement {
     let spans = highlight_snippet(language, text);
     div()
         .flex()
@@ -296,7 +296,7 @@ fn code_block(colors: Colors, language: Option<&str>, text: &str) -> AnyElement 
             div()
                 .whitespace_nowrap()
                 .min_h(px(14.))
-                .child(StyledText::new(line.to_string()).with_highlights(highlights))
+                .child(StyledText::new(line.to_owned()).with_highlights(highlights))
         }))
         .into_any_element()
 }
@@ -320,7 +320,7 @@ impl InlineMarkdown {
 
 impl RenderOnce for InlineMarkdown {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        styled_runs(Colors::active(cx), &self.runs, &self.key)
+        styled_runs(&Colors::active(cx), &self.runs, &self.key)
     }
 }
 
@@ -350,7 +350,7 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
     runs
 }
 
-fn inline_text(colors: Colors, runs: &[Run], key: &str, scale: f32) -> AnyElement {
+fn inline_text(colors: &Colors, runs: &[Run], key: &str, scale: f32) -> AnyElement {
     div()
         .text_size(gpui::rems(scale))
         .child(styled_runs(colors, runs, key))
@@ -360,7 +360,7 @@ fn inline_text(colors: Colors, runs: &[Run], key: &str, scale: f32) -> AnyElemen
 /// Inline code gets a third of an em of space on each side inside its background, as padding.
 const CODE_PADDING: &str = "\u{2004}";
 
-fn styled_runs(colors: Colors, runs: &[Run], key: &str) -> AnyElement {
+fn styled_runs(colors: &Colors, runs: &[Run], key: &str) -> AnyElement {
     let mut text = String::new();
     let mut highlights = Vec::new();
     let mut links = Vec::new();
@@ -463,7 +463,7 @@ fn paint_code_background(
     window.paint_quad(fill(bounds, color).corner_radii(px(4.)));
 }
 
-fn style_of(colors: Colors, run: &Run) -> HighlightStyle {
+fn style_of(colors: &Colors, run: &Run) -> HighlightStyle {
     let color = if run.link.is_some() {
         Some(colors.code(Capture::Function).into())
     } else if run.code {

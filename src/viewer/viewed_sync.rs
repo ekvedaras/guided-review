@@ -189,7 +189,7 @@ fn pull_viewed(
             }
         }
     }
-    for (path, now) in on_github.iter() {
+    for (path, now) in on_github {
         if !unsent.contains_key(path) {
             state.saw_on_github(path, *now);
         }
@@ -294,17 +294,16 @@ impl SyncRequest {
                 };
             }
         }
-        match self.baseline_wishes {
-            Some(wishes) => Self::take_baseline(github, pr, wishes),
-            None => {
-                let mut outcome = SyncOutcome::nothing();
-                outcome.error = push(github, pr, &self.unsent, &mut outcome.sent).err();
-                match read_viewed(github, pr) {
-                    Ok(on_github) => outcome.on_github = Some(on_github),
-                    Err(error) => outcome.error = outcome.error.or(Some(error)),
-                }
-                outcome
+        if let Some(wishes) = self.baseline_wishes {
+            Self::take_baseline(github, pr, wishes)
+        } else {
+            let mut outcome = SyncOutcome::nothing();
+            outcome.error = push(github, pr, &self.unsent, &mut outcome.sent).err();
+            match read_viewed(github, pr) {
+                Ok(on_github) => outcome.on_github = Some(on_github),
+                Err(error) => outcome.error = outcome.error.or(Some(error)),
             }
+            outcome
         }
     }
 

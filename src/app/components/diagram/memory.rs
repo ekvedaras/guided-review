@@ -121,7 +121,7 @@ impl<Bitmap> DiagramMemory<Bitmap> {
         std::mem::take(&mut self.pending_svgs)
     }
 
-    pub fn put_svg(&mut self, job: SvgJob, svg: Result<Svg, String>) {
+    pub fn put_svg(&mut self, job: &SvgJob, svg: Result<Svg, String>) {
         let key = (job.diagram, job.appearance);
         self.svgs_in_flight.remove(&key);
         self.svgs.insert(key, svg);
@@ -164,6 +164,10 @@ impl<Bitmap> DiagramMemory<Bitmap> {
         let (Some(shown), Some(svg)) = (self.shown, self.svg().cloned()) else {
             return Vec::new();
         };
+        #[expect(
+            clippy::needless_collect,
+            reason = "the collect ends the shared borrow of self before the map below changes it"
+        )]
         let wanted: Vec<Strip> = self
             .strips()
             .into_iter()
@@ -189,7 +193,7 @@ impl<Bitmap> DiagramMemory<Bitmap> {
     }
 
     /// Returns the bitmap when it came too late: the theme, step or scale changed, or the strip scrolled away.
-    pub fn put_bitmap(&mut self, job: StripJob, bitmap: Bitmap) -> Option<Bitmap> {
+    pub fn put_bitmap(&mut self, job: &StripJob, bitmap: Bitmap) -> Option<Bitmap> {
         let index = job.strip.index();
         if self.shown != Some(job.shown) || !self.strips_in_flight.remove(&index) {
             return Some(bitmap);

@@ -29,7 +29,7 @@ impl AgentEvent {
 fn text_delta(json: &Value) -> Option<AgentEvent> {
     let delta = at(json, "/event/delta");
     (at(delta, "/type") == "text_delta")
-        .then(|| AgentEvent::TextDelta(at(delta, "/text").as_str().unwrap_or_default().to_string()))
+        .then(|| AgentEvent::TextDelta(at(delta, "/text").as_str().unwrap_or_default().to_owned()))
 }
 
 fn tool_uses(json: &Value) -> Vec<AgentEvent> {
@@ -52,7 +52,7 @@ fn describe_tool_use(block: &Value) -> String {
         .find_map(|key| input.get(key).and_then(Value::as_str));
     match target {
         Some(target) => format!("{name} {target}"),
-        None => name.to_string(),
+        None => name.to_owned(),
     }
 }
 
@@ -62,14 +62,14 @@ fn outcome(json: &Value) -> AgentEvent {
             at(json, "/result")
                 .as_str()
                 .unwrap_or("the AI failed")
-                .to_string(),
+                .to_owned(),
         )
     } else {
         AgentEvent::Done {
             session_id: at(json, "/session_id")
                 .as_str()
                 .unwrap_or_default()
-                .to_string(),
+                .to_owned(),
         }
     }
 }

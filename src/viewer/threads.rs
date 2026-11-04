@@ -123,7 +123,7 @@ impl ThreadPlacement {
                     .pieces
                     .iter()
                     .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-                    .filter_map(|part| PieceDiff::of(part, files, display))
+                    .filter_map(|part| PieceDiff::of(&part, files, display))
                     .collect();
                 (StepId::from(step.id.as_str()), parts)
             })

@@ -53,7 +53,7 @@ pub struct StepId(String);
 
 impl From<&str> for StepId {
     fn from(id: &str) -> Self {
-        Self(id.to_string())
+        Self(id.to_owned())
     }
 }
 
@@ -375,7 +375,7 @@ impl Review {
                 let since_display = self.display(&links_from_read_head);
                 page.pieces = shown
                     .into_iter()
-                    .map(|part| PieceDiff::since_read(part, since_files, &since_display))
+                    .map(|part| PieceDiff::since_read(&part, since_files, &since_display))
                     .collect();
                 self.mark_repin_status(&mut page.pieces);
             }
@@ -661,7 +661,7 @@ impl Review {
 
     pub fn toggle_thread_fold(&mut self, thread_id: &str) {
         if !self.thread_fold_flipped.remove(thread_id) {
-            self.thread_fold_flipped.insert(thread_id.to_string());
+            self.thread_fold_flipped.insert(thread_id.to_owned());
         }
     }
 
@@ -714,7 +714,7 @@ impl Review {
             .apply_thread_action(&mut self.state, &outcome)
         {
             // The reply is on GitHub; a draft that fails to clear only shows again as text to discard.
-            let _ = self.save_viewer_sections();
+            self.save_viewer_sections().ok();
         }
         if let Some(threads) = &outcome.threads {
             self.set_threads(threads);
@@ -759,7 +759,7 @@ impl Review {
         let result = self.comment_desk.apply_finish(&mut self.state, outcome);
         if result == FinishResult::Sent {
             // The review is on GitHub; a body that fails to clear is only a draft left to overwrite.
-            let _ = self.save_viewer_sections();
+            self.save_viewer_sections().ok();
         }
         result
     }
@@ -876,7 +876,7 @@ impl Review {
         }
         Some(TypingSave::new(
             self.state_file.clone(),
-            self.saves.clone(),
+            Arc::clone(&self.saves),
             self.state.typed_text(),
         ))
     }
@@ -1067,11 +1067,11 @@ impl Review {
         self.is_folded(step)
             != self
                 .box_fold_flipped
-                .contains(&(step.clone(), path.to_string()))
+                .contains(&(step.clone(), path.to_owned()))
     }
 
     pub fn toggle_box_fold(&mut self, step: &StepId, path: &str) {
-        let key = (step.clone(), path.to_string());
+        let key = (step.clone(), path.to_owned());
         if !self.box_fold_flipped.remove(&key) {
             self.box_fold_flipped.insert(key);
         }
@@ -1119,7 +1119,7 @@ impl Review {
         }
         let saved = self.save_viewer_sections();
         self.viewed_sync
-            .settle(error.map(Err).unwrap_or(Ok(())).and(saved))
+            .settle(error.map_or(Ok(()), Err).and(saved))
     }
 
     fn coverage(&self) -> Coverage {
@@ -1140,9 +1140,10 @@ impl Review {
     }
 
     fn refuse_changes_while_repinning(&self) -> anyhow::Result<()> {
-        match self.repin_running {
-            true => Err(RepinRunning.into()),
-            false => Ok(()),
+        if self.repin_running {
+            Err(RepinRunning.into())
+        } else {
+            Ok(())
         }
     }
 
@@ -1198,8 +1199,8 @@ impl Review {
 #[derive(Debug)]
 pub struct RepinRunning;
 
-impl std::fmt::Display for RepinRunning {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for RepinRunning {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter
             .write_str("the tour is being updated to the new commits; try again when it is done")
     }

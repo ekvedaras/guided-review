@@ -41,7 +41,7 @@ impl SidebarRows {
             .sidebar()
             .into_iter()
             .map(|entry| SidebarStep {
-                label: entry.title.to_string().into(),
+                label: entry.title.to_owned().into(),
                 thread_count: entry.thread_count,
                 id: entry.id,
                 depth: entry.depth,

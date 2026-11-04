@@ -4,6 +4,10 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -22,7 +26,7 @@ fn serve_graphql(answers: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let asked = Arc::new(Mutex::new(Vec::new()));
-    let log = asked.clone();
+    let log = Arc::clone(&asked);
     thread::spawn(move || {
         for answer in answers {
             let (mut stream, _) = listener.accept().unwrap();

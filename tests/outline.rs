@@ -4,6 +4,10 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
 mod support;
 
@@ -16,7 +20,7 @@ fn outline_lists_a_changed_method_as_one_piece() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -25,12 +29,12 @@ class Order
         return 1;
     }
 }
-"#,
+",
     );
     let base = repo.commit("base");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -39,7 +43,7 @@ class Order
         return 2;
     }
 }
-"#,
+",
     );
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
@@ -68,7 +72,7 @@ fn piece_ids_do_not_change_when_lines_move() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -82,12 +86,12 @@ class Order
         return 1;
     }
 }
-"#,
+",
     );
     let base = repo.commit("base");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -103,7 +107,7 @@ class Order
         return 2;
     }
 }
-"#,
+",
     );
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
@@ -133,7 +137,7 @@ fn outline_shows_deleted_methods_changed_functions_and_changed_classes() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 final class Order
 {
@@ -145,7 +149,7 @@ final class Order
         return 1;
     }
 }
-"#,
+",
     );
     repo.write(
         "app/helpers.php",
@@ -160,24 +164,24 @@ function money(int $cents): string
     let base = repo.commit("base");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 final class Order
 {
     private int $cents = 100;
 
 }
-"#,
+",
     );
     repo.write(
         "app/helpers.php",
-        r#"<?php
+        r"<?php
 
 function money(int $cents): string
 {
     return number_format($cents / 100, 2);
 }
-"#,
+",
     );
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
@@ -205,7 +209,7 @@ app/helpers.php  modified  +1 −1
     );
 }
 
-const ORDER_V1: &str = r#"<?php
+const ORDER_V1: &str = r"<?php
 
 class Order
 {
@@ -214,9 +218,9 @@ class Order
         return 1;
     }
 }
-"#;
+";
 
-const ORDER_V2: &str = r#"<?php
+const ORDER_V2: &str = r"<?php
 
 class Order
 {
@@ -225,7 +229,7 @@ class Order
         return 2;
     }
 }
-"#;
+";
 
 const ORDER_OUTLINE: &str = "\
 pr: https://github.com/acme/shop/pull/7
@@ -342,7 +346,7 @@ fn signatures_are_one_line_without_comments() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -353,12 +357,12 @@ class Order
         $cart->empty();
     }
 }
-"#,
+",
     );
     let base = repo.commit("base");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -369,7 +373,7 @@ class Order
         $cart->clear();
     }
 }
-"#,
+",
     );
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
@@ -426,7 +430,7 @@ fn methods_of_anonymous_classes_belong_to_the_named_symbol_around_them() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let order = |total: &str| {
         format!(
-            r#"<?php
+            r"<?php
 
 class Order
 {{
@@ -440,7 +444,7 @@ class Order
         }};
     }}
 }}
-"#
+"
         )
     };
     repo.write("app/Order.php", &order("1"));
@@ -502,7 +506,7 @@ fn outline_of(repo: &FixtureRepo, base: &str, head: &str) -> String {
     run.stdout_with(&[(base, "<base>"), (head, "<head>")])
         .strip_prefix(OUTLINE_HEADER)
         .expect("outline starts with the header")
-        .to_string()
+        .to_owned()
 }
 
 #[test]

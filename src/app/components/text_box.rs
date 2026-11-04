@@ -121,7 +121,7 @@ impl TextBox {
         Self {
             id: id.into(),
             focus: focus.clone(),
-            text: text.to_string(),
+            text: text.to_owned(),
             lines,
             on_edit: None,
             on_submit: None,
@@ -159,7 +159,7 @@ impl RenderOnce for TextBox {
             state.on_cancel = self.on_cancel;
         });
         let key_context = match self.lines {
-            Lines::Single => KEY_CONTEXT.to_string(),
+            Lines::Single => KEY_CONTEXT.to_owned(),
             Lines::Multi => format!("{KEY_CONTEXT} {MULTI_LINE}"),
         };
         div()
@@ -300,7 +300,7 @@ impl EditState {
         self.goal_x = None;
         window.notify_text_input_changed(&self.focus);
         if let Some(on_edit) = self.on_edit.clone() {
-            let text = self.draft.text().to_string();
+            let text = self.draft.text().to_owned();
             cx.defer_in(window, move |_, window, cx| on_edit(text, window, cx));
         }
         cx.notify();
@@ -338,43 +338,43 @@ impl EditState {
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         self.change(window, cx, |draft| {
-            draft.delete(Step::Character, Direction::Back)
+            draft.delete(Step::Character, Direction::Back);
         });
     }
 
     fn backspace_word(&mut self, _: &BackspaceWord, window: &mut Window, cx: &mut Context<Self>) {
         self.change(window, cx, |draft| {
-            draft.delete(Step::Word, Direction::Back)
+            draft.delete(Step::Word, Direction::Back);
         });
     }
 
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
         self.change(window, cx, |draft| {
-            draft.delete(Step::Line, Direction::Back)
+            draft.delete(Step::Line, Direction::Back);
         });
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         self.change(window, cx, |draft| {
-            draft.delete(Step::Character, Direction::Forward)
+            draft.delete(Step::Character, Direction::Forward);
         });
     }
 
     fn delete_word(&mut self, _: &DeleteWord, window: &mut Window, cx: &mut Context<Self>) {
         self.change(window, cx, |draft| {
-            draft.delete(Step::Word, Direction::Forward)
+            draft.delete(Step::Word, Direction::Forward);
         });
     }
 
     fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.go(Step::Character, Direction::Back)
+            draft.go(Step::Character, Direction::Back);
         });
     }
 
     fn right(&mut self, _: &Right, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.go(Step::Character, Direction::Forward)
+            draft.go(Step::Character, Direction::Forward);
         });
     }
 
@@ -404,13 +404,13 @@ impl EditState {
 
     fn select_left(&mut self, _: &SelectLeft, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Character, Direction::Back)
+            draft.extend(Step::Character, Direction::Back);
         });
     }
 
     fn select_right(&mut self, _: &SelectRight, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Character, Direction::Forward)
+            draft.extend(Step::Character, Direction::Forward);
         });
     }
 
@@ -421,7 +421,7 @@ impl EditState {
         cx: &mut Context<Self>,
     ) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Word, Direction::Back)
+            draft.extend(Step::Word, Direction::Back);
         });
     }
 
@@ -432,7 +432,7 @@ impl EditState {
         cx: &mut Context<Self>,
     ) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Word, Direction::Forward)
+            draft.extend(Step::Word, Direction::Forward);
         });
     }
 
@@ -443,13 +443,13 @@ impl EditState {
         cx: &mut Context<Self>,
     ) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Line, Direction::Back)
+            draft.extend(Step::Line, Direction::Back);
         });
     }
 
     fn select_line_end(&mut self, _: &SelectLineEnd, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Line, Direction::Forward)
+            draft.extend(Step::Line, Direction::Forward);
         });
     }
 
@@ -531,7 +531,7 @@ impl EditState {
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.draft.selection().is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
-                self.draft.selected_text().to_string(),
+                self.draft.selected_text().to_owned(),
             ));
         }
     }
@@ -539,7 +539,7 @@ impl EditState {
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.draft.selection().is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
-                self.draft.selected_text().to_string(),
+                self.draft.selected_text().to_owned(),
             ));
             self.change(window, cx, |draft| draft.insert(""));
         }
@@ -617,7 +617,7 @@ impl EntityInputHandler for EditState {
     ) -> Option<String> {
         let range = self.draft.range_from_utf16(&range_utf16);
         actual_range.replace(self.draft.range_to_utf16(&range));
-        Some(self.draft.text_in(&range).to_string())
+        Some(self.draft.text_in(&range).to_owned())
     }
 
     fn selected_text_range(
@@ -678,7 +678,7 @@ impl EntityInputHandler for EditState {
         let range = range_utf16.map(|range| self.draft.range_from_utf16(&range));
         let text = match self.lines {
             Lines::Single => new_text.replace('\n', " "),
-            Lines::Multi => new_text.to_string(),
+            Lines::Multi => new_text.to_owned(),
         };
         self.change(window, cx, |draft| match range {
             Some(range) => draft.replace(range, &text),
@@ -700,7 +700,7 @@ impl EntityInputHandler for EditState {
             inserted.range_from_utf16(&selected)
         });
         self.change(window, cx, |draft| {
-            draft.replace_and_mark(range, new_text, selected)
+            draft.replace_and_mark(range, new_text, selected);
         });
     }
 
@@ -765,7 +765,7 @@ impl Element for TextBoxElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
         style.size.width = relative(1.).into();
-        let text = SharedString::from(self.state.read(cx).draft.text().to_string());
+        let text = SharedString::from(self.state.read(cx).draft.text().to_owned());
         let text_style = window.text_style();
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let line_height = window.line_height();
@@ -778,13 +778,12 @@ impl Element for TextBoxElement {
             let height = window
                 .text_system()
                 .shape_text(text.clone(), font_size, &runs, wrap_width, None)
-                .map(|lines| {
+                .map_or(line_height, |lines| {
                     lines
                         .iter()
                         .map(|line| line.size(line_height).height)
                         .sum::<Pixels>()
-                })
-                .unwrap_or(line_height);
+                });
             size(wrap_width.unwrap_or(Pixels::ZERO), height.max(line_height))
         });
         (layout, ())
@@ -801,7 +800,7 @@ impl Element for TextBoxElement {
     ) -> Self::PrepaintState {
         let state = self.state.read(cx);
         let draft = &state.draft;
-        let text = draft.text().to_string();
+        let text = draft.text().to_owned();
         let text_style = window.text_style();
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let line_height = window.line_height();

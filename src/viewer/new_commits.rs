@@ -52,7 +52,7 @@ impl TourRepinner {
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
         let state_file = ReviewStateFile::for_pr(&self.home, &self.pr);
         let (tour, _) = repin_tour(
-            &crate::tour::Tour::path_for(&self.home, &self.pr),
+            &Tour::path_for(&self.home, &self.pr),
             &state_file,
             source.as_ref(),
             &base,

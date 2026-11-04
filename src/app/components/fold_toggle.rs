@@ -33,16 +33,16 @@ impl RenderOnce for FoldToggle {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let label = match (self.folded, self.piece_count) {
-            (true, 1) => "▸ Open its 1 piece".to_string(),
+            (true, 1) => "▸ Open its 1 piece".to_owned(),
             (true, count) => format!("▸ Open all {count} pieces"),
-            (false, _) => "▾ Fold all pieces".to_string(),
+            (false, _) => "▾ Fold all pieces".to_owned(),
         };
         let kind = if self.folded {
             ButtonKind::Secondary
         } else {
             ButtonKind::Ghost
         };
-        button(colors, "fold-toggle", kind, ButtonSize::Small)
+        button(&colors, "fold-toggle", kind, ButtonSize::Small)
             .on_click(self.on_toggle)
             .child(label)
     }

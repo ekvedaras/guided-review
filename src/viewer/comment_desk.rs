@@ -300,7 +300,7 @@ impl CommentDesk {
         Ok(FinishRequest {
             pr: pr.clone(),
             verdict,
-            body: body.trim().to_string(),
+            body: body.trim().to_owned(),
         })
     }
 
@@ -319,9 +319,9 @@ impl CommentDesk {
 
 /// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.
 fn append_to_draft(state: &mut ReviewState, place: &CommentPlace, text: &str) -> Option<String> {
-    let written = state.draft_at(place)?.body.trim_end().to_string();
+    let written = state.draft_at(place)?.body.trim_end().to_owned();
     let body = if written.is_empty() {
-        text.to_string()
+        text.to_owned()
     } else {
         format!("{written}\n\n{text}")
     };
@@ -344,12 +344,12 @@ fn keep_for_retry(state: &mut ReviewState, request: &CommentRequest, reason: &st
             state.queue_comment(QueuedComment {
                 draft: request.draft.clone(),
                 mode: request.mode,
-                failed_because: reason.to_string(),
+                failed_because: reason.to_owned(),
             });
         }
         Origin::Queue => {
             if let Some(queued) = state.queued_at(place) {
-                queued.failed_because = reason.to_string();
+                reason.clone_into(&mut queued.failed_because);
             }
         }
     }

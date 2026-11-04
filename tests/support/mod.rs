@@ -4,10 +4,20 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 pub mod app_path;
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 pub mod fake_ports;
 
 use std::io::{BufRead, BufReader, Write};
@@ -56,7 +66,10 @@ impl FixtureRepo {
         std::fs::write(file, content).unwrap();
     }
 
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "each test binary uses only part of the shared test support"
+    )]
     pub fn write_bytes(&self, path: &str, content: &[u8]) {
         let file = self.root.path().join(path);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -90,7 +103,7 @@ impl FixtureRepo {
             "git {args:?} failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        String::from_utf8(output.stdout).unwrap().trim().to_string()
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
     }
 }
 
@@ -111,9 +124,12 @@ impl<'a> GuidedReview<'a> {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "each test binary uses only part of the shared test support"
+    )]
     pub fn with_env(mut self, name: &str, value: &Path) -> Self {
-        self.env.push((name.to_string(), value.to_path_buf()));
+        self.env.push((name.to_owned(), value.to_path_buf()));
         self
     }
 
@@ -219,7 +235,10 @@ impl FakeGitHub {
     }
 }
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 /// A real PNG of one flat colour, so the code under test can read its size.
 pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
     let mut bytes = std::io::Cursor::new(Vec::new());
@@ -229,7 +248,10 @@ pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
     bytes.into_inner()
 }
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 pub fn svg_of(width: u32, height: u32) -> String {
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">\n<rect width=\"{width}\" height=\"{height}\" fill=\"red\"/>\n</svg>\n"
@@ -237,7 +259,10 @@ pub fn svg_of(width: u32, height: u32) -> String {
 }
 
 /// Where `link` opens on GitHub, for a review with no IDE.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 pub fn on_github(review: &Review, link: &CodeLink) -> String {
     match review.code_opener(Err(NoIde::NoTemplate)).destination(link) {
         Destination::GitHub { url, .. } => url,

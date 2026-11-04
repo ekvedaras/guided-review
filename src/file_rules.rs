@@ -88,7 +88,7 @@ impl AttributeRule {
         let pattern = pattern.trim_end_matches('/');
         let anchored = pattern.trim_start_matches('/');
         let glob = if pattern.contains('/') {
-            anchored.to_string()
+            anchored.to_owned()
         } else {
             format!("**/{pattern}")
         };

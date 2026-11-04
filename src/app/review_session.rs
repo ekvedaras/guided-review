@@ -81,7 +81,10 @@ pub struct ReviewSession {
 impl EventEmitter<SessionEvent> for ReviewSession {}
 
 impl ReviewSession {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the view is built from its collaborators, which the caller owns"
+    )]
     pub fn new(
         review: Review,
         source: Arc<dyn CodeSource>,
@@ -100,8 +103,7 @@ impl ReviewSession {
         if !cx.has_global::<OpenDetails>() {
             cx.set_global(OpenDetails::default());
         }
-        let details_subscription =
-            cx.observe_global::<OpenDetails>(|this, cx| this.rebuild_rows(cx));
+        let details_subscription = cx.observe_global::<OpenDetails>(Self::rebuild_rows);
         cx.on_app_quit(|this, _| {
             this.save_typing_now();
             async {}
@@ -317,7 +319,7 @@ impl ReviewSession {
         };
         self.sending_comments.insert(place.clone());
         self.comment_problems.remove(&place);
-        let github = self.github.clone();
+        let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
             move || request.run(github.as_ref()),
@@ -356,7 +358,7 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) {
         let request = self.review.thread_action_request(action);
-        let github = self.github.clone();
+        let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
             move || request.run(github.as_ref()),
@@ -380,7 +382,7 @@ impl ReviewSession {
             Ok(request) => request,
             Err(refusal) => return on_done(&FinishResult::Refused(refusal), cx),
         };
-        let github = self.github.clone();
+        let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
             move || request.run(github.as_ref()),
@@ -400,7 +402,10 @@ impl ReviewSession {
         self.repin_progress = RepinProgress::Running;
         self.save_typing_now();
         self.change(cx, Review::start_repin);
-        let (repinner, github) = (self.tour_work.repinner.clone(), self.github.clone());
+        let (repinner, github) = (
+            Arc::clone(&self.tour_work.repinner),
+            Arc::clone(&self.github),
+        );
         self.run_off_thread(
             cx,
             move || repinner.run(github.as_ref()),
@@ -426,7 +431,7 @@ impl ReviewSession {
         self.refresh_progress = RefreshProgress::Running;
         self.save_typing_now();
         cx.notify();
-        let refresher = self.tour_work.refresher.clone();
+        let refresher = Arc::clone(&self.tour_work.refresher);
         self.run_off_thread(
             cx,
             move || refresher.run(),
@@ -521,7 +526,7 @@ impl ReviewSession {
     fn start_background_work(&mut self, cx: &mut Context<Self>) {
         let highlights = self.review.highlight_request();
         let files_at_head = self.review.files_at_head_request();
-        let source = self.source.clone();
+        let source = Arc::clone(&self.source);
         self.run_off_thread(
             cx,
             move || {
@@ -553,7 +558,7 @@ impl ReviewSession {
     }
 
     fn check_pr_head(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
         self.pr_head_check = Some(self.run_off_thread(
             cx,
             move || github.pull_request_tips(&pr),
@@ -572,7 +577,7 @@ impl ReviewSession {
         }
         self.is_syncing = true;
         let request = self.review.sync_request();
-        let github = self.github.clone();
+        let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
             move || request.run(github.as_ref()),
@@ -592,13 +597,13 @@ impl ReviewSession {
     fn sync_after_debounce(&mut self, cx: &mut Context<Self>) {
         self.push_debounce = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PUSH_DEBOUNCE).await;
-            this.update(cx, |this, cx| this.sync(cx)).ok();
+            this.update(cx, Self::sync).ok();
         }));
     }
 
     /// The reviewer may check out another branch while the app is open; focus is when to notice.
     fn check_working_copy(&mut self, cx: &mut Context<Self>) {
-        let (source, head) = (self.source.clone(), self.review.head().clone());
+        let (source, head) = (Arc::clone(&self.source), self.review.head().clone());
         self.working_copy_check = Some(self.run_off_thread(
             cx,
             move || source.working_tree_is_at(&head),
@@ -609,7 +614,7 @@ impl ReviewSession {
     }
 
     fn pull_pr_description(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
         self.pr_description_pull = Some(self.run_off_thread(
             cx,
             move || github.pull_request_description(&pr),
@@ -624,7 +629,7 @@ impl ReviewSession {
     }
 
     fn pull_threads(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
         self.threads_pull = Some(self.run_off_thread(
             cx,
             move || github.review_threads(&pr),
@@ -637,7 +642,7 @@ impl ReviewSession {
 
     /// What the finish dialog needs from GitHub: whether a pending review exists and who wrote the PR.
     fn pull_pending_review(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (self.github.clone(), self.review.pr().clone());
+        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
         self.pending_review_check = Some(self.run_off_thread(
             cx,
             move || (github.has_pending_review(&pr), github.viewer_authored(&pr)),
@@ -646,13 +651,13 @@ impl ReviewSession {
                     match exists {
                         Ok(exists) => review.pending_review_is(exists),
                         Err(error) => {
-                            eprintln!("warning: could not look for a pending review: {error:#}")
+                            eprintln!("warning: could not look for a pending review: {error:#}");
                         }
                     }
                     match authored {
                         Ok(authored) => review.viewer_authorship_is(authored),
                         Err(error) => {
-                            eprintln!("warning: could not tell who wrote the PR: {error:#}")
+                            eprintln!("warning: could not tell who wrote the PR: {error:#}");
                         }
                     }
                 });
@@ -669,7 +674,7 @@ impl ReviewSession {
             return;
         };
         self.is_retrying_comments = true;
-        let github = self.github.clone();
+        let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
             move || request.run(github.as_ref()),
@@ -692,10 +697,10 @@ impl ReviewSession {
     /// is dropped: `loading_images` was cleared, and its picture may not match the new review.
     fn load_images(&mut self, cx: &mut Context<Self>) {
         for request in self.review.image_preview_requests() {
-            if !self.loading_images.insert(request.path().to_string()) {
+            if !self.loading_images.insert(request.path().to_owned()) {
                 continue;
             }
-            let (source, cache) = (self.source.clone(), self.image_cache.clone());
+            let (source, cache) = (Arc::clone(&self.source), self.image_cache.clone());
             self.run_off_thread(
                 cx,
                 move || {
@@ -720,7 +725,7 @@ impl ReviewSession {
     fn save_typing_soon(&mut self, cx: &mut Context<Self>) {
         self.typing_save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(TYPING_SAVE_DEBOUNCE).await;
-            this.update(cx, |this, cx| this.save_typing(cx)).ok();
+            this.update(cx, Self::save_typing).ok();
         }));
     }
 

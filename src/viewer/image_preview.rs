@@ -31,14 +31,14 @@ impl ImageCache {
         }
         let unfinished = self.dir.join(format!("{blob_id}.tmp"));
         if std::fs::write(&unfinished, bytes).is_ok() {
-            let _ = std::fs::rename(unfinished, self.dir.join(blob_id));
+            std::fs::rename(unfinished, self.dir.join(blob_id)).ok();
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct LoadedImage {
-    pub bytes: Arc<Vec<u8>>,
+    pub bytes: Arc<[u8]>,
     /// `None` when the bytes are not an image the picture can be drawn from.
     pub pixels: Option<PixelSize>,
 }
@@ -64,7 +64,7 @@ impl ImageSide {
             Self::TooLarge { file_bytes } => {
                 format!("too large to preview, {}", file_size_text(*file_bytes))
             }
-            Self::Unreadable(_) => "could not be read".to_string(),
+            Self::Unreadable(_) => "could not be read".to_owned(),
         }
     }
 
@@ -182,7 +182,7 @@ fn load_side(source: &dyn CodeSource, cache: &ImageCache, sha: &Sha, path: &str)
     match bytes_of(source, cache, sha, path, &info) {
         Ok(bytes) => ImageSide::Loaded(LoadedImage {
             pixels: image_facts::measure(path, &bytes),
-            bytes: Arc::new(bytes),
+            bytes: bytes.into(),
         }),
         Err(error) => ImageSide::Unreadable(format!("{error:#}")),
     }

@@ -156,13 +156,13 @@ impl Asks {
     /// Ask carries the place's context, follow-ups are sent as they are.
     pub fn begin_turn(&mut self, id: AskId, question: &str, context: &str) -> String {
         let Some(ask) = self.ask_mut(id) else {
-            return question.to_string();
+            return question.to_owned();
         };
         let is_first = ask.messages.is_empty();
         ask.failure = None;
         ask.messages.push(Message {
             author: Author::Reviewer,
-            text: question.to_string(),
+            text: question.to_owned(),
             stopped: false,
         });
         ask.messages.push(Message {
@@ -173,7 +173,7 @@ impl Asks {
         let message = if is_first && ask.session_id.is_none() {
             format!("{context}\n\nQuestion: {question}")
         } else {
-            question.to_string()
+            question.to_owned()
         };
         self.save(id);
         message

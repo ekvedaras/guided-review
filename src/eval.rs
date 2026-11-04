@@ -6,6 +6,7 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::hex;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
 
@@ -20,23 +21,23 @@ pub enum Rule {
 }
 
 impl Rule {
-    pub const ALL: [Rule; 5] = [
-        Rule::Order,
-        Rule::Grouping,
-        Rule::Diagram,
-        Rule::Text,
-        Rule::Skim,
+    pub const ALL: [Self; 5] = [
+        Self::Order,
+        Self::Grouping,
+        Self::Diagram,
+        Self::Text,
+        Self::Skim,
     ];
 }
 
 impl fmt::Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Rule::Order => "order",
-            Rule::Grouping => "grouping",
-            Rule::Diagram => "diagram",
-            Rule::Text => "text",
-            Rule::Skim => "skim",
+            Self::Order => "order",
+            Self::Grouping => "grouping",
+            Self::Diagram => "diagram",
+            Self::Text => "text",
+            Self::Skim => "skim",
         })
     }
 }
@@ -52,9 +53,9 @@ pub enum Score {
 impl fmt::Display for Score {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Score::Pass => "pass",
-            Score::Partial => "partial",
-            Score::Fail => "fail",
+            Self::Pass => "pass",
+            Self::Partial => "partial",
+            Self::Fail => "fail",
         })
     }
 }
@@ -103,7 +104,7 @@ pub struct Skill {
 impl Skill {
     pub fn new(text: &str) -> Self {
         Self {
-            text: text.to_string(),
+            text: text.to_owned(),
         }
     }
 
@@ -117,11 +118,7 @@ impl Skill {
 
     pub fn version(&self) -> String {
         let digest = Sha256::digest(self.text.as_bytes());
-        digest
-            .iter()
-            .take(4)
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        hex::lower(digest.iter().take(4))
     }
 }
 
@@ -259,7 +256,7 @@ pub struct Eval<'a> {
 }
 
 impl Eval<'_> {
-    pub fn run(&self, source: TourSource, date: &str) -> anyhow::Result<Report> {
+    pub fn run(&self, source: &TourSource, date: &str) -> anyhow::Result<Report> {
         let test_set = self.store.test_set()?;
         if test_set.is_empty() {
             bail!(
@@ -270,7 +267,7 @@ impl Eval<'_> {
         let mut prs = BTreeMap::new();
         let mut failures = Vec::new();
         for TestPr { pr, note } in &test_set {
-            match self.score(pr, note, &source, date) {
+            match self.score(pr, note, source, date) {
                 Ok(verdicts) => {
                     prs.insert(pr.to_string(), verdicts);
                 }
@@ -278,7 +275,7 @@ impl Eval<'_> {
             }
         }
         let record = RunRecord {
-            date: date.to_string(),
+            date: date.to_owned(),
             skill_version: self.skill.version(),
             prs,
         };
@@ -341,7 +338,7 @@ impl Report {
 
 fn short_pr(url: &str) -> String {
     url.parse::<PullRequestUrl>()
-        .map_or_else(|_| url.to_string(), |pr| pr.short())
+        .map_or_else(|_| url.to_owned(), |pr| pr.short())
 }
 
 impl fmt::Display for Report {

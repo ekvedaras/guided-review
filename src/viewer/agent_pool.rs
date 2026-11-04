@@ -34,7 +34,7 @@ impl Default for AgentPool {
     fn default() -> Self {
         Self {
             max_live: 3,
-            idle_limit: Duration::from_secs(10 * 60),
+            idle_limit: Duration::from_mins(10),
             live: Vec::new(),
         }
     }
@@ -46,13 +46,14 @@ impl AgentPool {
             self.touch(ask, now, agent.is_answering);
             return Opening::Live;
         }
-        let mut stop = None;
-        if self.live.len() >= self.max_live {
+        let stop = if self.live.len() >= self.max_live {
             let Some(oldest_idle) = self.live.iter().position(|agent| !agent.is_answering) else {
                 return Opening::AllAnswering;
             };
-            stop = Some(self.live.remove(oldest_idle).ask);
-        }
+            Some(self.live.remove(oldest_idle).ask)
+        } else {
+            None
+        };
         self.live.push(LiveAgent {
             ask,
             last_used: now,

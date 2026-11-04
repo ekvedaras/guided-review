@@ -107,7 +107,7 @@ impl ThreadElement {
             kinds.push("Bot");
         }
         if kinds.is_empty() {
-            "Thread".to_string()
+            "Thread".to_owned()
         } else {
             kinds.join(", ")
         }
@@ -133,7 +133,7 @@ impl ThreadElement {
     }
 }
 
-fn small_button(colors: Colors, id: SharedString, label: &str) -> gpui::Stateful<gpui::Div> {
+fn small_button(colors: &Colors, id: SharedString, label: &str) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .px_2()
@@ -142,7 +142,7 @@ fn small_button(colors: Colors, id: SharedString, label: &str) -> gpui::Stateful
         .border_color(colors.border)
         .cursor_pointer()
         .text_sm()
-        .child(label.to_string())
+        .child(label.to_owned())
 }
 
 /// Starts an action and shows it as under way until GitHub answers.
@@ -177,7 +177,7 @@ fn run_action(
 
 impl ThreadElement {
     fn reactions(
-        colors: Colors,
+        colors: &Colors,
         comment: &ThreadComment,
         ui: &Entity<ThreadUi>,
         on_action: &OnThreadAction,
@@ -192,11 +192,11 @@ impl ThreadElement {
                      viewer_has_reacted,
                  }| {
                     let (ui, on_action, comment_id) =
-                        (ui.clone(), on_action.clone(), comment.id.clone());
+                        (ui.clone(), Rc::clone(on_action), comment.id.clone());
                     let label = if count > 0 {
                         format!("{} {count}", reaction.emoji())
                     } else {
-                        reaction.emoji().to_string()
+                        reaction.emoji().to_owned()
                     };
                     let button = small_button(
                         colors,
@@ -235,12 +235,13 @@ impl ThreadElement {
         }: ReplyBox,
         reply: &str,
     ) -> AnyElement {
-        let thread_id = thread_id.to_string();
+        let thread_id = thread_id.to_owned();
         let send = {
-            let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
-            let body = reply.to_string();
+            let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
+            let body = reply.to_owned();
             move |mode: SendMode| {
-                let (ui, on_action, thread_id) = (ui.clone(), on_action.clone(), thread_id.clone());
+                let (ui, on_action, thread_id) =
+                    (ui.clone(), Rc::clone(&on_action), thread_id.clone());
                 let body = body.clone();
                 move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                     send_reply(&ui, &on_action, &thread_id, body.clone(), mode, cx);
@@ -248,12 +249,12 @@ impl ThreadElement {
             }
         };
         let text = if is_busy {
-            div().child(reply.to_string()).into_any_element()
+            div().child(reply.to_owned()).into_any_element()
         } else {
             let (ui, on_action, submitted_thread) =
-                (ui.clone(), on_action.clone(), thread_id.clone());
-            let (on_edit, on_cancel) = (on_reply_draft.clone(), on_reply_draft.clone());
-            let body = reply.to_string();
+                (ui.clone(), Rc::clone(on_action), thread_id.clone());
+            let (on_edit, on_cancel) = (Rc::clone(on_reply_draft), Rc::clone(on_reply_draft));
+            let body = reply.to_owned();
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
                 focus,
@@ -269,7 +270,7 @@ impl ThreadElement {
                     body.clone(),
                     SendMode::AddToReview,
                     cx,
-                )
+                );
             })
             .on_cancel(move |_, cx| on_cancel(ReplyDraftChange::Discard, cx))
             .into_any_element()
@@ -281,7 +282,7 @@ impl ThreadElement {
                 .gap_2()
                 .child(
                     small_button(
-                        colors,
+                        &colors,
                         SharedString::from(format!("reply-add-{id}")),
                         "Add to review",
                     )
@@ -289,7 +290,7 @@ impl ThreadElement {
                 )
                 .children(can_reply_now.then(|| {
                     small_button(
-                        colors,
+                        &colors,
                         SharedString::from(format!("reply-now-{id}")),
                         "Reply now",
                     )
@@ -297,12 +298,12 @@ impl ThreadElement {
                 }))
                 .child(
                     small_button(
-                        colors,
+                        &colors,
                         SharedString::from(format!("reply-cancel-{id}")),
                         "Cancel",
                     )
                     .on_click({
-                        let on_reply_draft = on_reply_draft.clone();
+                        let on_reply_draft = Rc::clone(on_reply_draft);
                         move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
                     }),
                 )
@@ -335,7 +336,7 @@ fn send_reply(
         return;
     }
     let action = ThreadAction::Reply {
-        thread_id: thread_id.to_string(),
+        thread_id: thread_id.to_owned(),
         body,
         mode,
     };
@@ -359,7 +360,7 @@ impl RenderOnce for ThreadElement {
             cx,
             |_, cx| ThreadUi::new(cx),
         );
-        let reaction_on_action = self.on_action.clone();
+        let reaction_on_action = Rc::clone(&self.on_action);
         let comment_count = self.view.thread.comments.len();
         let first_author = self
             .view
@@ -416,17 +417,17 @@ impl RenderOnce for ThreadElement {
                                 )
                                 .on_lines(self.view.commented_lines.clone()),
                             )
-                            .child(Self::reactions(colors, comment, &ui, &reaction_on_action))
+                            .child(Self::reactions(&colors, comment, &ui, &reaction_on_action))
                     }),
             )
         });
         let reply = self.reply.clone();
-        let on_reply_draft = self.on_reply_draft.clone();
+        let on_reply_draft = Rc::clone(&self.on_reply_draft);
         let (is_busy, problem, focus) = {
             let state = ui.read(cx);
             (state.is_busy, state.problem.clone(), state.focus.clone())
         };
-        let (can_reply_now, on_action) = (self.can_reply_now, self.on_action.clone());
+        let (can_reply_now, on_action) = (self.can_reply_now, Rc::clone(&self.on_action));
         let actions = (!self.view.is_folded).then(|| {
             let thread = &self.view.thread;
             let resolve_action = if thread.is_resolved {
@@ -438,14 +439,14 @@ impl RenderOnce for ThreadElement {
                     thread_id: id.clone(),
                 }
             };
-            let (resolve_ui, resolve_on_action) = (ui.clone(), on_action.clone());
-            let open_reply = on_reply_draft.clone();
+            let (resolve_ui, resolve_on_action) = (ui.clone(), Rc::clone(&on_action));
+            let open_reply = Rc::clone(&on_reply_draft);
             let reply_focus = focus.clone();
             let buttons = div()
                 .flex()
                 .gap_2()
                 .child(
-                    small_button(colors, SharedString::from(format!("reply-{id}")), "Reply")
+                    small_button(&colors, SharedString::from(format!("reply-{id}")), "Reply")
                         .on_click(move |_, window, cx| {
                             open_reply(ReplyDraftChange::Open, cx);
                             window.focus(&reply_focus, cx);
@@ -453,7 +454,7 @@ impl RenderOnce for ThreadElement {
                 )
                 .child(
                     small_button(
-                        colors,
+                        &colors,
                         SharedString::from(format!("resolve-{id}")),
                         if thread.is_resolved {
                             "Unresolve"

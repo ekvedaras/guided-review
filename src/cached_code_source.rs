@@ -14,7 +14,7 @@ const PARALLEL_READS: usize = 8;
 /// and the caller always gets the real error.
 pub struct CachedCodeSource {
     source: Arc<dyn CodeSource>,
-    files: Mutex<HashMap<FileAt, Arc<Vec<u8>>>>,
+    files: Mutex<HashMap<FileAt, Arc<[u8]>>>,
 }
 
 impl CachedCodeSource {
@@ -26,19 +26,19 @@ impl CachedCodeSource {
     }
 
     /// A reader that panicked cannot leave a half-written entry, so a poisoned lock is still safe to use.
-    fn files(&self) -> MutexGuard<'_, HashMap<FileAt, Arc<Vec<u8>>>> {
+    fn files(&self) -> MutexGuard<'_, HashMap<FileAt, Arc<[u8]>>> {
         self.files.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn already_read(&self, file: &FileAt) -> Option<Arc<Vec<u8>>> {
+    fn already_read(&self, file: &FileAt) -> Option<Arc<[u8]>> {
         self.files().get(file).cloned()
     }
 
-    fn read(&self, file: FileAt) -> anyhow::Result<Arc<Vec<u8>>> {
+    fn read(&self, file: FileAt) -> anyhow::Result<Arc<[u8]>> {
         if let Some(bytes) = self.already_read(&file) {
             return Ok(bytes);
         }
-        let bytes = Arc::new(self.source.blob_at(&file.sha, &file.path)?);
+        let bytes: Arc<[u8]> = self.source.blob_at(&file.sha, &file.path)?.into();
         self.files().insert(file, Arc::clone(&bytes));
         Ok(bytes)
     }
@@ -52,9 +52,9 @@ impl CodeSource for CachedCodeSource {
     fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
         let file = FileAt {
             sha: sha.clone(),
-            path: path.to_string(),
+            path: path.to_owned(),
         };
-        Ok(self.read(file)?.as_ref().clone())
+        Ok(self.read(file)?.to_vec())
     }
 
     fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
@@ -87,7 +87,7 @@ impl CodeSource for CachedCodeSource {
             for _ in 0..PARALLEL_READS.min(missing.len()) {
                 scope.spawn(|| {
                     while let Some(file) = missing.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        let _ = self.read((*file).clone());
+                        self.read((*file).clone()).ok();
                     }
                 });
             }

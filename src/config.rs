@@ -32,8 +32,8 @@ pub struct AskSettings {
 impl Default for AskSettings {
     fn default() -> Self {
         Self {
-            model: "opus".to_string(),
-            effort: "medium".to_string(),
+            model: "opus".to_owned(),
+            effort: "medium".to_owned(),
         }
     }
 }

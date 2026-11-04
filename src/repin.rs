@@ -329,7 +329,7 @@ fn retarget(steps: &mut [Step], new_id_of_old_hunk: &HashMap<String, String>, go
                 .get(&old_id)
                 .and_then(|new_id| new_id.strip_prefix(&format!("{file}#")))
             {
-                *symbol = new_symbol.to_string();
+                new_symbol.clone_into(symbol);
             }
             true
         });

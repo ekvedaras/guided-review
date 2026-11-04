@@ -1,4 +1,7 @@
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -9,7 +12,7 @@ fn order_pr() -> (FixtureRepo, FakeGitHub) {
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -25,13 +28,13 @@ class Order
         return $base;
     }
 }
-"#,
+",
     );
     repo.write("notes.txt", "one\n");
     let base = repo.commit("base");
     repo.write(
         "app/Order.php",
-        r#"<?php
+        r"<?php
 
 class Order
 {
@@ -47,7 +50,7 @@ class Order
         return $base;
     }
 }
-"#,
+",
     );
     repo.write("notes.txt", "one\ntwo\n");
     let head = repo.commit("head");

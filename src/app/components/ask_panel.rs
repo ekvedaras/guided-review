@@ -57,12 +57,16 @@ impl Worker {
     ) -> Self {
         let (questions, incoming) = mpsc::channel::<String>();
         let stopper = Arc::new(Mutex::new(None));
-        let stopper_of_thread = stopper.clone();
+        let stopper_of_thread = Arc::clone(&stopper);
         std::thread::spawn(move || {
+            // A closed channel means the window is gone, so nobody is left to tell.
+            let tell = |message: WorkerMessage| {
+                into.unbounded_send((id, message)).ok();
+            };
             let mut agent = match launcher.start(&launch) {
                 Ok(agent) => agent,
                 Err(error) => {
-                    let _ = into.unbounded_send((id, WorkerMessage::Failed(format!("{error:#}"))));
+                    tell(WorkerMessage::Failed(format!("{error:#}")));
                     return;
                 }
             };
@@ -71,15 +75,14 @@ impl Worker {
             }
             while let Ok(message) = incoming.recv() {
                 let result = agent.ask(&message, &mut |line| {
-                    let _ = into.unbounded_send((id, WorkerMessage::Line(line.to_string())));
+                    tell(WorkerMessage::Line(line.to_owned()));
                 });
                 match result {
                     Ok(()) => {
-                        let _ = into.unbounded_send((id, WorkerMessage::TurnEnded));
+                        tell(WorkerMessage::TurnEnded);
                     }
                     Err(error) => {
-                        let _ =
-                            into.unbounded_send((id, WorkerMessage::Failed(format!("{error:#}"))));
+                        tell(WorkerMessage::Failed(format!("{error:#}")));
                         return;
                     }
                 }
@@ -310,7 +313,7 @@ impl AskPanel {
             Opening::AllAnswering => return false,
         }
         let worker = Worker::spawn(
-            self.setup.launcher.clone(),
+            Arc::clone(&self.setup.launcher),
             launch,
             id,
             self.from_workers.clone(),
@@ -326,7 +329,7 @@ impl AskPanel {
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
-        let question = self.question.trim().to_string();
+        let question = self.question.trim().to_owned();
         let (Some(id), Some(target)) = (self.selected, &self.target) else {
             return;
         };
@@ -350,7 +353,7 @@ impl AskPanel {
             self.pool.ended(id);
             self.ensure_worker(id);
             if let Some(worker) = self.workers.get(&id) {
-                let _ = worker.questions.send(message);
+                worker.questions.send(message).ok();
             }
         }
         self.pool.turn_started(id, Instant::now());
@@ -397,9 +400,9 @@ impl AskPanel {
             on_edit.update(cx, |this, cx| {
                 this.question = question;
                 cx.notify();
-            })
+            });
         })
-        .on_submit(move |_, cx| on_submit.update(cx, |this, cx| this.send(cx)))
+        .on_submit(move |_, cx| on_submit.update(cx, Self::send))
         .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
@@ -412,8 +415,7 @@ impl AskPanel {
                 message
                     .text
                     .lines()
-                    .map(|line| div().min_h(px(16.)).child(line.to_string()))
-                    .collect::<Vec<_>>(),
+                    .map(|line| div().min_h(px(16.)).child(line.to_owned())),
             );
             match message.author {
                 Author::Reviewer => div().font_weight(gpui::FontWeight::BOLD).child(text),
@@ -591,9 +593,9 @@ impl Render for AskPanel {
 }
 
 /// The button on a place. It shows how many Asks the place already has.
-pub fn ask_button(colors: Colors, id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
+pub fn ask_button(colors: &Colors, id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
     let label = if count == 0 {
-        "Ask".to_string()
+        "Ask".to_owned()
     } else {
         format!("Ask \u{25cf} {count}")
     };

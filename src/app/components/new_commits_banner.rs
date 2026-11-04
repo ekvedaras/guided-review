@@ -44,7 +44,7 @@ impl RenderOnce for NewCommitsBanner {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let message = match &self.progress {
-            RepinProgress::Running => "Updating the tour…".to_string(),
+            RepinProgress::Running => "Updating the tour…".to_owned(),
             RepinProgress::Idle | RepinProgress::Failed(_) => format!(
                 "The PR has new commits ({} → {}). Update the tour to comment.",
                 short(&self.old_head.tour_head),
@@ -57,7 +57,7 @@ impl RenderOnce for NewCommitsBanner {
         };
         let button = (self.progress != RepinProgress::Running).then(|| {
             button(
-                colors,
+                &colors,
                 "update-tour",
                 ButtonKind::Primary,
                 ButtonSize::Small,

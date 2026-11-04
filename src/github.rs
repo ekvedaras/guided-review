@@ -78,7 +78,7 @@ impl GitHub {
     pub fn from_env() -> Self {
         Self {
             api: std::env::var("GUIDED_REVIEW_GITHUB_API")
-                .unwrap_or_else(|_| "https://api.github.com".to_string()),
+                .unwrap_or_else(|_| "https://api.github.com".to_owned()),
             token: token_from_gh_cli().or_else(|| std::env::var("GITHUB_TOKEN").ok()),
             pull_request_ids: Arc::default(),
         }
@@ -87,8 +87,8 @@ impl GitHub {
     /// For a GitHub-like server at another address. GraphQL needs a token, so it gets a placeholder.
     pub fn at(api: &str) -> Self {
         Self {
-            api: api.to_string(),
-            token: Some("placeholder".to_string()),
+            api: api.to_owned(),
+            token: Some("placeholder".to_owned()),
             pull_request_ids: Arc::default(),
         }
     }
@@ -108,25 +108,25 @@ impl GitHub {
             "query($owner: String!, $name: String!, $number: Int!) {
                 repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } }
             }",
-            pull_request_variables(pr, &serde_json::Value::Null),
+            &pull_request_variables(pr, &serde_json::Value::Null),
         )?;
         let id = at(&data, "/repository/pullRequest/id")
             .as_str()
             .with_context(|| format!("GitHub did not know {pr}"))?
-            .to_string();
+            .to_owned();
         self.remember_pull_request_id(pr, &id);
         Ok(id)
     }
 
     fn remember_pull_request_id(&self, pr: &PullRequestUrl, id: &str) {
-        self.known_ids().insert(pr.to_string(), id.to_string());
+        self.known_ids().insert(pr.to_string(), id.to_owned());
     }
 
     /// Returns the `data` of the answer. A missing or refused token is `ViewedSyncUnavailable`.
     fn graphql(
         &self,
         query: &str,
-        variables: serde_json::Value,
+        variables: &serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
         let token = self.token.as_ref().ok_or_else(|| {
             ViewedSyncUnavailable("no GitHub token: run `gh auth login` or set GITHUB_TOKEN".into())
@@ -199,7 +199,7 @@ impl GitHub {
                         thread { id comments(first: 1) { nodes { pullRequestReview { id } } } }
                     }
                 }",
-                serde_json::json!({"input": input}),
+                &serde_json::json!({"input": input}),
             )
             .map_err(one_pending_review_error)?;
         let thread = at(&data, "/addPullRequestReviewThread/thread");
@@ -214,7 +214,7 @@ impl GitHub {
         Ok(at(thread, "/comments/nodes/0/pullRequestReview/id")
             .as_str()
             .unwrap_or_default()
-            .to_string())
+            .to_owned())
     }
 
     fn pending_review_id(&self, pr: &PullRequestUrl) -> anyhow::Result<Option<String>> {
@@ -225,7 +225,7 @@ impl GitHub {
                         reviews(states: PENDING, first: 10) { nodes { id viewerDidAuthor } }
                     } }
                 }",
-                pull_request_variables(pr, &serde_json::Value::Null),
+                &pull_request_variables(pr, &serde_json::Value::Null),
             )
             .with_context(|| format!("could not look for a pending review on {pr}"))?;
         Ok(at(&data, "/repository/pullRequest/reviews/nodes")
@@ -234,7 +234,7 @@ impl GitHub {
             .flatten()
             .find(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true))
             .and_then(|review| at(review, "/id").as_str())
-            .map(str::to_string))
+            .map(str::to_owned))
     }
 
     fn submit_pending_review(
@@ -247,7 +247,7 @@ impl GitHub {
             "mutation($input: SubmitPullRequestReviewInput!) {
                 submitPullRequestReview(input: $input) { clientMutationId }
             }",
-            serde_json::json!({"input": {
+            &serde_json::json!({"input": {
                 "pullRequestReviewId": review_id,
                 "event": verdict.github_name(),
                 "body": body,
@@ -318,7 +318,7 @@ impl ViewedFilesPort for GitHub {
                         }
                     } }
                 }",
-                pull_request_variables(pr, &after),
+                &pull_request_variables(pr, &after),
             )?;
             let pull = at(&data, "/repository/pullRequest");
             if let Some(id) = at(pull, "/id").as_str() {
@@ -353,7 +353,7 @@ impl ViewedFilesPort for GitHub {
                 "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
                 capitalized(mutation)
             ),
-            serde_json::json!({"input": {"pullRequestId": pull_request_id, "path": path}}),
+            &serde_json::json!({"input": {"pullRequestId": pull_request_id, "path": path}}),
         )
         .with_context(|| format!("could not change the viewed state of {path} in {pr}"))?;
         Ok(())
@@ -367,7 +367,7 @@ impl ReviewThreadsPort for GitHub {
         let mut after = serde_json::Value::Null;
         loop {
             let data = self
-                .graphql(REVIEW_THREADS_QUERY, pull_request_variables(pr, &after))
+                .graphql(REVIEW_THREADS_QUERY, &pull_request_variables(pr, &after))
                 .with_context(|| {
                     format!("could not read the review threads of {pr} from GitHub")
                 })?;
@@ -401,7 +401,7 @@ impl ReviewThreadsPort for GitHub {
                         comment { pullRequestReview { id state } }
                     }
                 }",
-                serde_json::json!({"input": input}),
+                &serde_json::json!({"input": input}),
             )
             .map_err(one_pending_review_error)
             .context("could not reply")?;
@@ -428,7 +428,7 @@ impl ReviewThreadsPort for GitHub {
                 "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
                 capitalized(mutation)
             ),
-            serde_json::json!({"input": {"threadId": thread_id}}),
+            &serde_json::json!({"input": {"threadId": thread_id}}),
         )
         .with_context(|| format!("could not change the thread {thread_id}"))?;
         Ok(())
@@ -441,7 +441,7 @@ impl ReviewThreadsPort for GitHub {
                 "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
                 capitalized(mutation)
             ),
-            serde_json::json!({"input": {"subjectId": comment_id, "content": reaction.github_name()}}),
+            &serde_json::json!({"input": {"subjectId": comment_id, "content": reaction.github_name()}}),
         )
         .context("could not change the reaction")?;
         Ok(())
@@ -457,7 +457,7 @@ impl ReviewWritesPort for GitHub {
                         reviews(states: PENDING, first: 10) { nodes { viewerDidAuthor } }
                     } }
                 }",
-                pull_request_variables(pr, &serde_json::Value::Null),
+                &pull_request_variables(pr, &serde_json::Value::Null),
             )
             .with_context(|| format!("could not look for a pending review on {pr}"))?;
         let reviews = at(&data, "/repository/pullRequest/reviews/nodes")
@@ -474,7 +474,7 @@ impl ReviewWritesPort for GitHub {
                 "query($owner: String!, $name: String!, $number: Int!) {
                     repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerDidAuthor } }
                 }",
-                pull_request_variables(pr, &serde_json::Value::Null),
+                &pull_request_variables(pr, &serde_json::Value::Null),
             )
             .with_context(|| format!("could not tell who wrote {pr}"))?;
         at(&data, "/repository/pullRequest/viewerDidAuthor")
@@ -505,15 +505,16 @@ impl ReviewWritesPort for GitHub {
             "mutation($input: SubmitPullRequestReviewInput!) {
                 submitPullRequestReview(input: $input) { clientMutationId }
             }",
-            serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
+            &serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
         );
         if let Err(error) = posted {
-            let _ = self.graphql(
+            self.graphql(
                 "mutation($input: DeletePullRequestReviewInput!) {
                     deletePullRequestReview(input: $input) { clientMutationId }
                 }",
-                serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
-            );
+                &serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
+            )
+            .ok();
             return Err(error.context("could not post the comment"));
         }
         Ok(())
@@ -535,7 +536,7 @@ impl ReviewWritesPort for GitHub {
             "mutation($input: AddPullRequestReviewInput!) {
                 addPullRequestReview(input: $input) { clientMutationId }
             }",
-            serde_json::json!({"input": {
+            &serde_json::json!({"input": {
                 "pullRequestId": self.pull_request_id(pr)?,
                 "event": verdict.github_name(),
                 "body": body,
@@ -694,7 +695,7 @@ fn one_pending_review_error(error: anyhow::Error) -> anyhow::Error {
 
 fn token_from_gh_cli() -> Option<String> {
     let output = Command::new("gh").args(["auth", "token"]).output().ok()?;
-    let token = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    let token = String::from_utf8(output.stdout).ok()?.trim().to_owned();
     (output.status.success() && !token.is_empty()).then_some(token)
 }
 
@@ -849,7 +850,7 @@ pub(crate) fn parse_review_threads(
                             .is_some_and(|author| author.kind == "Bot"),
                         author: comment
                             .author
-                            .map_or_else(|| "ghost".to_string(), |author| author.login),
+                            .map_or_else(|| "ghost".to_owned(), |author| author.login),
                         id: comment.id,
                         body: comment.body,
                         url: comment.url,

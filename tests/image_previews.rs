@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -126,10 +133,10 @@ impl Pull {
     }
 }
 
-fn loaded(side: &Option<ImageSide>) -> String {
+fn loaded(side: Option<&ImageSide>) -> String {
     match side {
         Some(side) => side.facts(),
-        None => "none".to_string(),
+        None => "none".to_owned(),
     }
 }
 
@@ -151,7 +158,7 @@ fn a_changed_image_shows_both_sides_with_pixel_size_file_size_and_the_change() {
 
     let preview = review.image_preview("logo.png").unwrap();
     assert_eq!(
-        (loaded(&preview.base), loaded(&preview.head)),
+        (loaded(preview.base.as_ref()), loaded(preview.head.as_ref())),
         (
             format!("64×64, {} B", before.len()),
             format!("128×96, {} B", after.len())
@@ -173,7 +180,10 @@ fn an_added_image_is_one_image_marked_added_and_a_deleted_one_marked_deleted() {
     added.load_preview(&mut review, &source);
     let preview = review.image_preview("new.png").unwrap();
     assert!(preview.base.is_none());
-    assert_eq!(loaded(&preview.head), format!("16×16, {} B", picture.len()));
+    assert_eq!(
+        loaded(preview.head.as_ref()),
+        format!("16×16, {} B", picture.len())
+    );
     assert_eq!(
         (preview.mark(), preview.size_change()),
         (Some("added"), None)
@@ -185,7 +195,10 @@ fn an_added_image_is_one_image_marked_added_and_a_deleted_one_marked_deleted() {
     deleted.load_preview(&mut review, &source);
     let preview = review.image_preview("old.png").unwrap();
     assert!(preview.head.is_none());
-    assert_eq!(loaded(&preview.base), format!("16×16, {} B", picture.len()));
+    assert_eq!(
+        loaded(preview.base.as_ref()),
+        format!("16×16, {} B", picture.len())
+    );
     assert_eq!(preview.mark(), Some("deleted"));
 }
 
@@ -202,8 +215,14 @@ fn a_side_above_ten_megabytes_is_never_fetched_and_shows_only_its_facts() {
 
     let preview = review.image_preview("big.png").unwrap();
     assert!(matches!(preview.base, Some(ImageSide::TooLarge { .. })));
-    assert_eq!(loaded(&preview.base), "too large to preview, 10.0 MB");
-    assert_eq!(loaded(&preview.head), format!("4×4, {} B", small.len()));
+    assert_eq!(
+        loaded(preview.base.as_ref()),
+        "too large to preview, 10.0 MB"
+    );
+    assert_eq!(
+        loaded(preview.head.as_ref()),
+        format!("4×4, {} B", small.len())
+    );
     assert_eq!(
         source.blob_reads() - reads_to_open,
         1,
@@ -253,7 +272,7 @@ fn an_svg_keeps_its_text_diff_next_to_the_picture() {
     assert!(piece.lines().any(|line| line.text.contains("width=\"48\"")));
     let preview = review.image_preview("icon.svg").unwrap();
     assert!(preview.is_svg);
-    assert!(loaded(&preview.head).starts_with("48×32"));
+    assert!(loaded(preview.head.as_ref()).starts_with("48×32"));
 }
 
 #[test]

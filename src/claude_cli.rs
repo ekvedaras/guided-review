@@ -98,7 +98,7 @@ impl AgentPort for ClaudeConversation {
 
     fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
         Arc::new(ClaudeTurnStopper {
-            stdin: self.stdin.clone(),
+            stdin: Arc::clone(&self.stdin),
         })
     }
 }
@@ -123,7 +123,7 @@ impl TurnStopper for ClaudeTurnStopper {
 fn write_line(stdin: &Mutex<ChildStdin>, json: &Value) -> anyhow::Result<()> {
     let mut stdin = stdin
         .lock()
-        .map_err(|_| anyhow::anyhow!("claude input is broken"))?;
+        .map_err(|poisoned| anyhow::anyhow!("claude input is broken: {poisoned}"))?;
     writeln!(stdin, "{json}").context("claude is no longer running")?;
     stdin.flush()?;
     Ok(())
@@ -131,8 +131,8 @@ fn write_line(stdin: &Mutex<ChildStdin>, json: &Value) -> anyhow::Result<()> {
 
 impl Drop for ClaudeConversation {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.child.kill().ok();
+        self.child.wait().ok();
     }
 }
 
@@ -312,7 +312,7 @@ fn run_headless(mut command: Command, prompt: &str) -> anyhow::Result<String> {
     let text = at(&answer, "/result")
         .as_str()
         .unwrap_or_default()
-        .to_string();
+        .to_owned();
     if at(&answer, "/is_error").as_bool().unwrap_or(false) || !output.status.success() {
         bail!("claude failed: {text}");
     }

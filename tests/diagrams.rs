@@ -4,6 +4,12 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
+
+use std::fmt::Write;
 
 use guided_review::app::components::diagram::{DiagramDrawer, Strip, Svg, rasterize};
 use guided_review::app::components::palette::{Appearance, Colors, TEXT_FONT};
@@ -77,7 +83,7 @@ fn text_that_is_not_mermaid_is_an_error() {
 fn tall_flowchart(nodes: usize) -> String {
     let mut source = String::from("flowchart TD\n");
     for node in 1..nodes {
-        source.push_str(&format!("  N{} --> N{node}\n", node - 1));
+        writeln!(source, "  N{} --> N{node}", node - 1).ok();
     }
     source
 }
@@ -86,7 +92,7 @@ fn tall_flowchart(nodes: usize) -> String {
 fn a_diagram_is_cut_into_strips_of_at_most_4096_device_pixels() {
     let strips = Strip::cut(5000.0, 2.0);
 
-    let rows: Vec<_> = strips.iter().map(|strip| strip.rows()).collect();
+    let rows: Vec<_> = strips.iter().map(Strip::rows).collect();
     assert_eq!(rows, [0..4096, 4096..8192, 8192..10000]);
     assert_eq!(strips[2].height(), 904.0);
 }
@@ -129,6 +135,10 @@ mod memory {
 
     const OTHER: &str = "flowchart LR\n  X --> Y\n";
 
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "DiagramMemory::show takes an Option, where None is the step without a diagram"
+    )]
     fn showing(source: &str, appearance: Appearance, scale: f32) -> Option<Showing<'_>> {
         Some(Showing {
             source,
@@ -141,7 +151,7 @@ mod memory {
     fn draw_svgs(memory: &mut DiagramMemory<Bitmap>) {
         for job in memory.svgs_to_draw() {
             let svg = DiagramDrawer::for_appearance(job.appearance).svg(&job.source);
-            memory.put_svg(job, svg);
+            memory.put_svg(&job, svg);
         }
     }
 
@@ -149,7 +159,7 @@ mod memory {
         let jobs = memory.strips_to_draw();
         let count = jobs.len();
         for job in jobs {
-            assert!(memory.put_bitmap(job, bitmap).is_none());
+            assert!(memory.put_bitmap(&job, bitmap).is_none());
         }
         count
     }
@@ -186,7 +196,7 @@ mod memory {
         memory.show(showing(FLOWCHART, Appearance::Light, 2.0));
 
         assert!(memory.svgs_to_draw().is_empty());
-        assert!(!memory.strips().is_empty());
+        assert_ne!(memory.strips(), [] as [Strip; 0]);
     }
 
     #[test]
@@ -207,7 +217,7 @@ mod memory {
                 .contains(&hex(Colors::of(Appearance::Light).background))
         );
         assert!(memory.strips_to_draw().is_empty(), "drawing twice");
-        memory.put_bitmap(jobs[0].clone(), "light");
+        memory.put_bitmap(&jobs[0].clone(), "light");
         memory.set_on_screen(0, true);
         assert!(memory.strips_to_draw().is_empty(), "drawing what is drawn");
         assert_eq!(memory.bitmap(0), Some(&"light"));
@@ -285,10 +295,9 @@ mod memory {
     fn showing_the_same_thing_again_keeps_the_bitmaps() {
         let mut memory = on_screen(FLOWCHART, Appearance::Dark);
 
-        assert!(
-            memory
-                .show(showing(FLOWCHART, Appearance::Dark, 2.0))
-                .is_empty()
+        assert_eq!(
+            memory.show(showing(FLOWCHART, Appearance::Dark, 2.0)),
+            [] as [&str; 0]
         );
         assert_eq!(memory.bitmap(0), Some(&"first"));
     }
@@ -303,7 +312,7 @@ mod memory {
 
         memory.show(showing(FLOWCHART, Appearance::Light, 2.0));
 
-        assert_eq!(memory.put_bitmap(job, "late dark"), Some("late dark"));
+        assert_eq!(memory.put_bitmap(&job, "late dark"), Some("late dark"));
         assert_eq!(memory.bitmap(0), None);
     }
 
@@ -317,7 +326,7 @@ mod memory {
 
         memory.set_on_screen(0, false);
 
-        assert_eq!(memory.put_bitmap(job, "late"), Some("late"));
+        assert_eq!(memory.put_bitmap(&job, "late"), Some("late"));
     }
 
     #[test]
@@ -343,7 +352,7 @@ mod memory {
         memory.show(showing("not a diagram", Appearance::Dark, 2.0));
         draw_svgs(&mut memory);
 
-        assert!(memory.strips().is_empty());
+        assert_eq!(memory.strips(), [] as [Strip; 0]);
         assert!(memory.error().is_some());
     }
 }

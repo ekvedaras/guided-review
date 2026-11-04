@@ -124,7 +124,7 @@ fn body_box(
     body: &str,
     on_body_edit: &OnBodyEdit,
 ) -> TextBox {
-    let (on_cancel, on_body_edit) = (ui.clone(), on_body_edit.clone());
+    let (on_cancel, on_body_edit) = (ui.clone(), Rc::clone(on_body_edit));
     TextBox::new("finish-review-body-text", focus, body, Lines::Multi)
         .on_edit(move |body, _, cx| on_body_edit(body, cx))
         .on_cancel(move |_, cx| update(&on_cancel, cx, |ui| ui.is_open = false))
@@ -152,19 +152,19 @@ impl RenderOnce for FinishReviewDialog {
         };
 
         let open_button = {
-            let (ui, focus) = (ui.clone(), focus.clone());
+            let (ui, focus) = (ui.clone(), focus);
             let open_button = if is_open {
-                toggle_button(colors, "finish-review", true, ButtonSize::Regular)
+                toggle_button(&colors, "finish-review", true, ButtonSize::Regular)
             } else if self.is_everything_read {
                 button(
-                    colors,
+                    &colors,
                     "finish-review",
                     ButtonKind::Primary,
                     ButtonSize::Regular,
                 )
             } else {
                 button(
-                    colors,
+                    &colors,
                     "finish-review",
                     ButtonKind::Secondary,
                     ButtonSize::Regular,
@@ -193,7 +193,7 @@ impl RenderOnce for FinishReviewDialog {
         .map(|choice| {
             let ui = ui.clone();
             toggle_button(
-                colors,
+                &colors,
                 SharedString::from(format!("verdict-{}", choice.github_name())),
                 choice == verdict,
                 ButtonSize::Small,
@@ -203,7 +203,7 @@ impl RenderOnce for FinishReviewDialog {
                 update(&ui, cx, |ui| {
                     ui.verdict = choice;
                     ui.is_confirming_approval = false;
-                })
+                });
             })
         });
 
@@ -212,9 +212,9 @@ impl RenderOnce for FinishReviewDialog {
             .flatten();
         let must_confirm = unread_warning.is_some() && !is_confirming;
         let submit_button = {
-            let (ui, on_finish, text) = (ui.clone(), self.on_finish.clone(), self.body.clone());
+            let (ui, on_finish, text) = (ui.clone(), Rc::clone(&self.on_finish), self.body.clone());
             button(
-                colors,
+                &colors,
                 "submit-review",
                 ButtonKind::Primary,
                 ButtonSize::Regular,

@@ -4,6 +4,10 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
 mod support;
 
@@ -154,7 +158,7 @@ struct FakeCodeHost {
 impl FakeCodeHost {
     fn new(repo: &str, number: u32) -> Self {
         Self {
-            repo: repo.to_string(),
+            repo: repo.to_owned(),
             number,
             routes: HashMap::new(),
             refusals: HashMap::new(),
@@ -162,7 +166,7 @@ impl FakeCodeHost {
     }
 
     fn route(mut self, path: String, as_diff: bool, body: &str) -> Self {
-        self.routes.insert((path, as_diff), body.to_string());
+        self.routes.insert((path, as_diff), body.to_owned());
         self
     }
 
@@ -180,7 +184,7 @@ impl FakeCodeHost {
     fn refuse_compare_diff(mut self, base: &str, head: &str, status: &str, body: &str) -> Self {
         let path = format!("/repos/{}/compare/{base}...{head}", self.repo);
         self.refusals
-            .insert(path, (status.to_string(), body.to_string()));
+            .insert(path, (status.to_owned(), body.to_owned()));
         self
     }
 
@@ -216,7 +220,7 @@ impl FakeCodeHost {
                     authorized |= header == "authorization: bearer test-token";
                 }
                 let path = request_line.split_whitespace().nth(1).unwrap_or_default();
-                let route = self.routes.get(&(path.to_string(), as_diff));
+                let route = self.routes.get(&(path.to_owned(), as_diff));
                 let refusal = self.refusals.get(path).filter(|_| as_diff);
                 let (status, body) = match route {
                     _ if refusal.is_some() => {

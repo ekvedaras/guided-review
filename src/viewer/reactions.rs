@@ -14,7 +14,7 @@ pub enum Reaction {
 }
 
 impl Reaction {
-    pub const ALL: [Reaction; 8] = [
+    pub const ALL: [Self; 8] = [
         Self::ThumbsUp,
         Self::ThumbsDown,
         Self::Laugh,

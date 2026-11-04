@@ -101,7 +101,7 @@ impl Destination {
                 ..
             } => format!("{} ({caveat})", self.label()),
             Self::GitHub { because, .. } => format!("Opens on GitHub: {because}"),
-            Self::Ide { caveat: None, .. } | Self::Browser(_) => self.label().to_string(),
+            Self::Ide { caveat: None, .. } | Self::Browser(_) => self.label().to_owned(),
         }
     }
 }
@@ -150,7 +150,7 @@ impl CodeOpener {
                 );
                 self.code_destination(Ok(at), &on_github)
             }
-            None => Destination::Browser(url.to_string()),
+            None => Destination::Browser(url.to_owned()),
         }
     }
 
@@ -166,7 +166,7 @@ impl CodeOpener {
                     .then_some(IdeCaveat::CloneNotAtTourHead),
             },
             Err(because) => Destination::GitHub {
-                url: on_github.to_string(),
+                url: on_github.to_owned(),
                 because,
             },
         }

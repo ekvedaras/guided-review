@@ -53,7 +53,7 @@ impl Diagrams {
                     })
                     .await;
                 this.update(cx, |this, cx| {
-                    this.memory.put_svg(job, svg);
+                    this.memory.put_svg(&job, svg);
                     cx.notify();
                 })
                 .ok();
@@ -88,7 +88,7 @@ impl Diagrams {
                 this.update(cx, |this, cx| match bitmap {
                     Ok(bitmap) => {
                         // A bitmap turned away was never painted, so it has no GPU copy to free.
-                        if this.memory.put_bitmap(job, bitmap).is_none() {
+                        if this.memory.put_bitmap(&job, bitmap).is_none() {
                             cx.notify();
                         }
                     }
@@ -129,12 +129,12 @@ impl RenderOnce for DiagramView {
             let strips = memory
                 .strips()
                 .into_iter()
-                .map(|strip| strip_block(strip, width, self.diagrams.clone()));
+                .map(|strip| strip_block(&strip, width, self.diagrams.clone()));
             return frame.child(div().flex().flex_col().children(strips));
         }
         let note = match memory.error() {
             Some(error) => format!("Could not draw the diagram: {error}"),
-            None => "Drawing the diagram…".to_string(),
+            None => "Drawing the diagram…".to_owned(),
         };
         frame
             .p_3()
@@ -146,14 +146,14 @@ impl RenderOnce for DiagramView {
 
 /// Reports in prepaint whether the strip is near the visible part of the page, so
 /// the bitmap is made just before it scrolls in and freed once it scrolls out.
-fn strip_block(strip: Strip, width: f32, diagrams: Entity<Diagrams>) -> impl IntoElement {
+fn strip_block(strip: &Strip, width: f32, diagrams: Entity<Diagrams>) -> impl IntoElement + use<> {
     let index = strip.index();
     let reporter = diagrams.clone();
     canvas(
         move |bounds, window, cx| {
             let on_screen = near_visible_part(bounds, window);
             reporter.update(cx, |diagrams, cx| {
-                diagrams.set_on_screen(index, on_screen, window, cx)
+                diagrams.set_on_screen(index, on_screen, window, cx);
             });
         },
         move |bounds, (), window, cx| {

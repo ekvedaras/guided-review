@@ -29,7 +29,7 @@ impl CommentPlace {
     /// A comment on a whole file, which GitHub takes for a picture. It has no line: line 0 never exists.
     pub fn on_file(path: &str) -> Self {
         let file = LineLocation {
-            path: path.to_string(),
+            path: path.to_owned(),
             side: Side::Head,
             line: 0,
         };
@@ -194,7 +194,7 @@ impl CommentRequest {
         match github.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
             Ok(_) => return Outcome::Refused(CommentRefusal::TourIsOld),
-            Err(error) => return classify(error),
+            Err(error) => return classify(&error),
         }
         let sent = match self.mode {
             SendMode::AddToReview => {
@@ -203,14 +203,14 @@ impl CommentRequest {
             SendMode::CommentNow => match github.has_pending_review(pr) {
                 Ok(false) => github.comment_now(pr, &self.draft.place, &self.draft.body),
                 Ok(true) => return Outcome::Refused(CommentRefusal::PendingReviewExists),
-                Err(error) => return classify(error),
+                Err(error) => return classify(&error),
             },
         };
-        sent.map_or_else(classify, |()| Outcome::Sent)
+        sent.map_or_else(|error| classify(&error), |()| Outcome::Sent)
     }
 }
 
-fn classify(error: anyhow::Error) -> Outcome {
+fn classify(error: &anyhow::Error) -> Outcome {
     if error.downcast_ref::<ThreadNotCreated>().is_some() {
         Outcome::Rejected(format!("{error:#}"))
     } else if error.downcast_ref::<PendingReviewExists>().is_some() {

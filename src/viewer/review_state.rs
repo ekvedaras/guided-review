@@ -123,7 +123,7 @@ impl RepinRecord {
 
     /// Two re-pins with no Refresh between read as one, from where the first one started:
     /// what changed in the first stays changed even when the second leaves it alone.
-    fn following(self, earlier: &RepinRecord) -> Self {
+    fn following(self, earlier: &Self) -> Self {
         let was_new_then = |id: &String| earlier.pieces.get(id) == Some(&RepinStatus::New);
         let pieces = self
             .pieces
@@ -227,9 +227,7 @@ impl ReviewState {
     }
 
     pub(super) fn saw_on_github(&mut self, path: &str, viewed: bool) {
-        self.viewer
-            .viewed_on_github
-            .insert(path.to_string(), viewed);
+        self.viewer.viewed_on_github.insert(path.to_owned(), viewed);
     }
 
     /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
@@ -237,7 +235,7 @@ impl ReviewState {
         if self.was_viewed_on_github(path) == viewed {
             self.viewer.unsent_viewed.remove(path);
         } else {
-            self.viewer.unsent_viewed.insert(path.to_string(), viewed);
+            self.viewer.unsent_viewed.insert(path.to_owned(), viewed);
         }
     }
 
@@ -260,12 +258,12 @@ impl ReviewState {
     pub(super) fn saw_pr_description(&mut self, body: &str) -> bool {
         let is_new = self.viewer.pr_description != body;
         if is_new {
-            self.viewer.pr_description = body.to_string();
+            body.clone_into(&mut self.viewer.pr_description);
         }
         is_new
     }
 
-    pub(super) fn take_viewer_sections(&mut self, from: &ReviewState) {
+    pub(super) fn take_viewer_sections(&mut self, from: &Self) {
         self.viewer = from.viewer.clone();
         self.typed = from.typed.clone();
     }
@@ -289,13 +287,13 @@ impl ReviewState {
     pub(super) fn open_reply(&mut self, thread_id: &str) {
         self.typed
             .reply_drafts
-            .entry(thread_id.to_string())
+            .entry(thread_id.to_owned())
             .or_default();
     }
 
     pub(super) fn write_reply(&mut self, thread_id: &str, text: &str) {
         if let Some(draft) = self.typed.reply_drafts.get_mut(thread_id) {
-            *draft = text.to_string();
+            text.clone_into(draft);
         }
     }
 
@@ -308,7 +306,7 @@ impl ReviewState {
     }
 
     pub(super) fn write_finish_body(&mut self, text: &str) {
-        self.typed.finish_body = text.to_string();
+        text.clone_into(&mut self.typed.finish_body);
     }
 
     pub(super) fn comment_drafts(&self) -> &[CommentDraft] {
@@ -343,7 +341,7 @@ impl ReviewState {
             .iter_mut()
             .find(|d| &d.place == place)
         {
-            draft.body = body.to_string();
+            body.clone_into(&mut draft.body);
         }
     }
 
@@ -477,7 +475,7 @@ impl ReviewStateFile {
 
 impl AskStore for ReviewStateFile {
     fn load(&self) -> anyhow::Result<Vec<Ask>> {
-        Ok(ReviewStateFile::load(self)?.asks)
+        Ok(Self::load(self)?.asks)
     }
 
     fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {

@@ -4,6 +4,10 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
 use guided_review::viewer::{Block, Markdown, Run};
 
@@ -141,11 +145,11 @@ fn linked(markdown: &Markdown) -> Vec<(String, Option<String>)> {
 }
 
 fn link(text: &str) -> (String, Option<String>) {
-    (text.to_string(), Some(text.to_string()))
+    (text.to_owned(), Some(text.to_owned()))
 }
 
 fn unlinked(text: &str) -> (String, Option<String>) {
-    (text.to_string(), None)
+    (text.to_owned(), None)
 }
 
 #[test]
@@ -179,8 +183,8 @@ fn a_url_in_code_or_inside_a_link_stays_as_it_is() {
     assert_eq!(
         linked(&in_link),
         [(
-            "see https://x.test/a".to_string(),
-            Some("https://x.test/b".to_string())
+            "see https://x.test/a".to_owned(),
+            Some("https://x.test/b".to_owned())
         )]
     );
 }

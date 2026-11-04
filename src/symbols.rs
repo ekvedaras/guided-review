@@ -33,8 +33,8 @@ impl Slot {
     pub fn id(&self) -> String {
         match self {
             Self::Symbol(path) => path.clone(),
-            Self::Imports => "imports".to_string(),
-            Self::Top => "(top)".to_string(),
+            Self::Imports => "imports".to_owned(),
+            Self::Top => "(top)".to_owned(),
         }
     }
 }
@@ -62,7 +62,7 @@ impl Symbols {
         parser
             .set_language(&grammar)
             .expect("grammar matches tree-sitter");
-        let lines = source.lines().map(str::to_string).collect();
+        let lines = source.lines().map(str::to_owned).collect();
         let Some(tree) = parser.parse(source, None) else {
             return Self {
                 symbols: Vec::new(),
@@ -177,10 +177,11 @@ impl Symbols {
                 .collect();
             let mut unpaired = Vec::new();
             for symbol in level {
-                let Some(parent) = head_parent_of(&symbol.path, &pairs) else {
+                let parent = head_parent_of(&symbol.path, &pairs);
+                if parent == HeadParent::Unpaired {
                     continue;
-                };
-                let head_path = join_path(parent.as_deref(), name_of(&symbol.path));
+                }
+                let head_path = join_path(parent.path(), name_of(&symbol.path));
                 if let Some(same_path) = head.named(&head_path) {
                     claimed.push(&same_path.path);
                     pairs.insert(symbol.path.clone(), head_path);
@@ -192,7 +193,7 @@ impl Symbols {
                 let candidate = head.symbols.iter().find(|candidate| {
                     candidate.kind == symbol.kind
                         && depth_of(&candidate.path) == depth
-                        && parent_of(&candidate.path) == parent.as_deref()
+                        && parent_of(&candidate.path) == parent.path()
                         && !claimed.contains(&candidate.path.as_str())
                         && self.named(&candidate.path).is_none()
                 });
@@ -230,14 +231,33 @@ fn name_of(path: &str) -> &str {
 }
 
 fn join_path(parent: Option<&str>, name: &str) -> String {
-    parent.map_or_else(|| name.to_string(), |parent| format!("{parent}::{name}"))
+    parent.map_or_else(|| name.to_owned(), |parent| format!("{parent}::{name}"))
 }
 
-/// The head path of the parent: `Some(None)` for a top-level symbol, `None` when the parent has no head path.
-fn head_parent_of(path: &str, pairs: &HashMap<String, String>) -> Option<Option<String>> {
+/// Where a symbol's parent is at head.
+#[derive(PartialEq)]
+enum HeadParent {
+    TopLevel,
+    At(String),
+    /// The parent has no head path, so the symbol cannot be paired by name.
+    Unpaired,
+}
+
+impl HeadParent {
+    fn path(&self) -> Option<&str> {
+        match self {
+            Self::At(path) => Some(path),
+            Self::TopLevel | Self::Unpaired => None,
+        }
+    }
+}
+
+fn head_parent_of(path: &str, pairs: &HashMap<String, String>) -> HeadParent {
     match parent_of(path) {
-        None => Some(None),
-        Some(parent) => pairs.get(parent).map(|head| Some(head.clone())),
+        None => HeadParent::TopLevel,
+        Some(parent) => pairs
+            .get(parent)
+            .map_or(HeadParent::Unpaired, |head| HeadParent::At(head.clone())),
     }
 }
 
@@ -286,7 +306,7 @@ fn tokens_of(root: Node, source: &str) -> Vec<Token> {
             let text = text_of(node, source);
             if !text.trim().is_empty() {
                 tokens.push(Token {
-                    text: text.to_string(),
+                    text: text.to_owned(),
                     line: node.start_position().row + 1,
                 });
             }
@@ -323,8 +343,8 @@ fn signature_of(node: Node, source: &str) -> String {
     let start = node
         .children(&mut children)
         .find(|child| !matches!(child.kind(), "attribute_list" | "decorator" | "comment"))
-        .map_or(node.start_byte(), |child| child.start_byte());
-    let end = body_of(node).map_or(node.end_byte(), |body| body.start_byte());
+        .map_or_else(|| node.start_byte(), |child| child.start_byte());
+    let end = body_of(node).map_or_else(|| node.end_byte(), |body| body.start_byte());
     let mut declaration = String::new();
     let mut from = start;
     for comment in comments_inside(node) {

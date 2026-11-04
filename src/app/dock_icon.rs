@@ -6,6 +6,10 @@ use crate::app::assets::Assets;
 const SIZE: u32 = 512;
 
 #[cfg(target_os = "macos")]
+#[expect(
+    unsafe_code,
+    reason = "objc2 marks the Cocoa call unsafe; it runs on the main thread, proved by the marker, with an image made just above"
+)]
 pub fn show() {
     use objc2::AllocAnyThread;
     use objc2::MainThreadMarker;

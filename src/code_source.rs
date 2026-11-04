@@ -128,7 +128,7 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
             if let Some(text) = raw.strip_prefix('-') {
                 let line = Line {
                     number: old_line,
-                    text: text.to_string(),
+                    text: text.to_owned(),
                 };
                 if let Some(hunk) = file.hunks.last_mut() {
                     hunk.removed.push(line.clone());
@@ -139,7 +139,7 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
             } else if let Some(text) = raw.strip_prefix('+') {
                 let line = Line {
                     number: new_line,
-                    text: text.to_string(),
+                    text: text.to_owned(),
                 };
                 if let Some(hunk) = file.hunks.last_mut() {
                     hunk.added.push(line.clone());
@@ -201,32 +201,32 @@ fn same_path_in_git_header(paths: &str) -> Option<String> {
     let paths = unquote_pair(paths);
     let half = paths.len().checked_sub(5)? / 2;
     let (old, new) = (paths.get(2..2 + half)?, paths.get(half + 5..)?);
-    (old == new).then(|| old.to_string())
+    (old == new).then(|| old.to_owned())
 }
 
 /// Git ends `---` and `+++` paths that hold a space with a tab.
 fn path_after_prefix(path: &str, prefix: &str) -> Option<String> {
     unquote(path.trim_end_matches('\t'))
         .strip_prefix(prefix)
-        .map(str::to_string)
+        .map(str::to_owned)
 }
 
 fn unquote_pair(paths: &str) -> String {
     if !paths.starts_with('"') {
-        return paths.to_string();
+        return paths.to_owned();
     }
     let Some(end) = paths.get(1..).and_then(|rest| rest.find("\" ")) else {
-        return paths.to_string();
+        return paths.to_owned();
     };
     match (paths.get(..end + 2), paths.get(end + 3..)) {
         (Some(first), Some(second)) => format!("{} {}", unquote(first), unquote(second)),
-        _ => paths.to_string(),
+        _ => paths.to_owned(),
     }
 }
 
 fn unquote(path: &str) -> String {
     let Some(inner) = path.strip_prefix('"').and_then(|p| p.strip_suffix('"')) else {
-        return path.to_string();
+        return path.to_owned();
     };
     let mut out = String::new();
     let mut chars = inner.chars();
@@ -249,7 +249,7 @@ fn unquote(path: &str) -> String {
 fn hunk_header(raw: &str) -> String {
     match raw.split_once(" @@") {
         Some((ranges, _)) => format!("{ranges} @@"),
-        None => raw.to_string(),
+        None => raw.to_owned(),
     }
 }
 

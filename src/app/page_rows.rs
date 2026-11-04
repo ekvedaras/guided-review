@@ -165,7 +165,7 @@ impl PageRow {
         std::mem::discriminant(self).hash(&mut hasher);
         match self {
             Self::SummaryTitle(text) | Self::SummaryBullet(text) | Self::StepWhy(text) => {
-                text.hash(&mut hasher)
+                text.hash(&mut hasher);
             }
             Self::StepHeading(heading) => {
                 heading.id.to_string().hash(&mut hasher);
@@ -355,7 +355,7 @@ impl PageRows {
                         id: heading.piece.to_string(),
                         path: heading.path.clone(),
                         row: index,
-                    })
+                    });
                 }
                 _ => {}
             }
@@ -444,7 +444,7 @@ impl PageRows {
         })
     }
 
-    pub fn change_from(&self, old: &PageRows) -> RowsChange {
+    pub fn change_from(&self, old: &Self) -> RowsChange {
         if self.screen != old.screen {
             return RowsChange::OtherScreen;
         }
@@ -474,12 +474,12 @@ fn changed_span(old: &[RowKey], new: &[RowKey]) -> RowsChange {
 }
 
 fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
-    rows.push(PageRow::SummaryTitle(review.title().to_string().into()));
+    rows.push(PageRow::SummaryTitle(review.title().to_owned().into()));
     rows.extend(
         review
             .summary()
             .iter()
-            .map(|bullet| PageRow::SummaryBullet(bullet.to_string().into())),
+            .map(|bullet| PageRow::SummaryBullet(bullet.clone().into())),
     );
     rows.extend(
         review
@@ -656,7 +656,7 @@ impl RowsBuilder<'_> {
                 path: block.path.clone(),
             };
             self.block_rows(
-                block,
+                &block,
                 Some(&ask_of),
                 Some(fold),
                 shows_change_since_read,
@@ -687,7 +687,7 @@ impl RowsBuilder<'_> {
             .partition(|thread| thread.anchor.is_some());
         self.add_threads_under_lines(under_a_line);
         for block in FileBlock::group(page.pieces) {
-            self.block_rows(block, None, None, false, review);
+            self.block_rows(&block, None, None, false, review);
         }
         self.rows.extend(
             after_code
@@ -708,14 +708,14 @@ impl RowsBuilder<'_> {
 
     fn block_rows(
         &mut self,
-        block: FileBlock,
+        block: &FileBlock,
         ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
         fold: Option<BoxFold>,
         shows_change_since_read: bool,
         review: &Review,
     ) {
         if fold.as_ref().is_some_and(|fold| fold.is_folded) {
-            self.folded_block_rows(&block, ask_of, fold);
+            self.folded_block_rows(block, ask_of, fold);
             return;
         }
         let heading = |piece: &PieceDiff| PieceHeading {
@@ -731,7 +731,7 @@ impl RowsBuilder<'_> {
         };
         let row_id = if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
-                fold: fold.clone(),
+                fold,
                 ..heading(piece)
             })));
             if has_no_change_since_read(piece) {
@@ -757,7 +757,7 @@ impl RowsBuilder<'_> {
             piece.id.to_string()
         } else {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
-                fold: fold.clone(),
+                fold,
                 piece: block.path.clone().into(),
                 path: block.path.clone(),
                 ask: None,
@@ -990,7 +990,7 @@ mod tests {
         PageRow::Composer {
             place: Rc::new(CommentPlace::on_file("a.rs")),
             text_lines: line_count(text),
-            problem: problem.map(str::to_string),
+            problem: problem.map(str::to_owned),
             is_sending: false,
         }
         .key()

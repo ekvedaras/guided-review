@@ -20,8 +20,8 @@ impl RepoName {
 
     pub fn new(owner: &str, name: &str) -> Self {
         Self {
-            owner: owner.to_string(),
-            name: name.trim_end_matches(".git").to_string(),
+            owner: owner.to_owned(),
+            name: name.trim_end_matches(".git").to_owned(),
         }
     }
 
@@ -59,7 +59,7 @@ impl fmt::Display for RepoName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestUrl {
     pub repo: RepoName,
     pub number: u64,
@@ -117,7 +117,7 @@ pub struct Sha(String);
 
 impl Sha {
     pub fn new(sha: &str) -> Self {
-        Self(sha.trim().to_string())
+        Self(sha.trim().to_owned())
     }
 
     pub fn as_str(&self) -> &str {

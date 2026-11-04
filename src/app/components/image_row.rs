@@ -55,7 +55,7 @@ impl Picture {
         let image = if image_facts::is_svg_path(path) {
             Image::from_bytes(ImageFormat::Png, rasterize_svg(&loaded.bytes, pixels)?)
         } else {
-            Image::from_bytes(format_of(path)?, loaded.bytes.as_ref().clone())
+            Image::from_bytes(format_of(path)?, loaded.bytes.to_vec())
         };
         Some(Self {
             image: Arc::new(image),
@@ -169,16 +169,16 @@ impl RenderOnce for ImageRow {
             .flex_col()
             .gap_2()
             .p_2()
-            .child(facts_row(&preview, colors))
+            .child(facts_row(&preview, &colors))
             .child(
                 div()
                     .flex()
                     .gap_4()
                     .children(preview.base.as_ref().map(|side| {
-                        side_column("before", preview.mark(), side, base, &path, colors)
+                        side_column("before", preview.mark(), side, base, &path, &colors)
                     }))
                     .children(preview.head.as_ref().map(|side| {
-                        side_column("after", preview.mark(), side, head, &path, colors)
+                        side_column("after", preview.mark(), side, head, &path, &colors)
                     })),
             )
             .child(
@@ -196,7 +196,7 @@ impl RenderOnce for ImageRow {
     }
 }
 
-fn facts_row(preview: &ImagePreview, colors: Colors) -> impl IntoElement {
+fn facts_row(preview: &ImagePreview, colors: &Colors) -> impl IntoElement {
     let side = |label: &str, side: &Option<ImageSide>| {
         side.as_ref()
             .map(|side| div().child(format!("{label}: {}", side.facts())))
@@ -218,7 +218,7 @@ fn side_column(
     side: &ImageSide,
     picture: Option<&Picture>,
     path: &SharedString,
-    colors: Colors,
+    colors: &Colors,
 ) -> AnyElement {
     let mark_color = match mark {
         Some("added") => colors.success,
@@ -234,8 +234,8 @@ fn side_column(
                 .gap_2()
                 .text_xs()
                 .text_color(colors.muted_text)
-                .child(label.to_string())
-                .children(mark.map(|mark| div().text_color(mark_color).child(mark.to_string()))),
+                .child(label.to_owned())
+                .children(mark.map(|mark| div().text_color(mark_color).child(mark.to_owned()))),
         )
         .child(match picture {
             Some(picture) => drawn(picture, path, label, colors).into_any_element(),
@@ -251,7 +251,7 @@ fn side_column(
         .into_any_element()
 }
 
-fn drawn(picture: &Picture, path: &SharedString, label: &str, colors: Colors) -> impl IntoElement {
+fn drawn(picture: &Picture, path: &SharedString, label: &str, colors: &Colors) -> impl IntoElement {
     let (width, height) = fitted(picture.pixels);
     div()
         .id(ElementId::from(SharedString::from(format!(
@@ -262,7 +262,7 @@ fn drawn(picture: &Picture, path: &SharedString, label: &str, colors: Colors) ->
         .h(px(height))
         .child(checkerboard(width, height, colors))
         .child(
-            img(picture.image.clone())
+            img(Arc::clone(&picture.image))
                 .absolute()
                 .top_0()
                 .left_0()
@@ -280,7 +280,7 @@ fn fitted(pixels: PixelSize) -> (f32, f32) {
 }
 
 /// What transparent parts of a picture show through to.
-fn checkerboard(width: f32, height: f32, colors: Colors) -> impl IntoElement {
+fn checkerboard(width: f32, height: f32, colors: &Colors) -> impl IntoElement {
     let (light, dark) = (colors.checker_light, colors.checker_dark);
     canvas(
         |_, _, _| (),

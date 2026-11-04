@@ -39,7 +39,7 @@ pub enum Capture {
 }
 
 impl Capture {
-    const ALL: [Capture; 24] = [
+    const ALL: [Self; 24] = [
         Self::Attribute,
         Self::Comment,
         Self::Constant,
@@ -156,7 +156,7 @@ impl HighlightLanguage {
             Self::Php => (
                 "php",
                 tree_sitter_php::LANGUAGE_PHP.into(),
-                tree_sitter_php::HIGHLIGHTS_QUERY.to_string(),
+                tree_sitter_php::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),
@@ -197,42 +197,42 @@ impl HighlightLanguage {
             Self::Json => (
                 "json",
                 tree_sitter_json::LANGUAGE.into(),
-                tree_sitter_json::HIGHLIGHTS_QUERY.to_string(),
+                tree_sitter_json::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),
             Self::Css => (
                 "css",
                 tree_sitter_css::LANGUAGE.into(),
-                tree_sitter_css::HIGHLIGHTS_QUERY.to_string(),
+                tree_sitter_css::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),
             Self::Html => (
                 "html",
                 tree_sitter_html::LANGUAGE.into(),
-                tree_sitter_html::HIGHLIGHTS_QUERY.to_string(),
+                tree_sitter_html::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),
             Self::Rust => (
                 "rust",
                 tree_sitter_rust::LANGUAGE.into(),
-                tree_sitter_rust::HIGHLIGHTS_QUERY.to_string(),
+                tree_sitter_rust::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),
             Self::Bash => (
                 "bash",
                 tree_sitter_bash::LANGUAGE.into(),
-                tree_sitter_bash::HIGHLIGHT_QUERY.to_string(),
+                tree_sitter_bash::HIGHLIGHT_QUERY.to_owned(),
                 "",
                 "",
             ),
             Self::Yaml => (
                 "yaml",
                 tree_sitter_yaml::LANGUAGE.into(),
-                tree_sitter_yaml::HIGHLIGHTS_QUERY.to_string(),
+                tree_sitter_yaml::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),
@@ -389,7 +389,7 @@ pub struct Highlights {
 impl Highlights {
     pub(super) fn spans(&self, side: Side, path: &str, line: usize) -> &[Span] {
         self.files
-            .get(&(side, path.to_string()))
+            .get(&(side, path.to_owned()))
             .and_then(|lines| lines.get(line.wrapping_sub(1)))
             .map_or(&[], Vec::as_slice)
     }
@@ -406,7 +406,7 @@ pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
     let source = if needs_php_tag {
         format!("<?php\n{text}")
     } else {
-        text.to_string()
+        text.to_owned()
     };
     let Some(configuration) = language.configuration() else {
         return vec![Vec::new(); line_count];

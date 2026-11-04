@@ -43,7 +43,10 @@ pub struct CommentComposer {
 impl CommentComposer {
     pub const KEY_CONTEXT: &str = "CommentInput";
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the view is built from its collaborators, which the caller owns"
+    )]
     pub fn new(
         draft: CommentDraft,
         focus: FocusHandle,
@@ -68,7 +71,7 @@ impl CommentComposer {
 }
 
 fn button(
-    colors: Colors,
+    colors: &Colors,
     id: &'static str,
     label: &'static str,
     on_click: OnCompose,
@@ -92,12 +95,12 @@ impl RenderOnce for CommentComposer {
         let place = &self.draft.place;
         let id = SharedString::from(format!("composer-{}-{}", place.path(), place.end.line));
         let actions = self.actions;
-        let on_focus = actions.on_focus.clone();
+        let on_focus = Rc::clone(&actions.on_focus);
         let body = if self.is_composing && !self.is_sending {
             let (on_type, on_submit, on_stop) = (
-                actions.on_type.clone(),
-                actions.on_add_to_review.clone(),
-                actions.on_stop.clone(),
+                Rc::clone(&actions.on_type),
+                Rc::clone(&actions.on_add_to_review),
+                Rc::clone(&actions.on_stop),
             );
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
@@ -112,35 +115,39 @@ impl RenderOnce for CommentComposer {
         } else {
             div().child(self.draft.body.clone()).into_any_element()
         };
-        let buttons =
-            (!self.is_sending).then(|| {
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(button(
-                        colors,
-                        "add-to-review",
-                        "Add to review",
-                        actions.on_add_to_review,
-                    ))
-                    .children(self.can_comment_now.then(|| {
-                        button(colors, "comment-now", "Comment now", actions.on_comment_now)
-                    }))
-                    .children(self.can_suggest_change.then(|| {
-                        button(
-                            colors,
-                            "suggest-change",
-                            "Suggest change",
-                            actions.on_suggest_change,
-                        )
-                    }))
-                    .child(button(
-                        colors,
-                        "discard-comment",
-                        "Discard",
-                        actions.on_discard,
-                    ))
-            });
+        let buttons = (!self.is_sending).then(|| {
+            div()
+                .flex()
+                .gap_2()
+                .child(button(
+                    &colors,
+                    "add-to-review",
+                    "Add to review",
+                    actions.on_add_to_review,
+                ))
+                .children(self.can_comment_now.then(|| {
+                    button(
+                        &colors,
+                        "comment-now",
+                        "Comment now",
+                        actions.on_comment_now,
+                    )
+                }))
+                .children(self.can_suggest_change.then(|| {
+                    button(
+                        &colors,
+                        "suggest-change",
+                        "Suggest change",
+                        actions.on_suggest_change,
+                    )
+                }))
+                .child(button(
+                    &colors,
+                    "discard-comment",
+                    "Discard",
+                    actions.on_discard,
+                ))
+        });
         div()
             .id(id)
             .flex()

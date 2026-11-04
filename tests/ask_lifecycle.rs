@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use std::path::PathBuf;
@@ -126,7 +133,7 @@ fn row(review: &Review, text: &str) -> LineLocation {
         .unwrap()
         .pieces
         .iter()
-        .flat_map(|piece| piece.lines())
+        .flat_map(guided_review::viewer::PieceDiff::lines)
         .find(|line| line.text.trim() == text)
         .unwrap_or_else(|| panic!("no row shows {text:?}"))
         .location
@@ -151,7 +158,7 @@ fn launch(review: &Review) -> AgentLaunch {
 fn launcher(turns: &[&str], sent: &SentLog) -> FakeAgentLauncher {
     FakeAgentLauncher {
         sent: sent.clone(),
-        turns: turns.iter().map(|turn| turn.to_string()).collect(),
+        turns: turns.iter().map(ToString::to_string).collect(),
     }
 }
 
@@ -303,7 +310,7 @@ fn stopping_a_turn_keeps_the_answer_so_far_marked_stopped_and_the_session() {
 
     assert!(
         sent.agent_lines()
-            .contains(&"agent: stop the turn".to_string())
+            .contains(&"agent: stop the turn".to_owned())
     );
     let ask = asks.get(id).unwrap();
     assert_eq!(ask.messages[1].text, "It returns");
@@ -360,7 +367,7 @@ fn asks_about_lines_are_kept_per_selection_newest_first() {
     let mut asks = shop.asks();
     let first = asks.start(place.clone(), review.head());
     asks.ask(first, "first?", &context, agent.as_mut()).unwrap();
-    let second = asks.start(place.clone(), review.head());
+    let second = asks.start(place, review.head());
     asks.ask(second, "second?", &context, agent.as_mut())
         .unwrap();
 
@@ -387,7 +394,7 @@ fn after_a_re_pin_asks_whose_piece_changed_say_code_changed_since_and_the_others
         on_total_lines,
         Place::Piece {
             step: StepId::from("total"),
-            piece: "app/Order.php#Order::total".to_string(),
+            piece: "app/Order.php#Order::total".to_owned(),
         },
         Place::Step {
             step: StepId::from("keep"),
@@ -451,7 +458,7 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
     let mut review = shop.open();
     let piece = Place::Piece {
         step: StepId::from("total"),
-        piece: "app/Order.php#Order::total".to_string(),
+        piece: "app/Order.php#Order::total".to_owned(),
     };
     let (asks, id) = answered(&shop, &review, piece);
     let first = review.use_as_comment(asks.get(id).unwrap()).unwrap();
@@ -487,5 +494,5 @@ fn use_as_comment_is_refused_without_lines_on_an_old_tour_and_for_an_ask_on_olde
         review.use_as_comment(asks_on_lines.get(on_lines).unwrap()),
         Err(CommentRefusal::AskIsOnOlderCode)
     );
-    assert!(review.comment_drafts().is_empty());
+    assert_eq!(review.comment_drafts(), []);
 }

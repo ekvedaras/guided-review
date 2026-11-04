@@ -80,16 +80,13 @@ pub(super) fn context_for(
             end,
             pieces,
         } => {
-            let shown = match step {
-                Some(id) => {
-                    let step = tour.steps().into_iter().find(|s| s.id == id.to_string())?;
-                    step_heading(&mut text, &step.title, &step.why, "few lines")?;
-                    StepPage::of(step, tour, files, &display, false).pieces
-                }
-                None => {
-                    writeln!(text, "Place: a few lines no step of the tour holds").ok()?;
-                    SafetyNetPage::of(tour, files, &display).pieces
-                }
+            let shown = if let Some(id) = step {
+                let step = tour.steps().into_iter().find(|s| s.id == id.to_string())?;
+                step_heading(&mut text, &step.title, &step.why, "few lines")?;
+                StepPage::of(step, tour, files, &display, false).pieces
+            } else {
+                writeln!(text, "Place: a few lines no step of the tour holds").ok()?;
+                SafetyNetPage::of(tour, files, &display).pieces
             };
             let rows: Vec<DiffLine> = shown.iter().flat_map(|p| p.lines().cloned()).collect();
             let mut selection = RowSelection::start_at(start.clone());

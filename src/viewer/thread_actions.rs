@@ -59,7 +59,7 @@ impl ThreadActionRequest {
     ) -> ThreadActionOutcome {
         let result = match self.perform(github) {
             Ok(()) => ThreadActionResult::Done,
-            Err(error) => classify(error),
+            Err(error) => classify(&error),
         };
         let threads = (result == ThreadActionResult::Done)
             .then(|| github.review_threads(&self.pr).ok())
@@ -111,7 +111,7 @@ impl std::fmt::Display for TourIsOld {
 
 impl std::error::Error for TourIsOld {}
 
-fn classify(error: anyhow::Error) -> ThreadActionResult {
+fn classify(error: &anyhow::Error) -> ThreadActionResult {
     if error.downcast_ref::<TourIsOld>().is_some() {
         ThreadActionResult::Refused(CommentRefusal::TourIsOld)
     } else if error.downcast_ref::<PendingReviewExists>().is_some() {

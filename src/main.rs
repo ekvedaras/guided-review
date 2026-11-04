@@ -185,7 +185,7 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
     let opened = OpenedPr::new(pr)?;
     let state_file = opened.state_file();
     if done {
-        state_file.update(|state| state.finish_refresh())?;
+        state_file.update(guided_review::viewer::ReviewState::finish_refresh)?;
         println!("refresh done: marks cleared");
         return Ok(());
     }
@@ -217,9 +217,9 @@ fn eval(existing_tours: bool) -> anyhow::Result<()> {
     }
     .run(
         if existing_tours {
-            TourSource::ExistingTours
+            &TourSource::ExistingTours
         } else {
-            TourSource::WriteNew
+            &TourSource::WriteNew
         },
         &UtcTimestamp::now().to_string(),
     )?;
@@ -255,7 +255,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let refresher = TourRefresher {
         home: opened.home.clone(),
         pr: pr.clone(),
-        pick_code_source: pick_code_source.clone(),
+        pick_code_source: Arc::clone(&pick_code_source),
         writer: Arc::new(ClaudeRefreshWriter::new(
             clone.clone().unwrap_or_else(|| opened.home.clone()),
         )),

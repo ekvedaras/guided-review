@@ -50,7 +50,7 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pieces: Vec<PieceRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<Step>,
+    pub children: Vec<Self>,
 }
 
 /// What a step points at. Variants are tried in this order when reading.
@@ -105,7 +105,7 @@ impl Tour {
         let text = serde_json::to_string_pretty(self)?;
         let mut temp_name = path.as_os_str().to_owned();
         temp_name.push(".tmp");
-        let temp = std::path::PathBuf::from(temp_name);
+        let temp = PathBuf::from(temp_name);
         std::fs::write(&temp, text + "\n")
             .and_then(|()| std::fs::rename(&temp, path))
             .with_context(|| format!("could not write {}", path.display()))

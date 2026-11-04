@@ -4,11 +4,19 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use serde_json::{Value, json};
+use std::fmt::Write;
 use support::{FakeGitHub, FixtureRepo, GuidedReview, Run};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -20,15 +28,14 @@ fn order_php(total: u32, tax: u32, keep: u32) -> String {
 }
 
 fn yaml(lines: &[(usize, &str)]) -> String {
-    (1..=30)
-        .map(|number| {
-            let text = lines
-                .iter()
-                .find(|(at, _)| *at == number)
-                .map_or("same", |(_, text)| text);
-            format!("key{number}: {text}\n")
-        })
-        .collect()
+    (1..=30).fold(String::new(), |mut yaml, number| {
+        let text = lines
+            .iter()
+            .find(|(at, _)| *at == number)
+            .map_or("same", |(_, text)| text);
+        writeln!(yaml, "key{number}: {text}").ok();
+        yaml
+    })
 }
 
 struct Shop {

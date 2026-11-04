@@ -145,17 +145,17 @@ fn subjects_of_test(
 /// What the test is named after: `OrderTest` and `order.test.ts` are about `order`;
 /// a `describe("Cart")` around the test is about `cart` too.
 fn stems_of_test(path: &str, symbol: &str) -> Vec<String> {
-    let mut stems = vec![strip_test_suffix(normalized(file_stem(path)))];
+    let mut stems = vec![strip_test_suffix(&normalized(file_stem(path)))];
     if let Some((outer, _)) = symbol.split_once("::") {
-        stems.push(strip_test_suffix(normalized(outer)));
+        stems.push(strip_test_suffix(&normalized(outer)));
     }
     stems
 }
 
-fn strip_test_suffix(name: String) -> String {
+fn strip_test_suffix(name: &str) -> String {
     name.strip_suffix("test")
         .or_else(|| name.strip_suffix("spec"))
-        .map_or(name.clone(), str::to_string)
+        .map_or_else(|| name.to_owned(), str::to_owned)
 }
 
 struct Names {

@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -102,14 +109,14 @@ fn a_query_matches_letters_in_order_ignoring_case() {
         labels(&review, "README"),
         ["File README.md", "Step Readme says hello"]
     );
-    assert!(labels(&review, "zzz").is_empty());
+    assert_eq!(labels(&review, "zzz"), [] as [String; 0]);
 }
 
 #[test]
 fn letters_scattered_inside_words_match_nothing() {
     let review = open(shop_tour());
 
-    assert!(labels(&review, "rdtl").is_empty());
+    assert_eq!(labels(&review, "rdtl"), [] as [String; 0]);
     assert_eq!(
         labels(&review, "otals"),
         ["Step Order totals go up"],

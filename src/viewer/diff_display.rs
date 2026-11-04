@@ -49,7 +49,7 @@ impl FilesAtHeadRequest {
             .iter()
             .filter_map(|path| {
                 let text = source.file_at(&self.head, path).ok()?;
-                Some((path.clone(), text.lines().map(str::to_string).collect()))
+                Some((path.clone(), text.lines().map(str::to_owned).collect()))
             })
             .collect();
         FilesAtHead { files }
@@ -156,7 +156,7 @@ impl DiffDisplay<'_> {
             })
             .enumerate()
             .filter_map(|(change, (removed, added, line_above, line_below))| {
-                let rows = self.change_rows(&file_lines, removed, added);
+                let rows = self.change_rows(&file_lines, &removed, &added);
                 if !rows.iter().any(DiffLine::is_change) {
                     return None;
                 }
@@ -196,7 +196,7 @@ impl DiffDisplay<'_> {
                             .map(|line| file_lines.context_row(line)),
                     );
                     hunk.rows.extend(segment.rows.iter().cloned());
-                    hunk.more_below = segment.more_below.clone();
+                    hunk.more_below.clone_from(&segment.more_below);
                     *previous = segment;
                 }
                 _ => {
@@ -230,13 +230,13 @@ impl DiffDisplay<'_> {
     fn change_rows(
         &self,
         file_lines: &FileLines,
-        removed: Vec<Line>,
-        added: Vec<Line>,
+        removed: &[Line],
+        added: &[Line],
     ) -> Vec<DiffLine> {
         let mut same_as_removed: HashMap<usize, usize> = HashMap::new();
         if self.ignores_whitespace {
             let mut next_removed = 0;
-            for line in &added {
+            for line in added {
                 let rest = removed.get(next_removed..).unwrap_or_default();
                 if let Some((offset, old)) = rest.iter().enumerate().find(|(_, old)| {
                     without_whitespace(&old.text) == without_whitespace(&line.text)

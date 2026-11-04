@@ -168,7 +168,7 @@ impl RenderOnce for DiffRow {
             .as_ref()
             .and_then(|hooks| hooks.selected.clone());
         let highlights = match selected {
-            Some(selected) => with_selection(highlights, selected, colors.text_selection),
+            Some(selected) => with_selection(&highlights, selected, colors.text_selection),
             None => highlights,
         };
         let code = StyledText::new(line.code.clone()).with_highlights(highlights);
@@ -180,17 +180,17 @@ impl RenderOnce for DiffRow {
             .child(div().relative().left(-self.scroll_x).child(code));
         let code = match self.code_selection.map(|hooks| hooks.on_gesture) {
             Some(on_gesture) => {
-                let (on_press, on_move) = (on_gesture.clone(), on_gesture);
+                let (on_press, on_move) = (Rc::clone(&on_gesture), on_gesture);
                 let (press_layout, move_layout) = (code_layout.clone(), code_layout);
                 code.cursor_text()
                     .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                         let byte = byte_at(&press_layout, event.position);
-                        on_press(RowGesture::Press, byte, window, cx)
+                        on_press(RowGesture::Press, byte, window, cx);
                     })
                     .on_mouse_move(move |event, window, cx| {
                         if event.pressed_button == Some(MouseButton::Left) {
                             let byte = byte_at(&move_layout, event.position);
-                            on_move(RowGesture::Over, byte, window, cx)
+                            on_move(RowGesture::Over, byte, window, cx);
                         }
                     })
             }
@@ -230,18 +230,18 @@ impl RenderOnce for DiffRow {
                     .group_hover("diff-row", |button| button.opacity(1.))
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        on_gesture(RowGesture::Press, &at, window, cx)
+                        on_gesture(RowGesture::Press, &at, window, cx);
                     })
                     .child("+")
                     .into_any_element()
             }
             None => comment_button.into_any_element(),
         };
-        let row = piece_row(colors)
+        let row = piece_row(&colors)
             .group("diff-row")
             .flex()
             .overflow_hidden()
-            .when(!line.wraps, |row| row.whitespace_nowrap())
+            .when(!line.wraps, Styled::whitespace_nowrap)
             .font_family(CODE_FONT)
             .text_sm()
             .when_some(self.on_scroll_x, |row, on_scroll_x| {
@@ -255,7 +255,7 @@ impl RenderOnce for DiffRow {
             })
             .when_some(self.on_gesture, |row, on_gesture| {
                 row.on_mouse_move(move |_, window, cx| {
-                    on_gesture(RowGesture::Over, &location, window, cx)
+                    on_gesture(RowGesture::Over, &location, window, cx);
                 })
             });
         let row = match line.kind {
@@ -268,7 +268,7 @@ impl RenderOnce for DiffRow {
     }
 }
 
-fn byte_at(layout: &TextLayout, position: gpui::Point<gpui::Pixels>) -> usize {
+fn byte_at(layout: &TextLayout, position: gpui::Point<Pixels>) -> usize {
     layout
         .index_for_position(position)
         .unwrap_or_else(|closest| closest)
@@ -276,7 +276,7 @@ fn byte_at(layout: &TextLayout, position: gpui::Point<gpui::Pixels>) -> usize {
 
 /// Lays the selection's background over the syntax colours, which must stay sorted and apart.
 fn with_selection(
-    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    highlights: &[(Range<usize>, HighlightStyle)],
     selected: Range<usize>,
     background: Rgba,
 ) -> Vec<(Range<usize>, HighlightStyle)> {
@@ -285,7 +285,7 @@ fn with_selection(
         ..Default::default()
     };
     let mut cut: Vec<usize> = vec![selected.start, selected.end];
-    for (range, _) in &highlights {
+    for (range, _) in highlights {
         cut.push(range.start);
         cut.push(range.end);
     }
@@ -314,7 +314,7 @@ fn with_selection(
 }
 
 /// Every row of a piece sits between the box's side borders.
-pub fn piece_row(colors: Colors) -> Div {
+pub fn piece_row(colors: &Colors) -> Div {
     div().w_full().border_x_1().border_color(colors.border)
 }
 
@@ -356,7 +356,7 @@ impl RenderOnce for PieceHeader {
             div()
                 .flex_none()
                 .text_color(colors.accent)
-                .child(SharedString::from(symbol.to_string()))
+                .child(SharedString::from(symbol.to_owned()))
         });
         div()
             .w_full()
@@ -392,13 +392,13 @@ impl RenderOnce for PieceHeader {
                                     .text_color(colors.muted_text)
                                     .text_ellipsis_start()
                                     .overflow_hidden()
-                                    .child(SharedString::from(name.folder.to_string())),
+                                    .child(SharedString::from(name.folder.to_owned())),
                             )
                             .child(
                                 div()
                                     .flex_none()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(SharedString::from(name.file.to_string())),
+                                    .child(SharedString::from(name.file.to_owned())),
                             ),
                     )
                     .children(symbol),
@@ -444,7 +444,7 @@ impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let name = PieceName::of(&self.piece);
-        piece_row(colors)
+        piece_row(&colors)
             .group("piece-marker")
             .h(px(24.))
             .flex()
@@ -463,7 +463,7 @@ impl RenderOnce for PieceMarker {
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .child(SharedString::from(
-                        name.symbol.unwrap_or(name.file).to_string(),
+                        name.symbol.unwrap_or(name.file).to_owned(),
                     )),
             )
             .children(self.repin_label.map(|label| {
@@ -512,7 +512,7 @@ impl<'a> PieceName<'a> {
 }
 
 /// The bottom edge of a piece box, and the space before the next one.
-pub fn piece_end(colors: Colors) -> impl IntoElement {
+pub fn piece_end(colors: &Colors) -> impl IntoElement {
     div().pb_3().child(
         div()
             .h_1()
@@ -523,7 +523,7 @@ pub fn piece_end(colors: Colors) -> impl IntoElement {
     )
 }
 
-pub fn no_change_since_read_row(colors: Colors) -> impl IntoElement {
+pub fn no_change_since_read_row(colors: &Colors) -> impl IntoElement {
     piece_row(colors)
         .px_2()
         .py_1()
@@ -532,7 +532,7 @@ pub fn no_change_since_read_row(colors: Colors) -> impl IntoElement {
         .child("No change since you read it")
 }
 
-pub fn only_whitespace_row(colors: Colors) -> impl IntoElement {
+pub fn only_whitespace_row(colors: &Colors) -> impl IntoElement {
     piece_row(colors)
         .px_2()
         .py_1()
@@ -543,7 +543,7 @@ pub fn only_whitespace_row(colors: Colors) -> impl IntoElement {
 
 /// A binary file has no lines to show, so it gets one row that opens the file.
 pub fn binary_file_row(
-    colors: Colors,
+    colors: &Colors,
     id: SharedString,
     link: CodeLink,
     cx: &App,
@@ -568,7 +568,7 @@ pub fn binary_file_row(
 
 /// The band between hunks, like GitHub's `@@` line; clicking it shows more unchanged lines.
 pub fn hunk_gap(
-    colors: Colors,
+    colors: &Colors,
     id: impl Into<ElementId>,
     more: Option<MoreContext>,
     on_more_context: OnMoreContext,

@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use std::cell::RefCell;
@@ -61,7 +68,7 @@ impl TourJudge for FakeJudge {
     fn judge(&self, input: &JudgeInput) -> anyhow::Result<Verdicts> {
         self.inputs
             .borrow_mut()
-            .push((input.note.to_string(), input.tour_json.to_string()));
+            .push((input.note.to_owned(), input.tour_json.to_owned()));
         let order = self.scores.borrow_mut().remove(0);
         Ok(Verdicts::from_pairs(Rule::ALL.map(|rule| {
             let score = if rule == Rule::Order {
@@ -113,7 +120,7 @@ fn run_eval(
         judge,
         skill,
     }
-    .run(source, date)
+    .run(&source, date)
     .unwrap();
     (report.to_string(), writer)
 }

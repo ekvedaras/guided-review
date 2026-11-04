@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -15,14 +22,17 @@ use guided_review::viewer::{
     DiffHunk, FileBlock, LineKind, LineLocation, Review, ReviewStateFile, Side,
 };
 use serde_json::{Value, json};
+use std::fmt::Write;
 use support::FixtureRepo;
 
 fn numbered_lines(count: usize, change: impl Fn(usize) -> Option<String>) -> String {
     (1..=count)
         .map(|number| change(number).unwrap_or_else(|| format!("line {number}")))
         .filter(|text| text != "<gone>")
-        .map(|text| format!("{text}\n"))
-        .collect()
+        .fold(String::new(), |mut lines, text| {
+            writeln!(lines, "{text}").ok();
+            lines
+        })
 }
 
 struct Pull {
@@ -72,7 +82,7 @@ fn rows(hunks: &[DiffHunk]) -> Vec<String> {
     hunks
         .iter()
         .flat_map(|hunk| {
-            std::iter::once("@@".to_string()).chain(hunk.rows.iter().map(|row| {
+            std::iter::once("@@".to_owned()).chain(hunk.rows.iter().map(|row| {
                 let number = row.location.line;
                 match row.kind {
                     LineKind::Removed => format!("-{number} {}", row.text),

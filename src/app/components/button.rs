@@ -34,7 +34,7 @@ impl ButtonSize {
 
 /// The look every button of the app shares; the caller adds the label and the click.
 pub fn button(
-    colors: Colors,
+    colors: &Colors,
     id: impl Into<ElementId>,
     kind: ButtonKind,
     size: ButtonSize,
@@ -92,7 +92,7 @@ pub fn button(
 
 /// A button that stays pressed while its option is on.
 pub fn toggle_button(
-    colors: Colors,
+    colors: &Colors,
     id: impl Into<ElementId>,
     is_on: bool,
     size: ButtonSize,

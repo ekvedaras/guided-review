@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -29,9 +36,10 @@ fn config(lines: &[(usize, &str)]) -> String {
             lines
                 .iter()
                 .find(|(changed, _)| *changed == number)
-                .map_or(format!("key{number}: {number}\n"), |(_, text)| {
-                    format!("{text}\n")
-                })
+                .map_or_else(
+                    || format!("key{number}: {number}\n"),
+                    |(_, text)| format!("{text}\n"),
+                )
         })
         .collect()
 }
@@ -209,7 +217,7 @@ fn every_line_links_to_the_same_line_on_github_at_the_tours_commits() {
         .unwrap()
         .pieces
         .iter()
-        .flat_map(|piece| piece.lines())
+        .flat_map(PieceDiff::lines)
         .map(|line| on_github(&review, &line.code_link))
         .collect();
     assert_eq!(

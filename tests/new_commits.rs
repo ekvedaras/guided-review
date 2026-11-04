@@ -4,10 +4,18 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,15 +40,14 @@ fn order_php(total: u32, tax: u32, keep: u32) -> String {
 }
 
 fn yaml(lines: &[(usize, &str)]) -> String {
-    (1..=30)
-        .map(|number| {
-            let text = lines
-                .iter()
-                .find(|(at, _)| *at == number)
-                .map_or("same", |(_, text)| text);
-            format!("key{number}: {text}\n")
-        })
-        .collect()
+    (1..=30).fold(String::new(), |mut yaml, number| {
+        let text = lines
+            .iter()
+            .find(|(at, _)| *at == number)
+            .map_or("same", |(_, text)| text);
+        writeln!(yaml, "key{number}: {text}").ok();
+        yaml
+    })
 }
 
 const PRICING_PHP: &str = "<?php\n\nclass Pricing\n{\n    public function discount(): int\n    {\n        return 0;\n    }\n}\n";
@@ -337,7 +344,7 @@ fn no_row_of_the_change_since_the_read_takes_a_comment_but_the_full_diff_rows_do
     let takes_comment = |review: &Review| -> Vec<bool> {
         review.current_step().unwrap().pieces[0]
             .lines()
-            .map(|line| line.takes_comment())
+            .map(guided_review::viewer::DiffLine::takes_comment)
             .collect()
     };
 
@@ -414,8 +421,8 @@ fn a_hunk_read_before_shows_only_the_changes_since_that_land_inside_it() {
     assert_eq!(
         per_piece,
         [
-            ("config.yaml#hunk-1".to_string(), 2),
-            ("config.yaml#hunk-2".to_string(), 0)
+            ("config.yaml#hunk-1".to_owned(), 2),
+            ("config.yaml#hunk-2".to_owned(), 0)
         ]
     );
     assert_eq!(

@@ -44,7 +44,7 @@ pub(super) fn all_targets(
                 shown_files.push(path);
                 targets.push(JumpTarget {
                     kind: JumpKind::File,
-                    label: path.to_string(),
+                    label: path.to_owned(),
                     detail: step.title.clone(),
                     screen: id.clone(),
                 });
@@ -64,8 +64,8 @@ pub(super) fn all_targets(
             shown_files.push(path);
             targets.push(JumpTarget {
                 kind: JumpKind::File,
-                label: (*path).to_string(),
-                detail: "Safety net".to_string(),
+                label: (*path).to_owned(),
+                detail: "Safety net".to_owned(),
                 screen: Screen::SafetyNet,
             });
         }

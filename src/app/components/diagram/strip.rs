@@ -21,12 +21,12 @@ pub struct Strip {
 
 impl Strip {
     /// `height` is in logical pixels.
-    pub fn cut(height: f32, scale: f32) -> Vec<Strip> {
+    pub fn cut(height: f32, scale: f32) -> Vec<Self> {
         let height_px = whole_pixels((height * scale).ceil());
         (0..height_px)
             .step_by(MAX_STRIP_PX as usize)
             .enumerate()
-            .map(|(index, top)| Strip {
+            .map(|(index, top)| Self {
                 index,
                 rows: top..(top + MAX_STRIP_PX).min(height_px),
                 scale,

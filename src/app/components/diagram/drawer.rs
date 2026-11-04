@@ -65,7 +65,7 @@ static LIGHT: LazyLock<DiagramDrawer> = LazyLock::new(|| DiagramDrawer::new(Appe
 static DARK: LazyLock<DiagramDrawer> = LazyLock::new(|| DiagramDrawer::new(Appearance::Dark));
 
 impl DiagramDrawer {
-    pub fn for_appearance(appearance: Appearance) -> &'static DiagramDrawer {
+    pub fn for_appearance(appearance: Appearance) -> &'static Self {
         match appearance {
             Appearance::Light => &LIGHT,
             Appearance::Dark => &DARK,
@@ -120,7 +120,7 @@ impl Setup {
             ))
             .map_err(|error| error.to_string())?;
         let RenderOutput::Svg(Some(svg)) = output else {
-            return Err("no Mermaid diagram found".to_string());
+            return Err("no Mermaid diagram found".to_owned());
         };
         let text: Arc<str> = svg.svg().into();
         let size = usvg::Tree::from_data(text.as_bytes(), &SVG_OPTIONS)

@@ -98,7 +98,7 @@ impl LocalGit {
             .filter_map(|line| line.split_once(' '))
             .filter(|(_, url)| RepoName::from_github_remote(url.trim()).is_some_and(|r| r == *repo))
             .filter_map(|(key, _)| key.strip_prefix("remote")?.strip_suffix(".url"))
-            .map(|name| name.trim_start_matches('.').to_string())
+            .map(|name| name.trim_start_matches('.').to_owned())
             .collect()
     }
 
@@ -143,7 +143,7 @@ impl CodeSource for LocalGit {
         let (id, size) = (fields.nth(2), fields.next());
         match (id, size.and_then(|size| size.parse().ok())) {
             (Some(id), Some(size)) => Ok(BlobInfo {
-                id: id.to_string(),
+                id: id.to_owned(),
                 size,
             }),
             _ => bail!("{path} is not a file at {sha}"),

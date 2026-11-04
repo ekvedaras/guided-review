@@ -91,10 +91,10 @@ impl JumpPalette {
         TextBox::new("jump-query", &self.focus, &self.query, Lines::Single)
             .on_edit(move |query, _, cx| {
                 on_edit.update(cx, |this, cx| {
-                    this.query = query.clone();
+                    this.query.clone_from(&query);
                     cx.emit(JumpEvent::QueryChanged(query));
                     cx.notify();
-                })
+                });
             })
             .on_submit(move |window, cx| on_submit.update(cx, |this, cx| this.pick(window, cx)))
             .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
@@ -118,7 +118,7 @@ impl JumpPalette {
                 ))
                 .into_any_element(),
             JumpKind::File | JumpKind::Symbol => {
-                code_label(colors, &target.label).into_any_element()
+                code_label(&colors, &target.label).into_any_element()
             }
         };
         let detail = (!target.detail.is_empty()).then(|| {
@@ -175,7 +175,7 @@ impl JumpPalette {
 
 /// A file or symbol target as `folder/` dim, then the file name, then the symbol, so the end of a
 /// long path is what stays readable.
-fn code_label(colors: Colors, label: &str) -> impl IntoElement {
+fn code_label(colors: &Colors, label: &str) -> impl IntoElement {
     let (path, symbol) = match label.split_once('#') {
         Some((path, symbol)) => (path, Some(symbol)),
         None => (label, None),
@@ -193,27 +193,27 @@ fn code_label(colors: Colors, label: &str) -> impl IntoElement {
             div()
                 .flex_none()
                 .font_weight(FontWeight::MEDIUM)
-                .child(SharedString::from(name.to_string()))
+                .child(SharedString::from(name.to_owned()))
         }))
         .child(
             div()
                 .flex()
                 .min_w_0()
                 .overflow_hidden()
-                .when(symbol.is_some(), |path| path.text_xs())
+                .when(symbol.is_some(), Styled::text_xs)
                 .child(
                     div()
                         .min_w_0()
                         .overflow_hidden()
                         .text_ellipsis_start()
                         .text_color(colors.muted_text)
-                        .child(SharedString::from(folder.to_string())),
+                        .child(SharedString::from(folder.to_owned())),
                 )
                 .child(
                     div()
                         .flex_none()
                         .when(symbol.is_some(), |file| file.text_color(colors.muted_text))
-                        .child(SharedString::from(file.to_string())),
+                        .child(SharedString::from(file.to_owned())),
                 ),
         )
 }

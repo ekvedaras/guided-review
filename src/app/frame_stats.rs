@@ -162,10 +162,10 @@ impl FrameStats {
             self.last_log = Instant::now();
             eprintln!("frame stats: {}", self.clock.borrow_mut().take_report());
         }
-        let clock = self.clock.clone();
+        let clock = Rc::clone(&self.clock);
         canvas(
             |_, _, _| {},
-            move |_, _, _, _| clock.borrow_mut().frame_painted(),
+            move |_, (), _, _| clock.borrow_mut().frame_painted(),
         )
         .absolute()
         .size_0()

@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 /// The `ide` line of `~/.guided-review/config.toml`, with `{path}` and `{line}` to fill in.
@@ -97,7 +98,7 @@ fn percent_encode_path(path: &str) -> String {
         if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
             encoded.push(byte as char);
         } else {
-            encoded.push_str(&format!("%{byte:02X}"));
+            write!(encoded, "%{byte:02X}").ok();
         }
     }
     encoded

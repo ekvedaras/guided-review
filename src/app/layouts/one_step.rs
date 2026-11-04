@@ -144,10 +144,10 @@ impl OneStepLayout {
         let session_subscriptions = [
             cx.observe(&session, |this, _, cx| {
                 this.use_code_opener_of_review(cx);
-                cx.notify()
+                cx.notify();
             }),
             cx.subscribe(&session, |this, _, SessionEvent::Reopened, cx| {
-                this.reopened(cx)
+                this.reopened(cx);
             }),
         ];
         let diagrams = Self::new_diagrams(cx);
@@ -171,11 +171,10 @@ impl OneStepLayout {
         .detach();
         let use_as_comment_subscription =
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
-                this.use_as_comment(ask, window, cx)
+                this.use_as_comment(ask, window, cx);
             });
         let asked_lines_subscription = cx.observe(&ask, |this, _, cx| {
-            this.session
-                .update(cx, |session, cx| session.asks_changed(cx))
+            this.session.update(cx, ReviewSession::asks_changed);
         });
         let layout_handle = cx.weak_entity();
         let on_row_gesture: OnRowGesture = Rc::new(move |gesture, at, _window, cx| {
@@ -190,7 +189,7 @@ impl OneStepLayout {
                     if gesture == RowGesture::Press {
                         window.focus(&this.focus, cx);
                     }
-                    this.on_code_gesture(gesture, at, cx)
+                    this.on_code_gesture(gesture, at, cx);
                 })
                 .ok();
         });
@@ -248,8 +247,8 @@ impl OneStepLayout {
         let ask = self.ask.clone();
         self.session.update(cx, |session, cx| {
             ask.update(cx, |panel, cx| {
-                panel.recheck_code_changes(session.review(), cx)
-            })
+                panel.recheck_code_changes(session.review(), cx);
+            });
         });
         self.diagrams = Self::new_diagrams(cx);
         cx.notify();
@@ -320,13 +319,13 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let count = self.ask.read(cx).count_at(&place);
-        ask_button(Colors::active(cx), SharedString::from(key), count).on_click(cx.listener(
+        ask_button(&Colors::active(cx), SharedString::from(key), count).on_click(cx.listener(
             move |this, _, window, cx| {
                 let ask = this.ask.clone();
                 this.session.update(cx, |session, cx| {
                     ask.update(cx, |panel, cx| {
-                        panel.open(session.review(), place.clone(), label.clone(), window, cx)
-                    })
+                        panel.open(session.review(), place.clone(), label.clone(), window, cx);
+                    });
                 });
             },
         ))
@@ -426,15 +425,15 @@ impl OneStepLayout {
     /// The comments on the whole file are rows under it, not part of it.
     fn image_row(&self, path: &str, cx: &mut Context<Self>) -> ImageRow {
         let layout = cx.entity();
-        let comment_path = path.to_string();
+        let comment_path = path.to_owned();
         let on_comment: OnImageComment = Rc::new(move |window, cx| {
             layout.update(cx, |this, cx| {
-                this.begin_file_comment(&comment_path, window, cx)
-            })
+                this.begin_file_comment(&comment_path, window, cx);
+            });
         });
         let session = self.session.read(cx);
         ImageRow::new(
-            path.to_string(),
+            path.to_owned(),
             session.review().image_preview(path).cloned(),
             session.image_pictures(path),
             on_comment,
@@ -449,7 +448,7 @@ impl OneStepLayout {
     ) -> OnCompose {
         let (layout, place) = (cx.entity(), place.clone());
         Rc::new(move |window, cx| {
-            layout.update(cx, |this, cx| act(this, place.clone(), window, cx))
+            layout.update(cx, |this, cx| act(this, place.clone(), window, cx));
         })
     }
 
@@ -474,7 +473,7 @@ impl OneStepLayout {
     fn queued_comment(&self, queued: &QueuedComment, cx: &mut Context<Self>) -> QueuedCommentNote {
         let on_discard = self.on_compose(&queued.draft.place, cx, |this, place, _, cx| {
             this.session
-                .update(cx, |session, cx| session.discard_comment(&place, cx))
+                .update(cx, |session, cx| session.discard_comment(&place, cx));
         });
         QueuedCommentNote::new(queued.clone(), on_discard)
     }
@@ -498,8 +497,8 @@ impl OneStepLayout {
             Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
                 layout.update(cx, |this, cx| {
                     this.session
-                        .update(cx, |session, cx| session.type_in_comment(&place, &body, cx))
-                })
+                        .update(cx, |session, cx| session.type_in_comment(&place, &body, cx));
+                });
             })
         };
         let actions = ComposerActions {
@@ -510,19 +509,18 @@ impl OneStepLayout {
             }),
             on_type,
             on_stop: self.on_compose(place, cx, |this, _, window, cx| {
-                this.session
-                    .update(cx, |session, cx| session.stop_composing(cx));
+                this.session.update(cx, ReviewSession::stop_composing);
                 window.focus(&this.focus, cx);
             }),
             on_add_to_review: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::AddToReview, cx)
+                    session.send_comment(place, SendMode::AddToReview, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
             on_comment_now: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::CommentNow, cx)
+                    session.send_comment(place, SendMode::CommentNow, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
@@ -553,13 +551,13 @@ impl OneStepLayout {
     fn on_thread_action(&self) -> OnThreadAction {
         let session = self.session.clone();
         Rc::new(move |action, on_done, cx| {
-            session.update(cx, |session, cx| session.act_on_thread(action, on_done, cx))
+            session.update(cx, |session, cx| session.act_on_thread(action, on_done, cx));
         })
     }
 
     /// Reply text goes to the core, which saves it, so it survives scrolling and restarts.
     fn on_reply_draft(&self, thread_id: &str) -> OnReplyDraft {
-        let (session, thread_id) = (self.session.clone(), thread_id.to_string());
+        let (session, thread_id) = (self.session.clone(), thread_id.to_owned());
         Rc::new(move |change, cx| {
             session.update(cx, |session, cx| {
                 let saved = match change {
@@ -591,8 +589,8 @@ impl OneStepLayout {
         let session = self.session.clone();
         Rc::new(move |verdict, body, on_done, cx| {
             session.update(cx, |session, cx| {
-                session.finish_review(verdict, &body, on_done, cx)
-            })
+                session.finish_review(verdict, &body, on_done, cx);
+            });
         })
     }
 
@@ -600,7 +598,7 @@ impl OneStepLayout {
         let id = view.thread.id.clone();
         let review = self.session.read(cx).review();
         let can_comment_now = review.can_comment_now();
-        let reply = review.reply_draft(&view.thread.id).map(str::to_string);
+        let reply = review.reply_draft(&view.thread.id).map(str::to_owned);
         ThreadElement::new(
             view.clone(),
             can_comment_now,
@@ -627,7 +625,7 @@ impl OneStepLayout {
     fn open_code_button(key: String, link: &CodeLink, cx: &mut Context<Self>) -> Stateful<Div> {
         let link = link.clone();
         let hint = link.clone();
-        tool_button(Colors::active(cx), key, open_code_label(&link, cx))
+        tool_button(&Colors::active(cx), key, open_code_label(&link, cx))
             .tooltip(tooltip(move |cx| open_code_hint(&hint, cx)))
             .on_click(move |_, _, cx| open_code(&link, cx))
     }
@@ -701,7 +699,7 @@ impl OneStepLayout {
         let sidebar = session.sidebar();
         let progress = sidebar.progress;
         let summary_row = sidebar_row(
-            colors,
+            &colors,
             "summary",
             0,
             sidebar.is_summary_current,
@@ -725,7 +723,7 @@ impl OneStepLayout {
             progress.total > 0 && progress.read == progress.total,
             sidebar.can_judge,
             sidebar.approve_warning,
-            session.review().finish_body().to_string(),
+            session.review().finish_body().to_owned(),
             self.on_finish_body_edit(),
             self.on_finish_review(),
         );
@@ -739,7 +737,7 @@ impl OneStepLayout {
                 RowMark::Unread
             };
             sidebar_row(
-                colors,
+                &colors,
                 SharedString::from(format!("step-{id}")),
                 step.depth,
                 step.is_current,
@@ -752,11 +750,11 @@ impl OneStepLayout {
                 format!("sidebar-{}", step.id),
                 &step.label,
             )))
-            .children(count_badge(colors, step.thread_count))
+            .children(count_badge(&colors, step.thread_count))
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
             sidebar_row(
-                colors,
+                &colors,
                 "safety-net",
                 0,
                 safety_net.is_current,
@@ -772,11 +770,11 @@ impl OneStepLayout {
                     .text_xs()
                     .text_color(colors.muted_text)
                     .child(match safety_net.pieces {
-                        1 => "1 piece".to_string(),
+                        1 => "1 piece".to_owned(),
                         pieces => format!("{pieces} pieces"),
                     }),
             )
-            .children(count_badge(colors, safety_net.thread_count))
+            .children(count_badge(&colors, safety_net.thread_count))
         });
         let header = div()
             .flex_none()
@@ -788,7 +786,7 @@ impl OneStepLayout {
             .gap_3()
             .border_b_1()
             .border_color(colors.subtle_border)
-            .child(progress_meter(colors, progress))
+            .child(progress_meter(&colors, progress))
             .child(finish_dialog)
             .children(sync_notices);
         div()
@@ -825,7 +823,7 @@ impl OneStepLayout {
                     .children(step_rows)
                     .children(safety_net_row),
             )
-            .child(key_hints(colors))
+            .child(key_hints(&colors))
     }
 
     /// The PR this review is of, and the window-wide actions.
@@ -833,9 +831,9 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let review = self.session.read(cx).review();
         let pr = review.pr().clone();
-        let title = review.title().to_string();
+        let title = review.title().to_owned();
         let jump = button(
-            colors,
+            &colors,
             "title-bar-jump",
             ButtonKind::Ghost,
             ButtonSize::Small,
@@ -846,7 +844,7 @@ impl OneStepLayout {
         .on_click(cx.listener(|this, _, window, cx| this.toggle_jump(&ToggleJump, window, cx)));
         let pr_link = pr.to_string();
         let github = button(
-            colors,
+            &colors,
             "title-bar-github",
             ButtonKind::Ghost,
             ButtonSize::Small,
@@ -918,7 +916,7 @@ impl OneStepLayout {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(eyebrow(colors, "Summary"))
+                .child(eyebrow(&colors, "Summary"))
                 .child(
                     div()
                         .text_2xl()
@@ -966,7 +964,7 @@ impl OneStepLayout {
             PageRow::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
-            } => repin_notes(colors, gone_pieces, text_may_be_old).into_any_element(),
+            } => repin_notes(&colors, gone_pieces, text_may_be_old).into_any_element(),
             PageRow::Toolbar(toolbar) => self.toolbar(&toolbar, cx).into_any_element(),
             PageRow::ScreenFooter(footer) => screen_footer(&footer, cx).into_any_element(),
             PageRow::SafetyNetIntro => SafetyNetIntro.into_any_element(),
@@ -993,7 +991,7 @@ impl OneStepLayout {
                                 .child(if fold.is_folded { "▸" } else { "▾" })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.change_review(cx, |review| {
-                                        review.toggle_box_fold(&fold.step, &fold.path)
+                                        review.toggle_box_fold(&fold.step, &fold.path);
                                     });
                                 })),
                         )
@@ -1013,17 +1011,17 @@ impl OneStepLayout {
                 )
                 .into_any_element()
             }
-            PageRow::NoChangeSinceRead => no_change_since_read_row(colors).into_any_element(),
+            PageRow::NoChangeSinceRead => no_change_since_read_row(&colors).into_any_element(),
             PageRow::BinaryFile { piece, link } => {
-                binary_file_row(colors, format!("binary-{piece}").into(), link, cx)
+                binary_file_row(&colors, format!("binary-{piece}").into(), link, cx)
                     .into_any_element()
             }
-            PageRow::Image { path, .. } => piece_row(colors)
+            PageRow::Image { path, .. } => piece_row(&colors)
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
-            PageRow::OnlyWhitespace => only_whitespace_row(colors).into_any_element(),
+            PageRow::OnlyWhitespace => only_whitespace_row(&colors).into_any_element(),
             PageRow::HunkGap { id, more } => {
-                hunk_gap(colors, id, more, self.on_more_context(cx)).into_any_element()
+                hunk_gap(&colors, id, more, self.on_more_context(cx)).into_any_element()
             }
             PageRow::Line(line) => {
                 let is_selected = selected.is_some_and(|rows| rows.contains(index, &line.location));
@@ -1032,7 +1030,7 @@ impl OneStepLayout {
                     .as_ref()
                     .filter(|selection| selection.is_on(self.session.read(cx).review().screen()))
                     .and_then(|selection| selection.range_on(index, line.code().len()));
-                let on_code_gesture = self.on_code_gesture.clone();
+                let on_code_gesture = Rc::clone(&self.on_code_gesture);
                 let path = line.location.path.clone();
                 let scroll_x = self
                     .code_scroll_x
@@ -1041,7 +1039,7 @@ impl OneStepLayout {
                 let on_scroll_x: OnScrollX = Rc::new(move |delta, window, cx| {
                     layout_handle
                         .update(cx, |this, cx| {
-                            this.scroll_code_sideways(&path, delta, window, cx)
+                            this.scroll_code_sideways(&path, delta, window, cx);
                         })
                         .ok();
                 });
@@ -1051,10 +1049,10 @@ impl OneStepLayout {
                     .with_code_selection(CodeSelectionHooks {
                         selected: code_selection,
                         on_gesture: Rc::new(move |gesture, byte, window, cx| {
-                            on_code_gesture(gesture, CodeSpot { row: index, byte }, window, cx)
+                            on_code_gesture(gesture, CodeSpot { row: index, byte }, window, cx);
                         }),
                     })
-                    .with_gestures(self.on_row_gesture.clone())
+                    .with_gestures(Rc::clone(&self.on_row_gesture))
                     .into_any_element()
             }
             PageRow::Thread {
@@ -1064,24 +1062,24 @@ impl OneStepLayout {
             } => {
                 let thread = self.thread_element(&view, cx);
                 if is_under_a_line {
-                    piece_row(colors).child(thread).into_any_element()
+                    piece_row(&colors).child(thread).into_any_element()
                 } else {
                     div().pb_3().child(thread).into_any_element()
                 }
             }
-            PageRow::QueuedComment(queued) => piece_row(colors)
+            PageRow::QueuedComment(queued) => piece_row(&colors)
                 .child(self.queued_comment(&queued, cx))
                 .into_any_element(),
-            PageRow::Composer { place, .. } => piece_row(colors)
+            PageRow::Composer { place, .. } => piece_row(&colors)
                 .children(self.composer(&place, cx))
                 .into_any_element(),
-            PageRow::AskMarker(ask) => piece_row(colors)
+            PageRow::AskMarker(ask) => piece_row(&colors)
                 .flex()
                 .px_2()
                 .py_1()
                 .child(self.ask_at(&ask, cx))
                 .into_any_element(),
-            PageRow::PieceEnd => piece_end(colors).into_any_element(),
+            PageRow::PieceEnd => piece_end(&colors).into_any_element(),
         }
     }
 
@@ -1095,7 +1093,7 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_2()
-            .child(eyebrow(colors, "PR description"))
+            .child(eyebrow(&colors, "PR description"))
             .child(
                 div()
                     .px_4()
@@ -1124,7 +1122,7 @@ impl OneStepLayout {
         let full_diff = toolbar.full_diff.as_ref().map(|control| {
             let step = control.step.clone();
             toggle_button(
-                colors,
+                &colors,
                 "full-diff-toggle",
                 control.is_showing_full_diff,
                 ButtonSize::Small,
@@ -1135,14 +1133,14 @@ impl OneStepLayout {
             .child("Full diff, not only the change since your read")
         });
         let whitespace = toolbar.ignores_whitespace.map(|is_on| {
-            toggle_button(colors, "ignore-whitespace", is_on, ButtonSize::Small)
+            toggle_button(&colors, "ignore-whitespace", is_on, ButtonSize::Small)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.change_review(cx, Review::toggle_ignore_whitespace);
                 }))
                 .child("Hide whitespace")
         });
         let wrap = toolbar.wraps_lines.map(|is_on| {
-            toggle_button(colors, "wrap-lines", is_on, ButtonSize::Small)
+            toggle_button(&colors, "wrap-lines", is_on, ButtonSize::Small)
                 .tooltip(tooltip(|_| "Wrap long lines (W)".into()))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.change_review(cx, Review::toggle_wrap_lines);
@@ -1184,7 +1182,7 @@ impl OneStepLayout {
 /// Keeps prose at a readable line length on a wide window; code still takes the full width.
 const READING_WIDTH: Pixels = px(760.);
 
-fn eyebrow(colors: Colors, text: impl Into<SharedString>) -> impl IntoElement {
+fn eyebrow(colors: &Colors, text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .text_xs()
         .font_weight(FontWeight::MEDIUM)
@@ -1210,9 +1208,9 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
         title
     };
     let eyebrow_text = match (heading.number, heading.is_gone) {
-        (_, true) => "Gone since the last version".to_string(),
+        (_, true) => "Gone since the last version".to_owned(),
         (Some((number, count)), false) => format!("Step {number} of {count}"),
-        (None, false) => "Step".to_string(),
+        (None, false) => "Step".to_owned(),
     };
     div()
         .w_full()
@@ -1228,13 +1226,13 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(eyebrow(colors, eyebrow_text))
+                .child(eyebrow(&colors, eyebrow_text))
                 .child(title),
         )
         .child(tick_button(heading.is_ticked, heading.id.clone(), cx))
 }
 
-fn repin_notes(colors: Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
+fn repin_notes(colors: &Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
     let note = |text: String| {
         div()
             .px_2()
@@ -1251,12 +1249,12 @@ fn repin_notes(colors: Colors, gone_pieces: usize, text_may_be_old: bool) -> imp
         .text_xs()
         .when(gone_pieces > 0, |row| {
             row.child(note(match gone_pieces {
-                1 => "1 piece gone since last version".to_string(),
+                1 => "1 piece gone since last version".to_owned(),
                 count => format!("{count} pieces gone since last version"),
             }))
         })
         .when(text_may_be_old, |row| {
-            row.child(note("The text may describe an older version".to_string()))
+            row.child(note("The text may describe an older version".to_owned()))
         })
 }
 
@@ -1264,7 +1262,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
     let colors = Colors::active(cx);
     let previous = footer.has_previous.then(|| {
         button(
-            colors,
+            &colors,
             "footer-previous",
             ButtonKind::Ghost,
             ButtonSize::Regular,
@@ -1276,7 +1274,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
     });
     let next_label = footer.next.as_ref().map(|next| match next {
         NextScreen::Step { title } => title.clone(),
-        NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_string(),
+        NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
     let action = match (&footer.ticks, footer.next.is_some(), footer.is_summary) {
         (_, true, true) => Some("Start the tour →"),
@@ -1288,7 +1286,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
     let primary = action.map(|label| {
         let ticks = footer.ticks.clone();
         button(
-            colors,
+            &colors,
             "footer-next",
             ButtonKind::Primary,
             ButtonSize::Regular,
@@ -1341,7 +1339,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
 }
 
 fn tool_button(
-    colors: Colors,
+    colors: &Colors,
     id: impl Into<gpui::ElementId>,
     label: &'static str,
 ) -> Stateful<Div> {
@@ -1355,7 +1353,7 @@ fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> 
     } else {
         ButtonKind::Secondary
     };
-    button(colors, "tick", kind, ButtonSize::Regular)
+    button(&colors, "tick", kind, ButtonSize::Regular)
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
         .child(if is_ticked {
             "✓ Read"
@@ -1364,7 +1362,7 @@ fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> 
         })
 }
 
-fn progress_meter(colors: Colors, progress: ReadProgress) -> impl IntoElement {
+fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
     let share = if progress.total == 0 {
         0.
     } else {
@@ -1409,7 +1407,7 @@ fn progress_meter(colors: Colors, progress: ReadProgress) -> impl IntoElement {
         )
 }
 
-fn key_hints(colors: Colors) -> impl IntoElement {
+fn key_hints(colors: &Colors) -> impl IntoElement {
     let hint = |keys: &'static [&'static str], what: &'static str| {
         div()
             .flex()
@@ -1434,7 +1432,7 @@ fn key_hints(colors: Colors) -> impl IntoElement {
         .child(hint(&["W"], "wrap long lines"))
 }
 
-fn key_cap(colors: Colors, key: &'static str) -> impl IntoElement {
+fn key_cap(colors: &Colors, key: &'static str) -> impl IntoElement {
     div()
         .min_w(px(18.))
         .h(px(18.))
@@ -1463,7 +1461,7 @@ impl Render for OneStepLayout {
         let key_context = if is_composing {
             format!("{} {}", Self::KEY_CONTEXT, CommentComposer::KEY_CONTEXT)
         } else {
-            Self::KEY_CONTEXT.to_string()
+            Self::KEY_CONTEXT.to_owned()
         };
         let frame_painted_marker = self.frame_stats.frame_started();
         self.run_scroll_script(window, cx);
@@ -1538,7 +1536,7 @@ impl Render for OneStepLayout {
                             old_head,
                             repin_progress,
                             cx.listener(|this, _, _, cx| {
-                                this.session.update(cx, |session, cx| session.repin(cx))
+                                this.session.update(cx, ReviewSession::repin);
                             }),
                         )
                     }))
@@ -1568,8 +1566,7 @@ impl Render for OneStepLayout {
                                     brief,
                                     refresh_progress,
                                     cx.listener(|this, _, _, cx| {
-                                        this.session
-                                            .update(cx, |session, cx| session.refresh_tour(cx))
+                                        this.session.update(cx, ReviewSession::refresh_tour);
                                     }),
                                 )
                             }),
@@ -1606,7 +1603,7 @@ impl CodeScrollX {
             self.screen = Some(screen.clone());
             self.by_path.clear();
         }
-        let offset = self.by_path.entry(path.to_string()).or_insert(Pixels::ZERO);
+        let offset = self.by_path.entry(path.to_owned()).or_insert(Pixels::ZERO);
         *offset = (*offset + delta).clamp(Pixels::ZERO, max);
     }
 }

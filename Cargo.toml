@@ -54,7 +54,14 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+[lints.rust]
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
 [lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# panic-free
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -62,9 +69,48 @@ unreachable = "deny"
 todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
 cast_possible_truncation = "deny"
 cast_sign_loss = "deny"
 cast_possible_wrap = "deny"
 cast_lossless = "deny"
-string_slice = "deny"
-indexing_slicing = "deny"
+
+# memory-lean
+clone_on_ref_ptr = "deny"
+rc_buffer = "deny"
+redundant_clone = "deny"
+needless_pass_by_value = "deny"
+large_types_passed_by_value = "warn"
+trivially_copy_pass_by_ref = "deny"
+needless_collect = "deny"
+format_collect = "deny"
+format_push_string = "deny"
+assigning_clones = "deny"
+implicit_clone = "deny"
+or_fun_call = "deny"
+
+# explicitness and idiom
+let_underscore_must_use = "deny"
+map_err_ignore = "deny"
+str_to_string = "deny"
+allow_attributes_without_reason = "deny"
+use_self = "warn"
+useless_let_if_seq = "warn"
+
+# pedantic members left off: noise for a gpui app, or false alarms here
+# cast_precision_loss: usize and u32 to f32 for pixel layout, where the precision is irrelevant
+# struct_field_names: two hits, both good names (on_* callbacks, a collection named after its type)
+# unused_self: view helpers and the comment desk's rules are methods on their owner on purpose
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+unreadable_literal = "allow"
+too_many_lines = "allow"
+cast_precision_loss = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
+unused_self = "allow"
+fn_params_excessive_bools = "allow"

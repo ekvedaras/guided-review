@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -100,7 +107,7 @@ fn read_forward(review: &mut Review) -> Vec<String> {
     while review.go_forward() {
         match review.screen() {
             Screen::Step(id) => seen.push(id.to_string()),
-            Screen::SafetyNet => seen.push("safety net".to_string()),
+            Screen::SafetyNet => seen.push("safety net".to_owned()),
             Screen::Summary => panic!("going forward never reaches to the summary"),
         }
     }
@@ -260,15 +267,15 @@ fn a_step_shows_its_pieces_with_path_side_and_line_on_every_line() {
         shown_lines(&review),
         [
             (
-                "app/Order.php#Order::total".to_string(),
+                "app/Order.php#Order::total".to_owned(),
                 vec![
-                    "app/Order.php:base:7         return 1;".to_string(),
-                    "app/Order.php:head:7         return 2;".to_string(),
+                    "app/Order.php:base:7         return 1;".to_owned(),
+                    "app/Order.php:head:7         return 2;".to_owned(),
                 ]
             ),
             (
-                "README.md#hunk-1".to_string(),
-                vec!["README.md:head:2 world".to_string()]
+                "README.md#hunk-1".to_owned(),
+                vec!["README.md:head:2 world".to_owned()]
             ),
         ]
     );

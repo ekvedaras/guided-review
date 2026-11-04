@@ -89,7 +89,7 @@ fn php_imports(text: &str) -> Vec<String> {
         };
         for item in items {
             let imported = item.split(" as ").next().unwrap_or(item).trim();
-            names.push(imported.rsplit('\\').next().unwrap_or(imported).to_string());
+            names.push(imported.rsplit('\\').next().unwrap_or(imported).to_owned());
         }
     }
     names
@@ -117,13 +117,13 @@ fn typescript_imports(text: &str) -> Vec<String> {
             .trim()
             .trim_end_matches(';')
             .trim_matches(['"', '\'']);
-        names.push(module_stem(module).to_string());
+        names.push(module_stem(module).to_owned());
         let clause = clause.trim_start().trim_start_matches("import").trim();
         let clause = clause.strip_prefix("type ").unwrap_or(clause);
         for part in clause.split([',', '{', '}']) {
             let imported = part.split(" as ").next().unwrap_or(part).trim();
             if !imported.is_empty() && !imported.starts_with('*') {
-                names.push(imported.to_string());
+                names.push(imported.to_owned());
             }
         }
         statement.clear();

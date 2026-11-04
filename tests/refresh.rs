@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use std::os::unix::fs::PermissionsExt;
@@ -217,7 +224,8 @@ impl RefreshWriter for SkillStandIn {
         if self.fails {
             anyhow::bail!("claude stopped");
         }
-        ReviewStateFile::for_pr(&self.home, pr).update(|state| state.finish_refresh())
+        ReviewStateFile::for_pr(&self.home, pr)
+            .update(guided_review::viewer::ReviewState::finish_refresh)
     }
 }
 

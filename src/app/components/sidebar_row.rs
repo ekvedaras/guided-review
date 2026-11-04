@@ -24,7 +24,7 @@ pub enum RowMark {
 
 /// The look every clickable row of the sidebar shares: a mark, then the caller's label.
 pub fn sidebar_row(
-    colors: Colors,
+    colors: &Colors,
     id: impl Into<ElementId>,
     depth: usize,
     is_current: bool,
@@ -55,7 +55,7 @@ pub fn sidebar_row(
         .child(mark_element(colors, mark, is_current))
 }
 
-fn mark_element(colors: Colors, mark: RowMark, is_current: bool) -> impl IntoElement {
+fn mark_element(colors: &Colors, mark: RowMark, is_current: bool) -> impl IntoElement {
     let slot = div()
         .flex_none()
         .w(px(14.))
@@ -78,7 +78,7 @@ fn mark_element(colors: Colors, mark: RowMark, is_current: bool) -> impl IntoEle
 }
 
 /// How many review threads hang on a row's screen.
-pub fn count_badge(colors: Colors, count: usize) -> Option<impl IntoElement> {
+pub fn count_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
     (count > 0).then(|| {
         div()
             .flex_none()

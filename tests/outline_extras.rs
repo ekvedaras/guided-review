@@ -1,6 +1,10 @@
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
+use std::fmt::Write;
 use support::{FakeGitHub, FixtureRepo, GuidedReview};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -26,7 +30,7 @@ fn pieces_section(base_files: &[(&str, &str)], head_files: &[(&str, &str)]) -> V
         .lines()
         .skip_while(|line| !line.is_empty())
         .skip(1)
-        .map(str::to_string)
+        .map(str::to_owned)
         .collect()
 }
 
@@ -39,7 +43,10 @@ fn subject_lines(section: &[String]) -> Vec<&str> {
 }
 
 fn lines_of_code(count: usize) -> String {
-    (0..count).map(|n| format!("line {n}\n")).collect()
+    (0..count).fold(String::new(), |mut lines, n| {
+        writeln!(lines, "line {n}").ok();
+        lines
+    })
 }
 
 #[test]
@@ -100,7 +107,7 @@ fn big_prs_get_no_read_in_full_hint() {
     assert!(!outline.contains("small PR"), "{outline}");
 }
 
-const ORDER_PHP: &str = r#"<?php
+const ORDER_PHP: &str = r"<?php
 
 class Order
 {
@@ -114,9 +121,9 @@ class Order
         return 1;
     }
 }
-"#;
+";
 
-const ORDER_PHP_CHANGED: &str = r#"<?php
+const ORDER_PHP_CHANGED: &str = r"<?php
 
 class Order
 {
@@ -130,9 +137,9 @@ class Order
         return 2;
     }
 }
-"#;
+";
 
-const ORDER_TEST_PHP: &str = r#"<?php
+const ORDER_TEST_PHP: &str = r"<?php
 
 class OrderTest
 {
@@ -141,9 +148,9 @@ class OrderTest
         assert(1 === 1);
     }
 }
-"#;
+";
 
-const ORDER_TEST_PHP_CHANGED: &str = r#"<?php
+const ORDER_TEST_PHP_CHANGED: &str = r"<?php
 
 class OrderTest
 {
@@ -152,7 +159,7 @@ class OrderTest
         assert(2 === 2);
     }
 }
-"#;
+";
 
 #[test]
 fn php_test_methods_are_test_pieces_with_subjects_found_by_name() {

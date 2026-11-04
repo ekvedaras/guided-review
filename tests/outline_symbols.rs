@@ -1,4 +1,7 @@
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -23,7 +26,7 @@ fn pieces_of_added_file(path: &str, content: &str) -> Vec<String> {
                 && !line.starts_with("  #(top)")
                 && !line.trim_start().starts_with("subjects:")
         })
-        .map(|line| line.trim_start().to_string())
+        .map(|line| line.trim_start().to_owned())
         .collect()
 }
 
@@ -31,7 +34,7 @@ fn pieces_of_added_file(path: &str, content: &str) -> Vec<String> {
 fn ts_functions_classes_and_methods_are_pieces() {
     let pieces = pieces_of_added_file(
         "src/cart.ts",
-        r#"export function total(items: number[]): number {
+        r"export function total(items: number[]): number {
   return items.length;
 }
 
@@ -46,7 +49,7 @@ export abstract class Cart {
 interface Priced {
   price: number;
 }
-"#,
+",
     );
 
     assert_eq!(
@@ -64,7 +67,7 @@ interface Priced {
 fn ts_type_aliases_and_enums_are_pieces() {
     let pieces = pieces_of_added_file(
         "src/types.ts",
-        r#"export type Money = {
+        r"export type Money = {
   cents: number;
 };
 
@@ -72,7 +75,7 @@ enum Status {
   Open,
   Closed,
 }
-"#,
+",
     );
 
     assert_eq!(
@@ -136,7 +139,7 @@ fn ts_tests_are_pieces_nested_under_their_describe() {
 fn php_enums_and_consts_are_pieces() {
     let pieces = pieces_of_added_file(
         "app/Status.php",
-        r#"<?php
+        r"<?php
 
 const LIMIT = 10;
 
@@ -151,7 +154,7 @@ enum Status: string
         return 'x';
     }
 }
-"#,
+",
     );
 
     assert_eq!(

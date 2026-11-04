@@ -18,17 +18,17 @@ pub enum Block {
     },
     List {
         first_number: Option<u64>,
-        items: Vec<Vec<Block>>,
+        items: Vec<Vec<Self>>,
     },
     Code {
         language: Option<String>,
         text: String,
     },
-    Quote(Vec<Block>),
+    Quote(Vec<Self>),
     /// A `<details>` fold: shown closed, the reader opens it.
     Details {
         summary: Vec<Run>,
-        body: Vec<Block>,
+        body: Vec<Self>,
     },
     Rule,
 }
@@ -69,7 +69,7 @@ impl Markdown {
 
 impl Block {
     fn nested_one_level(self) -> Self {
-        let nested = |blocks: Vec<Block>| blocks.into_iter().map(Block::nested_one_level).collect();
+        let nested = |blocks: Vec<Self>| blocks.into_iter().map(Self::nested_one_level).collect();
         match self {
             Self::Heading { level, text } => Self::Heading {
                 level: (level + 1).min(6),
@@ -224,7 +224,7 @@ impl Builder {
             }
             Event::Html(html) | Event::InlineHtml(html) => self.html(&html),
             Event::TaskListMarker(checked) => {
-                self.push_text(if checked { "[x] " } else { "[ ] " }, false)
+                self.push_text(if checked { "[x] " } else { "[ ] " }, false);
             }
             _ => {}
         }
@@ -244,7 +244,7 @@ impl Builder {
                     CodeBlockKind::Fenced(info) => info
                         .split_whitespace()
                         .next()
-                        .map(str::to_string)
+                        .map(str::to_owned)
                         .filter(|language| !language.is_empty()),
                     CodeBlockKind::Indented => None,
                 };
@@ -318,7 +318,7 @@ impl Builder {
             TagEnd::Emphasis => self.style.italic = self.style.italic.saturating_sub(1),
             TagEnd::Strong => self.style.bold = self.style.bold.saturating_sub(1),
             TagEnd::Strikethrough => {
-                self.style.strikethrough = self.style.strikethrough.saturating_sub(1)
+                self.style.strikethrough = self.style.strikethrough.saturating_sub(1);
             }
             TagEnd::Link => {
                 self.style.links.pop();
@@ -326,7 +326,7 @@ impl Builder {
             TagEnd::Image => {
                 if let Some((url, alt)) = self.image.take() {
                     let text = if alt.is_empty() {
-                        "image".to_string()
+                        "image".to_owned()
                     } else {
                         alt
                     };
@@ -392,7 +392,7 @@ impl Builder {
                 if let Some(src) = attribute(tag, "src") {
                     let text = attribute(tag, "alt").filter(|alt| !alt.is_empty());
                     self.runs.push(Run {
-                        text: text.unwrap_or_else(|| "image".to_string()),
+                        text: text.unwrap_or_else(|| "image".to_owned()),
                         link: Some(src),
                         ..self.style_run()
                     });
@@ -504,7 +504,7 @@ impl Builder {
         let style = self.style_run();
         if code || style.link.is_some() {
             self.runs.push(Run {
-                text: text.to_string(),
+                text: text.to_owned(),
                 code,
                 ..style
             });
@@ -512,8 +512,8 @@ impl Builder {
         }
         for (part, is_url) in split_bare_urls(text) {
             self.runs.push(Run {
-                text: part.to_string(),
-                link: is_url.then(|| part.to_string()),
+                text: part.to_owned(),
+                link: is_url.then(|| part.to_owned()),
                 ..style.clone()
             });
         }
@@ -564,5 +564,5 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     let rest = tag.get(start..)?;
     let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
     let (value, _) = rest.strip_prefix(quote)?.split_once(quote)?;
-    Some(value.to_string())
+    Some(value.to_owned())
 }

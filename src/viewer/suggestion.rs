@@ -9,7 +9,7 @@ impl SuggestionDiff {
     pub fn of(commented_lines: &[String], suggested_text: &str) -> Self {
         Self {
             removed: commented_lines.to_vec(),
-            added: suggested_text.lines().map(str::to_string).collect(),
+            added: suggested_text.lines().map(str::to_owned).collect(),
         }
     }
 }

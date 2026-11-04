@@ -191,7 +191,7 @@ impl FakeGitHub {
 
     /// A change made on the GitHub web page.
     pub fn set_viewed(&self, path: &str, state: ViewedState) {
-        self.viewed.lock().unwrap().insert(path.to_string(), state);
+        self.viewed.lock().unwrap().insert(path.to_owned(), state);
     }
 
     pub fn viewed_state(&self, path: &str) -> ViewedState {
@@ -234,7 +234,7 @@ impl ViewedFilesPort for FakeGitHub {
     fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetViewed {
             pr: pr.clone(),
-            path: path.to_string(),
+            path: path.to_owned(),
             viewed,
         });
         self.check_access()?;
@@ -288,8 +288,8 @@ impl ReviewThreadsPort for FakeGitHub {
         mode: SendMode,
     ) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::Reply {
-            thread_id: thread_id.to_string(),
-            body: body.to_string(),
+            thread_id: thread_id.to_owned(),
+            body: body.to_owned(),
             mode,
         });
         self.fail_if_connection_lost()?;
@@ -301,20 +301,20 @@ impl ReviewThreadsPort for FakeGitHub {
 
     fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetResolved {
-            thread_id: thread_id.to_string(),
+            thread_id: thread_id.to_owned(),
             resolved,
         });
         self.fail_if_connection_lost()?;
         self.resolved_now
             .lock()
             .unwrap()
-            .insert(thread_id.to_string(), resolved);
+            .insert(thread_id.to_owned(), resolved);
         Ok(())
     }
 
     fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetReaction {
-            comment_id: comment_id.to_string(),
+            comment_id: comment_id.to_owned(),
             reaction,
             on,
         });
@@ -322,7 +322,7 @@ impl ReviewThreadsPort for FakeGitHub {
         self.reacted_now
             .lock()
             .unwrap()
-            .insert((comment_id.to_string(), reaction), on);
+            .insert((comment_id.to_owned(), reaction), on);
         Ok(())
     }
 }
@@ -347,7 +347,7 @@ impl ReviewWritesPort for FakeGitHub {
         self.sent.record(GitHubCall::AddThread {
             pr: pr.clone(),
             place: place.clone(),
-            body: body.to_string(),
+            body: body.to_owned(),
         });
         self.fail_if_connection_lost()?;
         self.has_pending_review.store(true, Ordering::SeqCst);
@@ -366,7 +366,7 @@ impl ReviewWritesPort for FakeGitHub {
         self.sent.record(GitHubCall::CommentNow {
             pr: pr.clone(),
             place: place.clone(),
-            body: body.to_string(),
+            body: body.to_owned(),
         });
         self.fail_if_connection_lost()?;
         if self.use_up(&GitHubFault::PendingReviewAppearsOnCommentNow) {
@@ -390,7 +390,7 @@ impl ReviewWritesPort for FakeGitHub {
     ) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::Submit {
             verdict,
-            body: body.to_string(),
+            body: body.to_owned(),
         });
         self.fail_if_connection_lost()?;
         self.has_pending_review.store(false, Ordering::SeqCst);
@@ -410,7 +410,7 @@ impl FakeAgent {
             sent: sent.clone(),
             turns: turns
                 .iter()
-                .map(|turn| turn.lines().map(str::to_string).collect())
+                .map(|turn| turn.lines().map(str::to_owned).collect())
                 .collect(),
         }
     }
@@ -420,7 +420,9 @@ impl AgentPort for FakeAgent {
     fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
         self.sent.push(format!("agent: {message}"));
         let turn = self.turns.pop_front().unwrap_or_default();
-        turn.iter().for_each(|line| on_line(line));
+        for line in &turn {
+            on_line(line);
+        }
         Ok(())
     }
 
@@ -433,7 +435,7 @@ struct FakeTurnStopper(SentLog);
 
 impl TurnStopper for FakeTurnStopper {
     fn stop_turn(&self) -> anyhow::Result<()> {
-        self.0.push("agent: stop the turn".to_string());
+        self.0.push("agent: stop the turn".to_owned());
         Ok(())
     }
 }

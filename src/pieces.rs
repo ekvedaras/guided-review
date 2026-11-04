@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::code_source::{CodeSource, FileAt, FileDiff, FileStatus, Hunk, Line};
 use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
+use crate::hex;
 use crate::image_facts::{self, ImageChange};
 use crate::language::Language;
 use crate::pull_request::Sha;
@@ -127,13 +128,7 @@ impl DiffHash {
         for line in added {
             hasher.update(format!("+{}\n", line.text));
         }
-        Self(
-            hasher
-                .finalize()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
-        )
+        Self(hex::lower(hasher.finalize().iter()))
     }
 }
 
@@ -230,7 +225,7 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
                 None => context.cut_by_symbols()?,
             };
             Ok(ChangedFile {
-                path: diff.path().to_string(),
+                path: diff.path().to_owned(),
                 old_path: diff.old_path.clone().filter(|old| old != diff.path()),
                 binary: diff.binary,
                 status: diff.status(),
@@ -250,7 +245,7 @@ fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
     let cut_by_symbols = diffs.iter().filter(|diff| {
         !diff.binary
             && diff.status() != FileStatus::Deleted
-            && !(is_cut_per_hunk(diff.path()) && !diff.hunks.is_empty())
+            && (!is_cut_per_hunk(diff.path()) || diff.hunks.is_empty())
             && Language::for_path(diff.path()).is_some()
     });
     let both_sides = cut_by_symbols.flat_map(|diff| {
@@ -262,7 +257,7 @@ fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
         .chain(both_sides)
         .map(|(sha, path)| FileAt {
             sha: sha.clone(),
-            path: path.to_string(),
+            path: path.to_owned(),
         })
         .collect()
 }
@@ -327,7 +322,7 @@ impl<'a> CutContext<'a> {
                 let added: Vec<&Line> = hunk.added.iter().collect();
                 Piece::new(
                     PieceId {
-                        path: self.diff.path().to_string(),
+                        path: self.diff.path().to_owned(),
                         symbol: Some(format!("hunk-{}", index + 1)),
                     },
                     PieceKind::Hunk,
@@ -345,7 +340,7 @@ impl<'a> CutContext<'a> {
         let added: Vec<&Line> = self.diff.added.iter().collect();
         Piece::new(
             PieceId {
-                path: self.diff.path().to_string(),
+                path: self.diff.path().to_owned(),
                 symbol: None,
             },
             PieceKind::File,
@@ -392,7 +387,7 @@ impl<'a> CutContext<'a> {
         let changes = join_blank_line_changes(self.changes_by_slot(&pairing));
         let mut pieces: Vec<(usize, Piece)> = changes
             .into_iter()
-            .filter_map(|change| symbol_piece(&pairing, change, self.diff.status().into()))
+            .filter_map(|change| symbol_piece(&pairing, &change, self.diff.status().into()))
             .collect();
         pieces.sort_by_key(|(position, _)| *position);
         Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
@@ -472,7 +467,7 @@ struct SlotPair {
 
 fn symbol_piece(
     pairing: &SymbolPairing,
-    change: SymbolChange,
+    change: &SymbolChange,
     file_status: PieceStatus,
 ) -> Option<(usize, Piece)> {
     let slots = pairing.slots_of(&change.slot);
@@ -484,7 +479,7 @@ fn symbol_piece(
         .map_or_else(|| change.first_line(), |symbol| symbol.first_line);
     let base_tokens = pairing.base.tokens_in(&slots.base);
     let head_tokens = pairing.head.tokens_in(&slots.head);
-    let mark = mark_for(&change, &slots, pairing, base_tokens == head_tokens);
+    let mark = mark_for(change, &slots, pairing, base_tokens == head_tokens);
     let moved_body = match (&change.slot, status) {
         (Slot::Symbol(_), PieceStatus::Added) => Some(head_tokens.join(TOKEN_SEPARATOR)),
         (Slot::Symbol(_), PieceStatus::Deleted) => Some(base_tokens.join(TOKEN_SEPARATOR)),
@@ -492,7 +487,7 @@ fn symbol_piece(
     };
     let piece = Piece::new(
         PieceId {
-            path: change.path.to_string(),
+            path: change.path.to_owned(),
             symbol: Some(change.slot.id()),
         },
         kind,

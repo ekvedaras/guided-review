@@ -143,7 +143,7 @@ impl<'a> StepPage<'a> {
             .pieces
             .iter()
             .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-            .filter_map(|part| PieceDiff::of(part, files, display))
+            .filter_map(|part| PieceDiff::of(&part, files, display))
             .collect();
         Self {
             step,
@@ -170,7 +170,7 @@ impl SafetyNetPage {
         Self {
             pieces: coverage::safety_net(tour, files)
                 .into_iter()
-                .filter_map(|part| PieceDiff::of(part, files, display))
+                .filter_map(|part| PieceDiff::of(&part, files, display))
                 .collect(),
             threads: Vec::new(),
         }
@@ -183,14 +183,14 @@ impl PieceDiff {
     pub fn code_link(&self) -> Option<&CodeLink> {
         self.lines()
             .find(|line| line.location.side == Side::Head)
-            .or(self.lines().next())
+            .or_else(|| self.lines().next())
             .map(|line| &line.code_link)
             .or(self.binary_file.as_ref())
     }
 
     /// None when the piece's file is not among the changed files, which a cut piece never is.
     pub(super) fn of(
-        part: PiecePart,
+        part: &PiecePart,
         files: &[ChangedFile],
         display: &DiffDisplay,
     ) -> Option<Self> {
@@ -229,7 +229,7 @@ impl PieceDiff {
     /// No rows means nothing changed since the read. `display` links lines to the read head and
     /// shares everything else with the full diff, so rows keep path, side, line, links and spans.
     pub(super) fn since_read(
-        part: PiecePart,
+        part: &PiecePart,
         since_files: &[ChangedFile],
         display: &DiffDisplay,
     ) -> Self {

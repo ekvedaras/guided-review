@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -105,7 +112,7 @@ fn row(review: &Review, text: &str) -> LineLocation {
         .unwrap()
         .pieces
         .iter()
-        .flat_map(|piece| piece.lines())
+        .flat_map(guided_review::viewer::PieceDiff::lines)
         .find(|line| line.text == text)
         .unwrap_or_else(|| panic!("no row shows {text:?}"))
         .location
@@ -184,7 +191,7 @@ fn a_selection_on_expanded_context_takes_no_comment() {
     let refused = drag(&mut review, "line 5", "line ten");
 
     assert_eq!(refused, Err(CommentRefusal::NotInsideHunk));
-    assert!(review.comment_drafts().is_empty());
+    assert_eq!(review.comment_drafts(), []);
 }
 
 #[test]
@@ -320,7 +327,7 @@ fn comment_now_is_refused_when_a_pending_review_appeared_meanwhile_and_the_text_
     );
     assert!(!review.can_comment_now());
     assert_eq!(review.comment_drafts()[0].body, "now");
-    assert!(review.queued_comments().is_empty());
+    assert_eq!(review.queued_comments(), []);
 }
 
 #[test]
@@ -336,7 +343,7 @@ fn thread_null_is_a_failure_that_keeps_the_text_and_is_not_retried() {
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Rejected(_))));
     assert_eq!(review.comment_drafts()[0].body, "lost?");
-    assert!(review.queued_comments().is_empty());
+    assert_eq!(review.queued_comments(), []);
     assert!(
         !review.can_comment_now(),
         "it left an empty pending review behind"
@@ -355,7 +362,7 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
     let result = review.send_comment(&place, SendMode::AddToReview, &github);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
-    assert!(review.comment_drafts().is_empty());
+    assert_eq!(review.comment_drafts(), []);
     assert_eq!(review.queued_comments().len(), 1);
     assert_eq!(
         pull.open().queued_comments().len(),
@@ -366,7 +373,7 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
     github.heal(&GitHubFault::ConnectionLost);
     review.send_queued_comments(&github).unwrap();
 
-    assert!(review.queued_comments().is_empty());
+    assert_eq!(review.queued_comments(), []);
     assert!(github.has_pending_review_now());
 }
 
@@ -435,7 +442,7 @@ fn discarding_removes_the_draft_from_the_state_file() {
 
     review.discard_draft(&place).unwrap();
 
-    assert!(pull.open().comment_drafts().is_empty());
+    assert_eq!(pull.open().comment_drafts(), []);
 }
 
 #[test]

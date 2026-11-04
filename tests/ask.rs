@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use std::path::PathBuf;
@@ -80,7 +87,7 @@ fn start(launcher: &FakeAgentLauncher, resume: Option<&str>) -> Box<dyn AgentPor
     let launch = shop().review.agent_launch(
         PathBuf::from("/clones/shop"),
         &AskSettings::default(),
-        resume.map(str::to_string),
+        resume.map(str::to_owned),
     );
     launcher.start(&launch).unwrap()
 }
@@ -92,10 +99,10 @@ fn asking_about_a_step_sends_pointers_step_text_and_diff_lines_and_streams_the_a
     let store = FakeAskStore::default();
     let launcher = FakeAgentLauncher {
         sent: sent.clone(),
-        turns: vec![PONG.to_string()],
+        turns: vec![PONG.to_owned()],
     };
     let mut agent = start(&launcher, None);
-    let mut asks = Asks::load(Arc::new(store.clone())).unwrap();
+    let mut asks = Asks::load(Arc::new(store)).unwrap();
 
     let id = asks.start(order_step(), &head);
     let context = review.ask_context(&order_step()).unwrap();
@@ -140,7 +147,7 @@ fn a_follow_up_sends_only_the_question() {
     let sent = SentLog::default();
     let launcher = FakeAgentLauncher {
         sent: sent.clone(),
-        turns: vec![PONG.to_string(), PONG.to_string()],
+        turns: vec![PONG.to_owned(), PONG.to_owned()],
     };
     let mut agent = start(&launcher, None);
     let mut asks = Asks::load(Arc::new(FakeAskStore::default())).unwrap();
@@ -161,8 +168,8 @@ fn asks_are_kept_in_the_store_newest_first_per_place_and_come_back_on_load() {
     let sent = SentLog::default();
     let store = FakeAskStore::default();
     let launcher = FakeAgentLauncher {
-        sent: sent.clone(),
-        turns: vec![PONG.to_string(), PONG.to_string()],
+        sent,
+        turns: vec![PONG.to_owned(), PONG.to_owned()],
     };
     let mut agent = start(&launcher, None);
     let mut asks = Asks::load(Arc::new(store.clone())).unwrap();
@@ -174,7 +181,7 @@ fn asks_are_kept_in_the_store_newest_first_per_place_and_come_back_on_load() {
         .unwrap();
     let unanswered_draft = asks.start(Place::Tour, &head);
 
-    let reloaded = Asks::load(Arc::new(store.clone())).unwrap();
+    let reloaded = Asks::load(Arc::new(store)).unwrap();
 
     let at_step: Vec<&str> = reloaded
         .at(&order_step())
@@ -200,8 +207,8 @@ fn a_tool_use_shows_as_activity_and_the_answer_continues_in_a_new_paragraph() {
     let Shop { review, head } = shop();
     let sent = SentLog::default();
     let launcher = FakeAgentLauncher {
-        sent: sent.clone(),
-        turns: vec![READS_A_FILE.to_string()],
+        sent,
+        turns: vec![READS_A_FILE.to_owned()],
     };
     let mut agent = start(&launcher, None);
     let mut asks = Asks::load(Arc::new(FakeAskStore::default())).unwrap();
@@ -228,7 +235,7 @@ fn an_error_result_is_kept_as_the_ask_failure() {
     let Shop { review, head } = shop();
     let launcher = FakeAgentLauncher {
         sent: SentLog::default(),
-        turns: vec![FAILED.to_string()],
+        turns: vec![FAILED.to_owned()],
     };
     let mut agent = start(&launcher, None);
     let mut asks = Asks::load(Arc::new(FakeAskStore::default())).unwrap();
@@ -250,7 +257,7 @@ fn a_piece_and_the_whole_tour_have_their_own_context() {
     let piece = review
         .ask_context(&Place::Piece {
             step: StepId::from("order"),
-            piece: "app/Order.php#Order::total".to_string(),
+            piece: "app/Order.php#Order::total".to_owned(),
         })
         .unwrap();
     let tour = review.ask_context(&Place::Tour).unwrap();
@@ -274,7 +281,7 @@ fn the_agent_is_started_in_the_clone_with_default_model_and_effort_and_can_resum
     assert_eq!(
         sent.agent_lines(),
         [
-            "agent started in /clones/shop with opus / medium".to_string(),
+            "agent started in /clones/shop with opus / medium".to_owned(),
             format!("agent started in /clones/shop with opus / medium, resuming {SESSION}"),
         ]
     );

@@ -86,8 +86,8 @@ struct CodeColors {
 }
 
 impl Colors {
-    fn light() -> Colors {
-        Colors {
+    fn light() -> Self {
+        Self {
             background: rgb(0xffffff),
             sidebar: rgb(0xf6f8fa),
             surface: rgb(0xf6f8fa),
@@ -131,8 +131,8 @@ impl Colors {
         }
     }
 
-    fn dark() -> Colors {
-        Colors {
+    fn dark() -> Self {
+        Self {
             background: rgb(0x0d1117),
             sidebar: rgb(0x010409),
             surface: rgb(0x161b22),

@@ -4,6 +4,10 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -33,25 +37,23 @@ struct CountingSource {
 impl CountingSource {
     fn with_file(mut self, sha: &str, path: &str, text: &str) -> Self {
         self.files
-            .insert((sha.to_string(), path.to_string()), text.to_string());
+            .insert((sha.to_owned(), path.to_owned()), text.to_owned());
         self
     }
 
     fn with_patch(mut self, patch: &str) -> Self {
-        self.patch = patch.to_string();
+        patch.clone_into(&mut self.patch);
         self
     }
 
     fn reading_together(mut self, paths: &[&str]) -> Self {
-        self.read_together = paths.iter().map(|path| path.to_string()).collect();
+        self.read_together = paths.iter().map(ToString::to_string).collect();
         self
     }
 
     fn reads_of(&self, sha: &str, path: &str) -> usize {
         let reads = self.reads.lock().unwrap();
-        *reads
-            .get(&(sha.to_string(), path.to_string()))
-            .unwrap_or(&0)
+        *reads.get(&(sha.to_owned(), path.to_owned())).unwrap_or(&0)
     }
 
     fn wait_for_other_reads(&self) -> anyhow::Result<()> {
@@ -78,7 +80,7 @@ impl CodeSource for CountingSource {
     }
 
     fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
-        let key = (sha.to_string(), path.to_string());
+        let key = (sha.to_string(), path.to_owned());
         *self.reads.lock().unwrap().entry(key.clone()).or_default() += 1;
         if self.read_together.iter().any(|wanted| wanted == path) {
             self.wait_for_other_reads()?;
@@ -113,7 +115,7 @@ fn cached(source: &Arc<CountingSource>) -> CachedCodeSource {
 fn file_at(sha: &str, path: &str) -> FileAt {
     FileAt {
         sha: Sha::new(sha),
-        path: path.to_string(),
+        path: path.to_owned(),
     }
 }
 

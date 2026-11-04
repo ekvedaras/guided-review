@@ -4,8 +4,15 @@
     clippy::panic,
     reason = "a panic in a test helper is the test failing"
 )]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "test helpers take owned arguments so a case reads as a plain call"
+)]
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each test binary uses only part of the shared test support"
+)]
 mod support;
 
 use guided_review::local_git::LocalGit;
@@ -333,7 +340,7 @@ fn is_in_safety_net_only(shop: &Shop, thread: ReviewThread) -> bool {
 fn a_left_comment_on_an_unchanged_line_hangs_under_the_row_the_step_shows_for_it() {
     let base: Vec<_> = (1..=10).map(|n| format!("l{n}")).collect();
     let mut head = base.clone();
-    head.splice(2..2, ["new1".to_string(), "new2".to_string()]);
+    head.splice(2..2, ["new1".to_owned(), "new2".to_owned()]);
     let shop = Shop::with_list(
         &base.iter().map(String::as_str).collect::<Vec<_>>(),
         &head.iter().map(String::as_str).collect::<Vec<_>>(),

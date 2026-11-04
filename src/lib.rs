@@ -7,6 +7,7 @@ pub mod coverage;
 pub mod eval;
 pub mod file_rules;
 pub mod github;
+pub mod hex;
 pub mod ide;
 pub mod image_facts;
 pub mod json;

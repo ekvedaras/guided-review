@@ -60,10 +60,10 @@ impl RenderOnce for TitleBarArea {
             .border_b_1()
             .border_color(colors.subtle_border)
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                on_down.update(cx, |pressed, _| *pressed = true)
+                on_down.update(cx, |pressed, _| *pressed = true);
             })
             .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                on_up.update(cx, |pressed, _| *pressed = false)
+                on_up.update(cx, |pressed, _| *pressed = false);
             })
             .on_mouse_down_out(move |_, _, cx| on_out.update(cx, |pressed, _| *pressed = false))
             .on_mouse_move(move |_, window, cx| {

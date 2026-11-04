@@ -40,7 +40,7 @@ impl TextDraft {
     /// The caret goes to the end.
     pub fn with_text(text: &str) -> Self {
         Self {
-            text: text.to_string(),
+            text: text.to_owned(),
             selection: text.len()..text.len(),
             is_reversed: false,
             marked: None,
@@ -128,7 +128,10 @@ impl TextDraft {
 
     /// Replaces the selection, or the marked text while an input method composes.
     pub fn insert(&mut self, text: &str) {
-        let range = self.marked.clone().unwrap_or(self.selection.clone());
+        let range = self
+            .marked
+            .clone()
+            .unwrap_or_else(|| self.selection.clone());
         self.replace(range, text);
     }
 
@@ -147,8 +150,8 @@ impl TextDraft {
         selected: Option<Range<usize>>,
     ) {
         let range = range
-            .or(self.marked.clone())
-            .unwrap_or(self.selection.clone());
+            .or_else(|| self.marked.clone())
+            .unwrap_or_else(|| self.selection.clone());
         self.replace(range.clone(), text);
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
         if let Some(selected) = selected {
@@ -166,7 +169,7 @@ impl TextDraft {
         self.text_in(&(0..offset)).encode_utf16().count()
     }
 
-    pub fn from_utf16(&self, offset: usize) -> usize {
+    pub fn offset_at_utf16(&self, offset: usize) -> usize {
         let mut utf16 = 0;
         for (index, character) in self.text.char_indices() {
             if utf16 >= offset {
@@ -182,7 +185,7 @@ impl TextDraft {
     }
 
     pub fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.from_utf16(range.start)..self.from_utf16(range.end)
+        self.offset_at_utf16(range.start)..self.offset_at_utf16(range.end)
     }
 
     fn offset_from_caret(&self, step: Step, direction: Direction) -> usize {
@@ -345,6 +348,6 @@ mod tests {
         let draft = TextDraft::with_text("ą😀b");
         let b = "ą😀".len();
         assert_eq!(draft.to_utf16(b), 3);
-        assert_eq!(draft.from_utf16(3), b);
+        assert_eq!(draft.offset_at_utf16(3), b);
     }
 }

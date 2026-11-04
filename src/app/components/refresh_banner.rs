@@ -44,7 +44,7 @@ impl RenderOnce for RefreshBanner {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let message = match &self.progress {
-            RefreshProgress::Running => "Refreshing the tour with your claude…".to_string(),
+            RefreshProgress::Running => "Refreshing the tour with your claude…".to_owned(),
             RefreshProgress::Idle | RefreshProgress::Failed(_) => format!(
                 "{} to rewrite, {} to place since the new commits.",
                 counted(self.brief.stale_steps.len(), "step", "steps"),
@@ -61,7 +61,7 @@ impl RenderOnce for RefreshBanner {
         };
         let button = (self.progress != RefreshProgress::Running).then(|| {
             button(
-                colors,
+                &colors,
                 "refresh-tour",
                 ButtonKind::Primary,
                 ButtonSize::Small,

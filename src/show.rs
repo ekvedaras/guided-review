@@ -180,6 +180,6 @@ fn hunks_span_at_head(hunks: &[&Hunk]) -> Option<(usize, usize)> {
 
 fn write_lines<'a>(out: &mut String, sign: char, lines: impl Iterator<Item = &'a Line>) {
     for line in lines {
-        let _ = writeln!(out, "{sign}{}: {}", line.number, line.text);
+        writeln!(out, "{sign}{}: {}", line.number, line.text).ok();
     }
 }
