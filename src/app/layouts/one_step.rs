@@ -995,7 +995,7 @@ impl OneStepLayout {
                 });
                 let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
                 let header = PieceHeader::new(
-                    heading.piece.clone(),
+                    heading.label.clone(),
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
                 );
@@ -1026,7 +1026,7 @@ impl OneStepLayout {
                 });
                 let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
                 PieceMarker::new(
-                    heading.piece.clone(),
+                    heading.label.clone(),
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
                 )

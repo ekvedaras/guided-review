@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use gpui::SharedString;
 
-use crate::app::components::diff_view::DiffRowLine;
+use crate::app::components::diff_view::{DiffRowLine, PieceLabel};
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::file_path::FilePath;
@@ -92,6 +92,7 @@ pub struct PieceHeading {
     /// Set on the header of a file box in a step; the safety net does not fold.
     pub fold: Option<BoxFold>,
     pub piece: PieceId,
+    pub label: PieceLabel,
     pub path: FilePath,
     pub ask: Option<AskAt>,
     /// "changed" or "new" after a re-pin.
@@ -796,6 +797,7 @@ impl RowsBuilder<'_> {
         let heading = |piece: &PieceDiff| PieceHeading {
             fold: None,
             piece: piece.id.clone(),
+            label: PieceLabel::of(&piece.id),
             path: piece.id.path().clone(),
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
@@ -834,9 +836,11 @@ impl RowsBuilder<'_> {
             }
             piece.id.to_string()
         } else {
+            let whole_file = PieceId::whole_file(block.path.clone());
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
                 fold,
-                piece: PieceId::whole_file(block.path.clone()),
+                piece: whole_file.clone(),
+                label: PieceLabel::of(&whole_file),
                 path: block.path.clone(),
                 ask: None,
                 repin_label: None,
@@ -904,6 +908,7 @@ impl RowsBuilder<'_> {
         let heading = |piece: &PieceDiff| PieceHeading {
             fold: None,
             piece: piece.id.clone(),
+            label: PieceLabel::of(&piece.id),
             path: piece.id.path().clone(),
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
@@ -915,9 +920,11 @@ impl RowsBuilder<'_> {
                 ..heading(piece)
             })));
         } else {
+            let whole_file = PieceId::whole_file(block.path.clone());
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
                 fold,
-                piece: PieceId::whole_file(block.path.clone()),
+                piece: whole_file.clone(),
+                label: PieceLabel::of(&whole_file),
                 path: block.path.clone(),
                 ask: None,
                 repin_label: None,

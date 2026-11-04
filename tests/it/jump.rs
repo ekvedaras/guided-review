@@ -67,7 +67,7 @@ fn labels(review: &Review, query: &str) -> Vec<String> {
     review
         .jump_targets(query)
         .iter()
-        .map(|target| format!("{} {}", kind(&target.place), target.label))
+        .map(|target| format!("{} {}", kind(&target.place), target.label()))
         .collect()
 }
 
@@ -153,7 +153,7 @@ fn a_symbol_target_names_its_file_and_step() {
         .unwrap();
 
     assert_eq!(symbol.screen, Screen::Step("totals".into()));
-    assert_eq!(symbol.detail.as_deref(), Some("Order totals go up"));
+    assert_eq!(symbol.detail(), Some("Order totals go up"));
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn files_only_the_safety_net_shows_are_jump_targets() {
         .into_iter()
         .find(|target| matches!(target.place, JumpPlace::File(_)))
         .unwrap();
-    assert_eq!(readme.detail.as_deref(), Some("Safety net"));
+    assert_eq!(readme.detail(), Some("Safety net"));
 
     review.jump_to(&readme);
     assert_eq!(review.screen(), &Screen::SafetyNet);

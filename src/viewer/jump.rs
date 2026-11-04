@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use crate::file_path::FilePath;
@@ -18,12 +19,29 @@ pub enum JumpPlace {
 /// One row of the cmd+k list: a place the reviewer can jump to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumpTarget {
-    /// What the query is matched against; the list shows steps by it and files and symbols by `place`.
-    pub label: String,
-    /// The step title for files and symbols, none for steps; "Safety net" for files only it shows.
-    pub detail: Option<String>,
     pub screen: Screen,
     pub place: JumpPlace,
+    /// The step's title, or "Safety net" for files only it shows.
+    screen_title: String,
+}
+
+impl JumpTarget {
+    /// What the query is matched against: the step's title, the file's path or the piece's id.
+    pub fn label(&self) -> Cow<'_, str> {
+        match &self.place {
+            JumpPlace::StepTop => Cow::Borrowed(&self.screen_title),
+            JumpPlace::File(path) => Cow::Borrowed(path.as_str()),
+            JumpPlace::Piece(id) => Cow::Owned(id.to_string()),
+        }
+    }
+
+    /// Where a file or symbol is shown; a step needs none.
+    pub fn detail(&self) -> Option<&str> {
+        match self.place {
+            JumpPlace::StepTop => None,
+            JumpPlace::File(_) | JumpPlace::Piece(_) => Some(&self.screen_title),
+        }
+    }
 }
 
 /// Steps, then the files and symbols each step shows, in reading order, then the files only the safety net shows.
@@ -37,28 +55,25 @@ pub(super) fn all_targets(
     for step in tour.steps() {
         let id = Screen::Step(step.id.clone());
         targets.push(JumpTarget {
-            label: step.title.clone(),
-            detail: None,
             screen: id.clone(),
             place: JumpPlace::StepTop,
+            screen_title: step.title.clone(),
         });
         for piece in pieces_of(step, tour, files) {
             let path = piece.id.path();
             if shown_files.insert(path) {
                 targets.push(JumpTarget {
-                    label: path.to_string(),
-                    detail: Some(step.title.clone()),
                     screen: id.clone(),
                     place: JumpPlace::File(path.clone()),
+                    screen_title: step.title.clone(),
                 });
             }
             // A `hunk-N` piece only exists because the file could not be cut into symbols; the file row stands for it.
             if piece.id.symbol_path().is_some() && !piece.id.is_hunk() {
                 targets.push(JumpTarget {
-                    label: piece.id.to_string(),
-                    detail: Some(step.title.clone()),
                     screen: id.clone(),
                     place: JumpPlace::Piece(piece.id.clone()),
+                    screen_title: step.title.clone(),
                 });
             }
         }
@@ -66,10 +81,9 @@ pub(super) fn all_targets(
     for path in safety_net_files {
         if shown_files.insert(path) {
             targets.push(JumpTarget {
-                label: path.to_string(),
-                detail: Some("Safety net".to_owned()),
                 screen: Screen::SafetyNet,
                 place: JumpPlace::File((*path).clone()),
+                screen_title: "Safety net".to_owned(),
             });
         }
     }
@@ -86,8 +100,14 @@ pub(super) fn rank(targets: Vec<JumpTarget>, query: &str) -> Vec<JumpTarget> {
     let mut scored: Vec<(usize, usize, JumpTarget)> = targets
         .into_iter()
         .filter_map(|target| {
-            let looseness = looseness(&target.label, &query, &query_text)?;
-            Some((looseness, target.label.chars().count(), target))
+            let (looseness, length) = {
+                let label = target.label();
+                (
+                    looseness(&label, &query, &query_text)?,
+                    label.chars().count(),
+                )
+            };
+            Some((looseness, length, target))
         })
         .collect();
     scored.sort_by_key(|(looseness, length, _)| (*looseness, *length));

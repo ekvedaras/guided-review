@@ -7,6 +7,7 @@ use gpui::{
 use crate::pieces::PieceId;
 use crate::viewer::{JumpPlace, JumpTarget};
 
+use super::diff_view::PieceLabel;
 use super::markdown_view::InlineMarkdown;
 use super::palette::{Colors, TEXT_FONT};
 use super::text_box::TextBox;
@@ -25,10 +26,40 @@ pub enum JumpEvent {
 pub struct JumpPalette {
     is_open: bool,
     query: String,
-    targets: Vec<JumpTarget>,
+    targets: Vec<ShownTarget>,
     selected: usize,
     focus: FocusHandle,
     owner_focus: FocusHandle,
+}
+
+/// A target with the text its row shows, cut when the list changes rather than every frame.
+struct ShownTarget {
+    target: JumpTarget,
+    label: ShownLabel,
+    detail: Option<SharedString>,
+}
+
+enum ShownLabel {
+    Step(SharedString),
+    Piece(PieceLabel),
+}
+
+impl ShownTarget {
+    fn of(target: JumpTarget) -> Self {
+        let label = match &target.place {
+            JumpPlace::StepTop => ShownLabel::Step(target.label().into_owned().into()),
+            JumpPlace::File(path) => {
+                ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(path.clone())))
+            }
+            JumpPlace::Piece(id) => ShownLabel::Piece(PieceLabel::of(id)),
+        };
+        let detail = target.detail().map(|detail| detail.to_owned().into());
+        Self {
+            target,
+            label,
+            detail,
+        }
+    }
 }
 
 impl EventEmitter<JumpEvent> for JumpPalette {}
@@ -66,12 +97,16 @@ impl JumpPalette {
     }
 
     pub fn set_targets(&mut self, targets: Vec<JumpTarget>) {
-        self.targets = targets;
+        self.targets = targets.into_iter().map(ShownTarget::of).collect();
         self.selected = 0;
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(target) = self.targets.get(self.selected).cloned() {
+        if let Some(target) = self
+            .targets
+            .get(self.selected)
+            .map(|shown| shown.target.clone())
+        {
             self.close(window, cx);
             cx.emit(JumpEvent::Picked(target));
         }
@@ -101,29 +136,23 @@ impl JumpPalette {
             .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
-    fn row(&self, index: usize, target: &JumpTarget, cx: &mut Context<Self>) -> impl IntoElement {
+    fn row(&self, index: usize, shown: &ShownTarget, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let is_selected = index == self.selected;
-        let kind = match &target.place {
+        let kind = match &shown.target.place {
             JumpPlace::StepTop => "Step",
             JumpPlace::File(_) => "File",
             JumpPlace::Piece(_) => "Symbol",
         };
-        let label = match &target.place {
-            JumpPlace::StepTop => div()
+        let label = match &shown.label {
+            ShownLabel::Step(title) => div()
                 .min_w_0()
                 .truncate()
-                .child(InlineMarkdown::new(
-                    format!("jump-label-{index}"),
-                    &target.label,
-                ))
+                .child(InlineMarkdown::new(format!("jump-label-{index}"), title))
                 .into_any_element(),
-            JumpPlace::File(path) => {
-                piece_label(&colors, &PieceId::whole_file(path.clone())).into_any_element()
-            }
-            JumpPlace::Piece(id) => piece_label(&colors, id).into_any_element(),
+            ShownLabel::Piece(label) => piece_label(&colors, label.clone()).into_any_element(),
         };
-        let detail = target.detail.as_ref().map(|detail| {
+        let detail = shown.detail.as_ref().map(|detail| {
             div()
                 .flex_shrink(1.)
                 .min_w(px(80.))
@@ -174,11 +203,13 @@ impl JumpPalette {
 
 /// A file or symbol target as `folder/` dim, then the file name, then the symbol, so the end of a
 /// long path is what stays readable.
-fn piece_label(colors: &Colors, id: &PieceId) -> impl IntoElement {
-    let folder = id.folder().to_owned();
-    let file = id.file_name().to_owned();
-    let symbol = id.symbol_path().map(str::to_owned);
-    let symbol_name = id.symbol_name().map(str::to_owned);
+fn piece_label(colors: &Colors, label: PieceLabel) -> impl IntoElement {
+    let PieceLabel {
+        folder,
+        file_name: file,
+        symbol,
+        symbol_name,
+    } = label;
     div()
         .flex()
         .items_center()
@@ -189,7 +220,7 @@ fn piece_label(colors: &Colors, id: &PieceId) -> impl IntoElement {
             div()
                 .flex_none()
                 .font_weight(FontWeight::MEDIUM)
-                .child(SharedString::from(name))
+                .child(name)
         }))
         .child(
             div()
@@ -203,13 +234,13 @@ fn piece_label(colors: &Colors, id: &PieceId) -> impl IntoElement {
                         .overflow_hidden()
                         .text_ellipsis_start()
                         .text_color(colors.muted_text)
-                        .child(SharedString::from(folder)),
+                        .child(folder),
                 )
                 .child(
                     div()
                         .flex_none()
                         .when(symbol.is_some(), |file| file.text_color(colors.muted_text))
-                        .child(SharedString::from(file)),
+                        .child(file),
                 ),
         )
 }

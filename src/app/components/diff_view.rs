@@ -322,10 +322,32 @@ pub fn piece_row(colors: &Colors) -> Div {
     div().w_full().border_x_1().border_color(colors.border)
 }
 
+/// A piece's name cut into what is shown, once, so a frame shares the text instead of copying it.
+#[derive(Debug, Clone)]
+pub struct PieceLabel {
+    /// With its trailing slash, or empty at the repo root.
+    pub folder: SharedString,
+    pub file_name: SharedString,
+    pub symbol: Option<SharedString>,
+    /// The last part of the symbol: `total` of `Order::total`.
+    pub symbol_name: Option<SharedString>,
+}
+
+impl PieceLabel {
+    pub fn of(id: &PieceId) -> Self {
+        Self {
+            folder: SharedString::from(id.folder().to_owned()),
+            file_name: SharedString::from(id.file_name().to_owned()),
+            symbol: id.symbol_path().map(|symbol| symbol.to_owned().into()),
+            symbol_name: id.symbol_name().map(|name| name.to_owned().into()),
+        }
+    }
+}
+
 /// The top of a piece box: the piece's name, its re-pin label, and its buttons (open the code, ask).
 #[derive(IntoElement)]
 pub struct PieceHeader {
-    piece: PieceId,
+    piece: PieceLabel,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
     fold_toggle: Option<Stateful<Div>>,
@@ -333,7 +355,7 @@ pub struct PieceHeader {
 
 impl PieceHeader {
     pub fn new(
-        piece: PieceId,
+        piece: PieceLabel,
         repin_label: Option<&'static str>,
         buttons: Vec<Stateful<Div>>,
     ) -> Self {
@@ -355,13 +377,10 @@ impl PieceHeader {
 impl RenderOnce for PieceHeader {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let piece = &self.piece;
-        let symbol = piece.symbol_path().map(|symbol| {
-            div()
-                .flex_none()
-                .text_color(colors.accent)
-                .child(SharedString::from(symbol.to_owned()))
-        });
+        let piece = self.piece;
+        let symbol = piece
+            .symbol
+            .map(|symbol| div().flex_none().text_color(colors.accent).child(symbol));
         div()
             .w_full()
             .h(px(34.))
@@ -396,13 +415,13 @@ impl RenderOnce for PieceHeader {
                                     .text_color(colors.muted_text)
                                     .text_ellipsis_start()
                                     .overflow_hidden()
-                                    .child(SharedString::from(piece.folder().to_owned())),
+                                    .child(piece.folder),
                             )
                             .child(
                                 div()
                                     .flex_none()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(SharedString::from(piece.file_name().to_owned())),
+                                    .child(piece.file_name),
                             ),
                     )
                     .children(symbol),
@@ -425,14 +444,14 @@ impl RenderOnce for PieceHeader {
 /// Its buttons show only under the mouse, so the code reads as one file.
 #[derive(IntoElement)]
 pub struct PieceMarker {
-    piece: PieceId,
+    piece: PieceLabel,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
 }
 
 impl PieceMarker {
     pub fn new(
-        piece: PieceId,
+        piece: PieceLabel,
         repin_label: Option<&'static str>,
         buttons: Vec<Stateful<Div>>,
     ) -> Self {
@@ -447,7 +466,7 @@ impl PieceMarker {
 impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let piece = &self.piece;
+        let name = self.piece.symbol.unwrap_or(self.piece.file_name);
         piece_row(&colors)
             .group("piece-marker")
             .h(px(24.))
@@ -466,12 +485,7 @@ impl RenderOnce for PieceMarker {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(SharedString::from(
-                        piece
-                            .symbol_path()
-                            .unwrap_or_else(|| piece.file_name())
-                            .to_owned(),
-                    )),
+                    .child(name),
             )
             .children(self.repin_label.map(|label| {
                 div()
