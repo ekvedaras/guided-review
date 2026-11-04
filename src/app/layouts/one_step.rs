@@ -43,7 +43,9 @@ use crate::app::components::thread_view::{
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
-use crate::app::page_rows::{AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, Toolbar};
+use crate::app::page_rows::{
+    AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, ThreadRowPlace, Toolbar,
+};
 use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
@@ -1081,16 +1083,13 @@ impl OneStepLayout {
                     .with_gestures(Rc::clone(&self.on_row_gesture))
                     .into_any_element()
             }
-            PageRow::Thread {
-                view,
-                is_under_a_line,
-                ..
-            } => {
+            PageRow::Thread { view, place, .. } => {
                 let thread = self.thread_element(&view, cx);
-                if is_under_a_line {
-                    piece_row(&colors).child(thread).into_any_element()
-                } else {
-                    div().pb_3().child(thread).into_any_element()
+                match place {
+                    ThreadRowPlace::UnderLine => {
+                        piece_row(&colors).child(thread).into_any_element()
+                    }
+                    ThreadRowPlace::AfterCode => div().pb_3().child(thread).into_any_element(),
                 }
             }
             PageRow::QueuedComment(queued) => piece_row(&colors)

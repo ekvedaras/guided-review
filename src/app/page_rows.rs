@@ -143,7 +143,7 @@ pub enum PageRow {
     /// Under its line inside the piece box, or after the code.
     Thread {
         view: Rc<ThreadView>,
-        is_under_a_line: bool,
+        place: ThreadRowPlace,
         /// Of the reply box, if open; its text is read from the review when drawn.
         reply_lines: Option<usize>,
         /// The `<details>` of its comments that are open.
@@ -223,7 +223,7 @@ impl PageRow {
             }
             Self::Thread {
                 view,
-                is_under_a_line,
+                place,
                 reply_lines,
                 open_details,
             } => {
@@ -241,7 +241,7 @@ impl PageRow {
                 view.commented_lines.hash(&mut hasher);
                 reply_lines.hash(&mut hasher);
                 open_details.hash(&mut hasher);
-                is_under_a_line.hash(&mut hasher);
+                place.hash(&mut hasher);
             }
             Self::QueuedComment(queued) => {
                 queued.draft.place.hash(&mut hasher);
@@ -266,6 +266,22 @@ impl PageRow {
         }
         RowKey(hasher.finish())
     }
+}
+
+/// Where a thread's row sits on the page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ThreadRowPlace {
+    /// Hangs under the line it is about.
+    UnderLine,
+    /// Follows the step's code, for a thread with no line to hang under.
+    AfterCode,
+}
+
+/// What a piece box shows of its piece.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffShown {
+    Full,
+    ChangeSinceRead,
 }
 
 /// The rows a drag selected, as rows of the list: those in `rows` that show a line of `path`.
@@ -540,7 +556,7 @@ impl UnderLine {
 
     fn into_row(self, review: &Review, facts: &RowFacts) -> PageRow {
         match self {
-            Self::Thread(view) => thread_row(view, true, facts),
+            Self::Thread(view) => thread_row(view, ThreadRowPlace::UnderLine, facts),
             Self::Queued(queued) => PageRow::QueuedComment(Rc::new(queued)),
             Self::Composer(place) => composer_row(place, review, facts),
             Self::AskMarker(ask) => PageRow::AskMarker(Rc::new(ask)),
@@ -696,10 +712,15 @@ impl RowsBuilder<'_> {
             wraps_lines: Some(review.wraps_lines()),
         })));
         let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
-        let shows_change_since_read = page
+        let shown = if page
             .since_read
             .as_ref()
-            .is_some_and(|since| !since.showing_full_diff);
+            .is_some_and(|since| !since.showing_full_diff)
+        {
+            DiffShown::ChangeSinceRead
+        } else {
+            DiffShown::Full
+        };
         let (under_a_line, after_code): (Vec<_>, Vec<_>) = page
             .threads
             .into_iter()
@@ -719,18 +740,12 @@ impl RowsBuilder<'_> {
                 is_folded: review.is_box_folded(&id, &block.path),
                 path: block.path.clone(),
             };
-            self.block_rows(
-                &block,
-                Some(&ask_of),
-                Some(fold),
-                shows_change_since_read,
-                review,
-            );
+            self.block_rows(&block, Some(&ask_of), Some(fold), shown, review);
         }
         self.rows.extend(
             after_code
                 .into_iter()
-                .map(|view| thread_row(view, false, self.facts)),
+                .map(|view| thread_row(view, ThreadRowPlace::AfterCode, self.facts)),
         );
         self.rows.push(footer);
         diagram
@@ -751,12 +766,12 @@ impl RowsBuilder<'_> {
             .partition(|thread| thread.anchor.is_some());
         self.hang_threads_and(under_a_line, comments);
         for block in FileBlock::group(page.pieces) {
-            self.block_rows(&block, None, None, false, review);
+            self.block_rows(&block, None, None, DiffShown::Full, review);
         }
         self.rows.extend(
             after_code
                 .into_iter()
-                .map(|view| thread_row(view, false, self.facts)),
+                .map(|view| thread_row(view, ThreadRowPlace::AfterCode, self.facts)),
         );
         self.rows.push(screen_footer(review, None));
     }
@@ -771,7 +786,7 @@ impl RowsBuilder<'_> {
         block: &FileBlock,
         ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
         fold: Option<BoxFold>,
-        shows_change_since_read: bool,
+        shown: DiffShown,
         review: &Review,
     ) {
         if fold.as_ref().is_some_and(|fold| fold.is_folded) {
@@ -787,7 +802,9 @@ impl RowsBuilder<'_> {
             code_link: piece.code_link().cloned(),
         };
         let has_no_change_since_read = |piece: &PieceDiff| {
-            shows_change_since_read && piece.hunks.is_empty() && piece.binary_file.is_none()
+            shown == DiffShown::ChangeSinceRead
+                && piece.hunks.is_empty()
+                && piece.binary_file.is_none()
         };
         let row_id = if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
@@ -929,7 +946,7 @@ fn repin_label(status: RepinStatus) -> Option<&'static str> {
     }
 }
 
-fn thread_row(view: ThreadView, is_under_a_line: bool, facts: &RowFacts) -> PageRow {
+fn thread_row(view: ThreadView, place: ThreadRowPlace, facts: &RowFacts) -> PageRow {
     PageRow::Thread {
         reply_lines: view.reply_draft.as_deref().map(line_count),
         open_details: facts
@@ -937,7 +954,7 @@ fn thread_row(view: ThreadView, is_under_a_line: bool, facts: &RowFacts) -> Page
             .open_under(&format!("thread-{}-", view.thread.id))
             .into(),
         view: Rc::new(view),
-        is_under_a_line,
+        place,
     }
 }
 
@@ -1080,7 +1097,7 @@ mod tests {
     fn thread_key(view: ThreadView, reply_lines: Option<usize>, open: Vec<String>) -> RowKey {
         PageRow::Thread {
             view: Rc::new(view),
-            is_under_a_line: true,
+            place: ThreadRowPlace::UnderLine,
             reply_lines,
             open_details: open.into(),
         }

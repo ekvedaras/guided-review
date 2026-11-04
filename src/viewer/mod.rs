@@ -27,6 +27,7 @@ mod review_state;
 mod row_selection;
 mod step_page;
 mod suggestion;
+mod sync_state;
 mod thread_actions;
 mod threads;
 mod typing_save;
@@ -73,6 +74,7 @@ pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, SafetyNetPage, Side, SinceRead, StepPage,
 };
 pub use suggestion::SuggestionDiff;
+pub use sync_state::SyncState;
 pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };

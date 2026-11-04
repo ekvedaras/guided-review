@@ -4,7 +4,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
-use guided_review::viewer::{Review, ReviewStateFile, ViewedState};
+use guided_review::viewer::{Review, ReviewStateFile, SyncState, ViewedState};
 use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -287,4 +287,25 @@ fn nothing_syncs_while_the_tour_is_not_at_the_pull_request_head() {
             .iter()
             .all(|call| matches!(call, GitHubCall::TipsOf(_)))
     );
+}
+
+#[test]
+fn a_sync_asked_for_while_one_runs_runs_once_more_after_it() {
+    let mut sync = SyncState::default();
+
+    assert!(sync.start_or_queue());
+    assert!(!sync.start_or_queue());
+    assert!(!sync.start_or_queue());
+
+    assert!(sync.finish_and_wants_again());
+    assert!(sync.start_or_queue());
+    assert!(!sync.finish_and_wants_again());
+}
+
+#[test]
+fn a_sync_that_finishes_with_nothing_asked_leaves_the_next_free_to_start() {
+    let mut sync = SyncState::default();
+    assert!(sync.start_or_queue());
+    assert!(!sync.finish_and_wants_again());
+    assert!(sync.start_or_queue());
 }

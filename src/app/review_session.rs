@@ -20,7 +20,8 @@ use crate::code_source::CodeSource;
 use crate::viewer::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
     ImageCache, LineLocation, OldHead, Place, RefreshBrief, RepinnedTour, Review, ReviewVerdict,
-    Screen, SendMode, StepId, ThreadAction, ThreadActionResult, TourRefresher, TourRepinner,
+    Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, TourRefresher,
+    TourRepinner,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -65,8 +66,7 @@ pub struct ReviewSession {
     sending_comments: HashSet<CommentPlace>,
     comment_problems: HashMap<CommentPlace, CommentProblem>,
     is_retrying_comments: bool,
-    is_syncing: bool,
-    sync_again: bool,
+    sync_state: SyncState,
     pr_head_check: Option<Task<()>>,
     threads_pull: Option<Task<()>>,
     pr_description_pull: Option<Task<()>>,
@@ -77,6 +77,23 @@ pub struct ReviewSession {
     frame_stats: FrameStatsHook,
     _focus_subscription: Subscription,
     _details_subscription: Subscription,
+}
+
+/// Typing only changes a box's height when its line count changes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoxHeight {
+    Same,
+    Changed,
+}
+
+impl BoxHeight {
+    fn of(lines_before: Option<usize>, text: &str) -> Self {
+        if lines_before == Some(line_count(text)) {
+            Self::Same
+        } else {
+            Self::Changed
+        }
+    }
 }
 
 impl EventEmitter<SessionEvent> for ReviewSession {}
@@ -139,8 +156,7 @@ impl ReviewSession {
             sending_comments: HashSet::new(),
             comment_problems: HashMap::new(),
             is_retrying_comments: false,
-            is_syncing: false,
-            sync_again: false,
+            sync_state: SyncState::default(),
             pr_head_check: None,
             threads_pull: None,
             pr_description_pull: None,
@@ -267,18 +283,18 @@ impl ReviewSession {
             .find(|draft| &draft.place == place)
             .map(|draft| line_count(&draft.body));
         let kept = self.review.type_in_draft(place, text);
-        self.typed(&kept, lines_before != Some(line_count(text)), cx);
+        self.typed(&kept, BoxHeight::of(lines_before, text), cx);
     }
 
     pub fn type_in_reply(&mut self, thread_id: &str, text: &str, cx: &mut Context<Self>) {
         let lines_before = self.review.reply_draft(thread_id).map(line_count);
         let kept = self.review.type_in_reply(thread_id, text);
-        self.typed(&kept, lines_before != Some(line_count(text)), cx);
+        self.typed(&kept, BoxHeight::of(lines_before, text), cx);
     }
 
     pub fn type_in_finish_body(&mut self, text: &str, cx: &mut Context<Self>) {
         let kept = self.review.type_in_finish_body(text);
-        self.typed(&kept, false, cx);
+        self.typed(&kept, BoxHeight::Same, cx);
     }
 
     pub fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
@@ -491,14 +507,9 @@ impl ReviewSession {
 
     /// Typing only redraws; the rows are built again when a box got a line more or less.
     /// Text the review did not keep is named by the review's problems, which the sidebar shows.
-    fn typed(
-        &mut self,
-        kept: &anyhow::Result<()>,
-        box_changed_height: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn typed(&mut self, kept: &anyhow::Result<()>, height: BoxHeight, cx: &mut Context<Self>) {
         self.save_typing_soon(cx);
-        if box_changed_height {
+        if height == BoxHeight::Changed {
             self.rebuild_rows(cx);
         } else if kept.is_err() {
             self.show_problems(cx);
@@ -579,11 +590,9 @@ impl ReviewSession {
 
     /// Pushes what is queued and pulls what changed on GitHub, off the UI thread.
     fn sync(&mut self, cx: &mut Context<Self>) {
-        if self.is_syncing {
-            self.sync_again = true;
+        if !self.sync_state.start_or_queue() {
             return;
         }
-        self.is_syncing = true;
         let request = self.review.sync_request();
         let github = Arc::clone(&self.github);
         self.run_off_thread(
@@ -593,8 +602,7 @@ impl ReviewSession {
                 if let Err(error) = this.change(cx, |review| review.apply_sync(outcome)) {
                     eprintln!("could not sync with GitHub: {error:#}");
                 }
-                this.is_syncing = false;
-                if std::mem::take(&mut this.sync_again) {
+                if this.sync_state.finish_and_wants_again() {
                     this.sync(cx);
                 }
             },
