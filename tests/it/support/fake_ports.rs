@@ -7,9 +7,9 @@ use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentId, CommentPlace, GitHubError,
-    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    NoAccess, PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange,
+    ReactionCount, Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
+    SendMode, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -183,7 +183,7 @@ impl FakeGitHub {
                 _ => None,
             });
         match refusal {
-            Some(reason) => Err(GitHubError::NoAccess(reason)),
+            Some(reason) => Err(GitHubError::NoAccess(NoAccess::new(reason))),
             None => Ok(()),
         }
     }

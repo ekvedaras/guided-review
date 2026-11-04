@@ -560,3 +560,77 @@ fn a_file_comment_is_a_thread_of_subject_type_file_without_lines() {
         })
     );
 }
+
+#[test]
+fn review_threads_without_github_access_say_which_pr_they_were_read_for() {
+    let error = GitHub::without_token_at("http://127.0.0.1:9")
+        .review_threads(&pr())
+        .unwrap_err();
+
+    assert!(matches!(error, GitHubError::NoAccess(_)));
+    assert!(
+        format!("{error:#}")
+            .starts_with("could not read the review threads of https://github.com/"),
+        "{error:#}"
+    );
+    assert!(
+        format!("{error:#}").ends_with("set GITHUB_TOKEN"),
+        "{error:#}"
+    );
+}
+
+const ONE_PENDING_REVIEW: &str = r#"{"errors":[{"message":"User can only have one pending review per pull request"}],"data":null}"#;
+
+#[test]
+fn a_reply_github_answers_with_one_pending_review_per_user_is_told_apart() {
+    let (url, _) = serve_graphql(vec![NO_PENDING.into(), ONE_PENDING_REVIEW.into()]);
+
+    let error = GitHub::at(&url)
+        .reply_to_thread(&pr(), &ThreadId::new("T1"), "x", SendMode::AddToReview)
+        .unwrap_err();
+
+    assert!(matches!(error, GitHubError::PendingReviewExists));
+}
+
+#[test]
+fn a_comment_now_whose_send_meets_one_pending_review_says_it_waits_in_the_pending_review() {
+    let failed = r#"{"errors":[{"message":"something broke"}],"data":null}"#;
+    let (url, _) = serve_graphql(vec![
+        PULL_ID.into(),
+        THREAD_ADDED.into(),
+        ONE_PENDING_REVIEW.into(),
+        failed.into(),
+    ]);
+    let place = CommentPlace::Lines {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    let error = GitHub::at(&url)
+        .comment_now(&pr(), &place, "x")
+        .unwrap_err();
+
+    assert!(matches!(error, GitHubError::Other(_)), "{error:?}");
+    let text = format!("{error:#}");
+    assert!(text.contains("could not post the comment"), "{text}");
+    assert!(text.contains("pending review on GitHub"), "{text}");
+}
+
+#[test]
+fn a_new_review_github_answers_with_one_pending_review_is_a_failure_to_send() {
+    let (url, _) = serve_graphql(vec![
+        NO_PENDING.into(),
+        PULL_ID.into(),
+        ONE_PENDING_REVIEW.into(),
+    ]);
+
+    let error = GitHub::at(&url)
+        .submit_review(&pr(), ReviewVerdict::Approve, "")
+        .unwrap_err();
+
+    assert!(matches!(error, GitHubError::Other(_)), "{error:?}");
+    assert!(
+        format!("{error:#}").starts_with("could not send the review"),
+        "{error:#}"
+    );
+}

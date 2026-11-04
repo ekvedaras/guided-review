@@ -11,10 +11,10 @@ use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentId, CommentPlace, GitHubError, PullRequestDescriptionPort, PullRequestTipsPort,
-    Reaction, ReactionChange, ReactionCount, Resolution, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadComment, ThreadId, Viewed, ViewedFile,
-    ViewedFilesPort, ViewedState, percent_encode_path,
+    CommentId, CommentPlace, GitHubError, NoAccess, PullRequestDescriptionPort,
+    PullRequestTipsPort, Reaction, ReactionChange, ReactionCount, Resolution, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadComment, ThreadId,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -138,7 +138,9 @@ impl GitHub {
         variables: &serde_json::Value,
     ) -> Result<serde_json::Value, GitHubError> {
         let token = self.token.as_ref().ok_or_else(|| {
-            GitHubError::NoAccess("no GitHub token: run `gh auth login` or set GITHUB_TOKEN".into())
+            GitHubError::NoAccess(NoAccess::new(
+                "no GitHub token: run `gh auth login` or set GITHUB_TOKEN",
+            ))
         })?;
         let response = ureq::post(format!("{}/graphql", self.api))
             .header("Authorization", format!("Bearer {token}"))
@@ -150,9 +152,9 @@ impl GitHub {
                 .read_json()
                 .map_err(anyhow::Error::from)?,
             Err(ureq::Error::StatusCode(401 | 403)) => {
-                return Err(GitHubError::NoAccess(
-                    "GitHub refused the token: it needs the `repo` scope".into(),
-                ));
+                return Err(GitHubError::NoAccess(NoAccess::new(
+                    "GitHub refused the token: it needs the `repo` scope",
+                )));
             }
             Err(error) => return Err(anyhow::Error::from(error).into()),
         };
@@ -166,12 +168,9 @@ impl GitHub {
                 })
             });
             if refused {
-                return Err(GitHubError::NoAccess(
-                    "GitHub refused the token: it needs the `repo` scope".into(),
-                ));
-            }
-            if errors.to_string().contains("one pending review") {
-                return Err(GitHubError::PendingReviewExists);
+                return Err(GitHubError::NoAccess(NoAccess::new(
+                    "GitHub refused the token: it needs the `repo` scope",
+                )));
             }
             return Err(anyhow::anyhow!("GitHub answered with errors: {errors}").into());
         }
@@ -206,14 +205,16 @@ impl GitHub {
                 }
             }
         };
-        let data = self.graphql(
-            "mutation($input: AddPullRequestReviewThreadInput!) {
+        let data = self
+            .graphql(
+                "mutation($input: AddPullRequestReviewThreadInput!) {
                 addPullRequestReviewThread(input: $input) {
                     thread { id comments(first: 1) { nodes { pullRequestReview { id } } } }
                 }
             }",
-            &serde_json::json!({"input": input}),
-        )?;
+                &serde_json::json!({"input": input}),
+            )
+            .map_err(one_pending_review)?;
         let thread = at(&data, "/addPullRequestReviewThread/thread");
         if thread.is_null() {
             let line = match place {
@@ -444,7 +445,7 @@ impl ReviewThreadsPort for GitHub {
                 }",
                 &serde_json::json!({"input": input}),
             )
-            .map_err(|error| error.context("could not reply"))?;
+            .map_err(|error| one_pending_review(error).context("could not reply"))?;
         let review = at(
             &data,
             "/addPullRequestReviewThreadReply/comment/pullRequestReview",
@@ -744,6 +745,21 @@ struct ReplyInput<'a> {
 /// GitHub counts lines from 1 and answers `null` for none; a 0 is taken as none too, so the thread still shows.
 fn thread_line(line: Option<usize>) -> Option<LineNumber> {
     line.and_then(|line| LineNumber::try_from(line).ok())
+}
+
+/// GitHub gives this refusal no error type, only the message
+/// "User can only have one pending review per pull request".
+const ONE_PENDING_REVIEW: &str = "one pending review";
+
+/// Only a new thread or a reply can meet the viewer's other pending review; elsewhere the
+/// same words stay a plain failure.
+fn one_pending_review(error: GitHubError) -> GitHubError {
+    match error {
+        GitHubError::Other(error) if format!("{error:#}").contains(ONE_PENDING_REVIEW) => {
+            GitHubError::PendingReviewExists
+        }
+        error => error,
+    }
 }
 
 fn graphql_side(side: Side) -> &'static str {

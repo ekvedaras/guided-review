@@ -75,8 +75,8 @@ impl FinishRequest {
     pub fn run(self, github: &dyn ReviewWritesPort) -> FinishOutcome {
         let result = match github.submit_review(&self.pr, self.verdict, &self.body) {
             Ok(()) => FinishResult::Sent,
-            Err(GitHubError::NoAccess(reason)) => {
-                FinishResult::Refused(FinishRefusal::NoAccess(reason))
+            Err(GitHubError::NoAccess(no_access)) => {
+                FinishResult::Refused(FinishRefusal::NoAccess(no_access.into_reason()))
             }
             Err(error) => FinishResult::Failed(format!("{error:#}")),
         };

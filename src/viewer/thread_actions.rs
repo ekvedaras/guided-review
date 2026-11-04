@@ -120,8 +120,8 @@ fn classify(error: &GitHubError) -> ThreadActionResult {
         GitHubError::PendingReviewExists => {
             ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
         }
-        GitHubError::NoAccess(reason) => {
-            ThreadActionResult::Refused(CommentRefusal::NoAccess(reason.clone()))
+        GitHubError::NoAccess(no_access) => {
+            ThreadActionResult::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
         GitHubError::ThreadNotCreated(_) | GitHubError::Other(_) => {
             ThreadActionResult::Failed(format!("{error:#}"))

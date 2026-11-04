@@ -111,8 +111,8 @@ impl ViewedSync {
     /// GitHub saying viewed sync is unavailable switches it off for the session instead of failing.
     pub(super) fn settle(&mut self, error: GitHubError) -> anyhow::Result<()> {
         match error {
-            GitHubError::NoAccess(reason) => {
-                self.off_because = Some(reason);
+            GitHubError::NoAccess(no_access) => {
+                self.off_because = Some(no_access.into_reason());
                 Ok(())
             }
             GitHubError::Other(error) => Err(error),

@@ -119,7 +119,7 @@ impl<T> GitHubPort for T where
 pub enum GitHubError {
     /// No token, or GitHub refused it.
     #[error("{0}")]
-    NoAccess(String),
+    NoAccess(NoAccess),
     /// "User can only have one pending review per pull request."
     #[error("there is a pending review already")]
     PendingReviewExists,
@@ -131,12 +131,58 @@ pub enum GitHubError {
 }
 
 impl GitHubError {
-    /// Says what was being done when an untyped failure happened; a typed one already says it.
+    /// Says what was being done. `PendingReviewExists` and `ThreadNotCreated` already say it.
     #[must_use]
     pub fn context(self, context: impl std::fmt::Display + Send + Sync + 'static) -> Self {
         match self {
             Self::Other(error) => Self::Other(error.context(context)),
+            Self::NoAccess(no_access) => Self::NoAccess(no_access.while_doing(context)),
             typed => typed,
+        }
+    }
+}
+
+/// Why GitHub cannot be used, and what failed because of it. A refusal names only the reason;
+/// a failure shown as such says what was being done first.
+#[derive(Debug)]
+pub struct NoAccess {
+    reason: String,
+    doing: Option<String>,
+}
+
+impl NoAccess {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            doing: None,
+        }
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    pub fn into_reason(self) -> String {
+        self.reason
+    }
+
+    fn while_doing(self, doing: impl std::fmt::Display) -> Self {
+        let doing = match self.doing {
+            Some(inner) => format!("{doing}: {inner}"),
+            None => doing.to_string(),
+        };
+        Self {
+            doing: Some(doing),
+            ..self
+        }
+    }
+}
+
+impl std::fmt::Display for NoAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.doing {
+            Some(doing) => write!(f, "{doing}: {}", self.reason),
+            None => f.write_str(&self.reason),
         }
     }
 }

@@ -307,7 +307,9 @@ fn classify(error: &GitHubError) -> Outcome {
     match error {
         GitHubError::ThreadNotCreated(reason) => Outcome::Rejected(reason.clone()),
         GitHubError::PendingReviewExists => Outcome::Refused(CommentRefusal::PendingReviewExists),
-        GitHubError::NoAccess(reason) => Outcome::Refused(CommentRefusal::NoAccess(reason.clone())),
+        GitHubError::NoAccess(no_access) => {
+            Outcome::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
+        }
         GitHubError::Other(error) => Outcome::Failed(format!("{error:#}")),
     }
 }

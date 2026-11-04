@@ -57,9 +57,9 @@ pub use jump::{JumpPlace, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, PullRequestDescriptionPort,
-    PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort,
-    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess,
+    PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
+    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use problems::Problem;
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
