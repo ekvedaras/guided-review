@@ -270,7 +270,7 @@ fn without_a_re_pin_pieces_carry_no_status() {
 fn lines_of(review: &Review, step: &str) -> Vec<String> {
     let mut review_lines = Vec::new();
     let page = review.current_step().unwrap();
-    assert_eq!(page.step.id, step);
+    assert_eq!(page.step.id, StepId::from(step));
     for piece in &page.pieces {
         for line in piece.lines() {
             let sign = match line.location.side {

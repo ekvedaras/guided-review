@@ -3,7 +3,7 @@ use std::fmt;
 use crate::coverage;
 use crate::language::Language;
 use crate::pieces::{ChangedFile, PieceId};
-use crate::tour::{PieceRef, Step, Tour};
+use crate::tour::{PieceRef, Step, StepId, Tour};
 
 pub const MAX_SUMMARY_BULLETS: usize = 3;
 pub const MAX_WORDS_PER_BULLET: usize = 12;
@@ -14,7 +14,7 @@ const MAX_FILES_LISTED: usize = 3;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    UnknownPiece { step: String, pointer: PieceRef },
+    UnknownPiece { step: StepId, pointer: PieceRef },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,7 +25,7 @@ pub enum Warning {
         lines: usize,
     },
     LinesOnParsableFile {
-        step: String,
+        step: StepId,
         file: String,
         lines: [u32; 2],
     },
@@ -35,11 +35,11 @@ pub enum Warning {
         bullet: String,
     },
     WhyTooLong {
-        step: String,
+        step: StepId,
         lines: usize,
     },
     TooManyPieces {
-        step: String,
+        step: StepId,
         pieces: usize,
     },
     TooManyTopLevelSteps(usize),

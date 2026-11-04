@@ -126,7 +126,7 @@ impl ThreadPlacement {
                     .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
                     .filter_map(|part| PieceDiff::of(&part, files, display))
                     .collect();
-                (StepId::from(step.id.as_str()), parts)
+                (step.id.clone(), parts)
             })
             .collect();
         let mut homes: BTreeMap<Home, Vec<ReviewThread>> = BTreeMap::new();

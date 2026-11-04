@@ -8,7 +8,7 @@ use crate::code_source::CodeSource;
 use crate::coverage;
 use crate::pieces::{self, ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
-use crate::tour::{PieceRef, Step, Tour};
+use crate::tour::{PieceRef, Step, StepId, Tour};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -50,7 +50,7 @@ impl PieceRepin {
 /// The pieces one step showed before that are gone now, and the ones it shows at the new head.
 #[derive(Debug, Clone)]
 pub struct StepRepin {
-    pub step: String,
+    pub step: StepId,
     pub pieces: Vec<PieceRepin>,
 }
 

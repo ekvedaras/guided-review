@@ -2,8 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-
 use crate::code_source::CodeSource;
 use crate::coverage;
 use crate::pieces::{self, ChangedFile};
@@ -47,21 +45,7 @@ use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct StepId(String);
-
-impl From<&str> for StepId {
-    fn from(id: &str) -> Self {
-        Self(id.to_owned())
-    }
-}
-
-impl fmt::Display for StepId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+pub use crate::tour::StepId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
@@ -177,13 +161,13 @@ impl Review {
         let steps = tour
             .steps()
             .into_iter()
-            .map(|step| Screen::Step(StepId::from(step.id.as_str())));
+            .map(|step| Screen::Step(step.id.clone()));
         let steps_in_reading_order = std::iter::once(Screen::Summary).chain(steps).collect();
         let has_uncovered_changes = threads::uncovered(&tour, &files);
         let read_heads: BTreeSet<&Sha> = tour
             .steps()
             .iter()
-            .filter_map(|step| read_head_of(&state, &StepId::from(step.id.as_str())))
+            .filter_map(|step| read_head_of(&state, &step.id.clone()))
             .filter(|read_head| **read_head != tour.head)
             .collect();
         let changes_since = read_heads
@@ -411,7 +395,7 @@ impl Review {
     }
 
     fn step(&self, id: &StepId) -> Option<&Step> {
-        self.tour.steps().into_iter().find(|step| step.id == id.0)
+        self.tour.find_step(id)
     }
 
     /// A record of a re-pin to another head says nothing about this tour any more.
@@ -430,7 +414,7 @@ impl Review {
     }
 
     fn is_gone(&self, step: &Step) -> bool {
-        let id = StepId::from(step.id.as_str());
+        let id = step.id.clone();
         step.diagram.is_none()
             && self
                 .repin_record()
@@ -589,7 +573,7 @@ impl Review {
             into: &mut Vec<SidebarEntry<'a>>,
         ) {
             for step in steps {
-                let id = StepId::from(step.id.as_str());
+                let id = step.id.clone();
                 into.push(SidebarEntry {
                     is_current: current == Some(&id),
                     is_ticked: review.is_ticked(&id),

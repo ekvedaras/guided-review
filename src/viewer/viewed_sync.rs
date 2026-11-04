@@ -217,7 +217,7 @@ impl Coverage {
                 .map(|part| part.piece.id.path.clone());
             coverage
                 .files_by_step
-                .entry(StepId::from(step.id.as_str()))
+                .entry(step.id.clone())
                 .or_default()
                 .extend(paths);
         }

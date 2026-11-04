@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
-use super::review::{Screen, StepId};
+use super::review::Screen;
 use super::step_page::pieces_of;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +33,7 @@ pub(super) fn all_targets(
     let mut targets = Vec::new();
     let mut shown_files: HashSet<&str> = HashSet::new();
     for step in tour.steps() {
-        let id = Screen::Step(StepId::from(step.id.as_str()));
+        let id = Screen::Step(step.id.clone());
         targets.push(JumpTarget {
             kind: JumpKind::Step,
             label: step.title.clone(),

@@ -106,7 +106,7 @@ impl RepinRecord {
                         .filter(|piece| piece.status == RepinStatus::Gone)
                         .map(|piece| piece.id.to_string())
                         .collect();
-                    (StepId::from(step.step.as_str()), gone)
+                    (step.step.clone(), gone)
                 })
                 .filter(|(_, gone): &(StepId, BTreeSet<String>)| !gone.is_empty())
                 .collect(),
@@ -163,7 +163,7 @@ impl ReviewState {
             .iter()
             .filter(|step| step.has_changed_or_new_piece())
         {
-            let id = StepId::from(step.step.as_str());
+            let id = step.step.clone();
             if let Some(tick) = self.viewer.read_ticks.remove(&id) {
                 self.viewer.read_before.insert(id, tick);
             }

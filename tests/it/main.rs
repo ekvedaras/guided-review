@@ -45,6 +45,7 @@ mod show;
 mod step_details;
 mod symbol_edges;
 mod timestamp;
+mod tour_file;
 mod viewed_sync;
 mod viewer;
 mod write_comments;

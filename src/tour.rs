@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -32,9 +33,25 @@ fn current_version() -> u32 {
     VERSION
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StepId(String);
+
+impl From<&str> for StepId {
+    fn from(id: &str) -> Self {
+        Self(id.to_owned())
+    }
+}
+
+impl fmt::Display for StepId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Step {
-    pub id: String,
+    pub id: StepId,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -141,5 +158,16 @@ impl Tour {
         let mut all = Vec::new();
         collect(&self.steps, &mut all);
         all
+    }
+
+    pub fn find_step(&self, id: &StepId) -> Option<&Step> {
+        fn find<'a>(steps: &'a [Step], id: &StepId) -> Option<&'a Step> {
+            steps.iter().find_map(|step| {
+                (step.id == *id)
+                    .then_some(step)
+                    .or_else(|| find(&step.children, id))
+            })
+        }
+        find(&self.steps, id)
     }
 }

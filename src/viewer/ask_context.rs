@@ -55,20 +55,14 @@ pub(super) fn context_for(
             }
         }
         Place::Step { step: id } => {
-            let step = tour
-                .steps()
-                .into_iter()
-                .find(|step| step.id == id.to_string())?;
+            let step = tour.find_step(id)?;
             step_heading(&mut text, step.title.as_str(), step.why.as_str(), "step")?;
             for piece in StepPage::of(step, tour, files, &display, false).pieces {
                 piece_lines(&mut text, &piece)?;
             }
         }
         Place::Piece { step, piece } => {
-            let step = tour
-                .steps()
-                .into_iter()
-                .find(|s| s.id == step.to_string())?;
+            let step = tour.find_step(step)?;
             step_heading(&mut text, &step.title, &step.why, "piece")?;
             let page = StepPage::of(step, tour, files, &display, false);
             let piece = page.pieces.iter().find(|p| p.id.to_string() == *piece)?;
@@ -81,7 +75,7 @@ pub(super) fn context_for(
             pieces,
         } => {
             let shown = if let Some(id) = step {
-                let step = tour.steps().into_iter().find(|s| s.id == id.to_string())?;
+                let step = tour.find_step(id)?;
                 step_heading(&mut text, &step.title, &step.why, "few lines")?;
                 StepPage::of(step, tour, files, &display, false).pieces
             } else {

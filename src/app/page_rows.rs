@@ -639,7 +639,7 @@ impl RowsBuilder<'_> {
         review: &Review,
     ) -> Option<SharedString> {
         let step = page.step;
-        let id = StepId::from(step.id.as_str());
+        let id = step.id.clone();
         let place = review.reading_place();
         self.rows.push(PageRow::StepHeading(Rc::new(StepHeading {
             id: id.clone(),

@@ -48,7 +48,7 @@ impl RefreshBrief {
                     })
             })
             .map(|step| StaleStep {
-                id: StepId::from(step.id.as_str()),
+                id: step.id.clone(),
                 title: step.title.clone(),
             })
             .collect();
