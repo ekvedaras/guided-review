@@ -79,3 +79,39 @@ fn a_step_is_found_by_its_id_at_any_depth() {
     );
     assert!(tour.find_step(&StepId::from("nope")).is_none());
 }
+
+#[test]
+fn a_symbol_or_whole_file_pointer_names_its_piece_and_the_other_kinds_name_none() {
+    use guided_review::tour::PieceRef;
+
+    let named = |pointer: PieceRef| pointer.piece_id().map(|id| id.to_string());
+
+    assert_eq!(
+        named(PieceRef::Symbol {
+            file: "app/Order.php".into(),
+            symbol: "Order::total".into()
+        }),
+        Some("app/Order.php#Order::total".to_owned())
+    );
+    assert_eq!(
+        named(PieceRef::WholeFile {
+            file: "logo.png".into()
+        }),
+        Some("logo.png".to_owned())
+    );
+    assert_eq!(
+        named(PieceRef::Lines {
+            file: "ci.yml".into(),
+            lines: [1, 2]
+        }),
+        None
+    );
+    assert_eq!(named(PieceRef::Rest { rest: "app".into() }), None);
+    assert_eq!(
+        named(PieceRef::Symbol {
+            file: "a.php".into(),
+            symbol: "a/b".into()
+        }),
+        None
+    );
+}

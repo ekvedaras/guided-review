@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::file_path::FilePath;
+use crate::piece_id::PieceId;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 
 const VERSION: u32 = 1;
@@ -90,6 +92,20 @@ pub enum PieceRef {
     WholeFile {
         file: String,
     },
+}
+
+impl PieceRef {
+    /// The one piece a pointer names; a range or a folder names none, and a pointer that is no
+    /// valid piece id names none either, so the tour check reports it as not found.
+    pub fn piece_id(&self) -> Option<PieceId> {
+        match self {
+            Self::Symbol { file, symbol } => {
+                PieceId::symbol(FilePath::new(file).ok()?, symbol.as_str()).ok()
+            }
+            Self::WholeFile { file } => Some(PieceId::whole_file(FilePath::new(file).ok()?)),
+            Self::Rest { .. } | Self::Lines { .. } => None,
+        }
+    }
 }
 
 impl Tour {

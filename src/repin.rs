@@ -228,12 +228,11 @@ fn line_ranges_in_changed_files(
         .collect()
 }
 
-/// `new_id_of_old_hunk` and `gone_hunks` hold ids as the tour file writes them, since they rewrite its pointers.
 struct Matching<'a> {
     status_of_new: HashMap<&'a PieceId, RepinStatus>,
     gone_ids: HashSet<&'a PieceId>,
-    new_id_of_old_hunk: HashMap<String, String>,
-    gone_hunks: Vec<String>,
+    new_id_of_old_hunk: HashMap<PieceId, PieceId>,
+    gone_hunks: HashSet<PieceId>,
 }
 
 impl<'a> Matching<'a> {
@@ -242,7 +241,7 @@ impl<'a> Matching<'a> {
             status_of_new: HashMap::new(),
             gone_ids: HashSet::new(),
             new_id_of_old_hunk: HashMap::new(),
-            gone_hunks: Vec::new(),
+            gone_hunks: HashSet::new(),
         };
         let is_hunk = |piece: &&Piece| piece.kind == PieceKind::Hunk;
 
@@ -281,7 +280,7 @@ impl<'a> Matching<'a> {
                 let before = unmatched_old.remove(index);
                 matching
                     .new_id_of_old_hunk
-                    .insert(before.id.to_string(), now.id.to_string());
+                    .insert(before.id.clone(), now.id.clone());
                 matching.status_of_new.insert(
                     &now.id,
                     if before.diff_hash == now.diff_hash {
@@ -295,7 +294,7 @@ impl<'a> Matching<'a> {
         }
         for before in unmatched_old {
             matching.gone_ids.insert(&before.id);
-            matching.gone_hunks.push(before.id.to_string());
+            matching.gone_hunks.insert(before.id.clone());
         }
         matching
     }
@@ -319,20 +318,25 @@ impl HunkPairing {
 
 /// Points hunk pointers at the ordinal their hunk has now; pointers to vanished hunks are dropped,
 /// because that ordinal may now belong to another hunk.
-fn retarget(steps: &mut [Step], new_id_of_old_hunk: &HashMap<String, String>, gone: &[String]) {
+fn retarget(
+    steps: &mut [Step],
+    new_id_of_old_hunk: &HashMap<PieceId, PieceId>,
+    gone: &HashSet<PieceId>,
+) {
     for step in steps {
         step.pieces.retain_mut(|pointer| {
-            let PieceRef::Symbol { file, symbol } = pointer else {
+            let Some(old_id) = pointer.piece_id() else {
                 return true;
             };
-            let old_id = format!("{file}#{symbol}");
             if gone.contains(&old_id) {
                 return false;
             }
-            if let Some(new_symbol) = new_id_of_old_hunk
-                .get(&old_id)
-                .and_then(|new_id| new_id.strip_prefix(&format!("{file}#")))
-            {
+            if let (PieceRef::Symbol { symbol, .. }, Some(new_symbol)) = (
+                &mut *pointer,
+                new_id_of_old_hunk
+                    .get(&old_id)
+                    .and_then(PieceId::symbol_path),
+            ) {
                 new_symbol.clone_into(symbol);
             }
             true
