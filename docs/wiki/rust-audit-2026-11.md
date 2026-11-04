@@ -92,3 +92,30 @@ Behaviour that changed because a lint forced it, beyond the audit's phase 2 list
 - `PieceDiff::of` and `symbol_piece` drop a piece with no file or no symbol on either side, where they used to panic.
 
 Could not fix: nothing is left open. `needless_pass_by_value` and `large_types_passed_by_value` changed many signatures (`&Colors`, `&SvgJob`, `&StripJob`), which phase 3 should know when it touches the render path.
+
+## Phase 2 result (2026-11-04)
+
+Each fix has a test that failed first, unless noted. Each commit is green on `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test --all-features`.
+
+- `cb38ce9` Re-pin: colours, context lines and sync answers carry the commits they were read at, and `Review` drops those for another head. Comment outcomes still apply after a re-pin on purpose: the draft is the same saved entity, and dropping a "sent" outcome would invite a second post.
+- `0709c2a` Save failures: every write goes through `Saves`, which keeps the last failure until a write succeeds. The sidebar shows it, and a failed typing save marks the text unsaved again so the next save retries it.
+- `2ac45fd` Stuck Ask: a question that cannot reach a new AI process becomes the Ask's failure, and the turn never starts. No test: the path lives in the gpui panel and needs a window.
+- `5536394` Reply snapshot: `ThreadAction::Reply` has no body any more; the core sends the saved draft when the request is made, and refuses an empty one (`CommentRefusal::EmptyReply`). The stale closure itself needs a window to test; the test covers the new contract.
+- `f35cf00` Reversed input-method range: after phase 1 it no longer panicked in `text_in` but read as empty, and `replace` still panicked. Ranges are now ordered and clamped in one place.
+- `aa42da8` Markdown: after phase 1, `</details>` inside a list item no longer crashed but emptied the whole text. End tags now close only a frame of their own kind, Root never closes, and a `</details>` inside an item waits until the item and list close.
+- `7785434` Suggest change: no suggestion is added when the lines are not on the screen or none are kept.
+- `3fe24dd` Session id: `AgentEvent::Done { session_id: Option<String> }`; a result line with no id keeps the session the Ask had.
+- `5f5864d` Dropped piece (from phase 1): a change on a symbol found on neither side is recorded on its `ChangedFile` and named in the sidebar ("read it on GitHub"), together with any piece outside its file. The `PieceDiff::of` drop cannot happen by construction, but it is covered by the same notice.
+- `0ea8604` Failed window open (from phase 1): it printed and quit with status 0; it now exits with status 1.
+
+Other bugs from the audit notes that a reviewer can hit, fixed the same way:
+
+- `53de963` "Use as comment" on an Ask with no answer yet is refused (`NoAnswerYet`) instead of opening an empty comment box.
+- `41f4a9a` Copying code dragged to inside a multi-byte letter took the whole row out of the copy; the range now snaps to whole letters.
+- `8b392a6` The image cache wrote one shared temp name per blob, so two threads could leave a truncated picture cached for good. Each write now has its own temp file, removed on failure. No test: it is a timing race.
+
+Not fixed, left for later:
+
+- Typing in a draft or reply box while a re-pin runs is refused and only printed to stderr. The repin banner shows meanwhile, and the window is short.
+- `write_draft`/`write_reply` doing nothing when the draft is gone: no reachable path found, since the box closes when its draft is dropped.
+- A failed thread refetch after an action, a strip that fails to rasterize, image previews that fail to decode, and the GitHub adapter's empty review id and unchecked `gh auth token` status. Each needs a design choice (a soft warning channel, typed GitHub errors) that belongs with phase 4.
