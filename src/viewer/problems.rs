@@ -15,6 +15,8 @@ pub enum Problem {
     NotRead(Read, String),
     /// A code link was clicked and its IDE command could not be run, so nothing opened.
     IdeNotStarted(String),
+    /// The local clone could not give the commits, so code opens on GitHub and not in the IDE.
+    CodeOnGitHub(String),
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -54,6 +56,10 @@ impl fmt::Display for Problem {
             Self::IdeNotStarted(reason) => write!(
                 formatter,
                 "Could not start the IDE command, so code links open nothing: {reason}"
+            ),
+            Self::CodeOnGitHub(reason) => write!(
+                formatter,
+                "Code opens on GitHub, not in the IDE, as the local clone could not give the commits: {reason}"
             ),
         }
     }

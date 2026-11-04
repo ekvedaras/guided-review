@@ -23,6 +23,11 @@ pub trait CodeSource: Send + Sync {
         None
     }
 
+    /// Why the code is read from GitHub though the PR's repo has a clone; `None` when it is not.
+    fn fallback_reason(&self) -> Option<&str> {
+        None
+    }
+
     /// Says which files will be read next, so a source that can fetch them together does.
     fn read_ahead(&self, _files: &[FileAt]) {}
 }

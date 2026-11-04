@@ -141,6 +141,8 @@ pub struct Review {
     not_read: BTreeMap<Read, String>,
     /// Why the last IDE command could not be run, until one runs.
     ide_not_started: Option<String>,
+    /// Why the code is read from GitHub though there is a clone; set by the source this review opened on.
+    code_on_github: Option<String>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -206,6 +208,7 @@ impl Review {
             threads_not_read: None,
             not_read: BTreeMap::new(),
             ide_not_started: None,
+            code_on_github: source.fallback_reason().map(str::to_owned),
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -1238,6 +1241,7 @@ impl Review {
                     .map(|(read, reason)| Problem::NotRead(*read, reason.clone())),
             )
             .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
+            .chain(self.code_on_github.clone().map(Problem::CodeOnGitHub))
             .collect()
     }
 

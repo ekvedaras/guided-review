@@ -80,6 +80,10 @@ impl CodeSource for CachedCodeSource {
         self.source.local_clone()
     }
 
+    fn fallback_reason(&self) -> Option<&str> {
+        self.source.fallback_reason()
+    }
+
     fn read_ahead(&self, files: &[FileAt]) {
         let missing: Vec<&FileAt> = files
             .iter()

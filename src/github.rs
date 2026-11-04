@@ -302,6 +302,7 @@ impl GitHub {
         GitHubCodeSource {
             github: self.clone(),
             repo: repo.clone(),
+            fallback_reason: None,
         }
     }
 }
@@ -615,6 +616,7 @@ impl ReviewWritesPort for GitHub {
 pub struct GitHubCodeSource {
     github: GitHub,
     repo: RepoName,
+    fallback_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -623,12 +625,24 @@ struct CompareJson {
 }
 
 impl GitHubCodeSource {
+    /// Read from GitHub because the local clone could not give the commits.
+    pub fn instead_of_clone_because(self, reason: String) -> Self {
+        Self {
+            fallback_reason: Some(reason),
+            ..self
+        }
+    }
+
     fn compare_path(&self, base: &Sha, head: &Sha) -> String {
         format!("repos/{}/compare/{base}...{head}", self.repo)
     }
 }
 
 impl CodeSource for GitHubCodeSource {
+    fn fallback_reason(&self) -> Option<&str> {
+        self.fallback_reason.as_deref()
+    }
+
     fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
