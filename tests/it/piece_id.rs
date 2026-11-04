@@ -117,3 +117,14 @@ fn a_symbol_id_is_not_taken_for_another_piece() {
     assert!(!total.may_be(&PieceId::whole_file(path("app/Order.php"))));
     assert!(!total.may_be(&PieceId::symbol(path("app/Order.php"), "tax").unwrap()));
 }
+
+#[test]
+fn a_clone_shares_the_symbol_text() {
+    let id = PieceId::symbol(path("app/Order.php"), "Order::total").unwrap();
+    let clone = id.clone();
+
+    assert_eq!(
+        clone.symbol_path().unwrap().as_ptr(),
+        id.symbol_path().unwrap().as_ptr()
+    );
+}

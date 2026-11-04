@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -17,7 +18,7 @@ use crate::file_path::FilePath;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PieceId {
     path: FilePath,
-    symbol: Option<String>,
+    symbol: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +46,7 @@ impl PieceId {
         }
         Ok(Self {
             path,
-            symbol: Some(symbol),
+            symbol: Some(symbol.into()),
         })
     }
 
@@ -53,7 +54,7 @@ impl PieceId {
     pub fn hunk(path: FilePath, number: usize) -> Self {
         Self {
             path,
-            symbol: Some(format!("{HUNK_PREFIX}{number}")),
+            symbol: Some(format!("{HUNK_PREFIX}{number}").into()),
         }
     }
 
