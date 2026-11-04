@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
@@ -29,7 +31,7 @@ pub(super) fn all_targets(
     safety_net_files: &[&str],
 ) -> Vec<JumpTarget> {
     let mut targets = Vec::new();
-    let mut shown_files: Vec<&str> = Vec::new();
+    let mut shown_files: HashSet<&str> = HashSet::new();
     for step in tour.steps() {
         let id = Screen::Step(StepId::from(step.id.as_str()));
         targets.push(JumpTarget {
@@ -40,8 +42,7 @@ pub(super) fn all_targets(
         });
         for piece in pieces_of(step, tour, files) {
             let path = piece.id.path.as_str();
-            if !shown_files.contains(&path) {
-                shown_files.push(path);
+            if shown_files.insert(path) {
                 targets.push(JumpTarget {
                     kind: JumpKind::File,
                     label: path.to_owned(),
@@ -60,8 +61,7 @@ pub(super) fn all_targets(
         }
     }
     for path in safety_net_files {
-        if !shown_files.contains(path) {
-            shown_files.push(path);
+        if shown_files.insert(path) {
             targets.push(JumpTarget {
                 kind: JumpKind::File,
                 label: (*path).to_owned(),
@@ -80,14 +80,15 @@ fn is_named_symbol(symbol: &str) -> bool {
 
 /// Best matches first; targets the query does not spell are dropped. An empty query keeps reading order.
 pub(super) fn rank(targets: Vec<JumpTarget>, query: &str) -> Vec<JumpTarget> {
-    let query: Vec<char> = query.to_lowercase().chars().collect();
+    let query_text = query.to_lowercase();
+    let query: Vec<char> = query_text.chars().collect();
     if query.is_empty() {
         return targets;
     }
     let mut scored: Vec<(usize, usize, JumpTarget)> = targets
         .into_iter()
         .filter_map(|target| {
-            let looseness = looseness(&target.label, &query)?;
+            let looseness = looseness(&target.label, &query, &query_text)?;
             Some((looseness, target.label.chars().count(), target))
         })
         .collect();
@@ -99,14 +100,14 @@ pub(super) fn rank(targets: Vec<JumpTarget>, query: &str) -> Vec<JumpTarget> {
 /// 0 is an exact run. The query spells the text in runs, and every run but one found
 /// whole in the text starts a word, so letters scattered over a long path match nothing.
 /// `None` when it does not spell the text so.
-fn looseness(text: &str, query: &[char]) -> Option<usize> {
+fn looseness(text: &str, query: &[char], query_text: &str) -> Option<usize> {
+    let lowercase = text.to_lowercase();
     let original: Vec<char> = text.chars().collect();
-    let letters: Vec<char> = text.to_lowercase().chars().collect();
+    let letters: Vec<char> = lowercase.chars().collect();
     if original.len() != letters.len() {
         return None;
     }
-    let query_text: String = query.iter().collect();
-    if text.to_lowercase().contains(&query_text) {
+    if lowercase.contains(query_text) {
         return Some(0);
     }
     let (first_letter, rest_of_query) = query.split_first()?;

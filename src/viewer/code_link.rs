@@ -289,14 +289,23 @@ fn blob_url(repo: &RepoName, sha: &Sha, path: &str) -> String {
 }
 
 pub(crate) fn percent_encode_path(path: &str) -> String {
-    path.bytes()
-        .map(|byte| match byte {
+    let hex_digit = |half: u8| {
+        char::from_digit(u32::from(half), 16).map_or('0', |digit| digit.to_ascii_uppercase())
+    };
+    let mut encoded = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                char::from(byte).to_string()
+                encoded.push(char::from(byte));
             }
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
+            _ => {
+                encoded.push('%');
+                encoded.push(hex_digit(byte >> 4));
+                encoded.push(hex_digit(byte & 0x0F));
+            }
+        }
+    }
+    encoded
 }
 
 fn percent_decode(text: &str) -> String {
@@ -320,4 +329,17 @@ fn percent_decode(text: &str) -> String {
         }
     }
     String::from_utf8_lossy(&decoded).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent_encode_path;
+
+    #[test]
+    fn a_path_is_encoded_byte_by_byte_in_upper_case_hex() {
+        assert_eq!(
+            percent_encode_path("app/my shop/Café_1~.php"),
+            "app/my%20shop/Caf%C3%A9_1~.php"
+        );
+    }
 }

@@ -399,7 +399,8 @@ impl HighlightRequest {
                 })
                 .collect::<Vec<_>>(),
         );
-        let mut files = HashMap::new();
+        let mut base = HashMap::new();
+        let mut head = HashMap::new();
         for target in &self.targets {
             let Some(language) = HighlightLanguage::for_path(&target.path) else {
                 continue;
@@ -410,34 +411,45 @@ impl HighlightRequest {
             let Some(configuration) = language.configuration() else {
                 continue;
             };
-            files.insert(
-                (target.side, target.shown_path.clone()),
+            let side = match target.side {
+                Side::Base => &mut base,
+                Side::Head => &mut head,
+            };
+            side.insert(
+                target.shown_path.clone(),
                 highlight_file(configuration, &text),
             );
         }
         Highlights {
-            base: self.base.clone(),
-            head: self.head.clone(),
-            files,
+            base_sha: self.base.clone(),
+            head_sha: self.head.clone(),
+            base,
+            head,
         }
     }
 }
 
 #[derive(Debug, Default)]
 pub struct Highlights {
-    base: Sha,
-    head: Sha,
-    files: HashMap<(Side, String), Vec<Vec<Span>>>,
+    base_sha: Sha,
+    head_sha: Sha,
+    /// Spans per line, by the path the review shows the file under; one map per side, so a lookup borrows the path.
+    base: HashMap<String, Vec<Vec<Span>>>,
+    head: HashMap<String, Vec<Vec<Span>>>,
 }
 
 impl Highlights {
     pub(super) fn is_of(&self, base: &Sha, head: &Sha) -> bool {
-        self.base == *base && self.head == *head
+        self.base_sha == *base && self.head_sha == *head
     }
 
     pub(super) fn spans(&self, side: Side, path: &str, line: usize) -> &[Span] {
-        self.files
-            .get(&(side, path.to_owned()))
+        let files = match side {
+            Side::Base => &self.base,
+            Side::Head => &self.head,
+        };
+        files
+            .get(path)
             .and_then(|lines| lines.get(line.wrapping_sub(1)))
             .map_or(&[], Vec::as_slice)
     }
