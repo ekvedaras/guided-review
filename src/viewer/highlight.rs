@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::LazyLock;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -149,8 +150,45 @@ impl HighlightLanguage {
         Self::for_path(&format!("snippet.{extension}"))
     }
 
+    /// Compiling a language's queries takes milliseconds, so each is compiled once, on first use, and shared.
+    fn configuration(self) -> Option<&'static HighlightConfiguration> {
+        static PHP: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Php.compile());
+        static TYPESCRIPT: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::TypeScript.compile());
+        static TSX: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Tsx.compile());
+        static JAVASCRIPT: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::JavaScript.compile());
+        static JSON: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Json.compile());
+        static CSS: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Css.compile());
+        static HTML: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Html.compile());
+        static RUST: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Rust.compile());
+        static BASH: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Bash.compile());
+        static YAML: LazyLock<Option<HighlightConfiguration>> =
+            LazyLock::new(|| HighlightLanguage::Yaml.compile());
+        let configuration = match self {
+            Self::Php => &PHP,
+            Self::TypeScript => &TYPESCRIPT,
+            Self::Tsx => &TSX,
+            Self::JavaScript => &JAVASCRIPT,
+            Self::Json => &JSON,
+            Self::Css => &CSS,
+            Self::Html => &HTML,
+            Self::Rust => &RUST,
+            Self::Bash => &BASH,
+            Self::Yaml => &YAML,
+        };
+        configuration.as_ref()
+    }
+
     /// None when the built-in query does not compile; the file then stays plain, and stderr says which language.
-    fn configuration(self) -> Option<HighlightConfiguration> {
+    fn compile(self) -> Option<HighlightConfiguration> {
         // The later pattern wins, so a grammar's own additions come after the JavaScript base they extend.
         let (name, language, highlights, injections, locals) = match self {
             Self::Php => (
@@ -361,8 +399,6 @@ impl HighlightRequest {
                 })
                 .collect::<Vec<_>>(),
         );
-        let mut configurations: HashMap<HighlightLanguage, Option<HighlightConfiguration>> =
-            HashMap::new();
         let mut files = HashMap::new();
         for target in &self.targets {
             let Some(language) = HighlightLanguage::for_path(&target.path) else {
@@ -371,11 +407,7 @@ impl HighlightRequest {
             let Ok(text) = source.file_at(&target.sha, &target.path) else {
                 continue;
             };
-            let Some(configuration) = configurations
-                .entry(language)
-                .or_insert_with(|| language.configuration())
-                .as_ref()
-            else {
+            let Some(configuration) = language.configuration() else {
                 continue;
             };
             files.insert(
@@ -427,7 +459,7 @@ pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
     let Some(configuration) = language.configuration() else {
         return vec![Vec::new(); line_count];
     };
-    let mut lines = highlight_file(&configuration, &source);
+    let mut lines = highlight_file(configuration, &source);
     if needs_php_tag {
         lines.remove(0);
     }
