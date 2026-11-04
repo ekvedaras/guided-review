@@ -129,7 +129,7 @@ fn a_click_on_one_row_opens_a_comment_box_on_that_line() {
     let CommentPlace::Lines { end, .. } = &place else {
         panic!("a click is on lines");
     };
-    assert_eq!((end.line, place.path()), (line(10), "notes.txt"));
+    assert_eq!((end.line, place.path().as_str()), (line(10), "notes.txt"));
     assert_eq!(review.comment_drafts().len(), 1);
 }
 
@@ -550,5 +550,35 @@ fn a_comment_problem_reads_as_the_refusal_or_the_reason_github_gave() {
     assert_eq!(
         CommentProblem::Failed("could not reach GitHub: timeout".into()).to_string(),
         "could not reach GitHub: timeout"
+    );
+}
+
+#[test]
+fn a_comment_place_says_where_the_comment_goes() {
+    let at = |number| LineLocation {
+        path: crate::support::file_path("app/Order.php"),
+        side: Side::Head,
+        line: line(number),
+    };
+
+    assert_eq!(
+        CommentPlace::on_file(&crate::support::file_path("app/Order.php")).describe(),
+        "Comment on app/Order.php"
+    );
+    assert_eq!(
+        CommentPlace::Lines {
+            start: at(4),
+            end: at(4)
+        }
+        .describe(),
+        "Comment on app/Order.php line 4"
+    );
+    assert_eq!(
+        CommentPlace::Lines {
+            start: at(4),
+            end: at(9)
+        }
+        .describe(),
+        "Comment on app/Order.php lines 4 to 9"
     );
 }

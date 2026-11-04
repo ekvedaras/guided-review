@@ -175,7 +175,7 @@ impl RenderOnce for CommentComposer {
                 div()
                     .text_xs()
                     .text_color(colors.muted_text)
-                    .child(describe(place)),
+                    .child(place.describe()),
             )
             .child(div().min_h(gpui::px(48.)).child(body))
             .children(
@@ -196,19 +196,6 @@ fn shown(problem: CommentProblem) -> SharedString {
             Cow::Owned(text) => text.into(),
         },
         CommentProblem::Rejected(reason) | CommentProblem::Failed(reason) => reason.into(),
-    }
-}
-
-fn describe(place: &CommentPlace) -> String {
-    match place {
-        CommentPlace::File(path) => format!("Comment on {path}"),
-        CommentPlace::Lines { start, end } if start == end => {
-            format!("Comment on {} line {}", end.path, end.line)
-        }
-        CommentPlace::Lines { start, end } => format!(
-            "Comment on {} lines {} to {}",
-            end.path, start.line, end.line
-        ),
     }
 }
 

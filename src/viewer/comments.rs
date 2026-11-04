@@ -39,10 +39,24 @@ impl CommentPlace {
         matches!(self, Self::File(_))
     }
 
-    pub fn path(&self) -> &str {
+    pub fn path(&self) -> &FilePath {
         match self {
-            Self::File(path) => path.as_str(),
-            Self::Lines { end, .. } => end.path.as_str(),
+            Self::File(path) => path,
+            Self::Lines { end, .. } => &end.path,
+        }
+    }
+
+    /// The comment box's heading.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::File(path) => format!("Comment on {path}"),
+            Self::Lines { start, end } if start == end => {
+                format!("Comment on {} line {}", end.path, end.line)
+            }
+            Self::Lines { start, end } => format!(
+                "Comment on {} lines {} to {}",
+                end.path, start.line, end.line
+            ),
         }
     }
 
