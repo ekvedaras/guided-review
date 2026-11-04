@@ -21,6 +21,7 @@ pub enum Read {
     PrHead,
     PrDescription,
     PendingReview,
+    Authorship,
 }
 
 impl fmt::Display for Problem {
@@ -42,7 +43,11 @@ impl fmt::Display for Problem {
             ),
             Self::NotRead(Read::PendingReview, reason) => write!(
                 formatter,
-                "Could not look for a pending review on GitHub, so Comment now stays hidden: {reason}"
+                "Could not look for a pending review on GitHub, so Comment now may be wrong: {reason}"
+            ),
+            Self::NotRead(Read::Authorship, reason) => write!(
+                formatter,
+                "Could not tell who wrote the PR, so Approve and Request changes may be wrong: {reason}"
             ),
         }
     }

@@ -367,6 +367,7 @@ impl ReviewWritesPort for FakeGitHub {
 
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         self.sent.record(GitHubCall::AuthorOf(pr.clone()));
+        self.fail_if_reads_fail()?;
         Ok(self.viewer_is_author.load(Ordering::SeqCst))
     }
 

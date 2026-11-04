@@ -778,6 +778,7 @@ impl Review {
     }
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
+        self.not_read.remove(&Read::Authorship);
         self.comment_desk.viewer_authorship_is(authored);
     }
 

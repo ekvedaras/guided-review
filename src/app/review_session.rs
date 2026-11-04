@@ -675,9 +675,7 @@ impl ReviewSession {
                     }
                     match authored {
                         Ok(authored) => review.viewer_authorship_is(authored),
-                        Err(error) => {
-                            eprintln!("warning: could not tell who wrote the PR: {error:#}");
-                        }
+                        Err(error) => review.could_not_read(Read::Authorship, &error),
                     }
                 });
             },

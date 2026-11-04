@@ -73,7 +73,9 @@ impl AppPath for Review {
     }
 
     fn pull_viewer_authorship(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let authored = github.viewer_authored(self.pr())?;
+        let authored = github
+            .viewer_authored(self.pr())
+            .inspect_err(|error| self.could_not_read(Read::Authorship, error))?;
         self.viewer_authorship_is(authored);
         Ok(())
     }
