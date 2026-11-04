@@ -14,6 +14,7 @@ use super::suggestion::suggestion_block;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
+use crate::file_path::FilePath;
 
 /// Everything the reviewer writes to GitHub: the drag that opens a comment box, the comments,
 /// replies and finished review, and what GitHub said about the pending review and the PR's author.
@@ -116,7 +117,7 @@ impl CommentDesk {
     pub(super) fn begin_file_comment(
         &self,
         state: &mut ReviewState,
-        path: &str,
+        path: &FilePath,
         tour_is_old: bool,
         head: &Sha,
     ) -> Result<CommentPlace, CommentRefusal> {

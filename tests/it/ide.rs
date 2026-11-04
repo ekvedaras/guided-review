@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::support::FixtureRepo;
+use crate::support::{FixtureRepo, file_path};
 use guided_review::config::Config;
 use guided_review::ide::{Ide, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
@@ -16,7 +16,7 @@ fn a_url_template_gets_the_clone_path_and_line() {
     let ide = ide("idea://open?file={path}&line={line}", "/code/shop");
 
     assert_eq!(
-        ide.launch(Path::new("app/Order.php"), 7),
+        ide.launch(&file_path("app/Order.php"), 7),
         IdeLaunch::Url("idea://open?file=/code/shop/app/Order.php&line=7".into())
     );
 }
@@ -26,7 +26,7 @@ fn a_url_path_is_percent_encoded() {
     let ide = ide("idea://open?file={path}&line={line}", "/code/my shop");
 
     assert_eq!(
-        ide.launch(Path::new("app/Order.php"), 1),
+        ide.launch(&file_path("app/Order.php"), 1),
         IdeLaunch::Url("idea://open?file=/code/my%20shop/app/Order.php&line=1".into())
     );
 }
@@ -36,7 +36,7 @@ fn a_command_template_gets_a_shell_quoted_path() {
     let ide = ide("code --goto {path}:{line}", "/code/it's");
 
     assert_eq!(
-        ide.launch(Path::new("a b.php"), 3),
+        ide.launch(&file_path("a b.php"), 3),
         IdeLaunch::Shell("code --goto '/code/it'\\''s/a b.php':3".into())
     );
 }
@@ -80,7 +80,7 @@ fn running_a_url_launch_hands_the_url_to_the_opener() {
     let ide = ide("idea://open?file={path}&line={line}", "/code/shop");
     let mut opened = Vec::new();
 
-    ide.launch(Path::new("a.php"), 2)
+    ide.launch(&file_path("a.php"), 2)
         .run(|url| opened.push(url.to_owned()));
 
     assert_eq!(opened, ["idea://open?file=/code/shop/a.php&line=2"]);
@@ -90,6 +90,6 @@ fn running_a_url_launch_hands_the_url_to_the_opener() {
 fn running_a_shell_launch_does_not_use_the_url_opener() {
     let ide = ide("true {path}:{line}", "/code/shop");
 
-    ide.launch(Path::new("a.php"), 2)
+    ide.launch(&file_path("a.php"), 2)
         .run(|_| panic!("a shell command is not a URL"));
 }

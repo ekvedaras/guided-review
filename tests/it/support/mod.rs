@@ -23,6 +23,10 @@ use guided_review::ide::NoIde;
 use guided_review::viewer::{CodeLink, Destination, Review};
 use tempfile::TempDir;
 
+pub fn file_path(path: &str) -> guided_review::file_path::FilePath {
+    guided_review::file_path::FilePath::new(path).unwrap()
+}
+
 pub struct FixtureRepo {
     root: TempDir,
     home: TempDir,

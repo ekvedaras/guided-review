@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::coverage;
+use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
@@ -16,7 +17,7 @@ pub struct ReviewThread {
     pub id: String,
     pub is_resolved: bool,
     pub is_outdated: bool,
-    pub path: String,
+    pub path: FilePath,
     /// The last line the thread covers at the PR's head. Unknown for outdated threads and file comments.
     pub line: Option<usize>,
     pub start_line: Option<usize>,
@@ -135,7 +136,7 @@ impl ThreadPlacement {
                 .iter()
                 .find(|(_, parts)| match thread.anchor() {
                     Some(anchor) => parts.iter().any(|piece| hangs_under_a_row(piece, &anchor)),
-                    None => parts.iter().any(|piece| piece.id.path == thread.path),
+                    None => parts.iter().any(|piece| thread.path == piece.id.path),
                 })
                 .map_or(Home::SafetyNet, |(id, _)| Home::Step(id.clone()));
             homes.entry(home).or_default().push(thread.clone());
@@ -189,7 +190,11 @@ fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[S
         .any(|comment| comment.body.contains("```suggestion"));
     match (has_suggestion, thread.is_outdated, thread.side, thread.line) {
         (true, false, Side::Head, Some(last)) => files_at_head
-            .lines(&thread.path, thread.start_line.unwrap_or(last), last)
+            .lines(
+                thread.path.as_str(),
+                thread.start_line.unwrap_or(last),
+                last,
+            )
             .into(),
         _ => Arc::new([]),
     }

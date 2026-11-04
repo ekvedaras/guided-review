@@ -20,9 +20,9 @@ impl SubjectCandidates {
 
         let mut found = HashMap::new();
         for file in files {
-            let imports = ImportedNames::of(source, head, &file.path);
+            let imports = ImportedNames::of(source, head, file.path.as_str());
             for test in file.pieces.iter().filter(|piece| is_live_test(piece)) {
-                let candidates = subjects_of_test(&file.path, test, &imports, &pool);
+                let candidates = subjects_of_test(file.path.as_str(), test, &imports, &pool);
                 found.insert(test.id.to_string(), Subjects(candidates));
             }
         }
@@ -168,7 +168,7 @@ impl Names {
         let symbol = piece.id.symbol.as_deref().unwrap_or_default();
         Self {
             owner: normalized(symbol.split("::").next().unwrap_or(symbol)),
-            file: normalized(file_stem(&file.path)),
+            file: normalized(file_stem(file.path.as_str())),
         }
     }
 }

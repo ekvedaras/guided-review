@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ports::{
@@ -27,9 +28,9 @@ impl CommentPlace {
     }
 
     /// A comment on a whole file, which GitHub takes for a picture. It has no line: line 0 never exists.
-    pub fn on_file(path: &str) -> Self {
+    pub fn on_file(path: &FilePath) -> Self {
         let file = LineLocation {
-            path: path.to_owned(),
+            path: path.clone(),
             side: Side::Head,
             line: 0,
         };
@@ -44,7 +45,7 @@ impl CommentPlace {
     }
 
     pub fn path(&self) -> &str {
-        &self.end.path
+        self.end.path.as_str()
     }
 
     pub fn is_single_line(&self) -> bool {

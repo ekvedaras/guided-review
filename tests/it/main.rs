@@ -22,6 +22,7 @@ mod diagrams;
 mod diff_hunks;
 mod eval;
 mod eval_adapters;
+mod file_path;
 mod file_reads;
 mod finish_review;
 mod github_threads;

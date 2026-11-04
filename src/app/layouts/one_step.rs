@@ -1053,12 +1053,12 @@ impl OneStepLayout {
                 let path = line.location.path.clone();
                 let scroll_x = self
                     .code_scroll_x
-                    .of(self.session.read(cx).review().screen(), &path);
+                    .of(self.session.read(cx).review().screen(), path.as_str());
                 let layout_handle = cx.weak_entity();
                 let on_scroll_x: OnScrollX = Rc::new(move |delta, window, cx| {
                     layout_handle
                         .update(cx, |this, cx| {
-                            this.scroll_code_sideways(&path, delta, window, cx);
+                            this.scroll_code_sideways(path.as_str(), delta, window, cx);
                         })
                         .ok();
                 });

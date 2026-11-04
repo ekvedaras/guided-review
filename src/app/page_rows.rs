@@ -18,6 +18,7 @@ use gpui::SharedString;
 use crate::app::components::diff_view::DiffRowLine;
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
+use crate::file_path::FilePath;
 use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, FileBlock, JumpKind, JumpTarget, LineKind, LineLocation, Markdown,
@@ -445,7 +446,7 @@ impl PageRows {
         let head = self.row_of_line(selection.head())?;
         Some(SelectedRows {
             rows: anchor.min(head)..=anchor.max(head),
-            path: selection.anchor().path.clone(),
+            path: selection.anchor().path.as_str().to_owned(),
         })
     }
 
@@ -575,11 +576,14 @@ impl UnderLines {
 
     /// What hangs under a whole file (line 0), on either side.
     fn take_whole_file(&mut self, path: &str) -> Vec<UnderLine> {
+        let Ok(path) = FilePath::new(path) else {
+            return Vec::new();
+        };
         let mut here: Vec<(usize, UnderLine)> = [Side::Base, Side::Head]
             .into_iter()
             .filter_map(|side| {
                 self.by_line.remove(&LineLocation {
-                    path: path.to_owned(),
+                    path: path.clone(),
                     side,
                     line: 0,
                 })
@@ -967,7 +971,7 @@ mod tests {
 
     fn box_at(path: &str, side: Side, line: usize) -> UnderLine {
         let at = LineLocation {
-            path: path.to_owned(),
+            path: FilePath::new(path).unwrap(),
             side,
             line,
         };
@@ -993,7 +997,7 @@ mod tests {
             box_at("a.php", Side::Head, 3),
         ]);
         let head_3 = LineLocation {
-            path: "a.php".into(),
+            path: FilePath::new("a.php").unwrap(),
             side: Side::Head,
             line: 3,
         };
@@ -1027,7 +1031,7 @@ mod tests {
                 id: "T1".into(),
                 is_resolved: false,
                 is_outdated: false,
-                path: "a.rs".into(),
+                path: FilePath::new("a.rs").unwrap(),
                 line: Some(1),
                 start_line: None,
                 side: Side::Head,
@@ -1102,7 +1106,7 @@ mod tests {
 
     fn composer_key(text: &str, problem: Option<&str>) -> RowKey {
         PageRow::Composer {
-            place: Rc::new(CommentPlace::on_file("a.rs")),
+            place: Rc::new(CommentPlace::on_file(&FilePath::new("a.rs").unwrap())),
             text_lines: line_count(text),
             problem: problem.map(Rc::from),
             is_sending: false,

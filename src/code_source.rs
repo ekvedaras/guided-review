@@ -2,6 +2,7 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 pub trait CodeSource: Send + Sync {
@@ -37,8 +38,8 @@ pub struct FileAt {
 
 #[derive(Debug, Default)]
 pub struct FileDiff {
-    pub old_path: Option<String>,
-    pub new_path: Option<String>,
+    pub old_path: Option<FilePath>,
+    pub new_path: Option<FilePath>,
     pub binary: bool,
     pub removed: Vec<Line>,
     pub added: Vec<Line>,
@@ -97,11 +98,12 @@ pub struct Line {
 }
 
 impl FileDiff {
+    pub fn file_path(&self) -> Option<&FilePath> {
+        self.new_path.as_ref().or(self.old_path.as_ref())
+    }
+
     pub fn path(&self) -> &str {
-        self.new_path
-            .as_deref()
-            .or(self.old_path.as_deref())
-            .unwrap_or_default()
+        self.file_path().map_or("", FilePath::as_str)
     }
 
     pub fn status(&self) -> FileStatus {
@@ -175,9 +177,9 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
         } else if raw.starts_with("deleted file mode") {
             file.new_path = None;
         } else if let Some(path) = raw.strip_prefix("rename from ") {
-            file.old_path = Some(unquote(path));
+            file.old_path = repo_path(&unquote(path));
         } else if let Some(path) = raw.strip_prefix("rename to ") {
-            file.new_path = Some(unquote(path));
+            file.new_path = repo_path(&unquote(path));
         } else if let Some(path) = raw.strip_prefix("--- ") {
             file.old_path = path_after_prefix(path, "a/");
         } else if let Some(path) = raw.strip_prefix("+++ ") {
@@ -199,18 +201,21 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
 }
 
 /// `a/<path> b/<path>` when the path did not change; renames get their paths from `rename from/to`.
-fn same_path_in_git_header(paths: &str) -> Option<String> {
+fn same_path_in_git_header(paths: &str) -> Option<FilePath> {
     let paths = unquote_pair(paths);
     let half = paths.len().checked_sub(5)? / 2;
     let (old, new) = (paths.get(2..2 + half)?, paths.get(half + 5..)?);
-    (old == new).then(|| old.to_owned())
+    (old == new).then(|| repo_path(old)).flatten()
 }
 
 /// Git ends `---` and `+++` paths that hold a space with a tab.
-fn path_after_prefix(path: &str, prefix: &str) -> Option<String> {
-    unquote(path.trim_end_matches('\t'))
-        .strip_prefix(prefix)
-        .map(str::to_owned)
+fn path_after_prefix(path: &str, prefix: &str) -> Option<FilePath> {
+    repo_path(unquote(path.trim_end_matches('\t')).strip_prefix(prefix)?)
+}
+
+/// A path git prints that cannot be a repo path (one with a backslash in its name) leaves the side unnamed.
+fn repo_path(path: &str) -> Option<FilePath> {
+    FilePath::new(path).ok()
 }
 
 fn unquote_pair(paths: &str) -> String {

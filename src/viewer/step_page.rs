@@ -7,6 +7,7 @@ use super::diff_display::{DiffDisplay, DiffHunk};
 use super::highlight::Span;
 use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
+use crate::file_path::FilePath;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::repin::RepinStatus;
@@ -24,7 +25,7 @@ pub enum Side {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LineLocation {
     /// GitHub addresses both sides of a renamed file by its new path.
-    pub path: String,
+    pub path: FilePath,
     pub side: Side,
     pub line: usize,
 }

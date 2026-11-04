@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
@@ -88,7 +88,7 @@ fn thread_on_line_ten(comments: Vec<ThreadComment>) -> ReviewThread {
         id: "T1".into(),
         is_resolved: false,
         is_outdated: false,
-        path: "notes.txt".into(),
+        path: file_path("notes.txt"),
         line: Some(10),
         start_line: None,
         side: Side::Head,

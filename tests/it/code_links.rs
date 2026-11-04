@@ -1,6 +1,4 @@
-use std::path::Path;
-
-use crate::support::FixtureRepo;
+use crate::support::{FixtureRepo, file_path};
 use guided_review::code_source::CodeSource;
 use guided_review::config::Config;
 use guided_review::ide::{Ide, IdeLaunch, NoIde};
@@ -67,7 +65,7 @@ impl Shop {
 
     fn in_ide(&self, path: &str, line: usize) -> Destination {
         Destination::Ide {
-            launch: self.ide().unwrap().launch(Path::new(path), line),
+            launch: self.ide().unwrap().launch(&file_path(path), line),
             caveat: None,
         }
     }
@@ -149,7 +147,7 @@ fn a_clone_checked_out_at_another_commit_still_opens_in_the_ide_with_a_caveat() 
     assert_eq!(
         destination,
         Destination::Ide {
-            launch: shop.ide().unwrap().launch(Path::new("app/Order.php"), 2),
+            launch: shop.ide().unwrap().launch(&file_path("app/Order.php"), 2),
             caveat: Some(IdeCaveat::CloneNotAtTourHead),
         }
     );

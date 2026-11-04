@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeAgentLauncher, FakeAskStore, SentLog};
+use crate::support::{FixtureRepo, file_path};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
@@ -298,7 +298,7 @@ fn config_overrides_the_ask_model_and_effort() {
 
 fn lines_place(start: usize, end: usize) -> Place {
     let at = |line| LineLocation {
-        path: "src/a.rs".into(),
+        path: file_path("src/a.rs"),
         side: Side::Head,
         line,
     };

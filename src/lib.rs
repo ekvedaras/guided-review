@@ -5,6 +5,7 @@ pub mod code_source;
 pub mod config;
 pub mod coverage;
 pub mod eval;
+pub mod file_path;
 pub mod file_rules;
 pub mod github;
 pub mod hex;

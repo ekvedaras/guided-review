@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::ops::RangeInclusive;
 
 use crate::code_source::{CodeSource, FileAt, FileStatus, Line};
+use crate::file_path::FilePath;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::Sha;
 
@@ -17,7 +18,7 @@ const MORE_CONTEXT_LINES: usize = 20;
 #[derive(Debug, Clone)]
 pub struct FilesAtHeadRequest {
     head: Sha,
-    paths: Vec<String>,
+    paths: Vec<FilePath>,
 }
 
 impl FilesAtHeadRequest {
@@ -40,7 +41,7 @@ impl FilesAtHeadRequest {
                 .iter()
                 .map(|path| FileAt {
                     sha: self.head.clone(),
-                    path: path.clone(),
+                    path: path.as_str().to_owned(),
                 })
                 .collect::<Vec<_>>(),
         );
@@ -48,7 +49,7 @@ impl FilesAtHeadRequest {
             .paths
             .iter()
             .filter_map(|path| {
-                let text = source.file_at(&self.head, path).ok()?;
+                let text = source.file_at(&self.head, path.as_str()).ok()?;
                 Some((path.clone(), FileText::of(text)))
             })
             .collect();
@@ -62,7 +63,7 @@ impl FilesAtHeadRequest {
 #[derive(Debug, Default)]
 pub struct FilesAtHead {
     head: Sha,
-    files: HashMap<String, FileText>,
+    files: HashMap<FilePath, FileText>,
 }
 
 /// A file's text and where each of its lines is, so the lines of every changed file are not each a `String`.
@@ -417,7 +418,7 @@ impl FileLines<'_> {
             text: line.text.clone(),
             spans: self
                 .highlights
-                .spans(side, &self.file.path, line.number)
+                .spans(side, self.file.path.as_str(), line.number)
                 .to_vec(),
             is_in_change_since_read: false,
         }

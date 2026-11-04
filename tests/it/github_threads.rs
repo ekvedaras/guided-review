@@ -3,6 +3,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::support::file_path;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
@@ -119,7 +120,7 @@ fn review_threads_are_read_over_graphql_page_by_page() {
 
 fn location(side: Side, line: usize) -> LineLocation {
     LineLocation {
-        path: "a.php".into(),
+        path: file_path("a.php"),
         side,
         line,
     }
@@ -496,7 +497,11 @@ fn a_file_comment_is_a_thread_of_subject_type_file_without_lines() {
     let (url, asked) = serve_graphql(vec![PULL_ID.into(), THREAD_ADDED.into()]);
 
     GitHub::at(&url)
-        .add_review_thread(&pr(), &CommentPlace::on_file("logo.png"), "why red?")
+        .add_review_thread(
+            &pr(),
+            &CommentPlace::on_file(&file_path("logo.png")),
+            "why red?",
+        )
         .unwrap();
 
     let input = &asked_as_json(&asked)[1]["variables"]["input"];

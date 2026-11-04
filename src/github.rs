@@ -6,6 +6,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
+use crate::file_path::FilePath;
 use crate::json::at;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
@@ -783,7 +784,7 @@ pub(crate) fn parse_review_threads(
         id: String,
         is_resolved: bool,
         is_outdated: bool,
-        path: String,
+        path: FilePath,
         line: Option<usize>,
         start_line: Option<usize>,
         original_line: Option<usize>,

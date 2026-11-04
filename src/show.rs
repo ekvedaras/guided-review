@@ -107,7 +107,7 @@ impl Show<'_> {
             writeln!(out, "\nnot at head: the piece is deleted")?;
             return Ok(());
         }
-        let code = self.source.file_at(self.head, &file.path)?;
+        let code = self.source.file_at(self.head, file.path.as_str())?;
         let lines: Vec<&str> = code.lines().collect();
         let span = match (&piece.id.symbol, piece.kind) {
             (_, PieceKind::Hunk | PieceKind::Imports | PieceKind::Top) => {
@@ -118,7 +118,7 @@ impl Show<'_> {
                     )
                 })
             }
-            (Some(symbol), _) => Language::for_path(&file.path).and_then(|language| {
+            (Some(symbol), _) => Language::for_path(file.path.as_str()).and_then(|language| {
                 Symbols::find(&code, language)
                     .named(symbol)
                     .map(|symbol| (symbol.first_line, symbol.last_line))

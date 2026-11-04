@@ -1,6 +1,6 @@
-use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
@@ -99,7 +99,7 @@ fn thread(id: &str, path: &str, side: Side, line: usize) -> ReviewThread {
         id: id.into(),
         is_resolved: false,
         is_outdated: false,
-        path: path.into(),
+        path: file_path(path),
         line: Some(line),
         start_line: None,
         side,

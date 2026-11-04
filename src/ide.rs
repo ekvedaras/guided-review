@@ -1,5 +1,7 @@
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use crate::file_path::FilePath;
 
 /// The `ide` line of `~/.guided-review/config.toml`, with `{path}` and `{line}` to fill in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,13 +79,13 @@ impl Ide {
     }
 
     /// Whether the working copy has the file; it may be on another branch than the PR.
-    pub fn holds(&self, path: &Path) -> bool {
-        self.clone_root.join(path).is_file()
+    pub fn holds(&self, path: &FilePath) -> bool {
+        path.under(&self.clone_root).is_file()
     }
 
     /// `path` is relative to the clone root.
-    pub fn launch(&self, path: &Path, line: usize) -> IdeLaunch {
-        let absolute = self.clone_root.join(path).to_string_lossy().into_owned();
+    pub fn launch(&self, path: &FilePath, line: usize) -> IdeLaunch {
+        let absolute = path.under(&self.clone_root).to_string_lossy().into_owned();
         if self.template.is_url() {
             IdeLaunch::Url(self.template.fill(&percent_encode_path(&absolute), line))
         } else {

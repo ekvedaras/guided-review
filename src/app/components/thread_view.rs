@@ -128,7 +128,7 @@ impl ThreadElement {
             _ => None,
         };
         match (self.view.anchor.is_some(), lines) {
-            (true, _) | (false, None) => thread.path.clone(),
+            (true, _) | (false, None) => thread.path.to_string(),
             (false, Some(lines)) => format!("{}, {lines}", thread.path),
         }
     }

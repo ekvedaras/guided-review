@@ -1,7 +1,7 @@
 use std::fmt;
-use std::path::Path;
 
 use crate::code_source::FileStatus;
+use crate::file_path::FilePath;
 use crate::ide::{Ide, IdeLaunch, NoIde};
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -19,7 +19,7 @@ pub struct CodeLink {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct WorkingCopyLine {
-    path: String,
+    path: FilePath,
     line: usize,
 }
 
@@ -145,7 +145,7 @@ impl CodeOpener {
             Some(at) => {
                 let on_github = format!(
                     "{}#L{}",
-                    blob_url(&self.repo, &self.head, &at.path),
+                    blob_url(&self.repo, &self.head, at.path.as_str()),
                     at.line
                 );
                 self.code_destination(Ok(at), &on_github)
@@ -177,11 +177,10 @@ impl CodeOpener {
             NoIde::NoTemplate => NotInIde::NoIdeTemplate,
             NoIde::NoClone => NotInIde::NoClone(self.repo.clone()),
         })?;
-        let path = Path::new(&at.path);
-        if !ide.holds(path) {
+        if !ide.holds(&at.path) {
             return Err(NotInIde::NotInWorkingCopy);
         }
-        Ok(ide.launch(path, at.line))
+        Ok(ide.launch(&at.path, at.line))
     }
 
     /// `https://github.com/{owner}/{repo}/blob/{ref}/{path}#L{n}`; a ref with a slash in it is
@@ -199,8 +198,11 @@ impl CodeOpener {
         );
         let is_this_repo = owner.eq_ignore_ascii_case(self.repo.owner())
             && name.eq_ignore_ascii_case(self.repo.name());
-        (is_this_repo && kind == "blob" && !path.is_empty()).then(|| WorkingCopyLine {
-            path: percent_decode(path),
+        if !(is_this_repo && kind == "blob") {
+            return None;
+        }
+        Some(WorkingCopyLine {
+            path: FilePath::new(&percent_decode(path)).ok()?,
             line: line_of_fragment(fragment),
         })
     }
@@ -215,8 +217,8 @@ fn repo_relative(url: &str) -> Option<WorkingCopyLine> {
     }
     let (path, fragment) = url.split_once('#').unwrap_or((url, ""));
     let path = path.trim_start_matches("./").trim_start_matches('/');
-    (!path.is_empty()).then(|| WorkingCopyLine {
-        path: percent_decode(path),
+    Some(WorkingCopyLine {
+        path: FilePath::new(&percent_decode(path)).ok()?,
         line: line_of_fragment(fragment),
     })
 }
@@ -242,11 +244,14 @@ impl CodeLinks<'_> {
     pub fn to_line(&self, file: &ChangedFile, location: &LineLocation) -> CodeLink {
         let (at, in_working_copy) = match location.side {
             Side::Base => (
-                self.blob(self.base, file.old_path.as_deref().unwrap_or(&file.path)),
+                self.blob(
+                    self.base,
+                    file.old_path.as_ref().unwrap_or(&file.path).as_str(),
+                ),
                 Err(NotInIde::RemovedLine),
             ),
             Side::Head => (
-                self.blob(self.head, &file.path),
+                self.blob(self.head, file.path.as_str()),
                 Ok(WorkingCopyLine {
                     path: file.path.clone(),
                     line: location.line,
@@ -263,11 +268,11 @@ impl CodeLinks<'_> {
     pub fn to_file(&self, file: &ChangedFile) -> CodeLink {
         match file.status {
             FileStatus::Deleted => CodeLink {
-                on_github: self.blob(self.base, &file.path),
+                on_github: self.blob(self.base, file.path.as_str()),
                 in_working_copy: Err(NotInIde::RemovedLine),
             },
             _ => CodeLink {
-                on_github: self.blob(self.head, &file.path),
+                on_github: self.blob(self.head, file.path.as_str()),
                 in_working_copy: Ok(WorkingCopyLine {
                     path: file.path.clone(),
                     line: 1,

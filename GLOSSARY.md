@@ -16,6 +16,8 @@
 
 **File block**: The one box a page shows for all its diff pieces of one file, in line order. A thin label marks where each piece starts: at the first line of its symbol, not at its first changed line. Blank lines and lines with only closing brackets never move a label.
 
+**File path**: A file's path in the repo, relative to its root, with `/` separators. A renamed file is named by its new path on both sides.
+
 **Outline**: A short list of all diff pieces in a PR, with no code. A tour writer reads it first and opens only the pieces it needs.
 
 **Tour file**: The saved form of a tour. Any viewer can show it.

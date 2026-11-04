@@ -42,6 +42,7 @@ use super::thread_actions::{
 use super::threads::{self, ReviewThread, ThreadPlacement};
 use super::typing_save::{Saves, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
+use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 
@@ -826,9 +827,14 @@ impl Review {
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
     pub fn begin_file_comment(&mut self, path: &str) -> Result<CommentPlace, CommentRefusal> {
         let tour_is_old = self.old_head().is_some();
-        let place =
-            self.comment_desk
-                .begin_file_comment(&mut self.state, path, tour_is_old, &self.head)?;
+        let path =
+            FilePath::new(path).map_err(|error| CommentRefusal::NoAccess(error.to_string()))?;
+        let place = self.comment_desk.begin_file_comment(
+            &mut self.state,
+            &path,
+            tour_is_old,
+            &self.head,
+        )?;
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)

@@ -150,8 +150,13 @@ pub struct ImagePreviewRequest {
 impl ImagePreviewRequest {
     pub(super) fn for_file(file: &ChangedFile, base: &Sha, head: &Sha) -> Self {
         Self {
-            path: file.path.clone(),
-            base_path: file.old_path.clone().unwrap_or_else(|| file.path.clone()),
+            path: file.path.as_str().to_owned(),
+            base_path: file
+                .old_path
+                .as_ref()
+                .unwrap_or(&file.path)
+                .as_str()
+                .to_owned(),
             status: file.status,
             base: base.clone(),
             head: head.clone(),

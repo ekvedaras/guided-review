@@ -4,7 +4,10 @@ use std::ops::RangeInclusive;
 
 use sha2::{Digest, Sha256};
 
+use anyhow::Context as _;
+
 use crate::code_source::{CodeSource, FileAt, FileDiff, FileStatus, Hunk, Line};
+use crate::file_path::FilePath;
 use crate::file_rules::{GeneratedFiles, is_cut_per_hunk};
 use crate::hex;
 use crate::image_facts::{self, ImageChange};
@@ -195,9 +198,9 @@ impl Piece {
 
 #[derive(Debug)]
 pub struct ChangedFile {
-    pub path: String,
+    pub path: FilePath,
     /// Where the file lived at base when it was renamed.
-    pub old_path: Option<String>,
+    pub old_path: Option<FilePath>,
     pub binary: bool,
     pub status: FileStatus,
     pub added: usize,
@@ -217,11 +220,13 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
     let mut files = diffs
         .iter()
         .map(|diff| {
+            let path = diff.file_path().context("a changed file has no path")?;
             let context = CutContext {
                 source,
                 base,
                 head,
                 diff,
+                path,
             };
             let PlacedChanges { pieces, not_shown } = match context.cut_by_file_rules(&generated) {
                 Some(pieces) => PlacedChanges {
@@ -231,8 +236,11 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
                 None => context.cut_by_symbols()?,
             };
             Ok(ChangedFile {
-                path: diff.path().to_owned(),
-                old_path: diff.old_path.clone().filter(|old| old != diff.path()),
+                path: path.clone(),
+                old_path: diff
+                    .old_path
+                    .clone()
+                    .filter(|old| old.as_str() != diff.path()),
                 binary: diff.binary,
                 status: diff.status(),
                 added: diff.added.len(),
@@ -256,8 +264,16 @@ fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
             && Language::for_path(diff.path()).is_some()
     });
     let both_sides = cut_by_symbols.flat_map(|diff| {
-        let at_base = diff.old_path.as_deref().map(|path| (base, path));
-        let at_head = diff.new_path.as_deref().map(|path| (head, path));
+        let at_base = diff
+            .old_path
+            .as_ref()
+            .map(FilePath::as_str)
+            .map(|path| (base, path));
+        let at_head = diff
+            .new_path
+            .as_ref()
+            .map(FilePath::as_str)
+            .map(|path| (head, path));
         at_base.into_iter().chain(at_head)
     });
     std::iter::once((head, GIT_ATTRIBUTES))
@@ -282,6 +298,7 @@ struct CutContext<'a> {
     base: &'a Sha,
     head: &'a Sha,
     diff: &'a FileDiff,
+    path: &'a FilePath,
 }
 
 impl<'a> CutContext<'a> {
@@ -333,7 +350,7 @@ impl<'a> CutContext<'a> {
                 let added: Vec<&Line> = hunk.added.iter().collect();
                 Piece::new(
                     PieceId {
-                        path: self.diff.path().to_owned(),
+                        path: self.path.to_string(),
                         symbol: Some(format!("hunk-{}", index + 1)),
                     },
                     PieceKind::Hunk,
@@ -351,7 +368,7 @@ impl<'a> CutContext<'a> {
         let added: Vec<&Line> = self.diff.added.iter().collect();
         Piece::new(
             PieceId {
-                path: self.diff.path().to_owned(),
+                path: self.path.to_string(),
                 symbol: None,
             },
             PieceKind::File,
@@ -373,8 +390,8 @@ impl<'a> CutContext<'a> {
         let mut piece = self.whole_file_piece();
         piece.kind = PieceKind::Image;
         piece.image = Some(ImageChange {
-            base: size_at(self.base, self.diff.old_path.as_deref()),
-            head: size_at(self.head, self.diff.new_path.as_deref()),
+            base: size_at(self.base, self.diff.old_path.as_ref().map(FilePath::as_str)),
+            head: size_at(self.head, self.diff.new_path.as_ref().map(FilePath::as_str)),
         });
         piece
     }
@@ -392,8 +409,16 @@ impl<'a> CutContext<'a> {
     }
 
     fn cut_symbols(&self, language: Language) -> anyhow::Result<PlacedChanges> {
-        let base_symbols = self.symbols_at(self.base, self.diff.old_path.as_deref(), language)?;
-        let head_symbols = self.symbols_at(self.head, self.diff.new_path.as_deref(), language)?;
+        let base_symbols = self.symbols_at(
+            self.base,
+            self.diff.old_path.as_ref().map(FilePath::as_str),
+            language,
+        )?;
+        let head_symbols = self.symbols_at(
+            self.head,
+            self.diff.new_path.as_ref().map(FilePath::as_str),
+            language,
+        )?;
         let pairing = SymbolPairing::new(&base_symbols, &head_symbols);
         let changes = join_blank_line_changes(self.changes_by_slot(&pairing));
         Ok(place_changes(&pairing, changes, self.diff.status().into()))
@@ -405,13 +430,13 @@ impl<'a> CutContext<'a> {
         let mut changes: Vec<SymbolChange> = Vec::new();
         for line in &diff.removed {
             let slot = pairing.head_slot_of_removed_line(line.number);
-            SymbolChange::entry_for(&mut changes, diff.path(), slot)
+            SymbolChange::entry_for(&mut changes, self.path, slot)
                 .removed
                 .push(line);
         }
         for line in &diff.added {
             let slot = pairing.head.slot_at(line.number);
-            SymbolChange::entry_for(&mut changes, diff.path(), slot)
+            SymbolChange::entry_for(&mut changes, self.path, slot)
                 .added
                 .push(line);
         }
@@ -491,7 +516,7 @@ fn place_changes(
             Some(placed) => pieces.push(placed),
             None => not_shown.push(
                 PieceId {
-                    path: change.path.to_owned(),
+                    path: change.path.to_string(),
                     symbol: Some(change.slot.id()),
                 }
                 .to_string(),
@@ -527,7 +552,7 @@ fn symbol_piece(
     };
     let piece = Piece::new(
         PieceId {
-            path: change.path.to_owned(),
+            path: change.path.to_string(),
             symbol: Some(change.slot.id()),
         },
         kind,
@@ -648,7 +673,7 @@ fn mark_moved_symbols(files: &mut [ChangedFile]) {
 }
 
 struct SymbolChange<'a> {
-    path: &'a str,
+    path: &'a FilePath,
     slot: Slot,
     removed: Vec<&'a Line>,
     added: Vec<&'a Line>,
@@ -659,7 +684,7 @@ impl<'a> SymbolChange<'a> {
         clippy::indexing_slicing,
         reason = "the index is the position just found or the entry just pushed"
     )]
-    fn entry_for<'c>(changes: &'c mut Vec<Self>, path: &'a str, slot: Slot) -> &'c mut Self {
+    fn entry_for<'c>(changes: &'c mut Vec<Self>, path: &'a FilePath, slot: Slot) -> &'c mut Self {
         let index = changes
             .iter()
             .position(|change| change.slot == slot)
@@ -723,8 +748,9 @@ mod tests {
             number: 3,
             text: "ghost();".to_owned(),
         };
+        let ghost = FilePath::new("app/Ghost.php").unwrap();
         let change = SymbolChange {
-            path: "app/Ghost.php",
+            path: &ghost,
             slot: Slot::Symbol("Ghost::run".to_owned()),
             removed: Vec::new(),
             added: vec![&line],

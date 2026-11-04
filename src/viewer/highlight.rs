@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
 use crate::code_source::{CodeSource, FileAt, FileStatus};
+use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
 use crate::pull_request::Sha;
 
@@ -402,9 +403,9 @@ struct Target {
     side: Side,
     sha: Sha,
     /// Where to read the file at `sha`.
-    path: String,
+    path: FilePath,
     /// The name the review shows it under.
-    shown_path: String,
+    shown_path: FilePath,
 }
 
 /// What to highlight, owned so it can move to a background thread.
@@ -423,7 +424,7 @@ impl HighlightRequest {
                 targets.push(Target {
                     side: Side::Base,
                     sha: base.clone(),
-                    path: file.old_path.clone().unwrap_or_else(|| file.path.clone()),
+                    path: file.old_path.as_ref().unwrap_or(&file.path).clone(),
                     shown_path: file.path.clone(),
                 });
             }
@@ -436,7 +437,7 @@ impl HighlightRequest {
                 });
             }
         }
-        targets.retain(|target| HighlightLanguage::for_path(&target.path).is_some());
+        targets.retain(|target| HighlightLanguage::for_path(target.path.as_str()).is_some());
         Self {
             base: base.clone(),
             head: head.clone(),
@@ -452,17 +453,17 @@ impl HighlightRequest {
                 .iter()
                 .map(|target| FileAt {
                     sha: target.sha.clone(),
-                    path: target.path.clone(),
+                    path: target.path.as_str().to_owned(),
                 })
                 .collect::<Vec<_>>(),
         );
         let mut base = HashMap::new();
         let mut head = HashMap::new();
         for target in &self.targets {
-            let Some(language) = HighlightLanguage::for_path(&target.path) else {
+            let Some(language) = HighlightLanguage::for_path(target.path.as_str()) else {
                 continue;
             };
-            let Ok(text) = source.file_at(&target.sha, &target.path) else {
+            let Ok(text) = source.file_at(&target.sha, target.path.as_str()) else {
                 continue;
             };
             let Some(configuration) = language.configuration() else {
@@ -491,8 +492,8 @@ pub struct Highlights {
     base_sha: Sha,
     head_sha: Sha,
     /// Spans per line, by the path the review shows the file under; one map per side, so a lookup borrows the path.
-    base: HashMap<String, FileSpans>,
-    head: HashMap<String, FileSpans>,
+    base: HashMap<FilePath, FileSpans>,
+    head: HashMap<FilePath, FileSpans>,
 }
 
 impl Highlights {

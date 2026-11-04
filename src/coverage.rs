@@ -202,7 +202,7 @@ pub fn uncovered<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>
         .filter(|file| {
             !rest_folders
                 .iter()
-                .any(|folder| is_under(&file.path, folder))
+                .any(|folder| is_under(file.path.as_str(), folder))
         })
         .flat_map(|file| &file.pieces)
         .filter_map(|piece| seen.unseen(piece))
@@ -221,7 +221,7 @@ pub fn left_for_rest<'a>(
     let folder = folder.trim_matches('/');
     files
         .iter()
-        .filter(|file| is_under(&file.path, folder))
+        .filter(|file| is_under(file.path.as_str(), folder))
         .flat_map(|file| &file.pieces)
         .filter_map(|piece| seen.unseen(piece))
         .collect()
@@ -259,7 +259,10 @@ pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken
             pieces: 0,
             files: Vec::new(),
         };
-        for file in files.iter().filter(|file| is_under(&file.path, folder)) {
+        for file in files
+            .iter()
+            .filter(|file| is_under(file.path.as_str(), folder))
+        {
             let mut took_any = false;
             for piece in &file.pieces {
                 if seen.unseen(piece).is_some() && taken_by_earlier.insert(&piece.id) {
@@ -268,7 +271,7 @@ pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken
                 }
             }
             if took_any {
-                taken.files.push(&file.path);
+                taken.files.push(file.path.as_str());
             }
         }
         all.push(taken);
