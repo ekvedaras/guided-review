@@ -14,7 +14,7 @@
 
 **Diff piece**: A part of a PR diff that a step can point to. Usually one changed symbol: a method, function or class. Some pieces carry a mark: `format` (only layout changed), `moved` (same code, new place), `generated` (made by a tool).
 
-**Piece id**: The name of a diff piece: `<file path>#<symbol path>`, or just the file path for a whole-file piece. A `hunk-N` symbol stands for a file that could not be cut into symbols.
+**Piece id**: The name of a diff piece: `<file path>#<symbol path>`, or just the file path for a whole-file piece. A `hunk-N` symbol stands for a file that could not be cut into symbols. A state file writes a whole file whose name holds a `#` with a trailing `#` (`docs/C#.md#`), so it is not read as a symbol.
 
 **File block**: The one box a page shows for all its diff pieces of one file, in line order. A thin label marks where each piece starts: at the first line of its symbol, not at its first changed line. Blank lines and lines with only closing brackets never move a label.
 
