@@ -265,6 +265,12 @@ impl FrameStatsHook {
         }
     }
 
+    pub fn selection_ended(&self, took: Duration) {
+        if self.0.is_some() {
+            eprintln!("selection ended in {:.1}ms", took.as_secs_f64() * 1000.);
+        }
+    }
+
     pub fn code_arrived(&self) {
         if let Some(stats) = &self.0 {
             stats.borrow_mut().code_arrived();

@@ -9,6 +9,7 @@ use gpui::{
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::app::code_links::{
     open_code, open_code_hint, open_code_label, open_link, use_code_opener,
@@ -378,6 +379,7 @@ impl OneStepLayout {
     }
 
     fn end_row_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let started = Instant::now();
         if let Some(selection) = &mut self.code_selection
             && selection.is_dragging()
             && !selection.end_drag()
@@ -408,6 +410,7 @@ impl OneStepLayout {
             Ok(None) => {}
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
+        self.frame_stats.selection_ended(started.elapsed());
         cx.notify();
     }
 
