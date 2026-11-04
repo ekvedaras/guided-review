@@ -59,3 +59,36 @@ Phases run one after another on `main`, because they touch the same files.
 2. **User-facing bugs** from the findings above, each with a test that fails first.
 3. **Render cost**: highlight configs cached per language, markdown parsed once, no deep clones per frame, the diagram strip and `hang_under` loops.
 4. **Domain types**: path and piece id value objects, `StepId`, typed errors in place of downcasts, enums in place of `bool` params. This changes design, so it gets a spec before code.
+
+## Phase 1 result (2026-11-04)
+
+Commits on `main`, each green on `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test --all-features`:
+
+- `0aafd08` `CODING_STANDARDS.md` and a README pointer to it.
+- `48ad2c9` unwrap, expect, panic, unreachable, todo, unimplemented, dbg denied; `clippy.toml` test allowances; file-level `allow` with a reason in test files that have non-`#[test]` helpers.
+- `eeee318` cast_possible_truncation, cast_sign_loss, cast_possible_wrap, cast_lossless denied; `image_facts::whole_pixels`, integer percentiles, `cast_signed`.
+- `740fbeb` string_slice denied; `get`, `split_once`, `split_at_checked`, `TextDraft::text_in`.
+- `9b8a8be` indexing_slicing denied (tests may index); `get`, iterators, `json::at` for JSON reads, typed GraphQL mutation inputs, `SelectedLines` holds its first and last location.
+- `3318339` pedantic at warn plus the picks below, with `cargo clippy --fix` and hand fixes; avoid-breaking-exported-api off.
+
+Lints turned on: the four families above, plus `unsafe_code`, `unused_qualifications`, `pedantic` (group), `clone_on_ref_ptr`, `rc_buffer`, `redundant_clone`, `needless_pass_by_value`, `large_types_passed_by_value`, `trivially_copy_pass_by_ref`, `needless_collect`, `format_collect`, `format_push_string`, `assigning_clones`, `implicit_clone`, `or_fun_call`, `let_underscore_must_use`, `map_err_ignore`, `str_to_string`, `allow_attributes_without_reason`, `use_self`, `useless_let_if_seq`.
+
+Lints skipped:
+
+- `cast_precision_loss`, `must_use_candidate`, `return_self_not_must_use`, `missing_errors_doc`, `missing_panics_doc`, `unreadable_literal`, `too_many_lines`, `similar_names`, `struct_excessive_bools`, `fn_params_excessive_bools`: noise for this app, as the lint probe said.
+- `struct_field_names`: 2 hits, both fine names (`on_*` callbacks, `Symbols::symbols`).
+- `unused_self`: 12 hits in src, view helpers and `CommentDesk` rules that are methods on their owner on purpose. Revisit when the domain types phase decides what the desk owns.
+- `derive_partial_eq_without_eq`: fires inside gpui's `actions!` macro, which we cannot change.
+- `literal_string_with_formatting_args`: fires on the IDE template's `{path}` and `{line}` placeholders.
+
+`#[expect]` kept, each with a reason: `expect_used` for the compiled-in globs (`file_rules.rs`), the compiled-in grammars and symbol queries (`symbols.rs`); `indexing_slicing` in `SymbolChange::entry_for` (the index was just found or pushed); `cast_*` in `whole_pixels` and `channel_byte` (clamped first); `unsafe_code` in `dock_icon::show` (objc2 call on the main thread); `needless_collect` in `DiagramMemory::strips_to_draw` (the collect ends a borrow of `self`); `too_many_arguments` on two constructors. In tests: `needless_pass_by_value` is allowed per file for helpers, and `unnecessary_wraps` on one helper.
+
+Behaviour that changed because a lint forced it, beyond the audit's phase 2 list:
+
+- A judge answer with `}` before `{` no longer panics; it fails with the usual "did not answer with JSON".
+- A missing built-in highlight query leaves the file plain and prints the language on stderr, instead of panicking.
+- A failed window open prints the error and quits, instead of panicking.
+- A diagram font that fails to load shows the error where the diagram would be, instead of panicking at the first draw.
+- `PieceDiff::of` and `symbol_piece` drop a piece with no file or no symbol on either side, where they used to panic.
+
+Could not fix: nothing is left open. `needless_pass_by_value` and `large_types_passed_by_value` changed many signatures (`&Colors`, `&SvgJob`, `&StripJob`), which phase 3 should know when it touches the render path.
