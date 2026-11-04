@@ -456,6 +456,21 @@ fn an_authorship_lookup_that_failed_is_named_until_a_read_goes_through() {
 }
 
 #[test]
+fn an_ide_that_could_not_start_is_named_until_one_starts() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+
+    review.ide_not_started(&"No such file or directory");
+
+    assert_eq!(
+        review.problems(),
+        [Problem::IdeNotStarted("No such file or directory".into())]
+    );
+    review.ide_started();
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
 fn suggest_change_fills_the_box_with_the_selected_lines_in_a_suggestion_block() {
     let pull = Pull::new();
     let mut review = pull.open();

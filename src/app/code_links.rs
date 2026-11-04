@@ -3,15 +3,18 @@
 
 use gpui::{App, Global, SharedString};
 
-use crate::viewer::{CodeLink, CodeOpener, Destination};
+use gpui::Entity;
 
-struct ActiveCodeOpener(CodeOpener);
+use crate::app::review_session::ReviewSession;
+use crate::viewer::{CodeLink, CodeOpener, Destination, Opened, Review};
+
+struct ActiveCodeOpener(CodeOpener, Entity<ReviewSession>);
 
 impl Global for ActiveCodeOpener {}
 
 /// Set again whenever the review changes: its head and whether the clone is at it decide where code opens.
-pub fn use_code_opener(opener: CodeOpener, cx: &mut App) {
-    cx.set_global(ActiveCodeOpener(opener));
+pub fn use_code_opener(opener: CodeOpener, session: Entity<ReviewSession>, cx: &mut App) {
+    cx.set_global(ActiveCodeOpener(opener, session));
 }
 
 pub fn open_code(link: &CodeLink, cx: &mut App) {
@@ -40,5 +43,14 @@ pub fn open_code_hint(link: &CodeLink, cx: &App) -> SharedString {
 
 #[allow(clippy::disallowed_methods, reason = "the one place that opens a URL")]
 fn open(destination: &Destination, cx: &mut App) {
-    destination.open(|url| cx.open_url(url));
+    let session = cx.global::<ActiveCodeOpener>().1.clone();
+    match destination.open(|url| cx.open_url(url)) {
+        Opened::InIde => session.update(cx, |session, cx| {
+            session.change(cx, Review::ide_started);
+        }),
+        Opened::IdeNotStarted(reason) => session.update(cx, |session, cx| {
+            session.change(cx, |review| review.ide_not_started(&reason));
+        }),
+        Opened::Elsewhere => {}
+    }
 }

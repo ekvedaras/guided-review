@@ -13,6 +13,8 @@ pub enum Problem {
     ThreadsNotRead(String),
     /// A read from GitHub failed, so what the screen shows for it is missing or as of an earlier read.
     NotRead(Read, String),
+    /// A code link was clicked and its IDE command could not be run, so nothing opened.
+    IdeNotStarted(String),
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -48,6 +50,10 @@ impl fmt::Display for Problem {
             Self::NotRead(Read::Authorship, reason) => write!(
                 formatter,
                 "Could not tell who wrote the PR, so Approve and Request changes may be wrong: {reason}"
+            ),
+            Self::IdeNotStarted(reason) => write!(
+                formatter,
+                "Could not start the IDE command, so code links open nothing: {reason}"
             ),
         }
     }

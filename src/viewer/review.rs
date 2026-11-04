@@ -139,6 +139,8 @@ pub struct Review {
     threads_not_read: Option<String>,
     /// Why the last read of each of these failed, until one goes through.
     not_read: BTreeMap<Read, String>,
+    /// Why the last IDE command could not be run, until one runs.
+    ide_not_started: Option<String>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -203,6 +205,7 @@ impl Review {
             refused_while_repinning: false,
             threads_not_read: None,
             not_read: BTreeMap::new(),
+            ide_not_started: None,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -297,6 +300,14 @@ impl Review {
 
     pub fn could_not_read(&mut self, read: Read, error: &impl fmt::Display) {
         self.not_read.insert(read, format!("{error:#}"));
+    }
+
+    pub fn ide_not_started(&mut self, error: &impl fmt::Display) {
+        self.ide_not_started = Some(format!("{error:#}"));
+    }
+
+    pub fn ide_started(&mut self) {
+        self.ide_not_started = None;
     }
 
     pub fn pr_head_is(&mut self, head: Sha) {
@@ -1226,6 +1237,7 @@ impl Review {
                     .iter()
                     .map(|(read, reason)| Problem::NotRead(*read, reason.clone())),
             )
+            .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
             .collect()
     }
 

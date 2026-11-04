@@ -39,17 +39,16 @@ pub enum IdeLaunch {
 
 impl IdeLaunch {
     /// A URL is handed to `open_url`, because only the caller knows the system's opener.
-    pub fn run(&self, open_url: impl FnOnce(&str)) {
+    pub fn run(&self, open_url: impl FnOnce(&str)) -> std::io::Result<()> {
         match self {
-            Self::Url(url) => open_url(url),
-            Self::Shell(command) => {
-                if let Err(error) = std::process::Command::new("sh")
-                    .args(["-c", command])
-                    .spawn()
-                {
-                    eprintln!("could not run the IDE command: {error}");
-                }
+            Self::Url(url) => {
+                open_url(url);
+                Ok(())
             }
+            Self::Shell(command) => std::process::Command::new("sh")
+                .args(["-c", command])
+                .spawn()
+                .map(drop),
         }
     }
 }

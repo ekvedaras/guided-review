@@ -82,7 +82,8 @@ fn running_a_url_launch_hands_the_url_to_the_opener() {
     let mut opened = Vec::new();
 
     ide.launch(&file_path("a.php"), line(2))
-        .run(|url| opened.push(url.to_owned()));
+        .run(|url| opened.push(url.to_owned()))
+        .unwrap();
 
     assert_eq!(opened, ["idea://open?file=/code/shop/a.php&line=2"]);
 }
@@ -92,5 +93,6 @@ fn running_a_shell_launch_does_not_use_the_url_opener() {
     let ide = ide("true {path}:{line}", "/code/shop");
 
     ide.launch(&file_path("a.php"), line(2))
-        .run(|_| panic!("a shell command is not a URL"));
+        .run(|_| panic!("a shell command is not a URL"))
+        .unwrap();
 }

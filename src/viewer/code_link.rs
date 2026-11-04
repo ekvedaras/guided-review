@@ -77,12 +77,26 @@ pub enum Destination {
     Browser(String),
 }
 
+/// What opening a destination came to, for the IDE's failure to reach the reviewer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Opened {
+    InIde,
+    IdeNotStarted(String),
+    Elsewhere,
+}
+
 impl Destination {
     /// A URL is handed to `open_url`, because only the caller knows the system's opener.
-    pub fn open(&self, open_url: impl FnOnce(&str)) {
+    pub fn open(&self, open_url: impl FnOnce(&str)) -> Opened {
         match self {
-            Self::Ide { launch, .. } => launch.run(open_url),
-            Self::GitHub { url, .. } | Self::Browser(url) => open_url(url),
+            Self::Ide { launch, .. } => match launch.run(open_url) {
+                Ok(()) => Opened::InIde,
+                Err(error) => Opened::IdeNotStarted(error.to_string()),
+            },
+            Self::GitHub { url, .. } | Self::Browser(url) => {
+                open_url(url);
+                Opened::Elsewhere
+            }
         }
     }
 
