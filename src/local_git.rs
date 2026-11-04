@@ -174,7 +174,7 @@ impl CodeSource for LocalGit {
             base.as_str(),
             head.as_str(),
         ])?;
-        Ok(parse_unified_diff(&patch))
+        parse_unified_diff(&patch)
     }
 
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha> {

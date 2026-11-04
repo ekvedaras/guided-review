@@ -24,7 +24,7 @@ impl std::error::Error for InvalidFilePath {}
 impl FilePath {
     /// Refuses what cannot be a repo-relative path. `..` is left alone: git never writes it.
     pub fn new(path: &str) -> Result<Self, InvalidFilePath> {
-        if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+        if path.is_empty() || path.starts_with('/') {
             return Err(InvalidFilePath(path.to_owned()));
         }
         Ok(Self(path.into()))

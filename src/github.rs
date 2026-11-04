@@ -651,7 +651,7 @@ impl CodeSource for GitHubCodeSource {
                 ),
                 _ => error.context(format!("could not read the diff {base}...{head} from GitHub")),
             })?;
-        Ok(parse_unified_diff(&patch))
+        parse_unified_diff(&patch)
     }
 
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha> {

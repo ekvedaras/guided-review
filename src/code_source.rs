@@ -117,7 +117,7 @@ impl FileDiff {
 }
 
 /// Parses `git diff` output. Context lines are skipped, so any `-U<n>` works.
-pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
+pub fn parse_unified_diff(patch: &str) -> anyhow::Result<Vec<FileDiff>> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut old_line = 0;
     let mut new_line = 0;
@@ -161,7 +161,7 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
         }
 
         if let Some(paths) = raw.strip_prefix("diff --git ") {
-            let path = same_path_in_git_header(paths);
+            let path = same_path_in_git_header(paths)?;
             files.push(FileDiff {
                 old_path: path.clone(),
                 new_path: path,
@@ -177,13 +177,13 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
         } else if raw.starts_with("deleted file mode") {
             file.new_path = None;
         } else if let Some(path) = raw.strip_prefix("rename from ") {
-            file.old_path = repo_path(&unquote(path));
+            file.old_path = Some(repo_path(&unquote(path))?);
         } else if let Some(path) = raw.strip_prefix("rename to ") {
-            file.new_path = repo_path(&unquote(path));
+            file.new_path = Some(repo_path(&unquote(path))?);
         } else if let Some(path) = raw.strip_prefix("--- ") {
-            file.old_path = path_after_prefix(path, "a/");
+            file.old_path = path_after_prefix(path, "a/")?;
         } else if let Some(path) = raw.strip_prefix("+++ ") {
-            file.new_path = path_after_prefix(path, "b/");
+            file.new_path = path_after_prefix(path, "b/")?;
         } else if raw.starts_with("Binary files ") {
             file.binary = true;
         } else if let Some((old, new)) = hunk_ranges(raw) {
@@ -197,25 +197,32 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
             });
         }
     }
-    files
+    Ok(files)
 }
 
 /// `a/<path> b/<path>` when the path did not change; renames get their paths from `rename from/to`.
-fn same_path_in_git_header(paths: &str) -> Option<FilePath> {
+fn same_path_in_git_header(paths: &str) -> anyhow::Result<Option<FilePath>> {
     let paths = unquote_pair(paths);
-    let half = paths.len().checked_sub(5)? / 2;
-    let (old, new) = (paths.get(2..2 + half)?, paths.get(half + 5..)?);
-    (old == new).then(|| repo_path(old)).flatten()
+    let Some(half) = paths.len().checked_sub(5).map(|len| len / 2) else {
+        return Ok(None);
+    };
+    let (Some(old), Some(new)) = (paths.get(2..2 + half), paths.get(half + 5..)) else {
+        return Ok(None);
+    };
+    if old != new {
+        return Ok(None);
+    }
+    repo_path(old).map(Some)
 }
 
-/// Git ends `---` and `+++` paths that hold a space with a tab.
-fn path_after_prefix(path: &str, prefix: &str) -> Option<FilePath> {
-    repo_path(unquote(path.trim_end_matches('\t')).strip_prefix(prefix)?)
+/// Git ends `---` and `+++` paths that hold a space with a tab. `/dev/null` has no prefix and names no side.
+fn path_after_prefix(path: &str, prefix: &str) -> anyhow::Result<Option<FilePath>> {
+    let unquoted = unquote(path.trim_end_matches('\t'));
+    unquoted.strip_prefix(prefix).map(repo_path).transpose()
 }
 
-/// A path git prints that cannot be a repo path (one with a backslash in its name) leaves the side unnamed.
-fn repo_path(path: &str) -> Option<FilePath> {
-    FilePath::new(path).ok()
+fn repo_path(path: &str) -> anyhow::Result<FilePath> {
+    Ok(FilePath::new(path)?)
 }
 
 fn unquote_pair(paths: &str) -> String {

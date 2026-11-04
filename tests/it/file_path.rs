@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use guided_review::code_source::parse_unified_diff;
 use guided_review::file_path::FilePath;
 
 #[test]
-fn an_empty_absolute_or_backslashed_path_is_refused() {
-    for refused in ["", "/etc/passwd", "app\\Order.php"] {
+fn an_empty_or_absolute_path_is_refused() {
+    for refused in ["", "/etc/passwd"] {
         assert!(FilePath::new(refused).is_err(), "{refused:?} was accepted");
     }
 }
@@ -49,4 +50,31 @@ fn it_is_joined_onto_a_clone_root_by_name() {
         path.under(Path::new("/code/shop")),
         Path::new("/code/shop/app/Order.php")
     );
+}
+
+#[test]
+fn a_backslash_is_a_legal_character_in_a_file_name() {
+    assert_eq!(
+        FilePath::new("app\\Order.php").unwrap().as_str(),
+        "app\\Order.php"
+    );
+}
+
+#[test]
+fn a_changed_file_with_a_backslash_in_its_name_is_parsed() {
+    let patch = "diff --git \"a/app\\\\Order.php\" \"b/app\\\\Order.php\"\n--- \"a/app\\\\Order.php\"\n+++ \"b/app\\\\Order.php\"\n@@ -1 +1 @@\n-a\n+b\n";
+
+    let files = parse_unified_diff(patch).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path(), "app\\Order.php");
+}
+
+#[test]
+fn a_diff_path_that_cannot_be_a_repo_path_is_reported_not_dropped() {
+    let patch = "diff --git a/x b/x\nrename from x\nrename to /abs\n";
+
+    let error = parse_unified_diff(patch).unwrap_err();
+
+    assert!(error.to_string().contains("/abs"), "{error}");
 }

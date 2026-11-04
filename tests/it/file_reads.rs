@@ -91,7 +91,7 @@ impl CodeSource for CountingSource {
     }
 
     fn diff(&self, _base: &Sha, _head: &Sha) -> anyhow::Result<Vec<FileDiff>> {
-        Ok(parse_unified_diff(&self.patch))
+        parse_unified_diff(&self.patch)
     }
 
     fn merge_base(&self, a: &Sha, _b: &Sha) -> anyhow::Result<Sha> {
