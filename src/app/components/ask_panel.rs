@@ -351,9 +351,17 @@ impl AskPanel {
         if !delivered {
             self.workers.remove(&id);
             self.pool.ended(id);
-            self.ensure_worker(id);
-            if let Some(worker) = self.workers.get(&id) {
-                worker.questions.send(message).ok();
+            let resent = self.ensure_worker(id)
+                && self
+                    .workers
+                    .get(&id)
+                    .is_some_and(|worker| worker.questions.send(message).is_ok());
+            if !resent {
+                self.setup.asks.apply(
+                    id,
+                    crate::viewer::AgentEvent::Error(QUESTION_NOT_SENT.to_owned()),
+                );
+                return cx.notify();
             }
         }
         self.pool.turn_started(id, Instant::now());
@@ -501,6 +509,7 @@ impl AskPanel {
 const NO_CLONE: &str = "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml";
 const PLACE_GONE: &str = "These lines are not in the tour any more: select them again to ask";
 const ALL_ANSWERING: &str = "Three Asks are answering now: wait for one, or stop it";
+const QUESTION_NOT_SENT: &str = "The AI stopped before it got the question, and three other Asks are answering: ask again when one is done";
 
 impl EventEmitter<UseAsComment> for AskPanel {}
 
