@@ -102,8 +102,8 @@ pub fn run(
             });
             if let Err(error) = opened {
                 eprintln!("could not open the app window: {error:#}");
-                cx.quit();
-                return;
+                // gpui's quit ends the process with status 0; nothing is open yet that needs saving.
+                std::process::exit(1);
             }
             cx.on_window_closed(|cx, _| cx.quit()).detach();
             cx.activate(true);
