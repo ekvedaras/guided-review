@@ -238,13 +238,11 @@ impl ThreadElement {
         let thread_id = thread_id.to_owned();
         let send = {
             let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
-            let body = reply.to_owned();
             move |mode: SendMode| {
                 let (ui, on_action, thread_id) =
                     (ui.clone(), Rc::clone(&on_action), thread_id.clone());
-                let body = body.clone();
                 move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                    send_reply(&ui, &on_action, &thread_id, body.clone(), mode, cx);
+                    send_reply(&ui, &on_action, &thread_id, mode, cx);
                 }
             }
         };
@@ -254,7 +252,6 @@ impl ThreadElement {
             let (ui, on_action, submitted_thread) =
                 (ui.clone(), Rc::clone(on_action), thread_id.clone());
             let (on_edit, on_cancel) = (Rc::clone(on_reply_draft), Rc::clone(on_reply_draft));
-            let body = reply.to_owned();
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
                 focus,
@@ -267,7 +264,6 @@ impl ThreadElement {
                     &ui,
                     &on_action,
                     &submitted_thread,
-                    body.clone(),
                     SendMode::AddToReview,
                     cx,
                 );
@@ -328,16 +324,11 @@ fn send_reply(
     ui: &Entity<ThreadUi>,
     on_action: &OnThreadAction,
     thread_id: &str,
-    body: String,
     mode: SendMode,
     cx: &mut App,
 ) {
-    if body.trim().is_empty() {
-        return;
-    }
     let action = ThreadAction::Reply {
         thread_id: thread_id.to_owned(),
-        body,
         mode,
     };
     run_action(action, ui, on_action, cx);

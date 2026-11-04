@@ -100,6 +100,8 @@ pub enum CommentRefusal {
     AskIsOnOlderCode,
     /// Someone started a pending review since the last look, so "Comment now" is off.
     PendingReviewExists,
+    /// A reply with no text has nothing to send.
+    EmptyReply,
     NoAccess(String),
 }
 
@@ -116,6 +118,7 @@ impl fmt::Display for CommentRefusal {
             Self::PendingReviewExists => {
                 f.write_str("There is a pending review now: add the comment to it")
             }
+            Self::EmptyReply => f.write_str("Write the reply first"),
             Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
         }
     }

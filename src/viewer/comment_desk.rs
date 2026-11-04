@@ -241,11 +241,13 @@ impl CommentDesk {
         &self,
         pr: &PullRequestUrl,
         action: ThreadAction,
+        reply_body: Option<String>,
         tour_is_old: bool,
     ) -> ThreadActionRequest {
         ThreadActionRequest {
             pr: pr.clone(),
             action,
+            reply_body,
             tour_is_old,
         }
     }

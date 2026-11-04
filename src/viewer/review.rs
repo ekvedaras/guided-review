@@ -679,8 +679,16 @@ impl Review {
     }
 
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
-        self.comment_desk
-            .thread_action_request(&self.pr, action, self.old_head().is_some())
+        let reply_body = match &action {
+            ThreadAction::Reply { thread_id, .. } => self.reply_draft(thread_id).map(str::to_owned),
+            _ => None,
+        };
+        self.comment_desk.thread_action_request(
+            &self.pr,
+            action,
+            reply_body,
+            self.old_head().is_some(),
+        )
     }
 
     pub fn reply_draft(&self, thread_id: &str) -> Option<&str> {

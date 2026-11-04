@@ -10,9 +10,10 @@ use super::threads::ReviewThread;
 /// What the reviewer does to a thread that is already on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadAction {
+    /// Sends the thread's reply draft as it is saved when the request is made, so a key typed
+    /// just before sending is in it.
     Reply {
         thread_id: String,
-        body: String,
         mode: SendMode,
     },
     Resolve {
@@ -41,6 +42,8 @@ pub enum ThreadActionResult {
 pub struct ThreadActionRequest {
     pub(super) pr: PullRequestUrl,
     pub(super) action: ThreadAction,
+    /// The reply draft of the thread a `Reply` is for.
+    pub(super) reply_body: Option<String>,
     /// The tour is behind the PR head: the thread may sit on lines the tour does not show.
     pub(super) tour_is_old: bool,
 }
@@ -79,11 +82,12 @@ impl ThreadActionRequest {
             return Err(TourIsOld.into());
         }
         match &self.action {
-            ThreadAction::Reply {
-                thread_id,
-                body,
-                mode,
-            } => {
+            ThreadAction::Reply { thread_id, mode } => {
+                let body = self
+                    .reply_body
+                    .as_deref()
+                    .filter(|body| !body.trim().is_empty())
+                    .ok_or(EmptyReply)?;
                 if *mode == SendMode::CommentNow && github.has_pending_review(&self.pr)? {
                     return Err(PendingReviewExists.into());
                 }
@@ -111,9 +115,22 @@ impl std::fmt::Display for TourIsOld {
 
 impl std::error::Error for TourIsOld {}
 
+#[derive(Debug)]
+struct EmptyReply;
+
+impl std::fmt::Display for EmptyReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        CommentRefusal::EmptyReply.fmt(f)
+    }
+}
+
+impl std::error::Error for EmptyReply {}
+
 fn classify(error: &anyhow::Error) -> ThreadActionResult {
     if error.downcast_ref::<TourIsOld>().is_some() {
         ThreadActionResult::Refused(CommentRefusal::TourIsOld)
+    } else if error.downcast_ref::<EmptyReply>().is_some() {
+        ThreadActionResult::Refused(CommentRefusal::EmptyReply)
     } else if error.downcast_ref::<PendingReviewExists>().is_some() {
         ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
     } else if let Some(unavailable) = error.downcast_ref::<ViewedSyncUnavailable>() {

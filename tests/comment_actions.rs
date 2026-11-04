@@ -282,21 +282,23 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
     let mut review = pull.open();
     review.pull_pending_review(&github).unwrap();
     assert!(review.can_comment_now());
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
 
     let now = review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            body: "because".into(),
             mode: SendMode::CommentNow,
         },
         &github,
     );
     assert_eq!(now, ThreadActionResult::Done);
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "and also").unwrap();
 
     let added = review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            body: "and also".into(),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -315,11 +317,12 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
         .with_web_pending_review();
     let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            body: "because".into(),
             mode: SendMode::CommentNow,
         },
         &github,
@@ -456,7 +459,6 @@ fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
     review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            body: "because".into(),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -481,7 +483,6 @@ fn a_failed_reply_keeps_its_draft() {
     review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            body: "because".into(),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -502,7 +503,6 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     let result = review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            body: "because".into(),
             mode: SendMode::AddToReview,
         },
         &github,
@@ -615,4 +615,50 @@ fn a_read_tick_that_could_not_be_saved_says_why_until_a_save_goes_through() {
     std::fs::remove_dir(&lock).unwrap();
     review.untick(&"notes".into()).unwrap();
     assert_eq!(review.save_problem(), None);
+}
+
+#[test]
+fn a_reply_sends_its_draft_as_last_typed() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "becau").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
+
+    let result = review.act_on_thread(
+        ThreadAction::Reply {
+            thread_id: "T1".into(),
+            mode: SendMode::AddToReview,
+        },
+        &github,
+    );
+
+    assert_eq!(result, ThreadActionResult::Done);
+    assert!(pull.sent.github_calls().iter().any(|call| matches!(
+        call,
+        GitHubCall::Reply { body, .. } if body == "because"
+    )));
+}
+
+#[test]
+fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "  ").unwrap();
+
+    let result = review.act_on_thread(
+        ThreadAction::Reply {
+            thread_id: "T1".into(),
+            mode: SendMode::AddToReview,
+        },
+        &github,
+    );
+
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::EmptyReply)
+    );
 }
