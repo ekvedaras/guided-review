@@ -43,13 +43,20 @@ fn bold_italic_code_and_links_keep_their_style_in_one_paragraph() {
 fn a_fenced_block_keeps_its_language_and_text() {
     let markdown = Markdown::parse("```php\n$a = 1;\n$b = 2;\n```");
 
-    assert_eq!(
-        markdown.blocks,
-        [Block::Code {
-            language: Some("php".into()),
-            text: "$a = 1;\n$b = 2;\n".into()
-        }]
-    );
+    let [
+        Block::Code {
+            language,
+            text,
+            spans,
+        },
+    ] = markdown.blocks.as_slice()
+    else {
+        panic!("one code block, got {:?}", markdown.blocks);
+    };
+    assert_eq!(language.as_deref(), Some("php"));
+    assert_eq!(text, "$a = 1;\n$b = 2;\n");
+    assert_eq!(spans.len(), 2, "one line of colours per line of code");
+    assert!(spans.iter().all(|line| !line.is_empty()));
 }
 
 #[test]

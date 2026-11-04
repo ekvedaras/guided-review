@@ -5,12 +5,16 @@ use gpui::{
     Window, canvas, div, fill, point, px,
 };
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::Global;
 
 use crate::app::code_links::open_link;
-use crate::viewer::{Block, Capture, Markdown, Run, SuggestionDiff, highlight_snippet};
+use crate::viewer::{Block, Capture, Markdown, Run, Span, SuggestionDiff};
 
 use super::palette::{CODE_FONT, Colors};
 
@@ -41,26 +45,73 @@ impl OpenDetails {
     }
 }
 
+/// Texts parsed once and shared by every frame that draws them. Keyed by the source text itself, so a
+/// changed text is a new key and is parsed again; nothing is served stale.
+struct ParsedTexts<T> {
+    by_source: HashMap<Box<str>, Rc<T>>,
+}
+
+impl<T> ParsedTexts<T> {
+    /// More distinct texts than a review shows at once; past it the memo starts over instead of growing.
+    const MOST: usize = 4096;
+
+    fn new() -> Self {
+        Self {
+            by_source: HashMap::new(),
+        }
+    }
+
+    fn get_or_parse(&mut self, source: &str, parse: impl FnOnce(&str) -> T) -> Rc<T> {
+        if let Some(parsed) = self.by_source.get(source) {
+            return Rc::clone(parsed);
+        }
+        if self.by_source.len() >= Self::MOST {
+            self.by_source.clear();
+        }
+        let parsed = Rc::new(parse(source));
+        self.by_source.insert(source.into(), Rc::clone(&parsed));
+        parsed
+    }
+}
+
+thread_local! {
+    static PARSED_MARKDOWN: RefCell<ParsedTexts<Markdown>> = RefCell::new(ParsedTexts::new());
+    static PARSED_INLINE: RefCell<ParsedTexts<InlineText>> = RefCell::new(ParsedTexts::new());
+}
+
+/// The markdown of `source`, parsed on its first draw and shared after that.
+pub fn parsed_markdown(source: &str) -> Rc<Markdown> {
+    PARSED_MARKDOWN.with_borrow_mut(|parsed| parsed.get_or_parse(source, Markdown::parse))
+}
+
+fn parsed_inline(source: &str) -> Rc<InlineText> {
+    PARSED_INLINE.with_borrow_mut(|parsed| {
+        parsed.get_or_parse(source, |source| {
+            InlineText::of(&runs_of(&Markdown::parse(source).blocks))
+        })
+    })
+}
+
 /// A comment body: the one component every place that shows GitHub markdown uses.
 /// `key` tells this body's `<details>` folds apart from the folds of other bodies.
 #[derive(IntoElement)]
 pub struct MarkdownView {
     key: SharedString,
-    markdown: Markdown,
+    markdown: Rc<Markdown>,
     /// The lines the comment is on, so a suggestion block shows as a diff against them.
-    commented_lines: Vec<String>,
+    commented_lines: Arc<[String]>,
 }
 
 impl MarkdownView {
-    pub fn new(key: impl Into<SharedString>, markdown: Markdown) -> Self {
+    pub fn new(key: impl Into<SharedString>, markdown: Rc<Markdown>) -> Self {
         Self {
             key: key.into(),
             markdown,
-            commented_lines: Vec::new(),
+            commented_lines: Arc::new([]),
         }
     }
 
-    pub fn on_lines(mut self, commented_lines: Vec<String>) -> Self {
+    pub fn on_lines(mut self, commented_lines: Arc<[String]>) -> Self {
         self.commented_lines = commented_lines;
         self
     }
@@ -85,6 +136,7 @@ impl RenderOnce for MarkdownView {
                         Block::Code {
                             language: Some(language),
                             text,
+                            ..
                         } if language == "suggestion" => suggestion_view(
                             &colors,
                             &SuggestionDiff::of(&self.commented_lines, text),
@@ -151,7 +203,7 @@ fn blocks(items: &[Block], key: &str, window: &mut Window, cx: &mut App) -> AnyE
 fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) -> AnyElement {
     let colors = Colors::active(cx);
     match block {
-        Block::Paragraph(runs) => inline_text(&colors, runs, key, 1.0).into_any_element(),
+        Block::Paragraph(runs) => inline_text(&colors, runs, key, 1.0),
         Block::Heading { level, text } => {
             let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0]
                 .get(usize::from(*level - 1))
@@ -164,7 +216,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     ..run.clone()
                 })
                 .collect::<Vec<_>>();
-            inline_text(&colors, &heading, key, scale).into_any_element()
+            inline_text(&colors, &heading, key, scale)
         }
         Block::List {
             first_number,
@@ -190,7 +242,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     )))
             }))
             .into_any_element(),
-        Block::Code { language, text } => code_block(&colors, language.as_deref(), text),
+        Block::Code { text, spans, .. } => code_block(&colors, text, spans),
         Block::Quote(inner) => div()
             .pl_3()
             .border_l_2()
@@ -263,8 +315,7 @@ trait WhenOpen: ParentElement + Sized {
 
 impl<E: ParentElement> WhenOpen for E {}
 
-fn code_block(colors: &Colors, language: Option<&str>, text: &str) -> AnyElement {
-    let spans = highlight_snippet(language, text);
+fn code_block(colors: &Colors, text: &str, spans: &[Vec<Span>]) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -306,21 +357,21 @@ fn code_block(colors: &Colors, language: Option<&str>, text: &str) -> AnyElement
 #[derive(IntoElement)]
 pub struct InlineMarkdown {
     key: SharedString,
-    runs: Vec<Run>,
+    text: Rc<InlineText>,
 }
 
 impl InlineMarkdown {
     pub fn new(key: impl Into<SharedString>, source: &str) -> Self {
         Self {
             key: key.into(),
-            runs: runs_of(&Markdown::parse(source).blocks),
+            text: parsed_inline(source),
         }
     }
 }
 
 impl RenderOnce for InlineMarkdown {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        styled_runs(&Colors::active(cx), &self.runs, &self.key)
+        styled_text(&Colors::active(cx), &self.text, &self.key)
     }
 }
 
@@ -353,47 +404,85 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
 fn inline_text(colors: &Colors, runs: &[Run], key: &str, scale: f32) -> AnyElement {
     div()
         .text_size(gpui::rems(scale))
-        .child(styled_runs(colors, runs, key))
+        .child(styled_text(colors, &Rc::new(InlineText::of(runs)), key))
         .into_any_element()
 }
 
 /// Inline code gets a third of an em of space on each side inside its background, as padding.
 const CODE_PADDING: &str = "\u{2004}";
 
-fn styled_runs(colors: &Colors, runs: &[Run], key: &str) -> AnyElement {
-    let mut text = String::new();
-    let mut highlights = Vec::new();
-    let mut links = Vec::new();
-    let mut code_ranges = Vec::new();
-    for run in runs {
-        if run.code && !run.text.is_empty() {
-            text.push_str(CODE_PADDING);
+/// Runs joined into one line of text, with no colours in it, so one parse serves every theme.
+#[derive(Debug, PartialEq)]
+struct InlineText {
+    text: SharedString,
+    styled: Vec<(Range<usize>, Run)>,
+    links: Vec<(Range<usize>, String)>,
+    code_ranges: Vec<Range<usize>>,
+}
+
+impl InlineText {
+    fn of(runs: &[Run]) -> Self {
+        let mut text = String::new();
+        let mut styled = Vec::new();
+        let mut links = Vec::new();
+        let mut code_ranges = Vec::new();
+        for run in runs {
+            if run.code && !run.text.is_empty() {
+                text.push_str(CODE_PADDING);
+            }
+            let range = text.len()..text.len() + run.text.len();
+            text.push_str(&run.text);
+            if run.code && !run.text.is_empty() {
+                text.push_str(CODE_PADDING);
+                code_ranges.push(range.start - CODE_PADDING.len()..text.len());
+            }
+            let is_styled =
+                run.bold || run.italic || run.strikethrough || run.code || run.link.is_some();
+            if is_styled && !range.is_empty() {
+                styled.push((
+                    range.clone(),
+                    Run {
+                        text: String::new(),
+                        ..run.clone()
+                    },
+                ));
+            }
+            if let Some(url) = &run.link {
+                links.push((range, url.clone()));
+            }
         }
-        let range = text.len()..text.len() + run.text.len();
-        text.push_str(&run.text);
-        if run.code && !run.text.is_empty() {
-            text.push_str(CODE_PADDING);
-            code_ranges.push(range.start - CODE_PADDING.len()..text.len());
-        }
-        let is_styled =
-            run.bold || run.italic || run.strikethrough || run.code || run.link.is_some();
-        if is_styled && !range.is_empty() {
-            highlights.push((range.clone(), style_of(colors, run)));
-        }
-        if let Some(url) = &run.link {
-            links.push((range, url.clone()));
+        Self {
+            text: text.into(),
+            styled,
+            links,
+            code_ranges,
         }
     }
-    let styled = StyledText::new(text).with_highlights(highlights);
-    let backgrounds =
-        (!code_ranges.is_empty()).then(|| code_backgrounds(styled.layout().clone(), code_ranges));
-    let text = if links.is_empty() {
+
+    fn highlights(&self, colors: &Colors) -> Vec<(Range<usize>, HighlightStyle)> {
+        self.styled
+            .iter()
+            .map(|(range, run)| (range.clone(), style_of(colors, run)))
+            .collect()
+    }
+}
+
+fn styled_text(colors: &Colors, inline: &Rc<InlineText>, key: &str) -> AnyElement {
+    let styled = StyledText::new(inline.text.clone()).with_highlights(inline.highlights(colors));
+    let backgrounds = (!inline.code_ranges.is_empty())
+        .then(|| code_backgrounds(styled.layout().clone(), inline.code_ranges.clone()));
+    let text = if inline.links.is_empty() {
         styled.into_any_element()
     } else {
-        let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
+        let ranges = inline
+            .links
+            .iter()
+            .map(|(range, _)| range.clone())
+            .collect();
+        let links = Rc::clone(inline);
         InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
             .on_click(ranges, move |index, _, cx| {
-                if let Some(url) = urls.get(index) {
+                if let Some((_, url)) = links.links.get(index) {
                     open_link(url, cx);
                 }
             })
@@ -411,7 +500,7 @@ fn styled_runs(colors: &Colors, runs: &[Run], key: &str) -> AnyElement {
 
 /// Rounded backgrounds behind inline code, one per line a code run covers. Drawn under the text,
 /// which is laid out by the time this paints.
-fn code_backgrounds(layout: TextLayout, ranges: Vec<std::ops::Range<usize>>) -> AnyElement {
+fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement {
     canvas(
         |_, _, _| (),
         move |_, (), window, cx| {
@@ -491,6 +580,46 @@ fn style_of(colors: &Colors, run: &Run) -> HighlightStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_is_parsed_once_and_a_changed_text_again() {
+        let first = parsed_markdown("**one**");
+
+        assert!(Rc::ptr_eq(&first, &parsed_markdown("**one**")));
+        let changed = parsed_markdown("**two**");
+        assert!(!Rc::ptr_eq(&first, &changed));
+        assert_eq!(*changed, Markdown::parse("**two**"));
+    }
+
+    #[test]
+    fn a_changed_title_is_not_drawn_from_the_old_parse() {
+        assert_eq!(
+            parsed_inline("old `title`").text.as_ref(),
+            "old \u{2004}title\u{2004}"
+        );
+        assert_eq!(
+            parsed_inline("new `title`").text.as_ref(),
+            "new \u{2004}title\u{2004}"
+        );
+    }
+
+    #[test]
+    fn a_parsed_text_takes_its_colours_from_the_theme_it_is_drawn_in() {
+        use super::super::palette::Appearance;
+        let text = parsed_inline("see [docs](https://x.test)");
+
+        let light = text.highlights(&Colors::of(Appearance::Light));
+        let dark = text.highlights(&Colors::of(Appearance::Dark));
+
+        assert_eq!(
+            light.first().and_then(|(_, style)| style.color),
+            Some(Colors::of(Appearance::Light).code(Capture::Function).into())
+        );
+        assert_eq!(
+            dark.first().and_then(|(_, style)| style.color),
+            Some(Colors::of(Appearance::Dark).code(Capture::Function).into())
+        );
+    }
 
     #[test]
     fn tour_text_keeps_its_bold_and_code_and_drops_the_markers() {

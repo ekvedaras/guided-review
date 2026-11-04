@@ -99,7 +99,7 @@ impl Capture {
 }
 
 /// A coloured stretch of one line: byte offsets into that line's text.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Span {
     pub range: Range<usize>,
     pub capture: Capture,

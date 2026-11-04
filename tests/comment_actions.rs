@@ -451,7 +451,7 @@ fn a_thread_knows_the_lines_a_suggestion_is_against() {
 
     let view = review.current_step().unwrap().threads.remove(0);
 
-    assert_eq!(view.commented_lines, ["line 9", "line ten"]);
+    assert_eq!(*view.commented_lines, ["line 9", "line ten"]);
     let Markdown { blocks } = Markdown::parse(&view.thread.comments[0].body);
     assert!(blocks.iter().any(|block| matches!(
         block,

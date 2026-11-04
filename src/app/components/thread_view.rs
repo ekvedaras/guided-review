@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
@@ -8,10 +9,10 @@ use gpui::{
 
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    Markdown, ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment, ThreadView,
+    ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment, ThreadView,
 };
 
-use super::markdown_view::MarkdownView;
+use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -63,7 +64,7 @@ struct ReplyBox<'a> {
 /// Folded threads (resolved, outdated, by a bot) show one line and a toggle.
 #[derive(IntoElement)]
 pub struct ThreadElement {
-    view: ThreadView,
+    view: Rc<ThreadView>,
     can_reply_now: bool,
     reply: Option<String>,
     on_reply_draft: OnReplyDraft,
@@ -73,7 +74,7 @@ pub struct ThreadElement {
 
 impl ThreadElement {
     pub fn new(
-        view: ThreadView,
+        view: Rc<ThreadView>,
         can_reply_now: bool,
         reply: Option<String>,
         on_reply_draft: OnReplyDraft,
@@ -404,9 +405,9 @@ impl RenderOnce for ThreadElement {
                             .child(
                                 MarkdownView::new(
                                     format!("thread-{id}-{index}"),
-                                    Markdown::parse(&comment.body),
+                                    parsed_markdown(&comment.body),
                                 )
-                                .on_lines(self.view.commented_lines.clone()),
+                                .on_lines(Arc::clone(&self.view.commented_lines)),
                             )
                             .child(Self::reactions(&colors, comment, &ui, &reaction_on_action))
                     }),

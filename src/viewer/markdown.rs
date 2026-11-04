@@ -2,6 +2,8 @@ use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeStream,
 };
 
+use super::highlight::{Span, highlight_snippet};
+
 /// The part of GitHub-flavoured markdown that review comments use, as a tree the views can draw.
 /// Everything else (tables, raw HTML other than `<details>`, `<img>`, `<br>`, `<a>`) shows as plain text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -23,6 +25,8 @@ pub enum Block {
     Code {
         language: Option<String>,
         text: String,
+        /// Per line of `text`, coloured when parsed, so drawing the block highlights nothing.
+        spans: Vec<Vec<Span>>,
     },
     Quote(Vec<Self>),
     /// A `<details>` fold: shown closed, the reader opens it.
@@ -292,7 +296,12 @@ impl Builder {
             }
             TagEnd::CodeBlock => {
                 if let Some((language, text)) = self.code.take() {
-                    self.push_block(Block::Code { language, text });
+                    let spans = highlight_snippet(language.as_deref(), &text);
+                    self.push_block(Block::Code {
+                        language,
+                        text,
+                        spans,
+                    });
                 }
             }
             TagEnd::List(_) => {

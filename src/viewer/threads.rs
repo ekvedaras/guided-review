@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use crate::coverage;
 use crate::pieces::ChangedFile;
@@ -91,7 +92,7 @@ pub struct ThreadView {
     pub anchor: Option<LineLocation>,
     /// The lines of the head the thread is on, for showing suggestions against them.
     /// Empty unless a comment holds a suggestion.
-    pub commented_lines: Vec<String>,
+    pub commented_lines: Arc<[String]>,
     /// The reply being written in this thread; `Some` means the reply box is open.
     pub reply_draft: Option<String>,
 }
@@ -181,16 +182,16 @@ pub(super) fn views(
         .collect()
 }
 
-fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Vec<String> {
+fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[String]> {
     let has_suggestion = thread
         .comments
         .iter()
         .any(|comment| comment.body.contains("```suggestion"));
     match (has_suggestion, thread.is_outdated, thread.side, thread.line) {
-        (true, false, Side::Head, Some(last)) => {
-            files_at_head.lines(&thread.path, thread.start_line.unwrap_or(last), last)
-        }
-        _ => Vec::new(),
+        (true, false, Side::Head, Some(last)) => files_at_head
+            .lines(&thread.path, thread.start_line.unwrap_or(last), last)
+            .into(),
+        _ => Arc::new([]),
     }
 }
 

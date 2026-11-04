@@ -30,7 +30,7 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::icon::{Icon, icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
-use crate::app::components::markdown_view::{InlineMarkdown, MarkdownView};
+use crate::app::components::markdown_view::{InlineMarkdown, MarkdownView, parsed_markdown};
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
@@ -594,13 +594,13 @@ impl OneStepLayout {
         })
     }
 
-    fn thread_element(&self, view: &ThreadView, cx: &mut Context<Self>) -> ThreadElement {
+    fn thread_element(&self, view: &Rc<ThreadView>, cx: &mut Context<Self>) -> ThreadElement {
         let id = view.thread.id.clone();
         let review = self.session.read(cx).review();
         let can_comment_now = review.can_comment_now();
         let reply = review.reply_draft(&view.thread.id).map(str::to_owned);
         ThreadElement::new(
-            view.clone(),
+            Rc::clone(view),
             can_comment_now,
             reply,
             self.on_reply_draft(&view.thread.id),
@@ -956,7 +956,7 @@ impl OneStepLayout {
                 )))
                 .into_any_element(),
             PageRow::PrDescription(description) => {
-                self.pr_description(&description, cx).into_any_element()
+                self.pr_description(description, cx).into_any_element()
             }
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
@@ -965,7 +965,7 @@ impl OneStepLayout {
                 .text_color(colors.muted_text)
                 .child(MarkdownView::new(
                     format!("step-why-{index}"),
-                    Markdown::parse(&why),
+                    parsed_markdown(&why),
                 ))
                 .into_any_element(),
             PageRow::Diagram => div()
@@ -1095,7 +1095,11 @@ impl OneStepLayout {
         }
     }
 
-    fn pr_description(&self, description: &Markdown, cx: &mut Context<Self>) -> impl IntoElement {
+    fn pr_description(
+        &self,
+        description: Rc<Markdown>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = Colors::active(cx);
         div()
             .pt_2()
@@ -1115,7 +1119,7 @@ impl OneStepLayout {
                     .border_color(colors.subtle_border)
                     .bg(colors.surface)
                     .text_sm()
-                    .child(MarkdownView::new("pr-description", description.clone())),
+                    .child(MarkdownView::new("pr-description", description)),
             )
     }
 

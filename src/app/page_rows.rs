@@ -140,7 +140,7 @@ pub enum PageRow {
         /// Of the reply box, if open; its text is read from the review when drawn.
         reply_lines: Option<usize>,
         /// The `<details>` of its comments that are open.
-        open_details: Vec<String>,
+        open_details: Rc<[String]>,
     },
     QueuedComment(Rc<QueuedComment>),
     /// A comment box; its text is read from the review when drawn, so only its line count is a part of the row.
@@ -877,7 +877,8 @@ fn thread_row(view: ThreadView, is_under_a_line: bool, facts: &RowFacts) -> Page
         reply_lines: view.reply_draft.as_deref().map(line_count),
         open_details: facts
             .open_details
-            .open_under(&format!("thread-{}-", view.thread.id)),
+            .open_under(&format!("thread-{}-", view.thread.id))
+            .into(),
         view: Rc::new(view),
         is_under_a_line,
     }
@@ -906,6 +907,7 @@ pub fn line_count(text: &str) -> usize {
 mod tests {
     use super::*;
     use crate::viewer::{Reaction, ReactionCount, ReviewThread, Side, ThreadComment};
+    use std::sync::Arc;
 
     fn thread_view() -> ThreadView {
         ThreadView {
@@ -932,7 +934,7 @@ mod tests {
             },
             is_folded: false,
             anchor: None,
-            commented_lines: Vec::new(),
+            commented_lines: Arc::new([]),
             reply_draft: None,
         }
     }
@@ -942,7 +944,7 @@ mod tests {
             view: Rc::new(view),
             is_under_a_line: true,
             reply_lines,
-            open_details: open,
+            open_details: open.into(),
         }
         .key()
     }
