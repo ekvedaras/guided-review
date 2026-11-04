@@ -164,7 +164,7 @@ fn a_range_comment_is_added_as_a_thread_with_both_sides() {
         .add_thread_to_pending_review(&pr(), &place, "why?")
         .unwrap();
 
-    assert_eq!(review, "REVIEW_1");
+    assert_eq!(review.as_deref(), Some("REVIEW_1"));
     let input = &asked_as_json(&asked)[1]["variables"]["input"];
     assert_eq!(
         *input,
@@ -245,6 +245,96 @@ fn comment_now_submits_the_review_the_thread_went_into() {
     assert_eq!(
         *input,
         serde_json::json!({"pullRequestReviewId": "REVIEW_1", "event": "COMMENT"})
+    );
+}
+
+const THREAD_ADDED_WITHOUT_REVIEW: &str = r#"{"data":{"addPullRequestReviewThread":{"thread":{"id":"T9","comments":{"nodes":[{"pullRequestReview":null}]}}}}}"#;
+
+#[test]
+fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review() {
+    let (url, asked) = serve_graphql(vec![
+        PULL_ID.into(),
+        THREAD_ADDED_WITHOUT_REVIEW.into(),
+        PENDING.into(),
+        OK.into(),
+    ]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    GitHub::at(&url).comment_now(&pr(), &place, "x").unwrap();
+
+    assert_eq!(
+        asked_as_json(&asked)[3]["variables"]["input"],
+        serde_json::json!({"pullRequestReviewId": "REVIEW_7", "event": "COMMENT"})
+    );
+}
+
+#[test]
+fn comment_now_whose_review_cannot_be_found_says_where_the_comment_is_and_sends_nothing_more() {
+    let (url, asked) = serve_graphql(vec![
+        PULL_ID.into(),
+        THREAD_ADDED_WITHOUT_REVIEW.into(),
+        NO_PENDING.into(),
+    ]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    let error = GitHub::at(&url)
+        .comment_now(&pr(), &place, "x")
+        .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("look for it on GitHub"),
+        "{error:#}"
+    );
+    assert_eq!(asked_as_json(&asked).len(), 3);
+}
+
+#[test]
+fn a_comment_now_that_could_not_be_posted_or_taken_back_says_it_waits_in_the_pending_review() {
+    let failed = r#"{"errors":[{"message":"something broke"}],"data":null}"#;
+    let (url, _) = serve_graphql(vec![
+        PULL_ID.into(),
+        THREAD_ADDED.into(),
+        failed.into(),
+        failed.into(),
+    ]);
+    let place = CommentPlace {
+        start: location(Side::Head, 5),
+        end: location(Side::Head, 5),
+    };
+
+    let error = GitHub::at(&url)
+        .comment_now(&pr(), &place, "x")
+        .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("pending review on GitHub"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn a_reply_now_without_a_review_id_from_github_sends_the_viewers_pending_review() {
+    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"","state":"PENDING"}}}}}"#;
+    let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
+        replied.into(),
+        PENDING.into(),
+        OK.into(),
+    ]);
+
+    GitHub::at(&url)
+        .reply_to_thread(&pr(), "T1", "because", SendMode::CommentNow)
+        .unwrap();
+
+    assert_eq!(
+        asked_as_json(&asked)[3]["variables"]["input"]["pullRequestReviewId"],
+        "REVIEW_7"
     );
 }
 

@@ -168,13 +168,13 @@ impl GitHub {
             .unwrap_or_default())
     }
 
-    /// Returns the id of the pending review the thread went into.
+    /// Returns the id of the pending review the thread went into, when GitHub says it.
     pub fn add_thread_to_pending_review(
         &self,
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Option<String>> {
         let pull_request_id = self.pull_request_id(pr)?;
         let input = if place.is_file_comment() {
             ReviewThreadInput {
@@ -211,10 +211,26 @@ impl GitHub {
             ))
             .into());
         }
-        Ok(at(thread, "/comments/nodes/0/pullRequestReview/id")
-            .as_str()
-            .unwrap_or_default()
-            .to_owned())
+        Ok(non_empty_id(at(
+            thread,
+            "/comments/nodes/0/pullRequestReview/id",
+        )))
+    }
+
+    /// The review a new comment went into. When GitHub did not say which, it is the viewer's
+    /// pending one, as GitHub allows only one. When there is none either, the comment may already
+    /// be posted, so the reviewer looks before sending it again.
+    fn review_holding_new_comment(
+        &self,
+        pr: &PullRequestUrl,
+        reported: Option<String>,
+    ) -> anyhow::Result<String> {
+        if let Some(review_id) = reported {
+            return Ok(review_id);
+        }
+        self.pending_review_id(pr)?.context(
+            "GitHub took the comment but did not say into which review; look for it on GitHub before sending it again",
+        )
     }
 
     fn pending_review_id(&self, pr: &PullRequestUrl) -> anyhow::Result<Option<String>> {
@@ -233,8 +249,7 @@ impl GitHub {
             .into_iter()
             .flatten()
             .find(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true))
-            .and_then(|review| at(review, "/id").as_str())
-            .map(str::to_owned))
+            .and_then(|review| non_empty_id(at(review, "/id"))))
     }
 
     fn submit_pending_review(
@@ -410,8 +425,10 @@ impl ReviewThreadsPort for GitHub {
             "/addPullRequestReviewThreadReply/comment/pullRequestReview",
         );
         if mode == SendMode::CommentNow && at(review, "/state") == "PENDING" {
-            let review_id = at(review, "/id").as_str().unwrap_or_default();
-            self.submit_pending_review(review_id, ReviewVerdict::Comment, "")
+            let review_id = self
+                .review_holding_new_comment(pr, non_empty_id(at(review, "/id")))
+                .context("could not post the reply")?;
+            self.submit_pending_review(&review_id, ReviewVerdict::Comment, "")
                 .context("could not post the reply")?;
         }
         Ok(())
@@ -500,7 +517,10 @@ impl ReviewWritesPort for GitHub {
         place: &CommentPlace,
         body: &str,
     ) -> anyhow::Result<()> {
-        let review_id = self.add_thread_to_pending_review(pr, place, body)?;
+        let reported = self.add_thread_to_pending_review(pr, place, body)?;
+        let review_id = self
+            .review_holding_new_comment(pr, reported)
+            .context("could not post the comment")?;
         let posted = self.graphql(
             "mutation($input: SubmitPullRequestReviewInput!) {
                 submitPullRequestReview(input: $input) { clientMutationId }
@@ -508,14 +528,19 @@ impl ReviewWritesPort for GitHub {
             &serde_json::json!({"input": {"pullRequestReviewId": review_id, "event": "COMMENT"}}),
         );
         if let Err(error) = posted {
-            self.graphql(
+            let taken_back = self.graphql(
                 "mutation($input: DeletePullRequestReviewInput!) {
                     deletePullRequestReview(input: $input) { clientMutationId }
                 }",
                 &serde_json::json!({"input": {"pullRequestReviewId": review_id}}),
-            )
-            .ok();
-            return Err(error.context("could not post the comment"));
+            );
+            let error = error.context("could not post the comment");
+            return Err(match taken_back {
+                Ok(_) => error,
+                Err(cleanup) => error.context(format!(
+                    "the comment is left in your pending review on GitHub, which could not be deleted ({cleanup:#})"
+                )),
+            });
         }
         Ok(())
     }
@@ -683,6 +708,10 @@ fn graphql_side(side: Side) -> &'static str {
         Side::Base => "LEFT",
         Side::Head => "RIGHT",
     }
+}
+
+fn non_empty_id(id: &serde_json::Value) -> Option<String> {
+    id.as_str().filter(|id| !id.is_empty()).map(str::to_owned)
 }
 
 fn one_pending_review_error(error: anyhow::Error) -> anyhow::Error {
