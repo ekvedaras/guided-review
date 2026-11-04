@@ -6,7 +6,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::Tour;
 
-use super::ports::{PullRequestTipsPort, ViewedFilesPort, ViewedState, ViewedSyncUnavailable};
+use super::ports::{PullRequestTipsPort, Viewed, ViewedFilesPort, ViewedSyncUnavailable};
 use super::review::StepId;
 use super::review_state::ReviewState;
 
@@ -41,7 +41,7 @@ impl ViewedSync {
             .filter(|file| coverage.is_fully_ticked(file, |step| is_ticked(state, step)))
             .collect();
         for file in fully_ticked {
-            state.want_viewed(file, true);
+            state.want_viewed(file, Viewed::Yes);
         }
     }
 
@@ -55,7 +55,7 @@ impl ViewedSync {
             return;
         }
         for file in coverage.files_of(step) {
-            state.want_viewed(file, false);
+            state.want_viewed(file, Viewed::No);
         }
     }
 
@@ -134,7 +134,7 @@ fn is_ticked(state: &ReviewState, step: &StepId) -> bool {
 /// After a re-pin: viewed for every file whose steps are all still ticked, and the queued
 /// "not viewed" edits for the rest. Queued "viewed" edits are dropped: the ticks say it again
 /// where it is still true.
-fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<FilePath, bool> {
+fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<FilePath, Viewed> {
     let is_fully_ticked =
         |path: &FilePath| coverage.is_fully_ticked(path, |step| is_ticked(state, step));
     let still_viewed = coverage
@@ -142,12 +142,12 @@ fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<FilePat
         .values()
         .flatten()
         .filter(|path| is_fully_ticked(path))
-        .map(|path| (path.clone(), true));
+        .map(|path| (path.clone(), Viewed::Yes));
     let still_not_viewed = state
         .unsent_viewed()
         .iter()
-        .filter(|(path, viewed)| !**viewed && !is_fully_ticked(path))
-        .map(|(path, _)| (path.clone(), false));
+        .filter(|(path, viewed)| **viewed == Viewed::No && !is_fully_ticked(path))
+        .map(|(path, _)| (path.clone(), Viewed::No));
     still_viewed.chain(still_not_viewed).collect()
 }
 
@@ -157,7 +157,7 @@ fn pull_viewed(
     state: &mut ReviewState,
     coverage: &Coverage,
     tour_head: &Sha,
-    on_github: &BTreeMap<FilePath, bool>,
+    on_github: &BTreeMap<FilePath, Viewed>,
 ) -> Vec<StepId> {
     let unsent = state.unsent_viewed().clone();
     let is_viewed = |path: &FilePath| {
@@ -165,9 +165,9 @@ fn pull_viewed(
             .get(path)
             .or_else(|| on_github.get(path))
             .copied()
-            .unwrap_or(false)
+            .unwrap_or(Viewed::No)
     };
-    let changed: Vec<(&FilePath, bool)> = on_github
+    let changed: Vec<(&FilePath, Viewed)> = on_github
         .iter()
         .filter(|(path, now)| {
             !unsent.contains_key(*path) && state.was_viewed_on_github(path) != **now
@@ -176,16 +176,16 @@ fn pull_viewed(
         .collect();
 
     let mut unticked = Vec::new();
-    for (path, _) in changed.iter().filter(|(_, now)| !now) {
+    for (path, _) in changed.iter().filter(|(_, now)| *now == Viewed::No) {
         for step in coverage.steps_holding(path) {
             state.untick(step);
             unticked.push(step.clone());
         }
     }
-    for (path, _) in changed.iter().filter(|(_, now)| *now) {
+    for (path, _) in changed.iter().filter(|(_, now)| *now == Viewed::Yes) {
         for step in coverage.steps_holding(path) {
             let files = coverage.files_of(step);
-            if !is_ticked(state, step) && files.iter().all(&is_viewed) {
+            if !is_ticked(state, step) && files.iter().all(|path| is_viewed(path) == Viewed::Yes) {
                 state.tick(step, tour_head);
             }
         }
@@ -250,18 +250,18 @@ impl Coverage {
 pub struct SyncRequest {
     pr: PullRequestUrl,
     tour_head: Sha,
-    unsent: BTreeMap<FilePath, bool>,
+    unsent: BTreeMap<FilePath, Viewed>,
     /// Set for the first sync after a re-pin; it replaces `unsent`.
-    baseline_wishes: Option<BTreeMap<FilePath, bool>>,
+    baseline_wishes: Option<BTreeMap<FilePath, Viewed>>,
     is_off: bool,
 }
 
 /// What the network part of a sync learned and did; the review takes it in with `apply_sync`.
 pub struct SyncOutcome {
     tour_head: Sha,
-    sent: Vec<(FilePath, bool)>,
-    on_github: Option<BTreeMap<FilePath, bool>>,
-    baseline_wishes: Option<BTreeMap<FilePath, bool>>,
+    sent: Vec<(FilePath, Viewed)>,
+    on_github: Option<BTreeMap<FilePath, Viewed>>,
+    baseline_wishes: Option<BTreeMap<FilePath, Viewed>>,
     error: Option<anyhow::Error>,
 }
 
@@ -319,7 +319,7 @@ impl SyncRequest {
         github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
         tour_head: &Sha,
-        wishes: BTreeMap<FilePath, bool>,
+        wishes: BTreeMap<FilePath, Viewed>,
     ) -> SyncOutcome {
         let on_github = match read_viewed(github, pr) {
             Ok(on_github) => on_github,
@@ -330,9 +330,11 @@ impl SyncRequest {
                 };
             }
         };
-        let differing: BTreeMap<FilePath, bool> = wishes
+        let differing: BTreeMap<FilePath, Viewed> = wishes
             .iter()
-            .filter(|(path, viewed)| on_github.get(*path).copied().unwrap_or(false) != **viewed)
+            .filter(|(path, viewed)| {
+                on_github.get(*path).copied().unwrap_or(Viewed::No) != **viewed
+            })
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
         let mut outcome = SyncOutcome::nothing(tour_head);
@@ -347,8 +349,8 @@ impl SyncRequest {
 fn push(
     github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
-    wishes: &BTreeMap<FilePath, bool>,
-    sent: &mut Vec<(FilePath, bool)>,
+    wishes: &BTreeMap<FilePath, Viewed>,
+    sent: &mut Vec<(FilePath, Viewed)>,
 ) -> anyhow::Result<()> {
     for (path, viewed) in wishes {
         github.set_file_viewed(pr, path, *viewed)?;
@@ -360,10 +362,10 @@ fn push(
 fn read_viewed(
     github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
-) -> anyhow::Result<BTreeMap<FilePath, bool>> {
+) -> anyhow::Result<BTreeMap<FilePath, Viewed>> {
     Ok(github
         .viewed_files(pr)?
         .into_iter()
-        .map(|file| (file.path, file.state == ViewedState::Viewed))
+        .map(|file| (file.path, file.state.viewed()))
         .collect())
 }

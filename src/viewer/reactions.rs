@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Adds the viewer's reaction to a comment, or takes it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionChange {
+    Add,
+    Remove,
+}
+
 /// The eight reactions GitHub offers on a comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Reaction {

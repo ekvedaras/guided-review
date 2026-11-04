@@ -101,7 +101,7 @@ useless_let_if_seq = "warn"
 # pedantic members left off: noise for a gpui app, or false alarms here
 # cast_precision_loss: usize and u32 to f32 for pixel layout, where the precision is irrelevant
 # struct_field_names: two hits, both good names (on_* callbacks, a collection named after its type)
-# unused_self: view helpers and the comment desk's rules are methods on their owner on purpose
+# unused_self: rechecked in phase 4: the comment desk's stateless rules are associated functions now, the 12 left are view helpers and test fixtures that are methods on their owner on purpose
 must_use_candidate = "allow"
 return_self_not_must_use = "allow"
 missing_errors_doc = "allow"

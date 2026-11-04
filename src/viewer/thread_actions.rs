@@ -1,10 +1,11 @@
 use crate::pull_request::PullRequestUrl;
 
+use super::comment_desk::TourFreshness;
 use super::comments::{CommentRefusal, SendMode};
 use super::ports::{
-    PendingReviewExists, ReviewThreadsPort, ReviewWritesPort, ViewedSyncUnavailable,
+    PendingReviewExists, Resolution, ReviewThreadsPort, ReviewWritesPort, ViewedSyncUnavailable,
 };
-use super::reactions::Reaction;
+use super::reactions::{Reaction, ReactionChange};
 use super::threads::ReviewThread;
 
 /// What the reviewer does to a thread that is already on GitHub.
@@ -26,7 +27,7 @@ pub enum ThreadAction {
     SetReaction {
         comment_id: String,
         reaction: Reaction,
-        on: bool,
+        change: ReactionChange,
     },
 }
 
@@ -45,7 +46,7 @@ pub struct ThreadActionRequest {
     /// The reply draft of the thread a `Reply` is for.
     pub(super) reply_body: Option<String>,
     /// The tour is behind the PR head: the thread may sit on lines the tour does not show.
-    pub(super) tour_is_old: bool,
+    pub(super) freshness: TourFreshness,
 }
 
 pub struct ThreadActionOutcome {
@@ -81,7 +82,9 @@ impl ThreadActionRequest {
         &self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     ) -> anyhow::Result<()> {
-        if self.tour_is_old && matches!(self.action, ThreadAction::Reply { .. }) {
+        if self.freshness == TourFreshness::Behind
+            && matches!(self.action, ThreadAction::Reply { .. })
+        {
             return Err(TourIsOld.into());
         }
         match &self.action {
@@ -96,13 +99,17 @@ impl ThreadActionRequest {
                 }
                 github.reply_to_thread(&self.pr, thread_id, body, *mode)
             }
-            ThreadAction::Resolve { thread_id } => github.set_thread_resolved(thread_id, true),
-            ThreadAction::Unresolve { thread_id } => github.set_thread_resolved(thread_id, false),
+            ThreadAction::Resolve { thread_id } => {
+                github.set_thread_resolved(thread_id, Resolution::Resolved)
+            }
+            ThreadAction::Unresolve { thread_id } => {
+                github.set_thread_resolved(thread_id, Resolution::Unresolved)
+            }
             ThreadAction::SetReaction {
                 comment_id,
                 reaction,
-                on,
-            } => github.set_reaction(comment_id, *reaction, *on),
+                change,
+            } => github.set_reaction(comment_id, *reaction, *change),
         }
     }
 }

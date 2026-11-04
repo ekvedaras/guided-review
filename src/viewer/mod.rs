@@ -38,7 +38,8 @@ pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;
-pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde};
+pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, WorkingCopy};
+pub use comment_desk::TourFreshness;
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
     CommentResult, QueuedComment, SendMode,
@@ -57,12 +58,12 @@ pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubPort, PendingReviewExists,
-    PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, ReviewThreadsPort,
-    ReviewWritesPort, ThreadNotCreated, TurnStopper, ViewedFile, ViewedFilesPort, ViewedState,
-    ViewedSyncUnavailable,
+    PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
+    ReviewWritesPort, ThreadNotCreated, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState, ViewedSyncUnavailable,
 };
 pub use problems::Problem;
-pub use reactions::{Reaction, ReactionCount};
+pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, SafetyNetSize, Screen,

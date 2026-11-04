@@ -8,9 +8,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction, ReactionCount, Review,
-    ReviewStateFile, ReviewThread, SendMode, Side, SuggestionDiff, ThreadAction,
-    ThreadActionResult, ThreadComment,
+    CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction, ReactionChange,
+    ReactionCount, Resolution, Review, ReviewStateFile, ReviewThread, SendMode, Side,
+    SuggestionDiff, ThreadAction, ThreadActionResult, ThreadComment,
 };
 use serde_json::json;
 
@@ -155,7 +155,7 @@ fn resolving_a_thread_tells_github_and_shows_it_resolved() {
     assert_eq!(result, ThreadActionResult::Done);
     assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
         thread_id: "T1".into(),
-        resolved: true
+        resolution: Resolution::Resolved
     }));
     assert!(shown_thread(&review).is_resolved);
 }
@@ -178,7 +178,7 @@ fn unresolving_a_thread_tells_github_and_shows_it_open() {
 
     assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
         thread_id: "T1".into(),
-        resolved: false
+        resolution: Resolution::Unresolved
     }));
     assert!(!shown_thread(&review).is_resolved);
 }
@@ -194,7 +194,7 @@ fn a_reaction_is_added_and_removed_on_a_click() {
         ThreadAction::SetReaction {
             comment_id: "C1".into(),
             reaction: Reaction::Rocket,
-            on: true,
+            change: ReactionChange::Add,
         },
         &github,
     );
@@ -218,7 +218,7 @@ fn a_reaction_is_added_and_removed_on_a_click() {
         ThreadAction::SetReaction {
             comment_id: "C1".into(),
             reaction: Reaction::Rocket,
-            on: false,
+            change: ReactionChange::Remove,
         },
         &github,
     );
@@ -229,10 +229,10 @@ fn a_reaction_is_added_and_removed_on_a_click() {
             .into_iter()
             .filter(|call| matches!(call, GitHubCall::SetReaction { .. }))
             .collect::<Vec<_>>(),
-        [true, false].map(|on| GitHubCall::SetReaction {
+        [ReactionChange::Add, ReactionChange::Remove].map(|change| GitHubCall::SetReaction {
             comment_id: "C1".into(),
             reaction: Reaction::Rocket,
-            on
+            change
         })
     );
 }

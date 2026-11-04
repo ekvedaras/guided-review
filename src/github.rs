@@ -12,9 +12,9 @@ use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
     CommentPlace, PendingReviewExists, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
-    ReactionCount, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    Side, ThreadComment, ThreadNotCreated, ViewedFile, ViewedFilesPort, ViewedState,
-    ViewedSyncUnavailable, percent_encode_path,
+    ReactionChange, ReactionCount, Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict,
+    ReviewWritesPort, SendMode, Side, ThreadComment, ThreadNotCreated, Viewed, ViewedFile,
+    ViewedFilesPort, ViewedState, ViewedSyncUnavailable, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -366,12 +366,11 @@ impl ViewedFilesPort for GitHub {
         &self,
         pr: &PullRequestUrl,
         path: &FilePath,
-        viewed: bool,
+        viewed: Viewed,
     ) -> anyhow::Result<()> {
-        let mutation = if viewed {
-            "markFileAsViewed"
-        } else {
-            "unmarkFileAsViewed"
+        let mutation = match viewed {
+            Viewed::Yes => "markFileAsViewed",
+            Viewed::No => "unmarkFileAsViewed",
         };
         let pull_request_id = self.pull_request_id(pr)?;
         self.graphql(
@@ -445,11 +444,10 @@ impl ReviewThreadsPort for GitHub {
         Ok(())
     }
 
-    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
-        let mutation = if resolved {
-            "resolveReviewThread"
-        } else {
-            "unresolveReviewThread"
+    fn set_thread_resolved(&self, thread_id: &str, resolution: Resolution) -> anyhow::Result<()> {
+        let mutation = match resolution {
+            Resolution::Resolved => "resolveReviewThread",
+            Resolution::Unresolved => "unresolveReviewThread",
         };
         self.graphql(
             &format!(
@@ -462,8 +460,16 @@ impl ReviewThreadsPort for GitHub {
         Ok(())
     }
 
-    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
-        let mutation = if on { "addReaction" } else { "removeReaction" };
+    fn set_reaction(
+        &self,
+        comment_id: &str,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> anyhow::Result<()> {
+        let mutation = match change {
+            ReactionChange::Add => "addReaction",
+            ReactionChange::Remove => "removeReaction",
+        };
         self.graphql(
             &format!(
                 "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",

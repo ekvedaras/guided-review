@@ -7,9 +7,10 @@ use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, PendingReviewExists,
-    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionCount, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, ThreadNotCreated, TurnStopper,
-    ViewedFile, ViewedFilesPort, ViewedState, ViewedSyncUnavailable,
+    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
+    Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    ThreadNotCreated, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    ViewedSyncUnavailable,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -30,7 +31,7 @@ pub enum GitHubCall {
     SetViewed {
         pr: PullRequestUrl,
         path: String,
-        viewed: bool,
+        viewed: Viewed,
     },
     ThreadsOf(PullRequestUrl),
     PendingReviewOf(PullRequestUrl),
@@ -52,12 +53,12 @@ pub enum GitHubCall {
     },
     SetResolved {
         thread_id: String,
-        resolved: bool,
+        resolution: Resolution,
     },
     SetReaction {
         comment_id: String,
         reaction: Reaction,
-        on: bool,
+        change: ReactionChange,
     },
     Submit {
         verdict: ReviewVerdict,
@@ -239,7 +240,7 @@ impl ViewedFilesPort for FakeGitHub {
         &self,
         pr: &PullRequestUrl,
         path: &FilePath,
-        viewed: bool,
+        viewed: Viewed,
     ) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetViewed {
             pr: pr.clone(),
@@ -250,10 +251,9 @@ impl ViewedFilesPort for FakeGitHub {
         if self.is_faulty(&GitHubFault::ViewedPushesFail) {
             anyhow::bail!("network is down");
         }
-        let state = if viewed {
-            ViewedState::Viewed
-        } else {
-            ViewedState::Unviewed
+        let state = match viewed {
+            Viewed::Yes => ViewedState::Viewed,
+            Viewed::No => ViewedState::Unviewed,
         };
         self.set_viewed(path.as_str(), state);
         Ok(())
@@ -311,30 +311,35 @@ impl ReviewThreadsPort for FakeGitHub {
         Ok(())
     }
 
-    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()> {
+    fn set_thread_resolved(&self, thread_id: &str, resolution: Resolution) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetResolved {
             thread_id: thread_id.to_owned(),
-            resolved,
+            resolution,
         });
         self.fail_if_connection_lost()?;
         self.resolved_now
             .lock()
             .unwrap()
-            .insert(thread_id.to_owned(), resolved);
+            .insert(thread_id.to_owned(), resolution == Resolution::Resolved);
         Ok(())
     }
 
-    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()> {
+    fn set_reaction(
+        &self,
+        comment_id: &str,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetReaction {
             comment_id: comment_id.to_owned(),
             reaction,
-            on,
+            change,
         });
         self.fail_if_connection_lost()?;
-        self.reacted_now
-            .lock()
-            .unwrap()
-            .insert((comment_id.to_owned(), reaction), on);
+        self.reacted_now.lock().unwrap().insert(
+            (comment_id.to_owned(), reaction),
+            change == ReactionChange::Add,
+        );
         Ok(())
     }
 }

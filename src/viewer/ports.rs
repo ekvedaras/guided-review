@@ -1,9 +1,11 @@
 use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::ReviewVerdict;
-use super::reactions::Reaction;
+use super::reactions::{Reaction, ReactionChange};
 use super::threads::ReviewThread;
 use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
@@ -21,7 +23,7 @@ pub trait ViewedFilesPort: Send + Sync {
         &self,
         pr: &PullRequestUrl,
         path: &FilePath,
-        viewed: bool,
+        viewed: Viewed,
     ) -> anyhow::Result<()>;
 }
 
@@ -43,9 +45,14 @@ pub trait ReviewThreadsPort: Send + Sync {
         mode: SendMode,
     ) -> anyhow::Result<()>;
 
-    fn set_thread_resolved(&self, thread_id: &str, resolved: bool) -> anyhow::Result<()>;
+    fn set_thread_resolved(&self, thread_id: &str, resolution: Resolution) -> anyhow::Result<()>;
 
-    fn set_reaction(&self, comment_id: &str, reaction: Reaction, on: bool) -> anyhow::Result<()>;
+    fn set_reaction(
+        &self,
+        comment_id: &str,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> anyhow::Result<()>;
 }
 
 /// The viewer's own review: what it holds so far, new comments, and sending it.
@@ -133,6 +140,41 @@ pub enum ViewedState {
     Unviewed,
     /// Viewed once, then changed by a new commit. Counts as not viewed.
     Dismissed,
+}
+
+impl ViewedState {
+    pub fn viewed(self) -> Viewed {
+        match self {
+            Self::Viewed => Viewed::Yes,
+            Self::Unviewed | Self::Dismissed => Viewed::No,
+        }
+    }
+}
+
+/// Whether the viewer wants a file marked viewed. Saved as a plain true or false, as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "bool", into = "bool")]
+pub enum Viewed {
+    Yes,
+    No,
+}
+
+impl From<bool> for Viewed {
+    fn from(viewed: bool) -> Self {
+        if viewed { Self::Yes } else { Self::No }
+    }
+}
+
+impl From<Viewed> for bool {
+    fn from(viewed: Viewed) -> Self {
+        viewed == Viewed::Yes
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolution {
+    Resolved,
+    Unresolved,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

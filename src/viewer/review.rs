@@ -15,8 +15,8 @@ use crate::config::AskSettings;
 use super::ask::{Ask, Place};
 use super::ask_context;
 use super::ask_target::{AskTarget, Unavailable};
-use super::code_link::{CodeLinks, CodeOpener};
-use super::comment_desk::CommentDesk;
+use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
+use super::comment_desk::{CommentDesk, TourFreshness};
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
@@ -143,7 +143,7 @@ pub struct Review {
     /// Steps read before whose full diff the reviewer asked for. Not saved.
     full_diff_shown: BTreeSet<StepId>,
     /// Until told, code opens in the IDE with a note that its lines may differ.
-    working_copy_is_at_tour_head: bool,
+    working_copy: WorkingCopy,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     saves: Arc<Saves>,
@@ -202,7 +202,7 @@ impl Review {
             threads_not_read: None,
             changes_since,
             full_diff_shown: BTreeSet::new(),
-            working_copy_is_at_tour_head: false,
+            working_copy: WorkingCopy::Elsewhere,
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
             saves: Arc::default(),
@@ -472,7 +472,7 @@ impl Review {
         if ask.head != self.tour.head {
             return Err(CommentRefusal::AskIsOnOlderCode);
         }
-        if self.old_head().is_some() {
+        if self.tour_freshness() == TourFreshness::Behind {
             return Err(CommentRefusal::TourIsOld);
         }
         let selected = self.lines_of(&ask.place).ok_or(CommentRefusal::NoLines)?;
@@ -480,9 +480,7 @@ impl Review {
             return Err(CommentRefusal::NotInsideHunk);
         }
         let answer = ask.latest_answer().ok_or(CommentRefusal::NoAnswerYet)?;
-        let place = self
-            .comment_desk
-            .add_to_draft(&mut self.state, &selected, &self.head, answer);
+        let place = CommentDesk::add_to_draft(&mut self.state, &selected, &self.head, answer);
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)
@@ -702,6 +700,14 @@ impl Review {
     }
 
     /// "Comment now" shows only when there is surely no pending review.
+    fn tour_freshness(&self) -> TourFreshness {
+        if self.old_head().is_some() {
+            TourFreshness::Behind
+        } else {
+            TourFreshness::Current
+        }
+    }
+
     pub fn can_comment_now(&self) -> bool {
         self.comment_desk.can_comment_now()
     }
@@ -711,12 +717,7 @@ impl Review {
             ThreadAction::Reply { thread_id, .. } => self.reply_draft(thread_id).map(str::to_owned),
             _ => None,
         };
-        self.comment_desk.thread_action_request(
-            &self.pr,
-            action,
-            reply_body,
-            self.old_head().is_some(),
-        )
+        CommentDesk::thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
     }
 
     pub fn reply_draft(&self, thread_id: &str) -> Option<&str> {
@@ -841,11 +842,11 @@ impl Review {
     /// The drag ends: when the rows can take a comment, a comment box opens on them.
     pub fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
         let screen_lines = self.screen_lines();
-        let tour_is_old = self.old_head().is_some();
+        let freshness = self.tour_freshness();
         let place = self.comment_desk.finish_selection(
             &mut self.state,
             &screen_lines,
-            tour_is_old,
+            freshness,
             &self.head,
         )?;
         if place.is_some() {
@@ -857,10 +858,8 @@ impl Review {
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
     pub fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
-        let tour_is_old = self.old_head().is_some();
-        let place =
-            self.comment_desk
-                .begin_file_comment(&mut self.state, path, tour_is_old, &self.head)?;
+        let freshness = self.tour_freshness();
+        let place = CommentDesk::begin_file_comment(&mut self.state, path, freshness, &self.head)?;
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)
@@ -950,9 +949,7 @@ impl Review {
         let Some(rows) = self.rows_of(place) else {
             return Ok(None);
         };
-        let body = self
-            .comment_desk
-            .suggest_change(&mut self.state, place, &rows);
+        let body = CommentDesk::suggest_change(&mut self.state, place, &rows);
         if body.is_some() {
             self.save_viewer_sections()?;
         }
@@ -971,14 +968,12 @@ impl Review {
 
     /// `None` when there is no such draft.
     pub fn comment_request(&self, place: &CommentPlace, mode: SendMode) -> Option<CommentRequest> {
-        self.comment_desk
-            .comment_request(&self.state, place, mode, &self.head, &self.pr)
+        CommentDesk::comment_request(&self.state, place, mode, &self.head, &self.pr)
     }
 
     /// The oldest comment in the queue, to send again.
     pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        self.comment_desk
-            .queued_comment_request(&self.state, &self.head, &self.pr)
+        CommentDesk::queued_comment_request(&self.state, &self.head, &self.pr)
     }
 
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
@@ -989,12 +984,12 @@ impl Review {
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
     pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
-        CodeOpener::new(ide, self.working_copy_is_at_tour_head, &self.pr, &self.head)
+        CodeOpener::new(ide, self.working_copy, &self.pr, &self.head)
     }
 
     /// Asked of the clone on open and on each focus, not on each click.
-    pub fn working_copy_is_at_tour_head(&mut self, is_at: bool) {
-        self.working_copy_is_at_tour_head = is_at;
+    pub fn working_copy_is(&mut self, working_copy: WorkingCopy) {
+        self.working_copy = working_copy;
     }
 
     fn links(&self) -> CodeLinks<'_> {

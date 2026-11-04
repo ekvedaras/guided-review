@@ -19,7 +19,9 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{Asks, RefreshBrief, Review, TourRefresher, TourRepinner, repin_tour};
+use guided_review::viewer::{
+    Asks, RefreshBrief, Review, TourRefresher, TourRepinner, WorkingCopy, repin_tour,
+};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -240,7 +242,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let code = opened.at_pinned_tips(&tour)?;
     let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
     let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
-    review.working_copy_is_at_tour_head(working_copy_is_at_tour_head);
+    review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
 
     let clone = code.source.local_clone().map(Path::to_path_buf);
     let config = Config::load()?;

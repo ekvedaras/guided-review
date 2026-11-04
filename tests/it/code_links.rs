@@ -6,7 +6,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CodeOpener, Destination, IdeCaveat, NotInIde, Review, ReviewStateFile, Side,
+    CodeOpener, Destination, IdeCaveat, NotInIde, Review, ReviewStateFile, Side, WorkingCopy,
 };
 use serde_json::json;
 
@@ -53,7 +53,9 @@ impl Shop {
                 .unwrap(),
         );
         let mut review = Review::open(tour, &source, state_file).unwrap();
-        review.working_copy_is_at_tour_head(source.working_tree_is_at(&Sha::new(&self.head)));
+        review.working_copy_is(WorkingCopy::of(
+            source.working_tree_is_at(&Sha::new(&self.head)),
+        ));
         review.go_forward();
         review
     }

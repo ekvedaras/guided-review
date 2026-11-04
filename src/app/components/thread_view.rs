@@ -9,7 +9,8 @@ use gpui::{
 
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment, ThreadView,
+    ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment,
+    ThreadView,
 };
 
 use super::markdown_view::{MarkdownView, parsed_markdown};
@@ -214,7 +215,11 @@ impl ThreadElement {
                         let action = ThreadAction::SetReaction {
                             comment_id: comment_id.clone(),
                             reaction,
-                            on: !viewer_has_reacted,
+                            change: if viewer_has_reacted {
+                                ReactionChange::Remove
+                            } else {
+                                ReactionChange::Add
+                            },
                         };
                         run_action(action, &ui, &on_action, cx);
                     })

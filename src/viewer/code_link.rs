@@ -107,12 +107,30 @@ impl Destination {
     }
 }
 
+/// Which commit the local clone has checked out, compared with the tour's head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkingCopy {
+    AtTourHead,
+    /// Another commit, or no clone to ask.
+    Elsewhere,
+}
+
+impl WorkingCopy {
+    pub fn of(is_at_tour_head: bool) -> Self {
+        if is_at_tour_head {
+            Self::AtTourHead
+        } else {
+            Self::Elsewhere
+        }
+    }
+}
+
 /// The one place that decides where code opens: in the reviewer's IDE when the file is in the
 /// working copy of a local clone, else on GitHub.
 #[derive(Debug, Clone)]
 pub struct CodeOpener {
     ide: Result<Ide, NoIde>,
-    working_copy_is_at_tour_head: bool,
+    working_copy: WorkingCopy,
     repo: RepoName,
     head: Sha,
 }
@@ -120,13 +138,13 @@ pub struct CodeOpener {
 impl CodeOpener {
     pub(super) fn new(
         ide: Result<Ide, NoIde>,
-        working_copy_is_at_tour_head: bool,
+        working_copy: WorkingCopy,
         pr: &PullRequestUrl,
         head: &Sha,
     ) -> Self {
         Self {
             ide,
-            working_copy_is_at_tour_head,
+            working_copy,
             repo: pr.repo.clone(),
             head: head.clone(),
         }
@@ -163,7 +181,7 @@ impl CodeOpener {
         match in_working_copy.and_then(|at| self.ide_launch(&at)) {
             Ok(launch) => Destination::Ide {
                 launch,
-                caveat: (!self.working_copy_is_at_tour_head)
+                caveat: (self.working_copy == WorkingCopy::Elsewhere)
                     .then_some(IdeCaveat::CloneNotAtTourHead),
             },
             Err(because) => Destination::GitHub {

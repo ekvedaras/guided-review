@@ -8,8 +8,9 @@ use crate::support::file_path;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    CommentPlace, LineLocation, PendingReviewExists, Reaction, ReactionCount, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadNotCreated,
+    CommentPlace, LineLocation, PendingReviewExists, Reaction, ReactionChange, ReactionCount,
+    Resolution, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
+    ThreadNotCreated,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
@@ -363,8 +364,12 @@ fn a_thread_is_resolved_and_unresolved_by_its_id() {
     let (url, asked) = serve_graphql(vec![OK.into(), OK.into()]);
     let github = GitHub::at(&url);
 
-    github.set_thread_resolved("T1", true).unwrap();
-    github.set_thread_resolved("T1", false).unwrap();
+    github
+        .set_thread_resolved("T1", Resolution::Resolved)
+        .unwrap();
+    github
+        .set_thread_resolved("T1", Resolution::Unresolved)
+        .unwrap();
 
     let asked = asked_as_json(&asked);
     assert!(
@@ -387,9 +392,11 @@ fn a_reaction_is_added_and_removed_with_githubs_content_name() {
     let (url, asked) = serve_graphql(vec![OK.into(), OK.into()]);
     let github = GitHub::at(&url);
 
-    github.set_reaction("C1", Reaction::ThumbsUp, true).unwrap();
     github
-        .set_reaction("C1", Reaction::ThumbsUp, false)
+        .set_reaction("C1", Reaction::ThumbsUp, ReactionChange::Add)
+        .unwrap();
+    github
+        .set_reaction("C1", Reaction::ThumbsUp, ReactionChange::Remove)
         .unwrap();
 
     let asked = asked_as_json(&asked);

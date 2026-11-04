@@ -21,7 +21,7 @@ use crate::viewer::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
     ImageCache, LineLocation, OldHead, Place, RefreshBrief, RepinnedTour, Review, ReviewVerdict,
     Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, TourRefresher,
-    TourRepinner,
+    TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -624,7 +624,7 @@ impl ReviewSession {
             cx,
             move || source.working_tree_is_at(&head),
             |this, is_at, cx| {
-                this.change(cx, |review| review.working_copy_is_at_tour_head(is_at));
+                this.change(cx, |review| review.working_copy_is(WorkingCopy::of(is_at)));
             },
         ));
     }

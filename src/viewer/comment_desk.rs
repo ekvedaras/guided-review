@@ -50,6 +50,13 @@ enum PullRequestAuthorship {
     OwnedBySomeoneElse,
 }
 
+/// Whether the tour shows the PR as it is now: a comment on an older tour may land on lines the tour does not show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TourFreshness {
+    Current,
+    Behind,
+}
+
 impl CommentDesk {
     pub(super) fn pending_review_is(&mut self, exists: bool) {
         self.pending_review = PendingReview::exists(exists);
@@ -94,7 +101,7 @@ impl CommentDesk {
         &mut self,
         state: &mut ReviewState,
         screen_lines: &[DiffLine],
-        tour_is_old: bool,
+        freshness: TourFreshness,
         head: &Sha,
     ) -> Result<Option<CommentPlace>, CommentRefusal> {
         let Some(selection) = self.selection.take() else {
@@ -106,7 +113,7 @@ impl CommentDesk {
         if !selected.take_comment() {
             return Err(CommentRefusal::NotInsideHunk);
         }
-        if tour_is_old {
+        if freshness == TourFreshness::Behind {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::of(&selected);
@@ -115,13 +122,12 @@ impl CommentDesk {
     }
 
     pub(super) fn begin_file_comment(
-        &self,
         state: &mut ReviewState,
         path: &FilePath,
-        tour_is_old: bool,
+        freshness: TourFreshness,
         head: &Sha,
     ) -> Result<CommentPlace, CommentRefusal> {
-        if tour_is_old {
+        if freshness == TourFreshness::Behind {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::on_file(path);
@@ -131,7 +137,6 @@ impl CommentDesk {
 
     /// Opens a draft on the lines when there is none and puts `text` after what is typed already.
     pub(super) fn add_to_draft(
-        &self,
         state: &mut ReviewState,
         selected: &SelectedLines,
         head: &Sha,
@@ -153,7 +158,6 @@ impl CommentDesk {
     /// suggested on or there is no draft. No rows means no block: on GitHub an empty suggestion
     /// would replace the lines with nothing.
     pub(super) fn suggest_change(
-        &self,
         state: &mut ReviewState,
         place: &CommentPlace,
         rows: &[DiffLine],
@@ -174,7 +178,6 @@ impl CommentDesk {
 
     /// `None` when there is no such draft.
     pub(super) fn comment_request(
-        &self,
         state: &ReviewState,
         place: &CommentPlace,
         mode: SendMode,
@@ -193,7 +196,6 @@ impl CommentDesk {
 
     /// The oldest comment in the queue, to send again.
     pub(super) fn queued_comment_request(
-        &self,
         state: &ReviewState,
         tour_head: &Sha,
         pr: &PullRequestUrl,
@@ -243,17 +245,16 @@ impl CommentDesk {
     }
 
     pub(super) fn thread_action_request(
-        &self,
         pr: &PullRequestUrl,
         action: ThreadAction,
         reply_body: Option<String>,
-        tour_is_old: bool,
+        freshness: TourFreshness,
     ) -> ThreadActionRequest {
         ThreadActionRequest {
             pr: pr.clone(),
             action,
             reply_body,
-            tour_is_old,
+            freshness,
         }
     }
 
