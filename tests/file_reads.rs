@@ -79,14 +79,14 @@ impl CodeSource for CountingSource {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
         let key = (sha.to_string(), path.to_owned());
         *self.reads.lock().unwrap().entry(key.clone()).or_default() += 1;
         if self.read_together.iter().any(|wanted| wanted == path) {
             self.wait_for_other_reads()?;
         }
         match self.files.get(&key) {
-            Some(text) => Ok(text.clone().into_bytes()),
+            Some(text) => Ok(text.as_bytes().into()),
             None => anyhow::bail!("no {path} at {sha}"),
         }
     }
@@ -130,8 +130,8 @@ fn a_file_is_read_once_however_often_it_is_asked_for() {
             "<?php"
         );
         assert_eq!(
-            cache.blob_at(&Sha::new("head"), "app/Order.php").unwrap(),
-            b"<?php"
+            *cache.blob_at(&Sha::new("head"), "app/Order.php").unwrap(),
+            *b"<?php"
         );
     }
 

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::code_source::Line;
-use crate::pieces::{ChangedFile, Piece};
+use crate::pieces::{ChangedFile, Piece, PieceId};
 use crate::tour::{PieceRef, Tour};
 
 /// The pieces this pointer names directly; `None` when it names something that did not change.
@@ -126,7 +126,7 @@ impl<'a> PiecePart<'a> {
 
 /// The changed lines of each piece that some place shows.
 #[derive(Default)]
-struct Seen(HashMap<String, SeenLines>);
+struct Seen<'a>(HashMap<&'a PieceId, SeenLines>);
 
 #[derive(Default)]
 struct SeenLines {
@@ -134,11 +134,11 @@ struct SeenLines {
     added: HashSet<usize>,
 }
 
-impl Seen {
-    fn of<'a>(parts: impl IntoIterator<Item = PiecePart<'a>>) -> Self {
+impl<'a> Seen<'a> {
+    fn of(parts: impl IntoIterator<Item = PiecePart<'a>>) -> Self {
         let mut seen = Self::default();
         for part in parts {
-            let lines = seen.0.entry(part.piece.id.to_string()).or_default();
+            let lines = seen.0.entry(&part.piece.id).or_default();
             lines
                 .removed
                 .extend(part.removed_lines.iter().map(|line| line.number));
@@ -149,7 +149,7 @@ impl Seen {
         seen
     }
 
-    fn named_by(pointers: &[&PieceRef], files: &[ChangedFile]) -> Self {
+    fn named_by(pointers: &[&PieceRef], files: &'a [ChangedFile]) -> Self {
         Self::of(pointers.iter().flat_map(|pointer| match pointer {
             PieceRef::Rest { .. } => Vec::new(),
             named => named_parts(named, files),
@@ -157,8 +157,8 @@ impl Seen {
     }
 
     /// The lines of the piece nobody shows; a piece without changed lines is unseen until a pointer names it.
-    fn unseen<'a>(&self, piece: &'a Piece) -> Option<PiecePart<'a>> {
-        match self.0.get(&piece.id.to_string()) {
+    fn unseen<'p>(&self, piece: &'p Piece) -> Option<PiecePart<'p>> {
+        match self.0.get(&piece.id) {
             None => Some(PiecePart::whole(piece)),
             Some(seen) => {
                 Some(PiecePart::keeping_unseen(piece, seen)).filter(|unseen| !unseen.is_empty())
@@ -246,7 +246,7 @@ pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken
     let steps = tour.steps();
     let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
     let seen = Seen::named_by(&pointers, files);
-    let mut taken_by_earlier: HashSet<String> = HashSet::new();
+    let mut taken_by_earlier: HashSet<&PieceId> = HashSet::new();
 
     let mut all = Vec::new();
     for pointer in pointers {
@@ -262,8 +262,7 @@ pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken
         for file in files.iter().filter(|file| is_under(&file.path, folder)) {
             let mut took_any = false;
             for piece in &file.pieces {
-                let id = piece.id.to_string();
-                if seen.unseen(piece).is_some() && taken_by_earlier.insert(id) {
+                if seen.unseen(piece).is_some() && taken_by_earlier.insert(&piece.id) {
                     taken.pieces += 1;
                     took_any = true;
                 }

@@ -1,11 +1,13 @@
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::pull_request::Sha;
 
 pub trait CodeSource: Send + Sync {
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String>;
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>>;
+    /// Shared, so a cache can hand out what it holds without copying it.
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>>;
     /// What a file is at `sha`, without reading it: the blob id names its content, so equal ids are equal bytes.
     fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo>;
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>>;

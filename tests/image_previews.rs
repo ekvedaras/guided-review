@@ -48,7 +48,7 @@ impl CodeSource for CountingSource {
     fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
         self.inner.file_at(sha, path)
     }
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<std::sync::Arc<[u8]>> {
         self.blob_reads.fetch_add(1, Ordering::SeqCst);
         self.inner.blob_at(sha, path)
     }

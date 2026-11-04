@@ -191,7 +191,7 @@ fn load_side(source: &dyn CodeSource, cache: &ImageCache, sha: &Sha, path: &str)
     match bytes_of(source, cache, sha, path, &info) {
         Ok(bytes) => ImageSide::Loaded(LoadedImage {
             pixels: image_facts::measure(path, &bytes),
-            bytes: bytes.into(),
+            bytes,
         }),
         Err(error) => ImageSide::Unreadable(format!("{error:#}")),
     }
@@ -203,9 +203,9 @@ fn bytes_of(
     sha: &Sha,
     path: &str,
     info: &BlobInfo,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<Arc<[u8]>> {
     if let Some(bytes) = cache.read(&info.id) {
-        return Ok(bytes);
+        return Ok(bytes.into());
     }
     let bytes = source.blob_at(sha, path)?;
     cache.write(&info.id, &bytes);

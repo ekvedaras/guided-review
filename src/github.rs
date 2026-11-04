@@ -594,7 +594,7 @@ impl CodeSource for GitHubCodeSource {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
         let url = format!(
             "repos/{}/contents/{}?ref={sha}",
             self.repo,
@@ -604,7 +604,7 @@ impl CodeSource for GitHubCodeSource {
             .github
             .get(&url, "application/vnd.github.raw+json")
             .with_context(|| format!("could not read {path} at {sha} from GitHub"))?;
-        Ok(response.body_mut().read_to_vec()?)
+        Ok(response.body_mut().read_to_vec()?.into())
     }
 
     fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {

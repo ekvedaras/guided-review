@@ -15,7 +15,7 @@ use crate::symbols::{Slot, Symbol, Symbols};
 /// `app/Foo.php#Foo::handle`, or just `app/Foo.php` for a whole-file piece.
 /// Symbol paths never hold `#`, `@` or `/`, so a sub-part can later be appended
 /// after one of them without changing the ids old tour files point at.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PieceId {
     pub path: String,
     pub symbol: Option<String>,

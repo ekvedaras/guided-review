@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use anyhow::{Context, bail};
 
@@ -133,8 +134,8 @@ impl CodeSource for LocalGit {
         self.git(&["show", &format!("{sha}:{path}")])
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Vec<u8>> {
-        self.git_bytes(&["show", &format!("{sha}:{path}")])
+    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
+        Ok(self.git_bytes(&["show", &format!("{sha}:{path}")])?.into())
     }
 
     fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {

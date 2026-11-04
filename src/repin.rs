@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use anyhow::bail;
@@ -121,7 +121,7 @@ pub fn repin(
         .map(|step| {
             shown_ids(step, tour, &old_files)
                 .into_iter()
-                .filter(|id| matching.gone_ids.contains(&id.to_string()))
+                .filter(|id| matching.gone_ids.contains(id))
                 .map(PieceRepin::gone)
                 .collect()
         })
@@ -142,7 +142,7 @@ pub fn repin(
     let status_of_new = |id: &PieceId| {
         matching
             .status_of_new
-            .get(&id.to_string())
+            .get(id)
             .copied()
             .unwrap_or(RepinStatus::New)
     };
@@ -175,7 +175,7 @@ pub fn repin(
         .collect();
     pieces.extend(
         old.iter()
-            .filter(|piece| matching.gone_ids.contains(&piece.id.to_string()))
+            .filter(|piece| matching.gone_ids.contains(&piece.id))
             .map(|piece| PieceRepin::gone(piece.id.clone())),
     );
     Ok(Repin {
@@ -207,19 +207,20 @@ fn line_ranges_in_changed_files(
     old: &[&Piece],
     new: &[&Piece],
 ) -> Vec<String> {
-    let touched = |path: &String| {
-        old.iter()
-            .filter(|piece| matching.gone_ids.contains(&piece.id.to_string()))
-            .chain(new.iter().filter(|piece| {
-                matching.status_of_new.get(&piece.id.to_string()) != Some(&RepinStatus::Same)
-            }))
-            .any(|piece| &piece.id.path == path)
-    };
+    let touched: HashSet<&str> = old
+        .iter()
+        .filter(|piece| matching.gone_ids.contains(&piece.id))
+        .chain(
+            new.iter()
+                .filter(|piece| matching.status_of_new.get(&piece.id) != Some(&RepinStatus::Same)),
+        )
+        .map(|piece| piece.id.path.as_str())
+        .collect();
     tour.steps()
         .iter()
         .flat_map(|step| &step.pieces)
         .filter_map(|pointer| match pointer {
-            PieceRef::Lines { file, lines } if touched(file) => {
+            PieceRef::Lines { file, lines } if touched.contains(file.as_str()) => {
                 Some(format!("{file} lines {}-{}", lines[0], lines[1]))
             }
             _ => None,
@@ -227,31 +228,32 @@ fn line_ranges_in_changed_files(
         .collect()
 }
 
-struct Matching {
-    status_of_new: HashMap<String, RepinStatus>,
-    gone_ids: Vec<String>,
+/// `new_id_of_old_hunk` and `gone_hunks` hold ids as the tour file writes them, since they rewrite its pointers.
+struct Matching<'a> {
+    status_of_new: HashMap<&'a PieceId, RepinStatus>,
+    gone_ids: HashSet<&'a PieceId>,
     new_id_of_old_hunk: HashMap<String, String>,
     gone_hunks: Vec<String>,
 }
 
-impl Matching {
-    fn between(old: &[&Piece], new: &[&Piece]) -> Self {
+impl<'a> Matching<'a> {
+    fn between(old: &[&'a Piece], new: &[&'a Piece]) -> Self {
         let mut matching = Self {
             status_of_new: HashMap::new(),
-            gone_ids: Vec::new(),
+            gone_ids: HashSet::new(),
             new_id_of_old_hunk: HashMap::new(),
             gone_hunks: Vec::new(),
         };
         let is_hunk = |piece: &&Piece| piece.kind == PieceKind::Hunk;
 
-        let new_by_id: HashMap<String, &Piece> = new
+        let new_by_id: HashMap<&PieceId, &Piece> = new
             .iter()
             .filter(|piece| !is_hunk(piece))
-            .map(|piece| (piece.id.to_string(), *piece))
+            .map(|piece| (&piece.id, *piece))
             .collect();
         for piece in old.iter().filter(|piece| !is_hunk(piece)) {
-            let id = piece.id.to_string();
-            match new_by_id.get(&id) {
+            let id = &piece.id;
+            match new_by_id.get(id) {
                 Some(now) => {
                     let status = if now.diff_hash == piece.diff_hash {
                         RepinStatus::Same
@@ -260,7 +262,9 @@ impl Matching {
                     };
                     matching.status_of_new.insert(id, status);
                 }
-                None => matching.gone_ids.push(id),
+                None => {
+                    matching.gone_ids.insert(id);
+                }
             }
         }
 
@@ -279,7 +283,7 @@ impl Matching {
                     .new_id_of_old_hunk
                     .insert(before.id.to_string(), now.id.to_string());
                 matching.status_of_new.insert(
-                    now.id.to_string(),
+                    &now.id,
                     if before.diff_hash == now.diff_hash {
                         RepinStatus::Same
                     } else {
@@ -290,7 +294,7 @@ impl Matching {
             });
         }
         for before in unmatched_old {
-            matching.gone_ids.push(before.id.to_string());
+            matching.gone_ids.insert(&before.id);
             matching.gone_hunks.push(before.id.to_string());
         }
         matching
