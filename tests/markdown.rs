@@ -214,3 +214,51 @@ fn headings_nested_one_level_down_shrink_and_stop_at_the_smallest() {
         .collect();
     assert_eq!(levels, [2, 6, 3]);
 }
+
+fn all_text(blocks: &[Block]) -> String {
+    let mut text = String::new();
+    for block in blocks {
+        match block {
+            Block::Paragraph(runs) | Block::Heading { text: runs, .. } => {
+                text.extend(runs.iter().map(|run| run.text.as_str()));
+                text.push('\n');
+            }
+            Block::List { items, .. } => items.iter().for_each(|item| text += &all_text(item)),
+            Block::Quote(blocks) => text += &all_text(blocks),
+            Block::Details { summary, body } => {
+                text.extend(summary.iter().map(|run| run.text.as_str()));
+                text += &all_text(body);
+            }
+            Block::Code { text: code, .. } => text += code,
+            Block::Rule => {}
+        }
+    }
+    text
+}
+
+#[test]
+fn a_details_closed_inside_a_list_item_loses_no_text_after_it() {
+    let markdown = Markdown::parse("<details>\n\n- item </details>\n- next\n\nafter\n\n# end");
+
+    let text = all_text(&markdown.blocks);
+    for expected in ["item", "next", "after", "end"] {
+        assert!(
+            text.contains(expected),
+            "{expected} is missing from {text:?}"
+        );
+    }
+}
+
+#[test]
+fn a_details_left_open_inside_a_list_item_ends_with_the_item() {
+    let markdown = Markdown::parse("- one <details> two\n- three\n\nafter");
+
+    let text = all_text(&markdown.blocks);
+    for expected in ["one", "two", "three", "after"] {
+        assert!(
+            text.contains(expected),
+            "{expected} is missing from {text:?}"
+        );
+    }
+    assert!(matches!(markdown.blocks.last(), Some(Block::Paragraph(_))));
+}

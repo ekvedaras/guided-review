@@ -187,6 +187,8 @@ struct Builder {
     code: Option<(Option<String>, String)>,
     heading: Option<u8>,
     image: Option<(String, String)>,
+    /// `</details>` seen inside a list item or quote: the fold closes once those close.
+    details_to_close: usize,
 }
 
 impl Default for Builder {
@@ -201,6 +203,7 @@ impl Default for Builder {
             code: None,
             heading: None,
             image: None,
+            details_to_close: 0,
         }
     }
 }
@@ -282,8 +285,10 @@ impl Builder {
             }
             TagEnd::BlockQuote(_) => {
                 self.flush_runs();
-                let blocks = self.close();
-                self.push_block(Block::Quote(blocks));
+                if let Some(open) = self.close_frame(|frame| matches!(frame, Frame::Quote)) {
+                    self.push_block(Block::Quote(open.blocks));
+                }
+                self.close_waiting_details();
             }
             TagEnd::CodeBlock => {
                 if let Some((language, text)) = self.code.take() {
@@ -292,28 +297,33 @@ impl Builder {
             }
             TagEnd::List(_) => {
                 self.flush_runs();
-                if let Some(open) = self.stack.pop()
-                    && let Frame::List {
-                        first_number,
-                        items,
-                    } = open.frame
+                if let Some(Open {
+                    frame:
+                        Frame::List {
+                            first_number,
+                            items,
+                        },
+                    ..
+                }) = self.close_frame(|frame| matches!(frame, Frame::List { .. }))
                 {
                     self.push_block(Block::List {
                         first_number,
                         items,
                     });
                 }
+                self.close_waiting_details();
             }
             TagEnd::Item => {
                 self.flush_runs();
-                let blocks = self.close();
-                if let Some(Open {
-                    frame: Frame::List { items, .. },
-                    ..
-                }) = self.stack.last_mut()
+                if let Some(open) = self.close_frame(|frame| matches!(frame, Frame::Item))
+                    && let Some(Open {
+                        frame: Frame::List { items, .. },
+                        ..
+                    }) = self.stack.last_mut()
                 {
-                    items.push(blocks);
+                    items.push(open.blocks);
                 }
+                self.close_waiting_details();
             }
             TagEnd::Emphasis => self.style.italic = self.style.italic.saturating_sub(1),
             TagEnd::Strong => self.style.bold = self.style.bold.saturating_sub(1),
@@ -431,28 +441,63 @@ impl Builder {
         }
     }
 
+    /// A `</details>` inside a list item or quote the fold holds waits until those close.
     fn close_details(&mut self) {
         self.flush_runs();
-        let Some(index) = self
+        let is_open = self
             .stack
             .iter()
-            .rposition(|open| matches!(open.frame, Frame::Details { .. }))
-        else {
+            .any(|open| matches!(open.frame, Frame::Details { .. }));
+        if !is_open {
+            return;
+        }
+        self.details_to_close += 1;
+        self.close_waiting_details();
+    }
+
+    fn close_waiting_details(&mut self) {
+        while self.details_to_close > 0 && self.top_is_details() {
+            self.details_to_close -= 1;
+            self.close_top();
+        }
+    }
+
+    fn top_is_details(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|open| matches!(open.frame, Frame::Details { .. }))
+    }
+
+    /// Closes the innermost frame of a kind, and any fold still open inside it. `None` when no
+    /// such frame is open, so a stray end tag never closes a frame it did not open.
+    fn close_frame(&mut self, is: impl Fn(&Frame) -> bool) -> Option<Open> {
+        let index = self.stack.iter().rposition(|open| is(&open.frame))?;
+        while self.stack.len() > index + 1 {
+            self.close_top();
+        }
+        self.stack.pop()
+    }
+
+    /// Puts the innermost frame into its parent: a fold as a fold, anything else as a quote.
+    /// The root stays.
+    fn close_top(&mut self) {
+        self.flush_runs();
+        if self.stack.len() < 2 {
+            return;
+        }
+        let Some(open) = self.stack.pop() else {
             return;
         };
-        while self.stack.len() > index + 1 {
-            self.flush_runs();
-            let blocks = self.close();
-            self.push_block(Block::Quote(blocks));
-        }
-        if let Some(open) = self.stack.pop()
-            && let Frame::Details { summary } = open.frame
-        {
-            self.push_block(Block::Details {
+        let block = match open.frame {
+            Frame::Details { summary } => Block::Details {
                 summary,
                 body: open.blocks,
-            });
-        }
+            },
+            Frame::Root | Frame::Quote | Frame::Item | Frame::List { .. } => {
+                Block::Quote(open.blocks)
+            }
+        };
+        self.push_block(block);
     }
 
     fn open(&mut self, frame: Frame) {
@@ -461,10 +506,6 @@ impl Builder {
             frame,
             blocks: Vec::new(),
         });
-    }
-
-    fn close(&mut self) -> Vec<Block> {
-        self.stack.pop().map(|open| open.blocks).unwrap_or_default()
     }
 
     fn push_block(&mut self, block: Block) {
@@ -522,15 +563,7 @@ impl Builder {
     fn finish(mut self) -> Markdown {
         self.flush_runs();
         while self.stack.len() > 1 {
-            if self
-                .stack
-                .iter()
-                .any(|open| matches!(open.frame, Frame::Details { .. }))
-            {
-                self.close_details();
-            } else {
-                self.stack.pop();
-            }
+            self.close_top();
         }
         Markdown {
             blocks: self.stack.pop().map(|open| open.blocks).unwrap_or_default(),
