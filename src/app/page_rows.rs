@@ -995,7 +995,7 @@ mod tests {
 
     #[test]
     fn a_page_row_stays_small_since_there_is_one_per_line() {
-        assert!(size_of::<PageRow>() <= 56, "{} bytes", size_of::<PageRow>());
+        assert_eq!(size_of::<PageRow>(), 56);
     }
 
     fn line(number: usize) -> LineNumber {

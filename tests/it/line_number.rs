@@ -26,3 +26,8 @@ fn a_line_is_four_bytes_even_inside_an_option() {
     assert_eq!(size_of::<LineNumber>(), 4);
     assert_eq!(size_of::<Option<LineNumber>>(), 4);
 }
+
+#[test]
+fn a_diff_line_stays_small_since_there_is_one_per_shown_line() {
+    assert_eq!(size_of::<guided_review::viewer::DiffLine>(), 160);
+}
