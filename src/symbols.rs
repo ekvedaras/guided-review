@@ -82,7 +82,7 @@ impl Symbols {
             for capture in found_match.captures() {
                 match query.capture_names()[capture.index as usize] {
                     helper if helper.starts_with('_') => {}
-                    "name" => name = &source[capture.node.byte_range()],
+                    "name" => name = text_of(capture.node, source),
                     capture_name => {
                         if let Some(kind) = kind_of(capture_name) {
                             definition = Some((capture.node, kind));
@@ -271,14 +271,19 @@ fn import_lines(root: Node, language: Language) -> Vec<RangeInclusive<usize>> {
     lines
 }
 
+fn text_of<'a>(node: Node, source: &'a str) -> &'a str {
+    source.get(node.byte_range()).unwrap_or_default()
+}
+
 fn tokens_of(root: Node, source: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut unvisited = vec![root];
     while let Some(node) = unvisited.pop() {
         if node.child_count() == 0 {
-            if !source[node.byte_range()].trim().is_empty() {
+            let text = text_of(node, source);
+            if !text.trim().is_empty() {
                 tokens.push(Token {
-                    text: source[node.byte_range()].to_string(),
+                    text: text.to_string(),
                     line: node.start_position().row + 1,
                 });
             }
@@ -321,11 +326,11 @@ fn signature_of(node: Node, source: &str) -> String {
     let mut from = start;
     for comment in comments_inside(node) {
         if comment.start >= from && comment.end <= end {
-            declaration.push_str(&source[from..comment.start]);
+            declaration.push_str(source.get(from..comment.start).unwrap_or_default());
             from = comment.end;
         }
     }
-    declaration.push_str(&source[from..end.max(from)]);
+    declaration.push_str(source.get(from..end.max(from)).unwrap_or_default());
     let declaration = declaration.trim_end().trim_end_matches(';');
     declaration.split_whitespace().collect::<Vec<_>>().join(" ")
 }

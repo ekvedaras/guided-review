@@ -55,7 +55,7 @@ fn highlighted(review: &mut Review, source: &LocalGit) {
 fn captures_in(line: &DiffLine) -> Vec<(&str, Capture)> {
     line.spans
         .iter()
-        .map(|span| (&line.text[span.range.clone()], span.capture))
+        .map(|span| (line.text.get(span.range.clone()).unwrap(), span.capture))
         .collect()
 }
 

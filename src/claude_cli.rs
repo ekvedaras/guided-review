@@ -280,7 +280,10 @@ impl TourJudge for ClaudeTourJudge {
         let (Some(start), Some(end)) = (start, end) else {
             bail!("the judge did not answer with JSON: {answer}");
         };
-        serde_json::from_str(&answer[start..=end])
+        let Some(json) = answer.get(start..=end) else {
+            bail!("the judge did not answer with JSON: {answer}");
+        };
+        serde_json::from_str(json)
             .with_context(|| format!("could not read the judge's verdicts: {answer}"))
     }
 }

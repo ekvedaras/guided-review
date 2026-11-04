@@ -97,23 +97,30 @@ fn split_bare_urls(text: &str) -> Vec<(&str, bool)> {
     let mut parts = Vec::new();
     let mut rest = text;
     while let Some(start) = bare_url_start(rest) {
-        let candidate = &rest[start..];
+        let (before, candidate) = split_at_or_end(rest, start);
         let length = bare_url_length(candidate);
         if length == 0 {
-            parts.push((&rest[..start + 1], false));
-            rest = &rest[start + 1..];
+            let (through_scheme_start, tail) = split_at_or_end(rest, start + 1);
+            parts.push((through_scheme_start, false));
+            rest = tail;
             continue;
         }
-        if start > 0 {
-            parts.push((&rest[..start], false));
+        if !before.is_empty() {
+            parts.push((before, false));
         }
-        parts.push((&candidate[..length], true));
-        rest = &candidate[length..];
+        let (url, tail) = split_at_or_end(candidate, length);
+        parts.push((url, true));
+        rest = tail;
     }
     if !rest.is_empty() {
         parts.push((rest, false));
     }
     parts
+}
+
+/// Splits where `at` is a character boundary, else keeps all the text before the split.
+fn split_at_or_end(text: &str, at: usize) -> (&str, &str) {
+    text.split_at_checked(at).unwrap_or((text, ""))
 }
 
 fn bare_url_start(text: &str) -> Option<usize> {
@@ -135,7 +142,7 @@ fn bare_url_length(candidate: &str) -> usize {
         .find(|c: char| c.is_whitespace() || c == '<')
         .unwrap_or(candidate.len());
     loop {
-        let url = &candidate[..end];
+        let url = candidate.get(..end).unwrap_or_default();
         let opened = url.matches('(').count();
         let closed = url.matches(')').count();
         match url.chars().last() {
@@ -336,21 +343,20 @@ impl Builder {
 
     fn html(&mut self, html: &str) {
         let mut rest = html;
-        while let Some(open) = rest.find('<') {
-            self.push_html_text(&rest[..open]);
-            rest = &rest[open..];
-            if let Some(after_comment) = rest.strip_prefix("<!--") {
+        while let Some((text, after_open)) = rest.split_once('<') {
+            self.push_html_text(text);
+            if let Some(after_comment) = after_open.strip_prefix("!--") {
                 rest = after_comment
-                    .find("-->")
-                    .map_or("", |end| &after_comment[end + 3..]);
+                    .split_once("-->")
+                    .map_or("", |(_, after)| after);
                 continue;
             }
-            let Some(close) = rest.find('>') else {
-                self.push_html_text(rest);
+            let Some((tag, after_tag)) = after_open.split_once('>') else {
+                self.push_html_text(rest.get(text.len()..).unwrap_or_default());
                 return;
             };
-            self.tag(&rest[1..close]);
-            rest = &rest[close + 1..];
+            self.tag(tag);
+            rest = after_tag;
         }
         self.push_html_text(rest);
     }
@@ -555,8 +561,8 @@ fn heading_number(level: HeadingLevel) -> u8 {
 fn attribute(tag: &str, name: &str) -> Option<String> {
     let lower = tag.to_ascii_lowercase();
     let start = lower.find(&format!("{name}="))? + name.len() + 1;
-    let rest = &tag[start..];
+    let rest = tag.get(start..)?;
     let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
-    let rest = &rest[1..];
-    Some(rest[..rest.find(quote)?].to_string())
+    let (value, _) = rest.strip_prefix(quote)?.split_once(quote)?;
+    Some(value.to_string())
 }

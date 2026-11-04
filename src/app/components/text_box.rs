@@ -617,7 +617,7 @@ impl EntityInputHandler for EditState {
     ) -> Option<String> {
         let range = self.draft.range_from_utf16(&range_utf16);
         actual_range.replace(self.draft.range_to_utf16(&range));
-        Some(self.draft.text()[range].to_string())
+        Some(self.draft.text_in(&range).to_string())
     }
 
     fn selected_text_range(

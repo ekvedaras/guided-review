@@ -68,7 +68,7 @@ impl TextDraft {
     }
 
     pub fn selected_text(&self) -> &str {
-        &self.text[self.selection.clone()]
+        self.text_in(&self.selection)
     }
 
     pub fn move_to(&mut self, offset: usize) {
@@ -163,7 +163,7 @@ impl TextDraft {
     }
 
     pub fn to_utf16(&self, offset: usize) -> usize {
-        self.text[..self.clamp(offset)].encode_utf16().count()
+        self.text_in(&(0..offset)).encode_utf16().count()
     }
 
     pub fn from_utf16(&self, offset: usize) -> usize {
@@ -192,8 +192,11 @@ impl TextDraft {
             (Step::Character, Direction::Forward) => self.next_grapheme(caret),
             (Step::Word, Direction::Back) => self.previous_word_start(caret),
             (Step::Word, Direction::Forward) => self.next_word_end(caret),
-            (Step::Line, Direction::Back) => self.text[..caret].rfind('\n').map_or(0, |at| at + 1),
-            (Step::Line, Direction::Forward) => self.text[caret..]
+            (Step::Line, Direction::Back) => {
+                self.text_in(&(0..caret)).rfind('\n').map_or(0, |at| at + 1)
+            }
+            (Step::Line, Direction::Forward) => self
+                .text_in(&(caret..self.text.len()))
                 .find('\n')
                 .map_or(self.text.len(), |at| caret + at),
         }
@@ -215,24 +218,37 @@ impl TextDraft {
     }
 
     fn previous_word_start(&self, offset: usize) -> usize {
-        let before = &self.text[..offset];
+        let before = self.text_in(&(0..offset));
         let trimmed = before.trim_end_matches(|c: char| !c.is_alphanumeric());
         trimmed
             .rfind(|c: char| !c.is_alphanumeric())
             .map_or(0, |at| {
-                at + trimmed[at..].chars().next().map_or(1, char::len_utf8)
+                let width = trimmed
+                    .get(at..)
+                    .and_then(|rest| rest.chars().next())
+                    .map_or(1, char::len_utf8);
+                at + width
             })
     }
 
     fn next_word_end(&self, offset: usize) -> usize {
-        let after = &self.text[offset..];
+        let after = self.text_in(&(offset..self.text.len()));
         let skipped = after.len()
             - after
                 .trim_start_matches(|c: char| !c.is_alphanumeric())
                 .len();
-        after[skipped..]
+        after
+            .get(skipped..)
+            .unwrap_or_default()
             .find(|c: char| !c.is_alphanumeric())
             .map_or(self.text.len(), |at| offset + skipped + at)
+    }
+
+    /// The text between two offsets, each moved back onto a character boundary.
+    pub fn text_in(&self, range: &Range<usize>) -> &str {
+        let start = self.clamp(range.start);
+        let end = self.clamp(range.end);
+        self.text.get(start..end).unwrap_or_default()
     }
 
     fn clamp(&self, offset: usize) -> usize {

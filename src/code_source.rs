@@ -215,13 +215,12 @@ fn unquote_pair(paths: &str) -> String {
     if !paths.starts_with('"') {
         return paths.to_string();
     }
-    match paths[1..].find("\" ") {
-        Some(end) => format!(
-            "{} {}",
-            unquote(&paths[..end + 2]),
-            unquote(&paths[end + 3..])
-        ),
-        None => paths.to_string(),
+    let Some(end) = paths.get(1..).and_then(|rest| rest.find("\" ")) else {
+        return paths.to_string();
+    };
+    match (paths.get(..end + 2), paths.get(end + 3..)) {
+        (Some(first), Some(second)) => format!("{} {}", unquote(first), unquote(second)),
+        _ => paths.to_string(),
     }
 }
 

@@ -325,8 +325,11 @@ fn retarget(steps: &mut [Step], new_id_of_old_hunk: &HashMap<String, String>, go
             if gone.contains(&old_id) {
                 return false;
             }
-            if let Some(new_id) = new_id_of_old_hunk.get(&old_id) {
-                *symbol = new_id[file.len() + 1..].to_string();
+            if let Some(new_symbol) = new_id_of_old_hunk
+                .get(&old_id)
+                .and_then(|new_id| new_id.strip_prefix(&format!("{file}#")))
+            {
+                *symbol = new_symbol.to_string();
             }
             true
         });

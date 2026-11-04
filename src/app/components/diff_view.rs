@@ -499,9 +499,10 @@ impl<'a> PieceName<'a> {
             None => (piece, None),
         };
         let file_start = path.rfind('/').map_or(0, |slash| slash + 1);
+        let (folder, file) = path.split_at_checked(file_start).unwrap_or(("", path));
         Self {
-            folder: &path[..file_start],
-            file: &path[file_start..],
+            folder,
+            file,
             symbol,
         }
     }
