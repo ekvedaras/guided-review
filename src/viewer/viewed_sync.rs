@@ -6,7 +6,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::Tour;
 
-use super::ports::{PullRequestTipsPort, Viewed, ViewedFilesPort, ViewedSyncUnavailable};
+use super::ports::{GitHubError, PullRequestTipsPort, Viewed, ViewedFilesPort};
 use super::review::StepId;
 use super::review_state::ReviewState;
 
@@ -86,7 +86,7 @@ impl ViewedSync {
         coverage: &Coverage,
         tour_head: &Sha,
         outcome: SyncOutcome,
-    ) -> (Vec<StepId>, Option<anyhow::Error>) {
+    ) -> (Vec<StepId>, Option<GitHubError>) {
         let mut unticked = Vec::new();
         match (&outcome.baseline_wishes, &outcome.on_github) {
             (Some(wishes), Some(on_github)) => {
@@ -109,16 +109,14 @@ impl ViewedSync {
     }
 
     /// GitHub saying viewed sync is unavailable switches it off for the session instead of failing.
-    pub(super) fn settle(&mut self, result: anyhow::Result<()>) -> anyhow::Result<()> {
-        match result {
-            Err(error) => match error.downcast_ref::<ViewedSyncUnavailable>() {
-                Some(unavailable) => {
-                    self.off_because = Some(unavailable.to_string());
-                    Ok(())
-                }
-                None => Err(error),
-            },
-            ok => ok,
+    pub(super) fn settle(&mut self, error: GitHubError) -> anyhow::Result<()> {
+        match error {
+            GitHubError::NoAccess(reason) => {
+                self.off_because = Some(reason);
+                Ok(())
+            }
+            GitHubError::Other(error) => Err(error),
+            typed => Err(typed.into()),
         }
     }
 
@@ -262,7 +260,7 @@ pub struct SyncOutcome {
     sent: Vec<(FilePath, Viewed)>,
     on_github: Option<BTreeMap<FilePath, Viewed>>,
     baseline_wishes: Option<BTreeMap<FilePath, Viewed>>,
-    error: Option<anyhow::Error>,
+    error: Option<GitHubError>,
 }
 
 impl SyncOutcome {
@@ -296,7 +294,7 @@ impl SyncRequest {
             Ok(_) => return SyncOutcome::nothing(&self.tour_head),
             Err(error) => {
                 return SyncOutcome {
-                    error: Some(error),
+                    error: Some(error.into()),
                     ..SyncOutcome::nothing(&self.tour_head)
                 };
             }
@@ -351,7 +349,7 @@ fn push(
     pr: &PullRequestUrl,
     wishes: &BTreeMap<FilePath, Viewed>,
     sent: &mut Vec<(FilePath, Viewed)>,
-) -> anyhow::Result<()> {
+) -> Result<(), GitHubError> {
     for (path, viewed) in wishes {
         github.set_file_viewed(pr, path, *viewed)?;
         sent.push((path.clone(), *viewed));
@@ -362,7 +360,7 @@ fn push(
 fn read_viewed(
     github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
-) -> anyhow::Result<BTreeMap<FilePath, Viewed>> {
+) -> Result<BTreeMap<FilePath, Viewed>, GitHubError> {
     Ok(github
         .viewed_files(pr)?
         .into_iter()

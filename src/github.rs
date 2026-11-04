@@ -11,10 +11,10 @@ use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentPlace, PendingReviewExists, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
+    CommentPlace, GitHubError, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
     ReactionChange, ReactionCount, Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict,
-    ReviewWritesPort, SendMode, Side, ThreadComment, ThreadNotCreated, Viewed, ViewedFile,
-    ViewedFilesPort, ViewedState, ViewedSyncUnavailable, percent_encode_path,
+    ReviewWritesPort, SendMode, Side, ThreadComment, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -89,8 +89,15 @@ impl GitHub {
     /// For a GitHub-like server at another address. GraphQL needs a token, so it gets a placeholder.
     pub fn at(api: &str) -> Self {
         Self {
-            api: api.to_owned(),
             token: Some("placeholder".to_owned()),
+            ..Self::without_token_at(api)
+        }
+    }
+
+    pub fn without_token_at(api: &str) -> Self {
+        Self {
+            api: api.to_owned(),
+            token: None,
             pull_request_ids: Arc::default(),
         }
     }
@@ -102,7 +109,7 @@ impl GitHub {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn pull_request_id(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+    fn pull_request_id(&self, pr: &PullRequestUrl) -> Result<String, GitHubError> {
         if let Some(id) = self.known_ids().get(&pr.to_string()) {
             return Ok(id.clone());
         }
@@ -124,28 +131,30 @@ impl GitHub {
         self.known_ids().insert(pr.to_string(), id.to_owned());
     }
 
-    /// Returns the `data` of the answer. A missing or refused token is `ViewedSyncUnavailable`.
+    /// Returns the `data` of the answer. Every GitHub failure a caller tells apart is named here.
     fn graphql(
         &self,
         query: &str,
         variables: &serde_json::Value,
-    ) -> anyhow::Result<serde_json::Value> {
+    ) -> Result<serde_json::Value, GitHubError> {
         let token = self.token.as_ref().ok_or_else(|| {
-            ViewedSyncUnavailable("no GitHub token: run `gh auth login` or set GITHUB_TOKEN".into())
+            GitHubError::NoAccess("no GitHub token: run `gh auth login` or set GITHUB_TOKEN".into())
         })?;
         let response = ureq::post(format!("{}/graphql", self.api))
             .header("Authorization", format!("Bearer {token}"))
             .header("User-Agent", "guided-review")
             .send_json(serde_json::json!({"query": query, "variables": variables}));
         let mut answer: serde_json::Value = match response {
-            Ok(mut response) => response.body_mut().read_json()?,
+            Ok(mut response) => response
+                .body_mut()
+                .read_json()
+                .map_err(anyhow::Error::from)?,
             Err(ureq::Error::StatusCode(401 | 403)) => {
-                return Err(ViewedSyncUnavailable(
+                return Err(GitHubError::NoAccess(
                     "GitHub refused the token: it needs the `repo` scope".into(),
-                )
-                .into());
+                ));
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(anyhow::Error::from(error).into()),
         };
         if let Some(errors) = answer.get("errors") {
             let refused = errors.as_array().is_some_and(|errors| {
@@ -157,12 +166,14 @@ impl GitHub {
                 })
             });
             if refused {
-                return Err(ViewedSyncUnavailable(
+                return Err(GitHubError::NoAccess(
                     "GitHub refused the token: it needs the `repo` scope".into(),
-                )
-                .into());
+                ));
             }
-            anyhow::bail!("GitHub answered with errors: {errors}");
+            if errors.to_string().contains("one pending review") {
+                return Err(GitHubError::PendingReviewExists);
+            }
+            return Err(anyhow::anyhow!("GitHub answered with errors: {errors}").into());
         }
         Ok(answer
             .get_mut("data")
@@ -176,7 +187,7 @@ impl GitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> Result<Option<String>, GitHubError> {
         let pull_request_id = self.pull_request_id(pr)?;
         let input = match place {
             CommentPlace::File(path) => ReviewThreadInput {
@@ -195,27 +206,24 @@ impl GitHub {
                 }
             }
         };
-        let data = self
-            .graphql(
-                "mutation($input: AddPullRequestReviewThreadInput!) {
-                    addPullRequestReviewThread(input: $input) {
-                        thread { id comments(first: 1) { nodes { pullRequestReview { id } } } }
-                    }
-                }",
-                &serde_json::json!({"input": input}),
-            )
-            .map_err(one_pending_review_error)?;
+        let data = self.graphql(
+            "mutation($input: AddPullRequestReviewThreadInput!) {
+                addPullRequestReviewThread(input: $input) {
+                    thread { id comments(first: 1) { nodes { pullRequestReview { id } } } }
+                }
+            }",
+            &serde_json::json!({"input": input}),
+        )?;
         let thread = at(&data, "/addPullRequestReviewThread/thread");
         if thread.is_null() {
             let line = match place {
                 CommentPlace::File(_) => String::new(),
                 CommentPlace::Lines { end, .. } => format!(" line {}", end.line),
             };
-            return Err(ThreadNotCreated(format!(
+            return Err(GitHubError::ThreadNotCreated(format!(
                 "GitHub took no comment on {}{line}",
                 place.path()
-            ))
-            .into());
+            )));
         }
         Ok(non_empty_id(at(
             thread,
@@ -230,16 +238,16 @@ impl GitHub {
         &self,
         pr: &PullRequestUrl,
         reported: Option<String>,
-    ) -> anyhow::Result<String> {
+    ) -> Result<String, GitHubError> {
         if let Some(review_id) = reported {
             return Ok(review_id);
         }
-        self.pending_review_id(pr)?.context(
+        Ok(self.pending_review_id(pr)?.context(
             "GitHub took the comment but did not say into which review; look for it on GitHub before sending it again",
-        )
+        )?)
     }
 
-    fn pending_review_id(&self, pr: &PullRequestUrl) -> anyhow::Result<Option<String>> {
+    fn pending_review_id(&self, pr: &PullRequestUrl) -> Result<Option<String>, GitHubError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -249,7 +257,9 @@ impl GitHub {
                 }",
                 &pull_request_variables(pr, &serde_json::Value::Null),
             )
-            .with_context(|| format!("could not look for a pending review on {pr}"))?;
+            .map_err(|error| {
+                error.context(format!("could not look for a pending review on {pr}"))
+            })?;
         Ok(at(&data, "/repository/pullRequest/reviews/nodes")
             .as_array()
             .into_iter()
@@ -263,7 +273,7 @@ impl GitHub {
         review_id: &str,
         verdict: ReviewVerdict,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.graphql(
             "mutation($input: SubmitPullRequestReviewInput!) {
                 submitPullRequestReview(input: $input) { clientMutationId }
@@ -325,7 +335,7 @@ impl PullRequestDescriptionPort for GitHub {
 }
 
 impl ViewedFilesPort for GitHub {
-    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
+    fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, GitHubError> {
         let mut files = Vec::new();
         let mut after = serde_json::Value::Null;
         loop {
@@ -367,7 +377,7 @@ impl ViewedFilesPort for GitHub {
         pr: &PullRequestUrl,
         path: &FilePath,
         viewed: Viewed,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         let mutation = match viewed {
             Viewed::Yes => "markFileAsViewed",
             Viewed::No => "unmarkFileAsViewed",
@@ -380,21 +390,27 @@ impl ViewedFilesPort for GitHub {
             ),
             &serde_json::json!({"input": {"pullRequestId": pull_request_id, "path": path}}),
         )
-        .with_context(|| format!("could not change the viewed state of {path} in {pr}"))?;
+        .map_err(|error| {
+            error.context(format!(
+                "could not change the viewed state of {path} in {pr}"
+            ))
+        })?;
         Ok(())
     }
 }
 
 impl ReviewThreadsPort for GitHub {
     /// Every review thread of the PR, over GraphQL (REST shows no resolved or outdated state).
-    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
+    fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError> {
         let mut threads = Vec::new();
         let mut after = serde_json::Value::Null;
         loop {
             let data = self
                 .graphql(REVIEW_THREADS_QUERY, &pull_request_variables(pr, &after))
-                .with_context(|| {
-                    format!("could not read the review threads of {pr} from GitHub")
+                .map_err(|error| {
+                    error.context(format!(
+                        "could not read the review threads of {pr} from GitHub"
+                    ))
                 })?;
             let page = parse_review_threads(&serde_json::json!({"data": data}))?;
             threads.extend(page.threads);
@@ -413,7 +429,7 @@ impl ReviewThreadsPort for GitHub {
         thread_id: &str,
         body: &str,
         mode: SendMode,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         let input = ReplyInput {
             pull_request_review_thread_id: thread_id,
             body,
@@ -428,8 +444,7 @@ impl ReviewThreadsPort for GitHub {
                 }",
                 &serde_json::json!({"input": input}),
             )
-            .map_err(one_pending_review_error)
-            .context("could not reply")?;
+            .map_err(|error| error.context("could not reply"))?;
         let review = at(
             &data,
             "/addPullRequestReviewThreadReply/comment/pullRequestReview",
@@ -437,14 +452,18 @@ impl ReviewThreadsPort for GitHub {
         if mode == SendMode::CommentNow && at(review, "/state") == "PENDING" {
             let review_id = self
                 .review_holding_new_comment(pr, non_empty_id(at(review, "/id")))
-                .context("could not post the reply")?;
+                .map_err(|error| error.context("could not post the reply"))?;
             self.submit_pending_review(&review_id, ReviewVerdict::Comment, "")
-                .context("could not post the reply")?;
+                .map_err(|error| error.context("could not post the reply"))?;
         }
         Ok(())
     }
 
-    fn set_thread_resolved(&self, thread_id: &str, resolution: Resolution) -> anyhow::Result<()> {
+    fn set_thread_resolved(
+        &self,
+        thread_id: &str,
+        resolution: Resolution,
+    ) -> Result<(), GitHubError> {
         let mutation = match resolution {
             Resolution::Resolved => "resolveReviewThread",
             Resolution::Unresolved => "unresolveReviewThread",
@@ -456,7 +475,7 @@ impl ReviewThreadsPort for GitHub {
             ),
             &serde_json::json!({"input": {"threadId": thread_id}}),
         )
-        .with_context(|| format!("could not change the thread {thread_id}"))?;
+        .map_err(|error| error.context(format!("could not change the thread {thread_id}")))?;
         Ok(())
     }
 
@@ -465,7 +484,7 @@ impl ReviewThreadsPort for GitHub {
         comment_id: &str,
         reaction: Reaction,
         change: ReactionChange,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         let mutation = match change {
             ReactionChange::Add => "addReaction",
             ReactionChange::Remove => "removeReaction",
@@ -477,13 +496,13 @@ impl ReviewThreadsPort for GitHub {
             ),
             &serde_json::json!({"input": {"subjectId": comment_id, "content": reaction.github_name()}}),
         )
-        .context("could not change the reaction")?;
+        .map_err(|error| error.context("could not change the reaction"))?;
         Ok(())
     }
 }
 
 impl ReviewWritesPort for GitHub {
-    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -493,7 +512,9 @@ impl ReviewWritesPort for GitHub {
                 }",
                 &pull_request_variables(pr, &serde_json::Value::Null),
             )
-            .with_context(|| format!("could not look for a pending review on {pr}"))?;
+            .map_err(|error| {
+                error.context(format!("could not look for a pending review on {pr}"))
+            })?;
         let reviews = at(&data, "/repository/pullRequest/reviews/nodes")
             .as_array()
             .with_context(|| format!("could not read the reviews of {pr} from GitHub"))?;
@@ -502,7 +523,7 @@ impl ReviewWritesPort for GitHub {
             .any(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true)))
     }
 
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -510,10 +531,10 @@ impl ReviewWritesPort for GitHub {
                 }",
                 &pull_request_variables(pr, &serde_json::Value::Null),
             )
-            .with_context(|| format!("could not tell who wrote {pr}"))?;
-        at(&data, "/repository/pullRequest/viewerDidAuthor")
+            .map_err(|error| error.context(format!("could not tell who wrote {pr}")))?;
+        Ok(at(&data, "/repository/pullRequest/viewerDidAuthor")
             .as_bool()
-            .with_context(|| format!("GitHub did not say who wrote {pr}"))
+            .with_context(|| format!("GitHub did not say who wrote {pr}"))?)
     }
 
     fn add_review_thread(
@@ -521,7 +542,7 @@ impl ReviewWritesPort for GitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.add_thread_to_pending_review(pr, place, body)
             .map(|_| ())
     }
@@ -533,11 +554,11 @@ impl ReviewWritesPort for GitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         let reported = self.add_thread_to_pending_review(pr, place, body)?;
         let review_id = self
             .review_holding_new_comment(pr, reported)
-            .context("could not post the comment")?;
+            .map_err(|error| error.context("could not post the comment"))?;
         let posted = self.graphql(
             "mutation($input: SubmitPullRequestReviewInput!) {
                 submitPullRequestReview(input: $input) { clientMutationId }
@@ -568,11 +589,11 @@ impl ReviewWritesPort for GitHub {
         pr: &PullRequestUrl,
         verdict: ReviewVerdict,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         if let Some(review_id) = self.pending_review_id(pr)? {
             return self
                 .submit_pending_review(&review_id, verdict, body)
-                .context("could not send the review");
+                .map_err(|error| error.context("could not send the review"));
         }
         self.graphql(
             "mutation($input: AddPullRequestReviewInput!) {
@@ -584,7 +605,7 @@ impl ReviewWritesPort for GitHub {
                 "body": body,
             }}),
         )
-        .context("could not send the review")?;
+        .map_err(|error| error.context("could not send the review"))?;
         Ok(())
     }
 }
@@ -734,14 +755,6 @@ fn graphql_side(side: Side) -> &'static str {
 
 fn non_empty_id(id: &serde_json::Value) -> Option<String> {
     id.as_str().filter(|id| !id.is_empty()).map(str::to_owned)
-}
-
-fn one_pending_review_error(error: anyhow::Error) -> anyhow::Error {
-    if format!("{error:#}").contains("one pending review") {
-        PendingReviewExists.into()
-    } else {
-        error
-    }
 }
 
 fn token_from_gh_cli() -> Option<String> {

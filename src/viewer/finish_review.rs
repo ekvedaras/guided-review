@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::pull_request::PullRequestUrl;
 
-use super::ports::{ReviewWritesPort, ViewedSyncUnavailable};
+use super::ports::{GitHubError, ReviewWritesPort};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewVerdict {
@@ -75,12 +75,10 @@ impl FinishRequest {
     pub fn run(self, github: &dyn ReviewWritesPort) -> FinishOutcome {
         let result = match github.submit_review(&self.pr, self.verdict, &self.body) {
             Ok(()) => FinishResult::Sent,
-            Err(error) => match error.downcast_ref::<ViewedSyncUnavailable>() {
-                Some(unavailable) => {
-                    FinishResult::Refused(FinishRefusal::NoAccess(unavailable.to_string()))
-                }
-                None => FinishResult::Failed(format!("{error:#}")),
-            },
+            Err(GitHubError::NoAccess(reason)) => {
+                FinishResult::Refused(FinishRefusal::NoAccess(reason))
+            }
+            Err(error) => FinishResult::Failed(format!("{error:#}")),
         };
         FinishOutcome { result }
     }

@@ -8,10 +8,7 @@ use crate::file_path::FilePath;
 use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
-use super::ports::{
-    PendingReviewExists, PullRequestTipsPort, ReviewWritesPort, ThreadNotCreated,
-    ViewedSyncUnavailable,
-};
+use super::ports::{GitHubError, PullRequestTipsPort, ReviewWritesPort};
 use super::row_selection::SelectedLines;
 use super::step_page::{LineLocation, Side};
 
@@ -290,7 +287,7 @@ impl CommentRequest {
         match github.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
             Ok(_) => return Outcome::Refused(CommentRefusal::TourIsOld),
-            Err(error) => return classify(&error),
+            Err(error) => return Outcome::Failed(format!("{error:#}")),
         }
         let sent = match self.mode {
             SendMode::AddToReview => {
@@ -306,14 +303,11 @@ impl CommentRequest {
     }
 }
 
-fn classify(error: &anyhow::Error) -> Outcome {
-    if error.downcast_ref::<ThreadNotCreated>().is_some() {
-        Outcome::Rejected(format!("{error:#}"))
-    } else if error.downcast_ref::<PendingReviewExists>().is_some() {
-        Outcome::Refused(CommentRefusal::PendingReviewExists)
-    } else if let Some(unavailable) = error.downcast_ref::<ViewedSyncUnavailable>() {
-        Outcome::Refused(CommentRefusal::NoAccess(unavailable.to_string()))
-    } else {
-        Outcome::Failed(format!("{error:#}"))
+fn classify(error: &GitHubError) -> Outcome {
+    match error {
+        GitHubError::ThreadNotCreated(reason) => Outcome::Rejected(reason.clone()),
+        GitHubError::PendingReviewExists => Outcome::Refused(CommentRefusal::PendingReviewExists),
+        GitHubError::NoAccess(reason) => Outcome::Refused(CommentRefusal::NoAccess(reason.clone())),
+        GitHubError::Other(error) => Outcome::Failed(format!("{error:#}")),
     }
 }

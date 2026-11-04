@@ -6,11 +6,10 @@ use super::file_path;
 use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, PendingReviewExists,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, GitHubError,
     PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
     Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    ThreadNotCreated, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
-    ViewedSyncUnavailable,
+    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -166,14 +165,14 @@ impl FakeGitHub {
         faults.len() != before
     }
 
-    fn fail_if_connection_lost(&self) -> anyhow::Result<()> {
+    fn fail_if_connection_lost(&self) -> Result<(), GitHubError> {
         if self.is_faulty(&GitHubFault::ConnectionLost) {
-            anyhow::bail!("network is down");
+            return Err(anyhow::anyhow!("network is down").into());
         }
         Ok(())
     }
 
-    fn check_access(&self) -> anyhow::Result<()> {
+    fn check_access(&self) -> Result<(), GitHubError> {
         let refusal = self
             .faults
             .lock()
@@ -184,7 +183,7 @@ impl FakeGitHub {
                 _ => None,
             });
         match refusal {
-            Some(reason) => Err(ViewedSyncUnavailable(reason).into()),
+            Some(reason) => Err(GitHubError::NoAccess(reason)),
             None => Ok(()),
         }
     }
@@ -221,7 +220,7 @@ impl PullRequestDescriptionPort for FakeGitHub {
 }
 
 impl ViewedFilesPort for FakeGitHub {
-    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>> {
+    fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, GitHubError> {
         self.sent.record(GitHubCall::ViewedFilesOf(pr.clone()));
         self.check_access()?;
         Ok(self
@@ -241,7 +240,7 @@ impl ViewedFilesPort for FakeGitHub {
         pr: &PullRequestUrl,
         path: &FilePath,
         viewed: Viewed,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::SetViewed {
             pr: pr.clone(),
             path: path.to_string(),
@@ -249,7 +248,7 @@ impl ViewedFilesPort for FakeGitHub {
         });
         self.check_access()?;
         if self.is_faulty(&GitHubFault::ViewedPushesFail) {
-            anyhow::bail!("network is down");
+            return Err(anyhow::anyhow!("network is down").into());
         }
         let state = match viewed {
             Viewed::Yes => ViewedState::Viewed,
@@ -261,10 +260,10 @@ impl ViewedFilesPort for FakeGitHub {
 }
 
 impl ReviewThreadsPort for FakeGitHub {
-    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
+    fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError> {
         self.sent.record(GitHubCall::ThreadsOf(pr.clone()));
         if self.is_faulty(&GitHubFault::ThreadReadsFail) {
-            anyhow::bail!("network is down");
+            return Err(anyhow::anyhow!("network is down").into());
         }
         let resolved = self.resolved_now.lock().unwrap();
         let reacted = self.reacted_now.lock().unwrap();
@@ -298,7 +297,7 @@ impl ReviewThreadsPort for FakeGitHub {
         thread_id: &str,
         body: &str,
         mode: SendMode,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::Reply {
             thread_id: thread_id.to_owned(),
             body: body.to_owned(),
@@ -311,7 +310,11 @@ impl ReviewThreadsPort for FakeGitHub {
         Ok(())
     }
 
-    fn set_thread_resolved(&self, thread_id: &str, resolution: Resolution) -> anyhow::Result<()> {
+    fn set_thread_resolved(
+        &self,
+        thread_id: &str,
+        resolution: Resolution,
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::SetResolved {
             thread_id: thread_id.to_owned(),
             resolution,
@@ -329,7 +332,7 @@ impl ReviewThreadsPort for FakeGitHub {
         comment_id: &str,
         reaction: Reaction,
         change: ReactionChange,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::SetReaction {
             comment_id: comment_id.to_owned(),
             reaction,
@@ -345,12 +348,12 @@ impl ReviewThreadsPort for FakeGitHub {
 }
 
 impl ReviewWritesPort for FakeGitHub {
-    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         self.sent.record(GitHubCall::PendingReviewOf(pr.clone()));
         Ok(self.has_pending_review_now())
     }
 
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool> {
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         self.sent.record(GitHubCall::AuthorOf(pr.clone()));
         Ok(self.viewer_is_author.load(Ordering::SeqCst))
     }
@@ -360,7 +363,7 @@ impl ReviewWritesPort for FakeGitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::AddThread {
             pr: pr.clone(),
             place: place.clone(),
@@ -369,7 +372,7 @@ impl ReviewWritesPort for FakeGitHub {
         self.fail_if_connection_lost()?;
         self.has_pending_review.store(true, Ordering::SeqCst);
         if self.is_faulty(&GitHubFault::NewThreadsAnswerNull) {
-            return Err(ThreadNotCreated("thread: null".into()).into());
+            return Err(GitHubError::ThreadNotCreated("thread: null".into()));
         }
         Ok(())
     }
@@ -379,7 +382,7 @@ impl ReviewWritesPort for FakeGitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::CommentNow {
             pr: pr.clone(),
             place: place.clone(),
@@ -390,11 +393,11 @@ impl ReviewWritesPort for FakeGitHub {
             self.has_pending_review.store(true, Ordering::SeqCst);
         }
         if self.has_pending_review_now() {
-            return Err(PendingReviewExists.into());
+            return Err(GitHubError::PendingReviewExists);
         }
         if self.is_faulty(&GitHubFault::NewThreadsAnswerNull) {
             self.has_pending_review.store(true, Ordering::SeqCst);
-            return Err(ThreadNotCreated("thread: null".into()).into());
+            return Err(GitHubError::ThreadNotCreated("thread: null".into()));
         }
         Ok(())
     }
@@ -404,7 +407,7 @@ impl ReviewWritesPort for FakeGitHub {
         _pr: &PullRequestUrl,
         verdict: ReviewVerdict,
         body: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), GitHubError> {
         self.sent.record(GitHubCall::Submit {
             verdict,
             body: body.to_owned(),

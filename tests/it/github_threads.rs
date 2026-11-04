@@ -8,9 +8,8 @@ use crate::support::file_path;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    CommentPlace, LineLocation, PendingReviewExists, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
-    ThreadNotCreated,
+    CommentPlace, GitHubError, LineLocation, Reaction, ReactionChange, ReactionCount, Resolution,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
@@ -204,7 +203,7 @@ fn a_null_thread_without_errors_is_a_failure() {
         .add_review_thread(&pr(), &place, "x")
         .unwrap_err();
 
-    assert!(error.downcast_ref::<ThreadNotCreated>().is_some());
+    assert!(matches!(error, GitHubError::ThreadNotCreated(_)));
 }
 
 #[test]
@@ -222,7 +221,29 @@ fn github_saying_one_pending_review_per_user_is_told_apart() {
         .add_review_thread(&pr(), &place, "x")
         .unwrap_err();
 
-    assert!(error.downcast_ref::<PendingReviewExists>().is_some());
+    assert!(matches!(error, GitHubError::PendingReviewExists));
+}
+
+#[test]
+fn no_token_is_no_github_access() {
+    let error = GitHub::without_token_at("http://127.0.0.1:9")
+        .set_thread_resolved("T1", Resolution::Resolved)
+        .unwrap_err();
+
+    assert!(matches!(error, GitHubError::NoAccess(_)));
+}
+
+#[test]
+fn a_token_github_refuses_is_no_github_access() {
+    let (url, _) = serve_graphql(vec![
+        r#"{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}],"data":null}"#.into(),
+    ]);
+
+    let error = GitHub::at(&url)
+        .set_thread_resolved("T1", Resolution::Resolved)
+        .unwrap_err();
+
+    assert!(matches!(error, GitHubError::NoAccess(_)));
 }
 
 #[test]

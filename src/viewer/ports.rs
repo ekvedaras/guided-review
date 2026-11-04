@@ -16,15 +16,15 @@ pub trait PullRequestTipsPort: Send + Sync {
 
 pub trait ViewedFilesPort: Send + Sync {
     /// Every changed file of the PR with the viewer's viewed state, all pages of it.
-    /// Fails with `ViewedSyncUnavailable` when there is no token or it may not do this.
-    fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>>;
+    /// Fails with `NoAccess` when there is no token or it may not do this.
+    fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, GitHubError>;
 
     fn set_file_viewed(
         &self,
         pr: &PullRequestUrl,
         path: &FilePath,
         viewed: Viewed,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), GitHubError>;
 }
 
 pub trait PullRequestDescriptionPort: Send + Sync {
@@ -34,7 +34,7 @@ pub trait PullRequestDescriptionPort: Send + Sync {
 
 /// Reading review threads and acting on them: replies, resolving, reactions.
 pub trait ReviewThreadsPort: Send + Sync {
-    fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>>;
+    fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError>;
 
     /// Adds a reply to the pending review, or with `CommentNow` posts it at once.
     fn reply_to_thread(
@@ -43,25 +43,29 @@ pub trait ReviewThreadsPort: Send + Sync {
         thread_id: &str,
         body: &str,
         mode: SendMode,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), GitHubError>;
 
-    fn set_thread_resolved(&self, thread_id: &str, resolution: Resolution) -> anyhow::Result<()>;
+    fn set_thread_resolved(
+        &self,
+        thread_id: &str,
+        resolution: Resolution,
+    ) -> Result<(), GitHubError>;
 
     fn set_reaction(
         &self,
         comment_id: &str,
         reaction: Reaction,
         change: ReactionChange,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), GitHubError>;
 }
 
 /// The viewer's own review: what it holds so far, new comments, and sending it.
 pub trait ReviewWritesPort: Send + Sync {
     /// Whether the viewer has a pending review on the PR, one made here or on the web.
-    fn has_pending_review(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError>;
 
     /// Whether the viewer wrote the PR. GitHub refuses their approval or change request.
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> anyhow::Result<bool>;
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError>;
 
     /// Adds a thread to the pending review, or starts one. Fails with `ThreadNotCreated`
     /// when GitHub answers without a thread.
@@ -70,7 +74,7 @@ pub trait ReviewWritesPort: Send + Sync {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), GitHubError>;
 
     /// Posts one comment at once as a review of its own. Fails with `PendingReviewExists`
     /// when the viewer has a pending review, which GitHub would not post past.
@@ -79,7 +83,7 @@ pub trait ReviewWritesPort: Send + Sync {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), GitHubError>;
 
     /// Sends the pending review, or a new review when there is none.
     fn submit_review(
@@ -87,7 +91,7 @@ pub trait ReviewWritesPort: Send + Sync {
         pr: &PullRequestUrl,
         verdict: ReviewVerdict,
         body: &str,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), GitHubError>;
 }
 
 /// Everything the viewer core asks of GitHub, for the app that holds one adapter for all of it.
@@ -110,29 +114,32 @@ impl<T> GitHubPort for T where
 {
 }
 
-/// GitHub answered a new thread with `thread: null` and no error. It leaves an empty pending review behind.
-#[derive(Debug)]
-pub struct ThreadNotCreated(pub String);
-
-impl std::fmt::Display for ThreadNotCreated {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
+/// A GitHub failure a caller tells apart from the rest.
+#[derive(Debug, thiserror::Error)]
+pub enum GitHubError {
+    /// No token, or GitHub refused it.
+    #[error("{0}")]
+    NoAccess(String),
+    /// "User can only have one pending review per pull request."
+    #[error("there is a pending review already")]
+    PendingReviewExists,
+    /// GitHub answered a new thread with `thread: null` and no error. It leaves an empty pending review behind.
+    #[error("{0}")]
+    ThreadNotCreated(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
-impl std::error::Error for ThreadNotCreated {}
-
-/// "User can only have one pending review per pull request."
-#[derive(Debug)]
-pub struct PendingReviewExists;
-
-impl std::fmt::Display for PendingReviewExists {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("there is a pending review already")
+impl GitHubError {
+    /// Says what was being done when an untyped failure happened; a typed one already says it.
+    #[must_use]
+    pub fn context(self, context: impl std::fmt::Display + Send + Sync + 'static) -> Self {
+        match self {
+            Self::Other(error) => Self::Other(error.context(context)),
+            typed => typed,
+        }
     }
 }
-
-impl std::error::Error for PendingReviewExists {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewedState {
@@ -182,18 +189,6 @@ pub struct ViewedFile {
     pub path: FilePath,
     pub state: ViewedState,
 }
-
-/// No token, or GitHub refused it. The app keeps working with viewed sync switched off.
-#[derive(Debug)]
-pub struct ViewedSyncUnavailable(pub String);
-
-impl std::fmt::Display for ViewedSyncUnavailable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for ViewedSyncUnavailable {}
 
 /// How to start the local AI for one Ask.
 #[derive(Debug, Clone)]

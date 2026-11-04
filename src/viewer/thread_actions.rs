@@ -2,9 +2,7 @@ use crate::pull_request::PullRequestUrl;
 
 use super::comment_desk::TourFreshness;
 use super::comments::{CommentRefusal, SendMode};
-use super::ports::{
-    PendingReviewExists, Resolution, ReviewThreadsPort, ReviewWritesPort, ViewedSyncUnavailable,
-};
+use super::ports::{GitHubError, Resolution, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::ReviewThread;
 
@@ -81,7 +79,7 @@ impl ThreadActionRequest {
     fn perform(
         &self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> anyhow::Result<ThreadActionResult> {
+    ) -> Result<ThreadActionResult, GitHubError> {
         match &self.action {
             ThreadAction::Reply { .. } if self.freshness == TourFreshness::Behind => {
                 return Ok(ThreadActionResult::Refused(CommentRefusal::TourIsOld));
@@ -95,7 +93,9 @@ impl ThreadActionRequest {
                     return Ok(ThreadActionResult::Refused(CommentRefusal::EmptyReply));
                 };
                 if *mode == SendMode::CommentNow && github.has_pending_review(&self.pr)? {
-                    return Err(PendingReviewExists.into());
+                    return Ok(ThreadActionResult::Refused(
+                        CommentRefusal::PendingReviewExists,
+                    ));
                 }
                 github.reply_to_thread(&self.pr, thread_id, body, *mode)?;
             }
@@ -115,12 +115,16 @@ impl ThreadActionRequest {
     }
 }
 
-fn classify(error: &anyhow::Error) -> ThreadActionResult {
-    if error.downcast_ref::<PendingReviewExists>().is_some() {
-        ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
-    } else if let Some(unavailable) = error.downcast_ref::<ViewedSyncUnavailable>() {
-        ThreadActionResult::Refused(CommentRefusal::NoAccess(unavailable.to_string()))
-    } else {
-        ThreadActionResult::Failed(format!("{error:#}"))
+fn classify(error: &GitHubError) -> ThreadActionResult {
+    match error {
+        GitHubError::PendingReviewExists => {
+            ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
+        }
+        GitHubError::NoAccess(reason) => {
+            ThreadActionResult::Refused(CommentRefusal::NoAccess(reason.clone()))
+        }
+        GitHubError::ThreadNotCreated(_) | GitHubError::Other(_) => {
+            ThreadActionResult::Failed(format!("{error:#}"))
+        }
     }
 }

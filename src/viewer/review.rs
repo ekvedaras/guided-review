@@ -31,7 +31,7 @@ use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
 use super::markdown::Markdown;
-use super::ports::AgentLaunch;
+use super::ports::{AgentLaunch, GitHubError};
 use super::problems::Problem;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
@@ -672,7 +672,7 @@ impl Review {
     }
 
     /// The threads shown stay as they were, named as possibly old until a read goes through.
-    pub fn threads_not_read(&mut self, error: &anyhow::Error) {
+    pub fn threads_not_read(&mut self, error: &GitHubError) {
         self.threads_not_read = Some(format!("{error:#}"));
     }
 
@@ -1169,8 +1169,10 @@ impl Review {
             self.fold_flipped.remove(step);
         }
         let saved = self.save_viewer_sections();
-        self.viewed_sync
-            .settle(error.map_or(Ok(()), Err).and(saved))
+        match error {
+            Some(error) => self.viewed_sync.settle(error),
+            None => saved,
+        }
     }
 
     fn coverage(&self) -> Coverage {
