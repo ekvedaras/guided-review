@@ -153,6 +153,10 @@ impl<Bitmap> DiagramMemory<Bitmap> {
         }
     }
 
+    pub fn is_on_screen(&self, strip: usize) -> bool {
+        self.on_screen.contains(&strip)
+    }
+
     /// Returns the bitmap of a strip that left the screen.
     pub fn set_on_screen(&mut self, strip: usize, on_screen: bool) -> Option<Bitmap> {
         if on_screen {

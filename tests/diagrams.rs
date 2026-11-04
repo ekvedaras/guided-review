@@ -245,6 +245,25 @@ mod memory {
     }
 
     #[test]
+    fn a_strip_counts_as_new_on_screen_again_after_a_theme_or_scale_change() {
+        let mut memory = on_screen(FLOWCHART, Appearance::Dark);
+        assert!(memory.is_on_screen(0));
+
+        memory.show(showing(FLOWCHART, Appearance::Light, 2.0));
+        assert!(
+            !memory.is_on_screen(0),
+            "the new theme's strip must be drawn"
+        );
+
+        memory.set_on_screen(0, true);
+        memory.show(showing(FLOWCHART, Appearance::Light, 1.0));
+        assert!(
+            !memory.is_on_screen(0),
+            "the new scale's strip must be drawn"
+        );
+    }
+
+    #[test]
     fn a_theme_switch_drops_the_bitmaps_of_the_old_theme() {
         let mut memory = on_screen(FLOWCHART, Appearance::Dark);
 

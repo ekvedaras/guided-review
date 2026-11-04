@@ -70,10 +70,16 @@ impl Diagrams {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Every strip reports on every frame; only a strip that came or went changes what to draw.
+        if self.memory.is_on_screen(strip) == on_screen {
+            return;
+        }
         if let Some(bitmap) = self.memory.set_on_screen(strip, on_screen) {
             window.drop_image(bitmap).ok();
         }
-        self.draw_strips(cx);
+        if on_screen {
+            self.draw_strips(cx);
+        }
     }
 
     fn draw_strips(&mut self, cx: &mut Context<Self>) {
