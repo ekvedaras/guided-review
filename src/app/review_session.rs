@@ -329,8 +329,10 @@ impl ReviewSession {
                             return false;
                         }
                         Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
-                        Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason),
-                        Err(error) => CommentProblem::Failed(format!("{error:#}")),
+                        Ok(CommentResult::Rejected(reason)) => {
+                            CommentProblem::Rejected(reason.into())
+                        }
+                        Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
                     };
                     session.comment_problems.insert(place, problem);
                     false

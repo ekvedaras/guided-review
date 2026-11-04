@@ -17,7 +17,8 @@ use crate::app::code_selection::{CodeSelection, CodeSpot};
 use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
 use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
 use crate::app::components::comment_composer::{
-    CommentComposer, ComposerActions, OnCompose, QueuedCommentNote,
+    CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
+    QueuedCommentNote,
 };
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
@@ -488,10 +489,17 @@ impl OneStepLayout {
             .iter()
             .find(|draft| &draft.place == place)?
             .clone();
-        let is_composing = session.composing() == Some(place);
-        let is_sending = session.is_sending(place);
-        let can_comment_now = review.can_comment_now();
-        let can_suggest_change = review.can_suggest_change(place);
+        let state = if session.is_sending(place) {
+            ComposerState::Sending
+        } else if session.composing() == Some(place) {
+            ComposerState::Composing
+        } else {
+            ComposerState::Idle
+        };
+        let capabilities = CommentCapabilities {
+            comment_now: review.can_comment_now(),
+            suggest_change: review.can_suggest_change(place),
+        };
         let problem = session.comment_problem(place);
         let on_type = {
             let (layout, place) = (cx.entity(), place.clone());
@@ -540,10 +548,8 @@ impl OneStepLayout {
         Some(CommentComposer::new(
             draft,
             self.composer_focus.clone(),
-            is_composing,
-            is_sending,
-            can_comment_now,
-            can_suggest_change,
+            state,
+            capabilities,
             problem,
             actions,
         ))

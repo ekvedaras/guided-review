@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use super::palette::Colors;
-use super::text_input::{Direction, Lines, Step, TextDraft};
+use super::text_input::{Caret, Direction, Lines, Step, TextDraft};
 
 actions!(
     text_box,
@@ -368,30 +368,38 @@ impl EditState {
 
     fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.go(Step::Character, Direction::Back);
+            draft.go(Step::Character, Direction::Back, Caret::Move);
         });
     }
 
     fn right(&mut self, _: &Right, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.go(Step::Character, Direction::Forward);
+            draft.go(Step::Character, Direction::Forward, Caret::Move);
         });
     }
 
     fn word_left(&mut self, _: &WordLeft, window: &mut Window, cx: &mut Context<Self>) {
-        self.walk(window, cx, |draft| draft.go(Step::Word, Direction::Back));
+        self.walk(window, cx, |draft| {
+            draft.go(Step::Word, Direction::Back, Caret::Move);
+        });
     }
 
     fn word_right(&mut self, _: &WordRight, window: &mut Window, cx: &mut Context<Self>) {
-        self.walk(window, cx, |draft| draft.go(Step::Word, Direction::Forward));
+        self.walk(window, cx, |draft| {
+            draft.go(Step::Word, Direction::Forward, Caret::Move);
+        });
     }
 
     fn line_start(&mut self, _: &LineStart, window: &mut Window, cx: &mut Context<Self>) {
-        self.walk(window, cx, |draft| draft.go(Step::Line, Direction::Back));
+        self.walk(window, cx, |draft| {
+            draft.go(Step::Line, Direction::Back, Caret::Move);
+        });
     }
 
     fn line_end(&mut self, _: &LineEnd, window: &mut Window, cx: &mut Context<Self>) {
-        self.walk(window, cx, |draft| draft.go(Step::Line, Direction::Forward));
+        self.walk(window, cx, |draft| {
+            draft.go(Step::Line, Direction::Forward, Caret::Move);
+        });
     }
 
     fn text_start(&mut self, _: &TextStart, window: &mut Window, cx: &mut Context<Self>) {
@@ -404,13 +412,13 @@ impl EditState {
 
     fn select_left(&mut self, _: &SelectLeft, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Character, Direction::Back);
+            draft.go(Step::Character, Direction::Back, Caret::Extend);
         });
     }
 
     fn select_right(&mut self, _: &SelectRight, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Character, Direction::Forward);
+            draft.go(Step::Character, Direction::Forward, Caret::Extend);
         });
     }
 
@@ -421,7 +429,7 @@ impl EditState {
         cx: &mut Context<Self>,
     ) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Word, Direction::Back);
+            draft.go(Step::Word, Direction::Back, Caret::Extend);
         });
     }
 
@@ -432,7 +440,7 @@ impl EditState {
         cx: &mut Context<Self>,
     ) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Word, Direction::Forward);
+            draft.go(Step::Word, Direction::Forward, Caret::Extend);
         });
     }
 
@@ -443,13 +451,13 @@ impl EditState {
         cx: &mut Context<Self>,
     ) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Line, Direction::Back);
+            draft.go(Step::Line, Direction::Back, Caret::Extend);
         });
     }
 
     fn select_line_end(&mut self, _: &SelectLineEnd, window: &mut Window, cx: &mut Context<Self>) {
         self.walk(window, cx, |draft| {
-            draft.extend(Step::Line, Direction::Forward);
+            draft.go(Step::Line, Direction::Forward, Caret::Extend);
         });
     }
 
@@ -458,19 +466,19 @@ impl EditState {
     }
 
     fn up(&mut self, _: &Up, window: &mut Window, cx: &mut Context<Self>) {
-        self.go_vertically(Direction::Back, false, window, cx);
+        self.go_vertically(Direction::Back, Caret::Move, window, cx);
     }
 
     fn down(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
-        self.go_vertically(Direction::Forward, false, window, cx);
+        self.go_vertically(Direction::Forward, Caret::Move, window, cx);
     }
 
     fn select_up(&mut self, _: &SelectUp, window: &mut Window, cx: &mut Context<Self>) {
-        self.go_vertically(Direction::Back, true, window, cx);
+        self.go_vertically(Direction::Back, Caret::Extend, window, cx);
     }
 
     fn select_down(&mut self, _: &SelectDown, window: &mut Window, cx: &mut Context<Self>) {
-        self.go_vertically(Direction::Forward, true, window, cx);
+        self.go_vertically(Direction::Forward, Caret::Extend, window, cx);
     }
 
     /// One painted row up or down, wrapped rows included. Past the first or last row it goes to
@@ -478,7 +486,7 @@ impl EditState {
     fn go_vertically(
         &mut self,
         direction: Direction,
-        is_selecting: bool,
+        caret: Caret,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -503,11 +511,7 @@ impl EditState {
         } else {
             layout.offset_at(point(goal_x, row_y + layout.line_height / 2.))
         };
-        if is_selecting {
-            self.draft.select_to(target);
-        } else {
-            self.draft.move_to(target);
-        }
+        self.draft.put_caret_at(target, caret);
         self.caret_moved(window, cx);
     }
 
@@ -564,13 +568,13 @@ impl EditState {
         match event.click_count {
             2 => {
                 self.draft.move_to(offset);
-                self.draft.go(Step::Word, Direction::Back);
-                self.draft.extend(Step::Word, Direction::Forward);
+                self.draft.go(Step::Word, Direction::Back, Caret::Move);
+                self.draft.go(Step::Word, Direction::Forward, Caret::Extend);
             }
             3 => {
                 self.draft.move_to(offset);
-                self.draft.go(Step::Line, Direction::Back);
-                self.draft.extend(Step::Line, Direction::Forward);
+                self.draft.go(Step::Line, Direction::Back, Caret::Move);
+                self.draft.go(Step::Line, Direction::Forward, Caret::Extend);
             }
             _ if event.modifiers.shift => self.draft.select_to(offset),
             _ => {
@@ -640,7 +644,7 @@ impl EntityInputHandler for EditState {
         cx: &mut Context<Self>,
     ) {
         let range = self.draft.range_from_utf16(&range_utf16);
-        self.draft.select(range, false);
+        self.draft.select(range.start, range.end);
         self.moved(window, cx);
     }
 

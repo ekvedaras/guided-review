@@ -18,6 +18,13 @@ pub enum Step {
     Line,
 }
 
+/// Whether a caret move drops the selection or stretches it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Caret {
+    Move,
+    Extend,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {
     Back,
@@ -91,9 +98,17 @@ impl TextDraft {
         }
     }
 
-    pub fn select(&mut self, range: Range<usize>, is_reversed: bool) {
-        self.selection = self.range_in_text(&range);
-        self.is_reversed = is_reversed;
+    /// The caret is at `head`, and the selection runs to `anchor`, which stays put when it extends.
+    pub fn select(&mut self, anchor: usize, head: usize) {
+        self.selection = self.range_in_text(&(anchor..head));
+        self.is_reversed = self.clamp(head) < self.clamp(anchor);
+    }
+
+    pub fn put_caret_at(&mut self, offset: usize, caret: Caret) {
+        match caret {
+            Caret::Move => self.move_to(offset),
+            Caret::Extend => self.select_to(offset),
+        }
     }
 
     pub fn select_all(&mut self) {
@@ -102,20 +117,16 @@ impl TextDraft {
     }
 
     /// A plain move with a selection only collapses it to the side it moves to.
-    pub fn go(&mut self, step: Step, direction: Direction) {
-        if step == Step::Character && !self.selection.is_empty() {
+    pub fn go(&mut self, step: Step, direction: Direction, caret: Caret) {
+        if caret == Caret::Move && step == Step::Character && !self.selection.is_empty() {
             let end = match direction {
                 Direction::Back => self.selection.start,
                 Direction::Forward => self.selection.end,
             };
             self.move_to(end);
         } else {
-            self.move_to(self.offset_from_caret(step, direction));
+            self.put_caret_at(self.offset_from_caret(step, direction), caret);
         }
-    }
-
-    pub fn extend(&mut self, step: Step, direction: Direction) {
-        self.select_to(self.offset_from_caret(step, direction));
     }
 
     /// Deletes the selection, or from the caret by `step` when nothing is selected.
@@ -287,7 +298,7 @@ mod tests {
     fn a_reversed_range_from_the_input_method_reads_as_its_start_to_its_end() {
         let mut draft = draft_at("hello", 0);
 
-        draft.select(4..1, false);
+        draft.select(4, 1);
         assert_eq!(draft.selected_text(), "ell");
 
         draft.replace(4..1, "a");
@@ -296,6 +307,16 @@ mod tests {
         draft.replace_and_mark(Some(2..1), "ü", Some("ü".len()..0));
         assert_eq!(draft.text(), "hüo");
         assert_eq!(draft.selected_text(), "ü");
+    }
+
+    #[test]
+    fn a_selection_made_from_its_end_to_its_start_has_the_caret_at_the_start() {
+        let mut draft = TextDraft::with_text("abcd");
+        draft.select(3, 1);
+        assert_eq!(draft.selection(), 1..3);
+        assert_eq!(draft.caret(), 1);
+        draft.select(1, 3);
+        assert_eq!(draft.caret(), 3);
     }
 
     #[test]
@@ -318,23 +339,23 @@ mod tests {
     #[test]
     fn alt_moves_by_word_and_cmd_by_line() {
         let mut draft = draft_at("one two\nthree four", 12);
-        draft.go(Step::Word, Direction::Back);
+        draft.go(Step::Word, Direction::Back, Caret::Move);
         assert_eq!(draft.caret(), 8);
-        draft.go(Step::Word, Direction::Back);
+        draft.go(Step::Word, Direction::Back, Caret::Move);
         assert_eq!(draft.caret(), 4);
-        draft.go(Step::Word, Direction::Forward);
+        draft.go(Step::Word, Direction::Forward, Caret::Move);
         assert_eq!(draft.caret(), 7);
-        draft.go(Step::Line, Direction::Forward);
+        draft.go(Step::Line, Direction::Forward, Caret::Move);
         assert_eq!(draft.caret(), 7);
         draft.move_to(10);
-        draft.go(Step::Line, Direction::Back);
+        draft.go(Step::Line, Direction::Back, Caret::Move);
         assert_eq!(draft.caret(), 8);
     }
 
     #[test]
     fn shift_moves_select_and_typing_replaces_the_selection() {
         let mut draft = draft_at("hello world", 5);
-        draft.extend(Step::Word, Direction::Forward);
+        draft.go(Step::Word, Direction::Forward, Caret::Extend);
         assert_eq!(draft.selected_text(), " world");
         draft.insert("!");
         assert_eq!(draft.text(), "hello!");
@@ -343,9 +364,9 @@ mod tests {
     #[test]
     fn selecting_back_past_the_anchor_flips_the_selection() {
         let mut draft = draft_at("abcd", 2);
-        draft.extend(Step::Character, Direction::Forward);
-        draft.extend(Step::Character, Direction::Back);
-        draft.extend(Step::Character, Direction::Back);
+        draft.go(Step::Character, Direction::Forward, Caret::Extend);
+        draft.go(Step::Character, Direction::Back, Caret::Extend);
+        draft.go(Step::Character, Direction::Back, Caret::Extend);
         assert_eq!(draft.selection(), 1..2);
         assert_eq!(draft.caret(), 1);
     }
@@ -353,8 +374,8 @@ mod tests {
     #[test]
     fn a_plain_move_collapses_the_selection_to_its_side() {
         let mut draft = TextDraft::with_text("abcd");
-        draft.select(1..3, false);
-        draft.go(Step::Character, Direction::Back);
+        draft.select(1, 3);
+        draft.go(Step::Character, Direction::Back, Caret::Move);
         assert_eq!(draft.selection(), 1..1);
     }
 

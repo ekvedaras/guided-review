@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -172,23 +174,28 @@ pub enum CommentRefusal {
     NoAccess(String),
 }
 
+impl CommentRefusal {
+    /// Only a refusal that carries a reason has to build its text.
+    pub fn message(&self) -> Cow<'static, str> {
+        Cow::Borrowed(match self {
+            Self::TourIsOld => "Update tour to comment",
+            Self::CodeMoved => "Code moved, place the comment again",
+            Self::NotInsideHunk => "GitHub takes comments only on lines of the diff",
+            Self::NoLines => "Only an Ask about lines can become a comment",
+            Self::AskIsOnOlderCode => {
+                "This Ask is about older code: select the lines again to comment"
+            }
+            Self::PendingReviewExists => "There is a pending review now: add the comment to it",
+            Self::EmptyReply => "Write the reply first",
+            Self::NoAnswerYet => "This Ask has no answer yet",
+            Self::NoAccess(reason) => return Cow::Owned(format!("No access to GitHub: {reason}")),
+        })
+    }
+}
+
 impl fmt::Display for CommentRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TourIsOld => f.write_str("Update tour to comment"),
-            Self::CodeMoved => f.write_str("Code moved, place the comment again"),
-            Self::NotInsideHunk => f.write_str("GitHub takes comments only on lines of the diff"),
-            Self::NoLines => f.write_str("Only an Ask about lines can become a comment"),
-            Self::AskIsOnOlderCode => {
-                f.write_str("This Ask is about older code: select the lines again to comment")
-            }
-            Self::PendingReviewExists => {
-                f.write_str("There is a pending review now: add the comment to it")
-            }
-            Self::EmptyReply => f.write_str("Write the reply first"),
-            Self::NoAnswerYet => f.write_str("This Ask has no answer yet"),
-            Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
-        }
+        f.write_str(&self.message())
     }
 }
 
@@ -197,8 +204,8 @@ impl fmt::Display for CommentRefusal {
 pub enum CommentProblem {
     Refused(CommentRefusal),
     /// GitHub answered but made no thread.
-    Rejected(String),
-    Failed(String),
+    Rejected(Arc<str>),
+    Failed(Arc<str>),
 }
 
 impl fmt::Display for CommentProblem {

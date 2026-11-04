@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use gpui::{
@@ -26,15 +27,29 @@ pub struct ComposerActions {
     pub on_discard: OnCompose,
 }
 
+/// What the box is doing: only one of these at a time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ComposerState {
+    /// Shown, but keys go elsewhere.
+    Idle,
+    Composing,
+    Sending,
+}
+
+/// Which ways out the box offers; they are independent facts, not modes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CommentCapabilities {
+    pub comment_now: bool,
+    pub suggest_change: bool,
+}
+
 /// The box a comment is written in, under the last selected row: the text and the buttons.
 #[derive(IntoElement)]
 pub struct CommentComposer {
     draft: CommentDraft,
     focus: FocusHandle,
-    is_composing: bool,
-    is_sending: bool,
-    can_comment_now: bool,
-    can_suggest_change: bool,
+    state: ComposerState,
+    capabilities: CommentCapabilities,
     /// What stops the comment, or what went wrong with the last send.
     problem: Option<CommentProblem>,
     actions: ComposerActions,
@@ -43,27 +58,19 @@ pub struct CommentComposer {
 impl CommentComposer {
     pub const KEY_CONTEXT: &str = "CommentInput";
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the view is built from its collaborators, which the caller owns"
-    )]
     pub fn new(
         draft: CommentDraft,
         focus: FocusHandle,
-        is_composing: bool,
-        is_sending: bool,
-        can_comment_now: bool,
-        can_suggest_change: bool,
+        state: ComposerState,
+        capabilities: CommentCapabilities,
         problem: Option<CommentProblem>,
         actions: ComposerActions,
     ) -> Self {
         Self {
             draft,
             focus,
-            is_composing,
-            is_sending,
-            can_comment_now,
-            can_suggest_change,
+            state,
+            capabilities,
             problem,
             actions,
         }
@@ -99,7 +106,7 @@ impl RenderOnce for CommentComposer {
         });
         let actions = self.actions;
         let on_focus = Rc::clone(&actions.on_focus);
-        let body = if self.is_composing && !self.is_sending {
+        let body = if self.state == ComposerState::Composing {
             let (on_type, on_submit, on_stop) = (
                 Rc::clone(&actions.on_type),
                 Rc::clone(&actions.on_add_to_review),
@@ -118,7 +125,7 @@ impl RenderOnce for CommentComposer {
         } else {
             div().child(self.draft.body.clone()).into_any_element()
         };
-        let buttons = (!self.is_sending).then(|| {
+        let buttons = (self.state != ComposerState::Sending).then(|| {
             div()
                 .flex()
                 .gap_2()
@@ -128,7 +135,7 @@ impl RenderOnce for CommentComposer {
                     "Add to review",
                     actions.on_add_to_review,
                 ))
-                .children(self.can_comment_now.then(|| {
+                .children(self.capabilities.comment_now.then(|| {
                     button(
                         &colors,
                         "comment-now",
@@ -136,7 +143,7 @@ impl RenderOnce for CommentComposer {
                         actions.on_comment_now,
                     )
                 }))
-                .children(self.can_suggest_change.then(|| {
+                .children(self.capabilities.suggest_change.then(|| {
                     button(
                         &colors,
                         "suggest-change",
@@ -173,10 +180,22 @@ impl RenderOnce for CommentComposer {
             .child(div().min_h(gpui::px(48.)).child(body))
             .children(
                 self.problem
-                    .map(|problem| div().text_sm().text_color(red()).child(problem.to_string())),
+                    .map(|problem| div().text_sm().text_color(red()).child(shown(problem))),
             )
-            .children(self.is_sending.then(|| div().text_sm().child("Sending...")))
+            .children(
+                (self.state == ComposerState::Sending).then(|| div().text_sm().child("Sending...")),
+            )
             .children(buttons)
+    }
+}
+
+fn shown(problem: CommentProblem) -> SharedString {
+    match problem {
+        CommentProblem::Refused(refusal) => match refusal.message() {
+            Cow::Borrowed(text) => SharedString::new_static(text),
+            Cow::Owned(text) => text.into(),
+        },
+        CommentProblem::Rejected(reason) | CommentProblem::Failed(reason) => reason.into(),
     }
 }
 
