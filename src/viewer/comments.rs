@@ -102,6 +102,8 @@ pub enum CommentRefusal {
     PendingReviewExists,
     /// A reply with no text has nothing to send.
     EmptyReply,
+    /// An Ask still waiting for its first answer has nothing to put in a comment.
+    NoAnswerYet,
     NoAccess(String),
 }
 
@@ -119,6 +121,7 @@ impl fmt::Display for CommentRefusal {
                 f.write_str("There is a pending review now: add the comment to it")
             }
             Self::EmptyReply => f.write_str("Write the reply first"),
+            Self::NoAnswerYet => f.write_str("This Ask has no answer yet"),
             Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
         }
     }

@@ -496,3 +496,17 @@ fn use_as_comment_is_refused_without_lines_on_an_old_tour_and_for_an_ask_on_olde
     );
     assert_eq!(review.comment_drafts(), []);
 }
+
+#[test]
+fn use_as_comment_is_refused_for_an_ask_with_no_answer_yet() {
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    let place = lines_of_total(&mut review, "return 1;", "return 2;");
+    let mut asks = shop.asks();
+    let id = asks.start(place, review.head());
+
+    let refused = review.use_as_comment(asks.get(id).unwrap());
+
+    assert_eq!(refused, Err(CommentRefusal::NoAnswerYet));
+    assert_eq!(shop.open().comment_drafts().first(), None);
+}

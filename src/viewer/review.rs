@@ -487,7 +487,7 @@ impl Review {
         if !selected.take_comment() {
             return Err(CommentRefusal::NotInsideHunk);
         }
-        let answer = ask.latest_answer().unwrap_or_default();
+        let answer = ask.latest_answer().ok_or(CommentRefusal::NoAnswerYet)?;
         let place = self
             .comment_desk
             .add_to_draft(&mut self.state, &selected, &self.head, answer);
