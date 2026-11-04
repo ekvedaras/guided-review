@@ -257,6 +257,7 @@ pub struct SyncRequest {
 
 /// What the network part of a sync learned and did; the review takes it in with `apply_sync`.
 pub struct SyncOutcome {
+    tour_head: Sha,
     sent: Vec<(String, bool)>,
     on_github: Option<BTreeMap<String, bool>>,
     baseline_wishes: Option<BTreeMap<String, bool>>,
@@ -264,8 +265,13 @@ pub struct SyncOutcome {
 }
 
 impl SyncOutcome {
-    fn nothing() -> Self {
+    pub(super) fn is_for(&self, tour_head: &Sha) -> bool {
+        self.tour_head == *tour_head
+    }
+
+    fn nothing(tour_head: &Sha) -> Self {
         Self {
+            tour_head: tour_head.clone(),
             sent: Vec::new(),
             on_github: None,
             baseline_wishes: None,
@@ -282,22 +288,22 @@ impl SyncRequest {
     ) -> SyncOutcome {
         let pr = &self.pr;
         if self.is_off {
-            return SyncOutcome::nothing();
+            return SyncOutcome::nothing(&self.tour_head);
         }
         match github.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
-            Ok(_) => return SyncOutcome::nothing(),
+            Ok(_) => return SyncOutcome::nothing(&self.tour_head),
             Err(error) => {
                 return SyncOutcome {
                     error: Some(error),
-                    ..SyncOutcome::nothing()
+                    ..SyncOutcome::nothing(&self.tour_head)
                 };
             }
         }
         if let Some(wishes) = self.baseline_wishes {
-            Self::take_baseline(github, pr, wishes)
+            Self::take_baseline(github, pr, &self.tour_head, wishes)
         } else {
-            let mut outcome = SyncOutcome::nothing();
+            let mut outcome = SyncOutcome::nothing(&self.tour_head);
             outcome.error = push(github, pr, &self.unsent, &mut outcome.sent).err();
             match read_viewed(github, pr) {
                 Ok(on_github) => outcome.on_github = Some(on_github),
@@ -311,6 +317,7 @@ impl SyncRequest {
     fn take_baseline(
         github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
+        tour_head: &Sha,
         wishes: BTreeMap<String, bool>,
     ) -> SyncOutcome {
         let on_github = match read_viewed(github, pr) {
@@ -318,7 +325,7 @@ impl SyncRequest {
             Err(error) => {
                 return SyncOutcome {
                     error: Some(error),
-                    ..SyncOutcome::nothing()
+                    ..SyncOutcome::nothing(tour_head)
                 };
             }
         };
@@ -327,7 +334,7 @@ impl SyncRequest {
             .filter(|(path, viewed)| on_github.get(*path).copied().unwrap_or(false) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
-        let mut outcome = SyncOutcome::nothing();
+        let mut outcome = SyncOutcome::nothing(tour_head);
         outcome.error = push(github, pr, &differing, &mut outcome.sent).err();
         outcome.on_github = Some(on_github);
         outcome.baseline_wishes = Some(wishes);

@@ -52,16 +52,24 @@ impl FilesAtHeadRequest {
                 Some((path.clone(), text.lines().map(str::to_owned).collect()))
             })
             .collect();
-        FilesAtHead { files }
+        FilesAtHead {
+            head: self.head.clone(),
+            files,
+        }
     }
 }
 
 #[derive(Debug, Default)]
 pub struct FilesAtHead {
+    head: Sha,
     files: HashMap<String, Vec<String>>,
 }
 
 impl FilesAtHead {
+    pub(super) fn is_at(&self, head: &Sha) -> bool {
+        self.head == *head
+    }
+
     /// Lines `first` to `last` (1-based, both included) of a file at head; none when the file was not read.
     pub(super) fn lines(&self, path: &str, first: usize, last: usize) -> Vec<String> {
         self.files.get(path).map_or_else(Vec::new, |lines| {

@@ -315,6 +315,8 @@ struct Target {
 /// What to highlight, owned so it can move to a background thread.
 #[derive(Debug, Clone)]
 pub struct HighlightRequest {
+    base: Sha,
+    head: Sha,
     targets: Vec<Target>,
 }
 
@@ -340,7 +342,11 @@ impl HighlightRequest {
             }
         }
         targets.retain(|target| HighlightLanguage::for_path(&target.path).is_some());
-        Self { targets }
+        Self {
+            base: base.clone(),
+            head: head.clone(),
+            targets,
+        }
     }
 
     /// A file that cannot be read stays plain.
@@ -377,16 +383,26 @@ impl HighlightRequest {
                 highlight_file(configuration, &text),
             );
         }
-        Highlights { files }
+        Highlights {
+            base: self.base.clone(),
+            head: self.head.clone(),
+            files,
+        }
     }
 }
 
 #[derive(Debug, Default)]
 pub struct Highlights {
+    base: Sha,
+    head: Sha,
     files: HashMap<(Side, String), Vec<Vec<Span>>>,
 }
 
 impl Highlights {
+    pub(super) fn is_of(&self, base: &Sha, head: &Sha) -> bool {
+        self.base == *base && self.head == *head
+    }
+
     pub(super) fn spans(&self, side: Side, path: &str, line: usize) -> &[Span] {
         self.files
             .get(&(side, path.to_owned()))

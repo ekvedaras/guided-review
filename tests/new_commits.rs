@@ -24,7 +24,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Review, ReviewStateFile, Side, StepId, TourRepinner, ViewedState, repin_tour,
+    PieceDiff, Review, ReviewStateFile, Side, StepId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
 use support::app_path::AppPath;
@@ -576,4 +576,48 @@ fn ticks_count_again_once_a_re_pin_failed() {
     review.tick(&"total".into()).unwrap();
 
     assert_eq!(ticked(&shop.open()), ["total"]);
+}
+
+#[test]
+fn colours_and_context_lines_read_before_a_re_pin_do_not_reach_the_re_pinned_review() {
+    let shop = Shop::with_tour_at_first_head();
+    let before = shop.open();
+    let highlights = before.highlight_request().compute(&shop.source());
+    let files_at_head = before.files_at_head_request().read(&shop.source());
+    drop(before);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+
+    review.set_highlights(highlights);
+    review.set_files_at_head(files_at_head);
+
+    review.go_to(&"keep".into());
+    let page = review.current_step().unwrap();
+    let lines: Vec<_> = page.pieces.iter().flat_map(PieceDiff::lines).collect();
+    assert!(!lines.is_empty());
+    assert!(lines.iter().all(|line| line.is_change()));
+    assert!(lines.iter().all(|line| line.spans.is_empty()));
+}
+
+#[test]
+fn a_sync_answer_for_the_head_before_a_re_pin_leaves_the_re_pinned_review_s_ticks_alone() {
+    let shop = Shop::with_tour_at_first_head();
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", &shop.first_head, &sent)
+        .viewing("app/Order.php", ViewedState::Viewed);
+    let mut before = shop.open();
+    before.sync(&github).unwrap();
+    github.set_viewed("app/Order.php", ViewedState::Unviewed);
+    let stale = before.sync_request().run(&github);
+    drop(before);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+    let ticked_after_re_pin = ticked(&review);
+    assert!(ticked_after_re_pin.contains(&"keep".to_owned()));
+
+    review.apply_sync(stale).unwrap();
+
+    assert_eq!(ticked(&review), ticked_after_re_pin);
 }

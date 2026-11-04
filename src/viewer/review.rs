@@ -225,8 +225,13 @@ impl Review {
         HighlightRequest::for_files(&self.files, &self.tour.base, &self.tour.head)
     }
 
-    pub fn set_highlights(&mut self, highlights: Highlights) {
+    /// Colours read for another base or head, e.g. before a re-pin, are dropped. Says whether they were kept.
+    pub fn set_highlights(&mut self, highlights: Highlights) -> bool {
+        if !highlights.is_of(&self.tour.base, &self.tour.head) {
+            return false;
+        }
         self.display_options.set_highlights(highlights);
+        true
     }
 
     /// Context lines come from the files at head, read off the main thread like the colours.
@@ -234,9 +239,14 @@ impl Review {
         FilesAtHeadRequest::for_files(&self.files, &self.tour.head)
     }
 
-    pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) {
+    /// Files read at another head, e.g. before a re-pin, are dropped. Says whether they were kept.
+    pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) -> bool {
+        if !files_at_head.is_at(&self.tour.head) {
+            return false;
+        }
         self.display_options.set_files_at_head(files_at_head);
         self.place_threads();
+        true
     }
 
     /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
@@ -1106,8 +1116,9 @@ impl Review {
     }
 
     /// An error means something stays queued or unread; the next sync tries again.
+    /// An answer for another head, e.g. from before a re-pin, is dropped: the next sync asks again.
     pub fn apply_sync(&mut self, outcome: SyncOutcome) -> anyhow::Result<()> {
-        if self.viewed_sync.is_off() {
+        if self.viewed_sync.is_off() || !outcome.is_for(&self.head) {
             return Ok(());
         }
         let coverage = self.coverage();
