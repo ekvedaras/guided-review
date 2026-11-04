@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use crate::code_source::{BlobInfo, CodeSource, FileAt, FileDiff};
@@ -25,8 +25,13 @@ impl CachedCodeSource {
         }
     }
 
+    /// A reader that panicked cannot leave a half-written entry, so a poisoned lock is still safe to use.
+    fn files(&self) -> MutexGuard<'_, HashMap<FileAt, Arc<Vec<u8>>>> {
+        self.files.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn already_read(&self, file: &FileAt) -> Option<Arc<Vec<u8>>> {
-        self.files.lock().unwrap().get(file).cloned()
+        self.files().get(file).cloned()
     }
 
     fn read(&self, file: FileAt) -> anyhow::Result<Arc<Vec<u8>>> {
@@ -34,7 +39,7 @@ impl CachedCodeSource {
             return Ok(bytes);
         }
         let bytes = Arc::new(self.source.blob_at(&file.sha, &file.path)?);
-        self.files.lock().unwrap().insert(file, Arc::clone(&bytes));
+        self.files().insert(file, Arc::clone(&bytes));
         Ok(bytes)
     }
 }

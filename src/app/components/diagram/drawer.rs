@@ -53,6 +53,10 @@ pub(super) static SVG_OPTIONS: LazyLock<usvg::Options<'static>> = LazyLock::new(
 /// Turns Mermaid text into SVG in our colours. Loading the font is the slow part,
 /// so there is one drawer per appearance for the life of the process.
 pub struct DiagramDrawer {
+    setup: Result<Setup, String>,
+}
+
+struct Setup {
     renderer: Renderer,
     request: SvgRequest,
 }
@@ -69,6 +73,22 @@ impl DiagramDrawer {
     }
 
     fn new(appearance: Appearance) -> Self {
+        Self {
+            setup: Setup::new(appearance),
+        }
+    }
+
+    pub fn svg(&self, source: &str) -> Result<Svg, String> {
+        let setup = self
+            .setup
+            .as_ref()
+            .map_err(|reason| format!("the diagram drawer could not start: {reason}"))?;
+        setup.svg(source)
+    }
+}
+
+impl Setup {
+    fn new(appearance: Appearance) -> Result<Self, String> {
         let colors = Colors::of(appearance);
         let output = SvgOutputPolicy {
             preset: SvgPipelinePreset::ResvgSafe,
@@ -77,20 +97,20 @@ impl DiagramDrawer {
             ..SvgOutputPolicy::default()
         };
         let presentation = Presentation::new()
-            .with_theme(host_theme(appearance, &colors))
+            .with_theme(host_theme(appearance, &colors)?)
             .resolve();
-        Self {
+        Ok(Self {
             renderer: Renderer::new().with_engine(presentation.materialize_engine(Engine::new())),
             request: SvgRequest {
                 pipeline: Some(output.pipeline()),
                 presentation: presentation.render_policy(),
-                environment: measured_with_app_font(),
+                environment: measured_with_app_font()?,
                 ..Default::default()
             },
-        }
+        })
     }
 
-    pub fn svg(&self, source: &str) -> Result<Svg, String> {
+    fn svg(&self, source: &str) -> Result<Svg, String> {
         let output = self
             .renderer
             .render(RenderRequest::svg(
@@ -115,17 +135,17 @@ impl DiagramDrawer {
 }
 
 /// Merman places boxes around the text it measures; with any other font the labels overflow them.
-fn measured_with_app_font() -> SvgEnvironment {
+fn measured_with_app_font() -> Result<SvgEnvironment, String> {
     let fonts = NativeFontOptions::default()
         .with_font_file(TEXT_FONT_FILE)
         .load(&OperationControl::new())
-        .expect("the app font is on every Mac");
+        .map_err(|error| format!("the app font did not load: {error}"))?;
     SvgEnvironment::deterministic()
         .with_native_font_context(fonts)
-        .expect("the app font loads into merman")
+        .map_err(|error| format!("the app font did not load into merman: {error}"))
 }
 
-fn host_theme(appearance: Appearance, colors: &Colors) -> HostTheme {
+fn host_theme(appearance: Appearance, colors: &Colors) -> Result<HostTheme, String> {
     let roles = [
         (ThemeRole::Canvas, colors.background),
         (ThemeRole::Surface, colors.surface),
@@ -156,16 +176,15 @@ fn host_theme(appearance: Appearance, colors: &Colors) -> HostTheme {
             Appearance::Dark => HostThemeAppearance::Dark,
         })
         .try_with_font_family(TEXT_FONT)
-        .expect("the app font name is a valid font family");
-    roles
-        .into_iter()
-        .fold(theme, |theme, (role, color)| {
-            theme
-                .try_with_role(role, hex(color))
-                .expect("a hex colour is a valid theme colour")
-        })
+        .map_err(|error| format!("the app font name is not a font family: {error}"))?;
+    let theme = roles.into_iter().try_fold(theme, |theme, (role, color)| {
+        theme
+            .try_with_role(role, hex(color))
+            .map_err(|error| format!("{role:?} has no valid colour: {error}"))
+    })?;
+    theme
         .try_with_series_palette([colors.accent, colors.success, colors.warning].map(hex))
-        .expect("hex colours are a valid series palette")
+        .map_err(|error| format!("the series palette is not valid: {error}"))
 }
 
 fn hex(color: Rgba) -> String {

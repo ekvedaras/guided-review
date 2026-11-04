@@ -143,7 +143,7 @@ impl<'a> StepPage<'a> {
             .pieces
             .iter()
             .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-            .map(|part| PieceDiff::of(part, files, display))
+            .filter_map(|part| PieceDiff::of(part, files, display))
             .collect();
         Self {
             step,
@@ -170,7 +170,7 @@ impl SafetyNetPage {
         Self {
             pieces: coverage::safety_net(tour, files)
                 .into_iter()
-                .map(|part| PieceDiff::of(part, files, display))
+                .filter_map(|part| PieceDiff::of(part, files, display))
                 .collect(),
             threads: Vec::new(),
         }
@@ -188,12 +188,14 @@ impl PieceDiff {
             .or(self.binary_file.as_ref())
     }
 
-    pub(super) fn of(part: PiecePart, files: &[ChangedFile], display: &DiffDisplay) -> Self {
+    /// None when the piece's file is not among the changed files, which a cut piece never is.
+    pub(super) fn of(
+        part: PiecePart,
+        files: &[ChangedFile],
+        display: &DiffDisplay,
+    ) -> Option<Self> {
         let piece = part.piece;
-        let file = files
-            .iter()
-            .find(|file| file.path == piece.id.path)
-            .expect("a piece belongs to a changed file");
+        let file = files.iter().find(|file| file.path == piece.id.path)?;
         let hunks = display.hunks(
             &piece.id,
             file,
@@ -204,7 +206,7 @@ impl PieceDiff {
         );
         let is_image = piece.kind == PieceKind::Image;
         let has_changes = !part.removed_lines.is_empty() || !part.added_lines.is_empty();
-        Self {
+        Some(Self {
             id: piece.id.clone(),
             changes_only_whitespace: has_changes && hunks.is_empty(),
             hunks,
@@ -212,7 +214,7 @@ impl PieceDiff {
             is_image,
             repin_status: None,
             head_lines: piece.head_lines.clone(),
-        }
+        })
     }
 
     pub fn lines(&self) -> impl Iterator<Item = &DiffLine> {

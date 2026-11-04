@@ -104,17 +104,17 @@ struct Percentiles {
 
 impl Percentiles {
     fn of(mut samples: Vec<Duration>) -> Self {
-        if samples.is_empty() {
-            return Self::default();
-        }
         samples.sort();
+        let Some(&max) = samples.last() else {
+            return Self::default();
+        };
         let at = |p: f64| samples[((samples.len() - 1) as f64 * p).round() as usize];
         Self {
             count: samples.len(),
             p50: at(0.5),
             p90: at(0.9),
             p99: at(0.99),
-            max: *samples.last().expect("not empty"),
+            max,
             samples,
         }
     }

@@ -392,7 +392,7 @@ impl<'a> CutContext<'a> {
         let changes = join_blank_line_changes(self.changes_by_slot(&pairing));
         let mut pieces: Vec<(usize, Piece)> = changes
             .into_iter()
-            .map(|change| symbol_piece(&pairing, change, self.diff.status().into()))
+            .filter_map(|change| symbol_piece(&pairing, change, self.diff.status().into()))
             .collect();
         pieces.sort_by_key(|(position, _)| *position);
         Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
@@ -474,11 +474,11 @@ fn symbol_piece(
     pairing: &SymbolPairing,
     change: SymbolChange,
     file_status: PieceStatus,
-) -> (usize, Piece) {
+) -> Option<(usize, Piece)> {
     let slots = pairing.slots_of(&change.slot);
     let in_base = symbol_in(pairing.base, &slots.base);
     let in_head = symbol_in(pairing.head, &slots.head);
-    let (kind, status) = kind_and_status(&change.slot, in_base, in_head, file_status);
+    let (kind, status) = kind_and_status(&change.slot, in_base, in_head, file_status)?;
     let position = in_head
         .or(in_base)
         .map_or_else(|| change.first_line(), |symbol| symbol.first_line);
@@ -504,23 +504,24 @@ fn symbol_piece(
     .with_signature(in_head.or(in_base).map(|symbol| symbol.signature.clone()))
     .with_moved_body(moved_body)
     .with_head_lines(in_head.map(|symbol| symbol.first_line..=symbol.last_line));
-    (position, piece)
+    Some((position, piece))
 }
 
+/// None for a symbol slot found on neither base nor head, which pairing never produces.
 fn kind_and_status(
     slot: &Slot,
     in_base: Option<&Symbol>,
     in_head: Option<&Symbol>,
     file_status: PieceStatus,
-) -> (PieceKind, PieceStatus) {
-    match (slot, in_base, in_head) {
+) -> Option<(PieceKind, PieceStatus)> {
+    Some(match (slot, in_base, in_head) {
         (Slot::Imports, ..) => (PieceKind::Imports, file_status),
         (Slot::Top, ..) => (PieceKind::Top, file_status),
         (_, None, Some(symbol)) => (symbol.kind, PieceStatus::Added),
         (_, Some(symbol), None) => (symbol.kind, PieceStatus::Deleted),
         (_, Some(_), Some(symbol)) => (symbol.kind, PieceStatus::Modified),
-        (_, None, None) => unreachable!("a symbol slot is found on base or head"),
-    }
+        (_, None, None) => return None,
+    })
 }
 
 /// Same tokens on both sides means only formatting changed, or the symbol only moved inside the file.
@@ -558,10 +559,12 @@ fn join_blank_line_changes(changes: Vec<SymbolChange>) -> Vec<SymbolChange> {
             .map(|line| (false, line))
             .chain(blank.added.into_iter().map(|line| (true, line)))
         {
-            let nearest = changes
+            let Some(nearest) = changes
                 .iter_mut()
                 .min_by_key(|change| change.distance_to(line.number))
-                .expect("changes is not empty");
+            else {
+                continue;
+            };
             if is_added {
                 nearest.added.push(line);
             } else {

@@ -33,14 +33,22 @@ struct AttributeRule {
     generated: bool,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "BUILT_IN_GENERATED is fixed in this file, so every pattern is a valid glob"
+)]
+fn built_in_generated() -> GlobSet {
+    let mut built_in = GlobSetBuilder::new();
+    for pattern in BUILT_IN_GENERATED {
+        built_in.add(Glob::new(&format!("**/{pattern}")).expect("valid built-in glob"));
+    }
+    built_in.build().expect("valid built-in globs")
+}
+
 impl GeneratedFiles {
     pub fn new(root_gitattributes: &str) -> Self {
-        let mut built_in = GlobSetBuilder::new();
-        for pattern in BUILT_IN_GENERATED {
-            built_in.add(Glob::new(&format!("**/{pattern}")).expect("valid built-in glob"));
-        }
         Self {
-            built_in: built_in.build().expect("valid built-in globs"),
+            built_in: built_in_generated(),
             attributes: root_gitattributes
                 .lines()
                 .filter_map(AttributeRule::parse)

@@ -1,3 +1,7 @@
 disallowed-methods = [
     { path = "gpui::app::App::open_url", reason = "open links with app::code_links, so code opens where the CodeOpener decides" },
 ]
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true

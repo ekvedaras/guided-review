@@ -285,11 +285,11 @@ impl Builder {
             }
             TagEnd::List(_) => {
                 self.flush_runs();
-                let open = self.stack.pop().expect("a list was opened");
-                if let Frame::List {
-                    first_number,
-                    items,
-                } = open.frame
+                if let Some(open) = self.stack.pop()
+                    && let Frame::List {
+                        first_number,
+                        items,
+                    } = open.frame
                 {
                     self.push_block(Block::List {
                         first_number,
@@ -439,8 +439,9 @@ impl Builder {
             let blocks = self.close();
             self.push_block(Block::Quote(blocks));
         }
-        let open = self.stack.pop().expect("details frame");
-        if let Frame::Details { summary } = open.frame {
+        if let Some(open) = self.stack.pop()
+            && let Frame::Details { summary } = open.frame
+        {
             self.push_block(Block::Details {
                 summary,
                 body: open.blocks,

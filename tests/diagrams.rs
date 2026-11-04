@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a panic in a test helper is the test failing"
+)]
+
 use guided_review::app::components::diagram::{DiagramDrawer, Strip, Svg, rasterize};
 use guided_review::app::components::palette::{Appearance, Colors, TEXT_FONT};
 

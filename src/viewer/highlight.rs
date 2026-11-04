@@ -149,7 +149,8 @@ impl HighlightLanguage {
         Self::for_path(&format!("snippet.{extension}"))
     }
 
-    fn configuration(self) -> HighlightConfiguration {
+    /// None when the built-in query does not compile; the file then stays plain, and stderr says which language.
+    fn configuration(self) -> Option<HighlightConfiguration> {
         // The later pattern wins, so a grammar's own additions come after the JavaScript base they extend.
         let (name, language, highlights, injections, locals) = match self {
             Self::Php => (
@@ -238,13 +239,14 @@ impl HighlightLanguage {
         };
         let mut configuration =
             HighlightConfiguration::new(language, name, &highlights, injections, locals)
-                .unwrap_or_else(|error| panic!("the {name} highlight query is broken: {error}"));
+                .inspect_err(|error| eprintln!("the {name} highlight query is broken: {error}"))
+                .ok()?;
         let names: Vec<&str> = Capture::ALL
             .iter()
             .map(|capture| capture.query_name())
             .collect();
         configuration.configure(&names);
-        configuration
+        Some(configuration)
     }
 }
 
@@ -345,7 +347,8 @@ impl HighlightRequest {
                 })
                 .collect::<Vec<_>>(),
         );
-        let mut configurations: HashMap<HighlightLanguage, HighlightConfiguration> = HashMap::new();
+        let mut configurations: HashMap<HighlightLanguage, Option<HighlightConfiguration>> =
+            HashMap::new();
         let mut files = HashMap::new();
         for target in &self.targets {
             let Some(language) = HighlightLanguage::for_path(&target.path) else {
@@ -354,9 +357,13 @@ impl HighlightRequest {
             let Ok(text) = source.file_at(&target.sha, &target.path) else {
                 continue;
             };
-            let configuration = configurations
+            let Some(configuration) = configurations
                 .entry(language)
-                .or_insert_with(|| language.configuration());
+                .or_insert_with(|| language.configuration())
+                .as_ref()
+            else {
+                continue;
+            };
             files.insert(
                 (target.side, target.shown_path.clone()),
                 highlight_file(configuration, &text),
@@ -393,7 +400,10 @@ pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
     } else {
         text.to_string()
     };
-    let mut lines = highlight_file(&language.configuration(), &source);
+    let Some(configuration) = language.configuration() else {
+        return vec![Vec::new(); line_count];
+    };
+    let mut lines = highlight_file(&configuration, &source);
     if needs_php_tag {
         lines.remove(0);
     }

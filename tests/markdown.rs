@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a panic in a test helper is the test failing"
+)]
+
 use guided_review::viewer::{Block, Markdown, Run};
 
 fn plain(text: &str) -> Run {

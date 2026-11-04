@@ -78,7 +78,7 @@ pub fn run(
                 }),
                 ..Default::default()
             };
-            cx.open_window(options, |window, cx| {
+            let opened = cx.open_window(options, |window, cx| {
                 cx.set_global(Appearance::of_window(window.appearance()));
                 let collaborators = Collaborators {
                     github,
@@ -99,8 +99,12 @@ pub fn run(
                 });
                 layout.focus_handle(cx).focus(window, cx);
                 layout
-            })
-            .expect("could not open the app window");
+            });
+            if let Err(error) = opened {
+                eprintln!("could not open the app window: {error:#}");
+                cx.quit();
+                return;
+            }
             cx.on_window_closed(|cx, _| cx.quit()).detach();
             cx.activate(true);
         });

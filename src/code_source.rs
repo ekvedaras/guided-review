@@ -122,28 +122,29 @@ pub fn parse_unified_diff(patch: &str) -> Vec<FileDiff> {
 
     for raw in patch.lines() {
         if old_left > 0 || new_left > 0 {
-            let file = files.last_mut().expect("hunk inside a file");
-            let hunk = file.hunks.last_mut().expect("hunk header before its lines");
+            let Some(file) = files.last_mut() else {
+                break;
+            };
             if let Some(text) = raw.strip_prefix('-') {
-                hunk.removed.push(Line {
+                let line = Line {
                     number: old_line,
                     text: text.to_string(),
-                });
-                file.removed.push(Line {
-                    number: old_line,
-                    text: text.to_string(),
-                });
+                };
+                if let Some(hunk) = file.hunks.last_mut() {
+                    hunk.removed.push(line.clone());
+                }
+                file.removed.push(line);
                 old_line += 1;
                 old_left -= 1;
             } else if let Some(text) = raw.strip_prefix('+') {
-                hunk.added.push(Line {
+                let line = Line {
                     number: new_line,
                     text: text.to_string(),
-                });
-                file.added.push(Line {
-                    number: new_line,
-                    text: text.to_string(),
-                });
+                };
+                if let Some(hunk) = file.hunks.last_mut() {
+                    hunk.added.push(line.clone());
+                }
+                file.added.push(line);
                 new_line += 1;
                 new_left -= 1;
             } else if raw.starts_with(' ') || raw.is_empty() {

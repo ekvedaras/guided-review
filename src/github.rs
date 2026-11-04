@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use anyhow::Context;
 use serde::Deserialize;
@@ -61,8 +61,7 @@ struct FileNodeJson {
 }
 
 fn pull_request_variables(pr: &PullRequestUrl, after: &serde_json::Value) -> serde_json::Value {
-    let repo = pr.repo.to_string();
-    let (owner, name) = repo.split_once('/').expect("a repo name is owner/name");
+    let (owner, name) = (pr.repo.owner(), pr.repo.name());
     serde_json::json!({"owner": owner, "name": name, "number": pr.number, "after": after})
 }
 
@@ -93,8 +92,15 @@ impl GitHub {
         }
     }
 
+    /// An id is only ever inserted whole, so a poisoned lock is still safe to use.
+    fn known_ids(&self) -> MutexGuard<'_, HashMap<String, String>> {
+        self.pull_request_ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn pull_request_id(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
-        if let Some(id) = self.pull_request_ids.lock().unwrap().get(&pr.to_string()) {
+        if let Some(id) = self.known_ids().get(&pr.to_string()) {
             return Ok(id.clone());
         }
         let data = self.graphql(
@@ -112,10 +118,7 @@ impl GitHub {
     }
 
     fn remember_pull_request_id(&self, pr: &PullRequestUrl, id: &str) {
-        self.pull_request_ids
-            .lock()
-            .unwrap()
-            .insert(pr.to_string(), id.to_string());
+        self.known_ids().insert(pr.to_string(), id.to_string());
     }
 
     /// Returns the `data` of the answer. A missing or refused token is `ViewedSyncUnavailable`.

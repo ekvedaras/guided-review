@@ -52,6 +52,10 @@ pub struct Symbols {
 }
 
 impl Symbols {
+    #[expect(
+        clippy::expect_used,
+        reason = "the grammars and symbol queries are compiled in, so they match tree-sitter"
+    )]
     pub fn find(source: &str, language: Language) -> Self {
         let grammar = language.grammar();
         let mut parser = Parser::new();
@@ -79,7 +83,11 @@ impl Symbols {
                 match query.capture_names()[capture.index as usize] {
                     helper if helper.starts_with('_') => {}
                     "name" => name = &source[capture.node.byte_range()],
-                    kind => definition = Some((capture.node, kind_of(kind))),
+                    capture_name => {
+                        if let Some(kind) = kind_of(capture_name) {
+                            definition = Some((capture.node, kind));
+                        }
+                    }
                 }
             }
             if let Some((node, kind)) = definition {
@@ -284,8 +292,9 @@ fn tokens_of(root: Node, source: &str) -> Vec<Token> {
     tokens
 }
 
-fn kind_of(capture: &str) -> PieceKind {
-    match capture {
+/// None for a capture that names no kind, such as one a query only uses to find its parts.
+fn kind_of(capture: &str) -> Option<PieceKind> {
+    Some(match capture {
         "class" => PieceKind::Class,
         "interface" => PieceKind::Interface,
         "trait" => PieceKind::Trait,
@@ -296,8 +305,8 @@ fn kind_of(capture: &str) -> PieceKind {
         "test" => PieceKind::Test,
         "method" => PieceKind::Method,
         "function" => PieceKind::Function,
-        other => unreachable!("unknown capture @{other} in the symbol queries under queries/"),
-    }
+        _ => return None,
+    })
 }
 
 /// The declaration without attributes and body: `public function total(): int`

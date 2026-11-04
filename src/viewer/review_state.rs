@@ -443,7 +443,10 @@ impl ReviewStateFile {
     /// One lock file per state file, so writers in this app, in its background work and in a
     /// CLI run at the same time take turns instead of overwriting each other.
     fn lock(&self) -> anyhow::Result<std::fs::File> {
-        let folder = self.path.parent().expect("the state file sits in a folder");
+        let folder = self
+            .path
+            .parent()
+            .with_context(|| format!("{} has no folder", self.path.display()))?;
         std::fs::create_dir_all(folder)
             .with_context(|| format!("could not create {}", folder.display()))?;
         let lock_path = self.path.with_extension("json.lock");

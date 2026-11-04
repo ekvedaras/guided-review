@@ -175,7 +175,10 @@ impl EvalStore {
 
     pub fn add(&self, pr: &PullRequestUrl, note: &str) -> anyhow::Result<()> {
         let path = self.note_path(pr);
-        std::fs::create_dir_all(path.parent().expect("note path has a folder"))?;
+        let folder = path
+            .parent()
+            .with_context(|| format!("{} has no folder to write into", path.display()))?;
+        std::fs::create_dir_all(folder)?;
         std::fs::write(&path, format!("{}\n", note.trim()))
             .with_context(|| format!("could not write {}", path.display()))
     }
