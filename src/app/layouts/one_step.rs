@@ -1024,17 +1024,24 @@ impl OneStepLayout {
                 .into_any_element()
             }
             PageRow::NoChangeSinceRead => no_change_since_read_row(&colors).into_any_element(),
-            PageRow::BinaryFile { piece, link } => {
-                binary_file_row(&colors, format!("binary-{piece}").into(), link, cx)
-                    .into_any_element()
-            }
+            PageRow::BinaryFile(binary) => binary_file_row(
+                &colors,
+                format!("binary-{}", binary.piece).into(),
+                binary.link.clone(),
+                cx,
+            )
+            .into_any_element(),
             PageRow::Image { path, .. } => piece_row(&colors)
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
             PageRow::OnlyWhitespace => only_whitespace_row(&colors).into_any_element(),
-            PageRow::HunkGap { id, more } => {
-                hunk_gap(&colors, id, more, self.on_more_context(cx)).into_any_element()
-            }
+            PageRow::HunkGap(gap) => hunk_gap(
+                &colors,
+                gap.id.clone(),
+                gap.more.clone(),
+                self.on_more_context(cx),
+            )
+            .into_any_element(),
             PageRow::Line(line) => {
                 let is_selected = selected.is_some_and(|rows| rows.contains(index, &line.location));
                 let code_selection = self

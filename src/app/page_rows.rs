@@ -97,6 +97,17 @@ pub struct PieceHeading {
     pub code_link: Option<CodeLink>,
 }
 
+pub struct BinaryFileRow {
+    pub piece: SharedString,
+    pub link: CodeLink,
+}
+
+pub struct HunkGapRow {
+    pub id: SharedString,
+    pub more: Option<MoreContext>,
+}
+
+/// Rows are stored per line of a page, so a payload much bigger than a pointer goes behind an `Rc`.
 #[derive(Clone)]
 pub enum PageRow {
     SummaryTitle(SharedString),
@@ -118,20 +129,14 @@ pub enum PageRow {
     PieceMarker(Rc<PieceHeading>),
     /// In the change since the read, a piece without lines was not touched since.
     NoChangeSinceRead,
-    BinaryFile {
-        piece: SharedString,
-        link: CodeLink,
-    },
+    BinaryFile(Rc<BinaryFileRow>),
     /// The pictures of an image file; comments on the whole file hang under it.
     Image {
         path: SharedString,
         is_loaded: bool,
     },
     OnlyWhitespace,
-    HunkGap {
-        id: SharedString,
-        more: Option<MoreContext>,
-    },
+    HunkGap(Rc<HunkGapRow>),
     Line(Rc<DiffRowLine>),
     /// Under its line inside the piece box, or after the code.
     Thread {
@@ -147,7 +152,7 @@ pub enum PageRow {
     Composer {
         place: Rc<CommentPlace>,
         text_lines: usize,
-        problem: Option<String>,
+        problem: Option<Rc<str>>,
         is_sending: bool,
     },
     /// The ask button under the last of the lines that have Asks.
@@ -195,17 +200,17 @@ impl PageRow {
                 heading.piece.hash(&mut hasher);
                 heading.repin_label.hash(&mut hasher);
             }
-            Self::BinaryFile { piece, link } => {
-                piece.hash(&mut hasher);
-                link.hash(&mut hasher);
+            Self::BinaryFile(binary) => {
+                binary.piece.hash(&mut hasher);
+                binary.link.hash(&mut hasher);
             }
             Self::Image { path, is_loaded } => {
                 path.hash(&mut hasher);
                 is_loaded.hash(&mut hasher);
             }
-            Self::HunkGap { id, more } => {
-                id.hash(&mut hasher);
-                more.is_some().hash(&mut hasher);
+            Self::HunkGap(gap) => {
+                gap.id.hash(&mut hasher);
+                gap.more.is_some().hash(&mut hasher);
             }
             Self::Line(line) => {
                 line.location.path.hash(&mut hasher);
@@ -784,10 +789,10 @@ impl RowsBuilder<'_> {
                 self.rows.push(PageRow::NoChangeSinceRead);
             }
             if let Some(link) = piece.binary_file.clone() {
-                self.rows.push(PageRow::BinaryFile {
+                self.rows.push(PageRow::BinaryFile(Rc::new(BinaryFileRow {
                     piece: piece.id.to_string().into(),
                     link,
-                });
+                })));
             }
             if piece.is_image {
                 let path = piece.id.path.clone();
@@ -826,10 +831,10 @@ impl RowsBuilder<'_> {
         let shows_markers = !block.has_one_piece();
         for (index, hunk) in block.hunks.iter().enumerate() {
             if index > 0 || hunk.more_above.is_some() {
-                self.rows.push(PageRow::HunkGap {
+                self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow {
                     id: format!("{row_id}-above-{index}").into(),
                     more: hunk.more_above.clone(),
-                });
+                })));
             }
             for line in &hunk.rows {
                 if shows_markers
@@ -854,10 +859,10 @@ impl RowsBuilder<'_> {
                 self.hang(here);
             }
             if hunk.more_below.is_some() {
-                self.rows.push(PageRow::HunkGap {
+                self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow {
                     id: format!("{row_id}-below-{index}").into(),
                     more: hunk.more_below.clone(),
-                });
+                })));
             }
         }
         self.rows.push(PageRow::PieceEnd);
@@ -935,7 +940,10 @@ fn composer_row(place: CommentPlace, review: &Review, facts: &RowFacts) -> PageR
         .map_or("", |draft| draft.body.as_str());
     PageRow::Composer {
         text_lines: line_count(text),
-        problem: facts.comment_problems.get(&place).cloned(),
+        problem: facts
+            .comment_problems
+            .get(&place)
+            .map(|problem| Rc::from(problem.as_str())),
         is_sending: facts.sending_comments.contains(&place),
         place: Rc::new(place),
     }
@@ -951,6 +959,11 @@ mod tests {
     use super::*;
     use crate::viewer::{Reaction, ReactionCount, ReviewThread, Side, ThreadComment};
     use std::sync::Arc;
+
+    #[test]
+    fn a_page_row_stays_small_since_there_is_one_per_line() {
+        assert!(size_of::<PageRow>() <= 56, "{} bytes", size_of::<PageRow>());
+    }
 
     fn box_at(path: &str, side: Side, line: usize) -> UnderLine {
         let at = LineLocation {
@@ -1091,7 +1104,7 @@ mod tests {
         PageRow::Composer {
             place: Rc::new(CommentPlace::on_file("a.rs")),
             text_lines: line_count(text),
-            problem: problem.map(str::to_owned),
+            problem: problem.map(Rc::from),
             is_sending: false,
         }
         .key()

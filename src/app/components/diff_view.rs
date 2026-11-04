@@ -77,11 +77,10 @@ impl DiffRowLine {
         let highlights = line
             .spans
             .iter()
-            .filter(|span| {
-                line.text.is_char_boundary(span.range.start)
-                    && line.text.is_char_boundary(span.range.end)
+            .map(|span| (span.range(), span.capture))
+            .filter(|(range, _)| {
+                line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
             })
-            .map(|span| (span.range.clone(), span.capture))
             .collect();
         Self {
             takes_comment: line.takes_comment(),

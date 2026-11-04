@@ -332,11 +332,12 @@ fn code_block(colors: &Colors, text: &str, spans: &[Vec<Span>]) -> AnyElement {
             let highlights: Vec<_> = spans
                 .iter()
                 .filter(|span| {
-                    line.is_char_boundary(span.range.start) && line.is_char_boundary(span.range.end)
+                    let range = span.range();
+                    line.is_char_boundary(range.start) && line.is_char_boundary(range.end)
                 })
                 .map(|span| {
                     (
-                        span.range.clone(),
+                        span.range(),
                         HighlightStyle {
                             color: Some(colors.code(span.capture).into()),
                             ..Default::default()

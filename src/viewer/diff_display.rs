@@ -49,7 +49,7 @@ impl FilesAtHeadRequest {
             .iter()
             .filter_map(|path| {
                 let text = source.file_at(&self.head, path).ok()?;
-                Some((path.clone(), text.lines().map(str::to_owned).collect()))
+                Some((path.clone(), FileText::of(text)))
             })
             .collect();
         FilesAtHead {
@@ -62,7 +62,47 @@ impl FilesAtHeadRequest {
 #[derive(Debug, Default)]
 pub struct FilesAtHead {
     head: Sha,
-    files: HashMap<String, Vec<String>>,
+    files: HashMap<String, FileText>,
+}
+
+/// A file's text and where each of its lines is, so the lines of every changed file are not each a `String`.
+#[derive(Debug, Default)]
+struct FileText {
+    text: String,
+    /// Byte ranges of the lines, without their line breaks, as `str::lines` cuts them.
+    lines: Box<[(u32, u32)]>,
+}
+
+impl FileText {
+    fn of(text: String) -> Self {
+        let mut lines = Vec::new();
+        let mut at = 0;
+        for piece in text.split_inclusive('\n') {
+            let line = piece
+                .strip_suffix('\n')
+                .map_or(piece, |line| line.strip_suffix('\r').unwrap_or(line));
+            let (Ok(start), Ok(end)) = (u32::try_from(at), u32::try_from(at + line.len())) else {
+                break;
+            };
+            lines.push((start, end));
+            at += piece.len();
+        }
+        Self {
+            text,
+            lines: lines.into(),
+        }
+    }
+
+    fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// `number` counts from 1.
+    fn line(&self, number: usize) -> Option<&str> {
+        let &(start, end) = self.lines.get(number.checked_sub(1)?)?;
+        self.text
+            .get(usize::try_from(start).ok()?..usize::try_from(end).ok()?)
+    }
 }
 
 impl FilesAtHead {
@@ -72,12 +112,10 @@ impl FilesAtHead {
 
     /// Lines `first` to `last` (1-based, both included) of a file at head; none when the file was not read.
     pub(super) fn lines(&self, path: &str, first: usize, last: usize) -> Vec<String> {
-        self.files.get(path).map_or_else(Vec::new, |lines| {
-            lines
-                .iter()
-                .skip(first.saturating_sub(1))
-                .take((last + 1).saturating_sub(first))
-                .cloned()
+        self.files.get(path).map_or_else(Vec::new, |file| {
+            (first.max(1)..=last)
+                .map_while(|number| file.line(number))
+                .map(str::to_owned)
                 .collect()
         })
     }
@@ -130,7 +168,7 @@ impl DiffDisplay<'_> {
     ) -> Vec<DiffHunk> {
         let file_lines = FileLines {
             file,
-            at_head: self.files_at_head.files.get(&file.path).map(Vec::as_slice),
+            at_head: self.files_at_head.files.get(&file.path),
             changed_at_head: file
                 .hunks
                 .iter()
@@ -293,7 +331,7 @@ struct Segment {
 
 struct FileLines<'a> {
     file: &'a ChangedFile,
-    at_head: Option<&'a [String]>,
+    at_head: Option<&'a FileText>,
     changed_at_head: BTreeSet<usize>,
     highlights: &'a Highlights,
     links: &'a CodeLinks<'a>,
@@ -304,7 +342,7 @@ struct FileLines<'a> {
 impl FileLines<'_> {
     fn is_unchanged(&self, line: usize) -> bool {
         self.at_head
-            .is_some_and(|lines| line >= 1 && line <= lines.len())
+            .is_some_and(|file| line >= 1 && line <= file.line_count())
             && !self.changed_at_head.contains(&line)
             && self
                 .within
@@ -350,8 +388,8 @@ impl FileLines<'_> {
     fn context_row(&self, head_line: usize) -> DiffLine {
         let text = self
             .at_head
-            .and_then(|lines| lines.get(head_line - 1))
-            .cloned()
+            .and_then(|file| file.line(head_line))
+            .map(str::to_owned)
             .unwrap_or_default();
         self.changed_row(
             Side::Head,
@@ -382,6 +420,25 @@ impl FileLines<'_> {
                 .spans(side, &self.file.path, line.number)
                 .to_vec(),
             is_in_change_since_read: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileText;
+
+    #[test]
+    fn a_file_text_cuts_lines_as_str_lines_does() {
+        for text in ["", "a", "a\n", "a\r\nb", "a\n\nb\r\n", "é\nx\r", "\n\n"] {
+            let file = FileText::of(text.to_owned());
+
+            let lines: Vec<&str> = (1..=file.line_count())
+                .filter_map(|n| file.line(n))
+                .collect();
+            assert_eq!(lines, text.lines().collect::<Vec<_>>(), "{text:?}");
+            assert_eq!(file.line(0), None);
+            assert_eq!(file.line(file.line_count() + 1), None);
         }
     }
 }

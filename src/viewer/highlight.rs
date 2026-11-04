@@ -98,11 +98,69 @@ impl Capture {
     }
 }
 
-/// A coloured stretch of one line: byte offsets into that line's text.
+/// A coloured stretch of one line: byte offsets into that line's text. Kept for every line of every
+/// changed file, so the offsets are `u32`: 12 bytes a span instead of 24.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Span {
-    pub range: Range<usize>,
+    start: u32,
+    end: u32,
     pub capture: Capture,
+}
+
+impl Span {
+    /// None for a line longer than 4 GiB, which stays plain.
+    fn new(range: Range<usize>, capture: Capture) -> Option<Self> {
+        Some(Self {
+            start: u32::try_from(range.start).ok()?,
+            end: u32::try_from(range.end).ok()?,
+            capture,
+        })
+    }
+
+    pub fn range(&self) -> Range<usize> {
+        let at = |offset: u32| usize::try_from(offset).unwrap_or(usize::MAX);
+        at(self.start)..at(self.end)
+    }
+}
+
+/// The spans of every line of one file in one allocation, instead of one `Vec` per line.
+#[derive(Debug, Default)]
+struct FileSpans {
+    spans: Box<[Span]>,
+    /// Where each line's spans end in `spans`.
+    line_ends: Box<[u32]>,
+}
+
+impl FileSpans {
+    fn of(lines: Vec<Vec<Span>>) -> Self {
+        let mut line_ends = Vec::with_capacity(lines.len());
+        let mut spans = Vec::with_capacity(lines.iter().map(Vec::len).sum());
+        for line in lines {
+            spans.extend(line);
+            line_ends.push(u32::try_from(spans.len()).unwrap_or(u32::MAX));
+        }
+        Self {
+            spans: spans.into(),
+            line_ends: line_ends.into(),
+        }
+    }
+
+    /// `index` counts from 0.
+    fn line(&self, index: usize) -> &[Span] {
+        let end_of = |line: usize| {
+            self.line_ends
+                .get(line)
+                .and_then(|&end| usize::try_from(end).ok())
+        };
+        let start = match index.checked_sub(1) {
+            Some(previous) => end_of(previous),
+            None => Some(0),
+        };
+        match (start, end_of(index)) {
+            (Some(start), Some(end)) => self.spans.get(start..end).unwrap_or(&[]),
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -326,11 +384,10 @@ fn highlight_file(configuration: &HighlightConfiguration, source: &str) -> Vec<V
                     else {
                         break;
                     };
-                    if stop > at {
-                        spans.push(Span {
-                            range: at - line_start..stop - line_start,
-                            capture,
-                        });
+                    if stop > at
+                        && let Some(span) = Span::new(at - line_start..stop - line_start, capture)
+                    {
+                        spans.push(span);
                     }
                     at = stop.max(line_end) + 1;
                 }
@@ -417,7 +474,7 @@ impl HighlightRequest {
             };
             side.insert(
                 target.shown_path.clone(),
-                highlight_file(configuration, &text),
+                FileSpans::of(highlight_file(configuration, &text)),
             );
         }
         Highlights {
@@ -434,8 +491,8 @@ pub struct Highlights {
     base_sha: Sha,
     head_sha: Sha,
     /// Spans per line, by the path the review shows the file under; one map per side, so a lookup borrows the path.
-    base: HashMap<String, Vec<Vec<Span>>>,
-    head: HashMap<String, Vec<Vec<Span>>>,
+    base: HashMap<String, FileSpans>,
+    head: HashMap<String, FileSpans>,
 }
 
 impl Highlights {
@@ -450,8 +507,7 @@ impl Highlights {
         };
         files
             .get(path)
-            .and_then(|lines| lines.get(line.wrapping_sub(1)))
-            .map_or(&[], Vec::as_slice)
+            .map_or(&[], |lines| lines.line(line.wrapping_sub(1)))
     }
 }
 
@@ -477,4 +533,29 @@ pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
     }
     lines.resize(line_count, Vec::new());
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(range: Range<usize>) -> Span {
+        Span::new(range, Capture::Keyword).unwrap()
+    }
+
+    #[test]
+    fn a_span_is_twelve_bytes() {
+        assert_eq!(size_of::<Span>(), 12);
+    }
+
+    #[test]
+    fn each_line_gets_its_own_spans_back_from_the_one_list() {
+        let file = FileSpans::of(vec![vec![span(0..2)], vec![], vec![span(1..3), span(4..5)]]);
+
+        assert_eq!(file.line(0), [span(0..2)]);
+        assert_eq!(file.line(1), [] as [Span; 0]);
+        assert_eq!(file.line(2), [span(1..3), span(4..5)]);
+        assert_eq!(file.line(3), [] as [Span; 0]);
+        assert_eq!(file.line(usize::MAX), [] as [Span; 0]);
+    }
 }
