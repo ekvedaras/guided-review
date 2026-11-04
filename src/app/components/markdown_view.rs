@@ -14,7 +14,7 @@ use std::sync::Arc;
 use gpui::Global;
 
 use crate::app::code_links::open_link;
-use crate::viewer::{Block, Capture, Markdown, Run, Span, SuggestionDiff};
+use crate::viewer::{Block, Capture, Markdown, Run, Span};
 
 use super::palette::{CODE_FONT, Colors};
 
@@ -75,13 +75,160 @@ impl<T> ParsedTexts<T> {
 }
 
 thread_local! {
-    static PARSED_MARKDOWN: RefCell<ParsedTexts<Markdown>> = RefCell::new(ParsedTexts::new());
+    static PARSED_MARKDOWN: RefCell<ParsedTexts<PreparedMarkdown>> = RefCell::new(ParsedTexts::new());
     static PARSED_INLINE: RefCell<ParsedTexts<InlineText>> = RefCell::new(ParsedTexts::new());
 }
 
 /// The markdown of `source`, parsed on its first draw and shared after that.
-pub fn parsed_markdown(source: &str) -> Rc<Markdown> {
-    PARSED_MARKDOWN.with_borrow_mut(|parsed| parsed.get_or_parse(source, Markdown::parse))
+pub fn parsed_markdown(source: &str) -> Rc<PreparedMarkdown> {
+    PARSED_MARKDOWN.with_borrow_mut(|parsed| {
+        parsed.get_or_parse(source, |source| {
+            PreparedMarkdown::of(Markdown::parse(source))
+        })
+    })
+}
+
+/// A parsed body with everything drawing it needs made once: text joined, headings made bold, code lines
+/// cut and their colours checked, a suggestion's added lines split. Drawing only borrows it.
+#[derive(Debug, PartialEq)]
+pub struct PreparedMarkdown {
+    pub(super) markdown: Markdown,
+    blocks: Vec<PreparedBlock>,
+}
+
+impl PreparedMarkdown {
+    pub fn of(markdown: Markdown) -> Self {
+        let blocks = prepare(&markdown.blocks);
+        Self { markdown, blocks }
+    }
+}
+
+impl std::hash::Hash for PreparedMarkdown {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.markdown.hash(state);
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum PreparedBlock {
+    Text {
+        text: Rc<InlineText>,
+        scale: f32,
+    },
+    List {
+        first_number: Option<u64>,
+        items: Vec<Vec<Self>>,
+    },
+    Code {
+        lines: Vec<CodeLine>,
+    },
+    /// Drawn as a diff against the commented lines when there are some, as plain code when not.
+    Suggestion {
+        added: Vec<SharedString>,
+        lines: Vec<CodeLine>,
+    },
+    Quote(Vec<Self>),
+    Details {
+        summary: Rc<InlineText>,
+        body: Vec<Self>,
+    },
+    Rule,
+}
+
+#[derive(Debug, PartialEq)]
+struct CodeLine {
+    text: SharedString,
+    /// Only the colours that cut the line on char boundaries.
+    highlights: Vec<(Range<usize>, Capture)>,
+}
+
+fn prepare(blocks: &[Block]) -> Vec<PreparedBlock> {
+    blocks.iter().map(prepare_block).collect()
+}
+
+fn prepare_block(block: &Block) -> PreparedBlock {
+    match block {
+        Block::Paragraph(runs) => PreparedBlock::Text {
+            text: Rc::new(InlineText::of(runs)),
+            scale: 1.0,
+        },
+        Block::Heading { level, text } => {
+            let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0]
+                .get(usize::from(level.saturating_sub(1)))
+                .copied()
+                .unwrap_or(1.0);
+            let bold: Vec<Run> = text
+                .iter()
+                .map(|run| Run {
+                    bold: true,
+                    ..run.clone()
+                })
+                .collect();
+            PreparedBlock::Text {
+                text: Rc::new(InlineText::of(&bold)),
+                scale,
+            }
+        }
+        Block::List {
+            first_number,
+            items,
+        } => PreparedBlock::List {
+            first_number: *first_number,
+            items: items.iter().map(|item| prepare(item)).collect(),
+        },
+        Block::Code {
+            language,
+            text,
+            spans,
+        } => {
+            let lines = code_lines(text, spans);
+            if language.as_deref() == Some("suggestion") {
+                PreparedBlock::Suggestion {
+                    added: text
+                        .lines()
+                        .map(|line| SharedString::from(line.to_owned()))
+                        .collect(),
+                    lines,
+                }
+            } else {
+                PreparedBlock::Code { lines }
+            }
+        }
+        Block::Quote(inner) => PreparedBlock::Quote(prepare(inner)),
+        Block::Details { summary, body } => PreparedBlock::Details {
+            summary: Rc::new(InlineText::of(&details_title(summary))),
+            body: prepare(body),
+        },
+        Block::Rule => PreparedBlock::Rule,
+    }
+}
+
+fn details_title(summary: &[Run]) -> Vec<Run> {
+    if summary.is_empty() {
+        vec![Run {
+            text: "Details".into(),
+            ..Run::default()
+        }]
+    } else {
+        summary.to_vec()
+    }
+}
+
+fn code_lines(text: &str, spans: &[Vec<Span>]) -> Vec<CodeLine> {
+    text.lines()
+        .zip(spans)
+        .map(|(line, spans)| CodeLine {
+            text: SharedString::from(line.to_owned()),
+            highlights: spans
+                .iter()
+                .filter(|span| {
+                    let range = span.range();
+                    line.is_char_boundary(range.start) && line.is_char_boundary(range.end)
+                })
+                .map(|span| (span.range(), span.capture))
+                .collect(),
+        })
+        .collect()
 }
 
 fn parsed_inline(source: &str) -> Rc<InlineText> {
@@ -97,13 +244,13 @@ fn parsed_inline(source: &str) -> Rc<InlineText> {
 #[derive(IntoElement)]
 pub struct MarkdownView {
     key: SharedString,
-    markdown: Rc<Markdown>,
+    markdown: Rc<PreparedMarkdown>,
     /// The lines the comment is on, so a suggestion block shows as a diff against them.
-    commented_lines: Arc<[String]>,
+    commented_lines: Arc<[Arc<str>]>,
 }
 
 impl MarkdownView {
-    pub fn new(key: impl Into<SharedString>, markdown: Rc<Markdown>) -> Self {
+    pub fn new(key: impl Into<SharedString>, markdown: Rc<PreparedMarkdown>) -> Self {
         Self {
             key: key.into(),
             markdown,
@@ -111,7 +258,7 @@ impl MarkdownView {
         }
     }
 
-    pub fn on_lines(mut self, commented_lines: Arc<[String]>) -> Self {
+    pub fn on_lines(mut self, commented_lines: Arc<[Arc<str>]>) -> Self {
         self.commented_lines = commented_lines;
         self
     }
@@ -119,50 +266,26 @@ impl MarkdownView {
 
 impl RenderOnce for MarkdownView {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let colors = Colors::active(cx);
-        if self.commented_lines.is_empty() {
-            return blocks(&self.markdown.blocks, &self.key, window, cx);
-        }
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .children(
-                self.markdown
-                    .blocks
-                    .iter()
-                    .enumerate()
-                    .map(|(index, block)| match block {
-                        Block::Code {
-                            language: Some(language),
-                            text,
-                            ..
-                        } if language == "suggestion" => suggestion_view(
-                            &colors,
-                            &SuggestionDiff::of(&self.commented_lines, text),
-                        ),
-                        _ => block_element(block, &format!("{}-{index}", self.key), window, cx),
-                    }),
-            )
-            .into_any_element()
+        blocks(
+            &self.markdown.blocks,
+            &self.key,
+            &self.commented_lines,
+            window,
+            cx,
+        )
     }
 }
 
-fn suggestion_view(colors: &Colors, diff: &SuggestionDiff) -> AnyElement {
-    let rows = |lines: &[String], sign: &'static str, background: gpui::Rgba| {
-        lines
-            .iter()
-            .map(|line| {
-                div()
-                    .flex()
-                    .gap_2()
-                    .bg(background)
-                    .whitespace_nowrap()
-                    .min_h(px(14.))
-                    .child(div().flex_none().w(px(12.)).child(sign))
-                    .child(line.clone())
-            })
-            .collect::<Vec<_>>()
+fn suggestion_view(colors: &Colors, removed: &[Arc<str>], added: &[SharedString]) -> AnyElement {
+    let row = |line: SharedString, sign: &'static str, background: gpui::Rgba| {
+        div()
+            .flex()
+            .gap_2()
+            .bg(background)
+            .whitespace_nowrap()
+            .min_h(px(14.))
+            .child(div().flex_none().w(px(12.)).child(sign))
+            .child(line)
     };
     div()
         .flex()
@@ -181,44 +304,56 @@ fn suggestion_view(colors: &Colors, diff: &SuggestionDiff) -> AnyElement {
                 .text_color(colors.muted_text)
                 .child("Suggested change"),
         )
-        .children(rows(&diff.removed, "-", colors.removed_line))
-        .children(rows(&diff.added, "+", colors.added_line))
-        .into_any_element()
-}
-
-fn blocks(items: &[Block], key: &str, window: &mut Window, cx: &mut App) -> AnyElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap_2()
+        .children(removed.iter().map(|line| {
+            row(
+                SharedString::from(Arc::clone(line)),
+                "-",
+                colors.removed_line,
+            )
+        }))
         .children(
-            items
+            added
                 .iter()
-                .enumerate()
-                .map(|(index, block)| block_element(block, &format!("{key}-{index}"), window, cx)),
+                .map(|line| row(line.clone(), "+", colors.added_line)),
         )
         .into_any_element()
 }
 
-fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) -> AnyElement {
+/// A suggestion shows as a diff only among the top-level blocks of a body, where `commented_lines` belong.
+fn blocks(
+    items: &[PreparedBlock],
+    key: &str,
+    commented_lines: &[Arc<str>],
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(items.iter().enumerate().map(|(index, block)| {
+            block_element(
+                block,
+                &format!("{key}-{index}"),
+                commented_lines,
+                window,
+                cx,
+            )
+        }))
+        .into_any_element()
+}
+
+fn block_element(
+    block: &PreparedBlock,
+    key: &str,
+    commented_lines: &[Arc<str>],
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let colors = Colors::active(cx);
     match block {
-        Block::Paragraph(runs) => inline_text(&colors, runs, key, 1.0),
-        Block::Heading { level, text } => {
-            let scale = [1.5, 1.3, 1.15, 1.05, 1.0, 1.0]
-                .get(usize::from(*level - 1))
-                .copied()
-                .unwrap_or(1.0);
-            let heading = text
-                .iter()
-                .map(|run| Run {
-                    bold: true,
-                    ..run.clone()
-                })
-                .collect::<Vec<_>>();
-            inline_text(&colors, &heading, key, scale)
-        }
-        Block::List {
+        PreparedBlock::Text { text, scale } => inline_text(&colors, text, key, *scale),
+        PreparedBlock::List {
             first_number,
             items,
         } => div()
@@ -237,27 +372,35 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     .child(div().flex_1().min_w_0().child(blocks(
                         item,
                         &format!("{key}-{index}"),
+                        &[],
                         window,
                         cx,
                     )))
             }))
             .into_any_element(),
-        Block::Code { text, spans, .. } => code_block(&colors, text, spans),
-        Block::Quote(inner) => div()
+        PreparedBlock::Code { lines } => code_block(&colors, lines),
+        PreparedBlock::Suggestion { added, lines } => {
+            if commented_lines.is_empty() {
+                code_block(&colors, lines)
+            } else {
+                suggestion_view(&colors, commented_lines, added)
+            }
+        }
+        PreparedBlock::Quote(inner) => div()
             .pl_3()
             .border_l_2()
             .border_color(colors.border)
             .text_color(colors.muted_text)
-            .child(blocks(inner, key, window, cx))
+            .child(blocks(inner, key, &[], window, cx))
             .into_any_element(),
-        Block::Details { summary, body } => details(summary, body, key, window, cx),
-        Block::Rule => div().h(px(1.)).bg(colors.border).into_any_element(),
+        PreparedBlock::Details { summary, body } => details(summary, body, key, window, cx),
+        PreparedBlock::Rule => div().h(px(1.)).bg(colors.border).into_any_element(),
     }
 }
 
 fn details(
-    summary: &[Run],
-    body: &[Block],
+    summary: &Rc<InlineText>,
+    body: &[PreparedBlock],
     key: &str,
     window: &mut Window,
     cx: &mut App,
@@ -267,14 +410,6 @@ fn details(
         .try_global::<OpenDetails>()
         .is_some_and(|details| details.0.contains(key));
     let toggled_key = key.to_owned();
-    let title = if summary.is_empty() {
-        vec![Run {
-            text: "Details".into(),
-            ..Run::default()
-        }]
-    } else {
-        summary.to_vec()
-    };
     let header = div()
         .id(SharedString::from(format!("details-toggle-{key}")))
         .flex()
@@ -290,7 +425,7 @@ fn details(
         .child(div().flex_none().child(if open { "▾" } else { "▸" }))
         .child(div().flex_1().min_w_0().child(inline_text(
             &colors,
-            &title,
+            summary,
             &format!("{key}-summary"),
             1.0,
         )));
@@ -299,7 +434,7 @@ fn details(
         .flex_col()
         .gap_2()
         .child(header)
-        .when_open(open, blocks(body, key, window, cx))
+        .when_open(open, blocks(body, key, &[], window, cx))
         .into_any_element()
 }
 
@@ -315,7 +450,7 @@ trait WhenOpen: ParentElement + Sized {
 
 impl<E: ParentElement> WhenOpen for E {}
 
-fn code_block(colors: &Colors, text: &str, spans: &[Vec<Span>]) -> AnyElement {
+fn code_block(colors: &Colors, lines: &[CodeLine]) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -328,18 +463,15 @@ fn code_block(colors: &Colors, text: &str, spans: &[Vec<Span>]) -> AnyElement {
         .font_family(CODE_FONT)
         .text_sm()
         .overflow_hidden()
-        .children(text.lines().zip(spans).map(|(line, spans)| {
-            let highlights: Vec<_> = spans
+        .children(lines.iter().map(|line| {
+            let highlights: Vec<_> = line
+                .highlights
                 .iter()
-                .filter(|span| {
-                    let range = span.range();
-                    line.is_char_boundary(range.start) && line.is_char_boundary(range.end)
-                })
-                .map(|span| {
+                .map(|(range, capture)| {
                     (
-                        span.range(),
+                        range.clone(),
                         HighlightStyle {
-                            color: Some(colors.code(span.capture).into()),
+                            color: Some(colors.code(*capture).into()),
                             ..Default::default()
                         },
                     )
@@ -348,7 +480,7 @@ fn code_block(colors: &Colors, text: &str, spans: &[Vec<Span>]) -> AnyElement {
             div()
                 .whitespace_nowrap()
                 .min_h(px(14.))
-                .child(StyledText::new(line.to_owned()).with_highlights(highlights))
+                .child(StyledText::new(line.text.clone()).with_highlights(highlights))
         }))
         .into_any_element()
 }
@@ -402,10 +534,10 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
     runs
 }
 
-fn inline_text(colors: &Colors, runs: &[Run], key: &str, scale: f32) -> AnyElement {
+fn inline_text(colors: &Colors, text: &Rc<InlineText>, key: &str, scale: f32) -> AnyElement {
     div()
         .text_size(gpui::rems(scale))
-        .child(styled_text(colors, &Rc::new(InlineText::of(runs)), key))
+        .child(styled_text(colors, text, key))
         .into_any_element()
 }
 
@@ -589,7 +721,61 @@ mod tests {
         assert!(Rc::ptr_eq(&first, &parsed_markdown("**one**")));
         let changed = parsed_markdown("**two**");
         assert!(!Rc::ptr_eq(&first, &changed));
-        assert_eq!(*changed, Markdown::parse("**two**"));
+        assert_eq!(changed.markdown, Markdown::parse("**two**"));
+    }
+
+    fn prepared(source: &str) -> Vec<PreparedBlock> {
+        PreparedMarkdown::of(Markdown::parse(source)).blocks
+    }
+
+    #[test]
+    fn a_heading_is_prepared_bold_and_a_paragraph_as_it_is() {
+        let [heading, paragraph] = &prepared("## Title\n\nplain *soft*")[..] else {
+            panic!("expected a heading and a paragraph");
+        };
+
+        let (
+            PreparedBlock::Text { text: heading, .. },
+            PreparedBlock::Text {
+                text: paragraph, ..
+            },
+        ) = (heading, paragraph)
+        else {
+            panic!("expected text blocks");
+        };
+        assert_eq!(heading.text.as_ref(), "Title");
+        assert!(heading.styled.iter().all(|(_, run)| run.bold));
+        assert_eq!(paragraph.text.as_ref(), "plain soft");
+        assert!(paragraph.styled.iter().all(|(_, run)| !run.bold));
+    }
+
+    #[test]
+    fn a_suggestion_is_prepared_with_the_lines_it_adds() {
+        let blocks = prepared("```suggestion\nnew a\nnew b\n```");
+
+        let [PreparedBlock::Suggestion { added, .. }] = &blocks[..] else {
+            panic!("expected a suggestion");
+        };
+        assert_eq!(
+            added.iter().map(SharedString::as_ref).collect::<Vec<_>>(),
+            ["new a", "new b"]
+        );
+    }
+
+    #[test]
+    fn a_code_fence_is_prepared_a_line_at_a_time() {
+        let blocks = prepared("```php\n$a = 1;\n$b = 2;\n```");
+
+        let [PreparedBlock::Code { lines }] = &blocks[..] else {
+            panic!("expected a code block");
+        };
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.text.as_ref())
+                .collect::<Vec<_>>(),
+            ["$a = 1;", "$b = 2;"]
+        );
     }
 
     #[test]

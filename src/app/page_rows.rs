@@ -16,15 +16,15 @@ use std::rc::Rc;
 use gpui::SharedString;
 
 use crate::app::components::diff_view::{DiffRowLine, PieceLabel};
-use crate::app::components::markdown_view::OpenDetails;
+use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 use crate::app::components::step_notes::StepNotes;
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, CommentProblem, FileBlock, JumpPlace, JumpTarget, LineKind,
-    LineLocation, Markdown, MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review,
-    RowSelection, SafetyNetPage, Screen, StepId, StepPage, ThreadView,
+    LineLocation, MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection,
+    SafetyNetPage, Screen, StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -115,7 +115,7 @@ pub struct HunkGapRow {
 pub enum PageRow {
     SummaryTitle(SharedString),
     SummaryBullet(SharedString),
-    PrDescription(Rc<Markdown>),
+    PrDescription(Rc<PreparedMarkdown>),
     StepHeading(Rc<StepHeading>),
     StepWhy(SharedString),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
@@ -508,7 +508,7 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
     rows.extend(
         review
             .pr_description()
-            .map(|description| PageRow::PrDescription(Rc::new(description))),
+            .map(|description| PageRow::PrDescription(Rc::new(PreparedMarkdown::of(description)))),
     );
     rows.push(PageRow::Toolbar(Rc::new(Toolbar {
         ask: Some(AskAt {

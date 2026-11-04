@@ -32,7 +32,9 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::icon::{Icon, icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
-use crate::app::components::markdown_view::{InlineMarkdown, MarkdownView, parsed_markdown};
+use crate::app::components::markdown_view::{
+    InlineMarkdown, MarkdownView, PreparedMarkdown, parsed_markdown,
+};
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::refresh_banner::RefreshBanner;
@@ -52,8 +54,8 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
-    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
+    Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, MoreContext, NextScreen, Place,
+    QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
 };
 
 actions!(
@@ -1113,7 +1115,7 @@ impl OneStepLayout {
 
     fn pr_description(
         &self,
-        description: Rc<Markdown>,
+        description: Rc<PreparedMarkdown>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = Colors::active(cx);

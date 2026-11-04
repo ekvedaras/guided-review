@@ -10,7 +10,7 @@ use guided_review::tour::Tour;
 use guided_review::viewer::{
     CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
     ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile, ReviewThread,
-    SendMode, Side, SuggestionDiff, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    SendMode, Side, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -506,25 +506,6 @@ fn suggest_change_is_not_offered_when_removed_lines_are_selected() {
 }
 
 #[test]
-fn a_suggestion_shows_as_the_commented_lines_out_and_the_new_text_in() {
-    let diff = SuggestionDiff::of(
-        &["line 9".to_owned(), "line ten".to_owned()],
-        "line nine\nline 10\n",
-    );
-
-    assert_eq!(diff.removed, ["line 9", "line ten"]);
-    assert_eq!(diff.added, ["line nine", "line 10"]);
-}
-
-#[test]
-fn an_empty_suggestion_deletes_the_lines() {
-    let diff = SuggestionDiff::of(&["line ten".to_owned()], "");
-
-    assert_eq!(diff.removed, ["line ten"]);
-    assert_eq!(diff.added, [] as [String; 0]);
-}
-
-#[test]
 fn a_thread_knows_the_lines_a_suggestion_is_against() {
     let pull = Pull::new();
     let mut review = pull.open();
@@ -534,7 +515,8 @@ fn a_thread_knows_the_lines_a_suggestion_is_against() {
 
     let view = review.current_step().unwrap().threads.remove(0);
 
-    assert_eq!(*view.commented_lines, ["line 9", "line ten"]);
+    let lines: Vec<&str> = view.commented_lines.iter().map(|line| &**line).collect();
+    assert_eq!(lines, ["line 9", "line ten"]);
     let Markdown { blocks } = Markdown::parse(&view.thread.comments[0].body);
     assert!(blocks.iter().any(|block| matches!(
         block,

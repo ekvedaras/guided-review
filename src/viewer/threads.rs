@@ -139,7 +139,7 @@ pub struct ThreadView {
     pub anchor: Option<LineLocation>,
     /// The lines of the head the thread is on, for showing suggestions against them.
     /// Empty unless a comment holds a suggestion.
-    pub commented_lines: Arc<[String]>,
+    pub commented_lines: Arc<[Arc<str>]>,
     /// The reply being written in this thread; `Some` means the reply box is open.
     pub reply_draft: Option<String>,
 }
@@ -229,7 +229,7 @@ pub(super) fn views(
         .collect()
 }
 
-fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[String]> {
+fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[Arc<str>]> {
     let has_suggestion = thread
         .comments
         .iter()
@@ -241,7 +241,9 @@ fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[S
                 thread.start_line.unwrap_or(last).into(),
                 last.into(),
             )
-            .into(),
+            .into_iter()
+            .map(Arc::from)
+            .collect(),
         _ => Arc::new([]),
     }
 }
