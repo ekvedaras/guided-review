@@ -28,7 +28,7 @@ fn a_symbol_that_is_empty_or_holds_a_hash_at_or_slash_is_refused() {
             "{symbol:?} was accepted"
         );
     }
-    for text in ["a.php#", "a.php#x@y", "/abs.php#x"] {
+    for text in ["", "/abs.php#x"] {
         assert!(text.parse::<PieceId>().is_err(), "{text:?} was accepted");
     }
 }
@@ -66,4 +66,54 @@ fn an_id_is_written_and_read_as_its_text() {
         serde_json::from_str::<PieceId>("\"app/Order.php#Order::total\"").unwrap(),
         id
     );
+}
+
+const HASH_NAMES: [&str; 4] = ["docs/C#.md", "icons/a#1@2x.png", "#notes.md", "#autosave#"];
+
+#[test]
+fn a_whole_file_id_with_a_hash_in_its_name_is_written_and_read_back_as_itself() {
+    for name in HASH_NAMES {
+        let ids = [
+            PieceId::whole_file(path(name)),
+            PieceId::symbol(path(name), "Intro").unwrap(),
+        ];
+        for id in ids {
+            let written = serde_json::to_string(&id).unwrap();
+            assert_eq!(
+                serde_json::from_str::<PieceId>(&written).unwrap(),
+                id,
+                "{written}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_whole_file_id_without_a_hash_is_written_as_its_path() {
+    assert_eq!(
+        serde_json::to_string(&PieceId::whole_file(path("docs/a b.md"))).unwrap(),
+        "\"docs/a b.md\""
+    );
+}
+
+#[test]
+fn text_written_before_whole_file_ids_were_marked_names_the_whole_file() {
+    for name in HASH_NAMES {
+        let stored: PieceId = serde_json::from_str(&format!("{name:?}")).unwrap();
+        let whole = PieceId::whole_file(path(name));
+
+        assert!(
+            whole.may_be(&stored),
+            "{name} was not read as the whole file"
+        );
+        assert!(stored.may_be(&whole), "{name} does not name the whole file");
+    }
+}
+
+#[test]
+fn a_symbol_id_is_not_taken_for_another_piece() {
+    let total = PieceId::symbol(path("app/Order.php"), "total").unwrap();
+
+    assert!(!total.may_be(&PieceId::whole_file(path("app/Order.php"))));
+    assert!(!total.may_be(&PieceId::symbol(path("app/Order.php"), "tax").unwrap()));
 }

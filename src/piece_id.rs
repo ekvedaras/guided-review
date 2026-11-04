@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -9,7 +10,11 @@ use crate::file_path::FilePath;
 /// Symbol paths never hold `#`, `@` or `/`, so a sub-part can later be appended
 /// after one of them without changing the ids old tour files point at.
 /// `hunk-N` symbols stand for files that could not be cut into symbols.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// A state file holds the id as text. A whole file whose name holds a `#` is written with a
+/// trailing `#` (`docs/C#.md#`), so it cannot be read as the symbol `.md` of `docs/C`.
+/// Ids order by that text, so a saved state lists them as files written before did.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PieceId {
     path: FilePath,
     symbol: Option<String>,
@@ -91,6 +96,30 @@ impl PieceId {
         }
     }
 
+    /// Whether `other` may name this piece: it is this id, or one of the two was read from a
+    /// state file written before whole-file ids were marked, where the whole file `docs/C#.md`
+    /// had the same text as the symbol `.md` of `docs/C`.
+    pub fn may_be(&self, other: &Self) -> bool {
+        self == other
+            || self.is_read_from_plain_text_of(other)
+            || other.is_read_from_plain_text_of(self)
+    }
+
+    fn is_read_from_plain_text_of(&self, whole: &Self) -> bool {
+        whole.symbol.is_none()
+            && whole.path.as_str().contains('#')
+            && whole.path.as_str().parse::<Self>().ok().as_ref() == Some(self)
+    }
+
+    /// The id's text in a state file, in parts: path, separator, symbol.
+    fn written_parts(&self) -> [&str; 3] {
+        match &self.symbol {
+            Some(symbol) => [self.path.as_str(), "#", symbol],
+            None if self.path.as_str().contains('#') => [self.path.as_str(), "#", ""],
+            None => [self.path.as_str(), "", ""],
+        }
+    }
+
     pub fn is_hunk(&self) -> bool {
         self.symbol.as_deref().is_some_and(|symbol| {
             symbol.strip_prefix(HUNK_PREFIX).is_some_and(|number| {
@@ -112,20 +141,42 @@ impl fmt::Display for PieceId {
 impl FromStr for PieceId {
     type Err = InvalidPieceId;
 
-    /// Splits at the last `#` whose right side holds no `/`, so a folder may hold a `#`.
+    /// Reads the text a state file holds. A trailing `#` marks a whole file; otherwise the text
+    /// splits at its last `#` when both sides are valid, so a folder may hold a `#`. What is
+    /// left is a whole file, as text written before the mark was: `icons/a#1@2x.png`, `#notes.md`.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let path_of =
-            |path: &str| FilePath::new(path).map_err(|_refused| InvalidPieceId(text.to_owned()));
-        match text.rsplit_once('#') {
-            Some((path, symbol)) if !symbol.contains('/') => Self::symbol(path_of(path)?, symbol),
-            _ => path_of(text).map(Self::whole_file),
-        }
+        let marked_whole_file = text
+            .strip_suffix('#')
+            .and_then(|path| FilePath::new(path).ok())
+            .map(Self::whole_file);
+        let symbol = || {
+            let (path, symbol) = text.rsplit_once('#')?;
+            Self::symbol(FilePath::new(path).ok()?, symbol).ok()
+        };
+        let whole_file = || FilePath::new(text).ok().map(Self::whole_file);
+        marked_whole_file
+            .or_else(symbol)
+            .or_else(whole_file)
+            .ok_or_else(|| InvalidPieceId(text.to_owned()))
+    }
+}
+
+impl Ord for PieceId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let mine = self.written_parts().into_iter().flat_map(str::bytes);
+        mine.cmp(other.written_parts().into_iter().flat_map(str::bytes))
+    }
+}
+
+impl PartialOrd for PieceId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 impl Serialize for PieceId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
+        serializer.serialize_str(&self.written_parts().concat())
     }
 }
 

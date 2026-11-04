@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use guided_review::claude_cli::ClaudeCli;
+use guided_review::file_path::FilePath;
+use guided_review::pieces::PieceId;
 use guided_review::pull_request::Sha;
 use guided_review::repin::RepinStatus;
 use guided_review::viewer::{AgentLaunch, AgentLauncher, Asks, Place, ReviewStateFile};
@@ -261,4 +263,108 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     assert_eq!(saved["asks"][1]["place"], written["asks"][1]["place"]);
     let reloaded = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
     assert_eq!(reloaded.all(), asks.all());
+}
+
+#[test]
+fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
+    let home = TempDir::new().unwrap();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let written = json!({
+        "asks": [{
+            "id": 1,
+            "place": {"kind": "piece", "step": "docs", "piece": "docs/C#.md"},
+            "head": "abc"
+        }],
+        "last_repin": {
+            "from_base": "b1",
+            "from_head": "h1",
+            "to_base": "b2",
+            "to_head": "h2",
+            "pieces": {
+                "docs/C#.md": "changed",
+                "icons/a#1@2x.png": "new",
+                "#notes.md": "changed",
+                "/not/a/repo/path": "new"
+            },
+            "gone_by_step": {"docs": ["#old.md", ""]}
+        }
+    });
+    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, written.to_string()).unwrap();
+
+    let state = file.load().unwrap();
+    let record = state.last_repin().unwrap();
+    let whole = |name: &str| PieceId::whole_file(FilePath::new(name).unwrap());
+    assert_eq!(
+        record.status_of(&whole("docs/C#.md")),
+        Some(RepinStatus::Changed)
+    );
+    assert_eq!(
+        record.status_of(&whole("icons/a#1@2x.png")),
+        Some(RepinStatus::New)
+    );
+    assert_eq!(
+        record.status_of(&whole("#notes.md")),
+        Some(RepinStatus::Changed)
+    );
+    assert_eq!(record.gone_count(&"docs".into()), 1);
+
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let Place::Piece { piece, .. } = &asks.all()[0].place else {
+        panic!("not a piece place");
+    };
+    assert!(whole("docs/C#.md").may_be(piece));
+}
+
+#[test]
+fn a_saved_review_keeps_whole_files_with_a_hash_apart_from_symbols() {
+    let home = TempDir::new().unwrap();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        json!({"last_repin": {
+            "from_base": "b1", "from_head": "h1", "to_base": "b2", "to_head": "h2",
+            "pieces": {"docs/C#.md": "changed"},
+            "gone_by_step": {}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+
+    file.save(&file.load().unwrap()).unwrap();
+    let state = file.load().unwrap();
+
+    assert_eq!(
+        state
+            .last_repin()
+            .unwrap()
+            .status_of(&PieceId::whole_file(FilePath::new("docs/C#.md").unwrap())),
+        Some(RepinStatus::Changed)
+    );
+}
+
+#[test]
+fn re_pin_keys_are_saved_in_the_order_of_their_text() {
+    let home = TempDir::new().unwrap();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"last_repin":{"from_base":"b1","from_head":"h1","to_base":"b2","to_head":"h2","pieces":{"docs/a b.md":"new","docs/a#hunk-1":"changed"},"gone_by_step":{}}}"#,
+    )
+    .unwrap();
+
+    file.save(&file.load().unwrap()).unwrap();
+
+    let saved = std::fs::read_to_string(&path).unwrap();
+    let space = saved.find("docs/a b.md").unwrap();
+    let hunk = saved.find("docs/a#hunk-1").unwrap();
+    assert!(space < hunk, "{saved}");
 }

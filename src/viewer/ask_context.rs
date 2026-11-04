@@ -65,7 +65,11 @@ pub(super) fn context_for(
             let step = tour.find_step(step)?;
             step_heading(&mut text, &step.title, &step.why, "piece")?;
             let page = StepPage::of(step, tour, files, &display, false);
-            let piece = page.pieces.iter().find(|p| p.id == *piece)?;
+            let piece = page
+                .pieces
+                .iter()
+                .find(|p| p.id == *piece)
+                .or_else(|| page.pieces.iter().find(|p| p.id.may_be(piece)))?;
             piece_lines(&mut text, piece)?;
         }
         Place::Lines {

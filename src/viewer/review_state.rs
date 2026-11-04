@@ -76,8 +76,10 @@ pub struct RepinRecord {
     pub to_base: Sha,
     pub to_head: Sha,
     /// Pieces at `to_head`, by id.
+    #[serde(deserialize_with = "statuses_of_readable_ids")]
     pub pieces: BTreeMap<PieceId, RepinStatus>,
     /// By old id: a gone hunk's ordinal may belong to another hunk now.
+    #[serde(deserialize_with = "readable_gone_ids")]
     pub gone_by_step: BTreeMap<StepId, BTreeSet<PieceId>>,
 }
 
@@ -118,7 +120,14 @@ impl RepinRecord {
     }
 
     pub fn status_of(&self, piece: &PieceId) -> Option<RepinStatus> {
-        self.pieces.get(piece).copied()
+        self.pieces
+            .get(piece)
+            .or_else(|| {
+                self.pieces
+                    .iter()
+                    .find_map(|(id, status)| id.may_be(piece).then_some(status))
+            })
+            .copied()
     }
 
     pub fn gone_count(&self, step: &StepId) -> usize {
@@ -157,6 +166,31 @@ impl RepinRecord {
             ..self
         }
     }
+}
+
+/// An id no build wrote (empty, or an absolute path) is dropped, so one bad key never makes the
+/// whole state file unreadable.
+fn statuses_of_readable_ids<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<PieceId, RepinStatus>, D::Error> {
+    let by_text = BTreeMap::<String, RepinStatus>::deserialize(deserializer)?;
+    Ok(by_text
+        .into_iter()
+        .filter_map(|(text, status)| Some((text.parse().ok()?, status)))
+        .collect())
+}
+
+fn readable_gone_ids<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<StepId, BTreeSet<PieceId>>, D::Error> {
+    let by_step = BTreeMap::<StepId, Vec<String>>::deserialize(deserializer)?;
+    Ok(by_step
+        .into_iter()
+        .map(|(step, texts)| {
+            let ids = texts.iter().filter_map(|text| text.parse().ok()).collect();
+            (step, ids)
+        })
+        .collect())
 }
 
 impl ReviewState {
