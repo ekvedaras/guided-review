@@ -339,3 +339,28 @@ fn a_lines_place_is_labelled_with_its_file_and_lines() {
     );
     assert_eq!(Place::Tour.lines_label(), None);
 }
+
+#[test]
+fn a_result_with_no_session_id_leaves_the_ask_with_the_session_it_had() {
+    const NO_SESSION: &str = "{\"type\":\"result\",\"is_error\":false,\"result\":\"hi\"}\n";
+    let Shop { review, head } = shop();
+    let launcher = FakeAgentLauncher {
+        sent: SentLog::default(),
+        turns: vec![
+            NO_SESSION.to_owned(),
+            PONG.to_owned(),
+            NO_SESSION.to_owned(),
+        ],
+    };
+    let mut agent = start(&launcher, None);
+    let mut asks = Asks::load(Arc::new(FakeAskStore::default())).unwrap();
+    let id = asks.start(order_step(), &head);
+    let context = review.ask_context(&order_step()).unwrap();
+
+    asks.ask(id, "Why?", &context, agent.as_mut()).unwrap();
+    assert_eq!(asks.get(id).unwrap().session_id, None);
+
+    asks.ask(id, "Why two?", &context, agent.as_mut()).unwrap();
+    asks.ask(id, "And?", &context, agent.as_mut()).unwrap();
+    assert_eq!(asks.get(id).unwrap().session_id.as_deref(), Some(SESSION));
+}

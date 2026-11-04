@@ -224,7 +224,9 @@ impl Asks {
             AgentEvent::ToolUse { summary } => ask.activity = Some(summary),
             AgentEvent::Done { session_id } => {
                 ask.activity = None;
-                ask.session_id = Some(session_id);
+                if let Some(session_id) = session_id {
+                    ask.session_id = Some(session_id);
+                }
                 persist = true;
             }
             AgentEvent::Error(reason) => {

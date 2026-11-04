@@ -6,8 +6,13 @@ use crate::json::at;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
     TextDelta(String),
-    ToolUse { summary: String },
-    Done { session_id: String },
+    ToolUse {
+        summary: String,
+    },
+    /// `None` when the CLI named no session, so there is none to resume.
+    Done {
+        session_id: Option<String>,
+    },
     Error(String),
 }
 
@@ -68,8 +73,8 @@ fn outcome(json: &Value) -> AgentEvent {
         AgentEvent::Done {
             session_id: at(json, "/session_id")
                 .as_str()
-                .unwrap_or_default()
-                .to_owned(),
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned),
         }
     }
 }
