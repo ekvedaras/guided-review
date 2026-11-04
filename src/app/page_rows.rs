@@ -22,7 +22,7 @@ use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, FileBlock, JumpKind, JumpTarget, LineKind, LineLocation, Markdown,
     MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage,
-    Screen, StepId, StepPage, ThreadView,
+    Screen, Side, StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -321,7 +321,7 @@ impl PageRows {
         let screen = review.screen().clone();
         let mut builder = RowsBuilder {
             rows: Vec::new(),
-            under_lines: Vec::new(),
+            under_lines: UnderLines::default(),
             facts,
             review,
         };
@@ -330,14 +330,14 @@ impl PageRows {
             Screen::Summary => summary_rows(review, &mut builder.rows),
             Screen::Step(_) => {
                 if let Some(page) = review.current_step() {
-                    builder.under_lines = under_lines(review, &asked_lines);
-                    diagram = builder.step_rows(page, review);
+                    let comments = under_lines(review, &asked_lines);
+                    diagram = builder.step_rows(page, comments, review);
                 }
             }
             Screen::SafetyNet => {
                 if let Some(page) = review.safety_net() {
-                    builder.under_lines = under_lines(review, &asked_lines);
-                    builder.safety_net_rows(page, review);
+                    let comments = under_lines(review, &asked_lines);
+                    builder.safety_net_rows(page, comments, review);
                 }
             }
         }
@@ -541,6 +541,51 @@ impl UnderLine {
     }
 }
 
+/// What hangs under the rows of a screen, by the line it hangs under, each with its place in the order it shows.
+#[derive(Default)]
+struct UnderLines {
+    by_line: HashMap<LineLocation, Vec<(usize, UnderLine)>>,
+}
+
+impl UnderLines {
+    /// What hangs under no line is dropped.
+    fn of(items: impl IntoIterator<Item = UnderLine>) -> Self {
+        let mut by_line: HashMap<LineLocation, Vec<(usize, UnderLine)>> = HashMap::new();
+        for (order, item) in items.into_iter().enumerate() {
+            if let Some(at) = item.at() {
+                by_line.entry(at.clone()).or_default().push((order, item));
+            }
+        }
+        Self { by_line }
+    }
+
+    fn take_at(&mut self, at: &LineLocation) -> Vec<UnderLine> {
+        self.by_line
+            .remove(at)
+            .into_iter()
+            .flatten()
+            .map(|(_, item)| item)
+            .collect()
+    }
+
+    /// What hangs under a whole file (line 0), on either side.
+    fn take_whole_file(&mut self, path: &str) -> Vec<UnderLine> {
+        let mut here: Vec<(usize, UnderLine)> = [Side::Base, Side::Head]
+            .into_iter()
+            .filter_map(|side| {
+                self.by_line.remove(&LineLocation {
+                    path: path.to_owned(),
+                    side,
+                    line: 0,
+                })
+            })
+            .flatten()
+            .collect();
+        here.sort_by_key(|(order, _)| *order);
+        here.into_iter().map(|(_, item)| item).collect()
+    }
+}
+
 /// Comments and asks of the screen; threads come with the page.
 fn under_lines(review: &Review, asked_lines: &[Place]) -> Vec<UnderLine> {
     let queued = review
@@ -577,12 +622,17 @@ struct RowsBuilder<'a> {
     facts: &'a RowFacts<'a>,
     review: &'a Review,
     /// Taken out as their row is placed; what no row takes is dropped.
-    under_lines: Vec<UnderLine>,
+    under_lines: UnderLines,
 }
 
 impl RowsBuilder<'_> {
     /// Returns the diagram the step shows.
-    fn step_rows(&mut self, page: StepPage<'_>, review: &Review) -> Option<SharedString> {
+    fn step_rows(
+        &mut self,
+        page: StepPage<'_>,
+        comments: Vec<UnderLine>,
+        review: &Review,
+    ) -> Option<SharedString> {
         let step = page.step;
         let id = StepId::from(step.id.as_str());
         let place = review.reading_place();
@@ -640,7 +690,7 @@ impl RowsBuilder<'_> {
             .threads
             .into_iter()
             .partition(|thread| thread.anchor.is_some());
-        self.add_threads_under_lines(under_a_line);
+        self.hang_threads_and(under_a_line, comments);
         let ask_of = |piece: &PieceDiff| AskAt {
             id: format!("ask-piece-{id}-{}", piece.id).into(),
             place: Place::Piece {
@@ -672,7 +722,7 @@ impl RowsBuilder<'_> {
         diagram
     }
 
-    fn safety_net_rows(&mut self, page: SafetyNetPage, review: &Review) {
+    fn safety_net_rows(&mut self, page: SafetyNetPage, comments: Vec<UnderLine>, review: &Review) {
         self.rows.push(PageRow::SafetyNetIntro);
         self.rows.push(PageRow::Toolbar(Rc::new(Toolbar {
             ask: None,
@@ -685,7 +735,7 @@ impl RowsBuilder<'_> {
             .threads
             .into_iter()
             .partition(|thread| thread.anchor.is_some());
-        self.add_threads_under_lines(under_a_line);
+        self.hang_threads_and(under_a_line, comments);
         for block in FileBlock::group(page.pieces) {
             self.block_rows(&block, None, None, false, review);
         }
@@ -697,13 +747,9 @@ impl RowsBuilder<'_> {
         self.rows.push(screen_footer(review, None));
     }
 
-    fn add_threads_under_lines(&mut self, threads: Vec<ThreadView>) {
-        let rest = std::mem::take(&mut self.under_lines);
-        self.under_lines = threads
-            .into_iter()
-            .map(UnderLine::Thread)
-            .chain(rest)
-            .collect();
+    fn hang_threads_and(&mut self, threads: Vec<ThreadView>, comments: Vec<UnderLine>) {
+        self.under_lines =
+            UnderLines::of(threads.into_iter().map(UnderLine::Thread).chain(comments));
     }
 
     fn block_rows(
@@ -749,7 +795,8 @@ impl RowsBuilder<'_> {
                     is_loaded: review.image_preview(&path).is_some(),
                     path: path.clone().into(),
                 });
-                self.hang_under(|at| at.path == path && at.line == 0);
+                let here = self.under_lines.take_whole_file(&path);
+                self.hang(here);
             }
             if piece.changes_only_whitespace {
                 self.rows.push(PageRow::OnlyWhitespace);
@@ -799,12 +846,12 @@ impl RowsBuilder<'_> {
                     };
                     self.rows.push(PageRow::PieceMarker(Rc::new(marker)));
                 }
-                let location = line.location.clone();
+                let here = self.under_lines.take_at(&line.location);
                 self.rows.push(PageRow::Line(Rc::new(DiffRowLine::of(
                     line.clone(),
                     review.wraps_lines(),
                 ))));
-                self.hang_under(|at| *at == location);
+                self.hang(here);
             }
             if hunk.more_below.is_some() {
                 self.rows.push(PageRow::HunkGap {
@@ -853,11 +900,7 @@ impl RowsBuilder<'_> {
         self.rows.push(PageRow::PieceEnd);
     }
 
-    fn hang_under(&mut self, is_here: impl Fn(&LineLocation) -> bool) {
-        let (here, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.under_lines)
-            .into_iter()
-            .partition(|item| item.at().is_some_and(&is_here));
-        self.under_lines = later;
+    fn hang(&mut self, here: Vec<UnderLine>) {
         let (review, facts) = (self.review, self.facts);
         self.rows
             .extend(here.into_iter().map(|item| item.into_row(review, facts)));
@@ -908,6 +951,62 @@ mod tests {
     use super::*;
     use crate::viewer::{Reaction, ReactionCount, ReviewThread, Side, ThreadComment};
     use std::sync::Arc;
+
+    fn box_at(path: &str, side: Side, line: usize) -> UnderLine {
+        let at = LineLocation {
+            path: path.to_owned(),
+            side,
+            line,
+        };
+        UnderLine::Composer(CommentPlace {
+            start: at.clone(),
+            end: at,
+        })
+    }
+
+    fn lines_of(items: &[UnderLine]) -> Vec<(Side, usize)> {
+        items
+            .iter()
+            .filter_map(UnderLine::at)
+            .map(|at| (at.side, at.line))
+            .collect()
+    }
+
+    #[test]
+    fn what_hangs_under_a_line_is_taken_once_in_its_order() {
+        let mut under = UnderLines::of([
+            box_at("a.php", Side::Head, 3),
+            box_at("a.php", Side::Base, 3),
+            box_at("a.php", Side::Head, 3),
+        ]);
+        let head_3 = LineLocation {
+            path: "a.php".into(),
+            side: Side::Head,
+            line: 3,
+        };
+
+        assert_eq!(lines_of(&under.take_at(&head_3)), [(Side::Head, 3); 2]);
+        assert!(under.take_at(&head_3).is_empty());
+    }
+
+    #[test]
+    fn what_hangs_under_a_whole_file_comes_from_both_sides_in_its_order() {
+        let mut under = UnderLines::of([
+            box_at("logo.png", Side::Head, 0),
+            box_at("logo.png", Side::Base, 0),
+            box_at("other.png", Side::Head, 0),
+            box_at("logo.png", Side::Head, 0),
+        ]);
+
+        assert_eq!(
+            lines_of(&under.take_whole_file("logo.png")),
+            [(Side::Head, 0), (Side::Base, 0), (Side::Head, 0)]
+        );
+        assert_eq!(
+            lines_of(&under.take_whole_file("other.png")),
+            [(Side::Head, 0)]
+        );
+    }
 
     fn thread_view() -> ThreadView {
         ThreadView {
