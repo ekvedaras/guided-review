@@ -20,6 +20,7 @@ pub enum Problem {
 pub enum Read {
     PrHead,
     PrDescription,
+    PendingReview,
 }
 
 impl fmt::Display for Problem {
@@ -38,6 +39,10 @@ impl fmt::Display for Problem {
             Self::NotRead(Read::PrDescription, reason) => write!(
                 formatter,
                 "The PR description may be out of date, could not read it from GitHub: {reason}"
+            ),
+            Self::NotRead(Read::PendingReview, reason) => write!(
+                formatter,
+                "Could not look for a pending review on GitHub, so Comment now stays hidden: {reason}"
             ),
         }
     }

@@ -705,6 +705,7 @@ impl Review {
     }
 
     pub fn pending_review_is(&mut self, exists: bool) {
+        self.not_read.remove(&Read::PendingReview);
         self.comment_desk.pending_review_is(exists);
     }
 

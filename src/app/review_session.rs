@@ -671,9 +671,7 @@ impl ReviewSession {
                 this.change(cx, |review| {
                     match exists {
                         Ok(exists) => review.pending_review_is(exists),
-                        Err(error) => {
-                            eprintln!("warning: could not look for a pending review: {error:#}");
-                        }
+                        Err(error) => review.could_not_read(Read::PendingReview, &error),
                     }
                     match authored {
                         Ok(authored) => review.viewer_authorship_is(authored),

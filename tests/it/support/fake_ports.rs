@@ -361,6 +361,7 @@ impl ReviewThreadsPort for FakeGitHub {
 impl ReviewWritesPort for FakeGitHub {
     fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         self.sent.record(GitHubCall::PendingReviewOf(pr.clone()));
+        self.fail_if_reads_fail()?;
         Ok(self.has_pending_review_now())
     }
 

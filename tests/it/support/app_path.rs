@@ -65,7 +65,9 @@ impl AppPath for Review {
     }
 
     fn pull_pending_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let exists = github.has_pending_review(self.pr())?;
+        let exists = github
+            .has_pending_review(self.pr())
+            .inspect_err(|error| self.could_not_read(Read::PendingReview, error))?;
         self.pending_review_is(exists);
         Ok(())
     }
