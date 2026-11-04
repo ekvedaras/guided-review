@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::code_source::{BlobInfo, CodeSource, FileStatus};
+use crate::file_path::FilePath;
 use crate::image_facts::{self, MAX_PREVIEW_BYTES, PixelSize};
 use crate::pieces::ChangedFile;
 use crate::pull_request::Sha;
@@ -99,7 +100,7 @@ fn file_size_text(bytes: u64) -> String {
 /// An image file of the PR as the reviewer sees it: base left, head right.
 #[derive(Debug, Clone)]
 pub struct ImagePreview {
-    pub path: String,
+    pub path: FilePath,
     pub is_svg: bool,
     status: FileStatus,
     base_sha: Sha,
@@ -140,8 +141,8 @@ impl ImagePreview {
 /// What to load for one image file, owned so it can run on a background thread.
 #[derive(Debug, Clone)]
 pub struct ImagePreviewRequest {
-    path: String,
-    base_path: String,
+    path: FilePath,
+    base_path: FilePath,
     status: FileStatus,
     base: Sha,
     head: Sha,
@@ -150,20 +151,15 @@ pub struct ImagePreviewRequest {
 impl ImagePreviewRequest {
     pub(super) fn for_file(file: &ChangedFile, base: &Sha, head: &Sha) -> Self {
         Self {
-            path: file.path.as_str().to_owned(),
-            base_path: file
-                .old_path
-                .as_ref()
-                .unwrap_or(&file.path)
-                .as_str()
-                .to_owned(),
+            path: file.path.clone(),
+            base_path: file.old_path.as_ref().unwrap_or(&file.path).clone(),
             status: file.status,
             base: base.clone(),
             head: head.clone(),
         }
     }
 
-    pub fn path(&self) -> &str {
+    pub fn path(&self) -> &FilePath {
         &self.path
     }
 
@@ -173,7 +169,7 @@ impl ImagePreviewRequest {
         let has_head = self.status != FileStatus::Deleted;
         ImagePreview {
             path: self.path.clone(),
-            is_svg: image_facts::is_svg_path(&self.path),
+            is_svg: image_facts::is_svg_path(self.path.as_str()),
             status: self.status,
             base_sha: self.base.clone(),
             head_sha: self.head.clone(),
@@ -183,7 +179,7 @@ impl ImagePreviewRequest {
     }
 }
 
-fn load_side(source: &dyn CodeSource, cache: &ImageCache, sha: &Sha, path: &str) -> ImageSide {
+fn load_side(source: &dyn CodeSource, cache: &ImageCache, sha: &Sha, path: &FilePath) -> ImageSide {
     let info = match source.blob_info_at(sha, path) {
         Ok(info) => info,
         Err(error) => return ImageSide::Unreadable(format!("{error:#}")),
@@ -195,7 +191,7 @@ fn load_side(source: &dyn CodeSource, cache: &ImageCache, sha: &Sha, path: &str)
     }
     match bytes_of(source, cache, sha, path, &info) {
         Ok(bytes) => ImageSide::Loaded(LoadedImage {
-            pixels: image_facts::measure(path, &bytes),
+            pixels: image_facts::measure(path.as_str(), &bytes),
             bytes,
         }),
         Err(error) => ImageSide::Unreadable(format!("{error:#}")),
@@ -206,7 +202,7 @@ fn bytes_of(
     source: &dyn CodeSource,
     cache: &ImageCache,
     sha: &Sha,
-    path: &str,
+    path: &FilePath,
     info: &BlobInfo,
 ) -> anyhow::Result<Arc<[u8]>> {
     if let Some(bytes) = cache.read(&info.id) {

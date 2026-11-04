@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
 
@@ -39,10 +40,10 @@ struct ViewerSections {
     read_ticks: BTreeMap<StepId, ReadTick>,
     /// Per file, whether GitHub said viewed at the last sync. A pull reacts to changes against it.
     #[serde(default)]
-    viewed_on_github: BTreeMap<String, bool>,
+    viewed_on_github: BTreeMap<FilePath, bool>,
     /// Viewed changes GitHub has not taken yet, newest wish per file.
     #[serde(default)]
-    unsent_viewed: BTreeMap<String, bool>,
+    unsent_viewed: BTreeMap<FilePath, bool>,
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
     #[serde(default)]
     read_before: BTreeMap<StepId, ReadTick>,
@@ -195,8 +196,8 @@ impl ReviewState {
     /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
     pub(super) fn take_github_baseline(
         &mut self,
-        on_github: &BTreeMap<String, bool>,
-        wishes: &BTreeMap<String, bool>,
+        on_github: &BTreeMap<FilePath, bool>,
+        wishes: &BTreeMap<FilePath, bool>,
     ) {
         self.viewer.viewed_on_github = on_github.clone();
         self.viewer.unsent_viewed = wishes
@@ -218,7 +219,7 @@ impl ReviewState {
         self.viewer.read_ticks.remove(step);
     }
 
-    pub(super) fn was_viewed_on_github(&self, path: &str) -> bool {
+    pub(super) fn was_viewed_on_github(&self, path: &FilePath) -> bool {
         self.viewer
             .viewed_on_github
             .get(path)
@@ -226,24 +227,24 @@ impl ReviewState {
             .unwrap_or(false)
     }
 
-    pub(super) fn saw_on_github(&mut self, path: &str, viewed: bool) {
-        self.viewer.viewed_on_github.insert(path.to_owned(), viewed);
+    pub(super) fn saw_on_github(&mut self, path: &FilePath, viewed: bool) {
+        self.viewer.viewed_on_github.insert(path.clone(), viewed);
     }
 
     /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
-    pub(super) fn want_viewed(&mut self, path: &str, viewed: bool) {
+    pub(super) fn want_viewed(&mut self, path: &FilePath, viewed: bool) {
         if self.was_viewed_on_github(path) == viewed {
             self.viewer.unsent_viewed.remove(path);
         } else {
-            self.viewer.unsent_viewed.insert(path.to_owned(), viewed);
+            self.viewer.unsent_viewed.insert(path.clone(), viewed);
         }
     }
 
-    pub(super) fn unsent_viewed(&self) -> &BTreeMap<String, bool> {
+    pub(super) fn unsent_viewed(&self) -> &BTreeMap<FilePath, bool> {
         &self.viewer.unsent_viewed
     }
 
-    pub(super) fn sent_viewed(&mut self, path: &str, viewed: bool) {
+    pub(super) fn sent_viewed(&mut self, path: &FilePath, viewed: bool) {
         self.saw_on_github(path, viewed);
         if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
             self.viewer.unsent_viewed.remove(path);

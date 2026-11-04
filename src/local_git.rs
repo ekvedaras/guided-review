@@ -6,6 +6,7 @@ use anyhow::{Context, bail};
 
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
+use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 
 /// Reads git objects only, never the working tree, so uncommitted work never leaks into a tour.
@@ -130,16 +131,23 @@ impl CodeSource for LocalGit {
         Some(&self.repo)
     }
 
-    fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         self.git(&["show", &format!("{sha}:{path}")])
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
         Ok(self.git_bytes(&["show", &format!("{sha}:{path}")])?.into())
     }
 
-    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
-        let listed = self.git(&["ls-tree", "-l", "--full-tree", sha.as_str(), "--", path])?;
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
+        let listed = self.git(&[
+            "ls-tree",
+            "-l",
+            "--full-tree",
+            sha.as_str(),
+            "--",
+            path.as_str(),
+        ])?;
         let mut fields = listed.split_whitespace();
         let (id, size) = (fields.nth(2), fields.next());
         match (id, size.and_then(|size| size.parse().ok())) {

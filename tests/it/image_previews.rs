@@ -2,8 +2,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
-use crate::support::{FixtureRepo, png_of, svg_of};
+use crate::support::{FixtureRepo, file_path, png_of, svg_of};
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
+use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
@@ -28,14 +29,14 @@ impl CountingSource {
 }
 
 impl CodeSource for CountingSource {
-    fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         self.inner.file_at(sha, path)
     }
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<std::sync::Arc<[u8]>> {
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<std::sync::Arc<[u8]>> {
         self.blob_reads.fetch_add(1, Ordering::SeqCst);
         self.inner.blob_at(sha, path)
     }
-    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
         self.inner.blob_info_at(sha, path)
     }
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>> {
@@ -270,7 +271,7 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
     let sent = SentLog::default();
     let github = FakeGitHub::with_pull("main-tip", &pull.head, &sent);
 
-    let place = review.begin_file_comment("logo.png").unwrap();
+    let place = review.begin_file_comment(&file_path("logo.png")).unwrap();
     review.edit_draft(&place, "is the red intended?").unwrap();
     let result = review
         .send_comment(&place, SendMode::AddToReview, &github)
@@ -297,7 +298,7 @@ fn a_file_comment_is_refused_while_the_tour_is_for_an_old_head() {
     review.pr_head_is(Sha::new("a-newer-head"));
 
     assert_eq!(
-        review.begin_file_comment("logo.png"),
+        review.begin_file_comment(&file_path("logo.png")),
         Err(CommentRefusal::TourIsOld)
     );
 }
@@ -332,7 +333,7 @@ fn github_names_a_blob_and_its_size_without_sending_the_bytes() {
 
     let info = guided_review::github::GitHub::at(&url)
         .code_source(&RepoName::new("acme", "shop"))
-        .blob_info_at(&Sha::new("abc123"), "assets/my logo.png")
+        .blob_info_at(&Sha::new("abc123"), &file_path("assets/my logo.png"))
         .unwrap();
 
     assert_eq!((info.id.as_str(), info.size), ("980a0d5f", 4096));

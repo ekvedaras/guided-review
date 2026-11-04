@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::coverage;
 use crate::language::Language;
-use crate::pieces::{ChangedFile, PieceId};
+use crate::pieces::ChangedFile;
 use crate::tour::{PieceRef, Step, StepId, Tour};
 
 pub const MAX_SUMMARY_BULLETS: usize = 3;
@@ -227,14 +227,7 @@ struct Pointing<'a>(&'a PieceRef);
 impl fmt::Display for Pointing<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            PieceRef::Symbol { file, symbol } => write!(
-                f,
-                "{}",
-                PieceId {
-                    path: file.clone(),
-                    symbol: Some(symbol.clone())
-                }
-            ),
+            PieceRef::Symbol { file, symbol } => write!(f, "{file}#{symbol}"),
             PieceRef::Lines { file, lines } => write!(f, "{file} lines {}-{}", lines[0], lines[1]),
             PieceRef::WholeFile { file } => f.write_str(file),
             PieceRef::Rest { rest } => write!(f, "rest {rest}"),

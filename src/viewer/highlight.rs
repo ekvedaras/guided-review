@@ -453,7 +453,7 @@ impl HighlightRequest {
                 .iter()
                 .map(|target| FileAt {
                     sha: target.sha.clone(),
-                    path: target.path.as_str().to_owned(),
+                    path: target.path.clone(),
                 })
                 .collect::<Vec<_>>(),
         );
@@ -463,7 +463,7 @@ impl HighlightRequest {
             let Some(language) = HighlightLanguage::for_path(target.path.as_str()) else {
                 continue;
             };
-            let Ok(text) = source.file_at(&target.sha, target.path.as_str()) else {
+            let Ok(text) = source.file_at(&target.sha, &target.path) else {
                 continue;
             };
             let Some(configuration) = language.configuration() else {

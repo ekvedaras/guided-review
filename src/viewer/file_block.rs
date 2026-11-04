@@ -2,12 +2,13 @@ use std::collections::HashSet;
 
 use super::diff_display::{DiffHunk, MoreContext};
 use super::step_page::{DiffLine, LineKind, LineLocation, PieceDiff, Side};
+use crate::file_path::FilePath;
 
 /// The pieces of one file that a page shows, in one box, in line order. The rows of all pieces
 /// are joined, so a row two pieces both show appears once. A label marks where each piece starts:
 /// at the first row that belongs to it.
 pub struct FileBlock {
-    pub path: String,
+    pub path: FilePath,
     /// In the order the page names them.
     pub pieces: Vec<PieceDiff>,
     pub hunks: Vec<DiffHunk>,
@@ -26,7 +27,7 @@ struct PieceStart {
 impl FileBlock {
     /// One block per file, in the order the files first appear among `pieces`.
     pub fn group(pieces: Vec<PieceDiff>) -> Vec<Self> {
-        let mut files: Vec<(String, Vec<PieceDiff>)> = Vec::new();
+        let mut files: Vec<(FilePath, Vec<PieceDiff>)> = Vec::new();
         for piece in pieces {
             match files.iter_mut().find(|(path, _)| *path == piece.id.path) {
                 Some((_, of_file)) => of_file.push(piece),
@@ -39,7 +40,7 @@ impl FileBlock {
             .collect()
     }
 
-    fn of(path: String, pieces: Vec<PieceDiff>) -> Self {
+    fn of(path: FilePath, pieces: Vec<PieceDiff>) -> Self {
         if let [piece] = pieces.as_slice() {
             return Self {
                 path,

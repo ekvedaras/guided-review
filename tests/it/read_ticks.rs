@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::support::FixtureRepo;
+use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
@@ -153,15 +153,15 @@ fn a_folded_step_folds_each_file_box_on_its_own_and_opening_all_drops_single_cho
     let mut review = shop.open();
     let readme = "readme".into();
     review.tick(&readme).unwrap();
-    assert!(review.is_box_folded(&readme, "README.md"));
+    assert!(review.is_box_folded(&readme, &file_path("README.md")));
 
-    review.toggle_box_fold(&readme, "README.md");
-    assert!(!review.is_box_folded(&readme, "README.md"));
+    review.toggle_box_fold(&readme, &file_path("README.md"));
+    assert!(!review.is_box_folded(&readme, &file_path("README.md")));
     assert!(review.is_folded(&readme), "the step stays folded");
 
     review.toggle_fold(&readme);
     review.toggle_fold(&readme);
-    assert!(review.is_box_folded(&readme, "README.md"));
+    assert!(review.is_box_folded(&readme, &file_path("README.md")));
 }
 
 #[test]

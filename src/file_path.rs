@@ -82,3 +82,9 @@ impl<'de> Deserialize<'de> for FilePath {
         Self::new(&text).map_err(serde::de::Error::custom)
     }
 }
+
+impl From<FilePath> for Arc<str> {
+    fn from(path: FilePath) -> Self {
+        path.0
+    }
+}

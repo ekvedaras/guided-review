@@ -6,11 +6,11 @@ use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 pub trait CodeSource: Send + Sync {
-    fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String>;
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String>;
     /// Shared, so a cache can hand out what it holds without copying it.
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>>;
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>>;
     /// What a file is at `sha`, without reading it: the blob id names its content, so equal ids are equal bytes.
-    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo>;
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo>;
     fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>>;
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha>;
     /// True when the checked-out files are exactly `head`, so they can be opened in an IDE.
@@ -33,7 +33,7 @@ pub struct BlobInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileAt {
     pub sha: Sha,
-    pub path: String,
+    pub path: FilePath,
 }
 
 #[derive(Debug, Default)]

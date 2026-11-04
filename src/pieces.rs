@@ -20,7 +20,7 @@ use crate::symbols::{Slot, Symbol, Symbols};
 /// after one of them without changing the ids old tour files point at.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PieceId {
-    pub path: String,
+    pub path: FilePath,
     pub symbol: Option<String>,
 }
 
@@ -29,7 +29,7 @@ impl PieceId {
     pub fn within_file(&self) -> String {
         match &self.symbol {
             Some(symbol) => format!("#{symbol}"),
-            None => self.path.clone(),
+            None => self.path.to_string(),
         }
     }
 }
@@ -38,7 +38,7 @@ impl fmt::Display for PieceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.symbol {
             Some(symbol) => write!(f, "{}#{symbol}", self.path),
-            None => f.write_str(&self.path),
+            None => fmt::Display::fmt(&self.path, f),
         }
     }
 }
@@ -264,31 +264,31 @@ fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
             && Language::for_path(diff.path()).is_some()
     });
     let both_sides = cut_by_symbols.flat_map(|diff| {
-        let at_base = diff
-            .old_path
-            .as_ref()
-            .map(FilePath::as_str)
-            .map(|path| (base, path));
-        let at_head = diff
-            .new_path
-            .as_ref()
-            .map(FilePath::as_str)
-            .map(|path| (head, path));
+        let at_base = diff.old_path.as_ref().map(|path| (base, path));
+        let at_head = diff.new_path.as_ref().map(|path| (head, path));
         at_base.into_iter().chain(at_head)
     });
-    std::iter::once((head, GIT_ATTRIBUTES))
+    git_attributes()
+        .iter()
+        .map(|path| (head, path))
         .chain(both_sides)
         .map(|(sha, path)| FileAt {
             sha: sha.clone(),
-            path: path.to_owned(),
+            path: path.clone(),
         })
         .collect()
 }
 
 const GIT_ATTRIBUTES: &str = ".gitattributes";
 
+fn git_attributes() -> Option<FilePath> {
+    FilePath::new(GIT_ATTRIBUTES).ok()
+}
+
 fn generated_files(source: &dyn CodeSource, head: &Sha) -> GeneratedFiles {
-    let attributes_at_head = source.file_at(head, GIT_ATTRIBUTES).unwrap_or_default();
+    let attributes_at_head = git_attributes()
+        .and_then(|path| source.file_at(head, &path).ok())
+        .unwrap_or_default();
     GeneratedFiles::new(&attributes_at_head)
 }
 
@@ -350,7 +350,7 @@ impl<'a> CutContext<'a> {
                 let added: Vec<&Line> = hunk.added.iter().collect();
                 Piece::new(
                     PieceId {
-                        path: self.path.to_string(),
+                        path: self.path.clone(),
                         symbol: Some(format!("hunk-{}", index + 1)),
                     },
                     PieceKind::Hunk,
@@ -368,7 +368,7 @@ impl<'a> CutContext<'a> {
         let added: Vec<&Line> = self.diff.added.iter().collect();
         Piece::new(
             PieceId {
-                path: self.path.to_string(),
+                path: self.path.clone(),
                 symbol: None,
             },
             PieceKind::File,
@@ -379,19 +379,19 @@ impl<'a> CutContext<'a> {
     }
 
     fn image_piece(&self) -> Piece {
-        let size_at = |sha: &Sha, path: Option<&str>| {
+        let size_at = |sha: &Sha, path: Option<&FilePath>| {
             let path = path?;
             if self.source.blob_info_at(sha, path).ok()?.size > image_facts::MAX_PREVIEW_BYTES {
                 return None;
             }
             let bytes = self.source.blob_at(sha, path).ok()?;
-            image_facts::measure(path, &bytes)
+            image_facts::measure(path.as_str(), &bytes)
         };
         let mut piece = self.whole_file_piece();
         piece.kind = PieceKind::Image;
         piece.image = Some(ImageChange {
-            base: size_at(self.base, self.diff.old_path.as_ref().map(FilePath::as_str)),
-            head: size_at(self.head, self.diff.new_path.as_ref().map(FilePath::as_str)),
+            base: size_at(self.base, self.diff.old_path.as_ref()),
+            head: size_at(self.head, self.diff.new_path.as_ref()),
         });
         piece
     }
@@ -399,7 +399,7 @@ impl<'a> CutContext<'a> {
     fn symbols_at(
         &self,
         sha: &Sha,
-        path: Option<&str>,
+        path: Option<&FilePath>,
         language: Language,
     ) -> anyhow::Result<Symbols> {
         Ok(match path {
@@ -409,16 +409,8 @@ impl<'a> CutContext<'a> {
     }
 
     fn cut_symbols(&self, language: Language) -> anyhow::Result<PlacedChanges> {
-        let base_symbols = self.symbols_at(
-            self.base,
-            self.diff.old_path.as_ref().map(FilePath::as_str),
-            language,
-        )?;
-        let head_symbols = self.symbols_at(
-            self.head,
-            self.diff.new_path.as_ref().map(FilePath::as_str),
-            language,
-        )?;
+        let base_symbols = self.symbols_at(self.base, self.diff.old_path.as_ref(), language)?;
+        let head_symbols = self.symbols_at(self.head, self.diff.new_path.as_ref(), language)?;
         let pairing = SymbolPairing::new(&base_symbols, &head_symbols);
         let changes = join_blank_line_changes(self.changes_by_slot(&pairing));
         Ok(place_changes(&pairing, changes, self.diff.status().into()))
@@ -516,7 +508,7 @@ fn place_changes(
             Some(placed) => pieces.push(placed),
             None => not_shown.push(
                 PieceId {
-                    path: change.path.to_string(),
+                    path: change.path.clone(),
                     symbol: Some(change.slot.id()),
                 }
                 .to_string(),
@@ -552,7 +544,7 @@ fn symbol_piece(
     };
     let piece = Piece::new(
         PieceId {
-            path: change.path.to_string(),
+            path: change.path.clone(),
             symbol: Some(change.slot.id()),
         },
         kind,

@@ -41,7 +41,7 @@ impl FilesAtHeadRequest {
                 .iter()
                 .map(|path| FileAt {
                     sha: self.head.clone(),
-                    path: path.as_str().to_owned(),
+                    path: path.clone(),
                 })
                 .collect::<Vec<_>>(),
         );
@@ -49,7 +49,7 @@ impl FilesAtHeadRequest {
             .paths
             .iter()
             .filter_map(|path| {
-                let text = source.file_at(&self.head, path.as_str()).ok()?;
+                let text = source.file_at(&self.head, path).ok()?;
                 Some((path.clone(), FileText::of(text)))
             })
             .collect();

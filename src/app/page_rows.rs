@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::SharedString;
 
@@ -83,7 +84,7 @@ pub struct ScreenFooter {
 #[derive(Clone, Hash)]
 pub struct BoxFold {
     pub step: StepId,
-    pub path: String,
+    pub path: FilePath,
     pub is_folded: bool,
 }
 
@@ -91,7 +92,7 @@ pub struct PieceHeading {
     /// Set on the header of a file box in a step; the safety net does not fold.
     pub fold: Option<BoxFold>,
     pub piece: SharedString,
-    pub path: String,
+    pub path: FilePath,
     pub ask: Option<AskAt>,
     /// "changed" or "new" after a re-pin.
     pub repin_label: Option<&'static str>,
@@ -133,7 +134,7 @@ pub enum PageRow {
     BinaryFile(Rc<BinaryFileRow>),
     /// The pictures of an image file; comments on the whole file hang under it.
     Image {
-        path: SharedString,
+        path: FilePath,
         is_loaded: bool,
     },
     OnlyWhitespace,
@@ -270,7 +271,7 @@ impl PageRow {
 /// The rows a drag selected, as rows of the list: those in `rows` that show a line of `path`.
 pub struct SelectedRows {
     rows: RangeInclusive<usize>,
-    path: String,
+    path: FilePath,
 }
 
 impl SelectedRows {
@@ -281,7 +282,7 @@ impl SelectedRows {
 
 struct PieceAt {
     id: String,
-    path: String,
+    path: FilePath,
     row: usize,
 }
 
@@ -413,11 +414,11 @@ impl PageRows {
     }
 
     /// The most characters a line of this file has on the screen; how far its box can scroll sideways.
-    pub fn widest_line(&self, path: &str) -> usize {
+    pub fn widest_line(&self, path: &FilePath) -> usize {
         self.rows
             .iter()
             .filter_map(|row| match row {
-                PageRow::Line(line) if line.location.path == path => {
+                PageRow::Line(line) if line.location.path == *path => {
                     Some(line.code().chars().count())
                 }
                 _ => None,
@@ -446,7 +447,7 @@ impl PageRows {
         let head = self.row_of_line(selection.head())?;
         Some(SelectedRows {
             rows: anchor.min(head)..=anchor.max(head),
-            path: selection.anchor().path.as_str().to_owned(),
+            path: selection.anchor().path.clone(),
         })
     }
 
@@ -575,10 +576,7 @@ impl UnderLines {
     }
 
     /// What hangs under a whole file (line 0), on either side.
-    fn take_whole_file(&mut self, path: &str) -> Vec<UnderLine> {
-        let Ok(path) = FilePath::new(path) else {
-            return Vec::new();
-        };
+    fn take_whole_file(&mut self, path: &FilePath) -> Vec<UnderLine> {
         let mut here: Vec<(usize, UnderLine)> = [Side::Base, Side::Head]
             .into_iter()
             .filter_map(|side| {
@@ -801,8 +799,8 @@ impl RowsBuilder<'_> {
             if piece.is_image {
                 let path = piece.id.path.clone();
                 self.rows.push(PageRow::Image {
-                    is_loaded: review.image_preview(&path).is_some(),
-                    path: path.clone().into(),
+                    is_loaded: review.image_preview(path.as_str()).is_some(),
+                    path: path.clone(),
                 });
                 let here = self.under_lines.take_whole_file(&path);
                 self.hang(here);
@@ -814,7 +812,7 @@ impl RowsBuilder<'_> {
         } else {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
                 fold,
-                piece: block.path.clone().into(),
+                piece: Arc::<str>::from(block.path.clone()).into(),
                 path: block.path.clone(),
                 ask: None,
                 repin_label: None,
@@ -830,7 +828,7 @@ impl RowsBuilder<'_> {
                     self.rows.push(PageRow::OnlyWhitespace);
                 }
             }
-            block.path.clone()
+            block.path.to_string()
         };
         let shows_markers = !block.has_one_piece();
         for (index, hunk) in block.hunks.iter().enumerate() {
@@ -895,7 +893,7 @@ impl RowsBuilder<'_> {
         } else {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
                 fold,
-                piece: block.path.clone().into(),
+                piece: Arc::<str>::from(block.path.clone()).into(),
                 path: block.path.clone(),
                 ask: None,
                 repin_label: None,
@@ -1016,11 +1014,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            lines_of(&under.take_whole_file("logo.png")),
+            lines_of(&under.take_whole_file(&FilePath::new("logo.png").unwrap())),
             [(Side::Head, 0), (Side::Base, 0), (Side::Head, 0)]
         );
         assert_eq!(
-            lines_of(&under.take_whole_file("other.png")),
+            lines_of(&under.take_whole_file(&FilePath::new("other.png").unwrap())),
             [(Side::Head, 0)]
         );
     }

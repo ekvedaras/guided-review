@@ -107,7 +107,7 @@ impl Show<'_> {
             writeln!(out, "\nnot at head: the piece is deleted")?;
             return Ok(());
         }
-        let code = self.source.file_at(self.head, file.path.as_str())?;
+        let code = self.source.file_at(self.head, &file.path)?;
         let lines: Vec<&str> = code.lines().collect();
         let span = match (&piece.id.symbol, piece.kind) {
             (_, PieceKind::Hunk | PieceKind::Imports | PieceKind::Top) => {

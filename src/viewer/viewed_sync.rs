@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::coverage;
+use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::Tour;
@@ -34,7 +35,7 @@ impl ViewedSync {
         if self.off_because.is_some() {
             return;
         }
-        let fully_ticked: Vec<&String> = coverage
+        let fully_ticked: Vec<&FilePath> = coverage
             .files_of(step)
             .iter()
             .filter(|file| coverage.is_fully_ticked(file, |step| is_ticked(state, step)))
@@ -133,9 +134,9 @@ fn is_ticked(state: &ReviewState, step: &StepId) -> bool {
 /// After a re-pin: viewed for every file whose steps are all still ticked, and the queued
 /// "not viewed" edits for the rest. Queued "viewed" edits are dropped: the ticks say it again
 /// where it is still true.
-fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<String, bool> {
+fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<FilePath, bool> {
     let is_fully_ticked =
-        |path: &str| coverage.is_fully_ticked(path, |step| is_ticked(state, step));
+        |path: &FilePath| coverage.is_fully_ticked(path, |step| is_ticked(state, step));
     let still_viewed = coverage
         .files_by_step
         .values()
@@ -156,17 +157,17 @@ fn pull_viewed(
     state: &mut ReviewState,
     coverage: &Coverage,
     tour_head: &Sha,
-    on_github: &BTreeMap<String, bool>,
+    on_github: &BTreeMap<FilePath, bool>,
 ) -> Vec<StepId> {
     let unsent = state.unsent_viewed().clone();
-    let is_viewed = |path: &str| {
+    let is_viewed = |path: &FilePath| {
         unsent
             .get(path)
             .or_else(|| on_github.get(path))
             .copied()
             .unwrap_or(false)
     };
-    let changed: Vec<(&String, bool)> = on_github
+    let changed: Vec<(&FilePath, bool)> = on_github
         .iter()
         .filter(|(path, now)| {
             !unsent.contains_key(*path) && state.was_viewed_on_github(path) != **now
@@ -184,7 +185,7 @@ fn pull_viewed(
     for (path, _) in changed.iter().filter(|(_, now)| *now) {
         for step in coverage.steps_holding(path) {
             let files = coverage.files_of(step);
-            if !is_ticked(state, step) && files.iter().all(|file| is_viewed(file)) {
+            if !is_ticked(state, step) && files.iter().all(&is_viewed) {
                 state.tick(step, tour_head);
             }
         }
@@ -200,8 +201,8 @@ fn pull_viewed(
 /// Which files each step holds, and which files have changes no step holds.
 #[derive(Default)]
 pub(super) struct Coverage {
-    files_by_step: BTreeMap<StepId, BTreeSet<String>>,
-    partly_unheld: BTreeSet<String>,
+    files_by_step: BTreeMap<StepId, BTreeSet<FilePath>>,
+    partly_unheld: BTreeSet<FilePath>,
 }
 
 impl Coverage {
@@ -228,12 +229,12 @@ impl Coverage {
         coverage
     }
 
-    fn files_of(&self, step: &StepId) -> &BTreeSet<String> {
-        static NONE: BTreeSet<String> = BTreeSet::new();
+    fn files_of(&self, step: &StepId) -> &BTreeSet<FilePath> {
+        static NONE: BTreeSet<FilePath> = BTreeSet::new();
         self.files_by_step.get(step).unwrap_or(&NONE)
     }
 
-    fn steps_holding<'a>(&'a self, path: &'a str) -> impl Iterator<Item = &'a StepId> {
+    fn steps_holding<'a>(&'a self, path: &'a FilePath) -> impl Iterator<Item = &'a StepId> {
         self.files_by_step
             .iter()
             .filter(move |(_, files)| files.contains(path))
@@ -241,7 +242,7 @@ impl Coverage {
     }
 
     /// A file counts as read only when no change of it is left outside the steps.
-    fn is_fully_ticked(&self, path: &str, is_ticked: impl Fn(&StepId) -> bool) -> bool {
+    fn is_fully_ticked(&self, path: &FilePath, is_ticked: impl Fn(&StepId) -> bool) -> bool {
         !self.partly_unheld.contains(path) && self.steps_holding(path).all(is_ticked)
     }
 }
@@ -249,18 +250,18 @@ impl Coverage {
 pub struct SyncRequest {
     pr: PullRequestUrl,
     tour_head: Sha,
-    unsent: BTreeMap<String, bool>,
+    unsent: BTreeMap<FilePath, bool>,
     /// Set for the first sync after a re-pin; it replaces `unsent`.
-    baseline_wishes: Option<BTreeMap<String, bool>>,
+    baseline_wishes: Option<BTreeMap<FilePath, bool>>,
     is_off: bool,
 }
 
 /// What the network part of a sync learned and did; the review takes it in with `apply_sync`.
 pub struct SyncOutcome {
     tour_head: Sha,
-    sent: Vec<(String, bool)>,
-    on_github: Option<BTreeMap<String, bool>>,
-    baseline_wishes: Option<BTreeMap<String, bool>>,
+    sent: Vec<(FilePath, bool)>,
+    on_github: Option<BTreeMap<FilePath, bool>>,
+    baseline_wishes: Option<BTreeMap<FilePath, bool>>,
     error: Option<anyhow::Error>,
 }
 
@@ -318,7 +319,7 @@ impl SyncRequest {
         github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
         tour_head: &Sha,
-        wishes: BTreeMap<String, bool>,
+        wishes: BTreeMap<FilePath, bool>,
     ) -> SyncOutcome {
         let on_github = match read_viewed(github, pr) {
             Ok(on_github) => on_github,
@@ -329,7 +330,7 @@ impl SyncRequest {
                 };
             }
         };
-        let differing: BTreeMap<String, bool> = wishes
+        let differing: BTreeMap<FilePath, bool> = wishes
             .iter()
             .filter(|(path, viewed)| on_github.get(*path).copied().unwrap_or(false) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
@@ -346,8 +347,8 @@ impl SyncRequest {
 fn push(
     github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
-    wishes: &BTreeMap<String, bool>,
-    sent: &mut Vec<(String, bool)>,
+    wishes: &BTreeMap<FilePath, bool>,
+    sent: &mut Vec<(FilePath, bool)>,
 ) -> anyhow::Result<()> {
     for (path, viewed) in wishes {
         github.set_file_viewed(pr, path, *viewed)?;
@@ -359,7 +360,7 @@ fn push(
 fn read_viewed(
     github: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
-) -> anyhow::Result<BTreeMap<String, bool>> {
+) -> anyhow::Result<BTreeMap<FilePath, bool>> {
     Ok(github
         .viewed_files(pr)?
         .into_iter()

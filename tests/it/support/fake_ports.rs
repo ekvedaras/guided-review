@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::file_path;
+use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentPlace, PendingReviewExists,
@@ -227,16 +229,21 @@ impl ViewedFilesPort for FakeGitHub {
             .unwrap()
             .iter()
             .map(|(path, state)| ViewedFile {
-                path: path.clone(),
+                path: file_path(path),
                 state: *state,
             })
             .collect())
     }
 
-    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
+    fn set_file_viewed(
+        &self,
+        pr: &PullRequestUrl,
+        path: &FilePath,
+        viewed: bool,
+    ) -> anyhow::Result<()> {
         self.sent.record(GitHubCall::SetViewed {
             pr: pr.clone(),
-            path: path.to_owned(),
+            path: path.to_string(),
             viewed,
         });
         self.check_access()?;
@@ -248,7 +255,7 @@ impl ViewedFilesPort for FakeGitHub {
         } else {
             ViewedState::Unviewed
         };
-        self.set_viewed(path, state);
+        self.set_viewed(path.as_str(), state);
         Ok(())
     }
 }

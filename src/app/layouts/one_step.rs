@@ -45,6 +45,7 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, Toolbar};
 use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
 use crate::code_source::CodeSource;
+use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, Markdown, MoreContext, NextScreen,
@@ -407,7 +408,7 @@ impl OneStepLayout {
         cx.notify();
     }
 
-    fn begin_file_comment(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn begin_file_comment(&mut self, path: &FilePath, window: &mut Window, cx: &mut Context<Self>) {
         let begun = self.session.update(cx, |session, cx| {
             let begun = session.change(cx, |review| review.begin_file_comment(path));
             if let Ok(place) = &begun {
@@ -423,9 +424,9 @@ impl OneStepLayout {
     }
 
     /// The comments on the whole file are rows under it, not part of it.
-    fn image_row(&self, path: &str, cx: &mut Context<Self>) -> ImageRow {
+    fn image_row(&self, path: &FilePath, cx: &mut Context<Self>) -> ImageRow {
         let layout = cx.entity();
-        let comment_path = path.to_owned();
+        let comment_path = path.clone();
         let on_comment: OnImageComment = Rc::new(move |window, cx| {
             layout.update(cx, |this, cx| {
                 this.begin_file_comment(&comment_path, window, cx);
@@ -433,9 +434,9 @@ impl OneStepLayout {
         });
         let session = self.session.read(cx);
         ImageRow::new(
-            path.to_owned(),
-            session.review().image_preview(path).cloned(),
-            session.image_pictures(path),
+            path.clone(),
+            session.review().image_preview(path.as_str()).cloned(),
+            session.image_pictures(path.as_str()),
             on_comment,
         )
     }
@@ -652,7 +653,7 @@ impl OneStepLayout {
 
     fn scroll_code_sideways(
         &mut self,
-        path: &str,
+        path: &FilePath,
         delta: Pixels,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1053,12 +1054,12 @@ impl OneStepLayout {
                 let path = line.location.path.clone();
                 let scroll_x = self
                     .code_scroll_x
-                    .of(self.session.read(cx).review().screen(), path.as_str());
+                    .of(self.session.read(cx).review().screen(), &path);
                 let layout_handle = cx.weak_entity();
                 let on_scroll_x: OnScrollX = Rc::new(move |delta, window, cx| {
                     layout_handle
                         .update(cx, |this, cx| {
-                            this.scroll_code_sideways(path.as_str(), delta, window, cx);
+                            this.scroll_code_sideways(&path, delta, window, cx);
                         })
                         .ok();
                 });
@@ -1608,11 +1609,11 @@ impl Render for OneStepLayout {
 #[derive(Default)]
 struct CodeScrollX {
     screen: Option<Screen>,
-    by_path: HashMap<String, Pixels>,
+    by_path: HashMap<FilePath, Pixels>,
 }
 
 impl CodeScrollX {
-    fn of(&self, screen: &Screen, path: &str) -> Pixels {
+    fn of(&self, screen: &Screen, path: &FilePath) -> Pixels {
         match &self.screen {
             Some(scrolled) if scrolled == screen => {
                 self.by_path.get(path).copied().unwrap_or(Pixels::ZERO)
@@ -1621,12 +1622,12 @@ impl CodeScrollX {
         }
     }
 
-    fn scroll(&mut self, screen: &Screen, path: &str, delta: Pixels, max: Pixels) {
+    fn scroll(&mut self, screen: &Screen, path: &FilePath, delta: Pixels, max: Pixels) {
         if self.screen.as_ref() != Some(screen) {
             self.screen = Some(screen.clone());
             self.by_path.clear();
         }
-        let offset = self.by_path.entry(path.to_owned()).or_insert(Pixels::ZERO);
+        let offset = self.by_path.entry(path.clone()).or_insert(Pixels::ZERO);
         *offset = (*offset + delta).clamp(Pixels::ZERO, max);
     }
 }

@@ -7,6 +7,7 @@ use gpui::{
     Window, canvas, div, fill, img, point, px, size,
 };
 
+use crate::file_path::FilePath;
 use crate::image_facts::{self, PixelSize};
 use crate::viewer::{ImagePreview, ImageSide};
 
@@ -37,11 +38,11 @@ impl ImagePictures {
             base: preview
                 .base
                 .as_ref()
-                .and_then(|side| Picture::of(&preview.path, side)),
+                .and_then(|side| Picture::of(preview.path.as_str(), side)),
             head: preview
                 .head
                 .as_ref()
-                .and_then(|side| Picture::of(&preview.path, side)),
+                .and_then(|side| Picture::of(preview.path.as_str(), side)),
         }
     }
 }
@@ -119,7 +120,7 @@ fn rasterize_svg(svg: &[u8], size: PixelSize) -> Option<Vec<u8>> {
 /// for a comment on the whole file. An added or deleted image is one picture with a mark.
 #[derive(IntoElement)]
 pub struct ImageRow {
-    path: String,
+    path: FilePath,
     preview: Option<ImagePreview>,
     pictures: Option<Rc<ImagePictures>>,
     on_comment: OnImageComment,
@@ -127,7 +128,7 @@ pub struct ImageRow {
 
 impl ImageRow {
     pub fn new(
-        path: String,
+        path: FilePath,
         preview: Option<ImagePreview>,
         pictures: Option<Rc<ImagePictures>>,
         on_comment: OnImageComment,
@@ -162,7 +163,7 @@ impl RenderOnce for ImageRow {
                 .as_ref()
                 .and_then(|pictures| pictures.head.as_ref()),
         );
-        let path = SharedString::from(self.path);
+        let path = SharedString::from(Arc::<str>::from(self.path));
         let on_comment = self.on_comment;
         div()
             .flex()

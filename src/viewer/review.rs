@@ -130,7 +130,7 @@ pub struct Review {
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
     /// File boxes of a step opened or folded against the step's fold, by step and path.
-    box_fold_flipped: BTreeSet<(StepId, String)>,
+    box_fold_flipped: BTreeSet<(StepId, FilePath)>,
     viewed_sync: ViewedSync,
     repin_running: bool,
     refused_while_repinning: bool,
@@ -243,7 +243,7 @@ impl Review {
         let mut requests: Vec<ImagePreviewRequest> = Vec::new();
         for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
             let path = &piece.id.path;
-            let is_wanted = self.display_options.image_preview(path).is_none()
+            let is_wanted = self.display_options.image_preview(path.as_str()).is_none()
                 && !requests.iter().any(|request| request.path() == path);
             let file = self.files.iter().find(|file| file.path == *path);
             if let (true, Some(file)) = (is_wanted, file) {
@@ -825,16 +825,11 @@ impl Review {
     }
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
-    pub fn begin_file_comment(&mut self, path: &str) -> Result<CommentPlace, CommentRefusal> {
+    pub fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
         let tour_is_old = self.old_head().is_some();
-        let path =
-            FilePath::new(path).map_err(|error| CommentRefusal::NoAccess(error.to_string()))?;
-        let place = self.comment_desk.begin_file_comment(
-            &mut self.state,
-            &path,
-            tour_is_old,
-            &self.head,
-        )?;
+        let place =
+            self.comment_desk
+                .begin_file_comment(&mut self.state, path, tour_is_old, &self.head)?;
         self.save_viewer_sections()
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
         Ok(place)
@@ -1088,15 +1083,15 @@ impl Review {
     }
 
     /// A folded step still lists its file boxes, each folded on its own.
-    pub fn is_box_folded(&self, step: &StepId, path: &str) -> bool {
+    pub fn is_box_folded(&self, step: &StepId, path: &FilePath) -> bool {
         self.is_folded(step)
             != self
                 .box_fold_flipped
-                .contains(&(step.clone(), path.to_owned()))
+                .contains(&(step.clone(), path.clone()))
     }
 
-    pub fn toggle_box_fold(&mut self, step: &StepId, path: &str) {
-        let key = (step.clone(), path.to_owned());
+    pub fn toggle_box_fold(&mut self, step: &StepId, path: &FilePath) {
+        let key = (step.clone(), path.clone());
         if !self.box_fold_flipped.remove(&key) {
             self.box_fold_flipped.insert(key);
         }

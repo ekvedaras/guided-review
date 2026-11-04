@@ -5,12 +5,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use crate::code_source::{BlobInfo, CodeSource, FileAt, FileDiff};
+use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 const PARALLEL_READS: usize = 8;
 
 /// By commit, then path, so a lookup borrows both and allocates nothing.
-type FilesBySha = HashMap<Sha, HashMap<String, Arc<[u8]>>>;
+type FilesBySha = HashMap<Sha, HashMap<FilePath, Arc<[u8]>>>;
 
 /// Reads each file once per process: a file at a commit never changes.
 /// Failed reads are not kept, so a passing network error does not stick
@@ -33,11 +34,11 @@ impl CachedCodeSource {
         self.files.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn already_read(&self, sha: &Sha, path: &str) -> Option<Arc<[u8]>> {
+    fn already_read(&self, sha: &Sha, path: &FilePath) -> Option<Arc<[u8]>> {
         self.files().get(sha)?.get(path).cloned()
     }
 
-    fn read(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
+    fn read(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
         if let Some(bytes) = self.already_read(sha, path) {
             return Ok(bytes);
         }
@@ -45,21 +46,21 @@ impl CachedCodeSource {
         self.files()
             .entry(sha.clone())
             .or_default()
-            .insert(path.to_owned(), Arc::clone(&bytes));
+            .insert(path.clone(), Arc::clone(&bytes));
         Ok(bytes)
     }
 }
 
 impl CodeSource for CachedCodeSource {
-    fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
         self.read(sha, path)
     }
 
-    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
         self.source.blob_info_at(sha, path)
     }
 

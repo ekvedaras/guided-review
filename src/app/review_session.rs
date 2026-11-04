@@ -1,6 +1,7 @@
 //! The open review on the GPUI side: it owns the `Review`, the rows built from it, and every round trip
 //! to GitHub, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
 
+use crate::file_path::FilePath;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -57,8 +58,8 @@ pub struct ReviewSession {
     repin_progress: RepinProgress,
     refresh_progress: RefreshProgress,
     image_cache: ImageCache,
-    image_pictures: HashMap<String, Rc<ImagePictures>>,
-    loading_images: HashSet<String>,
+    image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
+    loading_images: HashSet<FilePath>,
     /// The comment box that takes the keys.
     composing: Option<CommentPlace>,
     sending_comments: HashSet<CommentPlace>,
@@ -702,7 +703,7 @@ impl ReviewSession {
     /// is dropped: `loading_images` was cleared, and its picture may not match the new review.
     fn load_images(&mut self, cx: &mut Context<Self>) {
         for request in self.review.image_preview_requests() {
-            if !self.loading_images.insert(request.path().to_owned()) {
+            if !self.loading_images.insert(request.path().clone()) {
                 continue;
             }
             let (source, cache) = (Arc::clone(&self.source), self.image_cache.clone());

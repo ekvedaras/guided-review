@@ -1,4 +1,4 @@
-use crate::support::{FixtureRepo, file_path};
+use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
@@ -287,7 +287,7 @@ fn cart_changes() -> Pull {
 
 fn label_at(block: &FileBlock, head_line: usize) -> Option<(String, bool)> {
     let at = LineLocation {
-        path: file_path(&block.path),
+        path: block.path.clone(),
         side: Side::Head,
         line: head_line,
     };

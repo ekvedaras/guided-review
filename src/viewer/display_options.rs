@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
@@ -16,7 +17,7 @@ pub(super) struct DisplayOptions {
     more_context: HashMap<MoreContext, usize>,
     ignores_whitespace: bool,
     wraps_lines: bool,
-    image_previews: HashMap<String, ImagePreview>,
+    image_previews: HashMap<FilePath, ImagePreview>,
 }
 
 impl DisplayOptions {

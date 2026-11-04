@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::code_source::CodeSource;
+use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind, PieceStatus};
 use crate::pull_request::Sha;
@@ -20,7 +21,7 @@ impl SubjectCandidates {
 
         let mut found = HashMap::new();
         for file in files {
-            let imports = ImportedNames::of(source, head, file.path.as_str());
+            let imports = ImportedNames::of(source, head, &file.path);
             for test in file.pieces.iter().filter(|piece| is_live_test(piece)) {
                 let candidates = subjects_of_test(file.path.as_str(), test, &imports, &pool);
                 found.insert(test.id.to_string(), Subjects(candidates));
@@ -203,11 +204,11 @@ fn normalized(name: &str) -> String {
 struct ImportedNames(Vec<String>);
 
 impl ImportedNames {
-    fn of(source: &dyn CodeSource, head: &Sha, path: &str) -> Self {
+    fn of(source: &dyn CodeSource, head: &Sha, path: &FilePath) -> Self {
         let Ok(text) = source.file_at(head, path) else {
             return Self(Vec::new());
         };
-        let language = Language::for_path(path).unwrap_or(Language::TypeScript);
+        let language = Language::for_path(path.as_str()).unwrap_or(Language::TypeScript);
         Self(
             language
                 .imported_names(&text)

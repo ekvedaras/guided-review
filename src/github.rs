@@ -57,7 +57,7 @@ struct PageInfoJson {
 
 #[derive(Deserialize)]
 struct FileNodeJson {
-    path: String,
+    path: FilePath,
     #[serde(rename = "viewerViewedState")]
     viewer_viewed_state: String,
 }
@@ -357,7 +357,12 @@ impl ViewedFilesPort for GitHub {
         }
     }
 
-    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()> {
+    fn set_file_viewed(
+        &self,
+        pr: &PullRequestUrl,
+        path: &FilePath,
+        viewed: bool,
+    ) -> anyhow::Result<()> {
         let mutation = if viewed {
             "markFileAsViewed"
         } else {
@@ -591,15 +596,15 @@ impl GitHubCodeSource {
 }
 
 impl CodeSource for GitHubCodeSource {
-    fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
         let url = format!(
             "repos/{}/contents/{}?ref={sha}",
             self.repo,
-            percent_encode_path(path)
+            percent_encode_path(path.as_str())
         );
         let mut response = self
             .github
@@ -608,7 +613,7 @@ impl CodeSource for GitHubCodeSource {
         Ok(response.body_mut().read_to_vec()?.into())
     }
 
-    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
         #[derive(Deserialize)]
         struct ContentsJson {
             sha: String,
@@ -617,7 +622,7 @@ impl CodeSource for GitHubCodeSource {
         let url = format!(
             "repos/{}/contents/{}?ref={sha}",
             self.repo,
-            percent_encode_path(path)
+            percent_encode_path(path.as_str())
         );
         let contents: ContentsJson = self
             .github

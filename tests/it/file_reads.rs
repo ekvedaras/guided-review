@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use crate::support::file_path;
 use guided_review::cached_code_source::CachedCodeSource;
 use guided_review::code_source::{BlobInfo, CodeSource, FileAt, FileDiff, parse_unified_diff};
+use guided_review::file_path::FilePath;
 use guided_review::pieces;
 use guided_review::pull_request::Sha;
 use guided_review::tour::Tour;
@@ -64,14 +66,18 @@ impl CountingSource {
 }
 
 impl CodeSource for CountingSource {
-    fn file_at(&self, sha: &Sha, path: &str) -> anyhow::Result<String> {
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
 
-    fn blob_at(&self, sha: &Sha, path: &str) -> anyhow::Result<Arc<[u8]>> {
-        let key = (sha.to_string(), path.to_owned());
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
+        let key = (sha.to_string(), path.to_string());
         *self.reads.lock().unwrap().entry(key.clone()).or_default() += 1;
-        if self.read_together.iter().any(|wanted| wanted == path) {
+        if self
+            .read_together
+            .iter()
+            .any(|wanted| wanted == path.as_str())
+        {
             self.wait_for_other_reads()?;
         }
         match self.files.get(&key) {
@@ -80,7 +86,7 @@ impl CodeSource for CountingSource {
         }
     }
 
-    fn blob_info_at(&self, sha: &Sha, path: &str) -> anyhow::Result<BlobInfo> {
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
         anyhow::bail!("no blob info for {path} at {sha}")
     }
 
@@ -104,7 +110,7 @@ fn cached(source: &Arc<CountingSource>) -> CachedCodeSource {
 fn file_at(sha: &str, path: &str) -> FileAt {
     FileAt {
         sha: Sha::new(sha),
-        path: path.to_owned(),
+        path: file_path(path),
     }
 }
 
@@ -115,11 +121,15 @@ fn a_file_is_read_once_however_often_it_is_asked_for() {
 
     for _ in 0..3 {
         assert_eq!(
-            cache.file_at(&Sha::new("head"), "app/Order.php").unwrap(),
+            cache
+                .file_at(&Sha::new("head"), &file_path("app/Order.php"))
+                .unwrap(),
             "<?php"
         );
         assert_eq!(
-            *cache.blob_at(&Sha::new("head"), "app/Order.php").unwrap(),
+            *cache
+                .blob_at(&Sha::new("head"), &file_path("app/Order.php"))
+                .unwrap(),
             *b"<?php"
         );
     }
@@ -137,11 +147,15 @@ fn the_same_path_at_another_commit_is_another_file() {
     let cache = cached(&source);
 
     assert_eq!(
-        cache.file_at(&Sha::new("base"), "app/Order.php").unwrap(),
+        cache
+            .file_at(&Sha::new("base"), &file_path("app/Order.php"))
+            .unwrap(),
         "old"
     );
     assert_eq!(
-        cache.file_at(&Sha::new("head"), "app/Order.php").unwrap(),
+        cache
+            .file_at(&Sha::new("head"), &file_path("app/Order.php"))
+            .unwrap(),
         "new"
     );
 }
@@ -151,8 +165,16 @@ fn a_file_that_could_not_be_read_is_asked_for_again() {
     let source = Arc::new(CountingSource::default());
     let cache = cached(&source);
 
-    assert!(cache.file_at(&Sha::new("head"), ".gitattributes").is_err());
-    assert!(cache.file_at(&Sha::new("head"), ".gitattributes").is_err());
+    assert!(
+        cache
+            .file_at(&Sha::new("head"), &file_path(".gitattributes"))
+            .is_err()
+    );
+    assert!(
+        cache
+            .file_at(&Sha::new("head"), &file_path(".gitattributes"))
+            .is_err()
+    );
 
     assert_eq!(source.reads_of("head", ".gitattributes"), 2);
 }
@@ -175,7 +197,10 @@ fn files_read_ahead_are_read_at_the_same_time_and_not_again_later() {
     ]);
 
     for (path, text) in [("a.php", "a"), ("b.php", "b"), ("c.php", "c")] {
-        assert_eq!(cache.file_at(&Sha::new("head"), path).unwrap(), text);
+        assert_eq!(
+            cache.file_at(&Sha::new("head"), &file_path(path)).unwrap(),
+            text
+        );
         assert_eq!(source.reads_of("head", path), 1);
     }
 }
@@ -184,7 +209,9 @@ fn files_read_ahead_are_read_at_the_same_time_and_not_again_later() {
 fn reading_ahead_skips_files_already_read() {
     let source = Arc::new(CountingSource::default().with_file("head", "a.php", "a"));
     let cache = cached(&source);
-    cache.file_at(&Sha::new("head"), "a.php").unwrap();
+    cache
+        .file_at(&Sha::new("head"), &file_path("a.php"))
+        .unwrap();
 
     cache.read_ahead(&[file_at("head", "a.php")]);
 
@@ -277,11 +304,15 @@ fn the_review_reads_every_changed_file_at_head_for_context_at_the_same_time() {
     review.files_at_head_request().read(&cache);
 
     assert_eq!(
-        cache.file_at(&Sha::new("head"), "docs/a.txt").unwrap(),
+        cache
+            .file_at(&Sha::new("head"), &file_path("docs/a.txt"))
+            .unwrap(),
         "a v2\n"
     );
     assert_eq!(
-        cache.file_at(&Sha::new("head"), "docs/b.txt").unwrap(),
+        cache
+            .file_at(&Sha::new("head"), &file_path("docs/b.txt"))
+            .unwrap(),
         "b v2\n"
     );
     assert_eq!(source.reads_of("head", "docs/a.txt"), 1);

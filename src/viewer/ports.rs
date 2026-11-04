@@ -5,6 +5,7 @@ use super::comments::{CommentPlace, SendMode};
 use super::finish_review::ReviewVerdict;
 use super::reactions::Reaction;
 use super::threads::ReviewThread;
+use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
 pub trait PullRequestTipsPort: Send + Sync {
@@ -16,7 +17,12 @@ pub trait ViewedFilesPort: Send + Sync {
     /// Fails with `ViewedSyncUnavailable` when there is no token or it may not do this.
     fn viewed_files(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ViewedFile>>;
 
-    fn set_file_viewed(&self, pr: &PullRequestUrl, path: &str, viewed: bool) -> anyhow::Result<()>;
+    fn set_file_viewed(
+        &self,
+        pr: &PullRequestUrl,
+        path: &FilePath,
+        viewed: bool,
+    ) -> anyhow::Result<()>;
 }
 
 pub trait PullRequestDescriptionPort: Send + Sync {
@@ -131,7 +137,7 @@ pub enum ViewedState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewedFile {
-    pub path: String,
+    pub path: FilePath,
     pub state: ViewedState,
 }
 
