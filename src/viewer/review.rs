@@ -978,10 +978,11 @@ impl Review {
 
     /// The cmd+k list for what the reviewer has typed so far.
     pub fn jump_targets(&self, query: &str) -> Vec<JumpTarget> {
-        let safety_net_files: Vec<&str> = if self.reading_order().contains(&Screen::SafetyNet) {
+        let safety_net_files: Vec<&FilePath> = if self.reading_order().contains(&Screen::SafetyNet)
+        {
             coverage::safety_net(&self.tour, &self.files)
                 .iter()
-                .map(|part| part.piece.id.path().as_str())
+                .map(|part| part.piece.id.path())
                 .collect()
         } else {
             Vec::new()

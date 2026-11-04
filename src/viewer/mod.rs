@@ -47,7 +47,7 @@ pub use finish_review::{
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{ImageCache, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage};
-pub use jump::{JumpKind, JumpTarget};
+pub use jump::{JumpPlace, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};
 pub use ports::{

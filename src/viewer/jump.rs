@@ -1,62 +1,64 @@
 use std::collections::HashSet;
 
-use crate::pieces::ChangedFile;
+use crate::file_path::FilePath;
+use crate::pieces::{ChangedFile, PieceId};
 use crate::tour::Tour;
 
 use super::review::Screen;
 use super::step_page::pieces_of;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JumpKind {
-    Step,
-    File,
-    Symbol,
+/// Where on its screen a jump lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JumpPlace {
+    StepTop,
+    File(FilePath),
+    Piece(PieceId),
 }
 
 /// One row of the cmd+k list: a place the reviewer can jump to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumpTarget {
-    pub kind: JumpKind,
-    /// What the query is matched against and what the row shows first.
+    /// What the query is matched against; the list shows steps by it and files and symbols by `place`.
     pub label: String,
-    /// The step title for files and symbols, empty for steps; "Safety net" for files only it shows.
-    pub detail: String,
+    /// The step title for files and symbols, none for steps; "Safety net" for files only it shows.
+    pub detail: Option<String>,
     pub screen: Screen,
+    pub place: JumpPlace,
 }
 
 /// Steps, then the files and symbols each step shows, in reading order, then the files only the safety net shows.
 pub(super) fn all_targets(
     tour: &Tour,
     files: &[ChangedFile],
-    safety_net_files: &[&str],
+    safety_net_files: &[&FilePath],
 ) -> Vec<JumpTarget> {
     let mut targets = Vec::new();
-    let mut shown_files: HashSet<&str> = HashSet::new();
+    let mut shown_files: HashSet<&FilePath> = HashSet::new();
     for step in tour.steps() {
         let id = Screen::Step(step.id.clone());
         targets.push(JumpTarget {
-            kind: JumpKind::Step,
             label: step.title.clone(),
-            detail: String::new(),
+            detail: None,
             screen: id.clone(),
+            place: JumpPlace::StepTop,
         });
         for piece in pieces_of(step, tour, files) {
-            let path = piece.id.path().as_str();
+            let path = piece.id.path();
             if shown_files.insert(path) {
                 targets.push(JumpTarget {
-                    kind: JumpKind::File,
-                    label: path.to_owned(),
-                    detail: step.title.clone(),
+                    label: path.to_string(),
+                    detail: Some(step.title.clone()),
                     screen: id.clone(),
+                    place: JumpPlace::File(path.clone()),
                 });
             }
             // A `hunk-N` piece only exists because the file could not be cut into symbols; the file row stands for it.
             if piece.id.symbol_path().is_some() && !piece.id.is_hunk() {
                 targets.push(JumpTarget {
-                    kind: JumpKind::Symbol,
                     label: piece.id.to_string(),
-                    detail: step.title.clone(),
+                    detail: Some(step.title.clone()),
                     screen: id.clone(),
+                    place: JumpPlace::Piece(piece.id.clone()),
                 });
             }
         }
@@ -64,10 +66,10 @@ pub(super) fn all_targets(
     for path in safety_net_files {
         if shown_files.insert(path) {
             targets.push(JumpTarget {
-                kind: JumpKind::File,
-                label: (*path).to_owned(),
-                detail: "Safety net".to_owned(),
+                label: path.to_string(),
+                detail: Some("Safety net".to_owned()),
                 screen: Screen::SafetyNet,
+                place: JumpPlace::File((*path).clone()),
             });
         }
     }

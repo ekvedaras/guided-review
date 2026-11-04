@@ -1,8 +1,10 @@
 use crate::support::FixtureRepo;
+use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
+use guided_review::pieces::PieceId;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{JumpKind, Review, ReviewStateFile, Screen};
+use guided_review::viewer::{JumpPlace, Review, ReviewStateFile, Screen};
 use serde_json::{Value, json};
 
 fn open(steps: Vec<Value>) -> Review {
@@ -53,11 +55,19 @@ fn shop_tour() -> Vec<Value> {
     ]
 }
 
+fn kind(place: &JumpPlace) -> &'static str {
+    match place {
+        JumpPlace::StepTop => "Step",
+        JumpPlace::File(_) => "File",
+        JumpPlace::Piece(_) => "Symbol",
+    }
+}
+
 fn labels(review: &Review, query: &str) -> Vec<String> {
     review
         .jump_targets(query)
         .iter()
-        .map(|target| format!("{:?} {}", target.kind, target.label))
+        .map(|target| format!("{} {}", kind(&target.place), target.label))
         .collect()
 }
 
@@ -125,7 +135,7 @@ fn picking_a_target_opens_the_step_that_holds_it() {
     let file = review
         .jump_targets("README")
         .into_iter()
-        .find(|target| target.kind == JumpKind::File)
+        .find(|target| matches!(target.place, JumpPlace::File(_)))
         .unwrap();
     review.jump_to(&file);
 
@@ -139,11 +149,11 @@ fn a_symbol_target_names_its_file_and_step() {
     let symbol = review
         .jump_targets("Order::total")
         .into_iter()
-        .find(|target| target.kind == JumpKind::Symbol)
+        .find(|target| matches!(target.place, JumpPlace::Piece(_)))
         .unwrap();
 
     assert_eq!(symbol.screen, Screen::Step("totals".into()));
-    assert_eq!(symbol.detail, "Order totals go up");
+    assert_eq!(symbol.detail.as_deref(), Some("Order totals go up"));
 }
 
 #[test]
@@ -181,10 +191,33 @@ fn files_only_the_safety_net_shows_are_jump_targets() {
     let readme = review
         .jump_targets("README")
         .into_iter()
-        .find(|target| target.kind == JumpKind::File)
+        .find(|target| matches!(target.place, JumpPlace::File(_)))
         .unwrap();
-    assert_eq!(readme.detail, "Safety net");
+    assert_eq!(readme.detail.as_deref(), Some("Safety net"));
 
     review.jump_to(&readme);
     assert_eq!(review.screen(), &Screen::SafetyNet);
+}
+
+#[test]
+fn a_target_says_where_it_lands_whatever_its_label_says() {
+    let review = open(shop_tour());
+    let path = FilePath::new("app/Order.php").unwrap();
+
+    let places: Vec<JumpPlace> = review
+        .jump_targets("")
+        .into_iter()
+        .map(|target| target.place)
+        .collect();
+
+    assert_eq!(
+        places,
+        [
+            JumpPlace::StepTop,
+            JumpPlace::File(path.clone()),
+            JumpPlace::Piece(PieceId::symbol(path, "Order::total").unwrap()),
+            JumpPlace::StepTop,
+            JumpPlace::File(FilePath::new("README.md").unwrap()),
+        ]
+    );
 }

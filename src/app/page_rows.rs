@@ -22,7 +22,7 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CodeLink, CommentPlace, FileBlock, JumpKind, JumpTarget, LineKind, LineLocation, Markdown,
+    CodeLink, CommentPlace, FileBlock, JumpPlace, JumpTarget, LineKind, LineLocation, Markdown,
     MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage,
     Screen, Side, StepId, StepPage, ThreadView,
 };
@@ -434,14 +434,10 @@ impl PageRows {
 
     /// The row a jump lands on: a file's first piece, a symbol's piece, else the step's top.
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
-        let piece = match target.kind {
-            JumpKind::Step => None,
-            JumpKind::File => self.pieces.iter().find(|piece| piece.path == target.label),
-            JumpKind::Symbol => target
-                .label
-                .parse::<PieceId>()
-                .ok()
-                .and_then(|id| self.pieces.iter().find(|piece| piece.id == id)),
+        let piece = match &target.place {
+            JumpPlace::StepTop => None,
+            JumpPlace::File(path) => self.pieces.iter().find(|piece| piece.path == *path),
+            JumpPlace::Piece(id) => self.pieces.iter().find(|piece| piece.id == *id),
         };
         piece.map_or(0, |piece| piece.row)
     }

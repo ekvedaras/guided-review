@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use crate::pieces::PieceId;
-use crate::viewer::{JumpKind, JumpTarget};
+use crate::viewer::{JumpPlace, JumpTarget};
 
 use super::markdown_view::InlineMarkdown;
 use super::palette::{Colors, TEXT_FONT};
@@ -104,13 +104,13 @@ impl JumpPalette {
     fn row(&self, index: usize, target: &JumpTarget, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let is_selected = index == self.selected;
-        let kind = match target.kind {
-            JumpKind::Step => "Step",
-            JumpKind::File => "File",
-            JumpKind::Symbol => "Symbol",
+        let kind = match &target.place {
+            JumpPlace::StepTop => "Step",
+            JumpPlace::File(_) => "File",
+            JumpPlace::Piece(_) => "Symbol",
         };
-        let label = match target.kind {
-            JumpKind::Step => div()
+        let label = match &target.place {
+            JumpPlace::StepTop => div()
                 .min_w_0()
                 .truncate()
                 .child(InlineMarkdown::new(
@@ -118,11 +118,12 @@ impl JumpPalette {
                     &target.label,
                 ))
                 .into_any_element(),
-            JumpKind::File | JumpKind::Symbol => {
-                code_label(&colors, &target.label).into_any_element()
+            JumpPlace::File(path) => {
+                piece_label(&colors, &PieceId::whole_file(path.clone())).into_any_element()
             }
+            JumpPlace::Piece(id) => piece_label(&colors, id).into_any_element(),
         };
-        let detail = (!target.detail.is_empty()).then(|| {
+        let detail = target.detail.as_ref().map(|detail| {
             div()
                 .flex_shrink(1.)
                 .min_w(px(80.))
@@ -130,10 +131,7 @@ impl JumpPalette {
                 .truncate()
                 .text_xs()
                 .text_color(colors.muted_text)
-                .child(InlineMarkdown::new(
-                    format!("jump-detail-{index}"),
-                    &target.detail,
-                ))
+                .child(InlineMarkdown::new(format!("jump-detail-{index}"), detail))
         });
         div()
             .id(SharedString::from(format!("jump-{index}")))
@@ -176,20 +174,11 @@ impl JumpPalette {
 
 /// A file or symbol target as `folder/` dim, then the file name, then the symbol, so the end of a
 /// long path is what stays readable.
-fn code_label(colors: &Colors, label: &str) -> impl IntoElement {
-    let id = label.parse::<PieceId>().ok();
-    let folder = id.as_ref().map_or("", PieceId::folder).to_owned();
-    let file = id
-        .as_ref()
-        .map_or_else(|| label.to_owned(), |id| id.file_name().to_owned());
-    let symbol = id
-        .as_ref()
-        .and_then(PieceId::symbol_path)
-        .map(str::to_owned);
-    let symbol_name = id
-        .as_ref()
-        .and_then(PieceId::symbol_name)
-        .map(str::to_owned);
+fn piece_label(colors: &Colors, id: &PieceId) -> impl IntoElement {
+    let folder = id.folder().to_owned();
+    let file = id.file_name().to_owned();
+    let symbol = id.symbol_path().map(str::to_owned);
+    let symbol_name = id.symbol_name().map(str::to_owned);
     div()
         .flex()
         .items_center()
