@@ -14,6 +14,7 @@ use crate::config::AskSettings;
 
 use super::ask::{Ask, Place};
 use super::ask_context;
+use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener};
 use super::comment_desk::CommentDesk;
 use super::comments::{
@@ -547,6 +548,36 @@ impl Review {
                 .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
                 .map(|piece| piece.id.clone())
                 .collect(),
+        }
+    }
+
+    /// The place the Ask panel opens on, ready only when an AI has code to read and the place is still in the tour.
+    pub fn ask_target(
+        &self,
+        place: Place,
+        label: String,
+        clone: Option<PathBuf>,
+        settings: &AskSettings,
+    ) -> AskTarget {
+        let Some(clone) = clone else {
+            return AskTarget::Unavailable {
+                place,
+                label,
+                why: Unavailable::NoClone,
+            };
+        };
+        let Some(context) = self.ask_context(&place) else {
+            return AskTarget::Unavailable {
+                place,
+                label,
+                why: Unavailable::PlaceGone,
+            };
+        };
+        AskTarget::Ready {
+            launch: self.agent_launch(clone, settings, None),
+            place,
+            label,
+            context,
         }
     }
 

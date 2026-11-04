@@ -5,6 +5,7 @@ mod agent_event;
 mod agent_pool;
 mod ask;
 mod ask_context;
+mod ask_target;
 mod code_link;
 mod comment_desk;
 mod comments;
@@ -34,6 +35,7 @@ mod viewed_sync;
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
+pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde};
 pub use comments::{

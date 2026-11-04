@@ -14,8 +14,8 @@ use gpui::{
 
 use crate::config::AskSettings;
 use crate::viewer::{
-    AgentLaunch, AgentLauncher, AgentPool, Ask, AskId, Asks, Author, Opening, Place, Review,
-    Screen, StepId, TurnStopper,
+    AgentLaunch, AgentLauncher, AgentPool, Ask, AskId, AskTarget, Asks, Author, Opening, Place,
+    Review, Screen, StepId, TurnStopper,
 };
 
 use super::palette::{Colors, TEXT_FONT};
@@ -99,27 +99,31 @@ impl Worker {
 /// Asks the layout to put an answer into the comment box; only the review can place it.
 pub struct UseAsComment(pub Ask);
 
-struct Target {
-    place: Place,
-    label: String,
-    context: String,
-    launch: AgentLaunch,
-    /// Why no new question can be asked here.
-    unavailable: Option<&'static str>,
+/// Why the last question did not go out.
+#[derive(Clone, Copy)]
+enum AskNotice {
+    AllAnswering,
+}
+
+impl AskNotice {
+    fn message(self) -> &'static str {
+        match self {
+            Self::AllAnswering => "Three Asks are answering now: wait for one, or stop it",
+        }
+    }
 }
 
 /// The right side panel: Asks about one place, newest first, and the box to ask the next one.
 pub struct AskPanel {
     setup: AskSetup,
-    target: Option<Target>,
+    target: Option<AskTarget>,
     selected: Option<AskId>,
     question: String,
     pool: AgentPool,
     workers: HashMap<AskId, Worker>,
     /// Asks a re-pin changed the code under, as of the review last shown.
     code_changed: HashSet<AskId>,
-    /// Why the last question did not go out.
-    notice: Option<&'static str>,
+    notice: Option<AskNotice>,
     from_workers: UnboundedSender<(AskId, WorkerMessage)>,
     /// The panel's, so escape closes it when no question can be typed.
     focus: FocusHandle,
@@ -232,60 +236,30 @@ impl AskPanel {
     ) {
         self.recheck_code_changes(review, cx);
         self.notice = None;
-        let Some(clone) = self.setup.clone.clone() else {
-            return self.show_unavailable(place, label, NO_CLONE, window, cx);
-        };
-        let Some(context) = review.ask_context(&place) else {
-            return self.show_unavailable(place, label, PLACE_GONE, window, cx);
-        };
-        let launch = review.agent_launch(clone, &self.setup.settings, None);
+        let target =
+            review.ask_target(place, label, self.setup.clone.clone(), &self.setup.settings);
+        if let AskTarget::Unavailable { .. } = target {
+            self.selected = None;
+            self.target = Some(target);
+            window.focus(&self.focus, cx);
+            return cx.notify();
+        }
+        let place = target.place();
         let reuses_draft = self.selected.is_some_and(|id| {
             self.setup
                 .asks
                 .get(id)
-                .is_some_and(|ask| ask.place == place && ask.messages.is_empty())
+                .is_some_and(|ask| &ask.place == place && ask.messages.is_empty())
         });
         if !reuses_draft {
             self.selected = Some(self.setup.asks.start(place.clone(), review.head()));
         }
-        self.target = Some(Target {
-            place,
-            label,
-            context,
-            launch,
-            unavailable: None,
-        });
+        self.target = Some(target);
         self.question.clear();
         if let Some(id) = self.selected {
             self.ensure_worker(id);
         }
         window.focus(&self.question_focus, cx);
-        cx.notify();
-    }
-
-    fn show_unavailable(
-        &mut self,
-        place: Place,
-        label: String,
-        reason: &'static str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.selected = None;
-        self.target = Some(Target {
-            place,
-            label,
-            context: String::new(),
-            launch: AgentLaunch {
-                cwd: PathBuf::new(),
-                model: String::new(),
-                effort: String::new(),
-                system_prompt: String::new(),
-                resume: None,
-            },
-            unavailable: Some(reason),
-        });
-        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -298,10 +272,10 @@ impl AskPanel {
     /// Gets the Ask a live process, stopping the one used longest ago when three are live.
     /// False when all three are answering.
     fn ensure_worker(&mut self, id: AskId) -> bool {
-        let Some(target) = &self.target else {
+        let Some(AskTarget::Ready { launch, .. }) = &self.target else {
             return false;
         };
-        let launch = self.setup.asks.launch_for(id, target.launch.clone());
+        let launch = self.setup.asks.launch_for(id, launch.clone());
         match self.pool.open(id, Instant::now()) {
             Opening::Live if self.workers.contains_key(&id) => return true,
             Opening::Live => {}
@@ -330,15 +304,16 @@ impl AskPanel {
 
     fn send(&mut self, cx: &mut Context<Self>) {
         let question = self.question.trim().to_owned();
-        let (Some(id), Some(target)) = (self.selected, &self.target) else {
+        let (Some(id), Some(AskTarget::Ready { context, .. })) = (self.selected, &self.target)
+        else {
             return;
         };
         if question.is_empty() || self.pool.is_answering(id) {
             return;
         }
-        let context = target.context.clone();
+        let context = context.clone();
         if !self.ensure_worker(id) {
-            self.notice = Some(ALL_ANSWERING);
+            self.notice = Some(AskNotice::AllAnswering);
             return cx.notify();
         }
         self.notice = None;
@@ -506,9 +481,6 @@ impl AskPanel {
     }
 }
 
-const NO_CLONE: &str = "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml";
-const PLACE_GONE: &str = "These lines are not in the tour any more: select them again to ask";
-const ALL_ANSWERING: &str = "Three Asks are answering now: wait for one, or stop it";
 const QUESTION_NOT_SENT: &str = "The AI stopped before it got the question, and three other Asks are answering: ask again when one is done";
 
 impl EventEmitter<UseAsComment> for AskPanel {}
@@ -523,18 +495,18 @@ impl Render for AskPanel {
         let Some(target) = &self.target else {
             return div().into_any_element();
         };
-        let place = target.label.clone();
+        let place = target.label().to_owned();
         let blocks: Vec<_> = self
             .setup
             .asks
-            .at(&target.place)
+            .at(target.place())
             .into_iter()
             .map(|ask| self.ask_block(ask, cx).into_any_element())
             .collect();
         let is_answering = self.selected.is_some_and(|id| self.pool.is_answering(id));
-        let input = match target.unavailable {
-            Some(reason) => div().text_color(red()).child(reason),
-            None => div()
+        let input = match target {
+            AskTarget::Unavailable { why, .. } => div().text_color(red()).child(why.message()),
+            AskTarget::Ready { .. } => div()
                 .flex()
                 .flex_col()
                 .children(is_answering.then(|| {
@@ -544,7 +516,7 @@ impl Render for AskPanel {
                 }))
                 .children(
                     self.notice
-                        .map(|notice| div().text_color(red()).child(notice)),
+                        .map(|notice| div().text_color(red()).child(notice.message())),
                 )
                 .child(self.question_box(cx)),
         };

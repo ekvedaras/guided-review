@@ -9,8 +9,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentLauncher, AgentPort, Asks, Author, LineLocation, Place, Review, ReviewStateFile, Side,
-    StepId,
+    AgentLauncher, AgentPort, AskTarget, Asks, Author, LineLocation, Place, Review,
+    ReviewStateFile, Side, StepId, Unavailable,
 };
 use serde_json::json;
 
@@ -347,4 +347,61 @@ fn a_result_with_no_session_id_leaves_the_ask_with_the_session_it_had() {
     asks.ask(id, "Why two?", &context, agent.as_mut()).unwrap();
     asks.ask(id, "And?", &context, agent.as_mut()).unwrap();
     assert_eq!(asks.get(id).unwrap().session_id.as_deref(), Some(SESSION));
+}
+
+#[test]
+fn a_place_is_ready_to_ask_about_with_its_context_and_a_launch_in_the_clone() {
+    let Shop { review, .. } = shop();
+
+    let target = review.ask_target(
+        order_step(),
+        "Total changes".to_owned(),
+        Some(PathBuf::from("/clones/shop")),
+        &AskSettings::default(),
+    );
+
+    let AskTarget::Ready {
+        place,
+        label,
+        context,
+        launch,
+    } = target
+    else {
+        panic!("expected a ready target, got {target:?}");
+    };
+    assert_eq!((place, label.as_str()), (order_step(), "Total changes"));
+    assert_eq!(context, review.ask_context(&order_step()).unwrap());
+    assert_eq!(launch.cwd, PathBuf::from("/clones/shop"));
+}
+
+#[test]
+fn without_a_clone_or_with_the_place_gone_a_place_cannot_be_asked_about_and_says_why() {
+    let Shop { review, .. } = shop();
+    let gone = Place::Step {
+        step: StepId::from("gone"),
+    };
+
+    let unavailable = |place: Place, clone: Option<PathBuf>| match review.ask_target(
+        place,
+        "label".to_owned(),
+        clone,
+        &AskSettings::default(),
+    ) {
+        AskTarget::Unavailable { why, .. } => Some(why),
+        AskTarget::Ready { .. } => None,
+    };
+
+    assert_eq!(unavailable(order_step(), None), Some(Unavailable::NoClone));
+    assert_eq!(
+        unavailable(gone, Some(PathBuf::from("/clones/shop"))),
+        Some(Unavailable::PlaceGone)
+    );
+    assert_eq!(
+        Unavailable::NoClone.message(),
+        "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml"
+    );
+    assert_eq!(
+        Unavailable::PlaceGone.message(),
+        "These lines are not in the tour any more: select them again to ask"
+    );
 }
