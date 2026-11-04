@@ -5,7 +5,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, red,
 };
 
-use crate::viewer::{CommentDraft, CommentPlace, QueuedComment};
+use crate::viewer::{CommentDraft, CommentPlace, CommentProblem, QueuedComment};
 
 use super::palette::Colors;
 use super::text_box::TextBox;
@@ -36,7 +36,7 @@ pub struct CommentComposer {
     can_comment_now: bool,
     can_suggest_change: bool,
     /// What stops the comment, or what went wrong with the last send.
-    problem: Option<String>,
+    problem: Option<CommentProblem>,
     actions: ComposerActions,
 }
 
@@ -54,7 +54,7 @@ impl CommentComposer {
         is_sending: bool,
         can_comment_now: bool,
         can_suggest_change: bool,
-        problem: Option<String>,
+        problem: Option<CommentProblem>,
         actions: ComposerActions,
     ) -> Self {
         Self {
@@ -173,7 +173,7 @@ impl RenderOnce for CommentComposer {
             .child(div().min_h(gpui::px(48.)).child(body))
             .children(
                 self.problem
-                    .map(|problem| div().text_sm().text_color(red()).child(problem)),
+                    .map(|problem| div().text_sm().text_color(red()).child(problem.to_string())),
             )
             .children(self.is_sending.then(|| div().text_sm().child("Sending...")))
             .children(buttons)

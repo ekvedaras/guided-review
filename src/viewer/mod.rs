@@ -37,8 +37,8 @@ pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde};
 pub use comments::{
-    CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
-    QueuedComment, SendMode,
+    CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
+    CommentResult, QueuedComment, SendMode,
 };
 pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
 pub use file_block::FileBlock;

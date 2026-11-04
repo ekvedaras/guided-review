@@ -6,8 +6,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentRefusal, CommentResult, LineLocation, Review, ReviewStateFile, SendMode,
-    Side,
+    CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation, Review,
+    ReviewStateFile, SendMode, Side,
 };
 use serde_json::json;
 
@@ -535,4 +535,20 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
     assert_eq!(reopened.comment_drafts()[0].place, file);
     assert_eq!(reopened.comment_drafts()[0].written_at, None);
     assert_eq!(reopened.comment_drafts()[1], drafts[1]);
+}
+
+#[test]
+fn a_comment_problem_reads_as_the_refusal_or_the_reason_github_gave() {
+    assert_eq!(
+        CommentProblem::Refused(CommentRefusal::TourIsOld).to_string(),
+        "Update tour to comment"
+    );
+    assert_eq!(
+        CommentProblem::Rejected("GitHub made no thread".into()).to_string(),
+        "GitHub made no thread"
+    );
+    assert_eq!(
+        CommentProblem::Failed("could not reach GitHub: timeout".into()).to_string(),
+        "could not reach GitHub: timeout"
+    );
 }

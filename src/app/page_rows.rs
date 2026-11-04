@@ -22,9 +22,9 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CodeLink, CommentPlace, FileBlock, JumpPlace, JumpTarget, LineKind, LineLocation, Markdown,
-    MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage,
-    Screen, StepId, StepPage, ThreadView,
+    CodeLink, CommentPlace, CommentProblem, FileBlock, JumpPlace, JumpTarget, LineKind,
+    LineLocation, Markdown, MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review,
+    RowSelection, SafetyNetPage, Screen, StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -154,7 +154,7 @@ pub enum PageRow {
     Composer {
         place: Rc<CommentPlace>,
         text_lines: usize,
-        problem: Option<Rc<str>>,
+        problem: Option<CommentProblem>,
         is_sending: bool,
     },
     /// The ask button under the last of the lines that have Asks.
@@ -626,7 +626,7 @@ fn under_lines(review: &Review, asked_lines: &[Place]) -> Vec<UnderLine> {
 
 /// What the layout knows that changes the height of rows and the review does not.
 pub struct RowFacts<'a> {
-    pub comment_problems: &'a HashMap<CommentPlace, String>,
+    pub comment_problems: &'a HashMap<CommentPlace, CommentProblem>,
     pub sending_comments: &'a HashSet<CommentPlace>,
     pub open_details: &'a OpenDetails,
 }
@@ -949,10 +949,7 @@ fn composer_row(place: CommentPlace, review: &Review, facts: &RowFacts) -> PageR
         .map_or("", |draft| draft.body.as_str());
     PageRow::Composer {
         text_lines: line_count(text),
-        problem: facts
-            .comment_problems
-            .get(&place)
-            .map(|problem| Rc::from(problem.as_str())),
+        problem: facts.comment_problems.get(&place).cloned(),
         is_sending: facts.sending_comments.contains(&place),
         place: Rc::new(place),
     }
@@ -1129,11 +1126,11 @@ mod tests {
         );
     }
 
-    fn composer_key(text: &str, problem: Option<&str>) -> RowKey {
+    fn composer_key(text: &str, problem: Option<CommentProblem>) -> RowKey {
         PageRow::Composer {
             place: Rc::new(CommentPlace::on_file(&FilePath::new("a.rs").unwrap())),
             text_lines: line_count(text),
-            problem: problem.map(Rc::from),
+            problem,
             is_sending: false,
         }
         .key()
@@ -1143,7 +1140,10 @@ mod tests {
     fn a_comment_box_row_changes_with_its_line_count_and_its_problem_only() {
         assert_eq!(composer_key("a", None), composer_key("a longer one", None));
         assert_ne!(composer_key("a", None), composer_key("a\nb", None));
-        assert_ne!(composer_key("a", None), composer_key("a", Some("rejected")));
+        assert_ne!(
+            composer_key("a", None),
+            composer_key("a", Some(CommentProblem::Rejected("rejected".into())))
+        );
     }
 
     fn keys(ids: &[u64]) -> Vec<RowKey> {

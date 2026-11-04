@@ -18,9 +18,9 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    CommentPlace, CommentRefusal, CommentResult, FinishResult, GitHubPort, ImageCache,
-    LineLocation, OldHead, Place, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
-    SendMode, StepId, ThreadAction, ThreadActionResult, TourRefresher, TourRepinner,
+    CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
+    ImageCache, LineLocation, OldHead, Place, RefreshBrief, RepinnedTour, Review, ReviewVerdict,
+    Screen, SendMode, StepId, ThreadAction, ThreadActionResult, TourRefresher, TourRepinner,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -63,7 +63,7 @@ pub struct ReviewSession {
     /// The comment box that takes the keys.
     composing: Option<CommentPlace>,
     sending_comments: HashSet<CommentPlace>,
-    comment_problems: HashMap<CommentPlace, String>,
+    comment_problems: HashMap<CommentPlace, CommentProblem>,
     is_retrying_comments: bool,
     is_syncing: bool,
     sync_again: bool,
@@ -202,11 +202,11 @@ impl ReviewSession {
     }
 
     /// Why the comment cannot go: its last refusal, or else the tour being behind the PR.
-    pub fn comment_problem(&self, place: &CommentPlace) -> Option<String> {
+    pub fn comment_problem(&self, place: &CommentPlace) -> Option<CommentProblem> {
         self.comment_problems.get(place).cloned().or_else(|| {
             self.old_head
                 .as_ref()
-                .map(|_| CommentRefusal::TourIsOld.to_string())
+                .map(|_| CommentProblem::Refused(CommentRefusal::TourIsOld))
         })
     }
 
@@ -328,9 +328,9 @@ impl ReviewSession {
                             session.composing = None;
                             return false;
                         }
-                        Ok(CommentResult::Refused(refusal)) => refusal.to_string(),
-                        Ok(CommentResult::Rejected(reason)) => reason,
-                        Err(error) => format!("{error:#}"),
+                        Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
+                        Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason),
+                        Err(error) => CommentProblem::Failed(format!("{error:#}")),
                     };
                     session.comment_problems.insert(place, problem);
                     false

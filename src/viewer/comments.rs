@@ -151,7 +151,7 @@ pub struct QueuedComment {
 }
 
 /// Why a comment was not written, with nothing lost: the text stays where it was.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CommentRefusal {
     /// The tour is for an older head, so its lines may not be where GitHub has them.
     TourIsOld,
@@ -188,6 +188,24 @@ impl fmt::Display for CommentRefusal {
             Self::EmptyReply => f.write_str("Write the reply first"),
             Self::NoAnswerYet => f.write_str("This Ask has no answer yet"),
             Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
+        }
+    }
+}
+
+/// What stops a comment box from going out, shown under it. Not the review-wide `Problem`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CommentProblem {
+    Refused(CommentRefusal),
+    /// GitHub answered but made no thread.
+    Rejected(String),
+    Failed(String),
+}
+
+impl fmt::Display for CommentProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(refusal) => refusal.fmt(f),
+            Self::Rejected(reason) | Self::Failed(reason) => f.write_str(reason),
         }
     }
 }
