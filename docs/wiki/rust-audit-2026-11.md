@@ -119,3 +119,20 @@ Not fixed, left for later:
 - Typing in a draft or reply box while a re-pin runs is refused and only printed to stderr. The repin banner shows meanwhile, and the window is short.
 - `write_draft`/`write_reply` doing nothing when the draft is gone: no reachable path found, since the box closes when its draft is dropped.
 - A failed thread refetch after an action, a strip that fails to rasterize, image previews that fail to decode, and the GitHub adapter's empty review id and unchecked `gh auth token` status. Each needs a design choice (a soft warning channel, typed GitHub errors) that belongs with phase 4.
+
+## Phase 2b result (2026-11-04)
+
+The failures phase 2 left on stderr or nowhere. Each has a test that failed first and is green on `cargo fmt --check`, clippy with `-D warnings` and `cargo test --all-features`. Review-wide failures now go through one list, `Review::problems()` (`Problem`), which the sidebar shows in one place in place of `save_problem`.
+
+- `4834628` Re-pin refusal: any change refused while a re-pin runs (typing, tick, discard, suggestion, reply) becomes `Problem::ChangeNotKeptWhileRepinning` until the re-pin ends; save failures moved into the same list (`Problem::NotSaved`). The duplicate stderr prints for ticks, discards, suggestions and replies are gone.
+- `3ff1748` Thread refetch: a failed read of the threads, after an action or on open, is `Problem::ThreadsNotRead` until a read goes through; the threads shown stay as they were.
+- `6c33500` Diagram strip: a strip that fails to rasterize shows why in its own place, as a diagram that fails to draw already did, and is not drawn again until the diagram, theme or scale changes. Kept in place rather than in the sidebar on purpose: the failure belongs to one block of the page.
+- `86fb64c` Empty review id: when GitHub does not name the review a new comment or reply went into, Comment now and Reply now send the viewer's pending review (GitHub allows one). When there is none, the error tells the reviewer to look on GitHub before sending again, since the comment may be posted. A Comment now whose review cannot be posted or deleted now says the comment is left in the pending review, instead of ignoring the failed delete.
+
+Still on stderr only, for later:
+
+- `review_session.rs`: a failed PR head check (the new-commits banner never shows), PR description read, pending-review lookup and authorship lookup (the finish dialog may offer the wrong choices). Each needs `Problem` variants with their own clearing rule.
+- `review_session.rs` `save_typing_now` before a reopen: the failure is kept by the review being replaced, so it is lost with it.
+- `ide.rs` `IdeLaunch::run`: an IDE command that cannot start; the code link just does nothing.
+- `pick_code_source.rs`: falling back to GitHub when the local clone cannot fetch; it works, but code then opens on GitHub without saying why.
+- Fine as they are: `claude_cli.rs` kill/wait on drop, `cached_code_source.rs` read-ahead, `write!` into a `String`, GPU image drops and entity updates after close in `app/`, `image_preview.rs` temp file removal, `frame_stats`, `snapshots`, `highlight.rs` broken built-in query (a build bug, not the reviewer's).
