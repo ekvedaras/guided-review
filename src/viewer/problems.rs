@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::PathBuf;
 
 use super::review::RepinRunning;
 
@@ -17,6 +18,8 @@ pub enum Problem {
     IdeNotStarted(String),
     /// The local clone could not give the commits, so code opens on GitHub and not in the IDE.
     CodeOnGitHub(String),
+    /// The saved review could not be read, so this one starts empty; the old file is kept at the path.
+    SavedReviewNotRead(PathBuf),
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -60,6 +63,11 @@ impl fmt::Display for Problem {
             Self::CodeOnGitHub(reason) => write!(
                 formatter,
                 "Code opens on GitHub, not in the IDE, as the local clone could not give the commits: {reason}"
+            ),
+            Self::SavedReviewNotRead(backup) => write!(
+                formatter,
+                "The saved review could not be read, so this review starts empty. The old file is kept as {}",
+                backup.display()
             ),
         }
     }

@@ -143,6 +143,8 @@ pub struct Review {
     ide_not_started: Option<String>,
     /// Why the code is read from GitHub though there is a clone; set by the source this review opened on.
     code_on_github: Option<String>,
+    /// Where the saved review went when it could not be read.
+    saved_review_kept_as: Option<PathBuf>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -162,7 +164,7 @@ impl Review {
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
-        let state = state_file.load()?;
+        let (state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let pr: PullRequestUrl = tour.pr.parse()?;
         let (base, head) = (tour.base.clone(), tour.head.clone());
         let files = pieces::cut(source, &base, &head)?;
@@ -209,6 +211,7 @@ impl Review {
             not_read: BTreeMap::new(),
             ide_not_started: None,
             code_on_github: source.fallback_reason().map(str::to_owned),
+            saved_review_kept_as,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -1242,6 +1245,11 @@ impl Review {
             )
             .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
             .chain(self.code_on_github.clone().map(Problem::CodeOnGitHub))
+            .chain(
+                self.saved_review_kept_as
+                    .clone()
+                    .map(Problem::SavedReviewNotRead),
+            )
             .collect()
     }
 

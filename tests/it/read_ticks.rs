@@ -4,7 +4,7 @@ use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
-use guided_review::viewer::{ReadProgress, Review, ReviewState, ReviewStateFile};
+use guided_review::viewer::{Problem, ReadProgress, Review, ReviewState, ReviewStateFile};
 use serde_json::{Value, json};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -203,14 +203,94 @@ fn sections_a_newer_app_wrote_survive_a_tick() {
     );
 }
 
-#[test]
-fn a_broken_state_file_stops_the_app_from_opening_instead_of_being_overwritten() {
-    let shop = Shop::with_pull();
+fn write_broken_state(shop: &Shop, text: &str) {
     std::fs::create_dir_all(shop.state_path().parent().unwrap()).unwrap();
-    std::fs::write(shop.state_path(), "{ not json").unwrap();
+    std::fs::write(shop.state_path(), text).unwrap();
+}
 
-    let error = shop.try_open().err().expect("opening should fail");
+fn backups_in_state_folder(shop: &Shop) -> Vec<String> {
+    shop.files_in_state_folder()
+        .into_iter()
+        .filter(|name| name.starts_with("7.broken-"))
+        .collect()
+}
 
+#[test]
+fn a_broken_state_file_is_moved_aside_and_the_app_opens_with_fresh_state() {
+    let shop = Shop::with_pull();
+    write_broken_state(&shop, "{ not json");
+
+    let mut review = shop.open();
+
+    let backups = backups_in_state_folder(&shop);
+    assert_eq!(
+        backups.len(),
+        1,
+        "files: {:?}",
+        shop.files_in_state_folder()
+    );
+    assert_eq!(
+        std::path::Path::new(&backups[0]).extension().unwrap(),
+        "json"
+    );
+    let backup = shop.state_path().with_file_name(&backups[0]);
+    assert_eq!(std::fs::read_to_string(backup).unwrap(), "{ not json");
+    assert_eq!(ticked_in_sidebar(&review), Vec::<String>::new());
+
+    review.tick(&"emails".into()).unwrap();
+    assert_eq!(
+        shop.state_on_disk()["read_ticks"],
+        json!({"emails": {"head": shop.head}})
+    );
+}
+
+#[test]
+fn a_moved_aside_state_file_is_a_problem_in_the_sidebar_that_names_the_backup() {
+    let shop = Shop::with_pull();
+    write_broken_state(&shop, "{ not json");
+
+    let review = shop.open();
+
+    let backups = backups_in_state_folder(&shop);
+    let backup = shop.state_path().with_file_name(&backups[0]);
+    let problems = review.problems();
+    assert_eq!(problems, [Problem::SavedReviewNotRead(backup.clone())]);
+    let shown = problems[0].to_string();
+    assert!(shown.contains("could not be read"), "shown: {shown}");
+    assert!(
+        shown.contains(&backup.display().to_string()),
+        "shown: {shown}"
+    );
+}
+
+#[test]
+fn a_second_broken_state_file_does_not_overwrite_the_first_backup() {
+    let shop = Shop::with_pull();
+    write_broken_state(&shop, "first");
+    drop(shop.open());
+    write_broken_state(&shop, "second");
+    drop(shop.open());
+
+    let mut kept: Vec<String> = backups_in_state_folder(&shop)
+        .iter()
+        .map(|name| std::fs::read_to_string(shop.state_path().with_file_name(name)).unwrap())
+        .collect();
+    kept.sort();
+    assert_eq!(kept, ["first", "second"]);
+}
+
+#[test]
+fn a_broken_state_file_that_cannot_be_moved_stops_the_app_from_opening() {
+    use std::os::unix::fs::PermissionsExt;
+    let shop = Shop::with_pull();
+    write_broken_state(&shop, "{ not json");
+    let folder = shop.state_path().parent().unwrap().to_owned();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let result = shop.try_open();
+
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = result.err().expect("opening should fail");
     assert!(
         format!("{error:#}").contains("is not a valid review state file"),
         "error: {error:#}"

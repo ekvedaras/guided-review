@@ -9,6 +9,7 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
+use crate::timestamp::UtcTimestamp;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
@@ -449,17 +450,82 @@ impl ReviewStateFile {
 
     /// A PR not reviewed before has no file yet: that is an empty state, not an error.
     pub fn load(&self) -> anyhow::Result<ReviewState> {
-        match std::fs::read_to_string(&self.path) {
-            Ok(text) => serde_json::from_str(&text).with_context(|| {
-                format!("{} is not a valid review state file", self.path.display())
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ReviewState::default())
+        match self.read_text()? {
+            Some(text) => self.parse(&text),
+            None => Ok(ReviewState::default()),
+        }
+    }
+
+    /// Opens the app on a file it cannot parse: the file is moved aside, before anything new is
+    /// written, and the state starts empty. Says where the file went. When the move fails the
+    /// error of `load` is returned, so the reviewer's data is never overwritten.
+    pub fn load_or_set_aside(&self) -> anyhow::Result<(ReviewState, Option<PathBuf>)> {
+        let Some(text) = self.read_text()? else {
+            return Ok((ReviewState::default(), None));
+        };
+        match self.parse(&text) {
+            Ok(state) => Ok((state, None)),
+            Err(not_valid) => {
+                let backup = self
+                    .set_aside()
+                    .map_err(|move_error| not_valid.context(format!("{move_error:#}")))?;
+                Ok((ReviewState::default(), Some(backup)))
             }
+        }
+    }
+
+    fn read_text(&self) -> anyhow::Result<Option<String>> {
+        match std::fs::read_to_string(&self.path) {
+            Ok(text) => Ok(Some(text)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => {
                 Err(error).with_context(|| format!("could not read {}", self.path.display()))
             }
         }
+    }
+
+    fn parse(&self, text: &str) -> anyhow::Result<ReviewState> {
+        serde_json::from_str(text)
+            .with_context(|| format!("{} is not a valid review state file", self.path.display()))
+    }
+
+    /// A hard link fails when the name is taken, so an earlier backup is never overwritten.
+    fn set_aside(&self) -> anyhow::Result<PathBuf> {
+        let _lock = self.lock()?;
+        let stamp = UtcTimestamp::now();
+        let stem = self
+            .path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .with_context(|| format!("{} has no name", self.path.display()))?;
+        for attempt in 1_u32.. {
+            let suffix = if attempt == 1 {
+                String::new()
+            } else {
+                format!("-{attempt}")
+            };
+            let backup = self
+                .path
+                .with_file_name(format!("{stem}.broken-{stamp}{suffix}.json"));
+            match std::fs::hard_link(&self.path, &backup) {
+                Ok(()) => {
+                    std::fs::remove_file(&self.path)
+                        .with_context(|| format!("could not move {} aside", self.path.display()))?;
+                    return Ok(backup);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "could not move {} to {}",
+                            self.path.display(),
+                            backup.display()
+                        )
+                    });
+                }
+            }
+        }
+        anyhow::bail!("no free backup name for {}", self.path.display())
     }
 
     /// Reads the file again before changing it: the viewer and the Asks each keep their own
