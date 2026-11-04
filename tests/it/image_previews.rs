@@ -9,7 +9,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentRefusal, CommentResult, ImageCache, ImageSide, Review, ReviewStateFile, SendMode,
+    CommentRefusal, CommentResult, ImageCache, ImageMark, ImageSide, Review, ReviewStateFile,
+    SendMode,
 };
 use serde_json::json;
 
@@ -170,7 +171,7 @@ fn an_added_image_is_one_image_marked_added_and_a_deleted_one_marked_deleted() {
     );
     assert_eq!(
         (preview.mark(), preview.size_change()),
-        (Some("added"), None)
+        (Some(ImageMark::Added), None)
     );
 
     let deleted = Pull::changing("old.png", Some(&picture), None);
@@ -183,7 +184,9 @@ fn an_added_image_is_one_image_marked_added_and_a_deleted_one_marked_deleted() {
         loaded(preview.base.as_ref()),
         format!("16×16, {} B", picture.len())
     );
-    assert_eq!(preview.mark(), Some("deleted"));
+    assert_eq!(preview.mark(), Some(ImageMark::Deleted));
+    assert_eq!(ImageMark::Added.label(), "added");
+    assert_eq!(ImageMark::Deleted.label(), "deleted");
 }
 
 #[test]

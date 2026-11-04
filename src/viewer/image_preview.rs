@@ -97,6 +97,22 @@ fn file_size_text(bytes: u64) -> String {
     }
 }
 
+/// The word next to an image that is only on one side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageMark {
+    Added,
+    Deleted,
+}
+
+impl ImageMark {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
 /// An image file of the PR as the reviewer sees it: base left, head right.
 #[derive(Debug, Clone)]
 pub struct ImagePreview {
@@ -116,10 +132,10 @@ impl ImagePreview {
         self.base_sha == *base && self.head_sha == *head
     }
 
-    pub fn mark(&self) -> Option<&'static str> {
+    pub fn mark(&self) -> Option<ImageMark> {
         match self.status {
-            FileStatus::Added => Some("added"),
-            FileStatus::Deleted => Some("deleted"),
+            FileStatus::Added => Some(ImageMark::Added),
+            FileStatus::Deleted => Some(ImageMark::Deleted),
             FileStatus::Modified | FileStatus::Renamed => None,
         }
     }

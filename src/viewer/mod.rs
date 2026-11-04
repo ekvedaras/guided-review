@@ -46,7 +46,9 @@ pub use finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
-pub use image_preview::{ImageCache, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage};
+pub use image_preview::{
+    ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
+};
 pub use jump::{JumpPlace, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};

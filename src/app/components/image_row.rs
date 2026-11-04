@@ -9,7 +9,7 @@ use gpui::{
 
 use crate::file_path::FilePath;
 use crate::image_facts::{self, PixelSize};
-use crate::viewer::{ImagePreview, ImageSide};
+use crate::viewer::{ImageMark, ImagePreview, ImageSide};
 
 use super::diff_view::OnImageComment;
 use super::palette::Colors;
@@ -215,16 +215,12 @@ fn facts_row(preview: &ImagePreview, colors: &Colors) -> impl IntoElement {
 
 fn side_column(
     label: &str,
-    mark: Option<&'static str>,
+    mark: Option<ImageMark>,
     side: &ImageSide,
     picture: Option<&Picture>,
     path: &SharedString,
     colors: &Colors,
 ) -> AnyElement {
-    let mark_color = match mark {
-        Some("added") => colors.success,
-        _ => colors.danger,
-    };
     div()
         .flex()
         .flex_col()
@@ -236,7 +232,13 @@ fn side_column(
                 .text_xs()
                 .text_color(colors.muted_text)
                 .child(label.to_owned())
-                .children(mark.map(|mark| div().text_color(mark_color).child(mark.to_owned()))),
+                .children(mark.map(|mark| {
+                    let color = match mark {
+                        ImageMark::Added => colors.success,
+                        ImageMark::Deleted => colors.danger,
+                    };
+                    div().text_color(color).child(mark.label())
+                })),
         )
         .child(match picture {
             Some(picture) => drawn(picture, path, label, colors).into_any_element(),
