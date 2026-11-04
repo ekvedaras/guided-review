@@ -205,7 +205,7 @@ impl ReviewSession {
         &self.refresh_progress
     }
 
-    pub fn image_pictures(&self, path: &str) -> Option<Rc<ImagePictures>> {
+    pub fn image_pictures(&self, path: &FilePath) -> Option<Rc<ImagePictures>> {
         self.image_pictures.get(path).cloned()
     }
 

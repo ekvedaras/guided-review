@@ -825,7 +825,7 @@ impl RowsBuilder<'_> {
             if piece.is_image {
                 let path = piece.id.path().clone();
                 self.rows.push(PageRow::Image {
-                    is_loaded: review.image_preview(path.as_str()).is_some(),
+                    is_loaded: review.image_preview(&path).is_some(),
                     path: path.clone(),
                 });
                 let here = self.under_lines.take_whole_file(&path);

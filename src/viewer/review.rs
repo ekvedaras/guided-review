@@ -260,8 +260,8 @@ impl Review {
             .set_image_preview(preview, &self.base, &self.head)
     }
 
-    pub fn image_preview(&self, path: &str) -> Option<&ImagePreview> {
-        self.display_options.image_preview(path)
+    pub fn image_preview(&self, path: &FilePath) -> Option<&ImagePreview> {
+        self.display_options.image_preview(path.as_str())
     }
 
     pub fn show_more_context(&mut self, more: &MoreContext) {

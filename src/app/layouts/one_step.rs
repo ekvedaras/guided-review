@@ -438,8 +438,8 @@ impl OneStepLayout {
         let session = self.session.read(cx);
         ImageRow::new(
             path.clone(),
-            session.review().image_preview(path.as_str()).cloned(),
-            session.image_pictures(path.as_str()),
+            session.review().image_preview(path).cloned(),
+            session.image_pictures(path),
             on_comment,
         )
     }
