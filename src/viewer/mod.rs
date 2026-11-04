@@ -18,6 +18,7 @@ mod jump;
 mod markdown;
 mod new_commits;
 mod ports;
+mod problems;
 mod reactions;
 mod refresh;
 mod review;
@@ -55,6 +56,7 @@ pub use ports::{
     ReviewWritesPort, ThreadNotCreated, TurnStopper, ViewedFile, ViewedFilesPort, ViewedState,
     ViewedSyncUnavailable,
 };
+pub use problems::Problem;
 pub use reactions::{Reaction, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use review::{

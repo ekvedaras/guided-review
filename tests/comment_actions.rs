@@ -21,7 +21,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentRefusal, LineLocation, Markdown, Reaction, ReactionCount, Review,
+    CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction, ReactionCount, Review,
     ReviewStateFile, ReviewThread, SendMode, Side, SuggestionDiff, ThreadAction,
     ThreadActionResult, ThreadComment,
 };
@@ -595,12 +595,15 @@ fn typed_text_whose_save_failed_is_saved_again_by_the_next_save() {
     let lock = break_saves(&pull);
 
     assert!(review.typing_save().unwrap().run().is_err());
-    assert!(review.save_problem().unwrap().contains("could not create"));
+    assert!(matches!(
+        review.problems().as_slice(),
+        [Problem::NotSaved(reason)] if reason.contains("could not create")
+    ));
 
     std::fs::remove_dir(&lock).unwrap();
     review.typing_save().unwrap().run().unwrap();
     assert_eq!(pull.open().reply_draft("T1"), Some("because"));
-    assert_eq!(review.save_problem(), None);
+    assert_eq!(review.problems(), []);
 }
 
 #[test]
@@ -610,11 +613,14 @@ fn a_read_tick_that_could_not_be_saved_says_why_until_a_save_goes_through() {
     let lock = break_saves(&pull);
 
     assert!(review.tick(&"notes".into()).is_err());
-    assert!(review.save_problem().is_some());
+    assert!(matches!(
+        review.problems().as_slice(),
+        [Problem::NotSaved(_)]
+    ));
 
     std::fs::remove_dir(&lock).unwrap();
     review.untick(&"notes".into()).unwrap();
-    assert_eq!(review.save_problem(), None);
+    assert_eq!(review.problems(), []);
 }
 
 #[test]

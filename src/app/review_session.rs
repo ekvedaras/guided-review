@@ -265,52 +265,44 @@ impl ReviewSession {
             .iter()
             .find(|draft| &draft.place == place)
             .map(|draft| line_count(&draft.body));
-        if let Err(error) = self.review.type_in_draft(place, text) {
-            eprintln!("could not keep the comment text: {error:#}");
-        }
-        self.typed(lines_before != Some(line_count(text)), cx);
+        let kept = self.review.type_in_draft(place, text);
+        self.typed(&kept, lines_before != Some(line_count(text)), cx);
     }
 
     pub fn type_in_reply(&mut self, thread_id: &str, text: &str, cx: &mut Context<Self>) {
         let lines_before = self.review.reply_draft(thread_id).map(line_count);
-        if let Err(error) = self.review.type_in_reply(thread_id, text) {
-            eprintln!("could not keep the reply text: {error:#}");
-        }
-        self.typed(lines_before != Some(line_count(text)), cx);
+        let kept = self.review.type_in_reply(thread_id, text);
+        self.typed(&kept, lines_before != Some(line_count(text)), cx);
     }
 
     pub fn type_in_finish_body(&mut self, text: &str, cx: &mut Context<Self>) {
-        if let Err(error) = self.review.type_in_finish_body(text) {
-            eprintln!("could not keep the review text: {error:#}");
-        }
-        self.typed(false, cx);
+        let kept = self.review.type_in_finish_body(text);
+        self.typed(&kept, false, cx);
     }
 
     pub fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
-        let saved = self.change(cx, |review| {
+        // A refused or failed tick is one of the review's problems, which the rebuilt sidebar shows.
+        self.change(cx, |review| {
             if review.is_ticked(id) {
                 review.untick(id)
             } else {
                 review.tick(id)
             }
-        });
-        if let Err(error) = saved {
-            eprintln!("could not save the read tick: {error:#}");
-        }
+        })
+        .ok();
         self.sync_after_debounce(cx);
     }
 
     pub fn discard_comment(&mut self, place: &CommentPlace, cx: &mut Context<Self>) {
-        let discarded = self.change_session(cx, |session| {
+        // A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
+        self.change_session(cx, |session| {
             if session.composing.as_ref() == Some(place) {
                 session.composing = None;
             }
             session.comment_problems.remove(place);
             session.review.discard_draft(place)
-        });
-        if let Err(error) = discarded {
-            eprintln!("could not save after discarding a comment: {error:#}");
-        }
+        })
+        .ok();
     }
 
     pub fn send_comment(&mut self, place: CommentPlace, mode: SendMode, cx: &mut Context<Self>) {
@@ -495,13 +487,26 @@ impl ReviewSession {
     }
 
     /// Typing only redraws; the rows are built again when a box got a line more or less.
-    fn typed(&mut self, box_changed_height: bool, cx: &mut Context<Self>) {
+    /// Text the review did not keep is named by the review's problems, which the sidebar shows.
+    fn typed(
+        &mut self,
+        kept: &anyhow::Result<()>,
+        box_changed_height: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.save_typing_soon(cx);
         if box_changed_height {
             self.rebuild_rows(cx);
+        } else if kept.is_err() {
+            self.show_problems(cx);
         } else {
             cx.notify();
         }
+    }
+
+    fn show_problems(&mut self, cx: &mut Context<Self>) {
+        self.sidebar = SidebarRows::of(&self.review);
+        cx.notify();
     }
 
     fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
@@ -739,9 +744,8 @@ impl ReviewSession {
             cx,
             move || save.run(),
             |this, saved, cx| {
-                if saved.is_err() || this.sidebar.save_problem.is_some() {
-                    this.sidebar = SidebarRows::of(&this.review);
-                    cx.notify();
+                if saved.is_err() || !this.sidebar.problems.is_empty() {
+                    this.show_problems(cx);
                 }
             },
         )

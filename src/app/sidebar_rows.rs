@@ -29,8 +29,8 @@ pub struct SidebarRows {
     pub approve_warning: Option<ApproveWarning>,
     pub sync_banner: Option<SharedString>,
     pub not_synced: bool,
-    /// Ticks and typed text are only in memory until a save goes through again.
-    pub save_problem: Option<SharedString>,
+    /// What went wrong that the reviewer must know about, until it is put right.
+    pub problems: Vec<SharedString>,
     /// Changed code no page shows, named so the reviewer reads it on GitHub.
     pub changes_not_shown: Option<SharedString>,
     pub is_summary_current: bool,
@@ -68,9 +68,11 @@ impl SidebarRows {
                 .map(|reason| format!("Not syncing with GitHub: {reason}").into()),
             not_synced: review.not_synced(),
             changes_not_shown: changes_not_shown_notice(&review.changes_not_shown()),
-            save_problem: review
-                .save_problem()
-                .map(|reason| format!("Not saved to disk: {reason}").into()),
+            problems: review
+                .problems()
+                .iter()
+                .map(|problem| problem.to_string().into())
+                .collect(),
             is_summary_current: review.screen() == &Screen::Summary,
             steps,
             safety_net,

@@ -33,6 +33,7 @@ use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
 use super::markdown::Markdown;
 use super::ports::AgentLaunch;
+use super::problems::Problem;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -147,6 +148,7 @@ pub struct Review {
     box_fold_flipped: BTreeSet<(StepId, String)>,
     viewed_sync: ViewedSync,
     repin_running: bool,
+    refused_while_repinning: bool,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -208,6 +210,7 @@ impl Review {
             box_fold_flipped: BTreeSet::new(),
             viewed_sync: ViewedSync::default(),
             repin_running: false,
+            refused_while_repinning: false,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy_is_at_tour_head: false,
@@ -1038,6 +1041,7 @@ impl Review {
 
     pub fn repin_failed(&mut self) {
         self.repin_running = false;
+        self.refused_while_repinning = false;
     }
 
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
@@ -1160,14 +1164,18 @@ impl Review {
         unplaced.chain(outside_their_file).collect()
     }
 
-    /// Why the last save failed, until a save goes through: ticks and text are then only in memory.
-    pub fn save_problem(&self) -> Option<String> {
-        self.saves.problem()
+    /// What went wrong that the reviewer must know about, until it is put right.
+    pub fn problems(&self) -> Vec<Problem> {
+        let not_saved = self.saves.problem().map(Problem::NotSaved);
+        let not_kept = self
+            .refused_while_repinning
+            .then_some(Problem::ChangeNotKeptWhileRepinning);
+        not_saved.into_iter().chain(not_kept).collect()
     }
 
     /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
     /// these are written into a freshly loaded file.
-    fn save_viewer_sections(&self) -> anyhow::Result<()> {
+    fn save_viewer_sections(&mut self) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
         let turn = self.saves.next_turn();
         self.saves.write(turn, || {
@@ -1178,8 +1186,10 @@ impl Review {
         Ok(())
     }
 
-    fn refuse_changes_while_repinning(&self) -> anyhow::Result<()> {
+    /// A refused change is named to the reviewer until the re-pin ends.
+    fn refuse_changes_while_repinning(&mut self) -> anyhow::Result<()> {
         if self.repin_running {
+            self.refused_while_repinning = true;
             Err(RepinRunning.into())
         } else {
             Ok(())

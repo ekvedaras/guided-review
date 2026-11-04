@@ -525,9 +525,9 @@ impl OneStepLayout {
                 window.focus(&this.focus, cx);
             }),
             on_suggest_change: self.on_compose(place, cx, |this, place, window, cx| {
-                if let Err(error) = this.change_review(cx, |review| review.suggest_change(&place)) {
-                    eprintln!("could not save the suggestion: {error:#}");
-                }
+                // A refused or failed save is one of the review's problems, which the sidebar shows.
+                this.change_review(cx, |review| review.suggest_change(&place))
+                    .ok();
                 window.focus(&this.composer_focus, cx);
             }),
             on_discard: self.on_compose(place, cx, |this, place, window, cx| {
@@ -560,19 +560,19 @@ impl OneStepLayout {
         let (session, thread_id) = (self.session.clone(), thread_id.to_owned());
         Rc::new(move |change, cx| {
             session.update(cx, |session, cx| {
-                let saved = match change {
-                    ReplyDraftChange::Edit(text) => {
-                        return session.type_in_reply(&thread_id, &text, cx);
-                    }
+                // A refused or failed save is one of the review's problems, which the sidebar shows.
+                match change {
+                    ReplyDraftChange::Edit(text) => session.type_in_reply(&thread_id, &text, cx),
                     ReplyDraftChange::Open => {
-                        session.change(cx, |review| review.open_reply(&thread_id))
+                        session
+                            .change(cx, |review| review.open_reply(&thread_id))
+                            .ok();
                     }
                     ReplyDraftChange::Discard => {
-                        session.change(cx, |review| review.discard_reply(&thread_id))
+                        session
+                            .change(cx, |review| review.discard_reply(&thread_id))
+                            .ok();
                     }
-                };
-                if let Err(error) = saved {
-                    eprintln!("could not save the reply text: {error:#}");
                 }
             });
         })
@@ -719,10 +719,12 @@ impl OneStepLayout {
                     .then(|| SharedString::from("Not synced with GitHub yet")),
             )
             .map(|notice| div().text_xs().text_color(colors.warning).child(notice));
-        let save_problem = sidebar
-            .save_problem
-            .clone()
-            .map(|problem| div().text_xs().text_color(colors.danger).child(problem));
+        let problems = sidebar.problems.iter().map(|problem| {
+            div()
+                .text_xs()
+                .text_color(colors.danger)
+                .child(problem.clone())
+        });
         let changes_not_shown = sidebar
             .changes_not_shown
             .clone()
@@ -797,7 +799,7 @@ impl OneStepLayout {
             .child(progress_meter(&colors, progress))
             .child(finish_dialog)
             .children(changes_not_shown)
-            .children(save_problem)
+            .children(problems)
             .children(sync_notices);
         div()
             .w(px(300.))
