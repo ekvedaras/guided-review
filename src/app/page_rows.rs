@@ -20,9 +20,9 @@ use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CodeLink, CommentPlace, JumpKind, JumpTarget, LineKind, LineLocation, Markdown, MoreContext,
-    NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen,
-    StepId, StepPage, ThreadView,
+    CodeLink, CommentPlace, FileBlock, JumpKind, JumpTarget, LineKind, LineLocation, Markdown,
+    MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage,
+    Screen, StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -51,6 +51,8 @@ pub struct Toolbar {
     pub full_diff: Option<FullDiffControl>,
     /// `None` while the pieces are folded away, as whitespace changes nothing then.
     pub ignores_whitespace: Option<bool>,
+    /// `None` while the pieces are folded away.
+    pub wraps_lines: Option<bool>,
 }
 
 #[derive(Hash)]
@@ -76,7 +78,17 @@ pub struct ScreenFooter {
     pub is_summary: bool,
 }
 
+/// The fold of one file box of a step.
+#[derive(Clone, Hash)]
+pub struct BoxFold {
+    pub step: StepId,
+    pub path: String,
+    pub is_folded: bool,
+}
+
 pub struct PieceHeading {
+    /// Set on the header of a file box in a step; the safety net does not fold.
+    pub fold: Option<BoxFold>,
     pub piece: SharedString,
     pub path: String,
     pub ask: Option<AskAt>,
@@ -102,6 +114,8 @@ pub enum PageRow {
     Toolbar(Rc<Toolbar>),
     SafetyNetIntro,
     PieceHeader(Rc<PieceHeading>),
+    /// Inside a file block of several pieces: where the next piece starts.
+    PieceMarker(Rc<PieceHeading>),
     /// In the change since the read, a piece without lines was not touched since.
     NoChangeSinceRead,
     BinaryFile {
@@ -165,6 +179,7 @@ impl PageRow {
                 toolbar.fold.hash(&mut hasher);
                 toolbar.full_diff.hash(&mut hasher);
                 toolbar.ignores_whitespace.hash(&mut hasher);
+                toolbar.wraps_lines.hash(&mut hasher);
             }
             Self::ScreenFooter(footer) => footer.hash(&mut hasher),
             Self::StepNotes(notes) => notes.hash(&mut hasher),
@@ -175,7 +190,8 @@ impl PageRow {
                 gone_pieces.hash(&mut hasher);
                 text_may_be_old.hash(&mut hasher);
             }
-            Self::PieceHeader(heading) => {
+            Self::PieceHeader(heading) | Self::PieceMarker(heading) => {
+                heading.fold.hash(&mut hasher);
                 heading.piece.hash(&mut hasher);
                 heading.repin_label.hash(&mut hasher);
             }
@@ -196,6 +212,7 @@ impl PageRow {
                 line.location.side.hash(&mut hasher);
                 line.location.line.hash(&mut hasher);
                 matches!(line.kind, LineKind::Context { .. }).hash(&mut hasher);
+                line.wraps.hash(&mut hasher);
             }
             Self::Thread {
                 view,
@@ -333,11 +350,13 @@ impl PageRows {
                 PageRow::Line(line) => {
                     line_rows.entry(line.location.clone()).or_insert(index);
                 }
-                PageRow::PieceHeader(heading) => pieces.push(PieceAt {
-                    id: heading.piece.to_string(),
-                    path: heading.path.clone(),
-                    row: index,
-                }),
+                PageRow::PieceHeader(heading) | PageRow::PieceMarker(heading) => {
+                    pieces.push(PieceAt {
+                        id: heading.piece.to_string(),
+                        path: heading.path.clone(),
+                        row: index,
+                    })
+                }
                 _ => {}
             }
         }
@@ -385,6 +404,20 @@ impl PageRows {
                 }
             )
         })
+    }
+
+    /// The most characters a line of this file has on the screen; how far its box can scroll sideways.
+    pub fn widest_line(&self, path: &str) -> usize {
+        self.rows
+            .iter()
+            .filter_map(|row| match row {
+                PageRow::Line(line) if line.location.path == path => {
+                    Some(line.code().chars().count())
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     /// The first row that shows the line.
@@ -461,6 +494,7 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
         fold: None,
         full_diff: None,
         ignores_whitespace: None,
+        wraps_lines: None,
     })));
     rows.push(screen_footer(review, None));
 }
@@ -589,21 +623,14 @@ impl RowsBuilder<'_> {
                 is_folded: page.is_folded,
                 piece_count: page.pieces.len(),
             }),
-            full_diff: page
-                .since_read
-                .as_ref()
-                .filter(|_| !page.is_folded)
-                .map(|since| FullDiffControl {
-                    step: id.clone(),
-                    is_showing_full_diff: since.showing_full_diff,
-                }),
-            ignores_whitespace: (!page.is_folded).then(|| review.ignores_whitespace()),
+            full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
+                step: id.clone(),
+                is_showing_full_diff: since.showing_full_diff,
+            }),
+            ignores_whitespace: Some(review.ignores_whitespace()),
+            wraps_lines: Some(review.wraps_lines()),
         })));
         let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
-        if page.is_folded {
-            self.rows.push(footer);
-            return diagram;
-        }
         let shows_change_since_read = page
             .since_read
             .as_ref()
@@ -613,16 +640,27 @@ impl RowsBuilder<'_> {
             .into_iter()
             .partition(|thread| thread.anchor.is_some());
         self.add_threads_under_lines(under_a_line);
-        for piece in page.pieces {
-            let ask = AskAt {
-                id: format!("ask-piece-{id}-{}", piece.id).into(),
-                place: Place::Piece {
-                    step: id.clone(),
-                    piece: piece.id.to_string(),
-                },
-                label: piece.id.to_string(),
+        let ask_of = |piece: &PieceDiff| AskAt {
+            id: format!("ask-piece-{id}-{}", piece.id).into(),
+            place: Place::Piece {
+                step: id.clone(),
+                piece: piece.id.to_string(),
+            },
+            label: piece.id.to_string(),
+        };
+        for block in FileBlock::group(page.pieces) {
+            let fold = BoxFold {
+                step: id.clone(),
+                is_folded: review.is_box_folded(&id, &block.path),
+                path: block.path.clone(),
             };
-            self.piece_rows(piece, Some(ask), shows_change_since_read, review);
+            self.block_rows(
+                block,
+                Some(&ask_of),
+                Some(fold),
+                shows_change_since_read,
+                review,
+            );
         }
         self.rows.extend(
             after_code
@@ -640,14 +678,15 @@ impl RowsBuilder<'_> {
             fold: None,
             full_diff: None,
             ignores_whitespace: Some(review.ignores_whitespace()),
+            wraps_lines: Some(review.wraps_lines()),
         })));
         let (under_a_line, after_code): (Vec<_>, Vec<_>) = page
             .threads
             .into_iter()
             .partition(|thread| thread.anchor.is_some());
         self.add_threads_under_lines(under_a_line);
-        for piece in page.pieces {
-            self.piece_rows(piece, None, false, review);
+        for block in FileBlock::group(page.pieces) {
+            self.block_rows(block, None, None, false, review);
         }
         self.rows.extend(
             after_code
@@ -666,61 +705,148 @@ impl RowsBuilder<'_> {
             .collect();
     }
 
-    fn piece_rows(
+    fn block_rows(
         &mut self,
-        piece: PieceDiff,
-        ask: Option<AskAt>,
+        block: FileBlock,
+        ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
+        fold: Option<BoxFold>,
         shows_change_since_read: bool,
         review: &Review,
     ) {
-        let id = piece.id.to_string();
-        let no_change_since_read =
-            shows_change_since_read && piece.hunks.is_empty() && piece.binary_file.is_none();
-        self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
-            piece: id.clone().into(),
+        if fold.as_ref().is_some_and(|fold| fold.is_folded) {
+            self.folded_block_rows(&block, ask_of, fold);
+            return;
+        }
+        let heading = |piece: &PieceDiff| PieceHeading {
+            fold: None,
+            piece: piece.id.to_string().into(),
             path: piece.id.path.clone(),
-            ask,
+            ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
-        })));
-        if no_change_since_read {
-            self.rows.push(PageRow::NoChangeSinceRead);
-        }
-        if let Some(link) = piece.binary_file {
-            self.rows.push(PageRow::BinaryFile {
-                piece: id.clone().into(),
-                link,
-            });
-        }
-        if piece.is_image {
-            let path = piece.id.path.clone();
-            self.rows.push(PageRow::Image {
-                is_loaded: review.image_preview(&path).is_some(),
-                path: path.clone().into(),
-            });
-            self.hang_under(|at| at.path == path && at.line == 0);
-        }
-        if piece.changes_only_whitespace {
-            self.rows.push(PageRow::OnlyWhitespace);
-        }
-        for (index, hunk) in piece.hunks.into_iter().enumerate() {
-            if index > 0 || hunk.more_above.is_some() {
-                self.rows.push(PageRow::HunkGap {
-                    id: format!("{id}-above-{index}").into(),
-                    more: hunk.more_above,
+        };
+        let has_no_change_since_read = |piece: &PieceDiff| {
+            shows_change_since_read && piece.hunks.is_empty() && piece.binary_file.is_none()
+        };
+        let row_id = if let [piece] = block.pieces.as_slice() {
+            self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
+                fold: fold.clone(),
+                ..heading(piece)
+            })));
+            if has_no_change_since_read(piece) {
+                self.rows.push(PageRow::NoChangeSinceRead);
+            }
+            if let Some(link) = piece.binary_file.clone() {
+                self.rows.push(PageRow::BinaryFile {
+                    piece: piece.id.to_string().into(),
+                    link,
                 });
             }
-            for line in hunk.rows {
-                let location = line.location.clone();
+            if piece.is_image {
+                let path = piece.id.path.clone();
+                self.rows.push(PageRow::Image {
+                    is_loaded: review.image_preview(&path).is_some(),
+                    path: path.clone().into(),
+                });
+                self.hang_under(|at| at.path == path && at.line == 0);
+            }
+            if piece.changes_only_whitespace {
+                self.rows.push(PageRow::OnlyWhitespace);
+            }
+            piece.id.to_string()
+        } else {
+            self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
+                fold: fold.clone(),
+                piece: block.path.clone().into(),
+                path: block.path.clone(),
+                ask: None,
+                repin_label: None,
+                code_link: block.lines().next().map(|line| line.code_link.clone()),
+            })));
+            for piece in block.without_rows() {
                 self.rows
-                    .push(PageRow::Line(Rc::new(DiffRowLine::of(line))));
+                    .push(PageRow::PieceMarker(Rc::new(heading(piece))));
+                if has_no_change_since_read(piece) {
+                    self.rows.push(PageRow::NoChangeSinceRead);
+                }
+                if piece.changes_only_whitespace {
+                    self.rows.push(PageRow::OnlyWhitespace);
+                }
+            }
+            block.path.clone()
+        };
+        let shows_markers = !block.has_one_piece();
+        for (index, hunk) in block.hunks.iter().enumerate() {
+            if index > 0 || hunk.more_above.is_some() {
+                self.rows.push(PageRow::HunkGap {
+                    id: format!("{row_id}-above-{index}").into(),
+                    more: hunk.more_above.clone(),
+                });
+            }
+            for line in &hunk.rows {
+                if shows_markers
+                    && let Some((piece, is_resumed)) = block.piece_starting_at(&line.location)
+                {
+                    let marker = if is_resumed {
+                        PieceHeading {
+                            ask: None,
+                            code_link: None,
+                            ..heading(piece)
+                        }
+                    } else {
+                        heading(piece)
+                    };
+                    self.rows.push(PageRow::PieceMarker(Rc::new(marker)));
+                }
+                let location = line.location.clone();
+                self.rows.push(PageRow::Line(Rc::new(DiffRowLine::of(
+                    line.clone(),
+                    review.wraps_lines(),
+                ))));
                 self.hang_under(|at| *at == location);
             }
             if hunk.more_below.is_some() {
                 self.rows.push(PageRow::HunkGap {
-                    id: format!("{id}-below-{index}").into(),
-                    more: hunk.more_below,
+                    id: format!("{row_id}-below-{index}").into(),
+                    more: hunk.more_below.clone(),
                 });
+            }
+        }
+        self.rows.push(PageRow::PieceEnd);
+    }
+
+    /// A folded box keeps its header and the labels of its pieces, so the step still says what it covers.
+    fn folded_block_rows(
+        &mut self,
+        block: &FileBlock,
+        ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
+        fold: Option<BoxFold>,
+    ) {
+        let heading = |piece: &PieceDiff| PieceHeading {
+            fold: None,
+            piece: piece.id.to_string().into(),
+            path: piece.id.path.clone(),
+            ask: ask_of.map(|ask_of| ask_of(piece)),
+            repin_label: piece.repin_status.and_then(repin_label),
+            code_link: piece.code_link().cloned(),
+        };
+        if let [piece] = block.pieces.as_slice() {
+            self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
+                fold,
+                ..heading(piece)
+            })));
+        } else {
+            self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
+                fold,
+                piece: block.path.clone().into(),
+                path: block.path.clone(),
+                ask: None,
+                repin_label: None,
+                code_link: block.lines().next().map(|line| line.code_link.clone()),
+            })));
+            for piece in block.pieces_in_order() {
+                self.rows
+                    .push(PageRow::PieceMarker(Rc::new(heading(piece))));
             }
         }
         self.rows.push(PageRow::PieceEnd);

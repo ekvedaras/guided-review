@@ -15,6 +15,7 @@ pub(super) struct DisplayOptions {
     files_at_head: FilesAtHead,
     more_context: HashMap<MoreContext, usize>,
     ignores_whitespace: bool,
+    wraps_lines: bool,
     image_previews: HashMap<String, ImagePreview>,
 }
 
@@ -41,6 +42,14 @@ impl DisplayOptions {
 
     pub(super) fn toggle_ignore_whitespace(&mut self) {
         self.ignores_whitespace = !self.ignores_whitespace;
+    }
+
+    pub(super) fn wraps_lines(&self) -> bool {
+        self.wraps_lines
+    }
+
+    pub(super) fn toggle_wrap_lines(&mut self) {
+        self.wraps_lines = !self.wraps_lines;
     }
 
     pub(super) fn image_preview(&self, path: &str) -> Option<&ImagePreview> {

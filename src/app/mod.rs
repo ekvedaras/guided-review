@@ -32,7 +32,7 @@ use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump,
+    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleWrapLines,
 };
 use review_session::TourWork;
 
@@ -64,6 +64,7 @@ pub fn run(
                 KeyBinding::new("j", GoForward, Some(&typing_is_not_navigation)),
                 KeyBinding::new("left", GoBack, Some(&typing_is_not_navigation)),
                 KeyBinding::new("k", GoBack, Some(&typing_is_not_navigation)),
+                KeyBinding::new("w", ToggleWrapLines, Some(&typing_is_not_navigation)),
                 KeyBinding::new("cmd-k", ToggleJump, Some(OneStepLayout::KEY_CONTEXT)),
                 KeyBinding::new("cmd-c", CopySelection, Some(&typing_is_not_navigation)),
             ]);

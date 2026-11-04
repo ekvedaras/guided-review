@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use serde::{Deserialize, Serialize};
 
 use super::code_link::CodeLink;
@@ -101,6 +103,8 @@ pub struct PieceDiff {
     pub is_image: bool,
     /// What the last re-pin did to this piece; `None` when the tour was not re-pinned.
     pub repin_status: Option<RepinStatus>,
+    /// The lines its symbol spans at head; unchanged rows there belong to it.
+    pub head_lines: Option<RangeInclusive<usize>>,
 }
 
 pub struct StepPage<'a> {
@@ -207,6 +211,7 @@ impl PieceDiff {
             binary_file: (file.binary && !is_image).then(|| display.links.to_file(file)),
             is_image,
             repin_status: None,
+            head_lines: piece.head_lines.clone(),
         }
     }
 
@@ -234,6 +239,7 @@ impl PieceDiff {
             binary_file: None,
             is_image: false,
             repin_status: None,
+            head_lines: piece.head_lines.clone(),
         };
         let Some(file) = since_files.iter().find(|file| file.path == piece.id.path) else {
             return diff;

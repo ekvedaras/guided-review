@@ -10,6 +10,7 @@ mod comment_desk;
 mod comments;
 mod diff_display;
 mod display_options;
+mod file_block;
 mod finish_review;
 mod highlight;
 mod image_preview;
@@ -39,6 +40,7 @@ pub use comments::{
     QueuedComment, SendMode,
 };
 pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
+pub use file_block::FileBlock;
 pub use finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };

@@ -6,6 +6,7 @@ use gpui::{
     Window, actions, div, list, px, relative,
 };
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -20,9 +21,9 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeSelectionHooks, DiffRow, OnImageComment, OnMoreContext, OnRowGesture, PieceHeader,
-    RowGesture, binary_file_row, hunk_gap, no_change_since_read_row, only_whitespace_row,
-    piece_end, piece_row,
+    CodeSelectionHooks, DiffRow, OnImageComment, OnMoreContext, OnRowGesture, OnScrollX,
+    PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
+    only_whitespace_row, piece_end, piece_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -50,7 +51,16 @@ use crate::viewer::{
     Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadView,
 };
 
-actions!(one_step, [GoForward, GoBack, ToggleJump, CopySelection]);
+actions!(
+    one_step,
+    [
+        GoForward,
+        GoBack,
+        ToggleJump,
+        CopySelection,
+        ToggleWrapLines
+    ]
+);
 
 type OnCodeSpot = Rc<dyn Fn(RowGesture, CodeSpot, &mut Window, &mut App)>;
 
@@ -78,6 +88,10 @@ pub struct OneStepLayout {
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
     on_code_gesture: OnCodeSpot,
+    /// The screen whose end the reader has had on screen; the arrow key ticks a step only then.
+    seen_end_of: Option<Screen>,
+    /// How far each file box on the screen is scrolled sideways, by path.
+    code_scroll_x: CodeScrollX,
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
     /// The rows of the last drag, to ask the AI about.
@@ -189,6 +203,8 @@ impl OneStepLayout {
         use_code_opener(opener, cx);
         Self {
             screen_list: session.read(cx).screen_list().clone(),
+            seen_end_of: None,
+            code_scroll_x: CodeScrollX::default(),
             session,
             on_row_gesture,
             diagrams,
@@ -622,12 +638,61 @@ impl OneStepLayout {
         use_code_opener(opener, cx);
     }
 
+    /// Like the footer's button, the arrow key ticks the step it leaves, but only once the reader
+    /// has seen the step's end, so skipping ahead does not count as reading.
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
+        self.note_seen_end(cx);
+        let review = self.session.read(cx).review();
+        if let Screen::Step(id) = review.screen().clone()
+            && !review.is_ticked(&id)
+            && self.seen_end_of.as_ref() == Some(review.screen())
+        {
+            self.toggle_tick(&id, cx);
+        }
         self.change_review(cx, Review::go_forward);
+    }
+
+    fn scroll_code_sideways(
+        &mut self,
+        path: &str,
+        delta: Pixels,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session = self.session.read(cx);
+        let font_size = window.rem_size() * 0.875;
+        let font_id = window
+            .text_system()
+            .resolve_font(&gpui::font(crate::app::components::palette::CODE_FONT));
+        let char_width = window
+            .text_system()
+            .advance(font_id, font_size, 'm')
+            .map_or(px(8.), |size| size.width);
+        let gutter = char_width * 14. + px(16.);
+        let shown = self.screen_list.viewport_bounds().size.width - gutter;
+        let widest = char_width * session.rows().widest_line(path) as f32;
+        let max = (widest - shown + char_width * 2.).max(Pixels::ZERO);
+        let screen = session.review().screen().clone();
+        self.code_scroll_x.scroll(&screen, path, delta, max);
+        cx.notify();
+    }
+
+    /// The screen's last row is its footer; once it is on screen, or above it, the end was seen.
+    fn note_seen_end(&mut self, cx: &App) {
+        let Some(last) = self.screen_list.item_count().checked_sub(1) else {
+            return;
+        };
+        if self.screen_list.item_is_below_viewport(last) == Some(false) {
+            self.seen_end_of = Some(self.session.read(cx).review().screen().clone());
+        }
     }
 
     fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) {
         self.change_review(cx, Review::go_back);
+    }
+
+    fn toggle_wrap_lines(&mut self, _: &ToggleWrapLines, _: &mut Window, cx: &mut Context<Self>) {
+        self.change_review(cx, Review::toggle_wrap_lines);
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -910,7 +975,38 @@ impl OneStepLayout {
                     Self::open_code_button(format!("open-piece-{}", heading.piece), link, cx)
                 });
                 let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
-                PieceHeader::new(
+                let header = PieceHeader::new(
+                    heading.piece.clone(),
+                    heading.repin_label,
+                    open_code.into_iter().chain(ask).collect(),
+                );
+                match heading.fold.clone() {
+                    Some(fold) => header
+                        .with_fold_toggle(
+                            div()
+                                .id(SharedString::from(format!("fold-box-{}", fold.path)))
+                                .flex_none()
+                                .w(px(14.))
+                                .cursor_pointer()
+                                .text_color(colors.muted_text)
+                                .hover(|chevron| chevron.text_color(colors.accent))
+                                .child(if fold.is_folded { "▸" } else { "▾" })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.change_review(cx, |review| {
+                                        review.toggle_box_fold(&fold.step, &fold.path)
+                                    });
+                                })),
+                        )
+                        .into_any_element(),
+                    None => header.into_any_element(),
+                }
+            }
+            PageRow::PieceMarker(heading) => {
+                let open_code = heading.code_link.as_ref().map(|link| {
+                    Self::open_code_button(format!("open-marker-{}", heading.piece), link, cx)
+                });
+                let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
+                PieceMarker::new(
                     heading.piece.clone(),
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
@@ -937,7 +1033,20 @@ impl OneStepLayout {
                     .filter(|selection| selection.is_on(self.session.read(cx).review().screen()))
                     .and_then(|selection| selection.range_on(index, line.code().len()));
                 let on_code_gesture = self.on_code_gesture.clone();
+                let path = line.location.path.clone();
+                let scroll_x = self
+                    .code_scroll_x
+                    .of(self.session.read(cx).review().screen(), &path);
+                let layout_handle = cx.weak_entity();
+                let on_scroll_x: OnScrollX = Rc::new(move |delta, window, cx| {
+                    layout_handle
+                        .update(cx, |this, cx| {
+                            this.scroll_code_sideways(&path, delta, window, cx)
+                        })
+                        .ok();
+                });
                 DiffRow::new(line)
+                    .scrolled_sideways(scroll_x, on_scroll_x)
                     .selected(is_selected)
                     .with_code_selection(CodeSelectionHooks {
                         selected: code_selection,
@@ -1032,6 +1141,14 @@ impl OneStepLayout {
                 }))
                 .child("Hide whitespace")
         });
+        let wrap = toolbar.wraps_lines.map(|is_on| {
+            toggle_button(colors, "wrap-lines", is_on, ButtonSize::Small)
+                .tooltip(tooltip(|_| "Wrap long lines (W)".into()))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.change_review(cx, Review::toggle_wrap_lines);
+                }))
+                .child("Wrap lines")
+        });
         let ask = toolbar.ask.as_ref().map(|ask| self.ask_at(ask, cx));
         div()
             .w_full()
@@ -1044,6 +1161,7 @@ impl OneStepLayout {
             .children(full_diff)
             .child(div().flex_1())
             .children(whitespace)
+            .children(wrap)
             .children(ask)
     }
 
@@ -1313,6 +1431,7 @@ fn key_hints(colors: Colors) -> impl IntoElement {
         .text_color(colors.muted_text)
         .child(hint(&["←", "→"], "previous / next screen"))
         .child(hint(&["⌘", "K"], "jump to a step, file or symbol"))
+        .child(hint(&["W"], "wrap long lines"))
 }
 
 fn key_cap(colors: Colors, key: &'static str) -> impl IntoElement {
@@ -1348,6 +1467,7 @@ impl Render for OneStepLayout {
         };
         let frame_painted_marker = self.frame_stats.frame_started();
         self.run_scroll_script(window, cx);
+        self.note_seen_end(cx);
         #[cfg(feature = "snapshots")]
         self.run_snapshots(window, cx);
         self.show_diagram(window, cx);
@@ -1397,6 +1517,7 @@ impl Render for OneStepLayout {
             )
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::go_back))
+            .on_action(cx.listener(Self::toggle_wrap_lines))
             .on_action(cx.listener(Self::toggle_jump))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
@@ -1460,5 +1581,32 @@ impl Render for OneStepLayout {
             })
             .child(self.jump.clone())
             .children(frame_painted_marker)
+    }
+}
+
+/// Sideways scroll of the file boxes of one screen; another screen starts unscrolled.
+#[derive(Default)]
+struct CodeScrollX {
+    screen: Option<Screen>,
+    by_path: HashMap<String, Pixels>,
+}
+
+impl CodeScrollX {
+    fn of(&self, screen: &Screen, path: &str) -> Pixels {
+        match &self.screen {
+            Some(scrolled) if scrolled == screen => {
+                self.by_path.get(path).copied().unwrap_or(Pixels::ZERO)
+            }
+            _ => Pixels::ZERO,
+        }
+    }
+
+    fn scroll(&mut self, screen: &Screen, path: &str, delta: Pixels, max: Pixels) {
+        if self.screen.as_ref() != Some(screen) {
+            self.screen = Some(screen.clone());
+            self.by_path.clear();
+        }
+        let offset = self.by_path.entry(path.to_string()).or_insert(Pixels::ZERO);
+        *offset = (*offset + delta).clamp(Pixels::ZERO, max);
     }
 }

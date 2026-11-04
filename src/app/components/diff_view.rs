@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, Div, ElementId, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, Rgba, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    StyledText, TextLayout, Window, div, px,
+    ParentElement, Pixels, RenderOnce, Rgba, SharedString, Stateful, StatefulInteractiveElement,
+    Styled, StyledText, TextLayout, Window, div, px,
 };
 
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
@@ -24,6 +24,9 @@ pub enum RowGesture {
     /// The mouse is over the row: a drag in progress reaches it.
     Over,
 }
+
+/// A sideways scroll on a row: how far the row's file box should move its code, in pixels.
+pub type OnScrollX = Rc<dyn Fn(Pixels, &mut Window, &mut App)>;
 
 pub type OnImageComment = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -55,6 +58,8 @@ pub struct DiffRowLine {
     code_link: CodeLink,
     /// Rows outside GitHub's hunks, and rows of the change since the read, take no comment.
     takes_comment: bool,
+    /// A long line wraps onto more rows instead of being cut at the box's edge.
+    pub wraps: bool,
 }
 
 impl DiffRowLine {
@@ -62,7 +67,7 @@ impl DiffRowLine {
         &self.code
     }
 
-    pub fn of(line: DiffLine) -> Self {
+    pub fn of(line: DiffLine, wraps: bool) -> Self {
         let number = line.location.line.to_string();
         let (base_number, head_number, sign) = match line.kind {
             LineKind::Removed => (number, String::new(), '-'),
@@ -80,6 +85,7 @@ impl DiffRowLine {
             .collect();
         Self {
             takes_comment: line.takes_comment(),
+            wraps,
             gutter: format!("{base_number:>5} {head_number:>5} {sign} ").into(),
             code: line.text.into(),
             highlights,
@@ -99,6 +105,9 @@ pub struct DiffRow {
     /// Without it the row takes no comment.
     on_gesture: Option<OnRowGesture>,
     code_selection: Option<CodeSelectionHooks>,
+    /// How far the code is moved left; all rows of a file box share it, so they scroll together.
+    scroll_x: Pixels,
+    on_scroll_x: Option<OnScrollX>,
 }
 
 impl DiffRow {
@@ -108,7 +117,18 @@ impl DiffRow {
             is_selected: false,
             on_gesture: None,
             code_selection: None,
+            scroll_x: Pixels::ZERO,
+            on_scroll_x: None,
         }
+    }
+
+    /// Only for a row that does not wrap: a wrapped row has nothing hidden to the side.
+    pub fn scrolled_sideways(mut self, scroll_x: Pixels, on_scroll_x: OnScrollX) -> Self {
+        if !self.line.wraps {
+            self.scroll_x = scroll_x;
+            self.on_scroll_x = Some(on_scroll_x);
+        }
+        self
     }
 
     pub fn with_code_selection(mut self, hooks: CodeSelectionHooks) -> Self {
@@ -153,7 +173,11 @@ impl RenderOnce for DiffRow {
         };
         let code = StyledText::new(line.code.clone()).with_highlights(highlights);
         let code_layout = code.layout().clone();
-        let code = div().flex_1().min_w_0().child(code);
+        let code = div()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .child(div().relative().left(-self.scroll_x).child(code));
         let code = match self.code_selection.map(|hooks| hooks.on_gesture) {
             Some(on_gesture) => {
                 let (on_press, on_move) = (on_gesture.clone(), on_gesture);
@@ -194,6 +218,7 @@ impl RenderOnce for DiffRow {
                 move |cx| open_code_hint(&link, cx)
             }))
             .on_click(move |_, _, cx| open_code(&link, cx))
+            .whitespace_nowrap()
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self.on_gesture.clone().filter(|_| line.takes_comment) {
@@ -216,9 +241,18 @@ impl RenderOnce for DiffRow {
             .group("diff-row")
             .flex()
             .overflow_hidden()
-            .whitespace_nowrap()
+            .when(!line.wraps, |row| row.whitespace_nowrap())
             .font_family(CODE_FONT)
             .text_sm()
+            .when_some(self.on_scroll_x, |row, on_scroll_x| {
+                row.on_scroll(move |event, window, cx| {
+                    let delta = event.delta.pixel_delta(window.line_height());
+                    if delta.x.abs() > delta.y.abs() {
+                        on_scroll_x(-delta.x, window, cx);
+                        cx.stop_propagation();
+                    }
+                })
+            })
             .when_some(self.on_gesture, |row, on_gesture| {
                 row.on_mouse_move(move |_, window, cx| {
                     on_gesture(RowGesture::Over, &location, window, cx)
@@ -287,6 +321,7 @@ pub struct PieceHeader {
     piece: SharedString,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
+    fold_toggle: Option<Stateful<Div>>,
 }
 
 impl PieceHeader {
@@ -299,7 +334,14 @@ impl PieceHeader {
             piece,
             repin_label,
             buttons,
+            fold_toggle: None,
         }
+    }
+
+    /// A chevron before the name that opens or folds the box.
+    pub fn with_fold_toggle(mut self, toggle: Stateful<Div>) -> Self {
+        self.fold_toggle = Some(toggle);
+        self
     }
 }
 
@@ -325,6 +367,7 @@ impl RenderOnce for PieceHeader {
             .rounded_t_md()
             .border_color(colors.border)
             .text_sm()
+            .children(self.fold_toggle)
             .child(
                 div()
                     .flex_1()
@@ -368,6 +411,76 @@ impl RenderOnce for PieceHeader {
                     .child(label)
             }))
             .children(self.buttons)
+    }
+}
+
+/// Inside a box of several pieces of one file: a thin dim line where the next piece starts.
+/// Its buttons show only under the mouse, so the code reads as one file.
+#[derive(IntoElement)]
+pub struct PieceMarker {
+    piece: SharedString,
+    repin_label: Option<&'static str>,
+    buttons: Vec<Stateful<Div>>,
+}
+
+impl PieceMarker {
+    pub fn new(
+        piece: SharedString,
+        repin_label: Option<&'static str>,
+        buttons: Vec<Stateful<Div>>,
+    ) -> Self {
+        Self {
+            piece,
+            repin_label,
+            buttons,
+        }
+    }
+}
+
+impl RenderOnce for PieceMarker {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let name = PieceName::of(&self.piece);
+        piece_row(colors)
+            .group("piece-marker")
+            .h(px(24.))
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .border_t_1()
+            .text_xs()
+            .font_family(CODE_FONT)
+            .text_color(colors.muted_text)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(SharedString::from(
+                        name.symbol.unwrap_or(name.file).to_string(),
+                    )),
+            )
+            .children(self.repin_label.map(|label| {
+                div()
+                    .flex_none()
+                    .px_1p5()
+                    .rounded_md()
+                    .bg(colors.warning_background)
+                    .text_color(colors.warning)
+                    .child(label)
+            }))
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .gap_2()
+                    .opacity(0.)
+                    .group_hover("piece-marker", |buttons| buttons.opacity(1.))
+                    .children(self.buttons),
+            )
     }
 }
 

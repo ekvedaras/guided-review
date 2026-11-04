@@ -14,6 +14,8 @@
 
 **Diff piece**: A part of a PR diff that a step can point to. Usually one changed symbol: a method, function or class. Some pieces carry a mark: `format` (only layout changed), `moved` (same code, new place), `generated` (made by a tool).
 
+**File block**: The one box a page shows for all its diff pieces of one file, in line order. A thin label marks where each piece starts: at the first line of its symbol, not at its first changed line. Blank lines and lines with only closing brackets never move a label.
+
 **Outline**: A short list of all diff pieces in a PR, with no code. A tour writer reads it first and opens only the pieces it needs.
 
 **Tour file**: The saved form of a tour. Any viewer can show it.

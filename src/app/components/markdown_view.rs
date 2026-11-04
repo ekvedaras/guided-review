@@ -1,8 +1,8 @@
 use gpui::{
     AnyElement, App, BorrowAppContext, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
     InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, UnderlineStyle, Window,
-    div, px,
+    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
+    Window, canvas, div, fill, point, px,
 };
 
 use std::collections::HashSet;
@@ -179,7 +179,7 @@ fn block_element(block: &Block, key: &str, window: &mut Window, cx: &mut App) ->
                     .flex()
                     .gap_2()
                     .child(div().flex_none().w(px(20.)).text_right().child(marker))
-                    .child(div().flex_1().child(blocks(
+                    .child(div().flex_1().min_w_0().child(blocks(
                         item,
                         &format!("{key}-{index}"),
                         window,
@@ -233,11 +233,12 @@ fn details(
             cx.refresh_windows();
         })
         .child(div().flex_none().child(if open { "▾" } else { "▸" }))
-        .child(
-            div()
-                .flex_1()
-                .child(inline_text(colors, &title, &format!("{key}-summary"), 1.0)),
-        );
+        .child(div().flex_1().min_w_0().child(inline_text(
+            colors,
+            &title,
+            &format!("{key}-summary"),
+            1.0,
+        )));
     div()
         .flex()
         .flex_col()
@@ -353,13 +354,24 @@ fn inline_text(colors: Colors, runs: &[Run], key: &str, scale: f32) -> AnyElemen
         .into_any_element()
 }
 
+/// Inline code gets a third of an em of space on each side inside its background, as padding.
+const CODE_PADDING: &str = "\u{2004}";
+
 fn styled_runs(colors: Colors, runs: &[Run], key: &str) -> AnyElement {
     let mut text = String::new();
     let mut highlights = Vec::new();
     let mut links = Vec::new();
+    let mut code_ranges = Vec::new();
     for run in runs {
+        if run.code && !run.text.is_empty() {
+            text.push_str(CODE_PADDING);
+        }
         let range = text.len()..text.len() + run.text.len();
         text.push_str(&run.text);
+        if run.code && !run.text.is_empty() {
+            text.push_str(CODE_PADDING);
+            code_ranges.push(range.start - CODE_PADDING.len()..text.len());
+        }
         let is_styled =
             run.bold || run.italic || run.strikethrough || run.code || run.link.is_some();
         if is_styled && !range.is_empty() {
@@ -370,13 +382,78 @@ fn styled_runs(colors: Colors, runs: &[Run], key: &str) -> AnyElement {
         }
     }
     let styled = StyledText::new(text).with_highlights(highlights);
-    if links.is_empty() {
-        return styled.into_any_element();
+    let backgrounds =
+        (!code_ranges.is_empty()).then(|| code_backgrounds(styled.layout().clone(), code_ranges));
+    let text = if links.is_empty() {
+        styled.into_any_element()
+    } else {
+        let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
+        InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
+            .on_click(ranges, move |index, _, cx| open_link(&urls[index], cx))
+            .into_any_element()
+    };
+    match backgrounds {
+        Some(backgrounds) => div()
+            .relative()
+            .child(backgrounds)
+            .child(text)
+            .into_any_element(),
+        None => text,
     }
-    let (ranges, urls): (Vec<_>, Vec<_>) = links.into_iter().unzip();
-    InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
-        .on_click(ranges, move |index, _, cx| open_link(&urls[index], cx))
-        .into_any_element()
+}
+
+/// Rounded backgrounds behind inline code, one per line a code run covers. Drawn under the text,
+/// which is laid out by the time this paints.
+fn code_backgrounds(layout: TextLayout, ranges: Vec<std::ops::Range<usize>>) -> AnyElement {
+    canvas(
+        |_, _, _| (),
+        move |_, (), window, cx| {
+            let color = Colors::active(cx).hover;
+            let line_height = layout.line_height();
+            let inset = line_height * 0.1;
+            let text = layout.text();
+            for range in &ranges {
+                let mut points = range
+                    .clone()
+                    .chain([range.end])
+                    .filter(|&index| text.is_char_boundary(index))
+                    .filter_map(|index| layout.position_for_index(index));
+                let Some(mut start) = points.next() else {
+                    continue;
+                };
+                let mut end = start;
+                for at in points {
+                    if at.y != start.y {
+                        paint_code_background(window, start, end.x, line_height, inset, color);
+                        start = at;
+                    }
+                    end = at;
+                }
+                paint_code_background(window, start, end.x, line_height, inset, color);
+            }
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
+}
+
+fn paint_code_background(
+    window: &mut Window,
+    start: gpui::Point<gpui::Pixels>,
+    end_x: gpui::Pixels,
+    line_height: gpui::Pixels,
+    inset: gpui::Pixels,
+    color: gpui::Rgba,
+) {
+    if end_x <= start.x {
+        return;
+    }
+    let bounds = gpui::Bounds::from_corners(
+        point(start.x, start.y + inset),
+        point(end_x, start.y + line_height - inset),
+    );
+    window.paint_quad(fill(bounds, color).corner_radii(px(4.)));
 }
 
 fn style_of(colors: Colors, run: &Run) -> HighlightStyle {
@@ -391,7 +468,6 @@ fn style_of(colors: Colors, run: &Run) -> HighlightStyle {
         color,
         font_weight: run.bold.then_some(FontWeight::BOLD),
         font_style: run.italic.then_some(FontStyle::Italic),
-        background_color: run.code.then(|| colors.surface.into()),
         underline: run.link.is_some().then(|| UnderlineStyle {
             thickness: px(1.),
             color: None,

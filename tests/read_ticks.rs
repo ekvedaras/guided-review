@@ -151,6 +151,23 @@ fn a_ticked_step_folds_and_opens_again_on_request() {
 }
 
 #[test]
+fn a_folded_step_folds_each_file_box_on_its_own_and_opening_all_drops_single_choices() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    let readme = "readme".into();
+    review.tick(&readme).unwrap();
+    assert!(review.is_box_folded(&readme, "README.md"));
+
+    review.toggle_box_fold(&readme, "README.md");
+    assert!(!review.is_box_folded(&readme, "README.md"));
+    assert!(review.is_folded(&readme), "the step stays folded");
+
+    review.toggle_fold(&readme);
+    review.toggle_fold(&readme);
+    assert!(review.is_box_folded(&readme, "README.md"));
+}
+
+#[test]
 fn ticks_of_steps_the_tour_no_longer_has_are_kept_but_not_counted() {
     let shop = Shop::with_pull();
     std::fs::create_dir_all(shop.state_path().parent().unwrap()).unwrap();

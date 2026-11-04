@@ -25,6 +25,7 @@ use super::comments::{
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::display_options::DisplayOptions;
+use super::file_block::FileBlock;
 use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
@@ -143,6 +144,8 @@ pub struct Review {
     /// Skim and ticked steps start folded; these are the steps whose fold the reviewer flipped.
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
+    /// File boxes of a step opened or folded against the step's fold, by step and path.
+    box_fold_flipped: BTreeSet<(StepId, String)>,
     viewed_sync: ViewedSync,
     repin_running: bool,
     /// The diff from each older head some step was read at to the tour's head.
@@ -204,6 +207,7 @@ impl Review {
             state,
             state_file,
             fold_flipped: BTreeSet::new(),
+            box_fold_flipped: BTreeSet::new(),
             viewed_sync: ViewedSync::default(),
             repin_running: false,
             changes_since,
@@ -271,6 +275,14 @@ impl Review {
 
     pub fn toggle_ignore_whitespace(&mut self) {
         self.display_options.toggle_ignore_whitespace();
+    }
+
+    pub fn wraps_lines(&self) -> bool {
+        self.display_options.wraps_lines()
+    }
+
+    pub fn toggle_wrap_lines(&mut self) {
+        self.display_options.toggle_wrap_lines();
     }
 
     pub fn screen(&self) -> &Screen {
@@ -495,11 +507,14 @@ impl Review {
             }
             None => self.safety_net()?.pieces,
         };
-        let rows: Vec<DiffLine> = pieces
-            .iter()
-            .filter(|shown| only_piece.is_none_or(|id| shown.id.to_string() == *id))
-            .flat_map(|shown| shown.lines().cloned())
-            .collect();
+        let rows: Vec<DiffLine> = match only_piece {
+            Some(id) => pieces
+                .iter()
+                .filter(|shown| shown.id.to_string() == *id)
+                .flat_map(|shown| shown.lines().cloned())
+                .collect(),
+            None => in_shown_order(pieces),
+        };
         let (start, end) = match place {
             Place::Lines { start, end, .. } => (start.clone(), end.clone()),
             _ => (
@@ -807,10 +822,7 @@ impl Review {
 
     /// Every row the current screen shows, top to bottom.
     fn screen_lines(&self) -> Vec<DiffLine> {
-        self.screen_pieces()
-            .iter()
-            .flat_map(|piece| piece.lines().cloned())
-            .collect()
+        in_shown_order(self.screen_pieces())
     }
 
     fn screen_pieces(&self) -> Vec<PieceDiff> {
@@ -1042,9 +1054,26 @@ impl Review {
         folds_by_default != self.fold_flipped.contains(id)
     }
 
+    /// Opens or folds every file box of the step at once.
     pub fn toggle_fold(&mut self, id: &StepId) {
         if !self.fold_flipped.remove(id) {
             self.fold_flipped.insert(id.clone());
+        }
+        self.box_fold_flipped.retain(|(step, _)| step != id);
+    }
+
+    /// A folded step still lists its file boxes, each folded on its own.
+    pub fn is_box_folded(&self, step: &StepId, path: &str) -> bool {
+        self.is_folded(step)
+            != self
+                .box_fold_flipped
+                .contains(&(step.clone(), path.to_string()))
+    }
+
+    pub fn toggle_box_fold(&mut self, step: &StepId, path: &str) {
+        let key = (step.clone(), path.to_string());
+        if !self.box_fold_flipped.remove(&key) {
+            self.box_fold_flipped.insert(key);
         }
     }
 
@@ -1180,4 +1209,12 @@ fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a Sha> {
         .read_tick(step)
         .or_else(|| state.read_before(step))
         .map(|tick| &tick.head)
+}
+
+/// Rows as a screen shows them: the pieces of one file in one block, in line order.
+fn in_shown_order(pieces: Vec<PieceDiff>) -> Vec<DiffLine> {
+    FileBlock::group(pieces)
+        .iter()
+        .flat_map(|block| block.lines().cloned())
+        .collect()
 }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::RangeInclusive;
 
 use sha2::{Digest, Sha256};
 
@@ -150,6 +151,8 @@ pub struct Piece {
     pub added_lines: Vec<Line>,
     /// Set on image pieces; the sizes are unknown when the bytes are not a readable image.
     pub image: Option<ImageChange>,
+    /// The lines its symbol spans at head, docblock included; `None` for other pieces.
+    pub head_lines: Option<RangeInclusive<usize>>,
     moved_body: Option<String>,
 }
 
@@ -173,6 +176,7 @@ impl Piece {
             removed_lines: removed.iter().copied().cloned().collect(),
             added_lines: added.iter().copied().cloned().collect(),
             image: None,
+            head_lines: None,
             moved_body: None,
         }
     }
@@ -183,6 +187,10 @@ impl Piece {
 
     fn with_marks(self, marks: Vec<PieceMark>) -> Self {
         Self { marks, ..self }
+    }
+
+    fn with_head_lines(self, head_lines: Option<RangeInclusive<usize>>) -> Self {
+        Self { head_lines, ..self }
     }
 
     fn with_moved_body(self, moved_body: Option<String>) -> Self {
@@ -494,7 +502,8 @@ fn symbol_piece(
     )
     .with_marks(mark.into_iter().collect())
     .with_signature(in_head.or(in_base).map(|symbol| symbol.signature.clone()))
-    .with_moved_body(moved_body);
+    .with_moved_body(moved_body)
+    .with_head_lines(in_head.map(|symbol| symbol.first_line..=symbol.last_line));
     (position, piece)
 }
 

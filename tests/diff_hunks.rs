@@ -4,7 +4,9 @@ mod support;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{DiffHunk, LineKind, Review, ReviewStateFile};
+use guided_review::viewer::{
+    DiffHunk, FileBlock, LineKind, LineLocation, Review, ReviewStateFile, Side,
+};
 use serde_json::{Value, json};
 use support::FixtureRepo;
 
@@ -191,6 +193,132 @@ fn more_context_below_joins_a_change_with_the_next_one_when_the_gap_is_shown() {
     );
     assert!(hunks[0].more_above.is_some());
     assert!(hunks[0].more_below.is_some());
+}
+
+fn shown_blocks(review: &Review) -> Vec<FileBlock> {
+    FileBlock::group(review.current_step().unwrap().pieces)
+}
+
+#[test]
+fn parts_of_one_file_show_in_one_block_in_line_order_whatever_order_the_step_names_them() {
+    let review = three_changes().open_step(json!([
+        {"file": "notes.txt", "lines": [14, 14]},
+        {"file": "notes.txt", "lines": [10, 10]},
+    ]));
+
+    let blocks = shown_blocks(&review);
+
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(
+        rows(&blocks[0].hunks),
+        [
+            "@@",
+            "-10 line 10",
+            "+10 line ten",
+            "@@",
+            "-14 line 14",
+            "+14 line fourteen",
+        ]
+    );
+}
+
+#[test]
+fn a_row_two_parts_of_a_block_both_show_appears_once() {
+    let review = three_changes().open_step(json!([
+        {"file": "notes.txt", "lines": [10, 16]},
+        {"file": "notes.txt", "lines": [7, 12]},
+    ]));
+
+    let blocks = shown_blocks(&review);
+
+    assert_eq!(
+        rows(&blocks[0].hunks),
+        [
+            "@@",
+            " 7|7 line 7",
+            " 8|8 line 8",
+            " 9|9 line 9",
+            "-10 line 10",
+            "+10 line ten",
+            " 11|11 line 11",
+            " 12|12 line 12",
+            " 13|13 line 13",
+            "-14 line 14",
+            "+14 line fourteen",
+            " 15|15 line 15",
+            " 16|16 line 16",
+        ]
+    );
+}
+
+const CART_AT_BASE: &str = "<?php
+
+final class Cart
+{
+    public function total(): int
+    {
+        $a = 1;
+        $b = 2;
+        $c = 3;
+        $d = 4;
+        return $a;
+    }
+
+    public function count(): int
+    {
+        return 0;
+    }
+}
+";
+
+/// A property joins the class at head line 5, and `$d` changes in the middle of `total` at head line 11.
+fn cart_changes() -> Pull {
+    Pull::changing(
+        "app/Cart.php",
+        CART_AT_BASE,
+        &CART_AT_BASE
+            .replace(
+                "{\n    public function total",
+                "{\n    private int $items = 0;\n    public function total",
+            )
+            .replace("$d = 4;", "$d = 5;"),
+    )
+}
+
+fn label_at(block: &FileBlock, head_line: usize) -> Option<(String, bool)> {
+    let at = LineLocation {
+        path: block.path.clone(),
+        side: Side::Head,
+        line: head_line,
+    };
+    block
+        .piece_starting_at(&at)
+        .map(|(piece, is_resumed)| (piece.id.to_string(), is_resumed))
+}
+
+#[test]
+fn a_label_in_a_block_sits_where_its_method_starts_not_at_its_first_changed_line() {
+    let review = cart_changes().open_step(json!([
+        {"file": "app/Cart.php", "symbol": "Cart::total"},
+        {"file": "app/Cart.php", "symbol": "Cart"},
+    ]));
+
+    let block = shown_blocks(&review).remove(0);
+
+    assert_eq!(
+        label_at(&block, 3),
+        Some(("app/Cart.php#Cart".into(), false))
+    );
+    assert_eq!(
+        label_at(&block, 6),
+        Some(("app/Cart.php#Cart::total".into(), false))
+    );
+    assert_eq!(label_at(&block, 11), None);
+    assert_eq!(
+        label_at(&block, 13),
+        None,
+        "a closing bracket moves no label"
+    );
 }
 
 /// Line 5 only gets indented; lines 20 and 21 change, 21 only in its indent.
