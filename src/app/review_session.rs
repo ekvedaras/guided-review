@@ -729,18 +729,23 @@ impl ReviewSession {
         }));
     }
 
+    /// A failed save shows in the sidebar until one goes through.
     fn save_typing(&mut self, cx: &mut Context<Self>) {
         self.typing_save = None;
         let Some(save) = self.review.typing_save() else {
             return;
         };
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(error) = save.run() {
-                    eprintln!("could not save the text: {error:#}");
+        self.run_off_thread(
+            cx,
+            move || save.run(),
+            |this, saved, cx| {
+                if saved.is_err() || this.sidebar.save_problem.is_some() {
+                    this.sidebar = SidebarRows::of(&this.review);
+                    cx.notify();
                 }
-            })
-            .detach();
+            },
+        )
+        .detach();
     }
 
     /// For when the file is about to be read or the app to end: what was typed goes to disk now.

@@ -15,6 +15,8 @@
 )]
 mod support;
 
+use std::path::PathBuf;
+
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
@@ -571,4 +573,46 @@ fn a_save_made_at_once_takes_the_typed_text_with_it() {
 
     assert_eq!(pull.open().reply_draft("T1"), Some("because"));
     assert!(review.typing_save().is_none());
+}
+
+/// Saves fail while a folder stands where the state file's lock goes.
+fn break_saves(pull: &Pull) -> PathBuf {
+    let lock = pull
+        .repo
+        .home()
+        .join(".guided-review/state/acme/shop/7.json.lock");
+    std::fs::remove_file(&lock).ok();
+    std::fs::create_dir_all(&lock).unwrap();
+    lock
+}
+
+#[test]
+fn typed_text_whose_save_failed_is_saved_again_by_the_next_save() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    review.open_reply("T1").unwrap();
+    review.type_in_reply("T1", "because").unwrap();
+    let lock = break_saves(&pull);
+
+    assert!(review.typing_save().unwrap().run().is_err());
+    assert!(review.save_problem().unwrap().contains("could not create"));
+
+    std::fs::remove_dir(&lock).unwrap();
+    review.typing_save().unwrap().run().unwrap();
+    assert_eq!(pull.open().reply_draft("T1"), Some("because"));
+    assert_eq!(review.save_problem(), None);
+}
+
+#[test]
+fn a_read_tick_that_could_not_be_saved_says_why_until_a_save_goes_through() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let lock = break_saves(&pull);
+
+    assert!(review.tick(&"notes".into()).is_err());
+    assert!(review.save_problem().is_some());
+
+    std::fs::remove_dir(&lock).unwrap();
+    review.untick(&"notes".into()).unwrap();
+    assert_eq!(review.save_problem(), None);
 }

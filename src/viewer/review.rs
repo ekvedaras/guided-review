@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +41,7 @@ use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 use super::threads::{self, ReviewThread, ThreadPlacement};
-use super::typing_save::{SaveOrder, TypingSave};
+use super::typing_save::{Saves, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
@@ -157,8 +156,7 @@ pub struct Review {
     working_copy_is_at_tour_head: bool,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
-    saves: Arc<SaveOrder>,
-    typing_is_unsaved: AtomicBool,
+    saves: Arc<Saves>,
 }
 
 impl Review {
@@ -216,7 +214,6 @@ impl Review {
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
             saves: Arc::default(),
-            typing_is_unsaved: AtomicBool::new(false),
         })
     }
 
@@ -349,11 +346,6 @@ impl Review {
         let display = self.display(&links);
         let mut page = StepPage::of(step, &self.tour, &self.files, &display, self.is_folded(id));
         page.is_ticked = self.is_ticked(id);
-        let shown: Vec<_> = step
-            .pieces
-            .iter()
-            .flat_map(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files))
-            .collect();
         page.threads = threads::views(
             self.threads.in_step(id),
             &page.pieces,
@@ -383,8 +375,10 @@ impl Review {
                     head: &self.head,
                 };
                 let since_display = self.display(&links_from_read_head);
-                page.pieces = shown
-                    .into_iter()
+                page.pieces = step
+                    .pieces
+                    .iter()
+                    .flat_map(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files))
                     .map(|part| PieceDiff::since_read(&part, since_files, &since_display))
                     .collect();
                 self.mark_repin_status(&mut page.pieces);
@@ -723,8 +717,10 @@ impl Review {
             .comment_desk
             .apply_thread_action(&mut self.state, &outcome)
         {
-            // The reply is on GitHub; a draft that fails to clear only shows again as text to discard.
-            self.save_viewer_sections().ok();
+            // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
+            if self.save_viewer_sections().is_err() {
+                self.saves.typed();
+            }
         }
         if let Some(threads) = &outcome.threads {
             self.set_threads(threads);
@@ -768,8 +764,10 @@ impl Review {
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
         let result = self.comment_desk.apply_finish(&mut self.state, outcome);
         if result == FinishResult::Sent {
-            // The review is on GitHub; a body that fails to clear is only a draft left to overwrite.
-            self.save_viewer_sections().ok();
+            // The review is on GitHub; a body that fails to clear is saved again with the next typing.
+            if self.save_viewer_sections().is_err() {
+                self.saves.typed();
+            }
         }
         result
     }
@@ -861,27 +859,27 @@ impl Review {
     pub fn type_in_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
         self.state.write_draft(place, body);
-        self.typing_is_unsaved.store(true, Ordering::Relaxed);
+        self.saves.typed();
         Ok(())
     }
 
     pub fn type_in_reply(&mut self, thread_id: &str, text: &str) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
         self.state.write_reply(thread_id, text);
-        self.typing_is_unsaved.store(true, Ordering::Relaxed);
+        self.saves.typed();
         Ok(())
     }
 
     pub fn type_in_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
         self.state.write_finish_body(text);
-        self.typing_is_unsaved.store(true, Ordering::Relaxed);
+        self.saves.typed();
         Ok(())
     }
 
     /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
     pub fn typing_save(&mut self) -> Option<TypingSave> {
-        if !self.typing_is_unsaved.swap(false, Ordering::Relaxed) {
+        if !self.saves.take_typing_unsaved() {
             return None;
         }
         Some(TypingSave::new(
@@ -1137,6 +1135,11 @@ impl Review {
         Coverage::of(&self.tour, &self.files)
     }
 
+    /// Why the last save failed, until a save goes through: ticks and text are then only in memory.
+    pub fn save_problem(&self) -> Option<String> {
+        self.saves.problem()
+    }
+
     /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
     /// these are written into a freshly loaded file.
     fn save_viewer_sections(&self) -> anyhow::Result<()> {
@@ -1146,7 +1149,7 @@ impl Review {
             self.state_file
                 .update(|saved| saved.take_viewer_sections(&self.state))
         })?;
-        self.typing_is_unsaved.store(false, Ordering::Relaxed);
+        self.saves.typing_saved();
         Ok(())
     }
 
