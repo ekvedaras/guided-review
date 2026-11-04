@@ -663,11 +663,12 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
     let mut review = pull.open();
     review.open_reply("T1").unwrap();
     review.type_in_reply("T1", "  ").unwrap();
+    let calls_before = pull.sent.github_calls();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
             thread_id: "T1".into(),
-            mode: SendMode::AddToReview,
+            mode: SendMode::CommentNow,
         },
         &github,
     );
@@ -675,6 +676,11 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
     assert_eq!(
         result,
         ThreadActionResult::Refused(CommentRefusal::EmptyReply)
+    );
+    assert_eq!(
+        pull.sent.github_calls(),
+        calls_before,
+        "GitHub was not asked"
     );
 }
 

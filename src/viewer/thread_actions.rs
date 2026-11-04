@@ -63,7 +63,7 @@ impl ThreadActionRequest {
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     ) -> ThreadActionOutcome {
         let result = match self.perform(github) {
-            Ok(()) => ThreadActionResult::Done,
+            Ok(result) => result,
             Err(error) => classify(&error),
         };
         let threads = (result == ThreadActionResult::Done).then(|| {
@@ -81,67 +81,42 @@ impl ThreadActionRequest {
     fn perform(
         &self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> anyhow::Result<()> {
-        if self.freshness == TourFreshness::Behind
-            && matches!(self.action, ThreadAction::Reply { .. })
-        {
-            return Err(TourIsOld.into());
-        }
+    ) -> anyhow::Result<ThreadActionResult> {
         match &self.action {
+            ThreadAction::Reply { .. } if self.freshness == TourFreshness::Behind => {
+                return Ok(ThreadActionResult::Refused(CommentRefusal::TourIsOld));
+            }
             ThreadAction::Reply { thread_id, mode } => {
-                let body = self
+                let Some(body) = self
                     .reply_body
                     .as_deref()
                     .filter(|body| !body.trim().is_empty())
-                    .ok_or(EmptyReply)?;
+                else {
+                    return Ok(ThreadActionResult::Refused(CommentRefusal::EmptyReply));
+                };
                 if *mode == SendMode::CommentNow && github.has_pending_review(&self.pr)? {
                     return Err(PendingReviewExists.into());
                 }
-                github.reply_to_thread(&self.pr, thread_id, body, *mode)
+                github.reply_to_thread(&self.pr, thread_id, body, *mode)?;
             }
             ThreadAction::Resolve { thread_id } => {
-                github.set_thread_resolved(thread_id, Resolution::Resolved)
+                github.set_thread_resolved(thread_id, Resolution::Resolved)?;
             }
             ThreadAction::Unresolve { thread_id } => {
-                github.set_thread_resolved(thread_id, Resolution::Unresolved)
+                github.set_thread_resolved(thread_id, Resolution::Unresolved)?;
             }
             ThreadAction::SetReaction {
                 comment_id,
                 reaction,
                 change,
-            } => github.set_reaction(comment_id, *reaction, *change),
+            } => github.set_reaction(comment_id, *reaction, *change)?,
         }
+        Ok(ThreadActionResult::Done)
     }
 }
-
-#[derive(Debug)]
-struct TourIsOld;
-
-impl std::fmt::Display for TourIsOld {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        CommentRefusal::TourIsOld.fmt(f)
-    }
-}
-
-impl std::error::Error for TourIsOld {}
-
-#[derive(Debug)]
-struct EmptyReply;
-
-impl std::fmt::Display for EmptyReply {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        CommentRefusal::EmptyReply.fmt(f)
-    }
-}
-
-impl std::error::Error for EmptyReply {}
 
 fn classify(error: &anyhow::Error) -> ThreadActionResult {
-    if error.downcast_ref::<TourIsOld>().is_some() {
-        ThreadActionResult::Refused(CommentRefusal::TourIsOld)
-    } else if error.downcast_ref::<EmptyReply>().is_some() {
-        ThreadActionResult::Refused(CommentRefusal::EmptyReply)
-    } else if error.downcast_ref::<PendingReviewExists>().is_some() {
+    if error.downcast_ref::<PendingReviewExists>().is_some() {
         ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
     } else if let Some(unavailable) = error.downcast_ref::<ViewedSyncUnavailable>() {
         ThreadActionResult::Refused(CommentRefusal::NoAccess(unavailable.to_string()))
