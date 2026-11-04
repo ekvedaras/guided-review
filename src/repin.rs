@@ -214,7 +214,7 @@ fn line_ranges_in_changed_files(
             new.iter()
                 .filter(|piece| matching.status_of_new.get(&piece.id) != Some(&RepinStatus::Same)),
         )
-        .map(|piece| piece.id.path.as_str())
+        .map(|piece| piece.id.path().as_str())
         .collect();
     tour.steps()
         .iter()
@@ -309,7 +309,7 @@ enum HunkPairing {
 
 impl HunkPairing {
     fn matches(self, before: &Piece, now: &Piece) -> bool {
-        before.id.path == now.id.path
+        before.id.path() == now.id.path()
             && match self {
                 Self::SameHash => before.diff_hash == now.diff_hash,
                 Self::SamePositionInFile => true,

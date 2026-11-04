@@ -242,7 +242,7 @@ impl Review {
     pub fn image_preview_requests(&self) -> Vec<ImagePreviewRequest> {
         let mut requests: Vec<ImagePreviewRequest> = Vec::new();
         for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
-            let path = &piece.id.path;
+            let path = piece.id.path();
             let is_wanted = self.display_options.image_preview(path.as_str()).is_none()
                 && !requests.iter().any(|request| request.path() == path);
             let file = self.files.iter().find(|file| file.path == *path);
@@ -981,7 +981,7 @@ impl Review {
         let safety_net_files: Vec<&str> = if self.reading_order().contains(&Screen::SafetyNet) {
             coverage::safety_net(&self.tour, &self.files)
                 .iter()
-                .map(|part| part.piece.id.path.as_str())
+                .map(|part| part.piece.id.path().as_str())
                 .collect()
         } else {
             Vec::new()
@@ -1156,7 +1156,12 @@ impl Review {
         let outside_their_file = self.files.iter().flat_map(|file| {
             file.pieces
                 .iter()
-                .filter(|piece| !self.files.iter().any(|other| other.path == piece.id.path))
+                .filter(|piece| {
+                    !self
+                        .files
+                        .iter()
+                        .any(|other| other.path == *piece.id.path())
+                })
                 .map(|piece| piece.id.to_string())
         });
         unplaced.chain(outside_their_file).collect()

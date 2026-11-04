@@ -29,9 +29,9 @@ impl FileBlock {
     pub fn group(pieces: Vec<PieceDiff>) -> Vec<Self> {
         let mut files: Vec<(FilePath, Vec<PieceDiff>)> = Vec::new();
         for piece in pieces {
-            match files.iter_mut().find(|(path, _)| *path == piece.id.path) {
+            match files.iter_mut().find(|(path, _)| path == piece.id.path()) {
                 Some((_, of_file)) => of_file.push(piece),
-                None => files.push((piece.id.path.clone(), vec![piece])),
+                None => files.push((piece.id.path().clone(), vec![piece])),
             }
         }
         files

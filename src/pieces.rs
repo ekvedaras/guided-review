@@ -15,33 +15,7 @@ use crate::language::Language;
 use crate::pull_request::Sha;
 use crate::symbols::{Slot, Symbol, Symbols};
 
-/// `app/Foo.php#Foo::handle`, or just `app/Foo.php` for a whole-file piece.
-/// Symbol paths never hold `#`, `@` or `/`, so a sub-part can later be appended
-/// after one of them without changing the ids old tour files point at.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PieceId {
-    pub path: FilePath,
-    pub symbol: Option<String>,
-}
-
-impl PieceId {
-    /// `#Foo::handle` under its file header in the outline; a whole-file piece keeps its path.
-    pub fn within_file(&self) -> String {
-        match &self.symbol {
-            Some(symbol) => format!("#{symbol}"),
-            None => self.path.to_string(),
-        }
-    }
-}
-
-impl fmt::Display for PieceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.symbol {
-            Some(symbol) => write!(f, "{}#{symbol}", self.path),
-            None => fmt::Display::fmt(&self.path, f),
-        }
-    }
-}
+pub use crate::piece_id::PieceId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PieceKind {
@@ -349,10 +323,7 @@ impl<'a> CutContext<'a> {
                 let removed: Vec<&Line> = hunk.removed.iter().collect();
                 let added: Vec<&Line> = hunk.added.iter().collect();
                 Piece::new(
-                    PieceId {
-                        path: self.path.clone(),
-                        symbol: Some(format!("hunk-{}", index + 1)),
-                    },
+                    PieceId::hunk(self.path.clone(), index + 1),
                     PieceKind::Hunk,
                     self.diff.status().into(),
                     &removed,
@@ -367,10 +338,7 @@ impl<'a> CutContext<'a> {
         let removed: Vec<&Line> = self.diff.removed.iter().collect();
         let added: Vec<&Line> = self.diff.added.iter().collect();
         Piece::new(
-            PieceId {
-                path: self.path.clone(),
-                symbol: None,
-            },
+            PieceId::whole_file(self.path.clone()),
             PieceKind::File,
             self.diff.status().into(),
             &removed,
@@ -506,13 +474,7 @@ fn place_changes(
     for change in changes {
         match symbol_piece(pairing, &change, file_status) {
             Some(placed) => pieces.push(placed),
-            None => not_shown.push(
-                PieceId {
-                    path: change.path.clone(),
-                    symbol: Some(change.slot.id()),
-                }
-                .to_string(),
-            ),
+            None => not_shown.push(format!("{}#{}", change.path, change.slot.id())),
         }
     }
     pieces.sort_by_key(|(position, _)| *position);
@@ -542,20 +504,12 @@ fn symbol_piece(
         (Slot::Symbol(_), PieceStatus::Deleted) => Some(base_tokens.join(TOKEN_SEPARATOR)),
         _ => None,
     };
-    let piece = Piece::new(
-        PieceId {
-            path: change.path.clone(),
-            symbol: Some(change.slot.id()),
-        },
-        kind,
-        status,
-        &change.removed,
-        &change.added,
-    )
-    .with_marks(mark.into_iter().collect())
-    .with_signature(in_head.or(in_base).map(|symbol| symbol.signature.clone()))
-    .with_moved_body(moved_body)
-    .with_head_lines(in_head.map(|symbol| symbol.first_line..=symbol.last_line));
+    let id = PieceId::symbol(change.path.clone(), change.slot.id()).ok()?;
+    let piece = Piece::new(id, kind, status, &change.removed, &change.added)
+        .with_marks(mark.into_iter().collect())
+        .with_signature(in_head.or(in_base).map(|symbol| symbol.signature.clone()))
+        .with_moved_body(moved_body)
+        .with_head_lines(in_head.map(|symbol| symbol.first_line..=symbol.last_line));
     Some((position, piece))
 }
 

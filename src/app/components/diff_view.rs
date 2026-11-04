@@ -10,6 +10,7 @@ use gpui::{
 
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
 use crate::app::components::tooltip::tooltip;
+use crate::pieces::PieceId;
 use crate::viewer::{Capture, CodeLink, DiffLine, Edge, LineKind, LineLocation, MoreContext};
 
 use super::palette::{CODE_FONT, Colors};
@@ -320,7 +321,7 @@ pub fn piece_row(colors: &Colors) -> Div {
 /// The top of a piece box: the piece's name, its re-pin label, and its buttons (open the code, ask).
 #[derive(IntoElement)]
 pub struct PieceHeader {
-    piece: SharedString,
+    piece: PieceId,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
     fold_toggle: Option<Stateful<Div>>,
@@ -328,7 +329,7 @@ pub struct PieceHeader {
 
 impl PieceHeader {
     pub fn new(
-        piece: SharedString,
+        piece: PieceId,
         repin_label: Option<&'static str>,
         buttons: Vec<Stateful<Div>>,
     ) -> Self {
@@ -350,8 +351,8 @@ impl PieceHeader {
 impl RenderOnce for PieceHeader {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let name = PieceName::of(&self.piece);
-        let symbol = name.symbol.map(|symbol| {
+        let piece = &self.piece;
+        let symbol = piece.symbol_path().map(|symbol| {
             div()
                 .flex_none()
                 .text_color(colors.accent)
@@ -391,13 +392,13 @@ impl RenderOnce for PieceHeader {
                                     .text_color(colors.muted_text)
                                     .text_ellipsis_start()
                                     .overflow_hidden()
-                                    .child(SharedString::from(name.folder.to_owned())),
+                                    .child(SharedString::from(piece.folder().to_owned())),
                             )
                             .child(
                                 div()
                                     .flex_none()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(SharedString::from(name.file.to_owned())),
+                                    .child(SharedString::from(piece.file_name().to_owned())),
                             ),
                     )
                     .children(symbol),
@@ -420,14 +421,14 @@ impl RenderOnce for PieceHeader {
 /// Its buttons show only under the mouse, so the code reads as one file.
 #[derive(IntoElement)]
 pub struct PieceMarker {
-    piece: SharedString,
+    piece: PieceId,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
 }
 
 impl PieceMarker {
     pub fn new(
-        piece: SharedString,
+        piece: PieceId,
         repin_label: Option<&'static str>,
         buttons: Vec<Stateful<Div>>,
     ) -> Self {
@@ -442,7 +443,7 @@ impl PieceMarker {
 impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let name = PieceName::of(&self.piece);
+        let piece = &self.piece;
         piece_row(&colors)
             .group("piece-marker")
             .h(px(24.))
@@ -462,7 +463,10 @@ impl RenderOnce for PieceMarker {
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .child(SharedString::from(
-                        name.symbol.unwrap_or(name.file).to_owned(),
+                        piece
+                            .symbol_path()
+                            .unwrap_or_else(|| piece.file_name())
+                            .to_owned(),
                     )),
             )
             .children(self.repin_label.map(|label| {
@@ -483,30 +487,6 @@ impl RenderOnce for PieceMarker {
                     .group_hover("piece-marker", |buttons| buttons.opacity(1.))
                     .children(self.buttons),
             )
-    }
-}
-
-/// A piece id, `<file>#<symbol>` or `<file>`, cut where the eye looks: the file name and the symbol.
-struct PieceName<'a> {
-    /// With its trailing slash, or empty.
-    folder: &'a str,
-    file: &'a str,
-    symbol: Option<&'a str>,
-}
-
-impl<'a> PieceName<'a> {
-    fn of(piece: &'a str) -> Self {
-        let (path, symbol) = match piece.split_once('#') {
-            Some((path, symbol)) => (path, Some(symbol)),
-            None => (piece, None),
-        };
-        let file_start = path.rfind('/').map_or(0, |slash| slash + 1);
-        let (folder, file) = path.split_at_checked(file_start).unwrap_or(("", path));
-        Self {
-            folder,
-            file,
-            symbol,
-        }
     }
 }
 

@@ -94,7 +94,7 @@ fn subjects_of_test(
     imports: &ImportedNames,
     pool: &[(&ChangedFile, &Piece)],
 ) -> Vec<Subject> {
-    let symbol = test.id.symbol.as_deref().unwrap_or_default();
+    let symbol = test.id.symbol_path().unwrap_or_default();
     let test_name = normalized(symbol.rsplit("::").next().unwrap_or(symbol));
     let stems = stems_of_test(test_path, symbol);
     let candidates = || {
@@ -166,7 +166,7 @@ struct Names {
 
 impl Names {
     fn of(file: &ChangedFile, piece: &Piece) -> Self {
-        let symbol = piece.id.symbol.as_deref().unwrap_or_default();
+        let symbol = piece.id.symbol_path().unwrap_or_default();
         Self {
             owner: normalized(symbol.split("::").next().unwrap_or(symbol)),
             file: normalized(file_stem(file.path.as_str())),
@@ -177,13 +177,12 @@ impl Names {
 fn is_member(piece: &Piece) -> bool {
     piece
         .id
-        .symbol
-        .as_deref()
+        .symbol_path()
         .is_some_and(|symbol| symbol.contains("::"))
 }
 
 fn own_name(piece: &Piece) -> &str {
-    let symbol = piece.id.symbol.as_deref().unwrap_or_default();
+    let symbol = piece.id.symbol_path().unwrap_or_default();
     symbol.rsplit("::").next().unwrap_or(symbol)
 }
 

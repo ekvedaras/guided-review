@@ -215,7 +215,7 @@ fn a_piece_opens_at_its_first_head_line_and_a_deleted_file_on_github_at_base() {
         let piece = page
             .pieces
             .iter()
-            .find(|piece| piece.id.path == path)
+            .find(|piece| piece.id.path() == path)
             .unwrap();
         opener.destination(piece.code_link().unwrap())
     };

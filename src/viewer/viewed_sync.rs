@@ -215,7 +215,7 @@ impl Coverage {
                 .pieces
                 .iter()
                 .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-                .map(|part| part.piece.id.path.clone());
+                .map(|part| part.piece.id.path().clone());
             coverage
                 .files_by_step
                 .entry(step.id.clone())
@@ -224,7 +224,7 @@ impl Coverage {
         }
         coverage.partly_unheld = coverage::safety_net(tour, files)
             .into_iter()
-            .map(|part| part.piece.id.path.clone())
+            .map(|part| part.piece.id.path().clone())
             .collect();
         coverage
     }

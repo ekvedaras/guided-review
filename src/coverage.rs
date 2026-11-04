@@ -29,7 +29,7 @@ pub fn named_pieces<'a>(pointer: &PieceRef, files: &'a [ChangedFile]) -> Option<
             .iter()
             .flat_map(|changed| &changed.pieces)
             .find(|piece| {
-                piece.id.path == *file && piece.id.symbol.as_deref() == Some(symbol.as_str())
+                piece.id.path() == file && piece.id.symbol_path() == Some(symbol.as_str())
             })
             .map(|piece| vec![piece]),
     }

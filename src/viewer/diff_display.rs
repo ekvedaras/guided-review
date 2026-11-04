@@ -128,10 +128,17 @@ pub enum Edge {
     Below,
 }
 
+/// The full diff of a piece and the change since read are shown apart, so asking for more lines in one leaves the other alone.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PieceView {
+    Full(PieceId),
+    SinceRead(PieceId),
+}
+
 /// The reviewer's ask for more unchanged lines on one edge of one change of a piece.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MoreContext {
-    piece: String,
+    piece: PieceView,
     change: usize,
     pub edge: Edge,
 }
@@ -161,7 +168,7 @@ impl DiffDisplay<'_> {
 
     pub(super) fn hunks(
         &self,
-        id: &PieceId,
+        view: &PieceView,
         file: &ChangedFile,
         removed: &[&Line],
         added: &[&Line],
@@ -208,7 +215,7 @@ impl DiffDisplay<'_> {
                     return None;
                 }
                 let more = |edge| MoreContext {
-                    piece: id.to_string(),
+                    piece: view.clone(),
                     change,
                     edge,
                 };

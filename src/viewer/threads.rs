@@ -136,7 +136,7 @@ impl ThreadPlacement {
                 .iter()
                 .find(|(_, parts)| match thread.anchor() {
                     Some(anchor) => parts.iter().any(|piece| hangs_under_a_row(piece, &anchor)),
-                    None => parts.iter().any(|piece| thread.path == piece.id.path),
+                    None => parts.iter().any(|piece| thread.path == *piece.id.path()),
                 })
                 .map_or(Home::SafetyNet, |(id, _)| Home::Step(id.clone()));
             homes.entry(home).or_default().push(thread.clone());

@@ -12,7 +12,6 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use gpui::SharedString;
 
@@ -20,6 +19,7 @@ use crate::app::components::diff_view::DiffRowLine;
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::step_notes::StepNotes;
 use crate::file_path::FilePath;
+use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, FileBlock, JumpKind, JumpTarget, LineKind, LineLocation, Markdown,
@@ -91,7 +91,7 @@ pub struct BoxFold {
 pub struct PieceHeading {
     /// Set on the header of a file box in a step; the safety net does not fold.
     pub fold: Option<BoxFold>,
-    pub piece: SharedString,
+    pub piece: PieceId,
     pub path: FilePath,
     pub ask: Option<AskAt>,
     /// "changed" or "new" after a re-pin.
@@ -773,8 +773,8 @@ impl RowsBuilder<'_> {
         }
         let heading = |piece: &PieceDiff| PieceHeading {
             fold: None,
-            piece: piece.id.to_string().into(),
-            path: piece.id.path.clone(),
+            piece: piece.id.clone(),
+            path: piece.id.path().clone(),
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
@@ -797,7 +797,7 @@ impl RowsBuilder<'_> {
                 })));
             }
             if piece.is_image {
-                let path = piece.id.path.clone();
+                let path = piece.id.path().clone();
                 self.rows.push(PageRow::Image {
                     is_loaded: review.image_preview(path.as_str()).is_some(),
                     path: path.clone(),
@@ -812,7 +812,7 @@ impl RowsBuilder<'_> {
         } else {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
                 fold,
-                piece: Arc::<str>::from(block.path.clone()).into(),
+                piece: PieceId::whole_file(block.path.clone()),
                 path: block.path.clone(),
                 ask: None,
                 repin_label: None,
@@ -879,8 +879,8 @@ impl RowsBuilder<'_> {
     ) {
         let heading = |piece: &PieceDiff| PieceHeading {
             fold: None,
-            piece: piece.id.to_string().into(),
-            path: piece.id.path.clone(),
+            piece: piece.id.clone(),
+            path: piece.id.path().clone(),
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
@@ -893,7 +893,7 @@ impl RowsBuilder<'_> {
         } else {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
                 fold,
-                piece: Arc::<str>::from(block.path.clone()).into(),
+                piece: PieceId::whole_file(block.path.clone()),
                 path: block.path.clone(),
                 ask: None,
                 repin_label: None,

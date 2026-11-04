@@ -4,6 +4,7 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
+use crate::pieces::PieceId;
 use crate::viewer::{JumpKind, JumpTarget};
 
 use super::markdown_view::InlineMarkdown;
@@ -176,13 +177,19 @@ impl JumpPalette {
 /// A file or symbol target as `folder/` dim, then the file name, then the symbol, so the end of a
 /// long path is what stays readable.
 fn code_label(colors: &Colors, label: &str) -> impl IntoElement {
-    let (path, symbol) = match label.split_once('#') {
-        Some((path, symbol)) => (path, Some(symbol)),
-        None => (label, None),
-    };
-    let file_start = path.rfind('/').map_or(0, |slash| slash + 1);
-    let (folder, file) = path.split_at(file_start);
-    let symbol_name = symbol.map(|symbol| symbol.rsplit("::").next().unwrap_or(symbol));
+    let id = label.parse::<PieceId>().ok();
+    let folder = id.as_ref().map_or("", PieceId::folder).to_owned();
+    let file = id
+        .as_ref()
+        .map_or_else(|| label.to_owned(), |id| id.file_name().to_owned());
+    let symbol = id
+        .as_ref()
+        .and_then(PieceId::symbol_path)
+        .map(str::to_owned);
+    let symbol_name = id
+        .as_ref()
+        .and_then(PieceId::symbol_name)
+        .map(str::to_owned);
     div()
         .flex()
         .items_center()
@@ -193,7 +200,7 @@ fn code_label(colors: &Colors, label: &str) -> impl IntoElement {
             div()
                 .flex_none()
                 .font_weight(FontWeight::MEDIUM)
-                .child(SharedString::from(name.to_owned()))
+                .child(SharedString::from(name))
         }))
         .child(
             div()
@@ -207,13 +214,13 @@ fn code_label(colors: &Colors, label: &str) -> impl IntoElement {
                         .overflow_hidden()
                         .text_ellipsis_start()
                         .text_color(colors.muted_text)
-                        .child(SharedString::from(folder.to_owned())),
+                        .child(SharedString::from(folder)),
                 )
                 .child(
                     div()
                         .flex_none()
                         .when(symbol.is_some(), |file| file.text_color(colors.muted_text))
-                        .child(SharedString::from(file.to_owned())),
+                        .child(SharedString::from(file)),
                 ),
         )
 }

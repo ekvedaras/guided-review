@@ -41,7 +41,7 @@ pub(super) fn all_targets(
             screen: id.clone(),
         });
         for piece in pieces_of(step, tour, files) {
-            let path = piece.id.path.as_str();
+            let path = piece.id.path().as_str();
             if shown_files.insert(path) {
                 targets.push(JumpTarget {
                     kind: JumpKind::File,
@@ -50,7 +50,8 @@ pub(super) fn all_targets(
                     screen: id.clone(),
                 });
             }
-            if piece.id.symbol.as_deref().is_some_and(is_named_symbol) {
+            // A `hunk-N` piece only exists because the file could not be cut into symbols; the file row stands for it.
+            if piece.id.symbol_path().is_some() && !piece.id.is_hunk() {
                 targets.push(JumpTarget {
                     kind: JumpKind::Symbol,
                     label: piece.id.to_string(),
@@ -71,11 +72,6 @@ pub(super) fn all_targets(
         }
     }
     targets
-}
-
-/// `hunk-N` pieces only exist because a file could not be cut into symbols; the file row stands for them.
-fn is_named_symbol(symbol: &str) -> bool {
-    !symbol.starts_with("hunk-")
 }
 
 /// Best matches first; targets the query does not spell are dropped. An empty query keeps reading order.

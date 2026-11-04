@@ -109,7 +109,7 @@ impl Show<'_> {
         }
         let code = self.source.file_at(self.head, &file.path)?;
         let lines: Vec<&str> = code.lines().collect();
-        let span = match (&piece.id.symbol, piece.kind) {
+        let span = match (piece.id.symbol_path(), piece.kind) {
             (_, PieceKind::Hunk | PieceKind::Imports | PieceKind::Top) => {
                 hunks_span_at_head(&hunks_of(file, piece)).map(|(first, last)| {
                     (

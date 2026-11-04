@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use serde::{Deserialize, Serialize};
 
 use super::code_link::CodeLink;
-use super::diff_display::{DiffDisplay, DiffHunk};
+use super::diff_display::{DiffDisplay, DiffHunk, PieceView};
 use super::highlight::Span;
 use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
@@ -196,9 +196,9 @@ impl PieceDiff {
         display: &DiffDisplay,
     ) -> Option<Self> {
         let piece = part.piece;
-        let file = files.iter().find(|file| file.path == piece.id.path)?;
+        let file = files.iter().find(|file| file.path == *piece.id.path())?;
         let hunks = display.hunks(
-            &piece.id,
+            &PieceView::Full(piece.id.clone()),
             file,
             &part.removed_lines,
             &part.added_lines,
@@ -244,14 +244,17 @@ impl PieceDiff {
             repin_status: None,
             head_lines: piece.head_lines.clone(),
         };
-        let Some(file) = since_files.iter().find(|file| file.path == piece.id.path) else {
+        let Some(file) = since_files
+            .iter()
+            .find(|file| file.path == *piece.id.path())
+        else {
             return diff;
         };
         let added_range = piece.added_lines.first().zip(piece.added_lines.last());
         let changed_since: Vec<&Piece> = file
             .pieces
             .iter()
-            .filter(|since| match (&piece.id.symbol, piece.kind) {
+            .filter(|since| match (piece.id.symbol_path(), piece.kind) {
                 (None, _) => true,
                 (Some(_), PieceKind::Hunk) => added_range.is_some_and(|(first, last)| {
                     since
@@ -271,15 +274,8 @@ impl PieceDiff {
             .flat_map(|since| &since.added_lines)
             .collect();
         // Its own key, so asking for more lines here does not widen the same piece in the full diff.
-        let since_id = PieceId {
-            path: piece.id.path.clone(),
-            symbol: Some(format!(
-                "{}@since-read",
-                piece.id.symbol.as_deref().unwrap_or("")
-            )),
-        };
         diff.hunks = display.hunks(
-            &since_id,
+            &PieceView::SinceRead(piece.id.clone()),
             file,
             &removed,
             &added,
