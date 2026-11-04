@@ -2,7 +2,7 @@
 //! The app runs the middle part on a background thread; tests run it in line.
 
 use guided_review::viewer::{
-    CommentPlace, CommentResult, FinishResult, GitHubPort, Review, ReviewVerdict, SendMode,
+    CommentPlace, CommentResult, FinishResult, GitHubPort, Read, Review, ReviewVerdict, SendMode,
     ThreadAction, ThreadActionResult,
 };
 
@@ -36,7 +36,9 @@ pub trait AppPath {
 
 impl AppPath for Review {
     fn check_pr_head(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let tips = github.pull_request_tips(self.pr())?;
+        let tips = github
+            .pull_request_tips(self.pr())
+            .inspect_err(|error| self.could_not_read(Read::PrHead, error))?;
         self.pr_head_is(tips.head);
         Ok(())
     }

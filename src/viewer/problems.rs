@@ -11,6 +11,14 @@ pub enum Problem {
     ChangeNotKeptWhileRepinning,
     /// The threads shown are as GitHub had them at the last read that went through.
     ThreadsNotRead(String),
+    /// A read from GitHub failed, so what the screen shows for it is missing or as of an earlier read.
+    NotRead(Read, String),
+}
+
+/// What the app reads from GitHub that has no problem of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Read {
+    PrHead,
 }
 
 impl fmt::Display for Problem {
@@ -21,6 +29,10 @@ impl fmt::Display for Problem {
             Self::ThreadsNotRead(reason) => write!(
                 formatter,
                 "Comments may be out of date, could not read them from GitHub: {reason}"
+            ),
+            Self::NotRead(Read::PrHead, reason) => write!(
+                formatter,
+                "New commits on the PR are not checked, could not read its head from GitHub: {reason}"
             ),
         }
     }

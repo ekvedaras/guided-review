@@ -9,8 +9,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
-    ReactionChange, ReactionCount, Resolution, Review, ReviewStateFile, ReviewThread, SendMode,
-    Side, SuggestionDiff, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile, ReviewThread,
+    SendMode, Side, SuggestionDiff, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -374,6 +374,24 @@ fn threads_that_could_not_be_read_again_after_an_action_are_named_until_a_read_g
     );
     github.heal(&GitHubFault::ThreadReadsFail);
     review.pull_threads(&github).unwrap();
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
+fn a_pr_head_that_could_not_be_read_is_named_until_a_read_goes_through() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    github.inject(GitHubFault::ReadsFail);
+
+    review.check_pr_head(&github).unwrap_err();
+
+    assert_eq!(
+        review.problems(),
+        [Problem::NotRead(Read::PrHead, "network is down".into())]
+    );
+    github.heal(&GitHubFault::ReadsFail);
+    review.check_pr_head(&github).unwrap();
     assert_eq!(review.problems(), []);
 }
 

@@ -19,9 +19,9 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
-    ImageCache, LineLocation, OldHead, Place, RefreshBrief, RepinnedTour, Review, ReviewVerdict,
-    Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, TourRefresher,
-    TourRepinner, WorkingCopy,
+    ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
+    ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
+    TourRefresher, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -583,7 +583,7 @@ impl ReviewSession {
             move || github.pull_request_tips(&pr),
             |this, tips, cx| match tips {
                 Ok(tips) => this.change(cx, |review| review.pr_head_is(tips.head)),
-                Err(error) => eprintln!("warning: could not check the PR's head: {error:#}"),
+                Err(error) => this.change(cx, |review| review.could_not_read(Read::PrHead, &error)),
             },
         ));
     }

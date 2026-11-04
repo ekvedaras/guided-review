@@ -98,6 +98,8 @@ pub enum GitHubFault {
     PendingReviewAppearsOnCommentNow,
     /// Reading the review threads fails as if the network were down.
     ThreadReadsFail,
+    /// Reading the PR's head, description, pending review and author fails as if the network were down.
+    ReadsFail,
 }
 
 pub struct FakeGitHub {
@@ -172,6 +174,13 @@ impl FakeGitHub {
         Ok(())
     }
 
+    fn fail_if_reads_fail(&self) -> Result<(), GitHubError> {
+        if self.is_faulty(&GitHubFault::ReadsFail) {
+            return Err(anyhow::anyhow!("network is down").into());
+        }
+        Ok(())
+    }
+
     fn check_access(&self) -> Result<(), GitHubError> {
         let refusal = self
             .faults
@@ -206,6 +215,7 @@ impl FakeGitHub {
 impl PullRequestTipsPort for FakeGitHub {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
         self.sent.record(GitHubCall::TipsOf(pr.clone()));
+        self.fail_if_reads_fail()?;
         Ok(PullRequestTips {
             base_branch_tip: self.tips.0.clone(),
             head: self.tips.1.clone(),

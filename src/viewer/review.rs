@@ -32,7 +32,7 @@ use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
 use super::markdown::Markdown;
 use super::ports::{AgentLaunch, GitHubError};
-use super::problems::Problem;
+use super::problems::{Problem, Read};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -137,6 +137,8 @@ pub struct Review {
     refused_while_repinning: bool,
     /// Why the last read of the threads failed, until one goes through.
     threads_not_read: Option<String>,
+    /// Why the last read of each of these failed, until one goes through.
+    not_read: BTreeMap<Read, String>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -200,6 +202,7 @@ impl Review {
             repin_running: false,
             refused_while_repinning: false,
             threads_not_read: None,
+            not_read: BTreeMap::new(),
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -292,7 +295,12 @@ impl Review {
         &self.pr
     }
 
+    pub fn could_not_read(&mut self, read: Read, error: &impl fmt::Display) {
+        self.not_read.insert(read, format!("{error:#}"));
+    }
+
     pub fn pr_head_is(&mut self, head: Sha) {
+        self.not_read.remove(&Read::PrHead);
         self.pr_head = Some(head);
     }
 
@@ -1210,6 +1218,11 @@ impl Review {
             .into_iter()
             .chain(not_kept)
             .chain(threads_not_read)
+            .chain(
+                self.not_read
+                    .iter()
+                    .map(|(read, reason)| Problem::NotRead(*read, reason.clone())),
+            )
             .collect()
     }
 
