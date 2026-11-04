@@ -136,3 +136,32 @@ Still on stderr only, for later:
 - `ide.rs` `IdeLaunch::run`: an IDE command that cannot start; the code link just does nothing.
 - `pick_code_source.rs`: falling back to GitHub when the local clone cannot fetch; it works, but code then opens on GitHub without saying why.
 - Fine as they are: `claude_cli.rs` kill/wait on drop, `cached_code_source.rs` read-ahead, `write!` into a `String`, GPU image drops and entity updates after close in `app/`, `image_preview.rs` temp file removal, `frame_stats`, `snapshots`, `highlight.rs` broken built-in query (a build bug, not the reviewer's).
+
+## Phase 3 result (2026-11-04)
+
+Render cost and memory. Each commit is green on `cargo fmt --check`, clippy with `-D warnings` and `cargo test --all-features`. Measured with throwaway release-mode timing tests, not `GUIDED_REVIEW_FRAME_STATS`: frame stats need the app driven by hand on a real PR, which this pass did not do.
+
+- `8b334bd` Highlight queries are compiled once per language (`LazyLock`) and shared by file highlighting and code fences. A PHP code fence went from 14.6 ms to 17 µs per highlight, and it was highlighted on every frame.
+- `95dd9dc` Markdown is parsed once per text and shared (`parsed_markdown`, and `InlineMarkdown` keeps its joined, colourless text); code fences are coloured at parse time (`Block::Code { spans }`). Threads are passed as `Rc<ThreadView>` and the PR description as `Rc<Markdown>`, so neither is deep-copied per frame. A comment with a PHP fence went from a 15 µs parse per frame (after `8b334bd`) to a 38 ns lookup. Tests: a changed text is parsed again; colours come from the theme at draw time.
+- `775bdca` Diagram strips: a strip reporting the state it already has changes nothing, so a frame no longer runs `strips_to_draw` (a `Strip::cut` and an SVG clone) once per strip. Test: a theme or scale change makes every strip new on screen again.
+- `d75202a` `hang_under`: what hangs under lines is indexed by `LineLocation` once per rebuild (`UnderLines`), so each line is one map lookup, not a split of every comment, box and ask into two new `Vec`s.
+- `802796e` cmd+k reads the safety net's file paths from `coverage::safety_net` instead of building its page per keystroke; shown files are a `HashSet`; each label is lowercased once. Diff rows: `percent_encode_path` builds one `String` (it made one per byte), and span lookup borrows the path (one map per side).
+- `957f975` `CodeSource::blob_at` returns `Arc<[u8]>`, so the cache hands out what it holds instead of copying the blob; the cache is keyed by sha, then path, so a lookup allocates nothing. `PieceId` derives `Hash`; repin and coverage key maps and sets by `&PieceId`, and repin collects the touched paths once instead of per step pointer.
+- `1d2ba19` Bulk data: `Span` holds `u32` offsets (24 to 12 bytes) and a file's spans are one list plus line ends (no `Vec` per line); `FilesAtHead` keeps one text per file plus line ranges (no `String` per line); `PageRow::BinaryFile`/`HunkGap` sit behind an `Rc` and the composer's problem is an `Rc<str>`, so a row went from 96 to 56 bytes. Size tests guard both.
+
+Skipped, and why:
+
+- `PageRow` to 48 bytes: the `Thread` row's payload holds it at 56. Another `Rc` would buy 8 bytes a row; not worth the churn now.
+- Paragraphs inside comment bodies still join their runs into a `String` per frame (titles and labels do not). Small next to the parse it replaced; caching it needs a key per block.
+- `SuggestionDiff::of` still runs per frame, only for comments with a suggestion block.
+- Caching all cmd+k targets per review: the targets change with a re-pin and folds, and ranking a few hundred labels per keystroke is cheap now that no page is built.
+- `FileBlock` holding rows twice, `line.clone()` per row in `block_rows`, and whole-page rebuilds for selection and image queries (`selected_lines`, `place_of_lines`, `image_preview_requests`): each needs the rows model reshaped, not a local fix.
+- `Token { text: String }` in `symbols.rs`: transient while cutting pieces, not kept. `head_lines: Option<RangeInclusive<usize>>`: one per piece, few per PR. Taste only.
+
+Notes for phase 4:
+
+- A `FilePath(Arc<str>)` value object would turn the path clones per diff row (`LineLocation`, `WorkingCopyLine`, the `Highlights` and `FilesAtHead` keys) into refcounts.
+- A `LineNumber(u32)` would shrink `Line.number`, `LineLocation.line` and `LineKind::Context.base_line`, which are `usize` on every diff line.
+- `CodeLink` could be computed on demand from `LineLocation` and `CodeLinks` instead of storing a GitHub URL in every row.
+- Repin's `new_id_of_old_hunk` and `gone_hunks` stay `String` because tour pointers are strings; a `PieceId` in `PieceRef` would let them use `&PieceId` too.
+- Comment problems are stored as strings (`comment_problems`), so the composer row hashes text; a `CommentProblem` enum would fix that with the rest of the typed errors.
