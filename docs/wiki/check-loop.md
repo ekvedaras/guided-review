@@ -14,7 +14,7 @@ Warm cache, one blank line appended to `src/lib.rs`, then `cargo test --all-feat
 | Tests | 430 | 430 |
 | Time inside tests | 33.6 s summed | 24.7 s for the `it` crate |
 
-The build was not the main cost: about 140 s went to starting 38 separate executables one after another, which is the saving the merge buys.
+The build was not the main cost: the rest of the 178 s (about 140 s, sys time was high) went to running 38 separate executables one after another; the cause was not profiled further.
 
 ## What changed
 
@@ -24,5 +24,5 @@ The build was not the main cost: about 140 s went to starting 38 separate execut
 
 ## Left
 
-- One test takes most of the 24.7 s; the next speedup is there.
+- The 24.7 s inside the `it` crate is the next place to look (not profiled).
 - Not tried: `[lib] doctest = false`, `[profile.dev.package."*"] opt-level = 1`.
