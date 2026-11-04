@@ -47,7 +47,9 @@ impl AppPath for Review {
     }
 
     fn pull_threads(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let threads = github.review_threads(self.pr())?;
+        let threads = github
+            .review_threads(self.pr())
+            .inspect_err(|error| self.threads_not_read(error))?;
         self.set_threads(&threads);
         Ok(())
     }

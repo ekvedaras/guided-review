@@ -363,6 +363,31 @@ fn a_failed_action_says_why_and_changes_nothing() {
 }
 
 #[test]
+fn threads_that_could_not_be_read_again_after_an_action_are_named_until_a_read_goes_through() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    github.inject(GitHubFault::ThreadReadsFail);
+
+    let result = review.act_on_thread(
+        ThreadAction::Resolve {
+            thread_id: "T1".into(),
+        },
+        &github,
+    );
+
+    assert_eq!(result, ThreadActionResult::Done);
+    assert_eq!(
+        review.problems(),
+        [Problem::ThreadsNotRead("network is down".into())]
+    );
+    github.heal(&GitHubFault::ThreadReadsFail);
+    review.pull_threads(&github).unwrap();
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
 fn suggest_change_fills_the_box_with_the_selected_lines_in_a_suggestion_block() {
     let pull = Pull::new();
     let mut review = pull.open();

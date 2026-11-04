@@ -640,7 +640,7 @@ impl ReviewSession {
             move || github.review_threads(&pr),
             |this, threads, cx| match threads {
                 Ok(threads) => this.change(cx, |review| review.set_threads(&threads)),
-                Err(error) => eprintln!("warning: could not read the review threads: {error:#}"),
+                Err(error) => this.change(cx, |review| review.threads_not_read(&error)),
             },
         ));
     }

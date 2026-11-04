@@ -51,8 +51,9 @@ pub struct ThreadActionRequest {
 pub struct ThreadActionOutcome {
     pub(super) action: ThreadAction,
     pub(super) result: ThreadActionResult,
-    /// The threads as GitHub has them after the action, so the screen shows what GitHub shows.
-    pub(super) threads: Option<Vec<ReviewThread>>,
+    /// The threads as GitHub has them after the action, so the screen shows what GitHub shows;
+    /// `None` when the action did not go through, so nothing changed.
+    pub(super) threads: Option<Result<Vec<ReviewThread>, String>>,
 }
 
 impl ThreadActionRequest {
@@ -64,9 +65,11 @@ impl ThreadActionRequest {
             Ok(()) => ThreadActionResult::Done,
             Err(error) => classify(&error),
         };
-        let threads = (result == ThreadActionResult::Done)
-            .then(|| github.review_threads(&self.pr).ok())
-            .flatten();
+        let threads = (result == ThreadActionResult::Done).then(|| {
+            github
+                .review_threads(&self.pr)
+                .map_err(|error| format!("{error:#}"))
+        });
         ThreadActionOutcome {
             action: self.action,
             result,

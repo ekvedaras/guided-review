@@ -94,6 +94,8 @@ pub enum GitHubFault {
     NewThreadsAnswerNull,
     /// The next `comment_now` finds a pending review that appeared meanwhile. Used up by it.
     PendingReviewAppearsOnCommentNow,
+    /// Reading the review threads fails as if the network were down.
+    ThreadReadsFail,
 }
 
 pub struct FakeGitHub {
@@ -254,6 +256,9 @@ impl ViewedFilesPort for FakeGitHub {
 impl ReviewThreadsPort for FakeGitHub {
     fn review_threads(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<ReviewThread>> {
         self.sent.record(GitHubCall::ThreadsOf(pr.clone()));
+        if self.is_faulty(&GitHubFault::ThreadReadsFail) {
+            anyhow::bail!("network is down");
+        }
         let resolved = self.resolved_now.lock().unwrap();
         let reacted = self.reacted_now.lock().unwrap();
         let mut threads = self.threads.clone();

@@ -149,6 +149,8 @@ pub struct Review {
     viewed_sync: ViewedSync,
     repin_running: bool,
     refused_while_repinning: bool,
+    /// Why the last read of the threads failed, until one goes through.
+    threads_not_read: Option<String>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -211,6 +213,7 @@ impl Review {
             viewed_sync: ViewedSync::default(),
             repin_running: false,
             refused_while_repinning: false,
+            threads_not_read: None,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy_is_at_tour_head: false,
@@ -649,8 +652,14 @@ impl Review {
     }
 
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
+        self.threads_not_read = None;
         self.pulled_threads = threads.to_vec();
         self.place_threads();
+    }
+
+    /// The threads shown stay as they were, named as possibly old until a read goes through.
+    pub fn threads_not_read(&mut self, error: &anyhow::Error) {
+        self.threads_not_read = Some(format!("{error:#}"));
     }
 
     /// Placed by the rows a step shows, which depend on the files read at head, so again when those arrive.
@@ -733,8 +742,10 @@ impl Review {
                 self.saves.typed();
             }
         }
-        if let Some(threads) = &outcome.threads {
-            self.set_threads(threads);
+        match &outcome.threads {
+            Some(Ok(threads)) => self.set_threads(threads),
+            Some(Err(reason)) => self.threads_not_read = Some(reason.clone()),
+            None => {}
         }
         outcome.result
     }
@@ -1170,7 +1181,12 @@ impl Review {
         let not_kept = self
             .refused_while_repinning
             .then_some(Problem::ChangeNotKeptWhileRepinning);
-        not_saved.into_iter().chain(not_kept).collect()
+        let threads_not_read = self.threads_not_read.clone().map(Problem::ThreadsNotRead);
+        not_saved
+            .into_iter()
+            .chain(not_kept)
+            .chain(threads_not_read)
+            .collect()
     }
 
     /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only

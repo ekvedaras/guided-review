@@ -9,6 +9,8 @@ pub enum Problem {
     NotSaved(String),
     /// A tick or typed text made while the re-pin ran; the re-pinned review will not have it.
     ChangeNotKeptWhileRepinning,
+    /// The threads shown are as GitHub had them at the last read that went through.
+    ThreadsNotRead(String),
 }
 
 impl fmt::Display for Problem {
@@ -16,6 +18,10 @@ impl fmt::Display for Problem {
         match self {
             Self::NotSaved(reason) => write!(formatter, "Not saved to disk: {reason}"),
             Self::ChangeNotKeptWhileRepinning => write!(formatter, "Not kept: {RepinRunning}"),
+            Self::ThreadsNotRead(reason) => write!(
+                formatter,
+                "Comments may be out of date, could not read them from GitHub: {reason}"
+            ),
         }
     }
 }
