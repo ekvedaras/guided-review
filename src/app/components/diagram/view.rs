@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, Bounds, Context, Corners, Entity, InteractiveElement, IntoElement, ParentElement, Pixels,
-    RenderImage, RenderOnce, StatefulInteractiveElement, Styled, Window, canvas, div, px,
+    AnyElement, App, Bounds, Context, Corners, Entity, InteractiveElement, IntoElement,
+    ParentElement, Pixels, RenderImage, RenderOnce, SharedString, StatefulInteractiveElement,
+    Styled, Window, canvas, div, px,
 };
 
 use crate::app::components::palette::{Appearance, Colors};
@@ -92,7 +93,11 @@ impl Diagrams {
                             cx.notify();
                         }
                     }
-                    Err(error) => eprintln!("could not draw a diagram strip: {error}"),
+                    Err(error) => {
+                        let note = format!("Could not draw this part of the diagram: {error}");
+                        this.memory.strip_failed(&job, note.into());
+                        cx.notify();
+                    }
                 })
                 .ok();
             })
@@ -126,10 +131,12 @@ impl RenderOnce for DiagramView {
             .border_color(colors.border);
         if let Some(svg) = memory.svg() {
             let width = svg.width();
-            let strips = memory
-                .strips()
-                .into_iter()
-                .map(|strip| strip_block(&strip, width, self.diagrams.clone()));
+            let strips = memory.strips().into_iter().map(|strip| {
+                match memory.strip_failure(strip.index()) {
+                    Some(error) => failed_strip_block(&strip, width, error, &colors),
+                    None => strip_block(&strip, width, self.diagrams.clone()).into_any_element(),
+                }
+            });
             return frame.child(div().flex().flex_col().children(strips));
         }
         let note = match memory.error() {
@@ -166,6 +173,18 @@ fn strip_block(strip: &Strip, width: f32, diagrams: Entity<Diagrams>) -> impl In
     )
     .w(px(width))
     .h(px(strip.height()))
+}
+
+/// Says why in the strip's own place, as a diagram that could not be drawn at all does.
+fn failed_strip_block(strip: &Strip, width: f32, note: &Arc<str>, colors: &Colors) -> AnyElement {
+    div()
+        .w(px(width))
+        .h(px(strip.height()))
+        .p_3()
+        .text_sm()
+        .text_color(colors.muted_text)
+        .child(SharedString::from(Arc::clone(note)))
+        .into_any_element()
 }
 
 fn near_visible_part(bounds: Bounds<Pixels>, window: &Window) -> bool {

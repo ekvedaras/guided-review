@@ -61,6 +61,9 @@ pub struct DiagramMemory<Bitmap> {
     on_screen: BTreeSet<usize>,
     strips_in_flight: BTreeSet<usize>,
     bitmaps: BTreeMap<usize, Bitmap>,
+    /// What to show where a strip of the shown diagram could not be drawn. Drawing it again gives the same result,
+    /// so it is not tried again until the diagram, theme or scale changes.
+    failed_strips: BTreeMap<usize, Arc<str>>,
 }
 
 impl<Bitmap> Default for DiagramMemory<Bitmap> {
@@ -73,6 +76,7 @@ impl<Bitmap> Default for DiagramMemory<Bitmap> {
             on_screen: BTreeSet::new(),
             strips_in_flight: BTreeSet::new(),
             bitmaps: BTreeMap::new(),
+            failed_strips: BTreeMap::new(),
         }
     }
 }
@@ -91,6 +95,7 @@ impl<Bitmap> DiagramMemory<Bitmap> {
         self.shown = shown;
         self.on_screen.clear();
         self.strips_in_flight.clear();
+        self.failed_strips.clear();
         if let Some(showing) = showing {
             self.ask_for_svgs(showing);
         }
@@ -176,6 +181,7 @@ impl<Bitmap> DiagramMemory<Bitmap> {
                 self.on_screen.contains(&index)
                     && !self.bitmaps.contains_key(&index)
                     && !self.strips_in_flight.contains(&index)
+                    && !self.failed_strips.contains_key(&index)
             })
             .collect();
         wanted
@@ -199,6 +205,18 @@ impl<Bitmap> DiagramMemory<Bitmap> {
             return Some(bitmap);
         }
         self.bitmaps.insert(index, bitmap)
+    }
+
+    /// A failure that came too late is dropped, like a late bitmap.
+    pub fn strip_failed(&mut self, job: &StripJob, error: Arc<str>) {
+        let index = job.strip.index();
+        if self.shown == Some(job.shown) && self.strips_in_flight.remove(&index) {
+            self.failed_strips.insert(index, error);
+        }
+    }
+
+    pub fn strip_failure(&self, strip: usize) -> Option<&Arc<str>> {
+        self.failed_strips.get(&strip)
     }
 
     pub fn bitmap(&self, strip: usize) -> Option<&Bitmap> {

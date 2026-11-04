@@ -317,6 +317,29 @@ mod memory {
     }
 
     #[test]
+    fn a_strip_that_could_not_be_drawn_says_why_and_is_not_drawn_again_until_the_diagram_changes() {
+        let mut memory = DiagramMemory::<Bitmap>::default();
+        memory.show(showing(FLOWCHART, Appearance::Dark, 2.0));
+        draw_svgs(&mut memory);
+        memory.set_on_screen(0, true);
+        let job = memory.strips_to_draw().remove(0);
+
+        memory.strip_failed(&job, "the strip has no pixels".into());
+        memory.set_on_screen(0, true);
+
+        assert_eq!(
+            memory.strip_failure(0).map(AsRef::as_ref),
+            Some("the strip has no pixels")
+        );
+        assert!(
+            memory.strips_to_draw().is_empty(),
+            "drawing what cannot be drawn"
+        );
+        memory.show(showing(FLOWCHART, Appearance::Light, 2.0));
+        assert!(memory.strip_failure(0).is_none());
+    }
+
+    #[test]
     fn a_bitmap_for_a_strip_that_left_the_screen_is_turned_away() {
         let mut memory = DiagramMemory::<Bitmap>::default();
         memory.show(showing(FLOWCHART, Appearance::Dark, 2.0));
