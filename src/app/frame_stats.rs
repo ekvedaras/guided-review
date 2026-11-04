@@ -108,12 +108,15 @@ impl Percentiles {
         let Some(&max) = samples.last() else {
             return Self::default();
         };
-        let at = |p: f64| samples[((samples.len() - 1) as f64 * p).round() as usize];
+        let at = |per_mille: usize| {
+            let rank = ((samples.len() - 1) * per_mille + 500) / 1000;
+            samples.get(rank).copied().unwrap_or(max)
+        };
         Self {
             count: samples.len(),
-            p50: at(0.5),
-            p90: at(0.9),
-            p99: at(0.99),
+            p50: at(500),
+            p90: at(900),
+            p99: at(990),
             max,
             samples,
         }

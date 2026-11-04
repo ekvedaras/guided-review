@@ -5,6 +5,16 @@ use std::path::Path;
 /// No preview, and no decoding, above this many bytes per side.
 pub const MAX_PREVIEW_BYTES: u64 = 10 * 1024 * 1024;
 
+/// A layout size as whole pixels. Callers round or ceil first; below zero and NaN give 0.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is clamped to zero or more first, and a float-to-int cast saturates at u32::MAX"
+)]
+pub fn whole_pixels(value: f32) -> u32 {
+    value.max(0.0) as u32
+}
+
 pub fn is_image_path(path: &str) -> bool {
     Path::new(path)
         .extension()
@@ -40,8 +50,8 @@ pub fn measure(path: &str, bytes: &[u8]) -> Option<PixelSize> {
         let tree = usvg::Tree::from_data(bytes, &usvg::Options::default()).ok()?;
         let size = tree.size();
         return Some(PixelSize {
-            width: size.width().round() as u32,
-            height: size.height().round() as u32,
+            width: whole_pixels(size.width().round()),
+            height: whole_pixels(size.height().round()),
         });
     }
     let (width, height) = image::ImageReader::new(Cursor::new(bytes))

@@ -20,7 +20,7 @@ impl UtcTimestamp {
 impl fmt::Display for UtcTimestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let seconds = self.0;
-        let (days, time) = ((seconds / 86_400) as i64, seconds % 86_400);
+        let (days, time) = ((seconds / 86_400).cast_signed(), seconds % 86_400);
         // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
         let z = days + 719_468;
         let era = z.div_euclid(146_097);

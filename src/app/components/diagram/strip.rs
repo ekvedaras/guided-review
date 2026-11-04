@@ -4,6 +4,8 @@ use std::sync::Arc;
 use gpui::RenderImage;
 use resvg::tiny_skia::{Pixmap, Transform};
 
+use crate::image_facts::whole_pixels;
+
 use super::drawer::Svg;
 
 /// GPU textures larger than this fail on some Macs, so a tall diagram is drawn in strips.
@@ -20,7 +22,7 @@ pub struct Strip {
 impl Strip {
     /// `height` is in logical pixels.
     pub fn cut(height: f32, scale: f32) -> Vec<Strip> {
-        let height_px = (height * scale).ceil() as u32;
+        let height_px = whole_pixels((height * scale).ceil());
         (0..height_px)
             .step_by(MAX_STRIP_PX as usize)
             .enumerate()
@@ -42,15 +44,19 @@ impl Strip {
 
     /// Logical pixels, the unit of the app layout.
     pub fn height(&self) -> f32 {
-        self.rows.len() as f32 / self.scale
+        self.height_px() as f32 / self.scale
+    }
+
+    fn height_px(&self) -> u32 {
+        self.rows.end - self.rows.start
     }
 }
 
 /// Our own resvg drawing: GPUI's SVG path draws one colour only, and its image path draws at 1x.
 pub fn rasterize(svg: &Svg, scale: f32, strip: &Strip) -> Result<Arc<RenderImage>, String> {
     let tree = svg.tree()?;
-    let width_px = (svg.width() * scale).ceil() as u32;
-    let height_px = strip.rows.len() as u32;
+    let width_px = whole_pixels((svg.width() * scale).ceil());
+    let height_px = strip.height_px();
     let mut pixmap = Pixmap::new(width_px, height_px).ok_or("the strip has no pixels")?;
     let transform =
         Transform::from_scale(scale, scale).post_translate(0.0, -(strip.rows.start as f32));

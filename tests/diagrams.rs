@@ -10,6 +10,11 @@ use guided_review::app::components::palette::{Appearance, Colors, TEXT_FONT};
 
 const FLOWCHART: &str = "flowchart TD\n  A[Open the tour] --> B{Has diagram?}\n  B -->|yes| C[Draw it]\n  B -->|no| D[Skip]\n";
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a colour channel is 0.0..=1.0, so the byte is 0..=255"
+)]
 fn hex(color: gpui::Rgba) -> String {
     let [r, g, b] = [color.r, color.g, color.b].map(|channel| (channel * 255.0).round() as u8);
     format!("#{r:02x}{g:02x}{b:02x}")
@@ -108,8 +113,8 @@ fn a_strip_is_drawn_at_screen_scale_with_blue_and_red_swapped_for_gpui() {
     let bitmap = rasterize(&svg, 2.0, last).unwrap();
 
     let size = bitmap.size(0);
-    assert_eq!(size.width.0 as u32, (svg.width() * 2.0).ceil() as u32);
-    assert_eq!(size.height.0 as u32, last.rows().len() as u32);
+    assert_eq!(size.width.0 as f32, (svg.width() * 2.0).ceil());
+    assert_eq!(size.height.0, i32::try_from(last.rows().len()).unwrap());
     let corner = &bitmap.as_bytes(0).unwrap()[..4];
     let dark_background_as_bgra = [0x17, 0x11, 0x0d, 0xff];
     assert_eq!(corner, dark_background_as_bgra);

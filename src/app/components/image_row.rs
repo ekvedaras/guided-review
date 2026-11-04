@@ -89,8 +89,8 @@ fn rasterize_svg(svg: &[u8], size: PixelSize) -> Option<Vec<u8>> {
     let longest = size.width.max(size.height) as f32;
     let scale = SVG_DRAW_SCALE.min(MAX_SVG_SIDE_PX / longest);
     let (width, height) = (
-        (size.width as f32 * scale).ceil() as u32,
-        (size.height as f32 * scale).ceil() as u32,
+        image_facts::whole_pixels((size.width as f32 * scale).ceil()),
+        image_facts::whole_pixels((size.height as f32 * scale).ceil()),
     );
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
     let fit = resvg::tiny_skia::Transform::from_scale(
@@ -285,8 +285,8 @@ fn checkerboard(width: f32, height: f32, colors: Colors) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |bounds, (), window, _| {
-            let columns = (width / CHECKER_CELL).ceil() as u32;
-            let rows = (height / CHECKER_CELL).ceil() as u32;
+            let columns = image_facts::whole_pixels((width / CHECKER_CELL).ceil());
+            let rows = image_facts::whole_pixels((height / CHECKER_CELL).ceil());
             for row in 0..rows {
                 for column in 0..columns {
                     let origin = bounds.origin

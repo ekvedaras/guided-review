@@ -187,7 +187,16 @@ fn host_theme(appearance: Appearance, colors: &Colors) -> Result<HostTheme, Stri
         .map_err(|error| format!("the series palette is not valid: {error}"))
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the channel is clamped to 0..=255 first"
+)]
+fn channel_byte(channel: f32) -> u8 {
+    (channel * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
 fn hex(color: Rgba) -> String {
-    let [r, g, b] = [color.r, color.g, color.b].map(|channel| (channel * 255.0).round() as u8);
+    let [r, g, b] = [color.r, color.g, color.b].map(channel_byte);
     format!("#{r:02x}{g:02x}{b:02x}")
 }
