@@ -31,6 +31,8 @@ pub struct SidebarRows {
     pub not_synced: bool,
     /// Ticks and typed text are only in memory until a save goes through again.
     pub save_problem: Option<SharedString>,
+    /// Changed code no page shows, named so the reviewer reads it on GitHub.
+    pub changes_not_shown: Option<SharedString>,
     pub is_summary_current: bool,
     pub steps: Vec<SidebarStep>,
     pub safety_net: Option<SidebarSafetyNet>,
@@ -65,6 +67,7 @@ impl SidebarRows {
                 .sync_banner()
                 .map(|reason| format!("Not syncing with GitHub: {reason}").into()),
             not_synced: review.not_synced(),
+            changes_not_shown: changes_not_shown_notice(&review.changes_not_shown()),
             save_problem: review
                 .save_problem()
                 .map(|reason| format!("Not saved to disk: {reason}").into()),
@@ -72,5 +75,30 @@ impl SidebarRows {
             steps,
             safety_net,
         }
+    }
+}
+
+fn changes_not_shown_notice(ids: &[String]) -> Option<SharedString> {
+    (!ids.is_empty()).then(|| {
+        format!(
+            "Changed code not shown here, read it on GitHub: {}",
+            ids.join(", ")
+        )
+        .into()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn changed_code_no_page_shows_is_named_in_the_sidebar() {
+        let ids = ["app/Ghost.php#Ghost::run".to_owned()];
+
+        let notice = changes_not_shown_notice(&ids).unwrap();
+
+        assert!(notice.contains("app/Ghost.php#Ghost::run"));
+        assert_eq!(changes_not_shown_notice(&[]), None);
     }
 }

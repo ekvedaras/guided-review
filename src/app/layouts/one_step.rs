@@ -723,6 +723,10 @@ impl OneStepLayout {
             .save_problem
             .clone()
             .map(|problem| div().text_xs().text_color(colors.danger).child(problem));
+        let changes_not_shown = sidebar
+            .changes_not_shown
+            .clone()
+            .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
         let finish_dialog = FinishReviewDialog::new(
             progress.total > 0 && progress.read == progress.total,
             sidebar.can_judge,
@@ -792,6 +796,7 @@ impl OneStepLayout {
             .border_color(colors.subtle_border)
             .child(progress_meter(&colors, progress))
             .child(finish_dialog)
+            .children(changes_not_shown)
             .children(save_problem)
             .children(sync_notices);
         div()

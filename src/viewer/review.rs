@@ -1145,6 +1145,21 @@ impl Review {
         Coverage::of(&self.tour, &self.files)
     }
 
+    /// Changed code no page can show, by piece id: the reviewer has to read it on GitHub.
+    pub fn changes_not_shown(&self) -> Vec<String> {
+        let unplaced = self
+            .files
+            .iter()
+            .flat_map(|file| file.not_shown.iter().cloned());
+        let outside_their_file = self.files.iter().flat_map(|file| {
+            file.pieces
+                .iter()
+                .filter(|piece| !self.files.iter().any(|other| other.path == piece.id.path))
+                .map(|piece| piece.id.to_string())
+        });
+        unplaced.chain(outside_their_file).collect()
+    }
+
     /// Why the last save failed, until a save goes through: ticks and text are then only in memory.
     pub fn save_problem(&self) -> Option<String> {
         self.saves.problem()

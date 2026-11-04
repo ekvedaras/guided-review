@@ -205,6 +205,9 @@ pub struct ChangedFile {
     pub pieces: Vec<Piece>,
     /// Every change of the file, whichever piece holds it.
     pub hunks: Vec<Hunk>,
+    /// Ids of changed symbols no piece could hold: their lines show on no page, so the
+    /// reviewer is told to look at them on GitHub.
+    pub not_shown: Vec<String>,
 }
 
 pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Vec<ChangedFile>> {
@@ -220,8 +223,11 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
                 head,
                 diff,
             };
-            let pieces = match context.cut_by_file_rules(&generated) {
-                Some(pieces) => pieces,
+            let PlacedChanges { pieces, not_shown } = match context.cut_by_file_rules(&generated) {
+                Some(pieces) => PlacedChanges {
+                    pieces,
+                    not_shown: Vec::new(),
+                },
                 None => context.cut_by_symbols()?,
             };
             Ok(ChangedFile {
@@ -233,6 +239,7 @@ pub fn cut(source: &dyn CodeSource, base: &Sha, head: &Sha) -> anyhow::Result<Ve
                 removed: diff.removed.len(),
                 pieces,
                 hunks: diff.hunks.clone(),
+                not_shown,
             })
         })
         .collect::<anyhow::Result<Vec<ChangedFile>>>()?;
@@ -278,15 +285,19 @@ struct CutContext<'a> {
 }
 
 impl<'a> CutContext<'a> {
-    fn cut_by_symbols(&self) -> anyhow::Result<Vec<Piece>> {
-        let symbol_pieces = match Language::for_path(self.diff.path()) {
+    /// With no symbol piece the whole file is one piece, which shows every change.
+    fn cut_by_symbols(&self) -> anyhow::Result<PlacedChanges> {
+        let placed = match Language::for_path(self.diff.path()) {
             Some(language) => self.cut_symbols(language)?,
-            None => Vec::new(),
+            None => PlacedChanges::default(),
         };
-        Ok(if symbol_pieces.is_empty() {
-            vec![self.whole_file_piece()]
+        Ok(if placed.pieces.is_empty() {
+            PlacedChanges {
+                pieces: vec![self.whole_file_piece()],
+                not_shown: Vec::new(),
+            }
         } else {
-            symbol_pieces
+            placed
         })
     }
 
@@ -380,17 +391,12 @@ impl<'a> CutContext<'a> {
         })
     }
 
-    fn cut_symbols(&self, language: Language) -> anyhow::Result<Vec<Piece>> {
+    fn cut_symbols(&self, language: Language) -> anyhow::Result<PlacedChanges> {
         let base_symbols = self.symbols_at(self.base, self.diff.old_path.as_deref(), language)?;
         let head_symbols = self.symbols_at(self.head, self.diff.new_path.as_deref(), language)?;
         let pairing = SymbolPairing::new(&base_symbols, &head_symbols);
         let changes = join_blank_line_changes(self.changes_by_slot(&pairing));
-        let mut pieces: Vec<(usize, Piece)> = changes
-            .into_iter()
-            .filter_map(|change| symbol_piece(&pairing, &change, self.diff.status().into()))
-            .collect();
-        pieces.sort_by_key(|(position, _)| *position);
-        Ok(pieces.into_iter().map(|(_, piece)| piece).collect())
+        Ok(place_changes(&pairing, changes, self.diff.status().into()))
     }
 
     /// Changed lines grouped by head slot: a removed line of a renamed symbol counts for its head name.
@@ -463,6 +469,40 @@ impl<'a> SymbolPairing<'a> {
 struct SlotPair {
     base: Slot,
     head: Slot,
+}
+
+#[derive(Default)]
+struct PlacedChanges {
+    pieces: Vec<Piece>,
+    not_shown: Vec<String>,
+}
+
+/// Pieces in file order. A change on a symbol found on neither side cannot become a piece;
+/// it is named, not dropped.
+fn place_changes(
+    pairing: &SymbolPairing,
+    changes: Vec<SymbolChange>,
+    file_status: PieceStatus,
+) -> PlacedChanges {
+    let mut pieces: Vec<(usize, Piece)> = Vec::new();
+    let mut not_shown = Vec::new();
+    for change in changes {
+        match symbol_piece(pairing, &change, file_status) {
+            Some(placed) => pieces.push(placed),
+            None => not_shown.push(
+                PieceId {
+                    path: change.path.to_owned(),
+                    symbol: Some(change.slot.id()),
+                }
+                .to_string(),
+            ),
+        }
+    }
+    pieces.sort_by_key(|(position, _)| *position);
+    PlacedChanges {
+        pieces: pieces.into_iter().map(|(_, piece)| piece).collect(),
+        not_shown,
+    }
 }
 
 fn symbol_piece(
@@ -668,5 +708,31 @@ impl From<FileStatus> for PieceStatus {
             FileStatus::Deleted => Self::Deleted,
             FileStatus::Modified | FileStatus::Renamed => Self::Modified,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_on_a_symbol_found_on_neither_side_is_named_as_not_shown() {
+        let none = Symbols::find("", Language::Php);
+        let pairing = SymbolPairing::new(&none, &none);
+        let line = Line {
+            number: 3,
+            text: "ghost();".to_owned(),
+        };
+        let change = SymbolChange {
+            path: "app/Ghost.php",
+            slot: Slot::Symbol("Ghost::run".to_owned()),
+            removed: Vec::new(),
+            added: vec![&line],
+        };
+
+        let placed = place_changes(&pairing, vec![change], PieceStatus::Modified);
+
+        assert!(placed.pieces.is_empty());
+        assert_eq!(placed.not_shown, ["app/Ghost.php#Ghost::run"]);
     }
 }
