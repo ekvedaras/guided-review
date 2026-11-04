@@ -19,4 +19,4 @@ Rust 2024 gpui app.
 
 - `CODING_STANDARDS.md`: the rules and lints.
 - `GLOSSARY.md`: the domain words.
-- `docs/wiki/index.md`: dated decisions and work logs. Check the cited commit before trusting a claim.
+- `docs/wiki/index.md`: dated decisions, their reasons and what is known open. Check the cited commit before trusting a claim.
