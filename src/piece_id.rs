@@ -68,13 +68,10 @@ impl PieceId {
 
     /// The folder with its trailing slash, or empty at the repo root.
     pub fn folder(&self) -> &str {
-        self.path
-            .as_str()
-            .rsplit_once('/')
-            .map_or("", |(folder, _)| {
-                let with_slash = folder.len() + 1;
-                self.path.as_str().get(..with_slash).unwrap_or_default()
-            })
+        let path = self.path.as_str();
+        path.rfind('/')
+            .and_then(|slash| path.get(..=slash))
+            .unwrap_or_default()
     }
 
     pub fn file_name(&self) -> &str {
