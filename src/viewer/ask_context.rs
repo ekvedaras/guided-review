@@ -65,7 +65,7 @@ pub(super) fn context_for(
             let step = tour.find_step(step)?;
             step_heading(&mut text, &step.title, &step.why, "piece")?;
             let page = StepPage::of(step, tour, files, &display, false);
-            let piece = page.pieces.iter().find(|p| p.id.to_string() == *piece)?;
+            let piece = page.pieces.iter().find(|p| p.id == *piece)?;
             piece_lines(&mut text, piece)?;
         }
         Place::Lines {
@@ -86,7 +86,16 @@ pub(super) fn context_for(
             let mut selection = RowSelection::start_at(start.clone());
             selection.extend_to(end.clone());
             let selected = selection.resolve(&rows)?;
-            writeln!(text, "\nSelected lines of {}", pieces.join(", ")).ok()?;
+            writeln!(
+                text,
+                "\nSelected lines of {}",
+                pieces
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .ok()?;
             for line in selected.lines() {
                 diff_line(&mut text, line)?;
             }

@@ -281,7 +281,7 @@ impl SelectedRows {
 }
 
 struct PieceAt {
-    id: String,
+    id: PieceId,
     path: FilePath,
     row: usize,
 }
@@ -359,7 +359,7 @@ impl PageRows {
                 }
                 PageRow::PieceHeader(heading) | PageRow::PieceMarker(heading) => {
                     pieces.push(PieceAt {
-                        id: heading.piece.to_string(),
+                        id: heading.piece.clone(),
                         path: heading.path.clone(),
                         row: index,
                     });
@@ -437,7 +437,11 @@ impl PageRows {
         let piece = match target.kind {
             JumpKind::Step => None,
             JumpKind::File => self.pieces.iter().find(|piece| piece.path == target.label),
-            JumpKind::Symbol => self.pieces.iter().find(|piece| piece.id == target.label),
+            JumpKind::Symbol => target
+                .label
+                .parse::<PieceId>()
+                .ok()
+                .and_then(|id| self.pieces.iter().find(|piece| piece.id == id)),
         };
         piece.map_or(0, |piece| piece.row)
     }
@@ -702,7 +706,7 @@ impl RowsBuilder<'_> {
             id: format!("ask-piece-{id}-{}", piece.id).into(),
             place: Place::Piece {
                 step: id.clone(),
-                piece: piece.id.to_string(),
+                piece: piece.id.clone(),
             },
             label: piece.id.to_string(),
         };

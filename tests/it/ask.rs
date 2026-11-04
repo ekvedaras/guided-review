@@ -240,7 +240,7 @@ fn a_piece_and_the_whole_tour_have_their_own_context() {
     let piece = review
         .ask_context(&Place::Piece {
             step: StepId::from("order"),
-            piece: "app/Order.php#Order::total".to_owned(),
+            piece: "app/Order.php#Order::total".parse().unwrap(),
         })
         .unwrap();
     let tour = review.ask_context(&Place::Tour).unwrap();

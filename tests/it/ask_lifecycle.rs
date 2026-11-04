@@ -377,7 +377,7 @@ fn after_a_re_pin_asks_whose_piece_changed_say_code_changed_since_and_the_others
         on_total_lines,
         Place::Piece {
             step: StepId::from("total"),
-            piece: "app/Order.php#Order::total".to_owned(),
+            piece: "app/Order.php#Order::total".parse().unwrap(),
         },
         Place::Step {
             step: StepId::from("keep"),
@@ -441,7 +441,7 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
     let mut review = shop.open();
     let piece = Place::Piece {
         step: StepId::from("total"),
-        piece: "app/Order.php#Order::total".to_owned(),
+        piece: "app/Order.php#Order::total".parse().unwrap(),
     };
     let (asks, id) = answered(&shop, &review, piece);
     let first = review.use_as_comment(asks.get(id).unwrap()).unwrap();

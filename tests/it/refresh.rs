@@ -185,7 +185,11 @@ fn the_app_offers_the_same_brief_until_done() {
 
     assert_eq!(brief.stale_steps.len(), 1);
     assert_eq!(
-        brief.unplaced_new_pieces,
+        brief
+            .unplaced_new_pieces
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
         [
             "app/Pricing.php#(top)",
             "app/Pricing.php#Pricing",

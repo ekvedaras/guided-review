@@ -6,6 +6,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
+use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
 
@@ -73,9 +74,9 @@ pub struct RepinRecord {
     pub to_base: Sha,
     pub to_head: Sha,
     /// Pieces at `to_head`, by id.
-    pub pieces: BTreeMap<String, RepinStatus>,
+    pub pieces: BTreeMap<PieceId, RepinStatus>,
     /// By old id: a gone hunk's ordinal may belong to another hunk now.
-    pub gone_by_step: BTreeMap<StepId, BTreeSet<String>>,
+    pub gone_by_step: BTreeMap<StepId, BTreeSet<PieceId>>,
 }
 
 impl RepinRecord {
@@ -95,7 +96,7 @@ impl RepinRecord {
                 .pieces
                 .iter()
                 .filter(|piece| piece.status != RepinStatus::Gone)
-                .map(|piece| (piece.id.to_string(), piece.status))
+                .map(|piece| (piece.id.clone(), piece.status))
                 .collect(),
             gone_by_step: repin
                 .steps
@@ -105,16 +106,16 @@ impl RepinRecord {
                         .pieces
                         .iter()
                         .filter(|piece| piece.status == RepinStatus::Gone)
-                        .map(|piece| piece.id.to_string())
+                        .map(|piece| piece.id.clone())
                         .collect();
                     (step.step.clone(), gone)
                 })
-                .filter(|(_, gone): &(StepId, BTreeSet<String>)| !gone.is_empty())
+                .filter(|(_, gone): &(StepId, BTreeSet<PieceId>)| !gone.is_empty())
                 .collect(),
         }
     }
 
-    pub fn status_of(&self, piece: &str) -> Option<RepinStatus> {
+    pub fn status_of(&self, piece: &PieceId) -> Option<RepinStatus> {
         self.pieces.get(piece).copied()
     }
 
@@ -125,7 +126,7 @@ impl RepinRecord {
     /// Two re-pins with no Refresh between read as one, from where the first one started:
     /// what changed in the first stays changed even when the second leaves it alone.
     fn following(self, earlier: &Self) -> Self {
-        let was_new_then = |id: &String| earlier.pieces.get(id) == Some(&RepinStatus::New);
+        let was_new_then = |id: &PieceId| earlier.pieces.get(id) == Some(&RepinStatus::New);
         let pieces = self
             .pieces
             .into_iter()

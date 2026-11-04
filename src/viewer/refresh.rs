@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::coverage;
-use crate::pieces::ChangedFile;
+use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 use crate::repin::RepinStatus;
 use crate::tour::Tour;
@@ -26,7 +26,7 @@ pub struct StaleStep {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RefreshBrief {
     pub stale_steps: Vec<StaleStep>,
-    pub unplaced_new_pieces: Vec<String>,
+    pub unplaced_new_pieces: Vec<PieceId>,
     pub new_or_changed_pieces: usize,
     pub pieces: usize,
 }
@@ -43,9 +43,7 @@ impl RefreshBrief {
                 step.pieces
                     .iter()
                     .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-                    .any(|part| {
-                        record.status_of(&part.piece.id.to_string()) == Some(RepinStatus::Changed)
-                    })
+                    .any(|part| record.status_of(&part.piece.id) == Some(RepinStatus::Changed))
             })
             .map(|step| StaleStep {
                 id: step.id.clone(),
@@ -54,7 +52,7 @@ impl RefreshBrief {
             .collect();
         let unplaced_new_pieces = coverage::uncovered(tour, files)
             .into_iter()
-            .map(|part| part.piece.id.to_string())
+            .map(|part| part.piece.id.clone())
             .filter(|id| record.status_of(id) == Some(RepinStatus::New))
             .collect();
         let new_or_changed_pieces = record

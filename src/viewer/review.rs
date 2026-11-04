@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::code_source::CodeSource;
 use crate::coverage;
-use crate::pieces::{self, ChangedFile};
+use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::{Step, Tour};
 
@@ -409,7 +409,7 @@ impl Review {
     fn mark_repin_status(&self, pieces: &mut [PieceDiff]) {
         if let Some(record) = self.repin_record() {
             for piece in pieces {
-                piece.repin_status = record.status_of(&piece.id.to_string());
+                piece.repin_status = record.status_of(&piece.id);
             }
         }
     }
@@ -443,7 +443,7 @@ impl Review {
         let Some(record) = self.repin_record() else {
             return false;
         };
-        let moved = |piece: &str| record.status_of(piece) != Some(RepinStatus::Same);
+        let moved = |piece: &PieceId| record.status_of(piece) != Some(RepinStatus::Same);
         match &ask.place {
             Place::Tour => false,
             Place::Step { step } => {
@@ -454,11 +454,11 @@ impl Review {
                             .flat_map(|pointer| {
                                 coverage::shown_parts(pointer, &self.tour, &self.files)
                             })
-                            .any(|part| moved(&part.piece.id.to_string()))
+                            .any(|part| moved(&part.piece.id))
                     })
             }
             Place::Piece { piece, .. } => moved(piece),
-            Place::Lines { pieces, .. } => pieces.iter().any(|piece| moved(piece)),
+            Place::Lines { pieces, .. } => pieces.iter().any(moved),
         }
     }
 
@@ -505,7 +505,7 @@ impl Review {
         let rows: Vec<DiffLine> = match only_piece {
             Some(id) => pieces
                 .iter()
-                .filter(|shown| shown.id.to_string() == *id)
+                .filter(|shown| shown.id == *id)
                 .flat_map(|shown| shown.lines().cloned())
                 .collect(),
             None => in_shown_order(pieces),
@@ -545,7 +545,7 @@ impl Review {
             pieces: pieces
                 .iter()
                 .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
-                .map(|piece| piece.id.to_string())
+                .map(|piece| piece.id.clone())
                 .collect(),
         }
     }

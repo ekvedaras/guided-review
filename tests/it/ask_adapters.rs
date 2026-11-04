@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use guided_review::claude_cli::ClaudeCli;
 use guided_review::pull_request::Sha;
+use guided_review::repin::RepinStatus;
 use guided_review::viewer::{AgentLaunch, AgentLauncher, Asks, Place, ReviewStateFile};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -191,4 +192,73 @@ fn stopping_a_turn_asks_claude_to_interrupt_over_its_input_and_keeps_the_process
     let sent: Value = serde_json::from_str(lines.lines().next().unwrap()).unwrap();
     assert_eq!(sent["type"], "control_request");
     assert_eq!(sent["request"]["subtype"], "interrupt");
+}
+
+#[test]
+fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
+    let home = TempDir::new().unwrap();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let written = json!({
+        "asks": [
+            {
+                "id": 1,
+                "place": {"kind": "piece", "step": "order", "piece": "app/Order.php#Order::total"},
+                "head": "abc",
+                "messages": [{"author": "reviewer", "text": "Why?"}]
+            },
+            {
+                "id": 2,
+                "place": {
+                    "kind": "lines",
+                    "step": "order",
+                    "start": {"path": "app/Order.php", "side": "Head", "line": 3},
+                    "end": {"path": "app/Order.php", "side": "Head", "line": 4},
+                    "pieces": ["app/Order.php#Order::total", "config.yml#hunk-1"]
+                },
+                "head": "abc"
+            }
+        ],
+        "last_repin": {
+            "from_base": "b1",
+            "from_head": "h1",
+            "to_base": "b2",
+            "to_head": "h2",
+            "pieces": {
+                "app/Order.php#Order::total": "changed",
+                "config.yml#hunk-1": "new"
+            },
+            "gone_by_step": {"order": ["app/Old.php#Old::run"]}
+        }
+    });
+    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, written.to_string()).unwrap();
+
+    let state = file.load().unwrap();
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let total = "app/Order.php#Order::total".parse().unwrap();
+    assert_eq!(
+        asks.all()[0].place,
+        Place::Piece {
+            step: "order".into(),
+            piece: total
+        }
+    );
+    assert_eq!(
+        state
+            .last_repin()
+            .unwrap()
+            .status_of(&"config.yml#hunk-1".parse().unwrap()),
+        Some(RepinStatus::New)
+    );
+
+    file.save(&state).unwrap();
+
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["last_repin"], written["last_repin"]);
+    assert_eq!(saved["asks"][0]["place"], written["asks"][0]["place"]);
+    assert_eq!(saved["asks"][1]["place"], written["asks"][1]["place"]);
+    let reloaded = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    assert_eq!(reloaded.all(), asks.all());
 }

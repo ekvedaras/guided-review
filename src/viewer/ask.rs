@@ -1,3 +1,4 @@
+use crate::pieces::PieceId;
 use crate::pull_request::Sha;
 use std::sync::Arc;
 
@@ -19,7 +20,7 @@ pub enum Place {
     /// All lines of one piece, as shown in `step`.
     Piece {
         step: StepId,
-        piece: String,
+        piece: PieceId,
     },
     /// Rows the reviewer selected, top to bottom, in a step or (`step: None`) the safety net.
     Lines {
@@ -27,7 +28,7 @@ pub enum Place {
         start: LineLocation,
         end: LineLocation,
         /// The pieces the rows belong to, to tell when a re-pin changed them.
-        pieces: Vec<String>,
+        pieces: Vec<PieceId>,
     },
 }
 
