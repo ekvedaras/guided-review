@@ -145,6 +145,8 @@ pub struct Review {
     code_on_github: Option<String>,
     /// Where the saved review went when it could not be read.
     saved_review_kept_as: Option<PathBuf>,
+    /// Why the last sync of viewed marks failed, until one goes through.
+    viewed_not_synced: Option<String>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -212,6 +214,7 @@ impl Review {
             ide_not_started: None,
             code_on_github: source.fallback_reason().map(str::to_owned),
             saved_review_kept_as,
+            viewed_not_synced: None,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -1197,8 +1200,15 @@ impl Review {
             self.fold_flipped.remove(step);
         }
         let saved = self.save_viewer_sections();
+        self.viewed_not_synced = None;
         match error {
-            Some(error) => self.viewed_sync.settle(error),
+            Some(error) => {
+                let settled = self.viewed_sync.settle(error);
+                if let Err(error) = &settled {
+                    self.viewed_not_synced = Some(format!("{error:#}"));
+                }
+                settled
+            }
             None => saved,
         }
     }
@@ -1245,6 +1255,7 @@ impl Review {
             )
             .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
             .chain(self.code_on_github.clone().map(Problem::CodeOnGitHub))
+            .chain(self.viewed_not_synced.clone().map(Problem::ViewedNotSynced))
             .chain(
                 self.saved_review_kept_as
                     .clone()

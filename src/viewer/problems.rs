@@ -20,6 +20,8 @@ pub enum Problem {
     CodeOnGitHub(String),
     /// The saved review could not be read, so this one starts empty; the old file is kept at the path.
     SavedReviewNotRead(PathBuf),
+    /// Ticks wait in the queue to reach GitHub's viewed marks, and GitHub may show them as unviewed.
+    ViewedNotSynced(String),
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -68,6 +70,10 @@ impl fmt::Display for Problem {
                 formatter,
                 "The saved review could not be read, so this review starts empty. The old file is kept as {}",
                 backup.display()
+            ),
+            Self::ViewedNotSynced(reason) => write!(
+                formatter,
+                "Viewed marks are not synced with GitHub, they are retried on the next sync: {reason}"
             ),
         }
     }

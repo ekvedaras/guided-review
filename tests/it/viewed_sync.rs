@@ -4,7 +4,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
-use guided_review::viewer::{Review, ReviewStateFile, SyncState, ViewedState};
+use guided_review::viewer::{Problem, Review, ReviewStateFile, SyncState, ViewedState};
 use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -227,6 +227,25 @@ fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
     review.sync(&github).unwrap();
     assert!(!review.not_synced());
     assert_eq!(github.viewed_state("c.txt"), ViewedState::Viewed);
+}
+
+#[test]
+fn a_sync_that_failed_is_a_problem_in_the_sidebar_until_a_sync_goes_through() {
+    let shop = Shop::with_pull();
+    let github = all_unviewed(&shop);
+    github.inject(GitHubFault::ViewedPushesFail);
+    let mut review = shop.open();
+    review.tick(&"c-only".into()).unwrap();
+
+    assert!(review.sync(&github).is_err());
+    assert_eq!(
+        review.problems(),
+        [Problem::ViewedNotSynced("network is down".into())]
+    );
+
+    github.heal(&GitHubFault::ViewedPushesFail);
+    review.sync(&github).unwrap();
+    assert_eq!(review.problems(), []);
 }
 
 #[test]
