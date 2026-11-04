@@ -318,3 +318,54 @@ fn the_review_reads_every_changed_file_at_head_for_context_at_the_same_time() {
     assert_eq!(source.reads_of("head", "docs/a.txt"), 1);
     assert_eq!(source.reads_of("head", "docs/b.txt"), 1);
 }
+
+/// Two hunks that claim the same head lines: the lines above line 4 add up to no base line.
+const HUNKS_THAT_DO_NOT_ADD_UP: &str = "diff --git a/docs/a.txt b/docs/a.txt
+--- a/docs/a.txt
++++ b/docs/a.txt
+@@ -0,0 +1,2 @@
++new 1
++new 2
+@@ -0,0 +2,1 @@
++new 2
+";
+
+#[test]
+fn an_unchanged_line_whose_base_line_does_not_add_up_is_still_shown() {
+    let source = Arc::new(
+        CountingSource::default()
+            .with_patch(HUNKS_THAT_DO_NOT_ADD_UP)
+            .with_file("base", "docs/a.txt", "")
+            .with_file("head", "docs/a.txt", "new 1\nnew 2\nkept\n"),
+    );
+    let cache = cached(&source);
+    let tour: Tour = serde_json::from_value(json!({
+        "pr": "https://github.com/acme/shop/pull/7",
+        "base": "base",
+        "head": "head",
+        "title": "Notes",
+        "summary": [],
+        "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "docs/a.txt"}], "children": []}],
+    }))
+    .unwrap();
+    let home = TempDir::new().unwrap();
+    let state_file = ReviewStateFile::for_pr(
+        home.path(),
+        &"https://github.com/acme/shop/pull/7".parse().unwrap(),
+    );
+    let mut review = Review::open(tour, &cache, state_file).unwrap();
+    let files_at_head = review.files_at_head_request().read(&cache);
+    review.set_files_at_head(files_at_head);
+    review.go_forward();
+
+    let shown: Vec<String> = review
+        .current_step()
+        .unwrap()
+        .pieces
+        .iter()
+        .flat_map(|piece| &piece.hunks)
+        .flat_map(|hunk| &hunk.rows)
+        .map(|row| row.text.clone())
+        .collect();
+    assert!(shown.iter().any(|text| text == "kept"), "{shown:?}");
+}

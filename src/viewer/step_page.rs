@@ -35,9 +35,10 @@ pub struct LineLocation {
 pub enum LineKind {
     Removed,
     Added,
-    /// Unchanged: its location is at head, and this is where it is at base.
+    /// Unchanged: its location is at head, and this is where it is at base. `None` when the
+    /// hunks above it do not add up to a line, as in a diff that does not match the file.
     Context {
-        base_line: LineNumber,
+        base_line: Option<LineNumber>,
         /// Shown on the reviewer's ask, outside GitHub's diff, so GitHub takes no comment on it.
         is_expanded: bool,
     },
@@ -64,7 +65,9 @@ impl DiffLine {
         self.takes_comment()
             && self.location.path == location.path
             && match (self.kind, location.side) {
-                (LineKind::Context { base_line, .. }, Side::Base) => base_line == location.line,
+                (LineKind::Context { base_line, .. }, Side::Base) => {
+                    base_line == Some(location.line)
+                }
                 _ => self.location.side == location.side && self.location.line == location.line,
             }
     }

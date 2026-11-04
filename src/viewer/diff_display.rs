@@ -314,7 +314,7 @@ impl DiffDisplay<'_> {
         let added_rows = added.iter().map(|line| {
             let kind = match same_as_removed.get(&line.number) {
                 Some(&base_line) => LineKind::Context {
-                    base_line,
+                    base_line: Some(base_line),
                     is_expanded: false,
                 },
                 None => LineKind::Added,
@@ -382,14 +382,18 @@ impl FileLines<'_> {
     }
 
     /// An unchanged head line sits lower at head by what the hunks above it added, less what they removed.
-    fn base_line_of(&self, head_line: usize) -> usize {
-        self.file
+    /// `None` when the hunks above do not add up to a line of the file.
+    fn base_line_of(&self, head_line: usize) -> Option<LineNumber> {
+        let line = self
+            .file
             .hunks
             .iter()
             .filter(|hunk| hunk.head_line_below() <= head_line)
-            .fold(head_line, |line, hunk| {
-                line + hunk.removed.len() - hunk.added.len()
-            })
+            .try_fold(head_line, |line, hunk| {
+                line.checked_add(hunk.removed.len())?
+                    .checked_sub(hunk.added.len())
+            })?;
+        LineNumber::try_from(line).ok()
     }
 
     fn is_in_github_diff(&self, head_line: usize) -> bool {
@@ -407,11 +411,10 @@ impl FileLines<'_> {
             .and_then(|file| file.line(head_line))
             .map(str::to_owned)
             .unwrap_or_default();
-        let base_line = LineNumber::try_from(self.base_line_of(head_line)).ok()?;
         Some(self.changed_row(
             Side::Head,
             LineKind::Context {
-                base_line,
+                base_line: self.base_line_of(head_line),
                 is_expanded: !self.is_in_github_diff(head_line),
             },
             &Line { number, text },

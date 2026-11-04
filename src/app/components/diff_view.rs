@@ -73,7 +73,11 @@ impl DiffRowLine {
         let (base_number, head_number, sign) = match line.kind {
             LineKind::Removed => (number, String::new(), '-'),
             LineKind::Added => (String::new(), number, '+'),
-            LineKind::Context { base_line, .. } => (base_line.to_string(), number, ' '),
+            LineKind::Context { base_line, .. } => (
+                base_line.map(|line| line.to_string()).unwrap_or_default(),
+                number,
+                ' ',
+            ),
         };
         let highlights = line
             .spans
