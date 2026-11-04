@@ -24,7 +24,7 @@ use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, FileBlock, JumpPlace, JumpTarget, LineKind, LineLocation, Markdown,
     MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection, SafetyNetPage,
-    Screen, Side, StepId, StepPage, ThreadView,
+    Screen, StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -526,13 +526,13 @@ enum UnderLine {
 }
 
 impl UnderLine {
-    fn at(&self) -> Option<LineLocation> {
+    fn at(&self) -> Option<Hangs> {
         match self {
-            Self::Thread(view) => view.anchor.clone(),
-            Self::Queued(queued) => Some(line_of(&queued.draft.place)),
-            Self::Composer(place) => Some(line_of(place)),
+            Self::Thread(view) => view.anchor.clone().map(Hangs::Line),
+            Self::Queued(queued) => Some(Hangs::of_comment(&queued.draft.place)),
+            Self::Composer(place) => Some(Hangs::of_comment(place)),
             Self::AskMarker(ask) => match &ask.place {
-                Place::Lines { end, .. } => Some(end.clone()),
+                Place::Lines { end, .. } => Some(Hangs::Line(end.clone())),
                 _ => None,
             },
         }
@@ -548,28 +548,32 @@ impl UnderLine {
     }
 }
 
-/// The line a comment hangs under; a file comment hangs under the file, which has line 0.
-fn line_of(place: &CommentPlace) -> LineLocation {
-    match place {
-        CommentPlace::File(path) => LineLocation {
-            path: path.clone(),
-            side: Side::Head,
-            line: 0,
-        },
-        CommentPlace::Lines { end, .. } => end.clone(),
+/// Where something hangs: under a line of code, or under the picture of a file.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Hangs {
+    Line(LineLocation),
+    File(FilePath),
+}
+
+impl Hangs {
+    fn of_comment(place: &CommentPlace) -> Self {
+        match place {
+            CommentPlace::File(path) => Self::File(path.clone()),
+            CommentPlace::Lines { end, .. } => Self::Line(end.clone()),
+        }
     }
 }
 
 /// What hangs under the rows of a screen, by the line it hangs under, each with its place in the order it shows.
 #[derive(Default)]
 struct UnderLines {
-    by_line: HashMap<LineLocation, Vec<(usize, UnderLine)>>,
+    by_line: HashMap<Hangs, Vec<(usize, UnderLine)>>,
 }
 
 impl UnderLines {
     /// What hangs under no line is dropped.
     fn of(items: impl IntoIterator<Item = UnderLine>) -> Self {
-        let mut by_line: HashMap<LineLocation, Vec<(usize, UnderLine)>> = HashMap::new();
+        let mut by_line: HashMap<Hangs, Vec<(usize, UnderLine)>> = HashMap::new();
         for (order, item) in items.into_iter().enumerate() {
             if let Some(at) = item.at() {
                 by_line.entry(at).or_default().push((order, item));
@@ -579,29 +583,20 @@ impl UnderLines {
     }
 
     fn take_at(&mut self, at: &LineLocation) -> Vec<UnderLine> {
+        self.take(&Hangs::Line(at.clone()))
+    }
+
+    fn take_whole_file(&mut self, path: &FilePath) -> Vec<UnderLine> {
+        self.take(&Hangs::File(path.clone()))
+    }
+
+    fn take(&mut self, at: &Hangs) -> Vec<UnderLine> {
         self.by_line
             .remove(at)
             .into_iter()
             .flatten()
             .map(|(_, item)| item)
             .collect()
-    }
-
-    /// What hangs under a whole file (line 0), on either side.
-    fn take_whole_file(&mut self, path: &FilePath) -> Vec<UnderLine> {
-        let mut here: Vec<(usize, UnderLine)> = [Side::Base, Side::Head]
-            .into_iter()
-            .filter_map(|side| {
-                self.by_line.remove(&LineLocation {
-                    path: path.clone(),
-                    side,
-                    line: 0,
-                })
-            })
-            .flatten()
-            .collect();
-        here.sort_by_key(|(order, _)| *order);
-        here.into_iter().map(|(_, item)| item).collect()
     }
 }
 
@@ -971,6 +966,7 @@ pub fn line_count(text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::line_number::LineNumber;
     use crate::viewer::{Reaction, ReactionCount, ReviewThread, Side, ThreadComment};
     use std::sync::Arc;
 
@@ -979,27 +975,33 @@ mod tests {
         assert!(size_of::<PageRow>() <= 56, "{} bytes", size_of::<PageRow>());
     }
 
-    fn box_at(path: &str, side: Side, line: usize) -> UnderLine {
+    fn line(number: usize) -> LineNumber {
+        LineNumber::try_from(number).unwrap()
+    }
+
+    fn box_at(path: &str, side: Side, number: usize) -> UnderLine {
         let at = LineLocation {
             path: FilePath::new(path).unwrap(),
             side,
-            line,
+            line: line(number),
         };
-        UnderLine::Composer(if line == 0 && side == Side::Head {
-            CommentPlace::File(at.path)
-        } else {
-            CommentPlace::Lines {
-                start: at.clone(),
-                end: at,
-            }
+        UnderLine::Composer(CommentPlace::Lines {
+            start: at.clone(),
+            end: at,
         })
     }
 
-    fn lines_of(items: &[UnderLine]) -> Vec<(Side, usize)> {
+    fn box_on_file(path: &str) -> UnderLine {
+        UnderLine::Composer(CommentPlace::File(FilePath::new(path).unwrap()))
+    }
+
+    fn lines_of(items: &[UnderLine]) -> Vec<(Side, u32)> {
         items
             .iter()
-            .filter_map(UnderLine::at)
-            .map(|at| (at.side, at.line))
+            .filter_map(|item| match item.at()? {
+                Hangs::Line(at) => Some((at.side, at.line.get())),
+                Hangs::File(_) => None,
+            })
             .collect()
     }
 
@@ -1013,7 +1015,7 @@ mod tests {
         let head_3 = LineLocation {
             path: FilePath::new("a.php").unwrap(),
             side: Side::Head,
-            line: 3,
+            line: line(3),
         };
 
         assert_eq!(lines_of(&under.take_at(&head_3)), [(Side::Head, 3); 2]);
@@ -1021,21 +1023,30 @@ mod tests {
     }
 
     #[test]
-    fn what_hangs_under_a_whole_file_comes_from_both_sides_in_its_order() {
+    fn what_hangs_under_a_whole_file_is_taken_once_and_not_with_its_lines() {
         let mut under = UnderLines::of([
-            box_at("logo.png", Side::Head, 0),
-            box_at("logo.png", Side::Base, 0),
-            box_at("other.png", Side::Head, 0),
-            box_at("logo.png", Side::Head, 0),
+            box_on_file("logo.png"),
+            box_on_file("other.png"),
+            box_at("logo.png", Side::Head, 1),
+            box_on_file("logo.png"),
         ]);
 
         assert_eq!(
-            lines_of(&under.take_whole_file(&FilePath::new("logo.png").unwrap())),
-            [(Side::Head, 0), (Side::Base, 0), (Side::Head, 0)]
+            under
+                .take_whole_file(&FilePath::new("logo.png").unwrap())
+                .len(),
+            2
+        );
+        assert!(
+            under
+                .take_whole_file(&FilePath::new("logo.png").unwrap())
+                .is_empty()
         );
         assert_eq!(
-            lines_of(&under.take_whole_file(&FilePath::new("other.png").unwrap())),
-            [(Side::Head, 0)]
+            under
+                .take_whole_file(&FilePath::new("other.png").unwrap())
+                .len(),
+            1
         );
     }
 
@@ -1046,11 +1057,11 @@ mod tests {
                 is_resolved: false,
                 is_outdated: false,
                 path: FilePath::new("a.rs").unwrap(),
-                line: Some(1),
+                line: Some(line(1)),
                 start_line: None,
                 side: Side::Head,
                 is_file_comment: false,
-                original_line: Some(1),
+                original_line: Some(line(1)),
                 original_start_line: None,
                 original_commit: None,
                 comments: vec![ThreadComment {

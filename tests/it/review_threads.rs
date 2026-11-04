@@ -1,5 +1,6 @@
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::line;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
@@ -94,7 +95,8 @@ fn comment(author: &str, is_bot: bool, body: &str) -> ThreadComment {
     }
 }
 
-fn thread(id: &str, path: &str, side: Side, line: usize) -> ReviewThread {
+fn thread(id: &str, path: &str, side: Side, number: usize) -> ReviewThread {
+    let line = line(number);
     ReviewThread {
         id: id.into(),
         is_resolved: false,
@@ -139,7 +141,7 @@ fn a_thread_hangs_under_its_line_in_the_step_that_holds_the_line() {
     let page = review.current_step().unwrap();
     assert_eq!(ids(&page.threads), ["t1"]);
     let anchor = page.threads[0].anchor.as_ref().unwrap();
-    assert_eq!((anchor.side, anchor.line), (Side::Head, 7));
+    assert_eq!((anchor.side, anchor.line), (Side::Head, line(7)));
 
     review.go_to(&"config".into());
     assert!(review.current_step().unwrap().threads.is_empty());
@@ -217,7 +219,7 @@ fn a_thread_on_a_line_only_the_safety_net_shows_hangs_under_that_line_there() {
 
     let net = review.safety_net().unwrap();
     assert_eq!(ids(&net.threads), ["t1"]);
-    assert_eq!(net.threads[0].anchor.as_ref().unwrap().line, 3);
+    assert_eq!(net.threads[0].anchor.as_ref().unwrap().line, line(3));
     review.go_to(&"order".into());
     assert!(review.current_step().unwrap().threads.is_empty());
 }
@@ -304,13 +306,13 @@ fn list_step() -> Vec<Value> {
     vec![step("list", json!([{"file": "list.txt"}]))]
 }
 
-fn hangs_in_step(shop: &Shop, thread: ReviewThread) -> Option<(Side, usize)> {
+fn hangs_in_step(shop: &Shop, thread: ReviewThread) -> Option<(Side, u32)> {
     let review = shop.open_with_threads_then_head_files(&[thread]);
     let page = review.current_step().unwrap();
     page.threads
         .first()
         .and_then(|view| view.anchor.as_ref())
-        .map(|anchor| (anchor.side, anchor.line))
+        .map(|anchor| (anchor.side, anchor.line.get()))
 }
 
 fn is_in_safety_net_only(shop: &Shop, thread: ReviewThread) -> bool {

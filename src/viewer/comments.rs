@@ -3,6 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
+use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ports::{
@@ -10,7 +11,7 @@ use super::ports::{
     ViewedSyncUnavailable,
 };
 use super::row_selection::SelectedLines;
-use super::step_page::LineLocation;
+use super::step_page::{LineLocation, Side};
 
 /// Where a comment sits: on a whole file, or on one line or a range that may cross hunks and sides.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -53,13 +54,18 @@ impl CommentPlace {
 
 impl<'de> Deserialize<'de> for CommentPlace {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(match StoredPlace::deserialize(deserializer)? {
-            StoredPlace::Current(CurrentPlace::File(path)) => Self::File(path),
+        match StoredPlace::deserialize(deserializer)? {
+            StoredPlace::Current(CurrentPlace::File(path)) => Ok(Self::File(path)),
+            StoredPlace::Current(CurrentPlace::Lines { start, end }) => {
+                Ok(Self::Lines { start, end })
+            }
             // Before places had kinds, a file comment was a place on line 0, which no line has.
-            StoredPlace::Before { end, .. } if end.line == 0 => Self::File(end.path),
-            StoredPlace::Current(CurrentPlace::Lines { start, end })
-            | StoredPlace::Before { start, end } => Self::Lines { start, end },
-        })
+            StoredPlace::Before { end, .. } if end.line == 0 => Ok(Self::File(end.path)),
+            StoredPlace::Before { start, end } => Ok(Self::Lines {
+                start: start.into_location().map_err(serde::de::Error::custom)?,
+                end: end.into_location().map_err(serde::de::Error::custom)?,
+            }),
+        }
     }
 }
 
@@ -68,9 +74,27 @@ impl<'de> Deserialize<'de> for CommentPlace {
 enum StoredPlace {
     Current(CurrentPlace),
     Before {
-        start: LineLocation,
-        end: LineLocation,
+        start: BeforeLocation,
+        end: BeforeLocation,
     },
+}
+
+/// A location as saved before lines were counted from 1.
+#[derive(Deserialize)]
+struct BeforeLocation {
+    path: FilePath,
+    side: Side,
+    line: u32,
+}
+
+impl BeforeLocation {
+    fn into_location(self) -> Result<LineLocation, InvalidLineNumber> {
+        Ok(LineLocation {
+            path: self.path,
+            side: self.side,
+            line: LineNumber::try_from(self.line)?,
+        })
+    }
 }
 
 #[derive(Deserialize)]

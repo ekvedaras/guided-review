@@ -389,13 +389,13 @@ impl<'a> CutContext<'a> {
         let diff = self.diff;
         let mut changes: Vec<SymbolChange> = Vec::new();
         for line in &diff.removed {
-            let slot = pairing.head_slot_of_removed_line(line.number);
+            let slot = pairing.head_slot_of_removed_line(line.number.into());
             SymbolChange::entry_for(&mut changes, self.path, slot)
                 .removed
                 .push(line);
         }
         for line in &diff.added {
-            let slot = pairing.head.slot_at(line.number);
+            let slot = pairing.head.slot_at(line.number.into());
             SymbolChange::entry_for(&mut changes, self.path, slot)
                 .added
                 .push(line);
@@ -567,7 +567,7 @@ fn join_blank_line_changes(changes: Vec<SymbolChange>) -> Vec<SymbolChange> {
         {
             let Some(nearest) = changes
                 .iter_mut()
-                .min_by_key(|change| change.distance_to(line.number))
+                .min_by_key(|change| change.distance_to(line.number.into()))
             else {
                 continue;
             };
@@ -657,7 +657,7 @@ impl<'a> SymbolChange<'a> {
         self.added
             .iter()
             .chain(&self.removed)
-            .map(|other| other.number.abs_diff(line))
+            .map(|other| usize::from(other.number).abs_diff(line))
             .min()
             .unwrap_or(usize::MAX)
     }
@@ -666,7 +666,7 @@ impl<'a> SymbolChange<'a> {
         self.added
             .iter()
             .chain(&self.removed)
-            .map(|line| line.number)
+            .map(|line| usize::from(line.number))
             .min()
             .unwrap_or_default()
     }
@@ -685,13 +685,14 @@ impl From<FileStatus> for PieceStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::line_number::LineNumber;
 
     #[test]
     fn a_change_on_a_symbol_found_on_neither_side_is_named_as_not_shown() {
         let none = Symbols::find("", Language::Php);
         let pairing = SymbolPairing::new(&none, &none);
         let line = Line {
-            number: 3,
+            number: LineNumber::try_from(3_usize).unwrap(),
             text: "ghost();".to_owned(),
         };
         let ghost = FilePath::new("app/Ghost.php").unwrap();

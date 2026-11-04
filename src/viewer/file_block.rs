@@ -172,7 +172,7 @@ fn joined(pieces: &[PieceDiff]) -> (Vec<DiffHunk>, Vec<Option<usize>>) {
     let owners = rows
         .iter()
         .map(|placed| match placed.row.kind {
-            LineKind::Context { .. } => innermost_spanning(pieces, placed.row.location.line),
+            LineKind::Context { .. } => innermost_spanning(pieces, placed.row.location.line.into()),
             LineKind::Added | LineKind::Removed => Some(placed.piece),
         })
         .collect();
@@ -220,7 +220,9 @@ fn innermost_spanning(pieces: &[PieceDiff], head_line: usize) -> Option<usize> {
 
 /// A removed row takes its place from the head rows around it in its own hunk.
 fn placed_rows(hunk: &DiffHunk, piece: usize) -> Vec<PlacedRow<'_>> {
-    let head_line = |row: &DiffLine| (row.location.side == Side::Head).then_some(row.location.line);
+    let head_line = |row: &DiffLine| {
+        (row.location.side == Side::Head).then_some(usize::from(row.location.line))
+    };
     hunk.rows
         .iter()
         .enumerate()
@@ -240,12 +242,12 @@ fn placed_rows(hunk: &DiffHunk, piece: usize) -> Vec<PlacedRow<'_>> {
                                 .find_map(head_line)
                                 .map(|line| line - 1)
                         })
-                        .unwrap_or(row.location.line),
+                        .unwrap_or_else(|| row.location.line.into()),
                     is_removed: true,
-                    base_line: row.location.line,
+                    base_line: row.location.line.into(),
                 },
                 LineKind::Added | LineKind::Context { .. } => Place {
-                    head_line: row.location.line,
+                    head_line: row.location.line.into(),
                     is_removed: false,
                     base_line: 0,
                 },

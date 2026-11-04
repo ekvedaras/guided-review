@@ -1,3 +1,4 @@
+use crate::support::line;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -297,10 +298,10 @@ fn config_overrides_the_ask_model_and_effort() {
 }
 
 fn lines_place(start: usize, end: usize) -> Place {
-    let at = |line| LineLocation {
+    let at = |line_number| LineLocation {
         path: file_path("src/a.rs"),
         side: Side::Head,
-        line,
+        line: line(line_number),
     };
     Place::Lines {
         step: None,

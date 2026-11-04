@@ -30,6 +30,7 @@ mod highlighting;
 mod ide;
 mod image_previews;
 mod jump;
+mod line_number;
 mod markdown;
 mod new_commits;
 mod open;

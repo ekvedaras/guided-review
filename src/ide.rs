@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use crate::file_path::FilePath;
+use crate::line_number::LineNumber;
 
 /// The `ide` line of `~/.guided-review/config.toml`, with `{path}` and `{line}` to fill in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +13,7 @@ impl IdeTemplate {
         Self(text)
     }
 
-    fn fill(&self, path: &str, line: usize) -> String {
+    fn fill(&self, path: &str, line: LineNumber) -> String {
         self.0
             .replace("{path}", path)
             .replace("{line}", &line.to_string())
@@ -84,7 +85,7 @@ impl Ide {
     }
 
     /// `path` is relative to the clone root.
-    pub fn launch(&self, path: &FilePath, line: usize) -> IdeLaunch {
+    pub fn launch(&self, path: &FilePath, line: LineNumber) -> IdeLaunch {
         let absolute = path.under(&self.clone_root).to_string_lossy().into_owned();
         if self.template.is_url() {
             IdeLaunch::Url(self.template.fill(&percent_encode_path(&absolute), line))

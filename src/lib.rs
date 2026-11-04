@@ -13,6 +13,7 @@ pub mod ide;
 pub mod image_facts;
 pub mod json;
 pub mod language;
+pub mod line_number;
 pub mod local_git;
 pub mod opened_pr;
 pub mod outline;

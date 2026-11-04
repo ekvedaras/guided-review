@@ -1,3 +1,4 @@
+use crate::support::line;
 use std::path::PathBuf;
 
 use crate::support::app_path::AppPath;
@@ -89,11 +90,11 @@ fn thread_on_line_ten(comments: Vec<ThreadComment>) -> ReviewThread {
         is_resolved: false,
         is_outdated: false,
         path: file_path("notes.txt"),
-        line: Some(10),
+        line: Some(line(10)),
         start_line: None,
         side: Side::Head,
         is_file_comment: false,
-        original_line: Some(10),
+        original_line: Some(line(10)),
         original_start_line: None,
         original_commit: None,
         comments,
@@ -429,7 +430,7 @@ fn a_thread_knows_the_lines_a_suggestion_is_against() {
     let pull = Pull::new();
     let mut review = pull.open();
     let mut thread = thread_on_line_ten(vec![comment("C1", "try:\n\n```suggestion\nline 10\n```")]);
-    thread.start_line = Some(9);
+    thread.start_line = Some(line(9));
     review.set_threads(&[thread]);
 
     let view = review.current_step().unwrap().threads.remove(0);

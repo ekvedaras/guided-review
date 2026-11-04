@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::file_path::FilePath;
 use crate::json::at;
+use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
     CommentPlace, PendingReviewExists, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
@@ -680,11 +681,11 @@ struct ReviewThreadInput<'a> {
     body: &'a str,
     subject_type: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<usize>,
+    line: Option<LineNumber>,
     #[serde(skip_serializing_if = "Option::is_none")]
     side: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    start_line: Option<usize>,
+    start_line: Option<LineNumber>,
     #[serde(skip_serializing_if = "Option::is_none")]
     start_side: Option<&'static str>,
 }
@@ -711,6 +712,11 @@ struct ReplyInput<'a> {
     body: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pull_request_review_id: Option<String>,
+}
+
+/// GitHub counts lines from 1 and answers `null` for none; a 0 is taken as none too, so the thread still shows.
+fn thread_line(line: Option<usize>) -> Option<LineNumber> {
+    line.and_then(|line| LineNumber::try_from(line).ok())
 }
 
 fn graphql_side(side: Side) -> &'static str {
@@ -862,16 +868,16 @@ pub(crate) fn parse_review_threads(
                 is_resolved: thread.is_resolved,
                 is_outdated: thread.is_outdated,
                 path: thread.path,
-                line: thread.line,
-                start_line: thread.start_line,
+                line: thread_line(thread.line),
+                start_line: thread_line(thread.start_line),
                 side: if thread.diff_side == "LEFT" {
                     Side::Base
                 } else {
                     Side::Head
                 },
                 is_file_comment: thread.subject_type == "FILE",
-                original_line: thread.original_line,
-                original_start_line: thread.original_start_line,
+                original_line: thread_line(thread.original_line),
+                original_start_line: thread_line(thread.original_start_line),
                 original_commit: thread
                     .comments
                     .nodes

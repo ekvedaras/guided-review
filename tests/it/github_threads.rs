@@ -1,3 +1,4 @@
+use crate::support::line;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -72,30 +73,36 @@ fn review_threads_are_read_over_graphql_page_by_page() {
 
     let threads = GitHub::at(&url).review_threads(&pr).unwrap();
 
-    let [line, file] = threads.as_slice() else {
+    let [on_line, file] = threads.as_slice() else {
         panic!("expected two threads, got {threads:?}");
     };
-    assert_eq!(line.id, "T1");
-    assert!(line.is_resolved && !line.is_outdated && !line.is_file_comment);
+    assert_eq!(on_line.id, "T1");
+    assert!(on_line.is_resolved && !on_line.is_outdated && !on_line.is_file_comment);
     assert_eq!(
-        (line.path.as_str(), line.line, line.start_line, line.side),
-        ("a.php", Some(227), Some(167), Side::Base)
+        (
+            on_line.path.as_str(),
+            on_line.line,
+            on_line.start_line,
+            on_line.side
+        ),
+        ("a.php", Some(line(227)), Some(line(167)), Side::Base)
     );
-    assert_eq!(line.original_commit.as_deref(), Some("9d6f"));
+    assert_eq!(on_line.original_commit.as_deref(), Some("9d6f"));
     assert_eq!(
-        line.comments
+        on_line
+            .comments
             .iter()
             .map(|comment| (comment.author.as_str(), comment.is_bot))
             .collect::<Vec<_>>(),
         [("alice", false), ("review-bot", true)]
     );
     assert_eq!(
-        line.comments[0].url,
+        on_line.comments[0].url,
         "https://github.com/acme/shop/pull/7#r1"
     );
-    assert_eq!(line.comments[0].id, "C1");
+    assert_eq!(on_line.comments[0].id, "C1");
     assert_eq!(
-        line.comments[0].reactions,
+        on_line.comments[0].reactions,
         [ReactionCount {
             reaction: Reaction::Heart,
             count: 2,
@@ -103,7 +110,7 @@ fn review_threads_are_read_over_graphql_page_by_page() {
         }]
     );
     assert!(file.is_outdated && file.is_file_comment);
-    assert_eq!((file.line, file.original_line), (None, Some(435)));
+    assert_eq!((file.line, file.original_line), (None, Some(line(435))));
     assert_eq!(file.comments[0].author, "ghost");
 
     let asked: Vec<serde_json::Value> = asked
@@ -118,11 +125,11 @@ fn review_threads_are_read_over_graphql_page_by_page() {
     assert_eq!(asked[0]["variables"]["number"], 7);
 }
 
-fn location(side: Side, line: usize) -> LineLocation {
+fn location(side: Side, number: usize) -> LineLocation {
     LineLocation {
         path: file_path("a.php"),
         side,
-        line,
+        line: line(number),
     }
 }
 

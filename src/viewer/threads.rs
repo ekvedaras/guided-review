@@ -10,6 +10,7 @@ use super::diff_display::{DiffDisplay, FilesAtHead};
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
+use crate::line_number::LineNumber;
 
 /// A review thread as GitHub holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,13 +20,13 @@ pub struct ReviewThread {
     pub is_outdated: bool,
     pub path: FilePath,
     /// The last line the thread covers at the PR's head. Unknown for outdated threads and file comments.
-    pub line: Option<usize>,
-    pub start_line: Option<usize>,
+    pub line: Option<LineNumber>,
+    pub start_line: Option<LineNumber>,
     pub side: Side,
     /// A comment on the whole file, not on a line.
     pub is_file_comment: bool,
-    pub original_line: Option<usize>,
-    pub original_start_line: Option<usize>,
+    pub original_line: Option<LineNumber>,
+    pub original_start_line: Option<LineNumber>,
     pub original_commit: Option<String>,
     pub comments: Vec<ThreadComment>,
 }
@@ -192,8 +193,8 @@ fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[S
         (true, false, Side::Head, Some(last)) => files_at_head
             .lines(
                 thread.path.as_str(),
-                thread.start_line.unwrap_or(last),
-                last,
+                thread.start_line.unwrap_or(last).into(),
+                last.into(),
             )
             .into(),
         _ => Arc::new([]),

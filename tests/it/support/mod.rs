@@ -27,6 +27,10 @@ pub fn file_path(path: &str) -> guided_review::file_path::FilePath {
     guided_review::file_path::FilePath::new(path).unwrap()
 }
 
+pub fn line(number: usize) -> guided_review::line_number::LineNumber {
+    guided_review::line_number::LineNumber::try_from(number).unwrap()
+}
+
 pub struct FixtureRepo {
     root: TempDir,
     home: TempDir,

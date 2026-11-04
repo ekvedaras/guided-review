@@ -1,6 +1,7 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::line;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
@@ -128,7 +129,7 @@ fn a_click_on_one_row_opens_a_comment_box_on_that_line() {
     let CommentPlace::Lines { end, .. } = &place else {
         panic!("a click is on lines");
     };
-    assert_eq!((end.line, place.path()), (10, "notes.txt"));
+    assert_eq!((end.line, place.path()), (line(10), "notes.txt"));
     assert_eq!(review.comment_drafts().len(), 1);
 }
 
@@ -164,7 +165,7 @@ fn dragging_upwards_selects_the_same_rows() {
     let CommentPlace::Lines { start, end } = &place else {
         panic!("a drag is on lines");
     };
-    assert_eq!((start.line, end.line), (10, 30));
+    assert_eq!((start.line, end.line), (line(10), line(30)));
 }
 
 #[test]
@@ -245,7 +246,7 @@ fn a_range_from_a_removed_line_to_an_added_one_goes_left_to_right() {
     };
     assert_eq!(
         (start.side, start.line, end.side, end.line),
-        (Side::Base, 10, Side::Head, 10)
+        (Side::Base, line(10), Side::Head, line(10))
     );
 }
 

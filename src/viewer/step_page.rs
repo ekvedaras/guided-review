@@ -8,6 +8,7 @@ use super::highlight::Span;
 use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
 use crate::file_path::FilePath;
+use crate::line_number::LineNumber;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::repin::RepinStatus;
@@ -27,7 +28,7 @@ pub struct LineLocation {
     /// GitHub addresses both sides of a renamed file by its new path.
     pub path: FilePath,
     pub side: Side,
-    pub line: usize,
+    pub line: LineNumber,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +37,7 @@ pub enum LineKind {
     Added,
     /// Unchanged: its location is at head, and this is where it is at base.
     Context {
-        base_line: usize,
+        base_line: LineNumber,
         /// Shown on the reviewer's ask, outside GitHub's diff, so GitHub takes no comment on it.
         is_expanded: bool,
     },

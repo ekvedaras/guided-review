@@ -289,7 +289,7 @@ fn label_at(block: &FileBlock, head_line: usize) -> Option<(String, bool)> {
     let at = LineLocation {
         path: block.path.clone(),
         side: Side::Head,
-        line: head_line,
+        line: crate::support::line(head_line),
     };
     block
         .piece_starting_at(&at)

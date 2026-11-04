@@ -65,7 +65,10 @@ impl Shop {
 
     fn in_ide(&self, path: &str, line: usize) -> Destination {
         Destination::Ide {
-            launch: self.ide().unwrap().launch(&file_path(path), line),
+            launch: self
+                .ide()
+                .unwrap()
+                .launch(&file_path(path), crate::support::line(line)),
             caveat: None,
         }
     }
@@ -147,7 +150,10 @@ fn a_clone_checked_out_at_another_commit_still_opens_in_the_ide_with_a_caveat() 
     assert_eq!(
         destination,
         Destination::Ide {
-            launch: shop.ide().unwrap().launch(&file_path("app/Order.php"), 2),
+            launch: shop
+                .ide()
+                .unwrap()
+                .launch(&file_path("app/Order.php"), crate::support::line(2)),
             caveat: Some(IdeCaveat::CloneNotAtTourHead),
         }
     );

@@ -3,6 +3,7 @@ use std::fmt;
 use crate::code_source::FileStatus;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, IdeLaunch, NoIde};
+use crate::line_number::LineNumber;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, RepoName, Sha};
 
@@ -20,7 +21,7 @@ pub struct CodeLink {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct WorkingCopyLine {
     path: FilePath,
-    line: usize,
+    line: LineNumber,
 }
 
 /// Why code opens on GitHub and not in the IDE.
@@ -224,12 +225,13 @@ fn repo_relative(url: &str) -> Option<WorkingCopyLine> {
 }
 
 /// `L12` or `L12-L20` opens at line 12; anything else at the top of the file.
-fn line_of_fragment(fragment: &str) -> usize {
+fn line_of_fragment(fragment: &str) -> LineNumber {
     fragment
         .strip_prefix('L')
         .map(|lines| lines.split('-').next().unwrap_or_default())
-        .and_then(|line| line.parse().ok())
-        .unwrap_or(1)
+        .and_then(|line| line.parse::<usize>().ok())
+        .and_then(|line| LineNumber::try_from(line).ok())
+        .unwrap_or(LineNumber::FIRST)
 }
 
 /// Links point at the commits the tour is pinned to, so a line stays the same line
@@ -275,7 +277,7 @@ impl CodeLinks<'_> {
                 on_github: self.blob(self.head, file.path.as_str()),
                 in_working_copy: Ok(WorkingCopyLine {
                     path: file.path.clone(),
-                    line: 1,
+                    line: LineNumber::FIRST,
                 }),
             },
         }

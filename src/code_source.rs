@@ -2,7 +2,10 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
+use anyhow::Context as _;
+
 use crate::file_path::FilePath;
+use crate::line_number::LineNumber;
 use crate::pull_request::Sha;
 
 pub trait CodeSource: Send + Sync {
@@ -93,7 +96,7 @@ impl fmt::Display for FileStatus {
 
 #[derive(Debug, Clone)]
 pub struct Line {
-    pub number: usize,
+    pub number: LineNumber,
     pub text: String,
 }
 
@@ -131,7 +134,7 @@ pub fn parse_unified_diff(patch: &str) -> anyhow::Result<Vec<FileDiff>> {
             };
             if let Some(text) = raw.strip_prefix('-') {
                 let line = Line {
-                    number: old_line,
+                    number: LineNumber::try_from(old_line).context("a removed line of the diff")?,
                     text: text.to_owned(),
                 };
                 if let Some(hunk) = file.hunks.last_mut() {
@@ -142,7 +145,7 @@ pub fn parse_unified_diff(patch: &str) -> anyhow::Result<Vec<FileDiff>> {
                 old_left -= 1;
             } else if let Some(text) = raw.strip_prefix('+') {
                 let line = Line {
-                    number: new_line,
+                    number: LineNumber::try_from(new_line).context("an added line of the diff")?,
                     text: text.to_owned(),
                 };
                 if let Some(hunk) = file.hunks.last_mut() {

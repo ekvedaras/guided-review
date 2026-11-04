@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 
 use crate::code_source::{CodeSource, FileAt, FileStatus, Line};
 use crate::file_path::FilePath;
+use crate::line_number::LineNumber;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::Sha;
 
@@ -180,7 +181,7 @@ impl DiffDisplay<'_> {
             changed_at_head: file
                 .hunks
                 .iter()
-                .flat_map(|hunk| hunk.added.iter().map(|line| line.number))
+                .flat_map(|hunk| hunk.added.iter().map(|line| usize::from(line.number)))
                 .collect(),
             highlights: self.highlights,
             links: self.links,
@@ -203,7 +204,9 @@ impl DiffDisplay<'_> {
                     return None;
                 }
                 let (line_above, line_below) = match (added.first(), added.last()) {
-                    (Some(first), Some(last)) => (first.number - 1, last.number + 1),
+                    (Some(first), Some(last)) => {
+                        (usize::from(first.number) - 1, usize::from(last.number) + 1)
+                    }
                     _ => (hunk.head_line_above(), hunk.head_line_below()),
                 };
                 Some((removed, added, line_above, line_below))
@@ -247,7 +250,7 @@ impl DiffDisplay<'_> {
                 Some((hunk, previous)) if segment.first_line <= previous.last_line + 1 => {
                     hunk.rows.extend(
                         (previous.line_below..=segment.line_above)
-                            .map(|line| file_lines.context_row(line)),
+                            .filter_map(|line| file_lines.context_row(line)),
                     );
                     hunk.rows.extend(segment.rows.iter().cloned());
                     hunk.more_below.clone_from(&segment.more_below);
@@ -257,7 +260,7 @@ impl DiffDisplay<'_> {
                     let rows = segment
                         .above
                         .iter()
-                        .map(|&line| file_lines.context_row(line))
+                        .filter_map(|&line| file_lines.context_row(line))
                         .chain(segment.rows.iter().cloned())
                         .collect();
                     let hunk = DiffHunk {
@@ -272,8 +275,11 @@ impl DiffDisplay<'_> {
         hunks
             .into_iter()
             .map(|(mut hunk, last)| {
-                hunk.rows
-                    .extend(last.below.iter().map(|&line| file_lines.context_row(line)));
+                hunk.rows.extend(
+                    last.below
+                        .iter()
+                        .filter_map(|&line| file_lines.context_row(line)),
+                );
                 hunk
             })
             .collect()
@@ -287,7 +293,7 @@ impl DiffDisplay<'_> {
         removed: &[Line],
         added: &[Line],
     ) -> Vec<DiffLine> {
-        let mut same_as_removed: HashMap<usize, usize> = HashMap::new();
+        let mut same_as_removed: HashMap<LineNumber, LineNumber> = HashMap::new();
         if self.ignores_whitespace {
             let mut next_removed = 0;
             for line in added {
@@ -300,7 +306,7 @@ impl DiffDisplay<'_> {
                 }
             }
         }
-        let hidden_removed: BTreeSet<usize> = same_as_removed.values().copied().collect();
+        let hidden_removed: BTreeSet<LineNumber> = same_as_removed.values().copied().collect();
         let removed_rows = removed
             .iter()
             .filter(|line| !hidden_removed.contains(&line.number))
@@ -393,23 +399,23 @@ impl FileLines<'_> {
         })
     }
 
-    fn context_row(&self, head_line: usize) -> DiffLine {
+    /// `None` for line 0, which a file does not have.
+    fn context_row(&self, head_line: usize) -> Option<DiffLine> {
+        let number = LineNumber::try_from(head_line).ok()?;
         let text = self
             .at_head
             .and_then(|file| file.line(head_line))
             .map(str::to_owned)
             .unwrap_or_default();
-        self.changed_row(
+        let base_line = LineNumber::try_from(self.base_line_of(head_line)).ok()?;
+        Some(self.changed_row(
             Side::Head,
             LineKind::Context {
-                base_line: self.base_line_of(head_line),
+                base_line,
                 is_expanded: !self.is_in_github_diff(head_line),
             },
-            &Line {
-                number: head_line,
-                text,
-            },
-        )
+            &Line { number, text },
+        ))
     }
 
     fn changed_row(&self, side: Side, kind: LineKind, line: &Line) -> DiffLine {
@@ -425,7 +431,7 @@ impl FileLines<'_> {
             text: line.text.clone(),
             spans: self
                 .highlights
-                .spans(side, self.file.path.as_str(), line.number)
+                .spans(side, self.file.path.as_str(), line.number.into())
                 .to_vec(),
             is_in_change_since_read: false,
         }

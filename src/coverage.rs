@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::code_source::Line;
+use crate::line_number::LineNumber;
 use crate::pieces::{ChangedFile, Piece, PieceId};
 use crate::tour::{PieceRef, Tour};
 
@@ -75,8 +76,8 @@ impl<'a> PiecePart<'a> {
 
     /// A line is inside a range by its own number: base numbers for removed lines, head numbers for added.
     fn within(piece: &'a Piece, [first, last]: [u32; 2]) -> Option<Self> {
-        let range = first as usize..=last as usize;
-        let part = Self::keeping(piece, |line| range.contains(&line.number));
+        let range = first..=last;
+        let part = Self::keeping(piece, |line| range.contains(&line.number.get()));
         (!part.is_empty()).then_some(Self {
             range: Some([first, last]),
             ..part
@@ -130,8 +131,8 @@ struct Seen<'a>(HashMap<&'a PieceId, SeenLines>);
 
 #[derive(Default)]
 struct SeenLines {
-    removed: HashSet<usize>,
-    added: HashSet<usize>,
+    removed: HashSet<LineNumber>,
+    added: HashSet<LineNumber>,
 }
 
 impl<'a> Seen<'a> {

@@ -170,8 +170,8 @@ fn holds(lines: &[Line], line: &Line) -> bool {
 fn hunks_span_at_head(hunks: &[&Hunk]) -> Option<(usize, usize)> {
     let spans = hunks.iter().map(|hunk| match hunk.added.as_slice() {
         [] => (hunk.head_line_above().max(1), hunk.head_line_above().max(1)),
-        [first, .., last] => (first.number, last.number),
-        [only] => (only.number, only.number),
+        [first, .., last] => (first.number.into(), last.number.into()),
+        [only] => (only.number.into(), only.number.into()),
     });
     let first = spans.clone().map(|(first, _)| first).min()?;
     let last = spans.map(|(_, last)| last).max()?;
