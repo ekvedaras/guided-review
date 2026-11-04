@@ -396,6 +396,27 @@ fn a_pr_head_that_could_not_be_read_is_named_until_a_read_goes_through() {
 }
 
 #[test]
+fn a_pr_description_that_could_not_be_read_is_named_until_a_read_goes_through() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    github.inject(GitHubFault::ReadsFail);
+
+    review.pull_pr_description(&github).unwrap_err();
+
+    assert_eq!(
+        review.problems(),
+        [Problem::NotRead(
+            Read::PrDescription,
+            "network is down".into()
+        )]
+    );
+    github.heal(&GitHubFault::ReadsFail);
+    review.pull_pr_description(&github).unwrap();
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
 fn suggest_change_fills_the_box_with_the_selected_lines_in_a_suggestion_block() {
     let pull = Pull::new();
     let mut review = pull.open();

@@ -19,6 +19,7 @@ pub enum Problem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Read {
     PrHead,
+    PrDescription,
 }
 
 impl fmt::Display for Problem {
@@ -33,6 +34,10 @@ impl fmt::Display for Problem {
             Self::NotRead(Read::PrHead, reason) => write!(
                 formatter,
                 "New commits on the PR are not checked, could not read its head from GitHub: {reason}"
+            ),
+            Self::NotRead(Read::PrDescription, reason) => write!(
+                formatter,
+                "The PR description may be out of date, could not read it from GitHub: {reason}"
             ),
         }
     }

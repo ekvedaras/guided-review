@@ -331,6 +331,7 @@ impl Review {
 
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
+        self.not_read.remove(&Read::PrDescription);
         if self.state.saw_pr_description(body) {
             self.save_viewer_sections()?;
         }

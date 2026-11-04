@@ -225,6 +225,7 @@ impl PullRequestTipsPort for FakeGitHub {
 
 impl PullRequestDescriptionPort for FakeGitHub {
     fn pull_request_description(&self, _pr: &PullRequestUrl) -> anyhow::Result<String> {
+        self.fail_if_reads_fail()?;
         Ok(String::new())
     }
 }

@@ -8,6 +8,7 @@ use guided_review::viewer::{
 
 pub trait AppPath {
     fn check_pr_head(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
+    fn pull_pr_description(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     fn sync(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     fn pull_threads(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     fn pull_pending_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
@@ -41,6 +42,13 @@ impl AppPath for Review {
             .inspect_err(|error| self.could_not_read(Read::PrHead, error))?;
         self.pr_head_is(tips.head);
         Ok(())
+    }
+
+    fn pull_pr_description(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        let body = github
+            .pull_request_description(self.pr())
+            .inspect_err(|error| self.could_not_read(Read::PrDescription, error))?;
+        self.set_pr_description(&body)
     }
 
     fn sync(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {

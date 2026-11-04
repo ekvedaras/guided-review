@@ -634,11 +634,16 @@ impl ReviewSession {
         self.pr_description_pull = Some(self.run_off_thread(
             cx,
             move || github.pull_request_description(&pr),
-            |this, body, cx| {
-                let set = body
-                    .and_then(|body| this.change(cx, |review| review.set_pr_description(&body)));
-                if let Err(error) = set {
-                    eprintln!("warning: could not read the PR's description: {error:#}");
+            |this, body, cx| match body {
+                Ok(body) => {
+                    if let Err(error) = this.change(cx, |review| review.set_pr_description(&body)) {
+                        eprintln!("warning: could not keep the PR's description: {error:#}");
+                    }
+                }
+                Err(error) => {
+                    this.change(cx, |review| {
+                        review.could_not_read(Read::PrDescription, &error);
+                    });
                 }
             },
         ));
