@@ -662,3 +662,14 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
         ThreadActionResult::Refused(CommentRefusal::EmptyReply)
     );
 }
+
+#[test]
+fn suggest_change_adds_nothing_when_the_commented_lines_are_not_on_the_screen() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = drag(&mut review, "line 9", "line ten");
+    review.go_to_summary();
+
+    assert_eq!(review.suggest_change(&place).unwrap(), None);
+    assert_eq!(review.comment_drafts()[0].body, "");
+}

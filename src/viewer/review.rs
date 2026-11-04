@@ -915,9 +915,11 @@ impl Review {
     }
 
     /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
-    /// `None` when the lines cannot be suggested on or there is no draft.
+    /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
     pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
-        let rows = self.rows_of(place).unwrap_or_default();
+        let Some(rows) = self.rows_of(place) else {
+            return Ok(None);
+        };
         let body = self
             .comment_desk
             .suggest_change(&mut self.state, place, &rows);

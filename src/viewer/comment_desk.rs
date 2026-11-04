@@ -149,7 +149,8 @@ impl CommentDesk {
     }
 
     /// Adds a suggestion block of the commented rows to the draft. `None` when the lines cannot be
-    /// suggested on or there is no draft.
+    /// suggested on or there is no draft. No rows means no block: on GitHub an empty suggestion
+    /// would replace the lines with nothing.
     pub(super) fn suggest_change(
         &self,
         state: &mut ReviewState,
@@ -164,6 +165,9 @@ impl CommentDesk {
             .filter(|row| row.location.side == Side::Head)
             .map(|row| row.text.as_str())
             .collect();
+        if kept_lines.is_empty() {
+            return None;
+        }
         append_to_draft(state, place, &suggestion_block(&kept_lines))
     }
 
