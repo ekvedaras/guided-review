@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use super::diff_display::{DiffHunk, MoreContext};
 use super::step_page::{DiffLine, LineKind, LineLocation, PieceDiff, Side};
 use crate::file_path::FilePath;
+use crate::line_number::LineNumber;
 
 /// The pieces of one file that a page shows, in one box, in line order. The rows of all pieces
 /// are joined, so a row two pieces both show appears once. A label marks where each piece starts:
@@ -128,8 +129,14 @@ fn has_code(text: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Place {
     head_line: usize,
-    is_removed: bool,
-    base_line: usize,
+    row: RowAtPlace,
+}
+
+/// A head row sorts before the rows removed below its line, which sort by their base line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RowAtPlace {
+    Head,
+    Removed { base_line: LineNumber },
 }
 
 struct PlacedRow<'a> {
@@ -243,13 +250,13 @@ fn placed_rows(hunk: &DiffHunk, piece: usize) -> Vec<PlacedRow<'_>> {
                                 .map(|line| line - 1)
                         })
                         .unwrap_or_else(|| row.location.line.into()),
-                    is_removed: true,
-                    base_line: row.location.line.into(),
+                    row: RowAtPlace::Removed {
+                        base_line: row.location.line,
+                    },
                 },
                 LineKind::Added | LineKind::Context { .. } => Place {
                     head_line: row.location.line.into(),
-                    is_removed: false,
-                    base_line: 0,
+                    row: RowAtPlace::Head,
                 },
             };
             PlacedRow { place, row, piece }
