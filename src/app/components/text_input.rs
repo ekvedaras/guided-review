@@ -92,7 +92,7 @@ impl TextDraft {
     }
 
     pub fn select(&mut self, range: Range<usize>, is_reversed: bool) {
-        self.selection = self.clamp(range.start)..self.clamp(range.end);
+        self.selection = self.range_in_text(&range);
         self.is_reversed = is_reversed;
     }
 
@@ -136,7 +136,7 @@ impl TextDraft {
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) {
-        let range = self.clamp(range.start)..self.clamp(range.end);
+        let range = self.range_in_text(&range);
         self.text.replace_range(range.clone(), text);
         self.move_to(range.start + text.len());
         self.marked = None;
@@ -152,9 +152,11 @@ impl TextDraft {
         let range = range
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.clone());
+        let range = self.range_in_text(&range);
         self.replace(range.clone(), text);
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
         if let Some(selected) = selected {
+            let selected = selected.start.min(selected.end)..selected.start.max(selected.end);
             let start = range.start + selected.start.min(text.len());
             let end = range.start + selected.end.min(text.len());
             self.selection = start..end;
@@ -249,9 +251,13 @@ impl TextDraft {
 
     /// The text between two offsets, each moved back onto a character boundary.
     pub fn text_in(&self, range: &Range<usize>) -> &str {
-        let start = self.clamp(range.start);
-        let end = self.clamp(range.end);
-        self.text.get(start..end).unwrap_or_default()
+        self.text.get(self.range_in_text(range)).unwrap_or_default()
+    }
+
+    /// The input method may hand over a range end first; it means the same text start first.
+    fn range_in_text(&self, range: &Range<usize>) -> Range<usize> {
+        let (a, b) = (self.clamp(range.start), self.clamp(range.end));
+        a.min(b)..a.max(b)
     }
 
     fn clamp(&self, offset: usize) -> usize {
@@ -271,6 +277,25 @@ mod tests {
         let mut draft = TextDraft::with_text(text);
         draft.move_to(caret);
         draft
+    }
+
+    #[test]
+    #[expect(
+        clippy::reversed_empty_ranges,
+        reason = "the input method can hand over ranges end first, which is the case under test"
+    )]
+    fn a_reversed_range_from_the_input_method_reads_as_its_start_to_its_end() {
+        let mut draft = draft_at("hello", 0);
+
+        draft.select(4..1, false);
+        assert_eq!(draft.selected_text(), "ell");
+
+        draft.replace(4..1, "a");
+        assert_eq!(draft.text(), "hao");
+
+        draft.replace_and_mark(Some(2..1), "ü", Some("ü".len()..0));
+        assert_eq!(draft.text(), "hüo");
+        assert_eq!(draft.selected_text(), "ü");
     }
 
     #[test]
