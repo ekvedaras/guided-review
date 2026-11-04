@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::code_source::{BlobInfo, CodeSource, FileStatus};
 use crate::image_facts::{self, MAX_PREVIEW_BYTES, PixelSize};
@@ -25,13 +26,21 @@ impl ImageCache {
 
     /// A cache that cannot be written only costs a second download later.
     fn write(&self, blob_id: &str, bytes: &[u8]) {
+        static WRITES: AtomicU64 = AtomicU64::new(0);
         let is_plain_id = !blob_id.is_empty() && blob_id.chars().all(|c| c.is_ascii_hexdigit());
         if !is_plain_id || std::fs::create_dir_all(&self.dir).is_err() {
             return;
         }
-        let unfinished = self.dir.join(format!("{blob_id}.tmp"));
-        if std::fs::write(&unfinished, bytes).is_ok() {
-            std::fs::rename(unfinished, self.dir.join(blob_id)).ok();
+        // One blob can load on two threads at once (an image copied to two paths): each writes
+        // its own temp file, so neither renames a file the other is still writing.
+        let write = WRITES.fetch_add(1, Ordering::Relaxed);
+        let unfinished = self
+            .dir
+            .join(format!("{blob_id}.{}.{write}.tmp", std::process::id()));
+        let finished = std::fs::write(&unfinished, bytes)
+            .and_then(|()| std::fs::rename(&unfinished, self.dir.join(blob_id)));
+        if finished.is_err() {
+            std::fs::remove_file(&unfinished).ok();
         }
     }
 }
