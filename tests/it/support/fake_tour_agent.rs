@@ -42,6 +42,8 @@ pub struct FakeTourAgent {
     live: Mutex<Vec<LiveTerminal>>,
     /// The terminals the app started, with when their status last changed.
     started_by_app: Mutex<BTreeMap<TerminalId, u64>>,
+    /// What every terminal shows, top line first.
+    screen: Mutex<Vec<String>>,
 }
 
 impl FakeTourAgent {
@@ -53,6 +55,7 @@ impl FakeTourAgent {
             calls: Mutex::default(),
             live: Mutex::default(),
             started_by_app: Mutex::default(),
+            screen: Mutex::default(),
         }
     }
 
@@ -274,5 +277,14 @@ impl TourAgentPort for FakeTourAgent {
         self.terminals.lock().unwrap().remove(terminal);
         self.started_by_app.lock().unwrap().remove(terminal);
         Ok(())
+    }
+
+    fn screen_lines(&self, _terminal: &TerminalId, count: usize) -> anyhow::Result<Vec<String>> {
+        let screen = self.screen.lock().unwrap();
+        Ok(screen
+            .iter()
+            .skip(screen.len().saturating_sub(count))
+            .cloned()
+            .collect())
     }
 }

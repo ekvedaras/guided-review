@@ -150,6 +150,9 @@ pub trait TourAgentPort: Send + Sync {
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId>;
 
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()>;
+
+    /// The last `count` lines the terminal shows, as plain text, blank lines at the bottom left out.
+    fn screen_lines(&self, terminal: &TerminalId, count: usize) -> anyhow::Result<Vec<String>>;
 }
 
 /// What the sidebar says of a PR's tour agent.
@@ -209,20 +212,58 @@ impl TourAgents {
     /// Starts the tour agent of a PR that has none, ending the idle app-started agent used longest ago when
     /// three live, never the one of `active`. Refuses, naming the busy ones, when none is idle.
     pub fn start(&self, pr: &PullRequestUrl, active: &PullRequestUrl) -> anyhow::Result<()> {
-        let Some(folder) = &self.folder else {
-            bail!("no folder to start a tour agent for {pr} in");
-        };
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
+        self.launch(pr, active, first_task(pr)).map(drop)
+    }
+
+    fn launch(
+        &self,
+        pr: &PullRequestUrl,
+        active: &PullRequestUrl,
+        first_task: String,
+    ) -> anyhow::Result<TerminalId> {
+        let Some(folder) = &self.folder else {
+            bail!("no folder to start a tour agent for {pr} in");
+        };
         self.make_room(active)?;
         self.port.start(&TourAgentStart {
             pr: pr.clone(),
             name: terminal_name(pr),
             folder: folder.clone(),
-            first_task: first_task(pr),
-        })?;
-        Ok(())
+            first_task,
+        })
+    }
+
+    /// Starts the tour agent that writes the PR's tour with the tour skill. It replaces any agent the PR had:
+    /// one the app started is ended, one the reviewer started only loses the PR's label.
+    pub fn write_tour(
+        &self,
+        pr: &PullRequestUrl,
+        active: &PullRequestUrl,
+    ) -> anyhow::Result<TerminalId> {
+        if let Err(reason) = self.port.link() {
+            bail!("tour agents are off: {reason}");
+        }
+        let app_started: Vec<TerminalId> = self
+            .port
+            .app_started()?
+            .into_iter()
+            .map(|agent| agent.terminal)
+            .collect();
+        for old in self.port.terminals_of(pr)? {
+            if app_started.contains(&old) {
+                self.port
+                    .kill(&old)
+                    .with_context(|| format!("could not end the old tour agent {old} of {pr}"))?;
+            } else {
+                self.port
+                    .release(&old)
+                    .with_context(|| format!("could not take the label of {pr} off {old}"))?;
+            }
+        }
+        self.launch(pr, active, writer_task(pr))
     }
 
     /// Makes the terminal the one tour agent of the PR: every other terminal with the PR's label loses it,
@@ -392,6 +433,21 @@ fn terminal_name(pr: &PullRequestUrl) -> String {
         .take(32 - number.len())
         .collect();
     format!("{repo}{number}")
+}
+
+/// The first task of an agent that writes a tour. It starts with the skill, so Claude runs it; the rest
+/// reaches the skill as its arguments. The agent runs with a fixed tool list, under which a chained or
+/// unlisted command is denied without a word (docs/wiki/agent-runs.md).
+fn writer_task(pr: &PullRequestUrl) -> String {
+    format!(
+        "/tour {pr} (you are the tour agent of this PR, started by the guided-review app because the reviewer \
+         picked it and it has no tour). Only the listed tools are allowed and anything else is denied, never \
+         asked: run one command per Bash call, with the PR url written out, without shell variables, pipes, \
+         `&&`, `;` or `$(...)`. The Write tool makes the tour's folder. When `guided-review check {pr}` is clean, \
+         run `guided-review open {pr}`, which shows the tour to the reviewer. Afterwards the reviewer's comments \
+         reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
+         wrong, and never change the PR's code."
+    )
 }
 
 /// What a tour agent the app started is told first. Hand-offs follow as messages that carry the rest of the protocol.

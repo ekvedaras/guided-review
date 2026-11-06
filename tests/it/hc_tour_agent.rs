@@ -373,6 +373,27 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_a
 }
 
 #[test]
+fn the_last_screen_lines_are_read_with_their_history_and_trailing_blank_lines_dropped() {
+    let dir = TempDir::new().unwrap();
+    let recorded = include_str!("../fixtures/hc/read-lines.json");
+    answer(
+        dir.path(),
+        "read",
+        &recorded.replace(r#"╰─""#, r#"╰─\n\n\n""#),
+    );
+
+    let lines = adapter(dir.path())
+        .screen_lines(&TerminalId::new("t9"), 3)
+        .unwrap();
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0], "");
+    assert!(lines[1].starts_with("╭─"), "{lines:?}");
+    assert_eq!(lines[2], "╰─");
+    assert_eq!(calls(dir.path(), "calls"), ["read t9 --json --lines 3"]);
+}
+
+#[test]
 fn a_tour_agent_is_ended_with_hc_kill() {
     let dir = TempDir::new().unwrap();
 

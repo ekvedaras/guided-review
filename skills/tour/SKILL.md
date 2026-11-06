@@ -5,7 +5,7 @@ description: Write a top-down guided-review tour of a GitHub PR with the guided-
 
 # /tour <pr-url> [--redo]
 
-Write a **tour file**: the PR's changes as **steps**, main flow first, details later. The `guided-review` CLI owns the facts (piece ids, shas); you own the story: order, nesting, text, diagrams, skim flags, summary. Terms: `GLOSSARY.md` in the guided-review repo.
+Write a **tour file**: the PR's changes as **steps**, main flow first, details later. Run each command as its own Bash call, with no `&&`, `;`, pipes or shell variables. The `guided-review` CLI owns the facts (piece ids, shas); you own the story: order, nesting, text, diagrams, skim flags, summary. Terms: `GLOSSARY.md` in the guided-review repo.
 
 The tour is done when `guided-review check <pr-url>` prints `0 errors` and you have handled every warning. Then **open** it: run `guided-review open <pr-url>`. It hands the PR to the one running app (starting it when none runs) and returns at once with a line saying what the app did. Reply with the tour summary at once.
 
@@ -22,7 +22,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
    - `worktree at head: yes`: you may grep and read the working tree. With `no`, the working tree is another version of the code; read code only through `show --around`.
    - A test piece lists up to 3 `subjects`, best first (`+N more` hides the rest; `same` repeats the line above). Put a test next to its subject, or in a late proof step.
 3. Open only the pieces you need to understand the flow: `guided-review show <pr-url> <piece id>…`. A file path as id opens every piece of that file. Add `--around` when the change needs the code near it at head. Pieces you can place from signature and size alone stay closed.
-4. Write the tour to the path `guided-review tour-path <pr-url>` prints (`mkdir -p` its folder first), in the shape below. Leave `version`, `pr`, `base`, `head` out; `check` fills them.
+4. Write the tour to the path `guided-review tour-path <pr-url>` prints with the Write tool, which makes the folder (no `mkdir`: an app-started writer may run only the commands this skill names), in the shape below. Leave `version`, `pr`, `base`, `head` out; `check` fills them.
 5. Run `guided-review check <pr-url>`. Fix every error. Handle every warning by changing the tour:
    - `no step covers <piece>`: put the piece in the step it belongs to, or in a `rest` piece under a `skim` step. Noise (renames, imports, generated code) goes to that `skim` step.
    - A limit warning (summary, bullets, `why`, pieces per step, top-level steps): shorten, split, or nest as it says. Pieces per step counts every piece the step names, imports and `(top)` included, but not what `rest` takes.

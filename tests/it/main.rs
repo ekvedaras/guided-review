@@ -61,6 +61,7 @@ mod symbol_edges;
 mod timestamp;
 mod tour_agent;
 mod tour_file;
+mod tour_skill;
 mod viewed_sync;
 mod viewer;
 mod write_comments;

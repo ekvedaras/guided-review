@@ -317,6 +317,52 @@ fn a_fourth_app_started_agent_is_refused_naming_the_working_ones_when_none_is_id
 }
 
 #[test]
+fn writing_a_tour_starts_the_prs_one_tour_agent_in_its_folder_on_the_tour_skill() {
+    let fake = Arc::new(FakeTourAgent::new());
+
+    let terminal = starting(&fake).write_tour(&url(PR_9), &pr()).unwrap();
+
+    let calls = fake.calls();
+    let [
+        TourAgentCall::Start {
+            name,
+            pr: started_for,
+            folder,
+            first_task,
+        },
+    ] = calls.as_slice()
+    else {
+        panic!("one start: {calls:?}");
+    };
+    assert_eq!(name, "tour-acme-shop-9");
+    assert_eq!(started_for, &url(PR_9));
+    assert_eq!(folder, std::path::Path::new("/clones/shop"));
+    assert!(
+        first_task.starts_with(&format!("/tour {PR_9} ")),
+        "{first_task}"
+    );
+    assert!(
+        first_task.contains("one command per Bash call"),
+        "{first_task}"
+    );
+    assert_eq!(fake.agents_of(PR_9), [terminal.to_string()]);
+}
+
+#[test]
+fn writing_a_tour_again_ends_the_app_started_agent_of_the_pr_first_and_unlabels_the_reviewers() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("mine", Some(PR_9), AgentStatus::Idle)
+            .app_started("t1", PR_9, AgentStatus::Idle, 100),
+    );
+
+    let terminal = starting(&fake).write_tour(&url(PR_9), &pr()).unwrap();
+
+    assert_eq!(kills(&fake), [TourAgentCall::Kill(TerminalId::new("t1"))]);
+    assert_eq!(fake.agents_of(PR_9), [terminal.to_string()]);
+}
+
+#[test]
 fn agents_the_reviewer_started_are_neither_counted_nor_ended() {
     let fake = Arc::new(
         FakeTourAgent::new()

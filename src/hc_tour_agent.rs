@@ -293,6 +293,23 @@ impl TourAgentPort for HcTourAgents {
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()> {
         self.hc(&["kill", terminal.as_str()]).map(drop)
     }
+
+    fn screen_lines(&self, terminal: &TerminalId, count: usize) -> anyhow::Result<Vec<String>> {
+        let read = self.hc(&[
+            "read",
+            terminal.as_str(),
+            "--json",
+            "--lines",
+            &count.to_string(),
+        ])?;
+        let text = at(&read, "/text").as_str().unwrap_or_default().trim_end();
+        let lines: Vec<&str> = text.lines().collect();
+        Ok(lines
+            .iter()
+            .skip(lines.len().saturating_sub(count))
+            .map(|line| line.trim_end().to_owned())
+            .collect())
+    }
 }
 
 impl HcTourAgents {
