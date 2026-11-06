@@ -8,7 +8,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentStatus, Audience, CommentId, CommentPlace, CommentResult, HandOffState, LineLocation,
-    Review, ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, ThreadAction,
+    Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, ThreadAction,
     ThreadActionResult, ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgents,
 };
 use serde_json::json;
@@ -604,4 +604,41 @@ fn hand_off_lines_survive_a_restart() {
         lines_under_the_threads(&reopened),
         [Some("Waiting for the agent to be free".to_owned())]
     );
+}
+
+#[test]
+fn a_hand_off_that_found_no_thread_is_a_sidebar_problem_until_the_next_one_goes_through() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Agent,
+        &github,
+    );
+
+    assert_eq!(
+        review.problems(),
+        [Problem::HandOffNotSent {
+            comment: "why ten?".into(),
+            reason: "GitHub shows no thread with the comment".into()
+        }]
+    );
+
+    github.threads = vec![thread_on_line_ten(
+        "T1",
+        vec![comment("C1", "me", "and eleven?")],
+    )];
+    let place = comment_on_line_ten(&mut review, "and eleven?");
+    send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Agent,
+        &github,
+    );
+    assert_eq!(review.problems(), []);
 }

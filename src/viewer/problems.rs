@@ -24,6 +24,8 @@ pub enum Problem {
     ViewedNotSynced(String),
     /// The AI Refresh ended and the steps marked as old are still as they were.
     TourNotRefreshed(String),
+    /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
+    HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
     SwitchFailed(String),
 }
@@ -87,6 +89,10 @@ impl fmt::Display for Problem {
             Self::TourNotRefreshed(reason) => {
                 write!(formatter, "The tour was not refreshed: {reason}")
             }
+            Self::HandOffNotSent { comment, reason } => write!(
+                formatter,
+                "The agent will not get your comment \"{comment}\": {reason}"
+            ),
             Self::SwitchFailed(reason) => write!(formatter, "Not switched: {reason}"),
         }
     }

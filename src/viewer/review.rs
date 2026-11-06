@@ -28,7 +28,7 @@ use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
-use super::hand_offs::{Audience, DeliveryOutcome, DeliveryRequest, HandOff};
+use super::hand_offs::{Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffState};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
@@ -155,6 +155,8 @@ pub struct Review {
     viewed_not_synced: Option<String>,
     /// Why the last Refresh did not go through; a Refresh that does opens a new review.
     tour_not_refreshed: Option<String>,
+    /// The comment start and reason of the latest hand-off that found no thread, until the next hand-off.
+    hand_off_not_sent: Option<(String, String)>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -226,6 +228,7 @@ impl Review {
             switch_failed: None,
             viewed_not_synced: None,
             tour_not_refreshed: None,
+            hand_off_not_sent: None,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -1118,12 +1121,32 @@ impl Review {
             Screen::Step(id) => Some(id.clone()),
             _ => None,
         };
+        let hand_offs_before = self.state.hand_offs().all().len();
         let result = self
             .comment_desk
             .apply_comment(&mut self.state, outcome, step);
+        self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
         self.save_viewer_sections()?;
         Ok(result)
+    }
+
+    fn note_new_hand_off(&mut self, hand_offs_before: usize) {
+        let Some(newest) = self
+            .state
+            .hand_offs()
+            .all()
+            .get(hand_offs_before..)
+            .and_then(<[_]>::last)
+        else {
+            return;
+        };
+        self.hand_off_not_sent = match (newest.thread(), newest.state()) {
+            (None, HandOffState::Failed(reason)) => {
+                Some((newest.comment().chars().take(60).collect(), reason.clone()))
+            }
+            _ => None,
+        };
     }
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
@@ -1382,6 +1405,11 @@ impl Review {
                 self.saved_review_kept_as
                     .clone()
                     .map(Problem::SavedReviewNotRead),
+            )
+            .chain(
+                self.hand_off_not_sent
+                    .clone()
+                    .map(|(comment, reason)| Problem::HandOffNotSent { comment, reason }),
             )
             .chain(self.switch_failed.clone().map(Problem::SwitchFailed))
             .collect()
