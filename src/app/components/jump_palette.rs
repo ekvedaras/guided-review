@@ -269,6 +269,7 @@ impl Render for JumpPalette {
             .items_start()
             .justify_center()
             .bg(gpui::rgba(0x00000066))
+            .occlude()
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),

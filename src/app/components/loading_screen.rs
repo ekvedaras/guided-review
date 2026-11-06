@@ -126,6 +126,7 @@ impl Render for LoadingScreen {
             .pt(px(80.))
             .gap_4()
             .bg(colors.background)
+            .occlude()
             .font_family(TEXT_FONT)
             .text_color(colors.text)
             .child(
