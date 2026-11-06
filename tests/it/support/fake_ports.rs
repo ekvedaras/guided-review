@@ -8,9 +8,9 @@ use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentId, CommentPlace, GitHubError,
     NoAccess, PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange,
-    ReactionCount, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict,
-    ReviewWritesPort, SendMode, SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile,
-    ViewedFilesPort, ViewedState,
+    ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome,
+    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview,
+    ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -101,6 +101,8 @@ pub enum GitHubFault {
     ThreadReadsFail,
     /// Reading the PR's head, description, pending review and author fails as if the network were down.
     ReadsFail,
+    /// Listing the relevant pull requests fails as if the network were down.
+    RelevantListFails,
 }
 
 pub struct FakeGitHub {
@@ -108,6 +110,7 @@ pub struct FakeGitHub {
     pub tips: (Sha, Sha),
     viewed: Mutex<BTreeMap<String, ViewedState>>,
     pub threads: Vec<ReviewThread>,
+    relevant: Mutex<RelevantPullRequests>,
     has_pending_review: AtomicBool,
     faults: Mutex<Vec<GitHubFault>>,
     viewer_is_author: AtomicBool,
@@ -124,6 +127,7 @@ impl FakeGitHub {
             tips: (Sha::new(base_branch_tip), Sha::new(head)),
             viewed: Mutex::default(),
             threads: Vec::new(),
+            relevant: Mutex::default(),
             has_pending_review: AtomicBool::new(false),
             faults: Mutex::default(),
             viewer_is_author: AtomicBool::new(false),
@@ -276,6 +280,22 @@ impl ViewedFilesPort for FakeGitHub {
         };
         self.set_viewed(path.as_str(), state);
         Ok(())
+    }
+}
+
+impl FakeGitHub {
+    pub fn with_relevant_pull_requests(self, relevant: RelevantPullRequests) -> Self {
+        *self.relevant.lock().unwrap() = relevant;
+        self
+    }
+}
+
+impl RelevantPullRequestsPort for FakeGitHub {
+    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, GitHubError> {
+        if self.is_faulty(&GitHubFault::RelevantListFails) {
+            return Err(anyhow::anyhow!("network is down").into());
+        }
+        Ok(self.relevant.lock().unwrap().clone())
     }
 }
 

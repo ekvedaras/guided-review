@@ -46,6 +46,7 @@ mod outline_symbols;
 mod pick_code_source;
 mod piece_id;
 mod pr_description;
+mod pr_switcher;
 mod read_ticks;
 mod refresh;
 mod relevant_prs;

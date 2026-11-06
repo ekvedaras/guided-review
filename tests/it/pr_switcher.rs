@@ -1,0 +1,217 @@
+use std::fs;
+use std::path::Path;
+
+use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use guided_review::pull_request::PullRequestUrl;
+use guided_review::tour::Tour;
+use guided_review::viewer::{
+    NotPickable, PrSwitcher, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
+    TourFact, WhyListed,
+};
+use tempfile::TempDir;
+
+const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
+const BLOG_7: &str = "https://github.com/acme/blog/pull/7";
+const API_31: &str = "https://github.com/acme/api/pull/31";
+
+fn pr(url: &str) -> PullRequestUrl {
+    url.parse().unwrap()
+}
+
+fn relevant(url: &str, title: &str, author: &str, why: WhyListed) -> RelevantPullRequest {
+    RelevantPullRequest {
+        url: pr(url),
+        title: title.to_owned(),
+        author: author.to_owned(),
+        is_draft: false,
+        updated_at: "2026-11-06T07:00:00Z".to_owned(),
+        why_listed: why,
+    }
+}
+
+fn three_pull_requests() -> FakeGitHub {
+    let mut draft = relevant(BLOG_7, "Fix feed", "ekvedaras", WhyListed::Mine);
+    draft.is_draft = true;
+    FakeGitHub::with_pull("a", "b", &SentLog::default()).with_relevant_pull_requests(
+        RelevantPullRequests {
+            pull_requests: vec![
+                draft,
+                relevant(API_31, "Rate limits", "dave", WhyListed::ReviewRequested),
+                relevant(SHOP_7, "Add checkout", "alice", WhyListed::Involved),
+            ],
+            teams_left_out: Vec::new(),
+        },
+    )
+}
+
+fn write_tour(home: &Path, url: &str) {
+    let path = Tour::path_for(home, &pr(url));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, "{}").unwrap();
+}
+
+fn home_with_tour_of(url: &str) -> TempDir {
+    let home = TempDir::new().unwrap();
+    write_tour(home.path(), url);
+    home
+}
+
+fn loaded(github: &FakeGitHub, home: &Path) -> PrSwitcher {
+    let mut switcher = PrSwitcher::default();
+    switcher.loaded(github.relevant_pull_requests(), home);
+    switcher
+}
+
+fn visible_urls(switcher: &PrSwitcher) -> Vec<String> {
+    switcher
+        .visible()
+        .map(|row| row.pull_request.url.to_string())
+        .collect()
+}
+
+#[test]
+fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
+    let home = home_with_tour_of(API_31);
+
+    let switcher = loaded(&three_pull_requests(), home.path());
+
+    let rows: Vec<_> = switcher.visible().collect();
+    let [feed, limits, _] = rows.as_slice() else {
+        panic!("expected three rows");
+    };
+    assert_eq!(feed.pull_request.url.short(), "acme/blog#7");
+    assert_eq!(feed.pull_request.title, "Fix feed");
+    assert!(feed.pull_request.is_draft);
+    assert_eq!(feed.pull_request.why_listed, WhyListed::Mine);
+    assert_eq!(limits.pull_request.author, "dave");
+}
+
+#[test]
+fn a_row_says_whether_the_pull_request_has_a_tour() {
+    let home = home_with_tour_of(API_31);
+
+    let switcher = loaded(&three_pull_requests(), home.path());
+
+    let tours: Vec<_> = switcher.visible().map(|row| row.tour).collect();
+    assert_eq!(
+        tours,
+        [TourFact::Missing, TourFact::Ready, TourFact::Missing]
+    );
+}
+
+#[test]
+fn a_tour_written_since_the_list_loaded_shows_when_the_tours_are_checked_again() {
+    let home = TempDir::new().unwrap();
+    let mut switcher = loaded(&three_pull_requests(), home.path());
+    write_tour(home.path(), SHOP_7);
+
+    switcher.check_tours(home.path());
+
+    let tours: Vec<_> = switcher.visible().map(|row| row.tour).collect();
+    assert_eq!(
+        tours,
+        [TourFact::Missing, TourFact::Missing, TourFact::Ready]
+    );
+}
+
+#[test]
+fn typing_filters_by_repo_number_title_and_author_ignoring_case() {
+    let home = TempDir::new().unwrap();
+    let mut switcher = loaded(&three_pull_requests(), home.path());
+
+    switcher.filter("ALICE");
+    assert_eq!(visible_urls(&switcher), [SHOP_7]);
+
+    switcher.filter("blog 7");
+    assert_eq!(visible_urls(&switcher), [BLOG_7]);
+
+    switcher.filter("rate");
+    assert_eq!(visible_urls(&switcher), [API_31]);
+
+    switcher.filter("");
+    assert_eq!(visible_urls(&switcher), [BLOG_7, API_31, SHOP_7]);
+}
+
+#[test]
+fn picking_a_pull_request_with_a_tour_switches_to_it() {
+    let home = home_with_tour_of(API_31);
+    let switcher = loaded(&three_pull_requests(), home.path());
+
+    assert_eq!(switcher.pick(1).unwrap(), pr(API_31));
+}
+
+#[test]
+fn a_pull_request_with_no_tour_cannot_be_picked_yet() {
+    let home = TempDir::new().unwrap();
+    let switcher = loaded(&three_pull_requests(), home.path());
+
+    assert_eq!(switcher.pick(0), Err(NotPickable::NoTourYet));
+}
+
+#[test]
+fn picking_counts_rows_as_filtered() {
+    let home = home_with_tour_of(SHOP_7);
+    let mut switcher = loaded(&three_pull_requests(), home.path());
+
+    switcher.filter("checkout");
+
+    assert_eq!(switcher.pick(0).unwrap(), pr(SHOP_7));
+    assert_eq!(switcher.pick(1), Err(NotPickable::NoSuchRow));
+}
+
+#[test]
+fn github_that_cannot_be_reached_is_said_in_the_switcher_and_the_list_stays_empty() {
+    let github = three_pull_requests();
+    github.inject(GitHubFault::RelevantListFails);
+
+    let switcher = loaded(&github, TempDir::new().unwrap().path());
+
+    assert_eq!(switcher.visible().count(), 0);
+    let notice = switcher.notice().unwrap();
+    assert!(notice.contains("network is down"), "{notice}");
+}
+
+#[test]
+fn while_the_list_loads_the_switcher_says_so() {
+    let mut switcher = PrSwitcher::default();
+    assert!(switcher.is_loading());
+
+    switcher.loaded(Ok(RelevantPullRequests::default()), Path::new("/nowhere"));
+
+    assert!(!switcher.is_loading());
+    assert_eq!(switcher.notice(), None);
+}
+
+#[test]
+fn teams_that_were_not_searched_are_named() {
+    let mut switcher = PrSwitcher::default();
+
+    switcher.loaded(
+        Ok(RelevantPullRequests {
+            pull_requests: Vec::new(),
+            teams_left_out: vec!["acme/team11".to_owned(), "acme/team12".to_owned()],
+        }),
+        Path::new("/nowhere"),
+    );
+
+    let notice = switcher.notice().unwrap();
+    assert!(
+        notice.contains("acme/team11") && notice.contains("acme/team12"),
+        "{notice}"
+    );
+}
+
+#[test]
+fn a_reload_after_a_failure_clears_the_notice_and_keeps_the_filter() {
+    let github = three_pull_requests();
+    github.inject(GitHubFault::RelevantListFails);
+    let home = TempDir::new().unwrap();
+    let mut switcher = loaded(&github, home.path());
+    switcher.filter("alice");
+
+    github.heal(&GitHubFault::RelevantListFails);
+    switcher.loaded(github.relevant_pull_requests(), home.path());
+
+    assert_eq!(switcher.notice(), None);
+    assert_eq!(visible_urls(&switcher), [SHOP_7]);
+}
