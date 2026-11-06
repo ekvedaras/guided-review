@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,20 @@ pub enum HandOffState {
     Answered,
     EndedWithoutAnswer,
     Failed(String),
+}
+
+impl HandOffState {
+    /// What the reviewer reads under the comment.
+    pub fn line(&self) -> String {
+        match self {
+            Self::Queued => "Waiting for the agent to be free".to_owned(),
+            Self::Delivered => "Delivered to the agent".to_owned(),
+            Self::Working => "The agent is working on it".to_owned(),
+            Self::Answered => "The agent answered".to_owned(),
+            Self::EndedWithoutAnswer => "The agent finished without answering".to_owned(),
+            Self::Failed(reason) => format!("Hand-off failed: {reason}"),
+        }
+    }
 }
 
 /// One earlier comment of the thread, for the agent's context.
@@ -289,6 +304,14 @@ impl HandOffs {
                 _ => continue,
             };
         }
+    }
+
+    /// The line under a thread: where its latest hand-off is. `None` when nothing was handed off in it.
+    pub(super) fn line_for(&self, thread: &ThreadId) -> Option<Arc<str>> {
+        self.0
+            .iter()
+            .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
+            .map(|hand_off| hand_off.state.line().into())
     }
 
     fn holds(&self, thread: &ThreadId) -> bool {

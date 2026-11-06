@@ -385,6 +385,7 @@ impl Review {
             self.display_options.files_at_head(),
             self.state.reply_drafts(),
             self.comment_desk.comment_edits(),
+            self.state.hand_offs(),
         );
         if let Some(record) = self.repin_record() {
             self.mark_repin_status(&mut page.pieces);
@@ -679,6 +680,7 @@ impl Review {
                 self.display_options.files_at_head(),
                 self.state.reply_drafts(),
                 self.comment_desk.comment_edits(),
+                self.state.hand_offs(),
             );
             page
         })

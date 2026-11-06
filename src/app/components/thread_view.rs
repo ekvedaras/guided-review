@@ -720,6 +720,12 @@ impl RenderOnce for ThreadElement {
                     .children(conversation_link),
             )
             .children(comments)
+            .children(self.view.hand_off_line.as_ref().map(|line| {
+                div()
+                    .text_sm()
+                    .text_color(colors.muted_text)
+                    .child(SharedString::from(Arc::clone(line)))
+            }))
             .children(actions)
     }
 }

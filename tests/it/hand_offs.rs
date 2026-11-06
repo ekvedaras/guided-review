@@ -505,3 +505,103 @@ fn a_delivered_hand_off_is_working_while_the_agent_works_and_ends_unanswered_whe
     assert_eq!(states(&review)[0], HandOffState::EndedWithoutAnswer);
     assert_eq!(states(&review)[1], HandOffState::Queued);
 }
+
+fn lines_under_the_threads(review: &Review) -> Vec<Option<String>> {
+    review
+        .current_step()
+        .unwrap()
+        .threads
+        .iter()
+        .map(|view| view.hand_off_line.as_deref().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn a_thread_sent_with_ask_agent_shows_each_hand_off_state_as_a_line_under_it() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    let waiting = Some("Waiting for the agent to be free".to_owned());
+
+    assert_eq!(
+        lines_under_the_threads(&review),
+        [waiting.clone(), waiting.clone()]
+    );
+    deliver(&mut review, &agents_of(&fake));
+    assert_eq!(
+        lines_under_the_threads(&review)[0].as_deref(),
+        Some("Delivered to the agent")
+    );
+    review.agent_status_is(AgentStatus::Working).unwrap();
+    assert_eq!(
+        lines_under_the_threads(&review)[0].as_deref(),
+        Some("The agent is working on it")
+    );
+    review.agent_status_is(AgentStatus::Idle).unwrap();
+    assert_eq!(
+        lines_under_the_threads(&review),
+        [
+            Some("The agent finished without answering".to_owned()),
+            waiting
+        ]
+    );
+}
+
+#[test]
+fn every_hand_off_state_has_its_own_line() {
+    let lines: Vec<String> = [
+        HandOffState::Queued,
+        HandOffState::Delivered,
+        HandOffState::Working,
+        HandOffState::Answered,
+        HandOffState::EndedWithoutAnswer,
+        HandOffState::Failed("no agent".into()),
+    ]
+    .iter()
+    .map(HandOffState::line)
+    .collect();
+
+    assert_eq!(
+        lines,
+        [
+            "Waiting for the agent to be free",
+            "Delivered to the agent",
+            "The agent is working on it",
+            "The agent answered",
+            "The agent finished without answering",
+            "Hand-off failed: no agent",
+        ]
+    );
+}
+
+#[test]
+fn a_thread_never_handed_off_shows_no_line() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    review.set_threads(&[thread_on_line_ten(
+        "T1",
+        vec![comment("C1", "me", "why ten?")],
+    )]);
+
+    assert_eq!(lines_under_the_threads(&review), [None]);
+}
+
+#[test]
+fn hand_off_lines_survive_a_restart() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let review = asked_twice(&pull, &mut github);
+    drop(review);
+
+    let mut reopened = pull.open();
+    reopened.set_threads(&[thread_on_line_ten(
+        "T1",
+        vec![comment("C1", "me", "why ten?")],
+    )]);
+
+    assert_eq!(
+        lines_under_the_threads(&reopened),
+        [Some("Waiting for the agent to be free".to_owned())]
+    );
+}

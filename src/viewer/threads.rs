@@ -10,6 +10,7 @@ use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
+use super::hand_offs::HandOffs;
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
@@ -146,6 +147,8 @@ pub struct ThreadView {
     pub reply_draft: Option<String>,
     /// The text of each comment of this thread that is being edited.
     pub edit_drafts: BTreeMap<CommentId, String>,
+    /// Where the comment sent with Ask agent is, when this thread has one.
+    pub hand_off_line: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -219,6 +222,7 @@ pub(super) fn views(
     files_at_head: &FilesAtHead,
     reply_drafts: &BTreeMap<ThreadId, String>,
     comment_edits: &BTreeMap<CommentId, String>,
+    hand_offs: &HandOffs,
 ) -> Vec<ThreadView> {
     threads
         .iter()
@@ -237,6 +241,7 @@ pub(super) fn views(
                     Some((comment.id.clone(), text.clone()))
                 })
                 .collect(),
+            hand_off_line: hand_offs.line_for(&thread.id),
             thread: thread.clone(),
         })
         .collect()

@@ -240,6 +240,7 @@ impl PageRow {
                     }
                 }
                 view.commented_lines.hash(&mut hasher);
+                view.hand_off_line.hash(&mut hasher);
                 reply_lines.hash(&mut hasher);
                 for (id, text) in &view.edit_drafts {
                     id.hash(&mut hasher);
@@ -1106,6 +1107,7 @@ mod tests {
             commented_lines: Arc::new([]),
             reply_draft: None,
             edit_drafts: std::collections::BTreeMap::new(),
+            hand_off_line: None,
         }
     }
 
