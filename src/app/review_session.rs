@@ -19,11 +19,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    AgentStatus, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem,
-    CommentRefusal, CommentResult, FinishResult, GitHubPort, ImageCache, LineLocation, OldHead,
-    Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId,
-    SyncState, ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    AgentStatus, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal,
+    CommentResult, FinishResult, GitHubPort, ImageCache, LineLocation, OldHead, Place, Read,
+    RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
+    ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents, TourRefresher,
+    TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);

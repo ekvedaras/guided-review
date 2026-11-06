@@ -79,11 +79,14 @@ impl ThreadActionRequest {
                 .review_threads(&self.pr)
                 .map_err(|error| format!("{error:#}"))
         });
+        let reply_body = matches!(self.action, ThreadAction::Reply { .. })
+            .then_some(self.draft_body)
+            .flatten();
         ThreadActionOutcome {
             action: self.action,
             result,
             threads,
-            reply_body: self.reply_body,
+            reply_body,
         }
     }
 

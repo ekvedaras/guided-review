@@ -10,8 +10,7 @@ use gpui::{
 
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    Audience, CommentId, ReactionChange, ReactionCount, SendMode, ThreadAction,
-    ThreadActionResult,
+    Audience, CommentId, ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult,
     ThreadComment, ThreadId, ThreadView,
 };
 

@@ -81,6 +81,7 @@ fn comment(id: &str, author: &str, body: &str) -> ThreadComment {
         body: body.into(),
         url: String::new(),
         reactions: Vec::new(),
+        by_viewer: false,
     }
 }
 
