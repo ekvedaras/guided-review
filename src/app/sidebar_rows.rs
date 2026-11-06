@@ -27,6 +27,7 @@ pub struct SidebarSafetyNet {
 pub struct SidebarLastReview {
     pub headline: SharedString,
     pub body: SharedString,
+    pub is_body_long: bool,
     pub is_old: bool,
 }
 
@@ -73,6 +74,7 @@ impl SidebarRows {
             last_review: review.last_review().map(|last| SidebarLastReview {
                 headline: last.headline(is_old).into(),
                 body: last.body.clone().into(),
+                is_body_long: last.body_is_long(),
                 is_old,
             }),
             can_judge: review.can_approve_or_request_changes(),

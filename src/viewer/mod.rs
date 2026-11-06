@@ -47,8 +47,8 @@ pub use comments::{
 pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
 pub use file_block::FileBlock;
 pub use finish_review::{
-    ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewOutcome,
-    ReviewVerdict, SubmittedReview,
+    ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
+    ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{

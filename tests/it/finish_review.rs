@@ -259,6 +259,19 @@ fn web_review(outcome: ReviewOutcome, commit: &str) -> SubmittedReview {
 }
 
 #[test]
+fn a_body_of_many_lines_or_many_words_is_long_enough_to_clamp() {
+    let with_body = |body: &str| SubmittedReview {
+        body: body.into(),
+        ..web_review(ReviewOutcome::Commented, "abc")
+    };
+
+    assert!(!with_body("needs a test").body_is_long());
+    assert!(!with_body("one\ntwo\nthree\nfour").body_is_long());
+    assert!(with_body("one\ntwo\nthree\nfour\nfive").body_is_long());
+    assert!(with_body(&"word ".repeat(80)).body_is_long());
+}
+
+#[test]
 fn the_headline_says_how_the_review_ended_when_and_whether_the_pr_moved_on() {
     let review = web_review(ReviewOutcome::ChangesRequested, "abc");
 

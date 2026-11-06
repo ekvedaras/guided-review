@@ -33,6 +33,12 @@ pub enum ReviewOutcome {
 }
 
 impl SubmittedReview {
+    /// Too tall for the sidebar as it is, so it is shown clamped to `CLAMPED_BODY_LINES`.
+    pub fn body_is_long(&self) -> bool {
+        self.body.lines().count() > CLAMPED_BODY_LINES
+            || self.body.chars().count() > LONG_BODY_CHARS
+    }
+
     /// How it ended and when, for a line the reviewer reads; `PR has new commits` when `is_old`.
     pub fn headline(&self, is_old: bool) -> String {
         let outcome = match self.outcome {
@@ -63,6 +69,10 @@ impl ReviewOutcome {
         }
     }
 }
+
+pub const CLAMPED_BODY_LINES: usize = 4;
+/// About what a sidebar line holds times the clamped lines; a longer text wraps past them.
+const LONG_BODY_CHARS: usize = 200;
 
 /// The viewer's latest sent review of a PR, as GitHub holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]

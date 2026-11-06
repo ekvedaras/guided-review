@@ -5,7 +5,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
+use crate::viewer::{ApproveWarning, CLAMPED_BODY_LINES, FinishResult, ReviewVerdict};
 
 use crate::app::sidebar_rows::SidebarLastReview;
 
@@ -24,6 +24,7 @@ pub type OnBodyEdit = Rc<dyn Fn(String, &mut App)>;
 /// What the reviewer is doing in the finish dialog. The body is not here: the core keeps it.
 struct FinishUi {
     is_open: bool,
+    is_last_review_body_open: bool,
     verdict: ReviewVerdict,
     /// The reviewer saw the unread warning and has to say yes to it once more.
     is_confirming_approval: bool,
@@ -36,6 +37,7 @@ impl FinishUi {
     fn new(has_draft: bool, cx: &mut Context<Self>) -> Self {
         Self {
             is_open: has_draft,
+            is_last_review_body_open: false,
             verdict: ReviewVerdict::Comment,
             is_confirming_approval: false,
             is_busy: false,
@@ -150,6 +152,7 @@ impl RenderOnce for FinishReviewDialog {
             state.is_busy,
             state.is_confirming_approval,
         );
+        let is_last_review_body_open = state.is_last_review_body_open;
         let (problem, focus) = (state.problem.clone(), state.focus.clone());
         let body = if is_busy {
             div().child(self.body.clone()).into_any_element()
@@ -205,10 +208,31 @@ impl RenderOnce for FinishReviewDialog {
                         .text_color(headline_color)
                         .child(last.headline.clone()),
                 )
-                .children(
-                    (!last.body.is_empty())
-                        .then(|| div().text_color(colors.muted_text).child(last.body.clone())),
-                )
+                .children((!last.body.is_empty()).then(|| {
+                    let body = div().text_color(colors.muted_text).child(last.body.clone());
+                    if last.is_body_long && !is_last_review_body_open {
+                        body.line_clamp(CLAMPED_BODY_LINES)
+                    } else {
+                        body
+                    }
+                }))
+                .children(last.is_body_long.then(|| {
+                    let ui = ui.clone();
+                    div()
+                        .id("last-review-body-toggle")
+                        .cursor_pointer()
+                        .text_color(colors.muted_text)
+                        .on_click(move |_, _, cx| {
+                            update(&ui, cx, |ui| {
+                                ui.is_last_review_body_open = !ui.is_last_review_body_open;
+                            });
+                        })
+                        .child(if is_last_review_body_open {
+                            "▾ Show less"
+                        } else {
+                            "▸ Show all"
+                        })
+                }))
         });
         let wrapper = div()
             .flex()
