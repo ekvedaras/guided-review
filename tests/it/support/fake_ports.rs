@@ -60,6 +60,10 @@ pub enum GitHubCall {
         reaction: Reaction,
         change: ReactionChange,
     },
+    EditComment {
+        comment_id: CommentId,
+        body: String,
+    },
     Submit {
         verdict: ReviewVerdict,
         body: String,
@@ -118,6 +122,7 @@ pub struct FakeGitHub {
     /// What the reviewer changed since: GitHub shows it on the next read of the threads.
     resolved_now: Mutex<BTreeMap<ThreadId, bool>>,
     reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
+    edited_now: Mutex<BTreeMap<CommentId, String>>,
 }
 
 impl FakeGitHub {
@@ -134,6 +139,7 @@ impl FakeGitHub {
             last_review: Mutex::default(),
             resolved_now: Mutex::default(),
             reacted_now: Mutex::default(),
+            edited_now: Mutex::default(),
         }
     }
 
@@ -307,12 +313,16 @@ impl ReviewThreadsPort for FakeGitHub {
         }
         let resolved = self.resolved_now.lock().unwrap();
         let reacted = self.reacted_now.lock().unwrap();
+        let edited = self.edited_now.lock().unwrap();
         let mut threads = self.threads.clone();
         for thread in &mut threads {
             if let Some(is_resolved) = resolved.get(&thread.id) {
                 thread.is_resolved = *is_resolved;
             }
             for comment in &mut thread.comments {
+                if let Some(body) = edited.get(&comment.id) {
+                    comment.body.clone_from(body);
+                }
                 for ((comment_id, reaction), on) in reacted.iter() {
                     if *comment_id != comment.id {
                         continue;
@@ -383,6 +393,19 @@ impl ReviewThreadsPort for FakeGitHub {
             (comment_id.clone(), reaction),
             change == ReactionChange::Add,
         );
+        Ok(())
+    }
+
+    fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), GitHubError> {
+        self.sent.record(GitHubCall::EditComment {
+            comment_id: comment_id.clone(),
+            body: body.to_owned(),
+        });
+        self.fail_if_connection_lost()?;
+        self.edited_now
+            .lock()
+            .unwrap()
+            .insert(comment_id.clone(), body.to_owned());
         Ok(())
     }
 }

@@ -18,7 +18,7 @@ fn page(has_next: bool, cursor: &str, nodes: &str) -> String {
 }
 
 const LINE_THREAD: &str = r#"{"id":"T1","isResolved":true,"isOutdated":false,"path":"a.php","line":227,"startLine":167,"originalLine":179,"originalStartLine":167,"diffSide":"LEFT","subjectType":"LINE","comments":{"nodes":[
-  {"id":"C1","url":"https://github.com/acme/shop/pull/7#r1","body":"named arguments","reactionGroups":[{"content":"HEART","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}],"originalCommit":{"oid":"9d6f"},"author":{"login":"alice","__typename":"User"}},
+  {"id":"C1","url":"https://github.com/acme/shop/pull/7#r1","body":"named arguments","reactionGroups":[{"content":"HEART","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}],"originalCommit":{"oid":"9d6f"},"viewerDidAuthor":true,"author":{"login":"alice","__typename":"User"}},
   {"id":"C2","url":"https://github.com/acme/shop/pull/7#r2","body":"done","originalCommit":{"oid":"9d6f"},"author":{"login":"review-bot","__typename":"Bot"}}]}}"#;
 
 const OUTDATED_FILE_THREAD: &str = r#"{"id":"T2","isResolved":false,"isOutdated":true,"path":"b.php","line":null,"startLine":null,"originalLine":435,"originalStartLine":null,"diffSide":"RIGHT","subjectType":"FILE","comments":{"nodes":[
@@ -62,6 +62,14 @@ fn review_threads_are_read_over_graphql_page_by_page() {
         "https://github.com/acme/shop/pull/7#r1"
     );
     assert_eq!(on_line.comments[0].id, CommentId::new("C1"));
+    assert_eq!(
+        on_line
+            .comments
+            .iter()
+            .map(|comment| comment.by_viewer)
+            .collect::<Vec<_>>(),
+        [true, false]
+    );
     assert_eq!(
         on_line.comments[0].reactions,
         [ReactionCount {
@@ -385,6 +393,45 @@ fn a_reply_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
     assert_eq!(
         asked_as_json(&asked)[3]["variables"]["input"]["pullRequestReviewId"],
         "REVIEW_7"
+    );
+}
+
+#[test]
+fn a_comment_is_edited_with_its_node_id_and_the_new_body() {
+    let (url, asked) = serve_graphql(vec![
+        r#"{"data":{"updatePullRequestReviewComment":{"pullRequestReviewComment":{"id":"C1","body":"better"}}}}"#.into(),
+    ]);
+
+    GitHub::at(&url)
+        .edit_comment(&CommentId::new("C1"), "better")
+        .unwrap();
+
+    let asked = asked_as_json(&asked);
+    assert!(
+        asked[0]["query"]
+            .as_str()
+            .unwrap()
+            .contains("updatePullRequestReviewComment")
+    );
+    assert_eq!(
+        asked[0]["variables"]["input"],
+        serde_json::json!({"pullRequestReviewCommentId": "C1", "body": "better"})
+    );
+}
+
+#[test]
+fn an_edit_github_refuses_says_what_was_being_done() {
+    let (url, _) = serve_graphql(vec![
+        r#"{"errors":[{"message":"Could not resolve to a node"}]}"#.into(),
+    ]);
+
+    let error = GitHub::at(&url)
+        .edit_comment(&CommentId::new("C1"), "better")
+        .unwrap_err();
+
+    assert!(
+        format!("{error:#}").starts_with("could not edit the comment"),
+        "{error:#}"
     );
 }
 

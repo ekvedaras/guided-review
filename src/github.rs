@@ -508,6 +508,17 @@ impl ReviewThreadsPort for GitHub {
         .map_err(|error| error.context("could not change the reaction"))?;
         Ok(())
     }
+
+    fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), GitHubError> {
+        self.graphql(
+            "mutation($input: UpdatePullRequestReviewCommentInput!) {
+                updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
+            }",
+            &serde_json::json!({"input": {"pullRequestReviewCommentId": comment_id, "body": body}}),
+        )
+        .map_err(|error| error.context("could not edit the comment"))?;
+        Ok(())
+    }
 }
 
 impl ReviewWritesPort for GitHub {
@@ -839,7 +850,7 @@ const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $numb
     reviewThreads(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes { id isResolved isOutdated path line startLine originalLine originalStartLine diffSide subjectType
-        comments(first: 50) { nodes { id url body reactionGroups { content viewerHasReacted reactors { totalCount } } originalCommit { oid } author { login __typename } } } }
+        comments(first: 50) { nodes { id url body viewerDidAuthor reactionGroups { content viewerHasReacted reactors { totalCount } } originalCommit { oid } author { login __typename } } } }
     }
   } }
 }";
@@ -910,6 +921,8 @@ pub(crate) fn parse_review_threads(
         #[serde(default)]
         reaction_groups: Vec<ReactionGroupJson>,
         body: String,
+        #[serde(default)]
+        viewer_did_author: bool,
         original_commit: Option<CommitJson>,
         /// GitHub answers `null` for a deleted account.
         author: Option<AuthorJson>,
@@ -987,6 +1000,7 @@ pub(crate) fn parse_review_threads(
                             .author
                             .map_or_else(|| "ghost".to_owned(), |author| author.login),
                         id: CommentId::new(&comment.id),
+                        by_viewer: comment.viewer_did_author,
                         body: comment.body,
                         url: comment.url,
                         reactions: comment

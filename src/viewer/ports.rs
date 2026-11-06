@@ -57,6 +57,9 @@ pub trait ReviewThreadsPort: Send + Sync {
         reaction: Reaction,
         change: ReactionChange,
     ) -> Result<(), GitHubError>;
+
+    /// Replaces the body of one of the viewer's own comments, sent or still in the pending review.
+    fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), GitHubError>;
 }
 
 /// The viewer's own review: what it holds so far, new comments, and sending it.

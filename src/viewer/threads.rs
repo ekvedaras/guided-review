@@ -82,6 +82,8 @@ pub struct ThreadComment {
     pub id: CommentId,
     pub author: String,
     pub is_bot: bool,
+    /// The viewer wrote it, so the viewer may edit it.
+    pub by_viewer: bool,
     pub body: String,
     /// The comment on the PR conversation page.
     pub url: String,

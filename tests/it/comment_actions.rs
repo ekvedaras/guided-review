@@ -78,6 +78,7 @@ fn comment(id: &str, body: &str) -> ThreadComment {
         id: CommentId::new(id),
         author: "alice".into(),
         is_bot: false,
+        by_viewer: false,
         body: body.into(),
         url: format!("{PR}#discussion_{id}"),
         reactions: Vec::new(),
