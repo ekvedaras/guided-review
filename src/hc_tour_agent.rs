@@ -1,0 +1,177 @@
+//! The tour agent port over herdr's `hc` CLI, and `herdr-app` to show a terminal.
+
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+
+use anyhow::{Context, bail};
+use serde_json::Value;
+
+use crate::json::at;
+use crate::pull_request::PullRequestUrl;
+use crate::viewer::{AgentStatus, TerminalId, TourAgentPort};
+
+const APP_LABEL: &str = "app=guided-review";
+
+pub struct HcTourAgents {
+    hc: PathBuf,
+    herdr_app: PathBuf,
+}
+
+impl HcTourAgents {
+    pub fn new() -> Self {
+        Self::with_binaries(PathBuf::from("hc"), PathBuf::from("herdr-app"))
+    }
+
+    pub fn with_binaries(hc: PathBuf, herdr_app: PathBuf) -> Self {
+        Self { hc, herdr_app }
+    }
+
+    fn hc(&self, args: &[&str]) -> anyhow::Result<Value> {
+        let output = Command::new(&self.hc)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .with_context(|| format!("could not run `hc {}`", args.join(" ")))?;
+        if !output.status.success() {
+            bail!(
+                "`hc {}` failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        if output.stdout.iter().all(u8::is_ascii_whitespace) {
+            return Ok(Value::Null);
+        }
+        serde_json::from_slice(&output.stdout)
+            .with_context(|| format!("`hc {}` did not answer JSON", args.join(" ")))
+    }
+}
+
+impl Default for HcTourAgents {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn label_of(pr: &PullRequestUrl) -> String {
+    format!("gr.pr={pr}")
+}
+
+fn state_of(terminal: &Value) -> AgentStatus {
+    let reported = match at(terminal, "/status") {
+        Value::String(state) => Some(state.as_str()),
+        status => at(status, "/state").as_str(),
+    };
+    AgentStatus::from_herdr(reported)
+}
+
+/// The terminal of an event line: a snapshot lists terminals, a change may name one.
+fn terminal_in<'a>(line: &'a Value, address: &str) -> Option<&'a Value> {
+    let listed = at(line, "/terminals")
+        .as_array()
+        .and_then(|terminals| terminals.iter().find(|t| at(t, "/address") == address));
+    let named = Some(at(line, "/terminal")).filter(|t| at(t, "/address") == address);
+    let bare = Some(line).filter(|t| at(t, "/address") == address);
+    listed.or(named).or(bare)
+}
+
+impl TourAgentPort for HcTourAgents {
+    fn link(&self) -> Result<(), String> {
+        match self.hc(&["server", "status", "--json"]) {
+            Ok(_) => Ok(()),
+            Err(error) if self.hc_is_missing() => Err(format!(
+                "`{}` is not on PATH ({error:#})",
+                self.hc.display()
+            )),
+            Err(error) => Err(format!("the herdr server does not answer: {error:#}")),
+        }
+    }
+
+    fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>> {
+        let label = label_of(pr);
+        let listed = self.hc(&["ls", "--label", APP_LABEL, "--label", &label, "--json"])?;
+        Ok(at(&listed, "/terminals")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|terminal| at(terminal, "/address").as_str())
+            .map(TerminalId::new)
+            .collect())
+    }
+
+    fn claim(&self, terminal: &TerminalId, pr: &PullRequestUrl) -> anyhow::Result<()> {
+        self.hc(&["label", terminal.as_str(), APP_LABEL, &label_of(pr)])
+            .map(drop)
+    }
+
+    fn release(&self, terminal: &TerminalId) -> anyhow::Result<()> {
+        self.hc(&["label", terminal.as_str(), "gr.pr="]).map(drop)
+    }
+
+    fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
+        let got = self.hc(&["get", terminal.as_str(), "--json"])?;
+        Ok(state_of(&got))
+    }
+
+    fn follow(
+        &self,
+        terminal: &TerminalId,
+        on_status: &mut dyn FnMut(AgentStatus),
+    ) -> anyhow::Result<()> {
+        let mut events = Command::new(&self.hc)
+            .args(["events", "--json", "--terminal", terminal.as_str()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("could not run `hc events`")?;
+        let stdout = events
+            .stdout
+            .take()
+            .context("`hc events` gave no output to read")?;
+        let mut last = None;
+        for line in BufReader::new(stdout).lines() {
+            let line = line.context("could not read `hc events`")?;
+            let Ok(json) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(changed) = terminal_in(&json, terminal.as_str()) else {
+                continue;
+            };
+            let status = state_of(changed);
+            if last != Some(status) {
+                last = Some(status);
+                on_status(status);
+            }
+        }
+        events.wait().context("`hc events` did not end cleanly")?;
+        Ok(())
+    }
+
+    fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {
+        let output = Command::new(&self.herdr_app)
+            .args(["do", "agent.focus", "--terminal", terminal.as_str()])
+            .stdin(Stdio::null())
+            .output()
+            .with_context(|| format!("could not run `{}`", self.herdr_app.display()))?;
+        if !output.status.success() {
+            bail!(
+                "`herdr-app do agent.focus` failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+}
+
+impl HcTourAgents {
+    fn hc_is_missing(&self) -> bool {
+        Command::new(&self.hc)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    }
+}

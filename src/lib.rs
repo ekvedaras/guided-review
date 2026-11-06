@@ -9,6 +9,7 @@ pub mod eval;
 pub mod file_path;
 pub mod file_rules;
 pub mod github;
+pub mod hc_tour_agent;
 pub mod hex;
 pub mod ide;
 pub mod image_facts;

@@ -1,0 +1,205 @@
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+
+use guided_review::hc_tour_agent::HcTourAgents;
+use guided_review::pull_request::PullRequestUrl;
+use guided_review::viewer::{AgentStatus, TerminalId, TourAgentPort};
+use tempfile::TempDir;
+
+const PR: &str = "https://github.com/acme/shop/pull/7";
+
+fn pr() -> PullRequestUrl {
+    PR.parse().unwrap()
+}
+
+/// A stand-in `hc` that logs each call on one line and answers from `<dir>/answer-<subcommand>`,
+/// failing when the server is made to be down.
+fn fake_hc(dir: &Path) -> PathBuf {
+    let script = dir.join("hc");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+echo "$@" >> "{dir}/calls"
+if [ "$1" = "server" ] && [ -f "{dir}/server-down" ]; then
+  echo "no server" >&2
+  exit 1
+fi
+if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
+"#,
+            dir = dir.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+fn fake_herdr_app(dir: &Path) -> PathBuf {
+    let script = dir.join("herdr-app");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> \"{}/app-calls\"\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+fn adapter(dir: &Path) -> HcTourAgents {
+    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir))
+}
+
+fn answer(dir: &Path, subcommand: &str, body: &str) {
+    std::fs::write(dir.join(format!("answer-{subcommand}")), body).unwrap();
+}
+
+fn calls(dir: &Path, file: &str) -> Vec<String> {
+    std::fs::read_to_string(dir.join(file))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_agent_of_a_pr_is_looked_up_by_its_label_and_the_app_label() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"hidden_finished":1,"terminals":[{"address":"t7","state":"live","status":"idle"},{"address":"t9","state":"live"}]}"#,
+    );
+
+    let terminals = adapter(dir.path()).terminals_of(&pr()).unwrap();
+
+    assert_eq!(terminals, [TerminalId::new("t7"), TerminalId::new("t9")]);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [format!(
+            "ls --label app=guided-review --label gr.pr={PR} --json"
+        )]
+    );
+}
+
+#[test]
+fn a_terminal_is_claimed_with_both_labels_and_released_by_emptying_the_pr_label() {
+    let dir = TempDir::new().unwrap();
+    let agents = adapter(dir.path());
+
+    agents.claim(&TerminalId::new("t7"), &pr()).unwrap();
+    agents.release(&TerminalId::new("t9")).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            format!("label t7 app=guided-review gr.pr={PR}"),
+            "label t9 gr.pr=".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn the_status_is_read_from_the_terminal_the_way_herdr_reports_it() {
+    let dir = TempDir::new().unwrap();
+    let agents = adapter(dir.path());
+    let t7 = TerminalId::new("t7");
+    let on = |state: &str| {
+        format!(r#"{{"address":"t7","status":{{"app":"claude-code","state":"{state}"}}}}"#)
+    };
+
+    let mut statuses = Vec::new();
+    for state in ["idle", "working", "blocked", "done", "error"] {
+        answer(dir.path(), "get", &on(state));
+        statuses.push(agents.status(&t7).unwrap());
+    }
+    answer(dir.path(), "get", r#"{"address":"t7","status":null}"#);
+    statuses.push(agents.status(&t7).unwrap());
+
+    assert_eq!(
+        statuses,
+        [
+            AgentStatus::Idle,
+            AgentStatus::Working,
+            AgentStatus::WaitingForYou,
+            AgentStatus::Idle,
+            AgentStatus::Failed,
+            AgentStatus::Unreported
+        ]
+    );
+    assert_eq!(calls(dir.path(), "calls")[0], "get t7 --json");
+}
+
+#[test]
+fn status_changes_follow_the_events_of_the_terminal_and_skip_repeats() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "events",
+        concat!(
+            r#"{"seq":1,"terminals":[{"address":"t3","status":{"state":"working"}},{"address":"t7","status":{"state":"idle"}}]}"#,
+            "\n",
+            "not json\n",
+            r#"{"seq":2,"terminals":[{"address":"t7","status":{"state":"idle"}}]}"#,
+            "\n",
+            r#"{"seq":3,"terminals":[{"address":"t7","status":{"state":"working"}}]}"#,
+            "\n",
+            r#"{"seq":4,"terminals":[{"address":"t7","status":{"state":"blocked"}}]}"#,
+            "\n",
+        ),
+    );
+    let mut seen = Vec::new();
+
+    adapter(dir.path())
+        .follow(&TerminalId::new("t7"), &mut |status| seen.push(status))
+        .unwrap();
+
+    assert_eq!(
+        seen,
+        [
+            AgentStatus::Idle,
+            AgentStatus::Working,
+            AgentStatus::WaitingForYou
+        ]
+    );
+    assert_eq!(calls(dir.path(), "calls"), ["events --json --terminal t7"]);
+}
+
+#[test]
+fn the_link_is_on_while_the_server_answers_and_off_with_its_reason_when_not() {
+    let dir = TempDir::new().unwrap();
+    let agents = adapter(dir.path());
+
+    assert_eq!(agents.link(), Ok(()));
+    assert_eq!(calls(dir.path(), "calls"), ["server status --json"]);
+
+    std::fs::write(dir.path().join("server-down"), "").unwrap();
+    let reason = agents.link().unwrap_err();
+    assert!(reason.contains("does not answer"), "{reason}");
+    assert!(reason.contains("no server"), "{reason}");
+}
+
+#[test]
+fn the_link_is_off_when_hc_is_not_installed() {
+    let dir = TempDir::new().unwrap();
+    let agents = HcTourAgents::with_binaries(dir.path().join("no-hc"), dir.path().join("no-app"));
+
+    let reason = agents.link().unwrap_err();
+
+    assert!(reason.contains("not on PATH"), "{reason}");
+}
+
+#[test]
+fn showing_an_agent_asks_the_herdr_app_to_focus_its_terminal() {
+    let dir = TempDir::new().unwrap();
+
+    adapter(dir.path()).show(&TerminalId::new("t7")).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "app-calls"),
+        ["do agent.focus --terminal t7"]
+    );
+}

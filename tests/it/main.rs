@@ -28,6 +28,7 @@ mod file_path;
 mod file_reads;
 mod finish_review;
 mod github_threads;
+mod hc_tour_agent;
 mod highlighting;
 mod ide;
 mod image_previews;
