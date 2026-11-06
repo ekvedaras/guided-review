@@ -2,21 +2,33 @@
 
 Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub PR: a summary, then steps from the main flow down to the details, each with the diff pieces and diagrams it talks about. The app shows the tour next to the diff and lets you comment on it.
 
-![A guided review of sharkdp/fd#2185: summary, a step with a diagram and diff, an inline thread, the next step](docs/assets/guided-review-intro.gif)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/guided-review-intro-dark.gif">
+  <img alt="A guided review of sharkdp/fd#2185: summary, a step with a diagram and diff, an inline thread, the next step" src="docs/assets/guided-review-intro.gif">
+</picture>
 
 ## Tour
 
 The tour of [sharkdp/fd#2185](https://github.com/sharkdp/fd/pull/2185), a merged public PR.
 
-![The tour summary next to the list of steps](docs/assets/tour-summary.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-summary-dark.png">
+  <img alt="The tour summary next to the list of steps" src="docs/assets/tour-summary.png">
+</picture>
 
 The summary and the PR description, with the steps listed on the left.
 
-![A step with a diagram and the diff it explains](docs/assets/tour-step-diagram.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-diagram-dark.png">
+  <img alt="A step with a diagram and the diff it explains" src="docs/assets/tour-step-diagram.png">
+</picture>
 
 A step: what to check, a diagram, then the diff pieces it talks about.
 
-![A review thread inside the diff](docs/assets/tour-step-thread.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-thread-dark.png">
+  <img alt="A review thread inside the diff" src="docs/assets/tour-step-thread.png">
+</picture>
 
 GitHub review threads sit inline in the diff, where you can reply and resolve.
 
