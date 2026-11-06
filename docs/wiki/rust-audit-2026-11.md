@@ -1,6 +1,6 @@
 # Rust quality audit, 2026-11
 
-On 2026-11-04 the maintainer asked for a repo-wide review: idiomatic Rust, no raw `.unwrap()`, every error handled, and memory-lean types. Spec and tickets: [issue 83](https://github.com/ekvedaras/guided-review/issues/83). The audit ran in four phases (guardrails, user-facing bugs, render cost, domain types), all on `main` in small commits (see [delivery](delivery.md)). This page keeps the outcomes and their reasons; the findings lists and step logs were removed when the audit ended, and the commits hold them.
+On 2026-11-04 the maintainer asked for a repo-wide review: idiomatic Rust, no raw `.unwrap()`, every error handled, and memory-lean types. Spec and tickets: issue 83 in the private archive. The audit ran in four phases (guardrails, user-facing bugs, render cost, domain types), all on `main` in small commits (see [delivery](delivery.md)). This page keeps the outcomes and their reasons; the findings lists and step logs were removed when the audit ended, and the commits hold them.
 
 ## Lasting outcomes
 
