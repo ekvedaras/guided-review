@@ -226,6 +226,35 @@ fn github_that_cannot_be_reached_is_said_in_the_switcher_and_the_list_stays_empt
 }
 
 #[test]
+fn a_failed_refresh_keeps_the_rows_already_listed_and_gives_the_reason() {
+    let github = three_pull_requests();
+    let home = TempDir::new().unwrap();
+    let mut switcher = loaded(&github, home.path());
+
+    github.inject(GitHubFault::RelevantListFails);
+    switcher.refreshing();
+    switcher.loaded(github.relevant_pull_requests(), home.path());
+
+    assert_eq!(visible_urls(&switcher), [BLOG_7, API_31, SHOP_7]);
+    let notice = switcher.notice().unwrap();
+    assert!(notice.contains("network is down"), "{notice}");
+    assert!(!switcher.is_refreshing());
+}
+
+#[test]
+fn while_a_refresh_runs_the_old_rows_stay_and_the_switcher_says_it_refreshes() {
+    let home = TempDir::new().unwrap();
+    let mut switcher = loaded(&three_pull_requests(), home.path());
+    assert!(!switcher.is_refreshing());
+
+    switcher.refreshing();
+
+    assert!(switcher.is_refreshing());
+    assert!(!switcher.is_loading(), "there is a list to show");
+    assert_eq!(switcher.visible().count(), 3);
+}
+
+#[test]
 fn while_the_list_loads_the_switcher_says_so() {
     let mut switcher = PrSwitcher::default();
     assert!(switcher.is_loading());

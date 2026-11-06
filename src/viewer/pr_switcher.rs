@@ -14,6 +14,7 @@ pub struct PrSwitcher {
     visible: Vec<usize>,
     filter: String,
     state: LoadState,
+    is_refreshing: bool,
     /// Whether tour agents can be reached, so a PR with no tour can be written; the reason when not.
     agent_link: Result<(), String>,
 }
@@ -69,14 +70,25 @@ impl Default for PrSwitcher {
             visible: Vec::new(),
             filter: String::new(),
             state: LoadState::Loading,
+            is_refreshing: true,
             agent_link: Ok(()),
         }
     }
 }
 
 impl PrSwitcher {
-    /// Takes the answer of the background read. A failed read empties the list and says why.
+    /// A read of the list starts; the rows listed so far stay until its answer.
+    pub fn refreshing(&mut self) {
+        self.is_refreshing = true;
+    }
+
+    pub fn is_refreshing(&self) -> bool {
+        self.is_refreshing
+    }
+
+    /// Takes the answer of the background read. A failed read keeps the rows listed before and says why.
     pub fn loaded(&mut self, answer: Result<RelevantPullRequests, GitHubError>, home: &Path) {
+        self.is_refreshing = false;
         match answer {
             Ok(relevant) => {
                 self.rows = relevant
@@ -89,7 +101,6 @@ impl PrSwitcher {
                 };
             }
             Err(error) => {
-                self.rows.clear();
                 self.state = LoadState::Failed(format!(
                     "Could not list your pull requests from GitHub: {error}"
                 ));
