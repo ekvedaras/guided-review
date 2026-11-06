@@ -16,13 +16,13 @@ mod sidebar_rows;
 mod snapshots;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use futures::channel::mpsc::{UnboundedReceiver, unbounded};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
     App, AppContext, AsyncApp, Bounds, Context, KeyBinding, TitlebarOptions, Window, WindowBounds,
     WindowHandle, WindowOptions, point, px, size,
@@ -30,15 +30,17 @@ use gpui::{
 use gpui_platform::application;
 
 use crate::app_link::{Answer, AppListener, OpenRequest, Request};
+use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{ActivePr, BuildTicket, Finished, OpenDecision, TourAgents};
+use crate::viewer::{ActivePr, BuildTicket, Finished, OpenDecision, ReviewStateFile, TourAgents};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
+use components::pr_switcher::{PrSwitcherView, PrSwitching};
 use components::text_box;
 use layouts::one_step::{
     Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleWrapLines,
@@ -51,6 +53,7 @@ type Asked = (Request, std::sync::mpsc::Sender<Answer>);
 /// when the first `open` request has built its review.
 pub fn serve(listener: AppListener, home: PathBuf) {
     let (requests, asked) = unbounded::<Asked>();
+    let requests_to_self = requests.clone();
     listener.serve(move |request| {
         let (reply, answer) = std::sync::mpsc::channel();
         if requests.unbounded_send((request, reply)).is_err() {
@@ -60,15 +63,48 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             .recv_timeout(Duration::from_secs(10))
             .unwrap_or_else(|_| refused("the app did not answer in time"))
     });
+    let switching = pr_switching(&requests_to_self, &home);
     application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
+            cx.set_global(switching);
             dock_icon::show();
             bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
             cx.spawn(async move |cx| answer_requests(asked, home, cx).await)
                 .detach();
         });
+}
+
+/// Picking a PR in the switcher is an open request the app makes of itself, so it takes the same path
+/// as one from the command line. No one waits for its answer; a failed build shows in the window.
+fn pr_switching(requests: &UnboundedSender<Asked>, home: &Path) -> PrSwitching {
+    let requests = requests.clone();
+    let home_folder = home.to_path_buf();
+    PrSwitching {
+        relevant: Arc::new(GitHub::from_env()),
+        home: home.to_path_buf(),
+        show: Arc::new(move |pr| {
+            // An unreadable state file only loses the remembered clone folder.
+            let folder = ReviewStateFile::for_pr(&home_folder, &pr)
+                .opened_from()
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| home_folder.clone());
+            let (reply, _) = std::sync::mpsc::channel();
+            let open = OpenRequest {
+                pr: pr.to_string(),
+                folder,
+                terminal: None,
+            };
+            if requests
+                .unbounded_send((Request::Open(open), reply))
+                .is_err()
+            {
+                eprintln!("could not switch to {pr}: the app is closing");
+            }
+        }),
+    }
 }
 
 fn refused(reason: &str) -> Answer {
@@ -224,10 +260,11 @@ fn switch_window(
 
 fn bind_keys(cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
+        PrSwitcherView::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );

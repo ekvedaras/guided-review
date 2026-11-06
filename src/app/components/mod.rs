@@ -11,6 +11,7 @@ pub mod jump_palette;
 pub mod markdown_view;
 pub mod new_commits_banner;
 pub mod palette;
+pub mod pr_switcher;
 pub mod refresh_banner;
 pub mod safety_net_view;
 pub mod sidebar_row;

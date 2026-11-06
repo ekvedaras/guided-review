@@ -38,6 +38,7 @@ use crate::app::components::markdown_view::{
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, TEXT_FONT};
+use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
@@ -109,6 +110,7 @@ pub struct OneStepLayout {
     #[cfg(feature = "snapshots")]
     snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
+    pr_switcher: Entity<PrSwitcherView>,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -161,6 +163,8 @@ impl OneStepLayout {
         ];
         let diagrams = Self::new_diagrams(cx);
         let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
+        let switching = cx.global::<PrSwitching>().clone();
+        let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
         cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
             JumpEvent::QueryChanged(query) => {
                 let targets = this.session.read(cx).review().jump_targets(query);
@@ -228,6 +232,7 @@ impl OneStepLayout {
             #[cfg(feature = "snapshots")]
             snapshots: crate::app::snapshots::Snapshots::from_env(),
             jump,
+            pr_switcher,
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -653,6 +658,16 @@ impl OneStepLayout {
         });
     }
 
+    fn toggle_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pr_switcher.update(cx, |switcher, cx| {
+            if switcher.is_open() {
+                switcher.close(window, cx);
+            } else {
+                switcher.open(window, cx);
+            }
+        });
+    }
+
     fn open_code_button(key: String, link: &CodeLink, cx: &mut Context<Self>) -> Stateful<Div> {
         let link = link.clone();
         let hint = link.clone();
@@ -935,29 +950,43 @@ impl OneStepLayout {
         .child(icon(Icon::ExternalLink, colors.muted_text))
         .child("GitHub")
         .on_click(move |_, _, cx| open_link(&pr_link, cx));
+        let switch_pr = div()
+            .id("title-bar-switch-pr")
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .cursor_pointer()
+            .hover(|button| button.bg(colors.hover))
+            .tooltip(tooltip(|_| "Switch pull request".into()))
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_pr_switcher(window, cx)))
+            .child(icon(Icon::PullRequest, colors.success))
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(colors.muted_text)
+                    .child(pr.short()),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(InlineMarkdown::new("title-bar-title", &title)),
+            );
         TitleBarArea::new("title-bar", colors.background).child(
             div()
                 .flex_1()
                 .min_w_0()
-                .px_4()
+                .px_2()
                 .flex()
                 .items_center()
                 .gap_2()
                 .text_sm()
-                .child(icon(Icon::PullRequest, colors.success))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(colors.muted_text)
-                        .child(pr.short()),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(InlineMarkdown::new("title-bar-title", &title)),
-                )
+                .child(switch_pr)
                 .child(div().flex_1())
                 .child(jump)
                 .child(github),
@@ -1668,6 +1697,7 @@ impl Render for OneStepLayout {
                 row.child(self.ask.clone())
             })
             .child(self.jump.clone())
+            .child(self.pr_switcher.clone())
             .children(frame_painted_marker)
     }
 }
