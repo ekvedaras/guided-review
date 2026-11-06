@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::comments::{CommentPlace, SendMode};
-use super::finish_review::ReviewVerdict;
+use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
@@ -63,6 +63,13 @@ pub trait ReviewThreadsPort: Send + Sync {
 pub trait ReviewWritesPort: Send + Sync {
     /// Whether the viewer has a pending review on the PR, one made here or on the web.
     fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError>;
+
+    /// The latest review the viewer sent on the PR, from here or from the web; `None` when
+    /// there is none. A pending review is not sent, so it is not this.
+    fn viewer_latest_review(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<SubmittedReview>, GitHubError>;
 
     /// Whether the viewer wrote the PR. GitHub refuses their approval or change request.
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError>;

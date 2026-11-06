@@ -2,10 +2,11 @@ use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    ApproveWarning, FinishRefusal, FinishResult, Review, ReviewStateFile, ReviewVerdict,
+    ApproveWarning, FinishRefusal, FinishResult, Review, ReviewOutcome, ReviewStateFile,
+    ReviewVerdict, SubmittedReview,
 };
 use serde_json::json;
 
@@ -246,4 +247,100 @@ fn a_refused_finish_keeps_the_body() {
 
     assert!(matches!(result, FinishResult::Refused(_)));
     assert_eq!(pull.open().finish_body(), "not yet");
+}
+
+fn web_review(outcome: ReviewOutcome, commit: &str) -> SubmittedReview {
+    SubmittedReview {
+        outcome,
+        body: "needs a test".into(),
+        submitted_at: "2026-11-05T13:35:33Z".into(),
+        commit: Sha::new(commit),
+    }
+}
+
+#[test]
+fn a_review_never_sent_has_no_last_review() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+
+    review.pull_last_review(&pull.github()).unwrap();
+
+    assert_eq!(review.last_review(), None);
+}
+
+#[test]
+fn a_review_sent_from_the_web_is_the_last_review() {
+    let pull = Pull::new();
+    let sent = web_review(ReviewOutcome::ChangesRequested, &pull.head);
+    let github = pull.github().with_last_review(sent.clone());
+    let mut review = pull.open();
+
+    review.pull_last_review(&github).unwrap();
+
+    assert_eq!(review.last_review(), Some(&sent));
+}
+
+#[test]
+fn the_last_review_is_old_once_the_pr_has_moved_past_its_commit() {
+    let pull = Pull::new();
+    let github = pull
+        .github()
+        .with_last_review(web_review(ReviewOutcome::Approved, "older-commit"));
+    let mut review = pull.open();
+    review.pull_last_review(&github).unwrap();
+    assert!(!review.last_review_is_old(), "the PR head is not known yet");
+
+    review.check_pr_head(&github).unwrap();
+
+    assert!(review.last_review_is_old());
+}
+
+#[test]
+fn the_last_review_is_not_old_while_the_pr_is_at_its_commit() {
+    let pull = Pull::new();
+    let github = pull
+        .github()
+        .with_last_review(web_review(ReviewOutcome::Approved, &pull.head));
+    let mut review = pull.open();
+    review.pull_last_review(&github).unwrap();
+
+    review.check_pr_head(&github).unwrap();
+
+    assert!(!review.last_review_is_old());
+}
+
+#[test]
+fn finishing_makes_the_review_the_last_one_when_read_again() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    review.pull_viewer_authorship(&github).unwrap();
+
+    review.finish_review(ReviewVerdict::Approve, "ship it", &github);
+    review.pull_last_review(&github).unwrap();
+
+    let last = review.last_review().unwrap();
+    assert_eq!(last.outcome, ReviewOutcome::Approved);
+    assert_eq!(last.body, "ship it");
+    assert_eq!(last.commit, Sha::new(&pull.head));
+}
+
+#[test]
+fn a_last_review_that_could_not_be_read_is_a_problem_until_it_is_read() {
+    let pull = Pull::new();
+    let github = pull.github();
+    github.inject(GitHubFault::ReadsFail);
+    let mut review = pull.open();
+
+    review.pull_last_review(&github).unwrap_err();
+    assert!(
+        review
+            .problems()
+            .iter()
+            .any(|problem| problem.to_string().contains("last review"))
+    );
+
+    github.heal(&GitHubFault::ReadsFail);
+    review.pull_last_review(&github).unwrap();
+    assert_eq!(review.problems().len(), 0);
 }

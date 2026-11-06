@@ -26,6 +26,7 @@ use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
+    SubmittedReview,
 };
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
@@ -115,6 +116,8 @@ pub struct Review {
     head: Sha,
     /// Unknown until GitHub answers.
     pr_head: Option<Sha>,
+    /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
+    last_review: Option<SubmittedReview>,
     files: Vec<ChangedFile>,
     /// Summary, then parent, its children, the next parent (from the big picture to the details),
     /// then the safety net when it holds anything.
@@ -197,6 +200,7 @@ impl Review {
             base,
             head,
             pr_head: None,
+            last_review: None,
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -730,6 +734,24 @@ impl Review {
     pub fn pending_review_is(&mut self, exists: bool) {
         self.not_read.remove(&Read::PendingReview);
         self.comment_desk.pending_review_is(exists);
+    }
+
+    pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
+        self.not_read.remove(&Read::LastReview);
+        self.last_review = last;
+    }
+
+    /// The viewer's latest sent review, from this app or the GitHub web page.
+    pub fn last_review(&self) -> Option<&SubmittedReview> {
+        self.last_review.as_ref()
+    }
+
+    /// The PR has commits the last review did not see. Not so while the PR's head is unknown.
+    pub fn last_review_is_old(&self) -> bool {
+        match (&self.last_review, &self.pr_head) {
+            (Some(review), Some(pr_head)) => review.commit != *pr_head,
+            _ => false,
+        }
     }
 
     /// "Comment now" shows only when there is surely no pending review.

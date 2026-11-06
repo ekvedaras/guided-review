@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::pull_request::PullRequestUrl;
+use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ports::{GitHubError, ReviewWritesPort};
 
@@ -20,6 +20,41 @@ impl ReviewVerdict {
             Self::RequestChanges => "REQUEST_CHANGES",
         }
     }
+}
+
+/// How a review that is on GitHub ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewOutcome {
+    Approved,
+    ChangesRequested,
+    Commented,
+    /// Someone took the review back; it no longer counts for or against the PR.
+    Dismissed,
+}
+
+impl ReviewOutcome {
+    /// From GitHub's `PullRequestReviewState`. A pending review is not sent, so it has no outcome.
+    pub fn from_github_state(state: &str) -> Option<Self> {
+        match state {
+            "APPROVED" => Some(Self::Approved),
+            "CHANGES_REQUESTED" => Some(Self::ChangesRequested),
+            "COMMENTED" => Some(Self::Commented),
+            "DISMISSED" => Some(Self::Dismissed),
+            _ => None,
+        }
+    }
+}
+
+/// The viewer's latest sent review of a PR, as GitHub holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmittedReview {
+    pub outcome: ReviewOutcome,
+    /// What the reviewer wrote with it; empty when nothing.
+    pub body: String,
+    /// GitHub's UTC time, like `2026-11-05T13:35:33Z`.
+    pub submitted_at: String,
+    /// The PR's head when the review was sent.
+    pub commit: Sha,
 }
 
 /// What approving now would skip over.

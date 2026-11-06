@@ -6,10 +6,11 @@ use std::thread;
 
 use crate::support::file_path;
 use guided_review::github::GitHub;
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::viewer::{
     CommentId, CommentPlace, GitHubError, LineLocation, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadId,
+    Resolution, ReviewOutcome, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
+    ThreadId,
 };
 
 /// Answers each POST to /graphql with the next scripted body and remembers what was asked.
@@ -147,6 +148,72 @@ fn asked_as_json(asked: &Arc<Mutex<Vec<String>>>) -> Vec<serde_json::Value> {
 
 fn pr() -> PullRequestUrl {
     "https://github.com/acme/shop/pull/7".parse().unwrap()
+}
+
+const LATEST_REVIEW_COMMENTED: &str =
+    include_str!("../fixtures/github/viewer_latest_review_commented.json");
+
+fn latest_review_answer(state: &str) -> String {
+    LATEST_REVIEW_COMMENTED.replace("COMMENTED", state)
+}
+
+#[test]
+fn the_viewers_latest_review_is_read_with_its_outcome_time_and_commit() {
+    let (url, asked) = serve_graphql(vec![LATEST_REVIEW_COMMENTED.into()]);
+
+    let review = GitHub::at(&url)
+        .viewer_latest_review(&pr())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(review.outcome, ReviewOutcome::Commented);
+    assert_eq!(review.body, "");
+    assert_eq!(review.submitted_at, "2026-11-05T13:35:33Z");
+    assert_eq!(
+        review.commit,
+        Sha::new("af1298eef928facea4139dfe85625c882ec5593b")
+    );
+    assert!(
+        asked_as_json(&asked)[0]["query"]
+            .as_str()
+            .unwrap()
+            .contains("viewerLatestReview")
+    );
+}
+
+#[test]
+fn every_way_a_review_can_end_is_named() {
+    let (url, _) = serve_graphql(
+        ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]
+            .map(latest_review_answer)
+            .into(),
+    );
+    let github = GitHub::at(&url);
+
+    let outcomes: Vec<_> = (0..3)
+        .map(|_| github.viewer_latest_review(&pr()).unwrap().unwrap().outcome)
+        .collect();
+
+    assert_eq!(
+        outcomes,
+        [
+            ReviewOutcome::Approved,
+            ReviewOutcome::ChangesRequested,
+            ReviewOutcome::Dismissed
+        ]
+    );
+}
+
+#[test]
+fn no_review_sent_and_a_pending_one_are_both_no_last_review() {
+    let (url, _) = serve_graphql(vec![
+        r#"{"data":{"repository":{"pullRequest":{"viewerLatestReview":null}}}}"#.into(),
+        latest_review_answer("PENDING"),
+    ]);
+    let github = GitHub::at(&url);
+
+    assert_eq!(github.viewer_latest_review(&pr()).unwrap(), None);
+    assert_eq!(github.viewer_latest_review(&pr()).unwrap(), None);
 }
 
 #[test]

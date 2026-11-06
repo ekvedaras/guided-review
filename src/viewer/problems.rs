@@ -33,6 +33,7 @@ pub enum Read {
     PrDescription,
     PendingReview,
     Authorship,
+    LastReview,
 }
 
 impl fmt::Display for Problem {
@@ -59,6 +60,10 @@ impl fmt::Display for Problem {
             Self::NotRead(Read::Authorship, reason) => write!(
                 formatter,
                 "Could not tell who wrote the PR, so Approve and Request changes may be wrong: {reason}"
+            ),
+            Self::NotRead(Read::LastReview, reason) => write!(
+                formatter,
+                "Could not read your last review from GitHub, so Finish review may not show it: {reason}"
             ),
             Self::IdeNotStarted(reason) => write!(
                 formatter,

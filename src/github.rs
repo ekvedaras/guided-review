@@ -12,9 +12,10 @@ use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
     CommentId, CommentPlace, GitHubError, NoAccess, PullRequestDescriptionPort,
-    PullRequestTipsPort, Reaction, ReactionChange, ReactionCount, Resolution, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, ThreadComment, ThreadId,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
+    PullRequestTipsPort, Reaction, ReactionChange, ReactionCount, Resolution, ReviewOutcome,
+    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
+    SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -523,6 +524,40 @@ impl ReviewWritesPort for GitHub {
         Ok(reviews
             .iter()
             .any(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true)))
+    }
+
+    fn viewer_latest_review(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<SubmittedReview>, GitHubError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        viewerLatestReview { state body submittedAt commit { oid } }
+                    } }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read your last review of {pr}")))?;
+        let review = at(&data, "/repository/pullRequest/viewerLatestReview");
+        if review.is_null() {
+            return Ok(None);
+        }
+        let text = |pointer: &str| at(review, pointer).as_str().map(str::to_owned);
+        let state = text("/state")
+            .with_context(|| format!("GitHub did not say how your last review of {pr} ended"))?;
+        let Some(outcome) = ReviewOutcome::from_github_state(&state) else {
+            return Ok(None);
+        };
+        let missing =
+            |what: &str| format!("GitHub did not give the {what} of your last review of {pr}");
+        Ok(Some(SubmittedReview {
+            outcome,
+            body: text("/body").unwrap_or_default(),
+            submitted_at: text("/submittedAt").with_context(|| missing("time"))?,
+            commit: Sha::new(&text("/commit/oid").with_context(|| missing("commit"))?),
+        }))
     }
 
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {

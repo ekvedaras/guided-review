@@ -8,8 +8,9 @@ use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentId, CommentPlace, GitHubError,
     NoAccess, PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange,
-    ReactionCount, Resolution, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
-    SendMode, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    ReactionCount, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict,
+    ReviewWritesPort, SendMode, SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile,
+    ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -110,6 +111,7 @@ pub struct FakeGitHub {
     has_pending_review: AtomicBool,
     faults: Mutex<Vec<GitHubFault>>,
     viewer_is_author: AtomicBool,
+    last_review: Mutex<Option<SubmittedReview>>,
     /// What the reviewer changed since: GitHub shows it on the next read of the threads.
     resolved_now: Mutex<BTreeMap<ThreadId, bool>>,
     reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
@@ -125,6 +127,7 @@ impl FakeGitHub {
             has_pending_review: AtomicBool::new(false),
             faults: Mutex::default(),
             viewer_is_author: AtomicBool::new(false),
+            last_review: Mutex::default(),
             resolved_now: Mutex::default(),
             reacted_now: Mutex::default(),
         }
@@ -132,6 +135,12 @@ impl FakeGitHub {
 
     pub fn with_viewer_as_pull_author(self) -> Self {
         self.viewer_is_author.store(true, Ordering::SeqCst);
+        self
+    }
+
+    /// A review the viewer sent on the GitHub web page.
+    pub fn with_last_review(self, review: SubmittedReview) -> Self {
+        *self.last_review.lock().unwrap() = Some(review);
         self
     }
 
@@ -365,6 +374,14 @@ impl ReviewWritesPort for FakeGitHub {
         Ok(self.has_pending_review_now())
     }
 
+    fn viewer_latest_review(
+        &self,
+        _pr: &PullRequestUrl,
+    ) -> Result<Option<SubmittedReview>, GitHubError> {
+        self.fail_if_reads_fail()?;
+        Ok(self.last_review.lock().unwrap().clone())
+    }
+
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         self.sent.record(GitHubCall::AuthorOf(pr.clone()));
         self.fail_if_reads_fail()?;
@@ -427,6 +444,16 @@ impl ReviewWritesPort for FakeGitHub {
         });
         self.fail_if_connection_lost()?;
         self.has_pending_review.store(false, Ordering::SeqCst);
+        *self.last_review.lock().unwrap() = Some(SubmittedReview {
+            outcome: match verdict {
+                ReviewVerdict::Comment => ReviewOutcome::Commented,
+                ReviewVerdict::Approve => ReviewOutcome::Approved,
+                ReviewVerdict::RequestChanges => ReviewOutcome::ChangesRequested,
+            },
+            body: body.to_owned(),
+            submitted_at: "2026-11-06T09:00:00Z".to_owned(),
+            commit: self.tips.1.clone(),
+        });
         Ok(())
     }
 }

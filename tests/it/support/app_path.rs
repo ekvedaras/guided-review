@@ -13,6 +13,7 @@ pub trait AppPath {
     fn pull_threads(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     fn pull_pending_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     fn pull_viewer_authorship(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
+    fn pull_last_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     /// `None` when there is no draft at `place`.
     fn send_comment(
         &mut self,
@@ -69,6 +70,14 @@ impl AppPath for Review {
             .has_pending_review(self.pr())
             .inspect_err(|error| self.could_not_read(Read::PendingReview, error))?;
         self.pending_review_is(exists);
+        Ok(())
+    }
+
+    fn pull_last_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
+        let last = github
+            .viewer_latest_review(self.pr())
+            .inspect_err(|error| self.could_not_read(Read::LastReview, error))?;
+        self.last_review_is(last);
         Ok(())
     }
 
