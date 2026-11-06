@@ -8,7 +8,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    PickCodeSource, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
+    PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -280,6 +280,27 @@ fn a_writer_that_ends_without_refreshing_fails_the_refresh_with_what_it_said() {
         "claude ended without refreshing the tour: I could not do the refresh. Bash is blocked."
     );
     assert!(shop.text_may_be_old("total"));
+}
+
+#[test]
+fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_goes_through() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.repin_onto_head_with_a_new_class();
+    let tour = Tour::load(&shop.tour_path()).unwrap();
+    let mut review = Review::open(tour, &shop.source(), shop.state_file()).unwrap();
+
+    let error = refresher(&shop, Writer::GivesUp).run().err().unwrap();
+    review.refresh_failed(&error);
+
+    assert_eq!(
+        review.problems(),
+        [Problem::TourNotRefreshed(
+            "claude ended without refreshing the tour: I could not do the refresh. Bash is blocked."
+                .into()
+        )]
+    );
+    let refreshed = refresher(&shop, Writer::Refreshes).run().unwrap();
+    assert_eq!(refreshed.review.problems(), []);
 }
 
 fn fake_claude(dir: &Path, exit_code: u8) -> PathBuf {

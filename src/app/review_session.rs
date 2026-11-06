@@ -452,8 +452,9 @@ impl ReviewSession {
                     this.reopen(refreshed, cx);
                 }
                 Err(error) => {
-                    this.refresh_progress = RefreshProgress::Failed(format!("{error:#}"));
-                    cx.notify();
+                    this.refresh_progress = RefreshProgress::Failed;
+                    this.review.refresh_failed(&error);
+                    this.show_problems(cx);
                 }
             },
         )

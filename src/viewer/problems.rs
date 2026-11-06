@@ -22,6 +22,8 @@ pub enum Problem {
     SavedReviewNotRead(PathBuf),
     /// Ticks wait in the queue to reach GitHub's viewed marks, and GitHub may show them as unviewed.
     ViewedNotSynced(String),
+    /// The AI Refresh ended and the steps marked as old are still as they were.
+    TourNotRefreshed(String),
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -75,6 +77,9 @@ impl fmt::Display for Problem {
                 formatter,
                 "Viewed marks are not synced with GitHub, they are retried on the next sync: {reason}"
             ),
+            Self::TourNotRefreshed(reason) => {
+                write!(formatter, "The tour was not refreshed: {reason}")
+            }
         }
     }
 }

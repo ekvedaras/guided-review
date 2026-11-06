@@ -12,7 +12,8 @@ use super::palette::Colors;
 pub enum RefreshProgress {
     Idle,
     Running,
-    Failed(String),
+    /// The reason is a problem of the review, shown in the sidebar.
+    Failed,
 }
 
 type OnRefresh = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -45,7 +46,7 @@ impl RenderOnce for RefreshBanner {
         let colors = Colors::active(cx);
         let message = match &self.progress {
             RefreshProgress::Running => "Refreshing the tour with your claude…".to_owned(),
-            RefreshProgress::Idle | RefreshProgress::Failed(_) => format!(
+            RefreshProgress::Idle | RefreshProgress::Failed => format!(
                 "{} to rewrite, {} to place since the new commits.",
                 counted(self.brief.stale_steps.len(), "step", "steps"),
                 counted(
@@ -56,7 +57,7 @@ impl RenderOnce for RefreshBanner {
             ),
         };
         let button_label = match &self.progress {
-            RefreshProgress::Failed(_) => "Try again",
+            RefreshProgress::Failed => "Try again",
             RefreshProgress::Idle | RefreshProgress::Running => "Refresh",
         };
         let button = (self.progress != RefreshProgress::Running).then(|| {
@@ -74,14 +75,11 @@ impl RenderOnce for RefreshBanner {
                 "{hint}. A full redo may read better: `/tour --redo` in claude."
             )))
         });
-        let error = match &self.progress {
-            RefreshProgress::Failed(error) => Some(
-                div()
-                    .text_color(colors.danger)
-                    .child(SharedString::from(error.clone())),
-            ),
-            RefreshProgress::Idle | RefreshProgress::Running => None,
-        };
+        let failed = (self.progress == RefreshProgress::Failed).then(|| {
+            div()
+                .text_color(colors.danger)
+                .child("The last refresh did not go through, the sidebar says why.")
+        });
         div()
             .px_6()
             .py_2()
@@ -101,7 +99,7 @@ impl RenderOnce for RefreshBanner {
                     .children(button),
             )
             .children(redo_hint)
-            .children(error)
+            .children(failed)
     }
 }
 

@@ -147,6 +147,8 @@ pub struct Review {
     saved_review_kept_as: Option<PathBuf>,
     /// Why the last sync of viewed marks failed, until one goes through.
     viewed_not_synced: Option<String>,
+    /// Why the last Refresh did not go through; a Refresh that does opens a new review.
+    tour_not_refreshed: Option<String>,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -215,6 +217,7 @@ impl Review {
             code_on_github: source.fallback_reason().map(str::to_owned),
             saved_review_kept_as,
             viewed_not_synced: None,
+            tour_not_refreshed: None,
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -1098,6 +1101,10 @@ impl Review {
         self.repin_running = true;
     }
 
+    pub fn refresh_failed(&mut self, error: &anyhow::Error) {
+        self.tour_not_refreshed = Some(format!("{error:#}"));
+    }
+
     pub fn repin_failed(&mut self) {
         self.repin_running = false;
         self.refused_while_repinning = false;
@@ -1256,6 +1263,11 @@ impl Review {
             .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
             .chain(self.code_on_github.clone().map(Problem::CodeOnGitHub))
             .chain(self.viewed_not_synced.clone().map(Problem::ViewedNotSynced))
+            .chain(
+                self.tour_not_refreshed
+                    .clone()
+                    .map(Problem::TourNotRefreshed),
+            )
             .chain(
                 self.saved_review_kept_as
                     .clone()
