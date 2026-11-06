@@ -5,12 +5,43 @@ Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub
 ## Requirements
 
 - macOS (the only platform tested; CI runs on macOS).
-- A Rust toolchain, stable (edition 2024).
+- A Rust toolchain, stable (edition 2024), only to build from source.
 - [`gh`](https://cli.github.com), logged in. The app reads the token from `gh auth token`.
 - [Claude Code](https://claude.com/claude-code) (`claude`), which writes the tours.
 - [herdr](https://herdr.dev) (`hc` and `herdr-app`), only for the agent features: the PR switcher starting a tour writer, comments reaching the tour's agent, Refresh. Without herdr the app turns those features off and says why; opening and reading an existing tour does not need it.
 
 ## Install
+
+### Prebuilt (no Rust needed)
+
+Download the archive for your Mac from the [latest release](https://github.com/ekvedaras/guided-review/releases/latest): `aarch64-apple-darwin` for Apple Silicon, `x86_64-apple-darwin` for Intel. Then:
+
+```sh
+VERSION=0.1.0 TARGET=aarch64-apple-darwin   # the release you downloaded
+shasum -a 256 -c guided-review-$VERSION-$TARGET.tar.gz.sha256   # optional
+tar xzf guided-review-$VERSION-$TARGET.tar.gz
+mkdir -p ~/.local/bin
+mv guided-review-$VERSION-$TARGET/guided-review ~/.local/bin/
+```
+
+`~/.local/bin` must be on `PATH`, also for agents the app starts.
+
+The binary is not signed or notarized, so macOS Gatekeeper blocks a downloaded copy. Remove the quarantine flag once:
+
+```sh
+xattr -d com.apple.quarantine ~/.local/bin/guided-review
+```
+
+Link the tour skill from the unpacked folder so Claude Code finds `/tour`. Keep that folder, the link points into it:
+
+```sh
+mkdir -p ~/.claude/skills
+ln -s "$PWD/guided-review-$VERSION-$TARGET/skills/tour" ~/.claude/skills/tour
+```
+
+The CLI embeds the skill, so keep both from the same release.
+
+### From source
 
 ```sh
 cargo install --path .
