@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Pictures of every screen of a tour, for looking at the UI: <n>-top.png and <n>-end.png in the output folder.
+# Usage: scripts/snapshot <pr-url> [out-dir]   (default out-dir: /tmp/guided-review-snapshots)
+# The PR needs a tour on disk (~/.guided-review/tours). Runs the app on a throwaway HOME so the maintainer's
+# running app is left alone; waits until the snapshot run has quit.
+set -euo pipefail
+
+pr="${1:?usage: scripts/snapshot <pr-url> [out-dir]}"
+out="${2:-/tmp/guided-review-snapshots}"
+
+cd "$(dirname "$0")/.."
+
+if ! command -v cargo >/dev/null 2>&1; then
+    export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$HOME/.cargo/bin:$PATH"
+fi
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
+
+repo="$PWD"
+real_home="$HOME"
+export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
+cargo build --features snapshots
+binary="$repo/target/debug/guided-review"
+
+rm -rf "$out"
+mkdir -p "$out"
+home="$(mktemp -d)"
+trap 'rm -rf "$home"' EXIT
+
+export HOME="$home"
+export GUIDED_REVIEW_TOURS_DIR="$real_home/.guided-review/tours"
+export GUIDED_REVIEW_APP_COMMAND="$binary"
+export GUIDED_REVIEW_SNAPSHOTS="$out"
+"$binary" open "$pr"
+
+for _ in $(seq 1 240); do
+    [ -S "$home/.guided-review/app.sock" ] || break
+    pgrep -f "$binary serve" >/dev/null || break
+    sleep 1
+done
+
+for png in "$out"/*.png; do
+    sips -Z 2000 "$png" >/dev/null
+done
+ls "$out"
