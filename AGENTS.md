@@ -17,6 +17,10 @@ Rust 2024 gpui app.
 - `src/viewer/` is the window-free core and is tested through those fakes. `src/app/` is gpui with no window tests, so put logic behind a viewer method.
 - New behaviour is test-first, one slice at a time: write the test, stub the new code with `todo!()`, see `cargo test <filter>` fail on that test, then implement. A test that was never red proves nothing.
 
+## Releasing
+
+Bump the version in `Cargo.toml` and `Cargo.lock`, then push the tag `v<version>`. The release workflow builds the archives and creates a draft release whose notes are the commit subjects since the previous `v*` tag, grouped by prefix. Review the draft on GitHub and publish it. Preview the notes locally with `scripts/release-notes <from-tag-or-empty> <to-ref>`, e.g. `scripts/release-notes "" main`.
+
 ## herdr
 
 - herdr-core (`hc`) and herdr-app run the maintainer's live terminals. `.claude/settings.json` denies driving them directly. To try herdr, use `scripts/herdr-probe`: `start` gives a throwaway terminal, every other verb works only on those, and `clean` removes them when done.
