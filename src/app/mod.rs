@@ -22,9 +22,7 @@ use gpui::{
 };
 use gpui_platform::application;
 
-use crate::code_source::CodeSource;
-use crate::ide::{Ide, NoIde};
-use crate::viewer::{GitHubPort, Review, TourRefresher, TourRepinner};
+use crate::open_review::OpenedReview;
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
@@ -37,15 +35,7 @@ use layouts::one_step::{
 use review_session::TourWork;
 
 /// Blocks until the window is closed.
-pub fn run(
-    review: Review,
-    source: Arc<dyn CodeSource>,
-    ask: AskSetup,
-    ide: Result<Ide, NoIde>,
-    github: Arc<dyn GitHubPort>,
-    repinner: TourRepinner,
-    refresher: TourRefresher,
-) {
+pub fn run(opened: OpenedReview) {
     application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
@@ -81,15 +71,23 @@ pub fn run(
             let opened = cx.open_window(options, |window, cx| {
                 cx.set_global(Appearance::of_window(window.appearance()));
                 let collaborators = Collaborators {
-                    github,
-                    ide,
+                    github: opened.github,
+                    ide: opened.ide,
                     tour_work: TourWork {
-                        repinner: Arc::new(repinner),
-                        refresher: Arc::new(refresher),
+                        repinner: Arc::new(opened.repinner),
+                        refresher: Arc::new(opened.refresher),
                     },
                 };
-                let layout =
-                    cx.new(|cx| OneStepLayout::new(review, source, ask, collaborators, window, cx));
+                let layout = cx.new(|cx| {
+                    OneStepLayout::new(
+                        opened.review,
+                        opened.source,
+                        opened.ask,
+                        collaborators,
+                        window,
+                        cx,
+                    )
+                });
                 layout.update(cx, |_, cx| {
                     cx.observe_window_appearance(window, |_, window, cx| {
                         cx.set_global(Appearance::of_window(window.appearance()));

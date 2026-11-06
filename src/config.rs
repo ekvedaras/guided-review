@@ -61,6 +61,10 @@ impl Config {
         let Some(home) = std::env::home_dir() else {
             return Ok(Self::default());
         };
+        Self::load_from(&home)
+    }
+
+    pub fn load_from(home: &std::path::Path) -> anyhow::Result<Self> {
         let path = home.join(".guided-review/config.toml");
         match std::fs::read_to_string(&path) {
             Ok(text) => Self::parse(&text, &path.display().to_string()),

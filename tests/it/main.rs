@@ -34,6 +34,7 @@ mod line_number;
 mod markdown;
 mod new_commits;
 mod open;
+mod open_review;
 mod outline;
 mod outline_extras;
 mod outline_images;

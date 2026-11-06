@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -27,6 +27,15 @@ impl OpenedPr {
             current_dir: std::env::current_dir().context("could not read the current folder")?,
             github: GitHub::from_env(),
         })
+    }
+
+    pub fn in_folders(pr: &PullRequestUrl, home: &Path, current_dir: &Path) -> Self {
+        Self {
+            pr: pr.clone(),
+            home: home.to_path_buf(),
+            current_dir: current_dir.to_path_buf(),
+            github: GitHub::from_env(),
+        }
     }
 
     pub fn tour_path(&self) -> PathBuf {

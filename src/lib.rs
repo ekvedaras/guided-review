@@ -15,6 +15,7 @@ pub mod json;
 pub mod language;
 pub mod line_number;
 pub mod local_git;
+pub mod open_review;
 pub mod opened_pr;
 pub mod outline;
 pub mod pick_code_source;

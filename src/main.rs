@@ -1,15 +1,9 @@
-use std::path::Path;
-use std::sync::Arc;
-
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use guided_review::app::AskSetup;
-use guided_review::claude_cli::{
-    ClaudeCli, ClaudeEvalWriter, ClaudeRefreshWriter, ClaudeTourJudge,
-};
-use guided_review::config::Config;
+use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
-use guided_review::ide::Ide;
+use guided_review::open_review::open_review;
 use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
 use guided_review::pieces;
@@ -19,9 +13,7 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{
-    Asks, RefreshBrief, Review, TourRefresher, TourRepinner, WorkingCopy, repin_tour,
-};
+use guided_review::viewer::{RefreshBrief, repin_tour};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -233,49 +225,7 @@ fn eval(existing_tours: bool) -> anyhow::Result<()> {
 }
 
 fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let opened = OpenedPr::new(pr)?;
-    let tour_path = opened.tour_path();
-    if !tour_path.exists() {
-        anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
-    }
-    let tour = Tour::load(&tour_path)?;
-    let code = opened.at_pinned_tips(&tour)?;
-    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
-    let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
-    review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
-
-    let clone = code.source.local_clone().map(Path::to_path_buf);
-    let config = Config::load()?;
-    let pick_code_source = opened.code_source_picker();
-
-    let ask = AskSetup {
-        asks: Asks::load(Arc::new(opened.state_file()))?,
-        launcher: Arc::new(ClaudeCli::new()),
-        clone: clone.clone(),
-        settings: config.ask_settings(),
-    };
-    let refresher = TourRefresher {
-        home: opened.home.clone(),
-        pr: pr.clone(),
-        pick_code_source: Arc::clone(&pick_code_source),
-        writer: Arc::new(ClaudeRefreshWriter::new(
-            clone.clone().unwrap_or_else(|| opened.home.clone()),
-        )),
-    };
-    let repinner = TourRepinner {
-        home: opened.home,
-        pr: pr.clone(),
-        pick_code_source,
-    };
-    let ide = Ide::for_clone(clone, config.ide_template());
-    guided_review::app::run(
-        review,
-        code.source.into(),
-        ask,
-        ide,
-        Arc::new(opened.github),
-        repinner,
-        refresher,
-    );
+    let current_dir = std::env::current_dir().context("could not read the current folder")?;
+    guided_review::app::run(open_review(pr, &current_dir, &home_folder()?)?);
     Ok(())
 }
