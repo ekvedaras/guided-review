@@ -12,6 +12,23 @@ Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub
 
 ## Install
 
+### Let your agent do it
+
+Paste this into Claude Code (or any coding agent with a shell):
+
+```text
+Install guided-review (https://github.com/ekvedaras/guided-review) for me from its latest GitHub release. Do it yourself, one step at a time, and stop and tell me if any step fails:
+1. Find my Mac's architecture with `uname -m`: arm64 means target aarch64-apple-darwin, x86_64 means x86_64-apple-darwin. Stop if this is not macOS.
+2. Find the latest release and its assets: `gh release view --repo ekvedaras/guided-review --json tagName,assets` (or, without gh, https://api.github.com/repos/ekvedaras/guided-review/releases/latest). Pick guided-review-<version>-<target>.tar.gz and its .sha256.
+3. Download both into a new empty folder ~/.local/share/guided-review/<version>/, check the archive with `shasum -a 256 -c <archive>.sha256`, and unpack it there with `tar xzf`.
+4. Link the binary: `mkdir -p ~/.local/bin` and `ln -sf` the unpacked guided-review binary to ~/.local/bin/guided-review. Remove the macOS quarantine flag from the unpacked binary with `xattr -d com.apple.quarantine <path>` (ignore "No such xattr").
+5. Link the tour skill: point ~/.claude/skills/tour at the unpacked skills/tour folder with `ln -sfn`. If ~/.claude/skills/tour exists and is a real folder rather than a link, ask me before replacing it.
+6. If ~/.local/bin is not on my PATH, tell me which line to add to my shell profile; do not edit it yourself.
+7. Run `guided-review --version` and tell me the installed version.
+```
+
+To update later, paste the same prompt again: each version unpacks into its own folder and the links move to the newest.
+
 ### Prebuilt (no Rust needed)
 
 Download the archive for your Mac from the [latest release](https://github.com/ekvedaras/guided-review/releases/latest): `aarch64-apple-darwin` for Apple Silicon, `x86_64-apple-darwin` for Intel. Then:
