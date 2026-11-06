@@ -27,6 +27,8 @@ use crate::viewer::{
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
+/// How long to wait before handing off again to an agent whose screen had not settled since it started.
+const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Rows laid out beyond the visible part, so a fast scroll does not show a blank edge.
 const LIST_OVERDRAW: f32 = 300.;
@@ -60,6 +62,7 @@ pub struct ReviewSession {
     show_agent: Option<Task<()>>,
     /// A hand-off being typed into the tour agent; the next one waits for it.
     delivering: Option<Task<()>>,
+    delivery_retry: Option<Task<()>>,
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
@@ -153,6 +156,7 @@ impl ReviewSession {
             tour_agent_follow: None,
             show_agent: None,
             delivering: None,
+            delivery_retry: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
             screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
@@ -697,11 +701,18 @@ impl ReviewSession {
             |this, outcome, cx| {
                 this.delivering = None;
                 let started_an_agent = outcome.started_an_agent();
+                let try_again_soon = outcome.wants_another_try_soon();
                 if let Err(error) = this.change(cx, |review| review.apply_delivery(outcome)) {
                     eprintln!("could not save where a hand-off is: {error:#}");
                 }
                 if started_an_agent {
                     this.follow_tour_agent(cx);
+                }
+                if try_again_soon {
+                    this.delivery_retry = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(AGENT_START_RETRY).await;
+                        this.update(cx, Self::deliver_hand_offs).ok();
+                    }));
                 }
             },
         ));

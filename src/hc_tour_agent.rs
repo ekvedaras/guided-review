@@ -1,8 +1,9 @@
 //! The tour agent port over herdr's `hc` CLI, and `herdr-app` to show a terminal.
 
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader};
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, bail};
@@ -21,15 +22,50 @@ const STARTED_BY_APP_LABEL: &str = "gr.started-by=app";
 pub struct HcTourAgents {
     hc: PathBuf,
     herdr_app: PathBuf,
+    /// The `PATH` an agent the app starts runs with.
+    agents_path: String,
 }
 
 impl HcTourAgents {
     pub fn new() -> Self {
+        let agents_path = std::env::current_exe().map_or_else(
+            |_| std::env::var("PATH").unwrap_or_default(),
+            |own| Self::path_for_agents(&own, std::env::var_os("PATH").as_deref()),
+        );
         Self::with_binaries(PathBuf::from("hc"), PathBuf::from("herdr-app"))
+            .giving_agents_path(&agents_path)
     }
 
     pub fn with_binaries(hc: PathBuf, herdr_app: PathBuf) -> Self {
-        Self { hc, herdr_app }
+        Self {
+            hc,
+            herdr_app,
+            agents_path: String::new(),
+        }
+    }
+
+    pub fn giving_agents_path(mut self, path: &str) -> Self {
+        path.clone_into(&mut self.agents_path);
+        self
+    }
+
+    /// Herdr starts a terminal with its server's environment, not the app's, and Claude's Bash tool
+    /// looks commands up in it: without the folder of the running `guided-review` in front, an agent
+    /// may find no `guided-review` at all (docs/wiki/agent-runs.md).
+    pub fn path_for_agents(guided_review: &Path, path: Option<&OsStr>) -> String {
+        let mut folders: Vec<PathBuf> = path
+            .map(|path| std::env::split_paths(path).collect())
+            .unwrap_or_default();
+        if let Some(own) = guided_review.parent()
+            && !folders.iter().any(|folder| folder == own)
+        {
+            folders.insert(0, own.to_owned());
+        }
+        folders
+            .iter()
+            .map(|folder| folder.display().to_string())
+            .collect::<Vec<_>>()
+            .join(":")
     }
 
     fn hc(&self, args: &[&str]) -> anyhow::Result<Value> {
@@ -195,6 +231,11 @@ impl TourAgentPort for HcTourAgents {
             return Ok(SendOutcome::Delivered);
         }
         let refusal: Value = serde_json::from_slice(&output.stderr).unwrap_or(Value::Null);
+        // Herdr waits for a new terminal's screen to settle before it types into it; a Claude busy with
+        // the first task from its command line can outlast that wait.
+        if at(&refusal, "/error/kind") == "unavailable" {
+            return Ok(SendOutcome::Starting);
+        }
         if at(&refusal, "/error/kind") != "status_mismatch" {
             bail!(
                 "`hc send` failed: {}",
@@ -259,6 +300,7 @@ impl TourAgentPort for HcTourAgents {
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
         let folder = start.folder.display().to_string();
         let pr_label = label_of(&start.pr);
+        let path = format!("PATH={}", self.agents_path);
         let args = [
             "run",
             "--bg",
@@ -276,6 +318,8 @@ impl TourAgentPort for HcTourAgents {
             "--label",
             STARTED_BY_APP_LABEL,
             "--",
+            "env",
+            &path,
             "claude",
             &start.first_task,
             "--permission-mode",

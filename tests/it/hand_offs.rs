@@ -513,6 +513,27 @@ fn with_no_agent_for_the_pr_one_is_started_and_the_hand_off_goes_once_it_is_idle
 }
 
 #[test]
+fn an_agent_still_starting_keeps_the_hand_off_queued_and_asks_to_try_again_soon() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    fake.still_starting("t1");
+    let agents = agents_of(&fake);
+
+    let outcome = review.delivery_request().unwrap().run(&agents);
+    assert!(outcome.wants_another_try_soon());
+    review.apply_delivery(outcome).unwrap();
+
+    assert_eq!(states(&review)[0], HandOffState::Queued);
+    fake.settled("t1");
+    let outcome = review.delivery_request().unwrap().run(&agents);
+    assert!(!outcome.wants_another_try_soon());
+    review.apply_delivery(outcome).unwrap();
+    assert_eq!(states(&review)[0], HandOffState::Delivered);
+}
+
+#[test]
 fn a_delivered_hand_off_is_working_while_the_agent_works_and_ends_unanswered_when_it_goes_idle() {
     let pull = Pull::new();
     let mut github = pull.github();

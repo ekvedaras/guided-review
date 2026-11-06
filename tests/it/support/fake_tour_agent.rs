@@ -44,6 +44,8 @@ pub struct FakeTourAgent {
     started_by_app: Mutex<BTreeMap<TerminalId, u64>>,
     /// What every terminal shows, top line first.
     screen: Mutex<Vec<String>>,
+    /// Terminals whose screen has not settled since they started, so herdr types nothing into them.
+    starting: Mutex<Vec<TerminalId>>,
 }
 
 impl FakeTourAgent {
@@ -56,6 +58,7 @@ impl FakeTourAgent {
             live: Mutex::default(),
             started_by_app: Mutex::default(),
             screen: Mutex::default(),
+            starting: Mutex::default(),
         }
     }
 
@@ -90,6 +93,21 @@ impl FakeTourAgent {
         {
             *current = status;
         }
+    }
+
+    /// Herdr refuses to type into the terminal until `settled` is called.
+    pub fn still_starting(&self, terminal: &str) {
+        self.starting
+            .lock()
+            .unwrap()
+            .push(TerminalId::new(terminal));
+    }
+
+    pub fn settled(&self, terminal: &str) {
+        self.starting
+            .lock()
+            .unwrap()
+            .retain(|starting| starting.as_str() != terminal);
     }
 
     pub fn live_terminal_addresses(&self) -> Vec<String> {
@@ -210,6 +228,9 @@ impl TourAgentPort for FakeTourAgent {
     }
 
     fn send_if_idle(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<SendOutcome> {
+        if self.starting.lock().unwrap().contains(terminal) {
+            return Ok(SendOutcome::Starting);
+        }
         let mut terminals = self.terminals.lock().unwrap();
         let (_, status) = terminals
             .get_mut(terminal)

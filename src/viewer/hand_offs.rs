@@ -167,6 +167,7 @@ impl DeliveryRequest {
         let how = match agents.send_if_idle(&self.pr, &self.text) {
             Ok(SendOutcome::Delivered) => Delivery::Delivered,
             Ok(SendOutcome::Refused(_)) => Delivery::Waiting,
+            Ok(SendOutcome::Starting) => Delivery::AgentStarting,
             Ok(SendOutcome::NoAgent) => match agents.start(&self.pr, &self.pr) {
                 Ok(()) => Delivery::AgentStarted,
                 Err(error) => Delivery::Failed(format!("{error:#}")),
@@ -187,6 +188,11 @@ impl DeliveryOutcome {
     pub fn started_an_agent(&self) -> bool {
         matches!(self.how, Delivery::AgentStarted)
     }
+
+    /// The agent was just started and took nothing yet; no status change may come to try again on.
+    pub fn wants_another_try_soon(&self) -> bool {
+        matches!(self.how, Delivery::AgentStarting)
+    }
 }
 
 enum Delivery {
@@ -195,6 +201,8 @@ enum Delivery {
     AgentStarted,
     /// The agent is not ready; the hand-off stays queued.
     Waiting,
+    /// The agent's screen has not settled since it started; the hand-off stays queued.
+    AgentStarting,
     Failed(String),
 }
 
@@ -320,7 +328,7 @@ impl HandOffs {
     pub(super) fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
         let state = match outcome.how {
             Delivery::Delivered => HandOffState::Delivered,
-            Delivery::Waiting | Delivery::AgentStarted => return,
+            Delivery::Waiting | Delivery::AgentStarting | Delivery::AgentStarted => return,
             Delivery::Failed(reason) => HandOffState::Failed(reason),
         };
         if let Some(hand_off) = self.0.iter_mut().find(|h| h.id == outcome.id) {

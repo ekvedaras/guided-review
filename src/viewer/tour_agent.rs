@@ -82,6 +82,8 @@ pub enum SendOutcome {
     Delivered,
     /// Nothing was typed; herdr's reason, such as "t7 is working, not idle".
     Refused(String),
+    /// Nothing was typed: the agent was just started and its screen has not settled yet. Try again shortly.
+    Starting,
     /// The PR has no tour agent to send to.
     NoAgent,
 }

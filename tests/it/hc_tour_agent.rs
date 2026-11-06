@@ -303,6 +303,26 @@ fn a_working_agent_refuses_the_text_with_herdrs_reason() {
 }
 
 #[test]
+fn an_agent_whose_screen_has_not_settled_since_it_started_is_still_starting_and_takes_nothing() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("refuse-idle"),
+        include_str!("../fixtures/hc/send-refused-starting.json"),
+    )
+    .unwrap();
+
+    let sent = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(sent, SendOutcome::Starting);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        ["send t2b --if idle a question"]
+    );
+}
+
+#[test]
 fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_done_not_idle() {
     let dir = TempDir::new().unwrap();
     std::fs::write(
@@ -323,7 +343,8 @@ fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_d
 }
 
 #[test]
-fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_and_tools() {
+fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_tools_and_the_apps_path()
+ {
     let dir = TempDir::new().unwrap();
     answer(
         dir.path(),
@@ -332,6 +353,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_a
     );
 
     let started = adapter(dir.path())
+        .giving_agents_path("/opt/gr/bin:/usr/bin")
         .start(&TourAgentStart {
             pr: pr(),
             name: "tour-acme-shop-7".to_owned(),
@@ -351,7 +373,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_a
         format!(
             "run --bg --json --outlive-parent --no-parent --name tour-acme-shop-7 --cwd /clones/shop \
              --label app=guided-review --label gr.pr={PR} --label gr.started-by=app \
-             -- claude You are the tour agent --permission-mode dontAsk"
+             -- env PATH=/opt/gr/bin:/usr/bin claude You are the tour agent --permission-mode dontAsk"
         )
     );
     let tools: Vec<&str> = tools.split(',').collect();
@@ -370,6 +392,29 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_a
             "{tool} could change something other than the tour"
         );
     }
+}
+
+#[test]
+fn agents_get_a_path_that_finds_the_running_guided_review_before_the_rest_of_the_apps_path() {
+    assert_eq!(
+        HcTourAgents::path_for_agents(
+            Path::new("/Users/me/.cargo/bin/guided-review"),
+            Some("/opt/homebrew/bin:/usr/bin".as_ref())
+        ),
+        "/Users/me/.cargo/bin:/opt/homebrew/bin:/usr/bin"
+    );
+    assert_eq!(
+        HcTourAgents::path_for_agents(
+            Path::new("/Users/me/.cargo/bin/guided-review"),
+            Some("/usr/bin:/Users/me/.cargo/bin".as_ref())
+        ),
+        "/usr/bin:/Users/me/.cargo/bin",
+        "already on it"
+    );
+    assert_eq!(
+        HcTourAgents::path_for_agents(Path::new("/Users/me/.cargo/bin/guided-review"), None),
+        "/Users/me/.cargo/bin"
+    );
 }
 
 #[test]
