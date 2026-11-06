@@ -44,4 +44,18 @@ On 2026-11-06 the maintainer set which terminal becomes a PR's tour agent on `op
 - The writer's `open` is the only "done" signal. A writer that goes idle after working without that `open`, whose terminal ends, or that could not start (the cap of 3) fails; the loading screen shows why with its last screen lines, Try again and Show agent, and the switcher row says "writing failed".
 - An `open` from a terminal the app started (`gr.started-by=app`) of a PR not on screen never switches the window; the CLI answers `kept_in_background`. Which tours are being written and which PRs got an agent reply while not shown live in the app's memory only, so a restart forgets them.
 - Checked on a probe terminal: a writer with that tool list and first task wrote, checked and opened the tour of ekvedaras/guided-review#82 (one file) with no denied call, making the tour folder through Write. `open` was stubbed so the maintainer's app was not reached, and the installed skill was the one before this change.
-- `hc read <t> --json --lines N` answers `{"complete","how","text"}`; fixture in `tests/fixtures/hc/read-lines.json`. Of a Claude terminal the last 20 lines are mostly its prompt box and status bar.
+- `hc read <t> --json --lines N` answers `{"complete","how","text"}`; fixture in `tests/fixtures/hc/read-lines.json`. Of a Claude terminal the last 20 lines are mostly its prompt box and status bar (fixed below).
+
+## Agents the app started could not find `guided-review` (2026-11-06)
+
+The maintainer's hand test: Ask agent on a PR with no tour agent started t2q, then showed "Hand-off failed: `hc send` failed: {json…}"; macOS asked for permissions at that moment. Picking a PR with no tour in the switcher started t2r, and the loading screen soon said the tour agent stopped without a tour, showing only Claude's empty prompt box.
+
+Found from `hc get`/`hc read` of t2q and t2r and their Claude transcripts:
+
+- Both agents got their first task (on Claude's command line) and worked on it. In both, the first `guided-review` call failed with `command not found`. `hc run` starts a terminal with the herdr server's environment, not the caller's: their `PATH` was `~/.local/bin:/opt/homebrew/bin:/usr/bin:/bin`, without `~/.cargo/bin`. t2r said so and stopped, so the writing failed rightly. t2q, told to find the tour, searched with Glob over the whole home folder (ripgrep timed out after 20 s) and `~/Library/Application Support`. That search is what raised the macOS permission prompts. The app runs no AppleScript.
+- The hand-off to t2q was sent while Claude was busy with its first task. Herdr refuses to type into a terminal whose screen has not settled since it started: exit 5, `kind: unavailable`, "t2q is still starting: its output has not settled" (reproduced on a probe, fixture `tests/fixtures/hc/send-refused-starting.json`). The adapter took every refusal other than `status_mismatch` as a failure.
+- `hc read --lines N` gives N lines of history above the whole screen, not the last N lines. A Claude screen is 120 rows with its work at the top, blank rows, then the prompt box and status bar, so the last 20 lines held none of the work. Fixture of t2r's screen: `tests/fixtures/hc/read-claude-after-turn.json`.
+
+Fixed: an agent the app starts runs under `env PATH=<the running guided-review's folder>:<the app's PATH>` (checked on a probe: herdr still sees `claude-code`, and `guided-review` runs). "Still starting" keeps the hand-off queued and the app tries again after 3 s. Herdr's errors read as its message, not its JSON, and a failed hand-off in a thread has Try again. The loading screen shows the last non-blank lines above Claude's prompt box.
+
+Open: the agents' Read, Grep and Glob are not limited to the clone and the tours folder, so an agent that goes searching can still touch the whole home folder and raise permission prompts.
