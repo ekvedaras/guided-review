@@ -35,7 +35,8 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, BuildTicket, Finished, HandOffId, OpenDecision, ReviewStateFile, TourAgents,
+    ActivePr, BuildTicket, Finished, HandOffId, OpenDecision, OpenOrigin, ReviewStateFile,
+    TourAgents,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -146,8 +147,12 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
                     continue;
                 };
                 claim_terminal(&pr, &open, cx);
-                let decision = screen.borrow_mut().active.request(pr.clone());
+                let origin = origin_of(&open, cx).await;
+                let decision = screen.borrow_mut().active.request(pr.clone(), origin);
                 match decision {
+                    OpenDecision::KeepInBackground => {
+                        reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
+                    }
                     OpenDecision::Reload => {
                         reply.send(Answer::Reloaded { pr: open.pr }).ok();
                         let window = screen.borrow().window;
@@ -214,6 +219,18 @@ fn claim_terminal(pr: &PullRequestUrl, open: &OpenRequest, cx: &mut AsyncApp) {
             }
         })
         .detach();
+}
+
+/// Asks herdr whether the open came from a tour agent the app started; off the UI thread, as it runs `hc`.
+async fn origin_of(open: &OpenRequest, cx: &mut AsyncApp) -> OpenOrigin {
+    let Some(terminal) = open.terminal.clone() else {
+        return OpenOrigin::Reviewer;
+    };
+    cx.background_executor()
+        .spawn(async move {
+            TourAgents::new(Arc::new(HcTourAgents::new())).origin_of(Some(&terminal))
+        })
+        .await
 }
 
 fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {

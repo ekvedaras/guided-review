@@ -88,6 +88,10 @@ pub enum Answer {
     Refused {
         reason: String,
     },
+    /// The reviewer reads another PR, so the app does not switch; its PR switcher marks this one ready.
+    KeptInBackground {
+        pr: String,
+    },
     /// The hand-off is marked answered and the threads are read again.
     HandOffAnswered {
         pr: String,
@@ -108,6 +112,10 @@ impl std::fmt::Display for Answer {
             Self::Opening { pr } => write!(f, "guided-review app is opening {pr}"),
             Self::Reloaded { pr } => write!(f, "guided-review app reloaded the tour of {pr}"),
             Self::Refused { reason } => write!(f, "guided-review app refused: {reason}"),
+            Self::KeptInBackground { pr } => write!(
+                f,
+                "guided-review app has {pr} ready; the reviewer reads another PR, so it shows in the PR switcher"
+            ),
             Self::HandOffAnswered { pr } => {
                 write!(f, "guided-review app marked the hand-off answered on {pr}")
             }

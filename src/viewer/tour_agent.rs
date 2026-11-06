@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 
+use super::active_pr::OpenOrigin;
 use crate::pull_request::PullRequestUrl;
 
 /// A herdr terminal, as `hc` names it (`t7`).
@@ -264,6 +265,27 @@ impl TourAgents {
             }
         }
         self.launch(pr, active, writer_task(pr))
+    }
+
+    /// Who an `open` from the terminal came from. Without herdr no agent of the app can be running.
+    pub fn origin_of(&self, terminal: Option<&str>) -> OpenOrigin {
+        let Some(address) = terminal else {
+            return OpenOrigin::Reviewer;
+        };
+        if self.port.link().is_err() {
+            return OpenOrigin::Reviewer;
+        }
+        // Unreadable, the open is taken as the reviewer's: switching wrongly costs a click, while
+        // swallowing the reviewer's own open would look like the app ignored them.
+        let app_started = self.port.app_started().unwrap_or_default();
+        if app_started
+            .iter()
+            .any(|agent| agent.terminal.as_str() == address)
+        {
+            OpenOrigin::AppStartedAgent
+        } else {
+            OpenOrigin::Reviewer
+        }
     }
 
     /// Makes the terminal the one tour agent of the PR: every other terminal with the PR's label loses it,

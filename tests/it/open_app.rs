@@ -181,6 +181,28 @@ fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
 }
 
 #[test]
+fn an_open_the_app_keeps_in_the_background_succeeds_and_says_so() {
+    let (repo, github) = shop_with_a_tour_file();
+    let app = fake_app(
+        repo.home(),
+        None,
+        vec![answer_line(
+            BUILD,
+            &format!(r#"{{"kept_in_background":{{"pr":"{PR}"}}}}"#),
+        )],
+        Seen::default(),
+    );
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["open", PR]);
+
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(run.stdout.contains("PR switcher"), "stdout: {}", run.stdout);
+}
+
+#[test]
 fn a_refusal_from_the_app_fails_the_open_with_its_reason() {
     let (repo, github) = shop_with_a_tour_file();
     let app = fake_app(

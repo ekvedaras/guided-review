@@ -62,6 +62,7 @@ mod timestamp;
 mod tour_agent;
 mod tour_file;
 mod tour_skill;
+mod tour_writing;
 mod viewed_sync;
 mod viewer;
 mod write_comments;

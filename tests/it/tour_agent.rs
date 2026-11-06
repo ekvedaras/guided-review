@@ -1,6 +1,8 @@
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, TerminalId, TourAgentPort, TourAgentState, TourAgents};
+use guided_review::viewer::{
+    AgentStatus, OpenOrigin, TerminalId, TourAgentPort, TourAgentState, TourAgents,
+};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -360,6 +362,25 @@ fn writing_a_tour_again_ends_the_app_started_agent_of_the_pr_first_and_unlabels_
 
     assert_eq!(kills(&fake), [TourAgentCall::Kill(TerminalId::new("t1"))]);
     assert_eq!(fake.agents_of(PR_9), [terminal.to_string()]);
+}
+
+#[test]
+fn an_open_from_a_terminal_the_app_started_comes_from_an_app_started_agent() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .app_started("t1", PR_9, AgentStatus::Working, 100)
+            .with_terminal("mine", Some(PR), AgentStatus::Working),
+    );
+    let agents = agents(&fake);
+
+    assert_eq!(agents.origin_of(Some("t1")), OpenOrigin::AppStartedAgent);
+    assert_eq!(agents.origin_of(Some("mine")), OpenOrigin::Reviewer);
+    assert_eq!(agents.origin_of(None), OpenOrigin::Reviewer);
+    let without_herdr = Arc::new(FakeTourAgent::new().without_herdr("no hc"));
+    assert_eq!(
+        self::agents(&without_herdr).origin_of(Some("t1")),
+        OpenOrigin::Reviewer
+    );
 }
 
 #[test]

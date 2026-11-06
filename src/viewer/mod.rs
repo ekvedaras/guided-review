@@ -35,10 +35,11 @@ mod sync_state;
 mod thread_actions;
 mod threads;
 mod tour_agent;
+mod tour_writing;
 mod typing_save;
 mod viewed_sync;
 
-pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision};
+pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
@@ -97,5 +98,6 @@ pub use tour_agent::{
     AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
     TourAgentState, TourAgents,
 };
+pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};

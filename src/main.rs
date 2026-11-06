@@ -256,7 +256,7 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
         },
     )?;
     match answer {
-        Answer::Opening { .. } | Answer::Reloaded { .. } => {
+        Answer::Opening { .. } | Answer::Reloaded { .. } | Answer::KeptInBackground { .. } => {
             println!("{answer}");
             Ok(())
         }

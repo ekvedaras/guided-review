@@ -32,6 +32,10 @@ pub struct SwitcherRow {
 pub enum TourFact {
     Ready,
     Missing,
+    /// A tour agent the app started is writing it.
+    Writing,
+    /// The writing ended without a tour.
+    WritingFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -119,7 +123,9 @@ impl PrSwitcher {
         let row = self.visible().nth(nth).ok_or(NotPickable::NoSuchRow)?;
         match row.tour {
             TourFact::Ready => Ok(row.pull_request.url.clone()),
-            TourFact::Missing => Err(NotPickable::NoTourYet),
+            TourFact::Missing | TourFact::Writing | TourFact::WritingFailed => {
+                Err(NotPickable::NoTourYet)
+            }
         }
     }
 

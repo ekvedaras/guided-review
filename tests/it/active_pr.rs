@@ -4,7 +4,9 @@ use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::Tour;
-use guided_review::viewer::{ActivePr, Finished, OpenDecision, Problem, ReviewStateFile};
+use guided_review::viewer::{
+    ActivePr, Finished, OpenDecision, OpenOrigin, Problem, ReviewStateFile,
+};
 use serde_json::json;
 
 const A: &str = "https://github.com/acme/shop/pull/7";
@@ -54,7 +56,7 @@ impl<'a> Window<'a> {
     }
 
     fn open(&mut self, url: &str) -> Option<String> {
-        let OpenDecision::Build(ticket) = self.active.request(pr(url)) else {
+        let OpenDecision::Build(ticket) = self.active.request(pr(url), OpenOrigin::Reviewer) else {
             return None;
         };
         let built = open_review(&pr(url), self.repo.path(), self.repo.home());
@@ -82,7 +84,7 @@ impl<'a> Window<'a> {
 }
 
 fn shown_after(active: &mut ActivePr, url: &str) {
-    let OpenDecision::Build(ticket) = active.request(pr(url)) else {
+    let OpenDecision::Build(ticket) = active.request(pr(url), OpenOrigin::Reviewer) else {
         panic!("builds");
     };
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
@@ -93,7 +95,10 @@ fn a_request_for_the_pr_on_screen_reloads_it() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
 
-    assert!(matches!(active.request(pr(A)), OpenDecision::Reload));
+    assert!(matches!(
+        active.request(pr(A), OpenOrigin::Reviewer),
+        OpenDecision::Reload
+    ));
     assert_eq!(active.shown(), Some(&pr(A)));
 }
 
@@ -102,17 +107,20 @@ fn a_request_for_another_pr_builds_it_while_the_first_stays_shown() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
 
-    assert!(matches!(active.request(pr(B)), OpenDecision::Build(_)));
+    assert!(matches!(
+        active.request(pr(B), OpenOrigin::Reviewer),
+        OpenDecision::Build(_)
+    ));
     assert_eq!(active.shown(), Some(&pr(A)));
 }
 
 #[test]
 fn a_newer_request_wins_over_a_build_still_running() {
     let mut active = ActivePr::default();
-    let OpenDecision::Build(first) = active.request(pr(A)) else {
+    let OpenDecision::Build(first) = active.request(pr(A), OpenOrigin::Reviewer) else {
         panic!("builds");
     };
-    let OpenDecision::Build(second) = active.request(pr(B)) else {
+    let OpenDecision::Build(second) = active.request(pr(B), OpenOrigin::Reviewer) else {
         panic!("builds");
     };
 
@@ -128,11 +136,14 @@ fn a_newer_request_wins_over_a_build_still_running() {
 fn a_reload_of_the_shown_pr_beats_a_build_of_another_one_still_running() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
-    let OpenDecision::Build(slow) = active.request(pr(B)) else {
+    let OpenDecision::Build(slow) = active.request(pr(B), OpenOrigin::Reviewer) else {
         panic!("builds");
     };
 
-    assert!(matches!(active.request(pr(A)), OpenDecision::Reload));
+    assert!(matches!(
+        active.request(pr(A), OpenOrigin::Reviewer),
+        OpenDecision::Reload
+    ));
 
     let late = active.finished(slow, Ok::<_, anyhow::Error>(()));
     assert!(matches!(late, Finished::Superseded));
@@ -143,7 +154,7 @@ fn a_reload_of_the_shown_pr_beats_a_build_of_another_one_still_running() {
 fn a_failed_build_stays_with_the_reason() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
-    let OpenDecision::Build(ticket) = active.request(pr(B)) else {
+    let OpenDecision::Build(ticket) = active.request(pr(B), OpenOrigin::Reviewer) else {
         panic!("builds");
     };
 
