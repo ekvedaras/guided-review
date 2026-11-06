@@ -30,9 +30,10 @@ use gpui::{
 use gpui_platform::application;
 
 use crate::app_link::{Answer, AppListener, OpenRequest, Request};
+use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{ActivePr, BuildTicket, Finished, OpenDecision};
+use crate::viewer::{ActivePr, BuildTicket, Finished, OpenDecision, TourAgents};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
@@ -102,6 +103,7 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
                         .ok();
                     continue;
                 };
+                claim_terminal(&pr, &open, cx);
                 let decision = screen.borrow_mut().active.request(pr.clone());
                 match decision {
                     OpenDecision::Reload => {
@@ -127,6 +129,20 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
             }
         }
     }
+}
+
+/// The terminal an `open` came from becomes the PR's tour agent, whatever the request then does. Slow
+/// (it runs `hc`), so it runs off the UI thread; a failure is for the app's log, as the window may stay.
+fn claim_terminal(pr: &PullRequestUrl, open: &OpenRequest, cx: &mut AsyncApp) {
+    let (pr, terminal) = (pr.clone(), open.terminal.clone());
+    cx.background_executor()
+        .spawn(async move {
+            let agents = TourAgents::new(Arc::new(HcTourAgents::new()));
+            if let Err(error) = agents.claim_for_open(&pr, terminal.as_deref()) {
+                eprintln!("could not claim the terminal for {pr}: {error:#}");
+            }
+        })
+        .detach();
 }
 
 fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {

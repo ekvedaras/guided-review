@@ -113,6 +113,17 @@ fn status_changes_are_followed_until_the_stream_ends() {
 }
 
 #[test]
+fn an_open_request_from_a_herdr_terminal_claims_it_and_one_from_outside_claims_nothing() {
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t2", None, AgentStatus::Idle));
+
+    agents(&fake).claim_for_open(&pr(), None).unwrap();
+    assert_eq!(fake.calls().len(), 0);
+
+    agents(&fake).claim_for_open(&pr(), Some("t2")).unwrap();
+    assert_eq!(fake.agents_of(PR), ["t2"]);
+}
+
+#[test]
 fn following_stops_when_nobody_wants_the_changes_any_more() {
     let fake = Arc::new(
         FakeTourAgent::new()

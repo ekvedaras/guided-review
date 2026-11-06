@@ -157,6 +157,19 @@ impl TourAgents {
             .with_context(|| format!("could not make {terminal} the tour agent of {pr}"))
     }
 
+    /// What an `open` request does with the terminal it came from: a request from a herdr terminal claims it
+    /// for the PR, one from outside herdr claims nothing.
+    pub fn claim_for_open(
+        &self,
+        pr: &PullRequestUrl,
+        terminal: Option<&str>,
+    ) -> anyhow::Result<()> {
+        match terminal {
+            Some(address) => self.claim(pr, &TerminalId::new(address)),
+            None => Ok(()),
+        }
+    }
+
     pub fn lookup(&self, pr: &PullRequestUrl) -> TourAgentState {
         if let Err(reason) = self.port.link() {
             return TourAgentState::LinkOff(reason);
