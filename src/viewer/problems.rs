@@ -24,6 +24,8 @@ pub enum Problem {
     ViewedNotSynced(String),
     /// The AI Refresh ended and the steps marked as old are still as they were.
     TourNotRefreshed(String),
+    /// Another PR was asked for and could not be opened, so this one stays on screen.
+    SwitchFailed(String),
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -85,6 +87,7 @@ impl fmt::Display for Problem {
             Self::TourNotRefreshed(reason) => {
                 write!(formatter, "The tour was not refreshed: {reason}")
             }
+            Self::SwitchFailed(reason) => write!(formatter, "Not switched: {reason}"),
         }
     }
 }

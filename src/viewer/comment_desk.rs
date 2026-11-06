@@ -7,7 +7,7 @@ use super::comments::{
 use super::finish_review::{
     FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
-use super::review_state::ReviewState;
+use super::review_state::{ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::step_page::{DiffLine, LineLocation, Side};
 use super::suggestion::suggestion_block;
@@ -326,6 +326,16 @@ impl CommentDesk {
 }
 
 /// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.
+impl CommentOutcome {
+    /// For a send that ended after its review was dropped, as when the window switched to another PR:
+    /// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
+    pub fn land_in(self, file: &ReviewStateFile) -> anyhow::Result<()> {
+        file.update(|state| {
+            CommentDesk::default().apply_comment(state, self);
+        })
+    }
+}
+
 fn append_to_draft(state: &mut ReviewState, place: &CommentPlace, text: &str) -> Option<String> {
     let written = state.draft_at(place)?.body.trim_end().to_owned();
     let body = if written.is_empty() {

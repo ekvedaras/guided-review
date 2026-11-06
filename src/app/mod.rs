@@ -15,14 +15,16 @@ mod sidebar_rows;
 #[cfg(feature = "snapshots")]
 mod snapshots;
 
-use std::path::{Path, PathBuf};
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Focusable, KeyBinding, TitlebarOptions, WindowBounds,
+    App, AppContext, AsyncApp, Bounds, Context, KeyBinding, TitlebarOptions, Window, WindowBounds,
     WindowHandle, WindowOptions, point, px, size,
 };
 use gpui_platform::application;
@@ -30,6 +32,7 @@ use gpui_platform::application;
 use crate::app_link::{Answer, AppListener, OpenRequest, Request};
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
+use crate::viewer::{ActivePr, BuildTicket, Finished, OpenDecision};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
@@ -73,13 +76,19 @@ fn refused(reason: &str) -> Answer {
     }
 }
 
-struct Shown {
-    window: WindowHandle<OneStepLayout>,
-    pr: PullRequestUrl,
+/// What the app shows now. The window is there once the first review is built.
+struct Screen {
+    active: ActivePr,
+    window: Option<WindowHandle<OneStepLayout>>,
 }
 
+type SharedScreen = Rc<RefCell<Screen>>;
+
 async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx: &mut AsyncApp) {
-    let mut shown: Option<Shown> = None;
+    let screen: SharedScreen = Rc::new(RefCell::new(Screen {
+        active: ActivePr::default(),
+        window: None,
+    }));
     while let Some((request, reply)) = asked.next().await {
         match request {
             Request::Quit => {
@@ -93,26 +102,26 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
                         .ok();
                     continue;
                 };
-                match &shown {
-                    Some(current) if current.pr == pr => {
+                let decision = screen.borrow_mut().active.request(pr.clone());
+                match decision {
+                    OpenDecision::Reload => {
                         reply.send(Answer::Reloaded { pr: open.pr }).ok();
-                        show_again(current, cx);
+                        let window = screen.borrow().window;
+                        if let Some(window) = window {
+                            show_again(window, cx);
+                        }
                     }
-                    Some(current) => {
-                        reply
-                            .send(refused(&format!(
-                                "the app shows {} and cannot switch to {pr} yet",
-                                current.pr
-                            )))
-                            .ok();
-                    }
-                    None => {
+                    OpenDecision::Build(ticket) => {
                         reply
                             .send(Answer::Opening {
                                 pr: open.pr.clone(),
                             })
                             .ok();
-                        shown = Some(first_window(pr, &open, &home, cx).await);
+                        let (screen, home) = (Rc::clone(&screen), home.clone());
+                        cx.spawn(async move |cx| {
+                            build_and_show(screen, ticket, pr, open, home, cx).await;
+                        })
+                        .detach();
                     }
                 }
             }
@@ -120,10 +129,9 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
     }
 }
 
-fn show_again(current: &Shown, cx: &mut AsyncApp) {
+fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
     cx.update(|cx| {
-        current
-            .window
+        window
             .update(cx, |layout, window, cx| {
                 layout.reload_tour(cx);
                 window.activate_window();
@@ -133,38 +141,69 @@ fn show_again(current: &Shown, cx: &mut AsyncApp) {
     });
 }
 
-/// The review is built off the UI thread. When it cannot be built there is no window to keep, so the app
-/// ends with the reason in its log.
-async fn first_window(
+/// The review is built off the UI thread while the PR on screen stays. When the very first build fails
+/// there is no window to keep, so the app ends with the reason in its log; later, the reason is shown
+/// in the window that stays.
+async fn build_and_show(
+    screen: SharedScreen,
+    ticket: BuildTicket,
     pr: PullRequestUrl,
-    open: &OpenRequest,
-    home: &Path,
+    open: OpenRequest,
+    home: PathBuf,
     cx: &mut AsyncApp,
-) -> Shown {
-    let (build_pr, folder, home) = (pr.clone(), open.folder.clone(), home.to_path_buf());
+) {
+    let (build_pr, folder) = (pr.clone(), open.folder.clone());
     let built = cx
         .background_executor()
         .spawn(async move { open_review(&build_pr, &folder, &home) })
         .await;
-    let opened = match built {
-        Ok(opened) => opened,
-        Err(error) => {
-            eprintln!("could not open {pr}: {error:#}");
+    let finished = screen.borrow_mut().active.finished(ticket, built);
+    let window = screen.borrow().window;
+    match (finished, window) {
+        (Finished::Superseded, _) => {}
+        (Finished::Stay { reason }, None) => {
+            eprintln!("{reason}");
             std::process::exit(1);
         }
-    };
-    let window = cx.update(|cx| {
-        let window = open_window(opened, cx);
-        cx.activate(true);
-        window
-    });
-    match window {
-        Ok(window) => Shown { window, pr },
-        Err(error) => {
-            eprintln!("could not open the app window: {error:#}");
-            std::process::exit(1);
+        (Finished::Stay { reason }, Some(window)) => {
+            eprintln!("{reason}");
+            cx.update(|cx| {
+                window
+                    .update(cx, |layout, _, cx| layout.switch_failed(reason, cx))
+                    .ok();
+            });
+        }
+        (Finished::Switch(opened), window) => {
+            let shown = cx.update(|cx| {
+                let shown = match window {
+                    Some(window) => switch_window(window, opened, &pr, cx).map(|()| window),
+                    None => open_window(opened, &pr, cx),
+                };
+                cx.activate(true);
+                shown
+            });
+            match shown {
+                Ok(window) => screen.borrow_mut().window = Some(window),
+                Err(error) => {
+                    eprintln!("could not show {pr}: {error:#}");
+                    std::process::exit(1);
+                }
+            }
         }
     }
+}
+
+/// Typing is saved first. The old root, with its session, Asks and code source, is dropped by the swap.
+fn switch_window(
+    window: WindowHandle<OneStepLayout>,
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    cx: &mut App,
+) -> anyhow::Result<()> {
+    window.update(cx, |layout, window, cx| {
+        layout.flush_typing(cx);
+        window.replace_root(cx, |window, cx| new_layout(opened, pr, window, cx));
+    })
 }
 
 fn bind_keys(cx: &mut App) {
@@ -188,12 +227,16 @@ fn bind_keys(cx: &mut App) {
     ]);
 }
 
-fn open_window(opened: OpenedReview, cx: &mut App) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+fn open_window(
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
-            title: Some("Guided review".into()),
+            title: Some(window_title(&opened, pr).into()),
             appears_transparent: true,
             traffic_light_position: Some(point(px(14.), px(14.))),
         }),
@@ -201,33 +244,43 @@ fn open_window(opened: OpenedReview, cx: &mut App) -> anyhow::Result<WindowHandl
     };
     cx.open_window(options, |window, cx| {
         cx.set_global(Appearance::of_window(window.appearance()));
-        let collaborators = Collaborators {
-            github: opened.github,
-            ide: opened.ide,
-            tour_work: TourWork {
-                repinner: Arc::new(opened.repinner),
-                refresher: Arc::new(opened.refresher),
-                reloader: Arc::new(opened.reloader),
-            },
-        };
-        let layout = cx.new(|cx| {
-            OneStepLayout::new(
-                opened.review,
-                opened.source,
-                opened.ask,
-                collaborators,
-                window,
-                cx,
-            )
-        });
-        layout.update(cx, |_, cx| {
-            cx.observe_window_appearance(window, |_, window, cx| {
-                cx.set_global(Appearance::of_window(window.appearance()));
-                cx.notify();
-            })
-            .detach();
-        });
-        layout.focus_handle(cx).focus(window, cx);
-        layout
+        cx.new(|cx| new_layout(opened, pr, window, cx))
     })
+}
+
+fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
+    format!("{pr}: {}", opened.review.title())
+}
+
+fn new_layout(
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    window: &mut Window,
+    cx: &mut Context<'_, OneStepLayout>,
+) -> OneStepLayout {
+    window.set_window_title(&window_title(&opened, pr));
+    let collaborators = Collaborators {
+        github: opened.github,
+        ide: opened.ide,
+        tour_work: TourWork {
+            repinner: Arc::new(opened.repinner),
+            refresher: Arc::new(opened.refresher),
+            reloader: Arc::new(opened.reloader),
+        },
+    };
+    let layout = OneStepLayout::new(
+        opened.review,
+        opened.source,
+        opened.ask,
+        collaborators,
+        window,
+        cx,
+    );
+    cx.observe_window_appearance(window, |_, window, cx| {
+        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.notify();
+    })
+    .detach();
+    cx.focus_self(window);
+    layout
 }

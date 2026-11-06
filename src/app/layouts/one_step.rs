@@ -251,6 +251,16 @@ impl OneStepLayout {
             .update(cx, |session, cx| session.change(cx, change))
     }
 
+    pub fn flush_typing(&mut self, cx: &mut Context<Self>) {
+        self.session
+            .update(cx, |session, _| session.save_typing_now());
+    }
+
+    pub fn switch_failed(&mut self, reason: String, cx: &mut Context<Self>) {
+        self.session
+            .update(cx, |session, cx| session.switch_failed(reason, cx));
+    }
+
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
         self.session.update(cx, ReviewSession::reload_tour);
     }

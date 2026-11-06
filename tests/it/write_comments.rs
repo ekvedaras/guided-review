@@ -643,3 +643,46 @@ fn a_comment_place_says_where_the_comment_goes() {
         "Comment on app/Order.php lines 4 to 9"
     );
 }
+
+#[test]
+fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_own_state_file() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    let place = comment_on(&mut review, "line ten");
+    typed(&mut review, &place, "on its way");
+    let request = review
+        .comment_request(&place, SendMode::AddToReview)
+        .unwrap();
+    let outcome = request.run(&github);
+    drop(review);
+
+    outcome
+        .land_in(&ReviewStateFile::for_pr(pull.repo.home(), &pull.pr()))
+        .unwrap();
+
+    assert_eq!(pull.open().comment_drafts(), []);
+}
+
+#[test]
+fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_its_pr() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    let place = comment_on(&mut review, "line ten");
+    typed(&mut review, &place, "later");
+    github.inject(GitHubFault::ConnectionLost);
+    let request = review
+        .comment_request(&place, SendMode::AddToReview)
+        .unwrap();
+    let outcome = request.run(&github);
+    drop(review);
+
+    outcome
+        .land_in(&ReviewStateFile::for_pr(pull.repo.home(), &pull.pr()))
+        .unwrap();
+
+    let reopened = pull.open();
+    assert_eq!(reopened.comment_drafts(), []);
+    assert_eq!(reopened.queued_comments()[0].draft.body, "later");
+}

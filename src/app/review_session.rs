@@ -18,8 +18,8 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
-    ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
+    CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult,
+    GitHubPort, ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
     ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
     TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
@@ -340,28 +340,47 @@ impl ReviewSession {
         self.sending_comments.insert(place.clone());
         self.comment_problems.remove(&place);
         let github = Arc::clone(&self.github);
-        self.run_off_thread(
-            cx,
-            move || request.run(github.as_ref()),
-            move |this, outcome, cx| {
-                this.change_session(cx, |session| {
-                    session.sending_comments.remove(&place);
-                    let problem = match session.review.apply_comment(outcome) {
-                        Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
-                            session.composing = None;
-                            return;
-                        }
-                        Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
-                        Ok(CommentResult::Rejected(reason)) => {
-                            CommentProblem::Rejected(reason.into())
-                        }
-                        Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
-                    };
-                    session.comment_problems.insert(place, problem);
-                });
-            },
-        )
+        let state_file = self.review.state_file();
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { request.run(github.as_ref()) })
+                .await;
+            let mut outcome = Some(outcome);
+            let applied = this.update(cx, |this, cx| {
+                if let Some(outcome) = outcome.take() {
+                    this.comment_sent(&place, outcome, cx);
+                }
+            });
+            // The window switched to another PR while this was in flight; the comment is not lost.
+            if let (Err(_), Some(outcome)) = (applied, outcome)
+                && let Err(error) = outcome.land_in(&state_file)
+            {
+                eprintln!("could not save the result of a comment that was sending: {error:#}");
+            }
+        })
         .detach();
+    }
+
+    fn comment_sent(
+        &mut self,
+        place: &CommentPlace,
+        outcome: CommentOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        self.change_session(cx, |session| {
+            session.sending_comments.remove(place);
+            let problem = match session.review.apply_comment(outcome) {
+                Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
+                    session.composing = None;
+                    return;
+                }
+                Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
+                Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.into()),
+                Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
+            };
+            session.comment_problems.insert(place.clone(), problem);
+        });
     }
 
     /// Runs a thread action in the background, then shows the threads as GitHub has them.
@@ -537,6 +556,11 @@ impl ReviewSession {
         } else {
             cx.notify();
         }
+    }
+
+    pub fn switch_failed(&mut self, reason: String, cx: &mut Context<Self>) {
+        self.review.switch_failed(reason);
+        self.show_problems(cx);
     }
 
     fn show_problems(&mut self, cx: &mut Context<Self>) {
@@ -801,7 +825,7 @@ impl ReviewSession {
     }
 
     /// For when the file is about to be read or the app to end: what was typed goes to disk now.
-    fn save_typing_now(&mut self) {
+    pub fn save_typing_now(&mut self) {
         self.typing_save = None;
         if let Some(save) = self.review.typing_save()
             && let Err(error) = save.run()

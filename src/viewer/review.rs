@@ -148,6 +148,7 @@ pub struct Review {
     code_on_github: Option<String>,
     /// Where the saved review went when it could not be read.
     saved_review_kept_as: Option<PathBuf>,
+    switch_failed: Option<String>,
     /// Why the last sync of viewed marks failed, until one goes through.
     viewed_not_synced: Option<String>,
     /// Why the last Refresh did not go through; a Refresh that does opens a new review.
@@ -220,6 +221,7 @@ impl Review {
             ide_not_started: None,
             code_on_github: source.fallback_reason().map(str::to_owned),
             saved_review_kept_as,
+            switch_failed: None,
             viewed_not_synced: None,
             tour_not_refreshed: None,
             changes_since,
@@ -1036,6 +1038,15 @@ impl Review {
         CommentDesk::queued_comment_request(&self.state, &self.head, &self.pr)
     }
 
+    /// The window was asked for another PR and could not open it; named until another switch succeeds.
+    pub fn switch_failed(&mut self, reason: String) {
+        self.switch_failed = Some(reason);
+    }
+
+    pub fn state_file(&self) -> ReviewStateFile {
+        self.state_file.clone()
+    }
+
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
         let result = self.comment_desk.apply_comment(&mut self.state, outcome);
@@ -1301,6 +1312,7 @@ impl Review {
                     .clone()
                     .map(Problem::SavedReviewNotRead),
             )
+            .chain(self.switch_failed.clone().map(Problem::SwitchFailed))
             .collect()
     }
 

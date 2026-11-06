@@ -4,7 +4,7 @@ use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::Tour;
-use guided_review::viewer::{ActivePr, Finished, OpenDecision, ReviewStateFile};
+use guided_review::viewer::{ActivePr, Finished, OpenDecision, Problem, ReviewStateFile};
 use serde_json::json;
 
 const A: &str = "https://github.com/acme/shop/pull/7";
@@ -185,6 +185,19 @@ fn a_failed_build_keeps_the_pr_on_screen_and_gives_the_reason() {
 
     assert!(reason.contains("no tour for"), "{reason}");
     assert_eq!(window.title(), format!("Tour of {A}"));
+}
+
+#[test]
+fn a_failed_switch_is_named_as_a_problem_of_the_pr_still_shown() {
+    let repo = shop_with_tours_of_a_and_b();
+    let mut window = Window::new(&repo);
+    window.open(A);
+    let reason = window.open(NO_TOUR).unwrap();
+
+    let review = &mut window.shown.as_mut().unwrap().review;
+    review.switch_failed(reason.clone());
+
+    assert_eq!(review.problems(), [Problem::SwitchFailed(reason)]);
 }
 
 #[test]
