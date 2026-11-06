@@ -7,6 +7,8 @@ use gpui::{
 
 use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
 
+use crate::app::sidebar_rows::SidebarLastReview;
+
 use super::button::{ButtonKind, ButtonSize, button, toggle_button};
 use super::palette::Colors;
 use super::text_box::TextBox;
@@ -50,6 +52,8 @@ pub struct FinishReviewDialog {
     is_everything_read: bool,
     can_judge: bool,
     warning: Option<ApproveWarning>,
+    /// A review of the viewer's is on GitHub already, so this one updates it.
+    last_review: Option<SidebarLastReview>,
     body: String,
     on_body_edit: OnBodyEdit,
     on_finish: OnFinish,
@@ -60,6 +64,7 @@ impl FinishReviewDialog {
         is_everything_read: bool,
         can_judge: bool,
         warning: Option<ApproveWarning>,
+        last_review: Option<SidebarLastReview>,
         body: String,
         on_body_edit: OnBodyEdit,
         on_finish: OnFinish,
@@ -68,6 +73,7 @@ impl FinishReviewDialog {
             is_everything_read,
             can_judge,
             warning,
+            last_review,
             body,
             on_body_edit,
             on_finish,
@@ -172,13 +178,44 @@ impl RenderOnce for FinishReviewDialog {
             };
             open_button
                 .justify_center()
-                .child("Finish review")
+                .child(if self.last_review.is_some() {
+                    "Update review"
+                } else {
+                    "Finish review"
+                })
                 .on_click(move |_, window, cx| {
                     update(&ui, cx, |ui| ui.is_open = !ui.is_open);
                     window.focus(&focus, cx);
                 })
         };
-        let wrapper = div().flex().flex_col().gap_2().child(open_button);
+        let last_review = self.last_review.as_ref().map(|last| {
+            let headline_color = if last.is_old {
+                colors.warning
+            } else {
+                colors.muted_text
+            };
+            div()
+                .id("last-review")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .text_xs()
+                .child(
+                    div()
+                        .text_color(headline_color)
+                        .child(last.headline.clone()),
+                )
+                .children(
+                    (!last.body.is_empty())
+                        .then(|| div().text_color(colors.muted_text).child(last.body.clone())),
+                )
+        });
+        let wrapper = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(open_button)
+            .children(last_review);
         if !is_open {
             return wrapper.into_any_element();
         }

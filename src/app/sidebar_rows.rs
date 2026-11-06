@@ -22,8 +22,17 @@ pub struct SidebarSafetyNet {
     pub is_current: bool,
 }
 
+/// How the viewer's last review on GitHub ended, shown under the finish button.
+#[derive(Clone)]
+pub struct SidebarLastReview {
+    pub headline: SharedString,
+    pub body: SharedString,
+    pub is_old: bool,
+}
+
 pub struct SidebarRows {
     pub progress: ReadProgress,
+    pub last_review: Option<SidebarLastReview>,
     /// Approve and Request changes show only on someone else's PR.
     pub can_judge: bool,
     pub approve_warning: Option<ApproveWarning>,
@@ -59,7 +68,13 @@ impl SidebarRows {
             thread_count: size.threads,
             is_current: review.screen() == &Screen::SafetyNet,
         });
+        let is_old = review.last_review_is_old();
         Self {
+            last_review: review.last_review().map(|last| SidebarLastReview {
+                headline: last.headline(is_old).into(),
+                body: last.body.clone().into(),
+                is_old,
+            }),
             can_judge: review.can_approve_or_request_changes(),
             approve_warning: review.approve_warning(),
             progress,

@@ -747,6 +747,7 @@ impl OneStepLayout {
             progress.total > 0 && progress.read == progress.total,
             sidebar.can_judge,
             sidebar.approve_warning,
+            sidebar.last_review.clone(),
             session.review().finish_body().to_owned(),
             self.on_finish_body_edit(),
             self.on_finish_review(),

@@ -73,6 +73,7 @@ pub struct ReviewSession {
     working_copy_check: Option<Task<()>>,
     push_debounce: Option<Task<()>>,
     pending_review_check: Option<Task<()>>,
+    last_review_pull: Option<Task<()>>,
     typing_save: Option<Task<()>>,
     frame_stats: FrameStatsHook,
     _focus_subscription: Subscription,
@@ -163,6 +164,7 @@ impl ReviewSession {
             working_copy_check: None,
             push_debounce: None,
             pending_review_check: None,
+            last_review_pull: None,
             typing_save: None,
             frame_stats,
             _focus_subscription: focus_subscription,
@@ -391,6 +393,9 @@ impl ReviewSession {
             move || request.run(github.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_finish(outcome));
+                if result == FinishResult::Sent {
+                    this.pull_last_review(cx);
+                }
                 on_done(&result, cx);
             },
         )
@@ -566,6 +571,7 @@ impl ReviewSession {
         self.sync(cx);
         self.pull_threads(cx);
         self.pull_pending_review(cx);
+        self.pull_last_review(cx);
         self.retry_queued_comments(cx);
     }
 
@@ -650,6 +656,21 @@ impl ReviewSession {
             |this, threads, cx| match threads {
                 Ok(threads) => this.change(cx, |review| review.set_threads(&threads)),
                 Err(error) => this.change(cx, |review| review.threads_not_read(&error)),
+            },
+        ));
+    }
+
+    /// The review the viewer sent last, which the finish button shows and updates.
+    fn pull_last_review(&mut self, cx: &mut Context<Self>) {
+        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
+        self.last_review_pull = Some(self.run_off_thread(
+            cx,
+            move || github.viewer_latest_review(&pr),
+            |this, last, cx| {
+                this.change(cx, |review| match last {
+                    Ok(last) => review.last_review_is(last),
+                    Err(error) => review.could_not_read(Read::LastReview, &error),
+                });
             },
         ));
     }

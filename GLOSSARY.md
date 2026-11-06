@@ -45,3 +45,5 @@
 **Test set**: A fixed list of real PRs used to score the tour writer. Every change to how tours are written runs on it.
 
 **Reviewer note**: A short note per PR in the test set, written once by the reviewer. It says what a good tour of that PR must show: the main flow and the diagrams it needs.
+
+**Last review**: The reviewer's latest sent review of the PR, as GitHub holds it: how it ended (approved, changes requested, commented or dismissed), its text, when, and the PR head it was sent on. A review sent from the GitHub web page counts too. The viewer reads it and does not keep it. While it exists the finish button reads "Update review", and it is named as old when the PR head has moved past its commit.

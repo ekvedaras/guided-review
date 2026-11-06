@@ -259,6 +259,20 @@ fn web_review(outcome: ReviewOutcome, commit: &str) -> SubmittedReview {
 }
 
 #[test]
+fn the_headline_says_how_the_review_ended_when_and_whether_the_pr_moved_on() {
+    let review = web_review(ReviewOutcome::ChangesRequested, "abc");
+
+    assert_eq!(
+        review.headline(false),
+        "Your last review: Changes requested on 2026-11-05"
+    );
+    assert_eq!(
+        review.headline(true),
+        "Your last review: Changes requested on 2026-11-05, PR has new commits since"
+    );
+}
+
+#[test]
 fn a_review_never_sent_has_no_last_review() {
     let pull = Pull::new();
     let mut review = pull.open();

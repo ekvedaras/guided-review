@@ -32,6 +32,25 @@ pub enum ReviewOutcome {
     Dismissed,
 }
 
+impl SubmittedReview {
+    /// How it ended and when, for a line the reviewer reads; `PR has new commits` when `is_old`.
+    pub fn headline(&self, is_old: bool) -> String {
+        let outcome = match self.outcome {
+            ReviewOutcome::Approved => "Approved",
+            ReviewOutcome::ChangesRequested => "Changes requested",
+            ReviewOutcome::Commented => "Commented",
+            ReviewOutcome::Dismissed => "Dismissed",
+        };
+        let day = self.submitted_at.split('T').next().unwrap_or_default();
+        let since = if is_old {
+            ", PR has new commits since"
+        } else {
+            ""
+        };
+        format!("Your last review: {outcome} on {day}{since}")
+    }
+}
+
 impl ReviewOutcome {
     /// From GitHub's `PullRequestReviewState`. A pending review is not sent, so it has no outcome.
     pub fn from_github_state(state: &str) -> Option<Self> {
