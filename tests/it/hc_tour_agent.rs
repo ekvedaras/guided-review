@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, LiveTerminal, TerminalId, TourAgentPort};
+use guided_review::viewer::{AgentStatus, LiveTerminal, SendOutcome, TerminalId, TourAgentPort};
 use tempfile::TempDir;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -25,6 +25,10 @@ echo "$@" >> "{dir}/calls"
 if [ "$1" = "server" ] && [ -f "{dir}/server-down" ]; then
   echo "no server" >&2
   exit 1
+fi
+if [ "$1" = "send" ] && [ "$4" = "idle" ] && [ -f "{dir}/refuse-idle" ]; then
+  cat "{dir}/refuse-idle" >&2
+  exit 10
 fi
 if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
 "#,
@@ -258,4 +262,60 @@ fn live_terminals_say_whether_they_run_claude_and_in_which_space_as_herdr_lists_
         ]
     );
     assert_eq!(calls(dir.path(), "calls"), ["ls --json"]);
+}
+
+#[test]
+fn text_is_sent_only_if_the_agent_is_idle() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "send",
+        include_str!("../fixtures/hc/send-started.json"),
+    );
+
+    let sent = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t7"), "a question")
+        .unwrap();
+
+    assert_eq!(sent, SendOutcome::Delivered);
+    assert_eq!(calls(dir.path(), "calls"), ["send t7 --if idle a question"]);
+}
+
+#[test]
+fn a_working_agent_refuses_the_text_with_herdrs_reason() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("refuse-idle"),
+        include_str!("../fixtures/hc/send-refused-working.json"),
+    )
+    .unwrap();
+
+    let sent = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(
+        sent,
+        SendOutcome::Refused("t2b is working, not idle".to_owned())
+    );
+}
+
+#[test]
+fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_done_not_idle() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("refuse-idle"),
+        include_str!("../fixtures/hc/send-refused-done.json"),
+    )
+    .unwrap();
+
+    let sent = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(sent, SendOutcome::Delivered);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        ["send t2b --if idle a question", "send t2b a question"]
+    );
 }

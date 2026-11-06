@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{AgentStatus, LiveTerminal, TerminalId, TourAgentPort};
+use crate::viewer::{AgentStatus, LiveTerminal, SendOutcome, TerminalId, TourAgentPort};
 
 const APP_LABEL: &str = "app=guided-review";
 
@@ -179,6 +179,34 @@ impl TourAgentPort for HcTourAgents {
         }
         events.wait().context("`hc events` did not end cleanly")?;
         Ok(())
+    }
+
+    fn send_if_idle(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<SendOutcome> {
+        let output = Command::new(&self.hc)
+            .args(["send", terminal.as_str(), "--if", "idle", text])
+            .stdin(Stdio::null())
+            .output()
+            .context("could not run `hc send`")?;
+        if output.status.success() {
+            return Ok(SendOutcome::Delivered);
+        }
+        let refusal: Value = serde_json::from_slice(&output.stderr).unwrap_or(Value::Null);
+        if at(&refusal, "/error/kind") != "status_mismatch" {
+            bail!(
+                "`hc send` failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let reason = at(&refusal, "/error/message")
+            .as_str()
+            .unwrap_or("the agent is not idle");
+        // Herdr keeps an agent at `done` after a turn until someone looks at the terminal, and `--if idle`
+        // refuses it, so an agent running in the background would never take a comment.
+        if reason.contains(" is done, not idle") {
+            self.hc(&["send", terminal.as_str(), text])?;
+            return Ok(SendOutcome::Delivered);
+        }
+        Ok(SendOutcome::Refused(reason.to_owned()))
     }
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {

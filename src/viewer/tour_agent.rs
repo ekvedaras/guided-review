@@ -74,6 +74,14 @@ pub struct LiveTerminal {
     pub space: String,
 }
 
+/// What herdr did with text sent only if the agent is idle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendOutcome {
+    Delivered,
+    /// Nothing was typed; herdr's reason, such as "t7 is working, not idle".
+    Refused(String),
+}
+
 /// Herdr behind the viewer: where a PR's tour agent runs and what it does. One adapter, `hc`.
 pub trait TourAgentPort: Send + Sync {
     /// Whether tour agents can be reached at all; the reason when not.
@@ -100,6 +108,10 @@ pub trait TourAgentPort: Send + Sync {
         terminal: &TerminalId,
         on_status: &mut dyn FnMut(AgentStatus) -> ControlFlow<()>,
     ) -> anyhow::Result<()>;
+
+    /// Types the text into the agent and presses enter, but only when the agent is idle: text sent
+    /// into a working agent would arrive mid-turn as input.
+    fn send_if_idle(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<SendOutcome>;
 
     /// Brings the terminal up in the herdr app.
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()>;

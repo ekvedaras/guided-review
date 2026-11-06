@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 use std::sync::Mutex;
 
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, LiveTerminal, TerminalId, TourAgentPort};
+use guided_review::viewer::{AgentStatus, LiveTerminal, SendOutcome, TerminalId, TourAgentPort};
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +14,11 @@ pub enum TourAgentCall {
     },
     Release(TerminalId),
     Show(TerminalId),
+    /// Text typed into the terminal.
+    Send {
+        terminal: TerminalId,
+        text: String,
+    },
 }
 
 /// Herdr with a few terminals: which PR each is the tour agent of, and the status each reports.
@@ -156,6 +161,25 @@ impl TourAgentPort for FakeTourAgent {
             }
         }
         Ok(())
+    }
+
+    fn send_if_idle(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<SendOutcome> {
+        let mut terminals = self.terminals.lock().unwrap();
+        let (_, status) = terminals
+            .get_mut(terminal)
+            .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
+        if *status != AgentStatus::Idle {
+            return Ok(SendOutcome::Refused(format!(
+                "{terminal} is {status}, not idle"
+            )));
+        }
+        *status = AgentStatus::Working;
+        drop(terminals);
+        self.record(TourAgentCall::Send {
+            terminal: terminal.clone(),
+            text: text.to_owned(),
+        });
+        Ok(SendOutcome::Delivered)
     }
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {
