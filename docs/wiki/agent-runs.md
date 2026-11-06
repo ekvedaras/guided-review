@@ -37,3 +37,11 @@ On 2026-11-06 the maintainer set which terminal becomes a PR's tour agent on `op
 - `hc send --if idle` refuses with exit 10 and a JSON error on stderr (`kind: status_mismatch`, "t2b is working, not idle"). Fixtures are in `tests/fixtures/hc/`.
 - After a turn herdr reports `done` until someone looks at the terminal, and `--if idle` refuses `done` too. An agent that works in the background would never take a comment, so the adapter sends plainly when the refusal says `done`. A `working` or `blocked` agent is still never sent to.
 - Not done yet: the hand-off state is not shown under the comment in the thread, and no tour agent is started when none is found.
+
+## Writing a tour from the PR switcher (2026-11-06)
+
+- The writer is an interactive `claude` in herdr under `--permission-mode dontAsk` and `tour_agent_tools()`, the setup that made Refresh fail silently. A test (`tests/it/tour_skill.rs`) holds every command the tour skill names in backticks to that list. It found `mkdir -p`, which the list denies; the skill now leaves the folder to the Write tool. The skill and the writer's first task ask for one command per Bash call.
+- The writer's `open` is the only "done" signal. A writer that goes idle after working without that `open`, whose terminal ends, or that could not start (the cap of 3) fails; the loading screen shows why with its last screen lines, Try again and Show agent, and the switcher row says "writing failed".
+- An `open` from a terminal the app started (`gr.started-by=app`) of a PR not on screen never switches the window; the CLI answers `kept_in_background`. Which tours are being written and which PRs got an agent reply while not shown live in the app's memory only, so a restart forgets them.
+- Checked on a probe terminal: a writer with that tool list and first task wrote, checked and opened the tour of ekvedaras/guided-review#82 (one file) with no denied call, making the tour folder through Write. `open` was stubbed so the maintainer's app was not reached, and the installed skill was the one before this change.
+- `hc read <t> --json --lines N` answers `{"complete","how","text"}`; fixture in `tests/fixtures/hc/read-lines.json`. Of a Claude terminal the last 20 lines are mostly its prompt box and status bar.
