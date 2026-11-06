@@ -13,6 +13,10 @@ pub struct PrSwitcher {
     /// Indexes into `rows` that match the filter, in list order.
     visible: Vec<usize>,
     filter: String,
+    /// Nth visible row.
+    selected: usize,
+    /// Nth visible row at the top of the rows shown.
+    first_shown: usize,
     state: LoadState,
     is_refreshing: bool,
     /// Whether tour agents can be reached, so a PR with no tour can be written; the reason when not.
@@ -30,6 +34,8 @@ pub struct SwitcherRow {
     pub tour: TourFact,
     /// The PR's tour agent answered while another PR was shown.
     pub has_unseen_reply: bool,
+    /// The PR under review.
+    pub is_active: bool,
     haystack: String,
 }
 
@@ -69,6 +75,8 @@ impl Default for PrSwitcher {
             rows: Vec::new(),
             visible: Vec::new(),
             filter: String::new(),
+            selected: 0,
+            first_shown: 0,
             state: LoadState::Loading,
             is_refreshing: true,
             agent_link: Ok(()),
@@ -77,6 +85,8 @@ impl Default for PrSwitcher {
 }
 
 impl PrSwitcher {
+    pub const ROWS_SHOWN: usize = 10;
+
     /// A read of the list starts; the rows listed so far stay until its answer.
     pub fn refreshing(&mut self) {
         self.is_refreshing = true;
@@ -118,6 +128,7 @@ impl PrSwitcher {
                 .tour_fact_of(pr)
                 .unwrap_or_else(|| TourFact::of(pr, home));
             row.has_unseen_reply = active.has_unseen_reply(pr);
+            row.is_active = active.shown() == Some(pr);
         }
     }
 
@@ -139,6 +150,48 @@ impl PrSwitcher {
     pub fn filter(&mut self, text: &str) {
         text.clone_into(&mut self.filter);
         self.apply_filter();
+        self.selected = 0;
+        self.first_shown = 0;
+    }
+
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    /// The nth visible row at the top of the `ROWS_SHOWN` rows on screen.
+    pub fn first_shown(&self) -> usize {
+        self.first_shown
+    }
+
+    pub fn select_next(&mut self) {
+        self.select((self.selected + 1).min(self.visible.len().saturating_sub(1)));
+    }
+
+    pub fn select_previous(&mut self) {
+        self.select(self.selected.saturating_sub(1));
+    }
+
+    /// Scrolls only as far as the row needs to be on screen, and not at all when it is.
+    pub fn select(&mut self, nth: usize) {
+        self.selected = nth;
+        if nth < self.first_shown {
+            self.first_shown = nth;
+        } else if nth >= self.first_shown + Self::ROWS_SHOWN {
+            self.first_shown = nth + 1 - Self::ROWS_SHOWN;
+        }
+    }
+
+    /// The wheel moves the rows, not the selection.
+    pub fn scroll_by(&mut self, rows: isize) {
+        let last_first = self.visible.len().saturating_sub(Self::ROWS_SHOWN);
+        self.first_shown = self.first_shown.saturating_add_signed(rows).min(last_first);
+    }
+
+    /// Puts the selection on the PR under review, or the first row, scrolling from the top.
+    pub fn select_active(&mut self) {
+        self.first_shown = 0;
+        let active = self.visible().position(|row| row.is_active);
+        self.select(active.unwrap_or(0));
     }
 
     pub fn is_loading(&self) -> bool {
@@ -189,6 +242,9 @@ impl PrSwitcher {
             .filter(|(_, row)| words.iter().all(|word| row.haystack.contains(word)))
             .map(|(index, _)| index)
             .collect();
+        let last = self.visible.len().saturating_sub(1);
+        self.select(self.selected.min(last));
+        self.scroll_by(0);
     }
 }
 
@@ -204,6 +260,7 @@ impl SwitcherRow {
         Self {
             tour: TourFact::of(&pull_request.url, home),
             has_unseen_reply: false,
+            is_active: false,
             pull_request,
             haystack,
         }

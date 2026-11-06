@@ -5,8 +5,8 @@ use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    ActivePr, NotPickable, Pick, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
-    RelevantPullRequestsPort, TourFact, WhyListed,
+    ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrSwitcher, RelevantPullRequest,
+    RelevantPullRequests, RelevantPullRequestsPort, TourFact, WhyListed,
 };
 use tempfile::TempDir;
 
@@ -297,4 +297,153 @@ fn a_reload_after_a_failure_clears_the_notice_and_keeps_the_filter() {
 
     assert_eq!(switcher.notice(), None);
     assert_eq!(visible_urls(&switcher), [SHOP_7]);
+}
+
+fn show(active: &mut ActivePr, url: &str) {
+    let OpenDecision::Build(ticket) = active.request(pr(url), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+}
+
+fn twelve_pull_requests() -> PrSwitcher {
+    let pull_requests = (1..=12)
+        .map(|number| {
+            relevant(
+                &format!("https://github.com/acme/shop/pull/{number}"),
+                &format!("Change {number}"),
+                "alice",
+                WhyListed::Mine,
+            )
+        })
+        .collect();
+    let mut switcher = PrSwitcher::default();
+    switcher.loaded(
+        Ok(RelevantPullRequests {
+            pull_requests,
+            teams_left_out: Vec::new(),
+        }),
+        Path::new("/nowhere"),
+    );
+    switcher
+}
+
+#[test]
+fn the_list_shows_ten_rows_from_the_top_until_the_selection_leaves_them() {
+    let mut switcher = twelve_pull_requests();
+
+    for _ in 0..9 {
+        switcher.select_next();
+    }
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (9, 0));
+}
+
+#[test]
+fn moving_down_past_the_last_shown_row_scrolls_by_just_one_row() {
+    let mut switcher = twelve_pull_requests();
+
+    for _ in 0..10 {
+        switcher.select_next();
+    }
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
+}
+
+#[test]
+fn moving_up_inside_the_shown_rows_does_not_scroll() {
+    let mut switcher = twelve_pull_requests();
+    for _ in 0..11 {
+        switcher.select_next();
+    }
+    assert_eq!(switcher.first_shown(), 2);
+
+    switcher.select_previous();
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 2));
+}
+
+#[test]
+fn moving_up_above_the_first_shown_row_scrolls_by_just_one_row() {
+    let mut switcher = twelve_pull_requests();
+    for _ in 0..11 {
+        switcher.select_next();
+    }
+    for _ in 0..9 {
+        switcher.select_previous();
+    }
+    assert_eq!((switcher.selected(), switcher.first_shown()), (2, 2));
+
+    switcher.select_previous();
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (1, 1));
+}
+
+#[test]
+fn the_selection_stops_at_both_ends_of_the_list() {
+    let mut switcher = twelve_pull_requests();
+
+    switcher.select_previous();
+    assert_eq!(switcher.selected(), 0);
+    for _ in 0..20 {
+        switcher.select_next();
+    }
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (11, 2));
+}
+
+#[test]
+fn typing_puts_the_selection_and_the_scroll_back_on_top() {
+    let mut switcher = twelve_pull_requests();
+    for _ in 0..11 {
+        switcher.select_next();
+    }
+
+    switcher.filter("change");
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));
+}
+
+#[test]
+fn scrolling_the_wheel_moves_the_rows_and_leaves_the_selection_where_it_is() {
+    let mut switcher = twelve_pull_requests();
+
+    switcher.scroll_by(5);
+    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 2));
+
+    switcher.scroll_by(-1);
+    assert_eq!(switcher.first_shown(), 1);
+    switcher.scroll_by(-9);
+    assert_eq!(switcher.first_shown(), 0);
+}
+
+#[test]
+fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected() {
+    let home = TempDir::new().unwrap();
+    let mut switcher = twelve_pull_requests();
+    let mut active = ActivePr::default();
+    show(&mut active, "https://github.com/acme/shop/pull/11");
+
+    switcher.check_tours(home.path(), &active);
+    switcher.select_active();
+
+    let marked: Vec<_> = switcher
+        .visible()
+        .filter(|row| row.is_active)
+        .map(|row| row.pull_request.url.short())
+        .collect();
+    assert_eq!(marked, ["acme/shop#11"]);
+    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
+}
+
+#[test]
+fn with_no_pull_request_under_review_the_list_opens_on_its_first_row() {
+    let home = TempDir::new().unwrap();
+    let mut switcher = twelve_pull_requests();
+    switcher.select_next();
+
+    switcher.check_tours(home.path(), &ActivePr::default());
+    switcher.select_active();
+
+    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));
 }
