@@ -2,6 +2,24 @@
 
 Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub PR: a summary, then steps from the main flow down to the details, each with the diff pieces and diagrams it talks about. The app shows the tour next to the diff and lets you comment on it.
 
+![A guided review of sharkdp/fd#2185: summary, a step with a diagram and diff, an inline thread, the next step](docs/assets/guided-review-intro.gif)
+
+## Tour
+
+The tour of [sharkdp/fd#2185](https://github.com/sharkdp/fd/pull/2185), a merged public PR.
+
+![The tour summary next to the list of steps](docs/assets/tour-summary.png)
+
+The summary and the PR description, with the steps listed on the left.
+
+![A step with a diagram and the diff it explains](docs/assets/tour-step-diagram.png)
+
+A step: what to check, a diagram, then the diff pieces it talks about.
+
+![A review thread inside the diff](docs/assets/tour-step-thread.png)
+
+GitHub review threads sit inline in the diff, where you can reply and resolve.
+
 ## Requirements
 
 - macOS (the only platform tested; CI runs on macOS).
