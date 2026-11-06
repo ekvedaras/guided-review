@@ -7,9 +7,13 @@ use crate::file_path::FilePath;
 use crate::pull_request::PullRequestUrl;
 
 use super::comments::SendMode;
+use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
 use super::review::StepId;
 use super::threads::{ReviewThread, ThreadId};
 use super::tour_agent::{AgentStatus, SendOutcome, TourAgents};
+
+/// Marks what the tour agent wrote on GitHub, where it shares the reviewer's account.
+const ROBOT: &str = "🤖";
 
 /// Who a comment is for. The plain send actions are for the PR's author; only Ask agent also
 /// reaches the tour agent.
@@ -22,6 +26,23 @@ pub enum Audience {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct HandOffId(u32);
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("{0:?} is not a hand-off id like h0")]
+pub struct NotAHandOffId(String);
+
+impl std::str::FromStr for HandOffId {
+    type Err = NotAHandOffId;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        text.strip_prefix('h')
+            .unwrap_or(text)
+            .parse()
+            .ok()
+            .map(Self)
+            .ok_or_else(|| NotAHandOffId(text.to_owned()))
+    }
+}
 
 impl fmt::Display for HandOffId {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -314,10 +335,109 @@ impl HandOffs {
             .map(|hand_off| hand_off.state.line().into())
     }
 
+    pub fn agent_reply(
+        &self,
+        pr: &PullRequestUrl,
+        id: HandOffId,
+        body: &str,
+    ) -> Result<AgentReplyRequest, AgentReplyRefused> {
+        let hand_off = self
+            .0
+            .iter()
+            .find(|hand_off| hand_off.id == id)
+            .ok_or_else(|| AgentReplyRefused::Unknown {
+                id,
+                known: self.0.iter().map(|hand_off| hand_off.id).collect(),
+            })?;
+        let thread = match (&hand_off.thread, &hand_off.state) {
+            (Some(thread), _) => thread.clone(),
+            (None, HandOffState::Failed(reason)) => {
+                return Err(AgentReplyRefused::NoThread {
+                    id,
+                    reason: reason.clone(),
+                });
+            }
+            (None, _) => {
+                return Err(AgentReplyRefused::NoThread {
+                    id,
+                    reason: "the thread was never found".to_owned(),
+                });
+            }
+        };
+        let said = body.trim().trim_start_matches(ROBOT).trim_start();
+        if said.is_empty() {
+            return Err(AgentReplyRefused::Empty);
+        }
+        Ok(AgentReplyRequest {
+            pr: pr.clone(),
+            thread,
+            body: format!("{ROBOT} {said}"),
+        })
+    }
+
     fn holds(&self, thread: &ThreadId) -> bool {
         self.0
             .iter()
             .any(|hand_off| hand_off.thread.as_ref() == Some(thread))
+    }
+}
+
+/// Why a reply from the tour agent is not posted, before GitHub is asked.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum AgentReplyRefused {
+    #[error("no hand-off {id} on this PR; {}", known_ids(.known))]
+    Unknown {
+        id: HandOffId,
+        known: Vec<HandOffId>,
+    },
+    #[error("hand-off {id} has no thread to reply in: {reason}")]
+    NoThread { id: HandOffId, reason: String },
+    #[error("the reply is empty")]
+    Empty,
+}
+
+fn known_ids(known: &[HandOffId]) -> String {
+    if known.is_empty() {
+        return "there are none".to_owned();
+    }
+    let ids: Vec<String> = known.iter().map(ToString::to_string).collect();
+    format!("the known ones are {}", ids.join(", "))
+}
+
+/// Where an agent reply ended up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplyPlacement {
+    /// In the reviewer's pending review, which goes out when they send it.
+    JoinedPendingReview,
+    PostedAtOnce,
+}
+
+/// The tour agent's answer to one hand-off, owned so it can run off the UI thread.
+#[derive(Debug)]
+pub struct AgentReplyRequest {
+    pr: PullRequestUrl,
+    thread: ThreadId,
+    body: String,
+}
+
+impl AgentReplyRequest {
+    /// Joins the reviewer's pending review when there is one and never sends it; with none the
+    /// reply is posted at once.
+    pub fn run(
+        &self,
+        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+    ) -> Result<ReplyPlacement, GitHubError> {
+        let placement = if github.has_pending_review(&self.pr)? {
+            ReplyPlacement::JoinedPendingReview
+        } else {
+            ReplyPlacement::PostedAtOnce
+        };
+        let mode = match placement {
+            ReplyPlacement::JoinedPendingReview => SendMode::AddToReview,
+            ReplyPlacement::PostedAtOnce => SendMode::CommentNow,
+        };
+        github.reply_to_thread(&self.pr, &self.thread, &self.body, mode)?;
+        Ok(placement)
     }
 }
 

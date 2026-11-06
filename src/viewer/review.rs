@@ -28,7 +28,9 @@ use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
-use super::hand_offs::{Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffState};
+use super::hand_offs::{
+    Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState,
+};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
@@ -1094,6 +1096,11 @@ impl Review {
     pub fn apply_delivery(&mut self, outcome: DeliveryOutcome) -> anyhow::Result<()> {
         self.state.hand_offs_mut().apply_delivery(outcome);
         self.save_viewer_sections()
+    }
+
+    pub fn hand_off_answered(&mut self, id: HandOffId) -> anyhow::Result<()> {
+        let _ = id;
+        todo!()
     }
 
     pub fn agent_status_is(&mut self, status: AgentStatus) -> anyhow::Result<()> {

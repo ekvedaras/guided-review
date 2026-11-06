@@ -57,8 +57,8 @@ pub use finish_review::{
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use hand_offs::{
-    Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState, HandOffs,
-    ThreadMessage,
+    AgentReplyRefused, AgentReplyRequest, Audience, DeliveryOutcome, DeliveryRequest, HandOff,
+    HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, ThreadMessage,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{

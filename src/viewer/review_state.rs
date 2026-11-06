@@ -13,7 +13,7 @@ use crate::timestamp::UtcTimestamp;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
-use super::hand_offs::HandOffs;
+use super::hand_offs::{AgentReplyRefused, HandOffId, HandOffs};
 use super::ports::Viewed;
 use super::review::StepId;
 use super::threads::ThreadId;
@@ -296,8 +296,13 @@ impl ReviewState {
         }
     }
 
-    pub(super) fn hand_offs(&self) -> &HandOffs {
+    pub fn hand_offs(&self) -> &HandOffs {
         &self.viewer.hand_offs
+    }
+
+    pub fn hand_off_answered(&mut self, id: HandOffId) -> Result<(), AgentReplyRefused> {
+        let _ = id;
+        todo!()
     }
 
     pub(super) fn hand_offs_mut(&mut self) -> &mut HandOffs {

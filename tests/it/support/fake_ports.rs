@@ -107,6 +107,8 @@ pub enum GitHubFault {
     ReadsFail,
     /// Listing the relevant pull requests fails as if the network were down.
     RelevantListFails,
+    /// A reply is refused as GitHub does for a thread that was deleted.
+    ThreadIsGone,
 }
 
 pub struct FakeGitHub {
@@ -354,6 +356,12 @@ impl ReviewThreadsPort for FakeGitHub {
             mode,
         });
         self.fail_if_connection_lost()?;
+        if self.is_faulty(&GitHubFault::ThreadIsGone) {
+            return Err(anyhow::anyhow!(
+                "GitHub answered with errors: Could not resolve to a PullRequestReviewThread"
+            )
+            .into());
+        }
         if mode == SendMode::AddToReview {
             self.has_pending_review.store(true, Ordering::SeqCst);
         }

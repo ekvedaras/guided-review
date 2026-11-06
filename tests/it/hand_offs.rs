@@ -1,15 +1,16 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentStatus, Audience, CommentId, CommentPlace, CommentResult, HandOffState, LineLocation,
-    Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, ThreadAction,
-    ThreadActionResult, ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgents,
+    AgentReplyRefused, AgentReplyRequest, AgentStatus, Audience, CommentId, CommentPlace,
+    CommentResult, HandOffId, HandOffState, LineLocation, Problem, ReplyPlacement, Review,
+    ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, ThreadAction, ThreadActionResult,
+    ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgents,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -641,4 +642,190 @@ fn a_hand_off_that_found_no_thread_is_a_sidebar_problem_until_the_next_one_goes_
         &github,
     );
     assert_eq!(review.problems(), []);
+}
+
+fn asked_one(pull: &Pull, github: &FakeGitHub, mode: SendMode) -> HandOffId {
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    send(&mut review, &place, mode, Audience::Agent, github);
+    review.hand_offs().first().unwrap().id()
+}
+
+fn reply_request(
+    pull: &Pull,
+    id: HandOffId,
+    body: &str,
+) -> Result<AgentReplyRequest, AgentReplyRefused> {
+    let pr: PullRequestUrl = PR.parse().unwrap();
+    let state = ReviewStateFile::for_pr(pull.repo.home(), &pr)
+        .load()
+        .unwrap();
+    state.hand_offs().agent_reply(&pr, id, body)
+}
+
+fn replies(sent: &SentLog) -> Vec<(String, SendMode)> {
+    sent.github_calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GitHubCall::Reply { body, mode, .. } => Some((body, mode)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_agent_reply_joins_the_pending_review_and_does_not_send_it() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let id = asked_one(&pull, &github, SendMode::AddToReview);
+    assert!(github.has_pending_review_now());
+
+    let posted = reply_request(&pull, id, "Because of the loop.")
+        .unwrap()
+        .run(&github)
+        .unwrap();
+
+    assert_eq!(posted, ReplyPlacement::JoinedPendingReview);
+    assert_eq!(
+        replies(&pull.sent),
+        [("🤖 Because of the loop.".to_owned(), SendMode::AddToReview)]
+    );
+    assert!(
+        github.has_pending_review_now(),
+        "the review is still the reviewer's to send"
+    );
+    assert!(
+        !pull
+            .sent
+            .github_calls()
+            .iter()
+            .any(|call| matches!(call, GitHubCall::Submit { .. }))
+    );
+}
+
+#[test]
+fn an_agent_reply_is_posted_at_once_when_the_reviewer_has_no_pending_review() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let id = asked_one(&pull, &github, SendMode::CommentNow);
+    assert!(!github.has_pending_review_now());
+
+    let posted = reply_request(&pull, id, "Because of the loop.")
+        .unwrap()
+        .run(&github)
+        .unwrap();
+
+    assert_eq!(posted, ReplyPlacement::PostedAtOnce);
+    assert_eq!(
+        replies(&pull.sent),
+        [("🤖 Because of the loop.".to_owned(), SendMode::CommentNow)]
+    );
+}
+
+#[test]
+fn an_agent_reply_starts_with_the_robot_exactly_once() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let id = asked_one(&pull, &github, SendMode::AddToReview);
+
+    for body in ["🤖 already marked", "🤖🤖  twice", "  plain  "] {
+        reply_request(&pull, id, body)
+            .unwrap()
+            .run(&github)
+            .unwrap();
+    }
+
+    let bodies: Vec<String> = replies(&pull.sent)
+        .into_iter()
+        .map(|(body, _)| body)
+        .collect();
+    assert_eq!(bodies, ["🤖 already marked", "🤖 twice", "🤖 plain"]);
+}
+
+#[test]
+fn an_agent_reply_to_a_thread_that_is_gone_fails_with_githubs_reason() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let id = asked_one(&pull, &github, SendMode::AddToReview);
+    github.inject(GitHubFault::ThreadIsGone);
+
+    let error = reply_request(&pull, id, "Because.")
+        .unwrap()
+        .run(&github)
+        .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("Could not resolve to a PullRequestReviewThread"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn an_agent_reply_to_an_unknown_hand_off_is_refused_with_the_known_ids() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    asked_one(&pull, &github, SendMode::AddToReview);
+
+    let refused = reply_request(&pull, "h9".parse().unwrap(), "Because.")
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        refused.to_string(),
+        "no hand-off h9 on this PR; the known ones are h0"
+    );
+}
+
+#[test]
+fn an_answered_hand_off_is_answered_in_the_review_and_in_the_state_file() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let first = review.hand_offs().first().unwrap().id();
+
+    review.hand_off_answered(first).unwrap();
+
+    assert_eq!(
+        states(&review),
+        [HandOffState::Answered, HandOffState::Queued]
+    );
+    let pr: PullRequestUrl = PR.parse().unwrap();
+    let saved = ReviewStateFile::for_pr(pull.repo.home(), &pr)
+        .load()
+        .unwrap();
+    assert_eq!(
+        saved.hand_offs().all().first().unwrap().state(),
+        &HandOffState::Answered
+    );
+}
+
+#[test]
+fn a_hand_off_answered_in_the_state_file_alone_is_answered_and_an_unknown_one_is_refused() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let id = asked_one(&pull, &github, SendMode::AddToReview);
+    let pr: PullRequestUrl = PR.parse().unwrap();
+    let file = ReviewStateFile::for_pr(pull.repo.home(), &pr);
+
+    let mut result = Ok(());
+    file.update(|state| result = state.hand_off_answered(id))
+        .unwrap();
+
+    result.unwrap();
+    assert_eq!(
+        file.load()
+            .unwrap()
+            .hand_offs()
+            .all()
+            .first()
+            .unwrap()
+            .state(),
+        &HandOffState::Answered
+    );
+    let refused = file
+        .load()
+        .unwrap()
+        .hand_off_answered("h9".parse().unwrap())
+        .unwrap_err();
+    assert!(matches!(refused, AgentReplyRefused::Unknown { .. }));
 }
