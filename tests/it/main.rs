@@ -11,6 +11,7 @@
 
 mod support;
 
+mod app_link;
 mod ask;
 mod ask_adapters;
 mod ask_lifecycle;
@@ -34,6 +35,7 @@ mod line_number;
 mod markdown;
 mod new_commits;
 mod open;
+mod open_app;
 mod open_review;
 mod outline;
 mod outline_extras;

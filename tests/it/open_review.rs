@@ -44,6 +44,22 @@ fn a_dropped_review_frees_its_code_source() {
 }
 
 #[test]
+fn the_reloader_reads_the_tour_file_again() {
+    let repo = shop_with_a_tour();
+    let opened = open_review(&pr(), repo.path(), repo.home()).unwrap();
+    assert_eq!(opened.review.title(), "Hello world");
+    let path = Tour::path_for(repo.home(), &pr());
+    let rewritten = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("Hello world", "Hello again");
+    std::fs::write(path, rewritten).unwrap();
+
+    let reloaded = opened.reloader.run().unwrap();
+
+    assert_eq!(reloaded.review.title(), "Hello again");
+}
+
+#[test]
 fn an_opened_review_can_be_built_off_the_ui_thread() {
     fn is_send<T: Send>() {}
     is_send::<OpenedReview>();

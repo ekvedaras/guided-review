@@ -39,6 +39,31 @@ pub struct TourRepinner {
     pub pick_code_source: PickCodeSource,
 }
 
+/// Reads the tour file again at the commits it is pinned to, for a tour the agent rewrote while the app
+/// shows it.
+pub struct TourReloader {
+    pub home: PathBuf,
+    pub pr: PullRequestUrl,
+    pub pick_code_source: PickCodeSource,
+}
+
+impl TourReloader {
+    /// Blocks on the code source; the app runs it off the main thread.
+    pub fn run(&self) -> anyhow::Result<RepinnedTour> {
+        let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
+        let source = (self.pick_code_source)(&tour.pinned_tips())?;
+        let review = Review::open(
+            tour,
+            source.as_ref(),
+            ReviewStateFile::for_pr(&self.home, &self.pr),
+        )?;
+        Ok(RepinnedTour {
+            review,
+            source: source.into(),
+        })
+    }
+}
+
 pub struct RepinnedTour {
     pub review: Review,
     pub source: Arc<dyn CodeSource>,

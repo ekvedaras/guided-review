@@ -56,7 +56,7 @@ pub use image_preview::{
 };
 pub use jump::{JumpPlace, JumpTarget};
 pub use markdown::{Block, Markdown, Run};
-pub use new_commits::{PickCodeSource, RepinnedTour, TourRepinner, repin_tour};
+pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess,
     PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,

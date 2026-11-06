@@ -9,7 +9,9 @@ use crate::ide::{Ide, NoIde};
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
-use crate::viewer::{Asks, GitHubPort, Review, TourRefresher, TourRepinner, WorkingCopy};
+use crate::viewer::{
+    Asks, GitHubPort, Review, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+};
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
 /// this frees them.
@@ -21,6 +23,15 @@ pub struct OpenedReview {
     pub github: Arc<dyn GitHubPort>,
     pub repinner: TourRepinner,
     pub refresher: TourRefresher,
+    pub reloader: TourReloader,
+}
+
+/// The refusal `open` gives before it asks or starts any app.
+pub fn require_tour(pr: &PullRequestUrl, home: &Path) -> anyhow::Result<()> {
+    if !Tour::path_for(home, pr).exists() {
+        anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
+    }
+    Ok(())
 }
 
 /// Builds the review of `pr` at the commits its tour is pinned to. `clones_from` is the folder a local
@@ -31,11 +42,8 @@ pub fn open_review(
     home: &Path,
 ) -> anyhow::Result<OpenedReview> {
     let opened = OpenedPr::in_folders(pr, home, clones_from);
-    let tour_path = opened.tour_path();
-    if !tour_path.exists() {
-        anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
-    }
-    let tour = Tour::load(&tour_path)?;
+    require_tour(pr, home)?;
+    let tour = Tour::load(&opened.tour_path())?;
     let code = opened.at_pinned_tips(&tour)?;
     let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
     let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
@@ -59,6 +67,11 @@ pub fn open_review(
             clone.clone().unwrap_or_else(|| home.to_path_buf()),
         )),
     };
+    let reloader = TourReloader {
+        home: home.to_path_buf(),
+        pr: pr.clone(),
+        pick_code_source: Arc::clone(&pick_code_source),
+    };
     let repinner = TourRepinner {
         home: home.to_path_buf(),
         pr: pr.clone(),
@@ -72,5 +85,6 @@ pub fn open_review(
         github: Arc::new(opened.github),
         repinner,
         refresher,
+        reloader,
     })
 }

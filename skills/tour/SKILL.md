@@ -7,7 +7,7 @@ description: Write a top-down guided-review tour of a GitHub PR with the guided-
 
 Write a **tour file**: the PR's changes as **steps**, main flow first, details later. The `guided-review` CLI owns the facts (piece ids, shas); you own the story: order, nesting, text, diagrams, skim flags, summary. Terms: `GLOSSARY.md` in the guided-review repo.
 
-The tour is done when `guided-review check <pr-url>` prints `0 errors` and you have handled every warning. Then **open** it: run `guided-review open <pr-url>` with the Bash tool's `run_in_background: true`. It runs until the user closes the window, so never wait on it or read its output. Reply with the tour summary at once.
+The tour is done when `guided-review check <pr-url>` prints `0 errors` and you have handled every warning. Then **open** it: run `guided-review open <pr-url>`. It hands the PR to the one running app (starting it when none runs) and returns at once with a line saying what the app did. Reply with the tour summary at once.
 
 ## Refresh and redo
 

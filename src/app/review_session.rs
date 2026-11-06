@@ -21,7 +21,7 @@ use crate::viewer::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort,
     ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
     ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
-    TourRefresher, TourRepinner, WorkingCopy,
+    TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -33,6 +33,7 @@ const LIST_OVERDRAW: f32 = 300.;
 pub struct TourWork {
     pub repinner: Arc<TourRepinner>,
     pub refresher: Arc<TourRefresher>,
+    pub reloader: Arc<TourReloader>,
 }
 
 /// The selected lines with Asks on a screen. They live in the Ask panel, and each gets a row marker.
@@ -68,6 +69,7 @@ pub struct ReviewSession {
     is_retrying_comments: bool,
     sync_state: SyncState,
     pr_head_check: Option<Task<()>>,
+    reload: Option<Task<()>>,
     threads_pull: Option<Task<()>>,
     pr_description_pull: Option<Task<()>>,
     working_copy_check: Option<Task<()>>,
@@ -156,6 +158,7 @@ impl ReviewSession {
             is_retrying_comments: false,
             sync_state: SyncState::default(),
             pr_head_check: None,
+            reload: None,
             threads_pull: None,
             pr_description_pull: None,
             working_copy_check: None,
@@ -435,6 +438,20 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    /// Runs when `open` names the PR already shown: the tour file is read again and the screen stays.
+    /// A failed read keeps the review on screen and is printed for the app's log.
+    pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
+        let reloader = Arc::clone(&self.tour_work.reloader);
+        self.reload = Some(self.run_off_thread(
+            cx,
+            move || reloader.run(),
+            |this, reloaded, cx| match reloaded {
+                Ok(reloaded) => this.reopen(reloaded, cx),
+                Err(error) => eprintln!("could not reload the tour: {error:#}"),
+            },
+        ));
     }
 
     /// Runs only on the button, in the background: the user's `claude` rewrites the marked steps.

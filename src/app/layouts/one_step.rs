@@ -251,6 +251,10 @@ impl OneStepLayout {
             .update(cx, |session, cx| session.change(cx, change))
     }
 
+    pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
+        self.session.update(cx, ReviewSession::reload_tour);
+    }
+
     /// The re-pin or Refresh opened a new review: diagrams and notes on old answers follow it.
     fn reopened(&mut self, cx: &mut Context<Self>) {
         let ask = self.ask.clone();

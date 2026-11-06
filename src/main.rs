@@ -1,9 +1,10 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
+use guided_review::app_link::{Answer, AppFolder, AppListener, BindError, OpenRequest, hand_over};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
-use guided_review::open_review::open_review;
+use guided_review::open_review::require_tour;
 use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
 use guided_review::pieces;
@@ -50,6 +51,9 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
+    /// Run the app itself; `open` starts it when none answers
+    #[command(hide = true)]
+    Serve,
     /// Score the /tour skill on the test set; `eval add` adds a PR to it
     Eval {
         #[command(subcommand)]
@@ -79,6 +83,7 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
+        Command::Serve => serve(),
         Command::Eval {
             action: Some(EvalAction::Add { pr, note }),
             ..
@@ -225,7 +230,33 @@ fn eval(existing_tours: bool) -> anyhow::Result<()> {
 }
 
 fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let current_dir = std::env::current_dir().context("could not read the current folder")?;
-    guided_review::app::run(open_review(pr, &current_dir, &home_folder()?)?);
-    Ok(())
+    let home = home_folder()?;
+    require_tour(pr, &home)?;
+    let answer = hand_over(
+        &AppFolder::in_home(&home),
+        OpenRequest {
+            pr: pr.to_string(),
+            folder: std::env::current_dir().context("could not read the current folder")?,
+            terminal: std::env::var("HC_TERMINAL_ID").ok(),
+        },
+    )?;
+    match answer {
+        Answer::Opening { .. } | Answer::Reloaded { .. } => {
+            println!("{answer}");
+            Ok(())
+        }
+        other => anyhow::bail!("{other}"),
+    }
+}
+
+fn serve() -> anyhow::Result<()> {
+    let home = home_folder()?;
+    match AppListener::bind(&AppFolder::in_home(&home)) {
+        Ok(listener) => {
+            guided_review::app::serve(listener, home);
+            Ok(())
+        }
+        Err(BindError::AlreadyRunning) => Ok(()),
+        Err(BindError::Failed(error)) => Err(error),
+    }
 }
