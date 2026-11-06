@@ -31,6 +31,7 @@ mod suggestion;
 mod sync_state;
 mod thread_actions;
 mod threads;
+mod tour_agent;
 mod typing_save;
 mod viewed_sync;
 
@@ -81,5 +82,6 @@ pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
+pub use tour_agent::{AgentStatus, TerminalId, TourAgentPort, TourAgentState, TourAgents};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};

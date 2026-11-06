@@ -11,6 +11,7 @@
 
 pub mod app_path;
 pub mod fake_ports;
+pub mod fake_tour_agent;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
