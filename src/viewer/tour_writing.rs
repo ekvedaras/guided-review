@@ -49,6 +49,20 @@ impl TourWriting {
         }
     }
 
+    /// Found again after a restart. It started before, so going idle now means it stopped.
+    pub(super) fn resumed(&mut self, terminal: TerminalId, status: Option<AgentStatus>) {
+        self.terminal = Some(terminal);
+        self.stage = WritingStage::Writing;
+        self.has_worked = true;
+        if let Some(status) = status {
+            self.status_is(status);
+        }
+    }
+
+    pub(super) fn lost_in_restart(&mut self, reason: String) {
+        self.stage = WritingStage::Failed(reason);
+    }
+
     pub(super) fn status_is(&mut self, status: AgentStatus) {
         self.status = Some(status);
         if self.stage != WritingStage::Writing {

@@ -30,6 +30,23 @@ pub fn write(pr: PullRequestUrl, cx: &mut App) {
     }
 }
 
+/// After a restart, finds each remembered writing's terminal again and follows it. Asking herdr is
+/// brief and happens once, before the window exists.
+pub fn resume(cx: &mut App) {
+    let switching = cx.global::<PrSwitching>().clone();
+    let (active, port) = (switching.active.clone(), switching.agents);
+    let to_follow = active.update(cx, |active, cx| {
+        let to_follow = active.resume_writings(port.as_ref());
+        cx.notify();
+        to_follow
+    });
+    for (pr, terminal) in to_follow {
+        let (active, port) = (active.clone(), Arc::clone(&port));
+        cx.spawn(async move |cx| follow(&active, port, &pr, terminal, cx).await)
+            .detach();
+    }
+}
+
 pub fn try_again(pr: PullRequestUrl, cx: &mut App) {
     let switching = cx.global::<PrSwitching>().clone();
     switching.active.update(cx, |active, cx| {

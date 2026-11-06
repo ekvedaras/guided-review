@@ -4,6 +4,7 @@
 mod active_pr;
 mod agent_event;
 mod agent_pool;
+mod app_state;
 mod ask;
 mod ask_context;
 mod ask_target;
@@ -43,6 +44,7 @@ mod viewed_sync;
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
+pub use app_state::AppStateFile;
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;

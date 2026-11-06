@@ -14,6 +14,7 @@ mod support;
 mod active_pr;
 mod agent_reply;
 mod app_link;
+mod app_state;
 mod ask;
 mod ask_adapters;
 mod ask_lifecycle;

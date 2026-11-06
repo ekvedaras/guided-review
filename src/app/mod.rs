@@ -36,7 +36,7 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, BuildTicket, Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher,
+    ActivePr, AppStateFile, BuildTicket, Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher,
     ReviewStateFile, TourAgents,
 };
 use components::ask_panel::AskPanel;
@@ -70,10 +70,12 @@ pub fn serve(listener: AppListener, home: PathBuf) {
     application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
-            let active = cx.new(|_| ActivePr::default());
+            let remembered = AppStateFile::in_home(&home);
+            let active = cx.new(|_| ActivePr::remembering_in(remembered));
             let switching = pr_switching(&requests_to_self, &home, active.clone(), cx);
             switching.refresh(cx);
             cx.set_global(switching);
+            tour_writer::resume(cx);
             dock_icon::show();
             bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();

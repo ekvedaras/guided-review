@@ -1,5 +1,6 @@
+use super::app_state::{AppState, AppStateFile};
 use super::pr_switcher::TourFact;
-use super::tour_agent::{AgentStatus, TerminalId};
+use super::tour_agent::{AgentStatus, TerminalId, TourAgentPort};
 use super::tour_writing::TourWriting;
 use crate::pull_request::PullRequestUrl;
 
@@ -18,6 +19,7 @@ pub struct ActivePr {
     /// The PR whose writing the loading screen shows.
     waiting_for: Option<PullRequestUrl>,
     unseen_replies: Vec<PullRequestUrl>,
+    remembered_in: Option<AppStateFile>,
 }
 
 /// Names one build, so its result can be told from the result of an older one.
@@ -61,6 +63,73 @@ pub enum Finished<Built> {
 }
 
 impl ActivePr {
+    /// Starts from what the file kept, and keeps the file up to date from here on. A file that cannot be
+    /// read is for the app's log: the app starts with nothing remembered.
+    pub fn remembering_in(file: AppStateFile) -> Self {
+        let saved = file.load().unwrap_or_else(|error| {
+            eprintln!("could not read the app state: {error:#}");
+            AppState::default()
+        });
+        Self {
+            writings: saved
+                .writings
+                .iter()
+                .filter_map(|url| url.parse().ok())
+                .map(|pr| (pr, TourWriting::starting()))
+                .collect(),
+            unseen_replies: saved
+                .unseen_replies
+                .iter()
+                .filter_map(|url| url.parse().ok())
+                .collect(),
+            remembered_in: Some(file),
+            ..Self::default()
+        }
+    }
+
+    /// After a restart, each remembered writing looks for its terminal by the PR's herdr label, never by
+    /// a stored id. Returns the writings to follow again; one whose terminal is gone, or that herdr
+    /// cannot be asked about, has failed with the reason.
+    pub fn resume_writings(
+        &mut self,
+        port: &dyn TourAgentPort,
+    ) -> Vec<(PullRequestUrl, TerminalId)> {
+        let mut to_follow = Vec::new();
+        for (pr, writing) in &mut self.writings {
+            match port.terminals_of(pr) {
+                Ok(terminals) => match terminals.into_iter().next() {
+                    Some(terminal) => {
+                        let status = port.status(&terminal).ok();
+                        writing.resumed(terminal.clone(), status);
+                        to_follow.push((pr.clone(), terminal));
+                    }
+                    None => writing.lost_in_restart(
+                        "The app restarted while this tour was being written, and the tour agent's terminal is gone."
+                            .to_owned(),
+                    ),
+                },
+                Err(error) => writing.lost_in_restart(format!(
+                    "The app restarted while this tour was being written, and herdr could not be asked for the tour agent's terminal: {error:#}"
+                )),
+            }
+        }
+        to_follow
+    }
+
+    fn remember(&self) {
+        let Some(file) = &self.remembered_in else {
+            return;
+        };
+        let urls = |prs: Vec<&PullRequestUrl>| prs.into_iter().map(ToString::to_string).collect();
+        let state = AppState {
+            writings: urls(self.writings.iter().map(|(pr, _)| pr).collect()),
+            unseen_replies: urls(self.unseen_replies.iter().collect()),
+        };
+        if let Err(error) = file.save(&state) {
+            eprintln!("could not keep the app state: {error:#}");
+        }
+    }
+
     pub fn shown(&self) -> Option<&PullRequestUrl> {
         self.shown.as_ref()
     }
@@ -82,6 +151,9 @@ impl ActivePr {
     pub fn request(&mut self, pr: PullRequestUrl, origin: OpenOrigin) -> OpenDecision {
         let was_written = self.writings.iter().any(|(writing, _)| writing == &pr);
         self.writings.retain(|(writing, _)| writing != &pr);
+        if was_written {
+            self.remember();
+        }
         if self.shown.as_ref() == Some(&pr) {
             self.issued += 1;
             self.building = None;
@@ -117,6 +189,7 @@ impl ActivePr {
         match built {
             Ok(built) => {
                 self.unseen_replies.retain(|unseen| unseen != &pr);
+                self.remember();
                 self.shown = Some(pr);
                 Finished::Switch(built)
             }
@@ -136,6 +209,7 @@ impl ActivePr {
             return WriteDecision::Watch;
         }
         self.writings.push((pr, TourWriting::starting()));
+        self.remember();
         WriteDecision::StartWriter
     }
 
@@ -203,6 +277,7 @@ impl ActivePr {
     pub fn agent_replied(&mut self, pr: &PullRequestUrl) {
         if self.shown.as_ref() != Some(pr) && !self.has_unseen_reply(pr) {
             self.unseen_replies.push(pr.clone());
+            self.remember();
         }
     }
 
