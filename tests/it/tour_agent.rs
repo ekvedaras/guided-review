@@ -113,14 +113,77 @@ fn status_changes_are_followed_until_the_stream_ends() {
 }
 
 #[test]
-fn an_open_request_from_a_herdr_terminal_claims_it_and_one_from_outside_claims_nothing() {
-    let fake = Arc::new(FakeTourAgent::new().with_terminal("t2", None, AgentStatus::Idle));
+fn an_open_request_from_outside_herdr_claims_nothing() {
+    let fake = Arc::new(FakeTourAgent::new().claude("t2", "shop"));
 
     agents(&fake).claim_for_open(&pr(), None).unwrap();
+
     assert_eq!(fake.calls().len(), 0);
+}
+
+#[test]
+fn an_open_request_from_a_terminal_running_claude_claims_it() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .claude("t2", "shop")
+            .claude("t3", "shop"),
+    );
 
     agents(&fake).claim_for_open(&pr(), Some("t2")).unwrap();
+
     assert_eq!(fake.agents_of(PR), ["t2"]);
+}
+
+#[test]
+fn an_open_request_from_a_plain_shell_claims_the_one_claude_terminal_of_its_space() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .shell("t1", "shop")
+            .claude("t2", "shop")
+            .claude("t3", "elsewhere")
+            .shell("t4", "shop"),
+    );
+
+    agents(&fake).claim_for_open(&pr(), Some("t1")).unwrap();
+
+    assert_eq!(fake.agents_of(PR), ["t2"]);
+}
+
+#[test]
+fn an_open_request_from_a_plain_shell_claims_nothing_when_its_space_has_several_claude_terminals() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .shell("t1", "shop")
+            .claude("t2", "shop")
+            .claude("t3", "shop"),
+    );
+
+    agents(&fake).claim_for_open(&pr(), Some("t1")).unwrap();
+
+    assert_eq!(fake.calls().len(), 0);
+}
+
+#[test]
+fn an_open_request_from_a_plain_shell_claims_nothing_when_its_space_has_no_claude_terminal() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .shell("t1", "shop")
+            .shell("t2", "shop")
+            .claude("t3", "elsewhere"),
+    );
+
+    agents(&fake).claim_for_open(&pr(), Some("t1")).unwrap();
+
+    assert_eq!(fake.calls().len(), 0);
+}
+
+#[test]
+fn an_open_request_from_a_terminal_herdr_does_not_list_claims_nothing() {
+    let fake = Arc::new(FakeTourAgent::new().claude("t2", "shop"));
+
+    agents(&fake).claim_for_open(&pr(), Some("t9")).unwrap();
+
+    assert_eq!(fake.calls().len(), 0);
 }
 
 #[test]

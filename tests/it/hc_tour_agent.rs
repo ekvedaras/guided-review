@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, TerminalId, TourAgentPort};
+use guided_review::viewer::{AgentStatus, LiveTerminal, TerminalId, TourAgentPort};
 use tempfile::TempDir;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -206,4 +206,33 @@ fn showing_an_agent_asks_the_herdr_app_to_focus_its_terminal() {
         calls(dir.path(), "app-calls"),
         ["do agent.focus --terminal t7"]
     );
+}
+
+fn live(terminal: &str, runs_claude: bool, space: &str) -> LiveTerminal {
+    LiveTerminal {
+        terminal: TerminalId::new(terminal),
+        runs_claude,
+        space: space.to_owned(),
+    }
+}
+
+#[test]
+fn live_terminals_say_whether_they_run_claude_and_in_which_space_as_herdr_lists_them() {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "ls", include_str!("../fixtures/herdr/ls.json"));
+
+    let terminals = adapter(dir.path()).live_terminals().unwrap();
+
+    assert_eq!(
+        terminals,
+        [
+            live("t1", true, "dotfiles"),
+            live("t3", false, "shop"),
+            live("t4", false, "shop"),
+            live("t1b", true, "guided-review"),
+            live("t2h", false, "guided-review"),
+            live("t2j", true, "guided-review"),
+        ]
+    );
+    assert_eq!(calls(dir.path(), "calls"), ["ls --json"]);
 }

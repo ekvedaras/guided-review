@@ -64,6 +64,16 @@ impl fmt::Display for AgentStatus {
     }
 }
 
+/// A live herdr terminal, as far as deciding whether it can be a tour agent needs to know it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveTerminal {
+    pub terminal: TerminalId,
+    /// Herdr recognises the program in it as Claude Code, so a question sent to it is read by Claude, not run by a shell.
+    pub runs_claude: bool,
+    /// The herdr space (workspace) it lives in.
+    pub space: String,
+}
+
 /// Herdr behind the viewer: where a PR's tour agent runs and what it does. One adapter, `hc`.
 pub trait TourAgentPort: Send + Sync {
     /// Whether tour agents can be reached at all; the reason when not.
@@ -71,6 +81,9 @@ pub trait TourAgentPort: Send + Sync {
 
     /// The live terminals labelled as the tour agent of the PR.
     fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>>;
+
+    /// Every live terminal herdr lists.
+    fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>>;
 
     /// Labels the terminal as the tour agent of the PR. Releasing the others is the caller's job.
     fn claim(&self, terminal: &TerminalId, pr: &PullRequestUrl) -> anyhow::Result<()>;
@@ -157,16 +170,31 @@ impl TourAgents {
             .with_context(|| format!("could not make {terminal} the tour agent of {pr}"))
     }
 
-    /// What an `open` request does with the terminal it came from: a request from a herdr terminal claims it
-    /// for the PR, one from outside herdr claims nothing.
+    /// What an `open` request does with the terminal it came from. Only a terminal running Claude is ever
+    /// claimed, because `hc send` types into it: a terminal running Claude is claimed, a plain shell hands over
+    /// to the one Claude terminal of its herdr space, and with none or several (a guess would put the PR's
+    /// questions into an unrelated session) nothing is claimed. A request from outside herdr claims nothing.
     pub fn claim_for_open(
         &self,
         pr: &PullRequestUrl,
         terminal: Option<&str>,
     ) -> anyhow::Result<()> {
-        match terminal {
-            Some(address) => self.claim(pr, &TerminalId::new(address)),
-            None => Ok(()),
+        let Some(address) = terminal else {
+            return Ok(());
+        };
+        let live = self.port.live_terminals()?;
+        let Some(origin) = live.iter().find(|live| live.terminal.as_str() == address) else {
+            return Ok(());
+        };
+        if origin.runs_claude {
+            return self.claim(pr, &origin.terminal);
+        }
+        let mut beside = live
+            .iter()
+            .filter(|other| other.runs_claude && other.space == origin.space);
+        match (beside.next(), beside.next()) {
+            (Some(only), None) => self.claim(pr, &only.terminal),
+            _ => Ok(()),
         }
     }
 

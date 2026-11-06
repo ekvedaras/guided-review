@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 use std::sync::Mutex;
 
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, TerminalId, TourAgentPort};
+use guided_review::viewer::{AgentStatus, LiveTerminal, TerminalId, TourAgentPort};
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +23,7 @@ pub struct FakeTourAgent {
     /// What `follow` reports, in order, before its stream ends.
     coming: Mutex<VecDeque<AgentStatus>>,
     calls: Mutex<Vec<TourAgentCall>>,
+    live: Mutex<Vec<LiveTerminal>>,
 }
 
 impl FakeTourAgent {
@@ -32,6 +33,7 @@ impl FakeTourAgent {
             terminals: Mutex::default(),
             coming: Mutex::default(),
             calls: Mutex::default(),
+            live: Mutex::default(),
         }
     }
 
@@ -46,6 +48,25 @@ impl FakeTourAgent {
             (pr.map(|pr| pr.parse().unwrap()), status),
         );
         self
+    }
+
+    /// A live terminal running Claude in a herdr space; it can be claimed.
+    pub fn claude(self, terminal: &str, space: &str) -> Self {
+        self.running(terminal, true, space)
+    }
+
+    /// A live terminal running a plain shell in a herdr space; it can be claimed.
+    pub fn shell(self, terminal: &str, space: &str) -> Self {
+        self.running(terminal, false, space)
+    }
+
+    fn running(self, terminal: &str, runs_claude: bool, space: &str) -> Self {
+        self.live.lock().unwrap().push(LiveTerminal {
+            terminal: TerminalId::new(terminal),
+            runs_claude,
+            space: space.to_owned(),
+        });
+        self.with_terminal(terminal, None, AgentStatus::Unreported)
     }
 
     pub fn then_reports(self, statuses: &[AgentStatus]) -> Self {
@@ -88,6 +109,10 @@ impl TourAgentPort for FakeTourAgent {
             .filter(|(_, (labelled, _))| labelled.as_ref() == Some(pr))
             .map(|(terminal, _)| terminal.clone())
             .collect())
+    }
+
+    fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>> {
+        Ok(self.live.lock().unwrap().clone())
     }
 
     fn claim(&self, terminal: &TerminalId, pr: &PullRequestUrl) -> anyhow::Result<()> {

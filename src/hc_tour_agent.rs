@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{AgentStatus, TerminalId, TourAgentPort};
+use crate::viewer::{AgentStatus, LiveTerminal, TerminalId, TourAgentPort};
 
 const APP_LABEL: &str = "app=guided-review";
 
@@ -53,6 +53,16 @@ impl Default for HcTourAgents {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// What `hc ls --json` names the Claude Code program in `agent`.
+const CLAUDE_AGENT: &str = "claude-code";
+
+/// `where` reads `<space> / <tab>`.
+fn space_of(place: &str) -> &str {
+    place
+        .rsplit_once(" / ")
+        .map_or(place, |(space, _tab)| space)
 }
 
 fn label_of(pr: &PullRequestUrl) -> String {
@@ -98,6 +108,22 @@ impl TourAgentPort for HcTourAgents {
             .flatten()
             .filter_map(|terminal| at(terminal, "/address").as_str())
             .map(TerminalId::new)
+            .collect())
+    }
+
+    fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>> {
+        let listed = self.hc(&["ls", "--json"])?;
+        Ok(at(&listed, "/terminals")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|terminal| {
+                Some(LiveTerminal {
+                    terminal: TerminalId::new(at(terminal, "/address").as_str()?),
+                    runs_claude: at(terminal, "/agent") == CLAUDE_AGENT,
+                    space: space_of(at(terminal, "/where").as_str()?).to_owned(),
+                })
+            })
             .collect())
     }
 
