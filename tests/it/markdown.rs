@@ -258,3 +258,35 @@ fn a_details_left_open_inside_a_list_item_ends_with_the_item() {
     }
     assert!(matches!(markdown.blocks.last(), Some(Block::Paragraph(_))));
 }
+
+#[test]
+fn a_diff_fence_colours_plus_and_minus_lines() {
+    use guided_review::viewer::{FenceLine, fence_lines};
+    let text = " app/\n-  old.php\n+  new.php\n+++ b/file\n--- a/file\n";
+
+    assert_eq!(
+        fence_lines(Some("diff"), text),
+        [
+            FenceLine::Plain,
+            FenceLine::Removed,
+            FenceLine::Added,
+            FenceLine::Plain,
+            FenceLine::Plain,
+        ]
+    );
+}
+
+#[test]
+fn a_patch_fence_is_coloured_like_a_diff_fence() {
+    use guided_review::viewer::{FenceLine, fence_lines};
+
+    assert_eq!(fence_lines(Some("Patch"), "+a"), [FenceLine::Added]);
+}
+
+#[test]
+fn other_fences_have_only_plain_lines() {
+    use guided_review::viewer::{FenceLine, fence_lines};
+
+    assert_eq!(fence_lines(Some("php"), "-1\n+2"), [FenceLine::Plain; 2]);
+    assert_eq!(fence_lines(None, "-1"), [FenceLine::Plain]);
+}

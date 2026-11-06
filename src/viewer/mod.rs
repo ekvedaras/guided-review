@@ -11,6 +11,7 @@ mod code_link;
 mod comment_desk;
 mod comments;
 mod diff_display;
+mod diff_fence;
 mod display_options;
 mod file_block;
 mod finish_review;
@@ -52,6 +53,7 @@ pub use comments::{
     CommentResult, QueuedComment, SendMode,
 };
 pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
+pub use diff_fence::{FenceLine, fence_lines};
 pub use file_block::FileBlock;
 pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
