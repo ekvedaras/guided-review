@@ -34,7 +34,9 @@ use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{ActivePr, BuildTicket, Finished, OpenDecision, ReviewStateFile, TourAgents};
+use crate::viewer::{
+    ActivePr, BuildTicket, Finished, HandOffId, OpenDecision, ReviewStateFile, TourAgents,
+};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
@@ -132,6 +134,10 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
                 reply.send(Answer::Quitting).ok();
                 cx.update(|cx| cx.quit());
             }
+            Request::AgentReplied { pr, hand_off } => {
+                let answer = mark_answered(&screen, pr, hand_off, cx);
+                reply.send(answer).ok();
+            }
             Request::Open(open) => {
                 let Ok(pr) = open.pr.parse::<PullRequestUrl>() else {
                     reply
@@ -164,6 +170,35 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
                 }
             }
         }
+    }
+}
+
+/// Only the PR in the window is marked here, because its session holds the state it writes back. For
+/// any other PR the command marks the state file.
+fn mark_answered(
+    screen: &SharedScreen,
+    pr: String,
+    hand_off: HandOffId,
+    cx: &mut AsyncApp,
+) -> Answer {
+    let window = {
+        let screen = screen.borrow();
+        let shown = screen.active.shown().map(ToString::to_string);
+        screen
+            .window
+            .filter(|_| shown.as_deref() == Some(pr.as_str()))
+    };
+    let Some(window) = window else {
+        return Answer::NotShown { pr };
+    };
+    let marked = cx.update(|cx| {
+        window
+            .update(cx, |layout, _, cx| layout.hand_off_answered(hand_off, cx))
+            .and_then(|marked| marked)
+    });
+    match marked {
+        Ok(()) => Answer::HandOffAnswered { pr },
+        Err(error) => refused(&format!("{error:#}")),
     }
 }
 

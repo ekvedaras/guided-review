@@ -335,6 +335,18 @@ impl HandOffs {
             .map(|hand_off| hand_off.state.line().into())
     }
 
+    /// The agent's answer arrived, whatever the hand-off was doing before.
+    pub fn answered(&mut self, id: HandOffId) -> Result<(), AgentReplyRefused> {
+        let known = self.0.iter().map(|hand_off| hand_off.id).collect();
+        let hand_off = self
+            .0
+            .iter_mut()
+            .find(|hand_off| hand_off.id == id)
+            .ok_or(AgentReplyRefused::Unknown { id, known })?;
+        hand_off.state = HandOffState::Answered;
+        Ok(())
+    }
+
     pub fn agent_reply(
         &self,
         pr: &PullRequestUrl,

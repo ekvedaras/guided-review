@@ -1,9 +1,11 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
+use guided_review::agent_reply::agent_reply;
 use guided_review::app_link::{Answer, AppFolder, AppListener, BindError, OpenRequest, hand_over};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
+use guided_review::github::GitHub;
 use guided_review::open_review::require_tour;
 use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
@@ -14,7 +16,7 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::Tour;
 use guided_review::tour_check;
-use guided_review::viewer::{RefreshBrief, repin_tour};
+use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -51,6 +53,14 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
+    /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
+    AgentReply {
+        pr: PullRequestUrl,
+        /// The hand-off id from the message, like `h0`
+        hand_off: HandOffId,
+        #[arg(long)]
+        body: String,
+    },
     /// Run the app itself; `open` starts it when none answers
     #[command(hide = true)]
     Serve,
@@ -83,6 +93,11 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
+        Command::AgentReply { pr, hand_off, body } => {
+            let said = agent_reply(&GitHub::from_env(), &home_folder()?, &pr, hand_off, &body)?;
+            println!("{said}");
+            Ok(())
+        }
         Command::Serve => serve(),
         Command::Eval {
             action: Some(EvalAction::Add { pr, note }),

@@ -1099,8 +1099,8 @@ impl Review {
     }
 
     pub fn hand_off_answered(&mut self, id: HandOffId) -> anyhow::Result<()> {
-        let _ = id;
-        todo!()
+        self.state.hand_off_answered(id)?;
+        self.save_viewer_sections()
     }
 
     pub fn agent_status_is(&mut self, status: AgentStatus) -> anyhow::Result<()> {

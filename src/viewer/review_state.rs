@@ -301,8 +301,7 @@ impl ReviewState {
     }
 
     pub fn hand_off_answered(&mut self, id: HandOffId) -> Result<(), AgentReplyRefused> {
-        let _ = id;
-        todo!()
+        self.viewer.hand_offs.answered(id)
     }
 
     pub(super) fn hand_offs_mut(&mut self) -> &mut HandOffs {

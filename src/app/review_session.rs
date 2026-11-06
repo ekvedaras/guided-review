@@ -20,8 +20,8 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AgentStatus, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal,
-    CommentResult, FinishResult, GitHubPort, ImageCache, LineLocation, OldHead, Place, Read,
-    RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
+    CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, OldHead, Place,
+    Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
     ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents, TourRefresher,
     TourReloader, TourRepinner, WorkingCopy,
 };
@@ -833,6 +833,19 @@ impl ReviewSession {
                 });
             },
         ));
+    }
+
+    /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the pending
+    /// review are read again so the reply shows under the asked comment.
+    pub fn hand_off_answered(
+        &mut self,
+        id: HandOffId,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.change(cx, |review| review.hand_off_answered(id))?;
+        self.pull_threads(cx);
+        self.pull_pending_review(cx);
+        Ok(())
     }
 
     /// What the finish dialog needs from GitHub: whether a pending review exists and who wrote the PR.

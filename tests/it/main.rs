@@ -12,6 +12,7 @@
 mod support;
 
 mod active_pr;
+mod agent_reply;
 mod app_link;
 mod ask;
 mod ask_adapters;

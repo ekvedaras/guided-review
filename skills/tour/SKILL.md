@@ -92,3 +92,12 @@ Rewrite only what the new commits made stale; every other step stays as it is, w
 5. `guided-review check <pr-url>` until `0 errors, 0 warnings`.
 6. `guided-review refresh <pr-url> --done` clears the marks, then **open** the app as above.
 7. If the brief has a `redo:` line, tell the user a full `/tour --redo <pr-url>` may read better. Never start a redo yourself.
+
+## Reviewer questions
+
+The app types a reviewer's comment into this session when they send it with Ask agent. The message starts `Reviewer comment h0 on <pr-url>` and gives the place, the step, the thread so far and the comment.
+
+1. Answer from the code and the tour: `guided-review show <pr-url> <ids>` for the pieces involved. Never change the PR's code.
+2. Post the answer: `guided-review agent-reply <pr-url> h0 --body "<answer>"`. It goes to the comment's thread on GitHub under the reviewer's account, so it starts with "🤖 " (added for you, once). It joins the reviewer's pending review when they have one and is posted at once when not; it never sends their review. Write it for the PR's author to read too, since they see it. Answer every hand-off with exactly one `agent-reply`, even when the answer is that you cannot tell.
+3. When the comment shows the tour is wrong or unclear, fix the tour file first, run `guided-review check <pr-url>` until it is clean, then `guided-review open <pr-url>` (the app reloads the tour in place), then reply saying what you changed.
+4. A refusal (an unknown id, a thread that is gone) is printed with its reason; do not retry with another id. Tell the user instead.

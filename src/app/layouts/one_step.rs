@@ -57,8 +57,9 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    Ask, Audience, CodeLink, CommentPlace, GitHubPort, LineLocation, MoreContext, NextScreen,
-    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
+    Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, LineLocation, MoreContext,
+    NextScreen, Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId,
+    ThreadView,
 };
 
 actions!(
@@ -265,6 +266,15 @@ impl OneStepLayout {
     pub fn switch_failed(&mut self, reason: String, cx: &mut Context<Self>) {
         self.session
             .update(cx, |session, cx| session.switch_failed(reason, cx));
+    }
+
+    pub fn hand_off_answered(
+        &mut self,
+        id: HandOffId,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.session
+            .update(cx, |session, cx| session.hand_off_answered(id, cx))
     }
 
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {

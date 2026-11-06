@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::viewer::HandOffId;
+
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
 const START_WAIT: Duration = Duration::from_secs(20);
 const QUIT_WAIT: Duration = Duration::from_secs(10);
@@ -45,6 +47,11 @@ pub struct OpenRequest {
 #[serde(rename_all = "snake_case")]
 pub enum Request {
     Open(OpenRequest),
+    /// The tour agent's reply to a hand-off is on GitHub.
+    AgentReplied {
+        pr: String,
+        hand_off: HandOffId,
+    },
     Quit,
 }
 
@@ -81,6 +88,14 @@ pub enum Answer {
     Refused {
         reason: String,
     },
+    /// The hand-off is marked answered and the threads are read again.
+    HandOffAnswered {
+        pr: String,
+    },
+    /// The window shows another PR, so the hand-off is not the app's to mark.
+    NotShown {
+        pr: String,
+    },
     /// Saving what is typed, then quitting.
     Quitting,
     /// The request was written by another build and was not acted on.
@@ -93,6 +108,10 @@ impl std::fmt::Display for Answer {
             Self::Opening { pr } => write!(f, "guided-review app is opening {pr}"),
             Self::Reloaded { pr } => write!(f, "guided-review app reloaded the tour of {pr}"),
             Self::Refused { reason } => write!(f, "guided-review app refused: {reason}"),
+            Self::HandOffAnswered { pr } => {
+                write!(f, "guided-review app marked the hand-off answered on {pr}")
+            }
+            Self::NotShown { pr } => write!(f, "guided-review app does not show {pr}"),
             Self::Quitting => write!(f, "guided-review app is quitting"),
             Self::OtherBuild => write!(f, "guided-review app is another build"),
         }
@@ -227,6 +246,14 @@ fn exchange(socket: &Path, request: &Request) -> anyhow::Result<Option<AnswerLin
     serde_json::from_str(&reply)
         .map(Some)
         .context("the app's answer is not an answer line")
+}
+
+/// Tells the running app a hand-off was answered. `None` when no app runs, or one of another build,
+/// which would not act on it.
+pub fn tell_app(folder: &AppFolder, request: &Request) -> anyhow::Result<Option<Answer>> {
+    Ok(exchange(&folder.socket(), request)?
+        .filter(|line| line.version == build())
+        .map(|line| line.answer))
 }
 
 /// Hands `open` to the running app, starting one when none answers and replacing one of another build.
