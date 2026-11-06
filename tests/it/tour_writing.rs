@@ -72,6 +72,26 @@ fn a_writer_works_in_the_clone_the_pr_was_opened_from_else_in_the_guided_review_
 }
 
 #[test]
+fn a_writer_without_a_clone_of_its_own_pr_tries_one_another_pr_of_the_repo_was_opened_from() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let elsewhere = FixtureRepo::cloned_from("acme/blog");
+    ReviewStateFile::for_pr(repo.home(), &pr(ELSEWHERE))
+        .remember_folder(elsewhere.path())
+        .unwrap();
+    assert_eq!(
+        writer_folder(&pr(NO_TOUR), repo.home()),
+        repo.home(),
+        "no clone of the repo"
+    );
+
+    ReviewStateFile::for_pr(repo.home(), &pr(SHOWN))
+        .remember_folder(repo.path())
+        .unwrap();
+
+    assert_eq!(writer_folder(&pr(NO_TOUR), repo.home()), repo.path());
+}
+
+#[test]
 fn picking_a_pr_with_no_tour_shows_its_writer_on_the_loading_screen() {
     let fake = Arc::new(FakeTourAgent::new());
     let mut active = showing_a_pr();

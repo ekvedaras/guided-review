@@ -38,18 +38,20 @@ pub fn require_tour(pr: &PullRequestUrl, home: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else the
-/// clone `config.toml` names, else the guided-review home, where the skill reads code through `show`.
+/// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else one
+/// another PR of the repo was opened from, else the clone `config.toml` names, else the guided-review
+/// home, where the skill reads code through `show`.
 pub fn writer_folder(pr: &PullRequestUrl, home: &Path) -> PathBuf {
-    // An unreadable state file or config only costs the clone: the skill still reads code through `show`.
-    let remembered = ReviewStateFile::for_pr(home, pr)
+    let own = ReviewStateFile::for_pr(home, pr)
         .opened_from()
         .ok()
-        .flatten()
-        .unwrap_or_else(|| home.to_path_buf());
-    LocalGit::find(&pr.repo, &remembered)
-        .ok()
-        .flatten()
+        .flatten();
+    let others = ReviewStateFile::folders_opened_from_in(home, pr);
+    // An unreadable state file or config only costs the clone: the skill still reads code through `show`.
+    own.into_iter()
+        .chain(others)
+        .chain([home.to_path_buf()])
+        .find_map(|folder| LocalGit::find(&pr.repo, &folder).ok().flatten())
         .map_or_else(|| home.to_path_buf(), |clone| clone.root().to_path_buf())
 }
 

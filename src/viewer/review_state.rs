@@ -467,6 +467,22 @@ impl ReviewStateFile {
         }
     }
 
+    /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
+    /// and folders count for nothing: this only looks for a clone to work in.
+    pub fn folders_opened_from_in(home: &Path, pr: &PullRequestUrl) -> Vec<PathBuf> {
+        let Ok(files) =
+            std::fs::read_dir(home.join(".guided-review/state").join(pr.repo.to_string()))
+        else {
+            return Vec::new();
+        };
+        let mut paths: Vec<PathBuf> = files.filter_map(|file| Some(file.ok()?.path())).collect();
+        paths.sort();
+        paths
+            .into_iter()
+            .filter_map(|path| Self { path }.opened_from().ok().flatten())
+            .collect()
+    }
+
     /// A PR not reviewed before has no file yet: that is an empty state, not an error.
     pub fn load(&self) -> anyhow::Result<ReviewState> {
         match self.read_text()? {
