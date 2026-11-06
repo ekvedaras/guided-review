@@ -7,7 +7,7 @@ description: Write a top-down guided-review tour of a GitHub PR with the guided-
 
 Write a **tour file**: the PR's changes as **steps**, main flow first, details later. The `guided-review` CLI owns the facts (piece ids, shas); you own the story: order, nesting, text, diagrams, skim flags, summary. Terms: `GLOSSARY.md` in the guided-review repo.
 
-The tour is done when `guided-review check <pr-url>` prints `0 errors` and you have handled every warning.
+The tour is done when `guided-review check <pr-url>` prints `0 errors` and you have handled every warning. Then **open** it: run `guided-review open <pr-url>` with the Bash tool's `run_in_background: true`. It runs until the user closes the window, so never wait on it or read its output. Reply with the tour summary at once.
 
 ## Refresh and redo
 
@@ -90,5 +90,5 @@ Rewrite only what the new commits made stale; every other step stays as it is, w
    - Each new piece: add a pointer to the step it belongs to. Noise goes to the `skim` step. Add a new step only when no step fits.
    - Leave all other steps untouched.
 5. `guided-review check <pr-url>` until `0 errors, 0 warnings`.
-6. `guided-review refresh <pr-url> --done` clears the marks.
+6. `guided-review refresh <pr-url> --done` clears the marks, then **open** the app as above.
 7. If the brief has a `redo:` line, tell the user a full `/tour --redo <pr-url>` may read better. Never start a redo yourself.
