@@ -76,6 +76,10 @@ impl HandOff {
         self.mode
     }
 
+    pub fn thread_so_far(&self) -> &[ThreadMessage] {
+        &self.thread_so_far
+    }
+
     pub fn state(&self) -> &HandOffState {
         &self.state
     }
@@ -83,7 +87,6 @@ impl HandOff {
 
 /// What a hand-off is made from: the comment as GitHub has it now, in the threads read right after the send.
 pub(super) struct SentComment<'a> {
-    pub path: &'a FilePath,
     pub place: String,
     pub step: Option<StepId>,
     pub mode: SendMode,
@@ -99,33 +102,75 @@ impl HandOffs {
         &self.0
     }
 
-    /// The comment started a thread, which is the one whose only comment is the text just sent
-    /// and that no hand-off holds yet. `Failed` when the threads could not say which.
+    /// The comment started a thread, which is the one whose last comment is the text just sent
+    /// and that no hand-off holds yet.
     pub(super) fn record_new_thread(
         &mut self,
+        path: &FilePath,
         sent: &SentComment<'_>,
         threads: Option<&Result<Vec<ReviewThread>, String>>,
     ) {
-        let thread = match threads {
-            Some(Ok(threads)) => threads
+        let found = read_of(threads).and_then(|threads| {
+            threads
                 .iter()
                 .find(|thread| {
-                    !self.holds(&thread.id)
-                        && &thread.path == sent.path
-                        && thread
-                            .comments
-                            .last()
-                            .is_some_and(|comment| comment.body.trim() == sent.body.trim())
+                    !self.holds(&thread.id) && &thread.path == path && ends_with(thread, sent.body)
                 })
-                .map(|thread| thread.id.clone())
-                .ok_or_else(|| "GitHub shows no thread with the comment".to_owned()),
-            Some(Err(reason)) => Err(format!("the threads could not be read: {reason}")),
-            None => Err("the threads were not read".to_owned()),
+                .ok_or_else(|| "GitHub shows no thread with the comment".to_owned())
+        });
+        let (thread, so_far, state) = match found {
+            Ok(thread) => (Some(thread.id.clone()), Vec::new(), HandOffState::Queued),
+            Err(reason) => (None, Vec::new(), HandOffState::Failed(reason)),
         };
-        let (thread, state) = match thread {
-            Ok(thread) => (Some(thread), HandOffState::Queued),
-            Err(reason) => (None, HandOffState::Failed(reason)),
+        self.push(sent, thread, so_far, state);
+    }
+
+    /// The reply joined a thread GitHub already had, so the thread is known and the agent gets what was said in it.
+    pub(super) fn record_reply(
+        &mut self,
+        thread_id: &ThreadId,
+        sent: SentComment<'_>,
+        threads: Option<&Result<Vec<ReviewThread>, String>>,
+    ) {
+        let found = read_of(threads).and_then(|threads| {
+            threads
+                .iter()
+                .find(|thread| &thread.id == thread_id)
+                .ok_or_else(|| "GitHub shows no such thread".to_owned())
+        });
+        let mut sent = sent;
+        let (so_far, state) = match found {
+            Ok(thread) => {
+                sent.place = place_of(thread);
+                let said = if ends_with(thread, sent.body) {
+                    thread
+                        .comments
+                        .split_last()
+                        .map_or(&[][..], |(_, said)| said)
+                } else {
+                    &thread.comments[..]
+                };
+                let messages = said
+                    .iter()
+                    .map(|comment| ThreadMessage {
+                        author: comment.author.clone(),
+                        body: comment.body.clone(),
+                    })
+                    .collect();
+                (messages, HandOffState::Queued)
+            }
+            Err(reason) => (Vec::new(), HandOffState::Failed(reason)),
         };
+        self.push(&sent, Some(thread_id.clone()), so_far, state);
+    }
+
+    fn push(
+        &mut self,
+        sent: &SentComment<'_>,
+        thread: Option<ThreadId>,
+        thread_so_far: Vec<ThreadMessage>,
+        state: HandOffState,
+    ) {
         let id = HandOffId(
             self.0
                 .iter()
@@ -140,7 +185,7 @@ impl HandOffs {
             mode: sent.mode,
             comment: sent.body.to_owned(),
             thread,
-            thread_so_far: Vec::new(),
+            thread_so_far,
             state,
         });
     }
@@ -149,5 +194,27 @@ impl HandOffs {
         self.0
             .iter()
             .any(|hand_off| hand_off.thread.as_ref() == Some(thread))
+    }
+}
+
+fn read_of(threads: Option<&Result<Vec<ReviewThread>, String>>) -> Result<&[ReviewThread], String> {
+    match threads {
+        Some(Ok(threads)) => Ok(threads),
+        Some(Err(reason)) => Err(format!("the threads could not be read: {reason}")),
+        None => Err("the threads were not read".to_owned()),
+    }
+}
+
+fn ends_with(thread: &ReviewThread, body: &str) -> bool {
+    thread
+        .comments
+        .last()
+        .is_some_and(|comment| comment.body.trim() == body.trim())
+}
+
+fn place_of(thread: &ReviewThread) -> String {
+    match thread.line {
+        Some(line) if !thread.is_file_comment => format!("{} line {line}", thread.path),
+        _ => thread.path.to_string(),
     }
 }

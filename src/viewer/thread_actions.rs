@@ -2,6 +2,7 @@ use crate::pull_request::PullRequestUrl;
 
 use super::comment_desk::TourFreshness;
 use super::comments::{CommentRefusal, SendMode};
+use super::hand_offs::Audience;
 use super::ports::{GitHubError, Resolution, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
@@ -14,6 +15,8 @@ pub enum ThreadAction {
     Reply {
         thread_id: ThreadId,
         mode: SendMode,
+        /// Ask agent hands the reply to the tour agent too.
+        audience: Audience,
     },
     Resolve {
         thread_id: ThreadId,
@@ -58,6 +61,8 @@ pub struct ThreadActionOutcome {
     /// The threads as GitHub has them after the action, so the screen shows what GitHub shows;
     /// `None` when the action did not go through, so nothing changed.
     pub(super) threads: Option<Result<Vec<ReviewThread>, String>>,
+    /// The text of the reply a `Reply` sent.
+    pub(super) reply_body: Option<String>,
 }
 
 impl ThreadActionRequest {
@@ -78,6 +83,7 @@ impl ThreadActionRequest {
             action: self.action,
             result,
             threads,
+            reply_body: self.reply_body,
         }
     }
 
@@ -89,7 +95,9 @@ impl ThreadActionRequest {
             ThreadAction::Reply { .. } if self.freshness == TourFreshness::Behind => {
                 return Ok(ThreadActionResult::Refused(CommentRefusal::TourIsOld));
             }
-            ThreadAction::Reply { thread_id, mode } => {
+            ThreadAction::Reply {
+                thread_id, mode, ..
+            } => {
                 let Some(body) = self
                     .draft_body
                     .as_deref()

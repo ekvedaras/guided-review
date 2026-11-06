@@ -16,7 +16,7 @@ use super::suggestion::suggestion_block;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{CommentId, ReviewThread};
+use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use std::collections::BTreeMap;
 
@@ -238,8 +238,8 @@ impl CommentDesk {
                 leave(state, &request.origin, &place);
                 if request.audience == Audience::Agent {
                     state.hand_offs_mut().record_new_thread(
+                        place.path(),
                         &SentComment {
-                            path: place.path(),
                             place: place.describe(),
                             step,
                             mode: request.mode,
@@ -323,15 +323,21 @@ impl CommentDesk {
         &mut self,
         state: &mut ReviewState,
         outcome: &ThreadActionOutcome,
+        step: Option<StepId>,
     ) -> bool {
         match (&outcome.result, &outcome.action) {
             (
                 ThreadActionResult::Done,
                 ThreadAction::Reply {
-                    thread_id, mode, ..
+                    thread_id,
+                    mode,
+                    audience,
                 },
             ) => {
                 self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
+                if *audience == Audience::Agent {
+                    hand_off_reply(state, thread_id, *mode, step, outcome);
+                }
                 state.drop_reply(thread_id);
                 true
             }
@@ -445,4 +451,23 @@ fn keep_as_draft(state: &mut ReviewState, request: &CommentRequest) {
         state.open_draft(place.clone(), request.draft.written_at.as_ref());
         state.write_draft(place, &request.draft.body);
     }
+}
+
+fn hand_off_reply(
+    state: &mut ReviewState,
+    thread_id: &ThreadId,
+    mode: SendMode,
+    step: Option<StepId>,
+    outcome: &ThreadActionOutcome,
+) {
+    state.hand_offs_mut().record_reply(
+        thread_id,
+        SentComment {
+            place: String::new(),
+            step,
+            mode,
+            body: outcome.reply_body.as_deref().unwrap_or_default(),
+        },
+        outcome.threads.as_ref(),
+    );
 }

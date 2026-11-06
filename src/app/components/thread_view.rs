@@ -10,7 +10,8 @@ use gpui::{
 
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    CommentId, ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult,
+    Audience, CommentId, ReactionChange, ReactionCount, SendMode, ThreadAction,
+    ThreadActionResult,
     ThreadComment, ThreadId, ThreadView,
 };
 
@@ -268,11 +269,11 @@ impl ThreadElement {
         let thread_id = thread_id.clone();
         let send = {
             let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
-            move |mode: SendMode| {
+            move |mode: SendMode, audience: Audience| {
                 let (ui, on_action, thread_id) =
                     (ui.clone(), Rc::clone(&on_action), thread_id.clone());
                 move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                    send_reply(&ui, &on_action, &thread_id, mode, cx);
+                    send_reply(&ui, &on_action, &thread_id, mode, audience, cx);
                 }
             }
         };
@@ -295,6 +296,7 @@ impl ThreadElement {
                     &on_action,
                     &submitted_thread,
                     SendMode::AddToReview,
+                    Audience::Author,
                     cx,
                 );
             })
@@ -312,7 +314,7 @@ impl ThreadElement {
                         SharedString::from(format!("reply-add-{id}")),
                         "Add to review",
                     )
-                    .on_click(send(SendMode::AddToReview)),
+                    .on_click(send(SendMode::AddToReview, Audience::Author)),
                 )
                 .children(can_reply_now.then(|| {
                     small_button(
@@ -320,7 +322,7 @@ impl ThreadElement {
                         SharedString::from(format!("reply-now-{id}")),
                         "Reply now",
                     )
-                    .on_click(send(SendMode::CommentNow))
+                    .on_click(send(SendMode::CommentNow, Audience::Author))
                 }))
                 .child(
                     small_button(
@@ -451,11 +453,13 @@ fn send_reply(
     on_action: &OnThreadAction,
     thread_id: &ThreadId,
     mode: SendMode,
+    audience: Audience,
     cx: &mut App,
 ) {
     let action = ThreadAction::Reply {
         thread_id: thread_id.clone(),
         mode,
+        audience,
     };
     run_action(action, ui, on_action, cx);
 }

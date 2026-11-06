@@ -836,9 +836,13 @@ impl Review {
     }
 
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
+        let step = match &self.screen {
+            Screen::Step(id) => Some(id.clone()),
+            _ => None,
+        };
         if self
             .comment_desk
-            .apply_thread_action(&mut self.state, &outcome)
+            .apply_thread_action(&mut self.state, &outcome, step)
         {
             // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
             if self.save_viewer_sections().is_err() {

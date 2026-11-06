@@ -7,7 +7,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     Audience, CommentId, CommentPlace, CommentResult, HandOffState, LineLocation, Review,
-    ReviewStateFile, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
+    ReviewStateFile, ReviewThread, SendMode, Side, ThreadAction, ThreadActionResult, ThreadComment,
+    ThreadId, ThreadMessage,
 };
 use serde_json::json;
 
@@ -271,4 +272,86 @@ fn hand_offs_survive_a_restart() {
 
     assert_eq!(reopened.hand_offs(), review.hand_offs());
     assert_eq!(reopened.hand_offs().len(), 1);
+}
+
+fn reply(
+    review: &mut Review,
+    text: &str,
+    audience: Audience,
+    github: &FakeGitHub,
+) -> ThreadActionResult {
+    let thread = ThreadId::new("T1");
+    review.open_reply(&thread).unwrap();
+    review.type_in_reply(&thread, text).unwrap();
+    review.act_on_thread(
+        ThreadAction::Reply {
+            thread_id: thread,
+            mode: SendMode::AddToReview,
+            audience,
+        },
+        github,
+    )
+}
+
+fn conversation(last: &str) -> Vec<ThreadComment> {
+    vec![
+        comment("C1", "me", "why ten?"),
+        comment("C2", "alice", "because"),
+        comment("C3", "me", last),
+    ]
+}
+
+#[test]
+fn a_reply_sent_with_ask_agent_is_handed_off_with_the_thread_so_far() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    github.threads = vec![thread_on_line_ten("T1", conversation("and why not nine?"))];
+    let mut review = pull.open();
+
+    let result = reply(&mut review, "and why not nine?", Audience::Agent, &github);
+
+    assert_eq!(result, ThreadActionResult::Done);
+    let [hand_off] = review.hand_offs() else {
+        panic!("an asked reply is handed off");
+    };
+    assert_eq!(hand_off.comment(), "and why not nine?");
+    assert_eq!(hand_off.thread(), Some(&ThreadId::new("T1")));
+    assert_eq!(
+        hand_off.thread_so_far(),
+        [
+            ThreadMessage {
+                author: "me".into(),
+                body: "why ten?".into()
+            },
+            ThreadMessage {
+                author: "alice".into(),
+                body: "because".into()
+            }
+        ]
+    );
+}
+
+#[test]
+fn a_plain_reply_is_not_handed_off_even_in_a_thread_that_started_with_ask_agent() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    github.threads = vec![thread_on_line_ten(
+        "T1",
+        vec![comment("C1", "me", "why ten?")],
+    )];
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Agent,
+        &github,
+    );
+    assert_eq!(review.hand_offs().len(), 1);
+    github.threads = vec![thread_on_line_ten("T1", conversation("thanks"))];
+
+    reply(&mut review, "thanks", Audience::Author, &github);
+
+    assert_eq!(review.hand_offs().len(), 1, "only the first comment asked");
 }

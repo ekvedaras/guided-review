@@ -8,7 +8,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
+    Audience, CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
     ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile, ReviewThread,
     SendMode, Side, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
 };
@@ -276,6 +276,7 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::CommentNow,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -289,6 +290,7 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -315,6 +317,7 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::CommentNow,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -556,6 +559,7 @@ fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -580,6 +584,7 @@ fn a_failed_reply_keeps_its_draft() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -603,6 +608,7 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -755,6 +761,7 @@ fn a_reply_sends_its_draft_as_last_typed() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::AddToReview,
+            audience: Audience::Author,
         },
         &github,
     );
@@ -779,6 +786,7 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
         ThreadAction::Reply {
             thread_id: ThreadId::new("T1"),
             mode: SendMode::CommentNow,
+            audience: Audience::Author,
         },
         &github,
     );
