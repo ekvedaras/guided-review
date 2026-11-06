@@ -36,8 +36,8 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, BuildTicket, Finished, HandOffId, OpenDecision, OpenOrigin, ReviewStateFile,
-    TourAgents,
+    ActivePr, BuildTicket, Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher,
+    ReviewStateFile, TourAgents,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -71,7 +71,9 @@ pub fn serve(listener: AppListener, home: PathBuf) {
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
             let active = cx.new(|_| ActivePr::default());
-            cx.set_global(pr_switching(&requests_to_self, &home, active.clone()));
+            let switching = pr_switching(&requests_to_self, &home, active.clone(), cx);
+            switching.refresh(cx);
+            cx.set_global(switching);
             dock_icon::show();
             bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
@@ -86,6 +88,7 @@ fn pr_switching(
     requests: &UnboundedSender<Asked>,
     home: &Path,
     active: Entity<ActivePr>,
+    cx: &mut App,
 ) -> PrSwitching {
     let requests = requests.clone();
     let home_folder = home.to_path_buf();
@@ -94,6 +97,7 @@ fn pr_switching(
         home: home.to_path_buf(),
         active,
         agents: Arc::new(HcTourAgents::new()),
+        list: cx.new(|_| PrSwitcher::default()),
         show: Arc::new(move |pr| {
             // An unreadable state file only loses the remembered clone folder.
             let folder = ReviewStateFile::for_pr(&home_folder, &pr)

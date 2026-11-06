@@ -168,6 +168,8 @@ impl OneStepLayout {
         let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
         let switching = cx.global::<PrSwitching>().clone();
         let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
+        cx.observe(&switching.active, |_, _, cx| cx.notify())
+            .detach();
         let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
         cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
             JumpEvent::QueryChanged(query) => {
@@ -1031,6 +1033,12 @@ impl OneStepLayout {
                     .font_weight(FontWeight::MEDIUM)
                     .child(InlineMarkdown::new("title-bar-title", &title)),
             );
+        let switching_to = cx
+            .global::<PrSwitching>()
+            .active
+            .read(cx)
+            .switching_to()
+            .map(|pr| SharedString::from(format!("Switching to {}...", pr.short())));
         TitleBarArea::new("title-bar", colors.background).child(
             div()
                 .flex_1()
@@ -1041,6 +1049,13 @@ impl OneStepLayout {
                 .gap_2()
                 .text_sm()
                 .child(switch_pr)
+                .children(switching_to.map(|label| {
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(colors.accent)
+                        .child(label)
+                }))
                 .child(div().flex_1())
                 .child(jump)
                 .child(github),

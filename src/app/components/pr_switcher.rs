@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Entity, FocusHandle, FontWeight, Global, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, px,
+    App, Context, Entity, FocusHandle, FontWeight, Global, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
 use crate::app::tour_writer;
@@ -19,7 +19,8 @@ use super::palette::{Colors, TEXT_FONT};
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
-const VISIBLE_ROWS: usize = 10;
+const ROW_HEIGHT: Pixels = px(36.);
+const MIN_THUMB_HEIGHT: Pixels = px(20.);
 
 /// What the switcher needs from the app: where the list comes from, and how to ask the app to show
 /// a PR. Nothing in it belongs to one PR, so it may live as long as the app.
@@ -32,23 +33,49 @@ pub struct PrSwitching {
     pub active: Entity<ActivePr>,
     /// Herdr, where tour agents write tours.
     pub agents: Arc<dyn TourAgentPort>,
+    /// The list, kept from one opening to the next and from one PR to the next.
+    pub list: Entity<PrSwitcher>,
 }
 
 impl Global for PrSwitching {}
 
+impl PrSwitching {
+    /// Reads the list and whether herdr answers off the UI thread. The rows listed so far stay until the
+    /// answers are in, and whoever shows the list is told when they are.
+    pub fn refresh(&self, cx: &mut App) {
+        self.list.update(cx, |list, _| list.refreshing());
+        let (relevant, agents) = (Arc::clone(&self.relevant), Arc::clone(&self.agents));
+        let (list, active, home) = (self.list.clone(), self.active.clone(), self.home.clone());
+        cx.spawn(async move |cx| {
+            let (answer, link) = cx
+                .background_executor()
+                .spawn(async move { (relevant.relevant_pull_requests(), agents.link()) })
+                .await;
+            list.update(cx, |list, cx| {
+                list.loaded(answer, &home);
+                list.agent_link(link);
+                list.check_tours(&home, active.read(cx));
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
+
 /// The overlay behind the PR title: the reviewer's relevant PRs under a query box.
 pub struct PrSwitcherView {
     is_open: bool,
-    core: PrSwitcher,
     query: String,
     shown: Vec<ShownRow>,
-    selected: usize,
+    /// Wheel movement not yet enough for a whole row.
+    scrolled: Pixels,
     /// Why the picked row did not open.
     refusal: Option<SharedString>,
     notice: Option<SharedString>,
     switching: PrSwitching,
     focus: FocusHandle,
     owner_focus: FocusHandle,
+    _list_changes: Subscription,
 }
 
 /// A row with its texts made when the list or the query changes, not every frame.
@@ -61,6 +88,7 @@ struct ShownRow {
     tour: TourFact,
     tour_label: &'static str,
     has_unseen_reply: bool,
+    is_active: bool,
 }
 
 impl ShownRow {
@@ -79,6 +107,7 @@ impl ShownRow {
             tour: row.tour,
             tour_label: switcher.tour_label(row),
             has_unseen_reply: row.has_unseen_reply,
+            is_active: row.is_active,
         }
     }
 }
@@ -87,18 +116,26 @@ impl PrSwitcherView {
     pub const KEY_CONTEXT: &str = "PrSwitcherInput";
 
     pub fn new(switching: PrSwitching, owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
-        Self {
+        let list_changes = cx.observe(&switching.list, |this, _, cx| {
+            if this.is_open {
+                this.refresh_shown(cx);
+                cx.notify();
+            }
+        });
+        let mut view = Self {
             is_open: false,
-            core: PrSwitcher::default(),
             query: String::new(),
             shown: Vec::new(),
-            selected: 0,
+            scrolled: px(0.),
             refusal: None,
             notice: None,
             switching,
             focus: cx.focus_handle(),
             owner_focus,
-        }
+            _list_changes: list_changes,
+        };
+        view.refresh_shown(cx);
+        view
     }
 
     pub fn is_open(&self) -> bool {
@@ -108,12 +145,16 @@ impl PrSwitcherView {
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.is_open = true;
         self.query.clear();
-        self.core.filter("");
-        self.check_tours(cx);
         self.refusal = None;
-        self.refresh_shown();
+        let (home, active) = (self.switching.home.clone(), self.switching.active.clone());
+        self.switching.list.update(cx, |list, cx| {
+            list.filter("");
+            list.check_tours(&home, active.read(cx));
+            list.select_active();
+        });
+        self.refresh_shown(cx);
         window.focus(&self.focus, cx);
-        self.load(cx);
+        self.switching.refresh(cx);
         cx.notify();
     }
 
@@ -123,47 +164,21 @@ impl PrSwitcherView {
         cx.notify();
     }
 
-    fn check_tours(&mut self, cx: &Context<Self>) {
-        let active = self.switching.active.read(cx);
-        self.core.check_tours(&self.switching.home, active);
-    }
-
-    /// The list and whether herdr answers are read off the UI thread; what was shown stays until the
-    /// answers are in.
-    fn load(&self, cx: &mut Context<Self>) {
-        let relevant = Arc::clone(&self.switching.relevant);
-        let agents = Arc::clone(&self.switching.agents);
-        cx.spawn(async move |this, cx| {
-            let (answer, link) = cx
-                .background_executor()
-                .spawn(async move { (relevant.relevant_pull_requests(), agents.link()) })
-                .await;
-            this.update(cx, |this, cx| {
-                this.core.loaded(answer, &this.switching.home);
-                this.core.agent_link(link);
-                this.check_tours(cx);
-                this.refresh_shown();
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    fn refresh_shown(&mut self) {
-        self.shown = self
-            .core
-            .visible()
-            .map(|row| ShownRow::of(row, &self.core))
-            .collect();
-        self.selected = self.selected.min(self.shown.len().saturating_sub(1));
-        self.notice = self.core.notice().map(Into::into);
+    fn refresh_shown(&mut self, cx: &Context<Self>) {
+        let list = self.switching.list.read(cx);
+        self.shown = list.visible().map(|row| ShownRow::of(row, list)).collect();
+        self.notice = list.notice().map(Into::into);
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.core.pick(self.selected) {
+        let selected = self.switching.list.read(cx).selected();
+        match self.switching.list.read(cx).pick(selected) {
             Ok(Pick::Show(pr)) => {
                 self.close(window, cx);
+                self.switching.active.update(cx, |active, cx| {
+                    active.picked(pr.clone());
+                    cx.notify();
+                });
                 (self.switching.show)(pr);
             }
             Ok(Pick::Write(pr)) => {
@@ -179,11 +194,27 @@ impl PrSwitcherView {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
-            "down" => self.selected = (self.selected + 1).min(self.shown.len().saturating_sub(1)),
-            "up" => self.selected = self.selected.saturating_sub(1),
+            "down" => self.switching.list.update(cx, |list, _| list.select_next()),
+            "up" => self
+                .switching
+                .list
+                .update(cx, |list, _| list.select_previous()),
             _ => return,
         }
         self.refusal = None;
+        cx.notify();
+    }
+
+    fn on_scroll(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.scrolled += event.delta.pixel_delta(ROW_HEIGHT).y;
+        while self.scrolled.abs() >= ROW_HEIGHT {
+            let up = self.scrolled > px(0.);
+            self.scrolled += if up { -ROW_HEIGHT } else { ROW_HEIGHT };
+            let rows = if up { -1 } else { 1 };
+            self.switching
+                .list
+                .update(cx, |list, _| list.scroll_by(rows));
+        }
         cx.notify();
     }
 
@@ -192,11 +223,12 @@ impl PrSwitcherView {
         TextBox::new("pr-switcher-query", &self.focus, &self.query, Lines::Single)
             .on_edit(move |query, _, cx| {
                 on_edit.update(cx, |this, cx| {
-                    this.core.filter(&query);
+                    this.switching
+                        .list
+                        .update(cx, |list, _| list.filter(&query));
                     this.query = query;
-                    this.selected = 0;
                     this.refusal = None;
-                    this.refresh_shown();
+                    this.refresh_shown(cx);
                     cx.notify();
                 });
             })
@@ -206,7 +238,7 @@ impl PrSwitcherView {
 
     fn row(&self, index: usize, shown: &ShownRow, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let is_selected = index == self.selected;
+        let is_selected = index == self.switching.list.read(cx).selected();
         let has_tour = shown.tour == TourFact::Ready;
         let tour_color = match shown.tour {
             TourFact::Ready => colors.accent,
@@ -233,14 +265,25 @@ impl PrSwitcherView {
                 }
             })
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.selected = index;
+                this.switching.list.update(cx, |list, _| list.select(index));
                 this.pick(window, cx);
             }))
             .child(
                 div()
                     .flex_none()
+                    .size(px(6.))
+                    .rounded_full()
+                    .when(shown.is_active, |dot| dot.bg(colors.accent)),
+            )
+            .child(
+                div()
+                    .flex_none()
                     .text_xs()
-                    .text_color(colors.muted_text)
+                    .text_color(if shown.is_active {
+                        colors.accent
+                    } else {
+                        colors.muted_text
+                    })
                     .child(shown.pr.clone()),
             )
             .child(
@@ -275,6 +318,15 @@ impl PrSwitcherView {
                     .text_color(colors.muted_text)
                     .child(shown.why),
             )
+            .when(shown.is_active, |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(colors.accent)
+                        .child("viewing"),
+                )
+            })
             .when(shown.has_unseen_reply, |row| {
                 row.child(
                     div()
@@ -301,16 +353,19 @@ impl Render for PrSwitcherView {
         if !self.is_open {
             return div().into_any_element();
         }
-        let first_shown = self.selected.saturating_sub(VISIBLE_ROWS - 1);
+        let list = self.switching.list.read(cx);
+        let (first_shown, is_loading, is_refreshing) =
+            (list.first_shown(), list.is_loading(), list.is_refreshing());
         let rows: Vec<_> = self
             .shown
             .iter()
             .enumerate()
             .skip(first_shown)
-            .take(VISIBLE_ROWS)
+            .take(PrSwitcher::ROWS_SHOWN)
             .map(|(index, shown)| self.row(index, shown, cx).into_any_element())
             .collect();
-        let empty_text = if self.core.is_loading() {
+        let scrollbar = scrollbar(first_shown, self.shown.len(), &colors);
+        let empty_text = if is_loading {
             "Loading your pull requests from GitHub..."
         } else {
             "No pull request matches."
@@ -358,18 +413,26 @@ impl Render for PrSwitcherView {
                             .border_color(colors.border)
                             .child(self.query_box(cx)),
                     )
-                    .child(div().py_2().flex().flex_col().children(rows).when(
-                        self.shown.is_empty(),
-                        |list| {
-                            list.child(
-                                div()
-                                    .px_4()
-                                    .py_3()
-                                    .text_color(colors.muted_text)
-                                    .child(empty_text),
-                            )
-                        },
-                    ))
+                    .child(
+                        div()
+                            .id("pr-switcher-list")
+                            .relative()
+                            .py_2()
+                            .flex()
+                            .flex_col()
+                            .on_scroll(cx.listener(Self::on_scroll))
+                            .children(rows)
+                            .when(self.shown.is_empty(), |list| {
+                                list.child(
+                                    div()
+                                        .px_4()
+                                        .py_3()
+                                        .text_color(colors.muted_text)
+                                        .child(empty_text),
+                                )
+                            })
+                            .children(scrollbar),
+                    )
                     .children(message.map(|message| {
                         div()
                             .px_4()
@@ -393,9 +456,35 @@ impl Render for PrSwitcherView {
                             .text_color(colors.muted_text)
                             .child("↑ ↓  move")
                             .child("↵  open")
-                            .child("esc  close"),
+                            .child("esc  close")
+                            .child(div().flex_1())
+                            .when(is_refreshing && !is_loading, |footer| {
+                                footer.child("Refreshing from GitHub...")
+                            }),
                     ),
             )
             .into_any_element()
     }
+}
+
+/// A thumb on the right edge of the rows: where the rows shown sit in the whole list. It shows only
+/// when some rows are out of sight.
+fn scrollbar(first_shown: usize, total: usize, colors: &Colors) -> Option<impl IntoElement> {
+    if total <= PrSwitcher::ROWS_SHOWN {
+        return None;
+    }
+    let track = ROW_HEIGHT * PrSwitcher::ROWS_SHOWN as f32;
+    let share = |rows: usize| track * (rows as f32 / total as f32);
+    let height = share(PrSwitcher::ROWS_SHOWN).max(MIN_THUMB_HEIGHT);
+    let top = px(8.) + share(first_shown).min(track - height);
+    Some(
+        div()
+            .absolute()
+            .right(px(2.))
+            .top(top)
+            .w(px(5.))
+            .h(height)
+            .rounded_full()
+            .bg(colors.muted_text),
+    )
 }
