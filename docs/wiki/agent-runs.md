@@ -30,3 +30,10 @@ The maintainer decided on 2026-11-06:
 Superseding part of the above, on 2026-11-06 the maintainer decided that not every comment goes to the tour agent (a side review pointed out that comments meant for the PR author would get a 🤖 reply under the maintainer's name). The comment box gets two send actions: "Comment" goes to GitHub for the author with no agent, and "Ask agent" goes to GitHub and to the tour agent, which answers on that thread with 🤖. The maintainer kept the agent Q&A on GitHub on purpose: it is a lasting trace of the discussion about the change.
 
 On 2026-11-06 the maintainer set which terminal becomes a PR's tour agent on `open` (a side review found that a plain shell could be claimed, and `hc send` would run a question as a shell command): the Claude session that ran `open`; else, when `open` ran in a plain shell, a Claude terminal in the same herdr session; else the app starts its own agent. The coordinator added two limits: only a terminal that runs Claude is ever claimed, and with several Claude terminals in that session none is claimed, because a busy unrelated session would get the PR's questions mid-work.
+
+## Hand-offs and herdr, checked on a real terminal (2026-11-06)
+
+- `hc events --json` writes a snapshot line, then JSON-RPC lines: `params.type` is `status` (with `params.data.status.state`) or `turn`, and `params.terminal` names the terminal. Recorded in `tests/fixtures/hc/events-claude-turn.jsonl`. The first parser expected the snapshot shape for changes too and would never have seen one.
+- `hc send --if idle` refuses with exit 10 and a JSON error on stderr (`kind: status_mismatch`, "t2b is working, not idle"). Fixtures are in `tests/fixtures/hc/`.
+- After a turn herdr reports `done` until someone looks at the terminal, and `--if idle` refuses `done` too. An agent that works in the background would never take a comment, so the adapter sends plainly when the refusal says `done`. A `working` or `blocked` agent is still never sent to.
+- Not done yet: the hand-off state is not shown under the comment in the thread, and no tour agent is started when none is found.

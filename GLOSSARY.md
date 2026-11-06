@@ -51,3 +51,7 @@
 **Tour agent**: The AI session, in a herdr terminal, that answers for the tour of one PR. At most one per PR. The viewer finds it by the herdr label `gr.pr=<url>`, never by a stored terminal id, and a terminal claimed for another PR loses the label.
 
 **Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why and the tour agent features are off.
+
+**Ask agent**: The comment box's second send action. The comment or reply is posted to GitHub like any other and also handed off to the tour agent. A comment sent with the plain action is for the PR author only; the agent never sees it.
+
+**Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, answered, ended without an answer, or failed. It holds the id of its GitHub thread.
