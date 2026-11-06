@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::app::active_session::use_active_session;
 use crate::app::code_links::{
     open_code, open_code_hint, open_code_label, open_link, use_code_opener,
 };
@@ -206,7 +207,8 @@ impl OneStepLayout {
         })
         .detach();
         let opener = session.read(cx).review().code_opener(ide.clone());
-        use_code_opener(opener, session.clone(), cx);
+        use_active_session(&session, cx);
+        use_code_opener(opener, cx);
         Self {
             screen_list: session.read(cx).screen_list().clone(),
             seen_end_of: None,
@@ -647,7 +649,7 @@ impl OneStepLayout {
     /// The opener follows the review: a re-pin moves its head, a focus re-checks the clone.
     fn use_code_opener_of_review(&self, cx: &mut Context<Self>) {
         let opener = self.session.read(cx).review().code_opener(self.ide.clone());
-        use_code_opener(opener, self.session.clone(), cx);
+        use_code_opener(opener, cx);
     }
 
     /// Like the footer's button, the arrow key ticks the step it leaves, but only once the reader

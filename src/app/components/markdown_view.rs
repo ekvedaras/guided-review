@@ -1,8 +1,8 @@
 use gpui::{
-    AnyElement, App, BorrowAppContext, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
-    InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
-    Window, canvas, div, fill, point, px,
+    AnyElement, App, FontStyle, FontWeight, HighlightStyle, InteractiveElement, InteractiveText,
+    IntoElement, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement,
+    StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle, Window, canvas, div, fill,
+    point, px,
 };
 
 use std::cell::RefCell;
@@ -11,8 +11,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::Global;
-
+use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::viewer::{Block, Capture, Markdown, Run, Span};
 
@@ -23,10 +22,12 @@ use super::palette::{CODE_FONT, Colors};
 #[derive(Default)]
 pub struct OpenDetails(HashSet<String>);
 
-impl Global for OpenDetails {}
-
 impl OpenDetails {
-    fn toggle(&mut self, key: &str) {
+    pub fn is_open(&self, key: &str) -> bool {
+        self.0.contains(key)
+    }
+
+    pub fn toggle(&mut self, key: &str) {
         if !self.0.remove(key) {
             self.0.insert(key.to_owned());
         }
@@ -406,9 +407,7 @@ fn details(
     cx: &mut App,
 ) -> AnyElement {
     let colors = Colors::active(cx);
-    let open = cx
-        .try_global::<OpenDetails>()
-        .is_some_and(|details| details.0.contains(key));
+    let open = details_are_open(key, cx);
     let toggled_key = key.to_owned();
     let header = div()
         .id(SharedString::from(format!("details-toggle-{key}")))
@@ -416,11 +415,7 @@ fn details(
         .gap_2()
         .cursor_pointer()
         .on_click(move |_, _, cx| {
-            if !cx.has_global::<OpenDetails>() {
-                cx.set_global(OpenDetails::default());
-            }
-            cx.update_global::<OpenDetails, _>(|details, _| details.toggle(&toggled_key));
-            cx.refresh_windows();
+            toggle_details(&toggled_key, cx);
         })
         .child(div().flex_none().child(if open { "▾" } else { "▸" }))
         .child(div().flex_1().min_w_0().child(inline_text(

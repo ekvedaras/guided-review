@@ -77,7 +77,7 @@ pub struct ReviewSession {
     typing_save: Option<Task<()>>,
     frame_stats: FrameStatsHook,
     _focus_subscription: Subscription,
-    _details_subscription: Subscription,
+    open_details: OpenDetails,
 }
 
 /// Typing only changes a box's height when its line count changes.
@@ -119,10 +119,7 @@ impl ReviewSession {
                 this.pull_from_github(cx);
             }
         });
-        if !cx.has_global::<OpenDetails>() {
-            cx.set_global(OpenDetails::default());
-        }
-        let details_subscription = cx.observe_global::<OpenDetails>(Self::rebuild_rows);
+        let open_details = OpenDetails::default();
         cx.on_app_quit(|this, _| {
             this.save_typing_now();
             async {}
@@ -134,7 +131,7 @@ impl ReviewSession {
             &RowFacts {
                 comment_problems: &HashMap::new(),
                 sending_comments: &HashSet::new(),
-                open_details: cx.global::<OpenDetails>(),
+                open_details: &open_details,
             },
         );
         let mut session = Self {
@@ -168,10 +165,19 @@ impl ReviewSession {
             typing_save: None,
             frame_stats,
             _focus_subscription: focus_subscription,
-            _details_subscription: details_subscription,
+            open_details,
         };
         session.start_background_work(cx);
         session
+    }
+
+    pub fn is_details_open(&self, key: &str) -> bool {
+        self.open_details.is_open(key)
+    }
+
+    pub fn toggle_details(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.open_details.toggle(key);
+        self.rebuild_rows(cx);
     }
 
     pub fn review(&self) -> &Review {
@@ -483,7 +489,7 @@ impl ReviewSession {
             &RowFacts {
                 comment_problems: &self.comment_problems,
                 sending_comments: &self.sending_comments,
-                open_details: cx.global::<OpenDetails>(),
+                open_details: &self.open_details,
             },
         );
         match rows.change_from(&self.rows) {

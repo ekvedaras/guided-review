@@ -1,6 +1,7 @@
 //! The GPUI app. Shared components know nothing of the layout; a layout assembles them
 //! around a `viewer::Review`, so a new layout later is one new file in `layouts`.
 
+mod active_session;
 mod assets;
 mod code_links;
 mod code_selection;
