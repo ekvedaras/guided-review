@@ -1,16 +1,18 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Audience, CommentId, CommentPlace, CommentResult, HandOffState, LineLocation, Review,
-    ReviewStateFile, ReviewThread, SendMode, Side, ThreadAction, ThreadActionResult, ThreadComment,
-    ThreadId, ThreadMessage,
+    AgentStatus, Audience, CommentId, CommentPlace, CommentResult, HandOffState, LineLocation,
+    Review, ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, ThreadAction,
+    ThreadActionResult, ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgents,
 };
 use serde_json::json;
+use std::sync::Arc;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -354,4 +356,151 @@ fn a_plain_reply_is_not_handed_off_even_in_a_thread_that_started_with_ask_agent(
     reply(&mut review, "thanks", Audience::Author, &github);
 
     assert_eq!(review.hand_offs().len(), 1, "only the first comment asked");
+}
+
+fn asked_twice(pull: &Pull, github: &mut FakeGitHub) -> Review {
+    github.threads = vec![
+        thread_on_line_ten("T1", vec![comment("C1", "me", "why ten?")]),
+        thread_on_line_ten("T2", vec![comment("C2", "me", "and eleven?")]),
+    ];
+    let mut review = pull.open();
+    for body in ["why ten?", "and eleven?"] {
+        let place = comment_on_line_ten(&mut review, body);
+        send(
+            &mut review,
+            &place,
+            SendMode::AddToReview,
+            Audience::Agent,
+            github,
+        );
+    }
+    review
+}
+
+fn agents_of(fake: &Arc<FakeTourAgent>) -> TourAgents {
+    TourAgents::new(Arc::clone(fake) as Arc<dyn TourAgentPort>)
+}
+
+fn deliver(review: &mut Review, agents: &TourAgents) {
+    if let Some(request) = review.delivery_request() {
+        review.apply_delivery(request.run(agents)).unwrap();
+    }
+}
+
+fn states(review: &Review) -> Vec<HandOffState> {
+    review
+        .hand_offs()
+        .iter()
+        .map(|hand_off| hand_off.state().clone())
+        .collect()
+}
+
+#[test]
+fn an_idle_agent_gets_the_oldest_hand_off_as_a_self_contained_message() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+
+    deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { terminal, text }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert_eq!(terminal, &TerminalId::new("t1"));
+    for part in [
+        PR,
+        "h0",
+        "why ten?",
+        "notes.txt",
+        "guided-review agent-reply",
+    ] {
+        assert!(text.contains(part), "{part} missing from {text}");
+    }
+    assert!(!text.contains("and eleven?"), "only the oldest goes");
+    assert_eq!(
+        states(&review),
+        [HandOffState::Delivered, HandOffState::Queued]
+    );
+}
+
+#[test]
+fn a_busy_agent_keeps_the_hand_offs_queued_and_the_second_waits_for_the_first_to_be_done() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let busy = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Working));
+
+    deliver(&mut review, &agents_of(&busy));
+
+    assert_eq!(busy.calls(), []);
+    assert_eq!(
+        states(&review),
+        [HandOffState::Queued, HandOffState::Queued]
+    );
+    let idle = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    deliver(&mut review, &agents_of(&idle));
+    deliver(&mut review, &agents_of(&idle));
+    let sent: Vec<bool> = idle
+        .calls()
+        .into_iter()
+        .map(|call| match call {
+            TourAgentCall::Send { text, .. } => text.contains("why ten?"),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [true],
+        "the agent works on the first, so the second is refused"
+    );
+}
+
+#[test]
+fn an_agent_waiting_for_the_reviewer_is_never_sent_to() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake =
+        Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::WaitingForYou));
+
+    deliver(&mut review, &agents_of(&fake));
+
+    assert_eq!(fake.calls(), []);
+    assert_eq!(states(&review)[0], HandOffState::Queued);
+}
+
+#[test]
+fn with_no_agent_for_the_pr_the_hand_off_waits() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake = Arc::new(FakeTourAgent::new());
+
+    deliver(&mut review, &agents_of(&fake));
+
+    assert_eq!(states(&review)[0], HandOffState::Queued);
+}
+
+#[test]
+fn a_delivered_hand_off_is_working_while_the_agent_works_and_ends_unanswered_when_it_goes_idle() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    deliver(&mut review, &agents_of(&fake));
+
+    review.agent_status_is(AgentStatus::Idle).unwrap();
+    assert_eq!(
+        states(&review)[0],
+        HandOffState::Delivered,
+        "not seen working yet"
+    );
+    review.agent_status_is(AgentStatus::Working).unwrap();
+    assert_eq!(states(&review)[0], HandOffState::Working);
+    review.agent_status_is(AgentStatus::Idle).unwrap();
+
+    assert_eq!(states(&review)[0], HandOffState::EndedWithoutAnswer);
+    assert_eq!(states(&review)[1], HandOffState::Queued);
 }

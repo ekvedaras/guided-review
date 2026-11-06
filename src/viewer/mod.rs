@@ -56,7 +56,10 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
-pub use hand_offs::{Audience, HandOff, HandOffId, HandOffState, HandOffs, ThreadMessage};
+pub use hand_offs::{
+    Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState, HandOffs,
+    ThreadMessage,
+};
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,

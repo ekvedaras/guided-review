@@ -28,7 +28,7 @@ use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
-use super::hand_offs::{Audience, HandOff};
+use super::hand_offs::{Audience, DeliveryOutcome, DeliveryRequest, HandOff};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
@@ -43,6 +43,7 @@ use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement};
+use super::tour_agent::AgentStatus;
 use super::typing_save::{Saves, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::file_path::FilePath;
@@ -1078,6 +1079,21 @@ impl Review {
 
     pub fn hand_offs(&self) -> &[HandOff] {
         self.state.hand_offs().all()
+    }
+
+    /// The oldest queued hand-off to send to the tour agent, when it is time to try.
+    pub fn delivery_request(&self) -> Option<DeliveryRequest> {
+        self.state.hand_offs().delivery_request(&self.pr)
+    }
+
+    pub fn apply_delivery(&mut self, outcome: DeliveryOutcome) -> anyhow::Result<()> {
+        self.state.hand_offs_mut().apply_delivery(outcome);
+        self.save_viewer_sections()
+    }
+
+    pub fn agent_status_is(&mut self, status: AgentStatus) -> anyhow::Result<()> {
+        self.state.hand_offs_mut().agent_status_is(status);
+        self.save_viewer_sections()
     }
 
     /// The oldest comment in the queue, to send again.

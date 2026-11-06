@@ -3,10 +3,12 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
+use crate::pull_request::PullRequestUrl;
 
 use super::comments::SendMode;
 use super::review::StepId;
 use super::threads::{ReviewThread, ThreadId};
+use super::tour_agent::{AgentStatus, SendOutcome, TourAgents};
 
 /// Who a comment is for. The plain send actions are for the PR's author; only Ask agent also
 /// reaches the tour agent.
@@ -83,6 +85,68 @@ impl HandOff {
     pub fn state(&self) -> &HandOffState {
         &self.state
     }
+
+    /// What the tour agent is typed: everything it needs to answer without asking back.
+    fn message(&self, pr: &PullRequestUrl) -> String {
+        let id = self.id;
+        let mut lines = vec![
+            format!("Reviewer comment {id} on {pr}"),
+            format!("Place: {}", self.place),
+        ];
+        lines.extend(self.step.iter().map(|step| format!("Step: {step}")));
+        lines.push(
+            match self.mode {
+                SendMode::AddToReview => "Sent: added to the pending review",
+                SendMode::CommentNow => "Sent: posted at once",
+            }
+            .to_owned(),
+        );
+        if !self.thread_so_far.is_empty() {
+            lines.push("Thread so far:".to_owned());
+            lines.extend(
+                self.thread_so_far
+                    .iter()
+                    .map(|said| format!("- {}: {}", said.author, said.body)),
+            );
+        }
+        lines.push(format!("Comment: {}", self.comment));
+        lines.push(format!(
+            "Answer with `guided-review agent-reply {pr} {id} --body <text>`. If the comment shows the tour is wrong, \
+             fix the tour file, run `guided-review check {pr}` until it is clean, then `guided-review open {pr}`. \
+             Never change the PR's code."
+        ));
+        lines.join("\n")
+    }
+}
+
+/// Sending the oldest queued hand-off to the tour agent, owned so it can run on a background thread.
+pub struct DeliveryRequest {
+    id: HandOffId,
+    pr: PullRequestUrl,
+    text: String,
+}
+
+impl DeliveryRequest {
+    pub fn run(self, agents: &TourAgents) -> DeliveryOutcome {
+        let how = match agents.send_if_idle(&self.pr, &self.text) {
+            Ok(SendOutcome::Delivered) => Delivery::Delivered,
+            Ok(SendOutcome::Refused(_)) => Delivery::Waiting,
+            Err(error) => Delivery::Failed(format!("{error:#}")),
+        };
+        DeliveryOutcome { id: self.id, how }
+    }
+}
+
+pub struct DeliveryOutcome {
+    id: HandOffId,
+    how: Delivery,
+}
+
+enum Delivery {
+    Delivered,
+    /// The agent is not ready; the hand-off stays queued.
+    Waiting,
+    Failed(String),
 }
 
 /// What a hand-off is made from: the comment as GitHub has it now, in the threads read right after the send.
@@ -188,6 +252,43 @@ impl HandOffs {
             thread_so_far,
             state,
         });
+    }
+
+    /// The oldest queued hand-off, unless one was delivered and its agent has not started on it:
+    /// they go one at a time, in the order they were sent.
+    pub(super) fn delivery_request(&self, pr: &PullRequestUrl) -> Option<DeliveryRequest> {
+        if self.0.iter().any(|h| h.state == HandOffState::Delivered) {
+            return None;
+        }
+        let next = self.0.iter().find(|h| h.state == HandOffState::Queued)?;
+        Some(DeliveryRequest {
+            id: next.id,
+            pr: pr.clone(),
+            text: next.message(pr),
+        })
+    }
+
+    pub(super) fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
+        let state = match outcome.how {
+            Delivery::Delivered => HandOffState::Delivered,
+            Delivery::Waiting => return,
+            Delivery::Failed(reason) => HandOffState::Failed(reason),
+        };
+        if let Some(hand_off) = self.0.iter_mut().find(|h| h.id == outcome.id) {
+            hand_off.state = state;
+        }
+    }
+
+    /// A delivered hand-off is working once the agent is seen working; when it then goes idle with no
+    /// answer, it ended without one.
+    pub(super) fn agent_status_is(&mut self, status: AgentStatus) {
+        for hand_off in &mut self.0 {
+            hand_off.state = match (&hand_off.state, status) {
+                (HandOffState::Delivered, AgentStatus::Working) => HandOffState::Working,
+                (HandOffState::Working, AgentStatus::Idle) => HandOffState::EndedWithoutAnswer,
+                _ => continue,
+            };
+        }
     }
 
     fn holds(&self, thread: &ThreadId) -> bool {

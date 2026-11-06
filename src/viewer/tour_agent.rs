@@ -248,6 +248,28 @@ impl TourAgents {
         }
     }
 
+    /// Types the text into the PR's tour agent only when it is idle: never into a working agent and never
+    /// past one that waits for the reviewer.
+    pub fn send_if_idle(&self, pr: &PullRequestUrl, text: &str) -> anyhow::Result<SendOutcome> {
+        match self.lookup(pr) {
+            TourAgentState::Agent {
+                terminal,
+                status: AgentStatus::Working,
+            } => Ok(SendOutcome::Refused(format!("{terminal} is working"))),
+            TourAgentState::Agent {
+                terminal,
+                status: AgentStatus::WaitingForYou,
+            } => Ok(SendOutcome::Refused(format!("{terminal} waits for you"))),
+            TourAgentState::Agent { terminal, .. } => self.port.send_if_idle(&terminal, text),
+            TourAgentState::LinkOff(reason) => Ok(SendOutcome::Refused(format!(
+                "tour agents are off: {reason}"
+            ))),
+            TourAgentState::None | TourAgentState::Unknown => {
+                Ok(SendOutcome::Refused(format!("no tour agent for {pr}")))
+            }
+        }
+    }
+
     pub fn show(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
         match self.lookup(pr) {
             TourAgentState::Agent { terminal, .. } => self.port.show(&terminal),
