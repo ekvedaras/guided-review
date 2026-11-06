@@ -1101,6 +1101,7 @@ mod tests {
             anchor: None,
             commented_lines: Arc::new([]),
             reply_draft: None,
+            edit_drafts: std::collections::BTreeMap::new(),
         }
     }
 

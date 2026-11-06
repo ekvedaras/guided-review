@@ -181,6 +181,8 @@ pub enum CommentRefusal {
     PendingReviewExists,
     /// A reply with no text has nothing to send.
     EmptyReply,
+    /// An edit that left no text would not be a comment any more.
+    EmptyComment,
     /// An Ask still waiting for its first answer has nothing to put in a comment.
     NoAnswerYet,
     NoAccess(String),
@@ -199,6 +201,7 @@ impl CommentRefusal {
             }
             Self::PendingReviewExists => "There is a pending review now: add the comment to it",
             Self::EmptyReply => "Write the reply first",
+            Self::EmptyComment => "A comment needs text",
             Self::NoAnswerYet => "This Ask has no answer yet",
             Self::NoAccess(reason) => return Cow::Owned(format!("No access to GitHub: {reason}")),
         })

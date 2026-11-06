@@ -804,3 +804,123 @@ fn suggest_change_adds_nothing_when_the_commented_lines_are_not_on_the_screen() 
     assert_eq!(review.suggest_change(&place).unwrap(), None);
     assert_eq!(review.comment_drafts()[0].body, "");
 }
+
+fn mine(id: &str, body: &str) -> ThreadComment {
+    ThreadComment {
+        by_viewer: true,
+        author: "me".into(),
+        ..comment(id, body)
+    }
+}
+
+fn edit_box_of(review: &Review, id: &str) -> Option<String> {
+    let step = review.current_step().unwrap();
+    step.threads
+        .first()
+        .unwrap()
+        .edit_drafts
+        .get(&CommentId::new(id))
+        .cloned()
+}
+
+fn edit(id: &str) -> ThreadAction {
+    ThreadAction::EditComment {
+        comment_id: CommentId::new(id),
+    }
+}
+
+#[test]
+fn editing_my_comment_opens_its_text_and_sends_the_new_text_in_its_place() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+
+    review.open_edit(&CommentId::new("C1"));
+    assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("why?"));
+    review
+        .type_in_edit(&CommentId::new("C1"), "why not?")
+        .unwrap();
+    let result = review.act_on_thread(edit("C1"), &github);
+
+    assert_eq!(result, ThreadActionResult::Done);
+    assert!(pull.sent.github_calls().contains(&GitHubCall::EditComment {
+        comment_id: CommentId::new("C1"),
+        body: "why not?".into()
+    }));
+    assert_eq!(shown_thread(&review).comments[0].body, "why not?");
+    assert_eq!(edit_box_of(&review, "C1"), None);
+}
+
+#[test]
+fn a_comment_of_someone_else_cannot_be_opened_for_editing() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+
+    review.open_edit(&CommentId::new("C1"));
+
+    assert_eq!(edit_box_of(&review, "C1"), None);
+}
+
+#[test]
+fn an_edit_that_fails_keeps_the_new_text_and_says_why() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.open_edit(&CommentId::new("C1"));
+    review
+        .type_in_edit(&CommentId::new("C1"), "why not?")
+        .unwrap();
+    github.inject(GitHubFault::ConnectionLost);
+
+    let result = review.act_on_thread(edit("C1"), &github);
+
+    assert!(
+        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("network is down")),
+        "{result:?}"
+    );
+    assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("why not?"));
+    assert_eq!(shown_thread(&review).comments[0].body, "why?");
+}
+
+#[test]
+fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.open_edit(&CommentId::new("C1"));
+    review.type_in_edit(&CommentId::new("C1"), "  \n").unwrap();
+
+    let result = review.act_on_thread(edit("C1"), &github);
+
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::EmptyComment)
+    );
+    assert!(
+        !pull
+            .sent
+            .github_calls()
+            .iter()
+            .any(|call| matches!(call, GitHubCall::EditComment { .. }))
+    );
+    assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("  \n"));
+}
+
+#[test]
+fn an_edit_given_up_leaves_the_comment_as_it_was() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.open_edit(&CommentId::new("C1"));
+
+    review.discard_edit(&CommentId::new("C1"));
+
+    assert_eq!(edit_box_of(&review, "C1"), None);
+    assert_eq!(shown_thread(&review).comments[0].body, "why?");
+}

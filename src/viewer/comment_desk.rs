@@ -14,7 +14,9 @@ use super::suggestion::suggestion_block;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
+use super::threads::{CommentId, ReviewThread};
 use crate::file_path::FilePath;
+use std::collections::BTreeMap;
 
 /// Everything the reviewer writes to GitHub: the drag that opens a comment box, the comments,
 /// replies and finished review, and what GitHub said about the pending review and the PR's author.
@@ -26,6 +28,9 @@ pub(super) struct CommentDesk {
     pending_review: PendingReview,
     /// Approve and Request changes are only offered when the PR is known to be someone else's.
     authorship: PullRequestAuthorship,
+    /// The text of each of the viewer's comments being edited. Not saved: an edit not sent is
+    /// given up with the app, as the comment on GitHub is still whole.
+    comment_edits: BTreeMap<CommentId, String>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -245,17 +250,50 @@ impl CommentDesk {
     }
 
     pub(super) fn thread_action_request(
+        &self,
         pr: &PullRequestUrl,
         action: ThreadAction,
         reply_body: Option<String>,
         freshness: TourFreshness,
     ) -> ThreadActionRequest {
+        let draft_body = match &action {
+            ThreadAction::EditComment { comment_id } => self.comment_edits.get(comment_id).cloned(),
+            _ => reply_body,
+        };
         ThreadActionRequest {
             pr: pr.clone(),
             action,
-            reply_body,
+            draft_body,
             freshness,
         }
+    }
+
+    pub(super) fn comment_edits(&self) -> &BTreeMap<CommentId, String> {
+        &self.comment_edits
+    }
+
+    /// Opens the edit on the comment's current text, when the viewer wrote it. Another
+    /// person's comment is left alone, as is an edit already open.
+    pub(super) fn open_edit(&mut self, threads: &[ReviewThread], comment_id: &CommentId) {
+        let own_comment = threads
+            .iter()
+            .flat_map(|thread| &thread.comments)
+            .find(|comment| comment.id == *comment_id && comment.by_viewer);
+        if let Some(comment) = own_comment {
+            self.comment_edits
+                .entry(comment_id.clone())
+                .or_insert_with(|| comment.body.clone());
+        }
+    }
+
+    pub(super) fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) {
+        if let Some(edit) = self.comment_edits.get_mut(comment_id) {
+            text.clone_into(edit);
+        }
+    }
+
+    pub(super) fn discard_edit(&mut self, comment_id: &CommentId) {
+        self.comment_edits.remove(comment_id);
     }
 
     /// Says whether a reply went out, so its draft was dropped.
@@ -274,6 +312,10 @@ impl CommentDesk {
                 self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
                 state.drop_reply(thread_id);
                 true
+            }
+            (ThreadActionResult::Done, ThreadAction::EditComment { comment_id }) => {
+                self.comment_edits.remove(comment_id);
+                false
             }
             (
                 ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),

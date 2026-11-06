@@ -41,7 +41,7 @@ use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRe
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{self, ReviewThread, ThreadId, ThreadPlacement};
+use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement};
 use super::typing_save::{Saves, TypingSave};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::file_path::FilePath;
@@ -382,6 +382,7 @@ impl Review {
             &self.thread_fold_flipped,
             self.display_options.files_at_head(),
             self.state.reply_drafts(),
+            self.comment_desk.comment_edits(),
         );
         if let Some(record) = self.repin_record() {
             self.mark_repin_status(&mut page.pieces);
@@ -675,6 +676,7 @@ impl Review {
                 &self.thread_fold_flipped,
                 self.display_options.files_at_head(),
                 self.state.reply_drafts(),
+                self.comment_desk.comment_edits(),
             );
             page
         })
@@ -774,7 +776,25 @@ impl Review {
             ThreadAction::Reply { thread_id, .. } => self.reply_draft(thread_id).map(str::to_owned),
             _ => None,
         };
-        CommentDesk::thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
+        self.comment_desk
+            .thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
+    }
+
+    /// Opens the edit of one of the viewer's own comments on its current text. Nothing opens for
+    /// a comment someone else wrote.
+    pub fn open_edit(&mut self, comment_id: &CommentId) {
+        self.comment_desk
+            .open_edit(&self.pulled_threads, comment_id);
+    }
+
+    pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) -> anyhow::Result<()> {
+        self.refuse_changes_while_repinning()?;
+        self.comment_desk.type_in_edit(comment_id, text);
+        Ok(())
+    }
+
+    pub fn discard_edit(&mut self, comment_id: &CommentId) {
+        self.comment_desk.discard_edit(comment_id);
     }
 
     pub fn reply_draft(&self, thread_id: &ThreadId) -> Option<&str> {

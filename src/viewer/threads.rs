@@ -144,6 +144,8 @@ pub struct ThreadView {
     pub commented_lines: Arc<[Arc<str>]>,
     /// The reply being written in this thread; `Some` means the reply box is open.
     pub reply_draft: Option<String>,
+    /// The text of each comment of this thread that is being edited.
+    pub edit_drafts: BTreeMap<CommentId, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,6 +218,7 @@ pub(super) fn views(
     flipped: &BTreeSet<ThreadId>,
     files_at_head: &FilesAtHead,
     reply_drafts: &BTreeMap<ThreadId, String>,
+    comment_edits: &BTreeMap<CommentId, String>,
 ) -> Vec<ThreadView> {
     threads
         .iter()
@@ -226,6 +229,14 @@ pub(super) fn views(
                 .filter(|anchor| shown.iter().any(|piece| hangs_under_a_row(piece, anchor))),
             commented_lines: commented_lines(thread, files_at_head),
             reply_draft: reply_drafts.get(&thread.id).cloned(),
+            edit_drafts: thread
+                .comments
+                .iter()
+                .filter_map(|comment| {
+                    let text = comment_edits.get(&comment.id)?;
+                    Some((comment.id.clone(), text.clone()))
+                })
+                .collect(),
             thread: thread.clone(),
         })
         .collect()

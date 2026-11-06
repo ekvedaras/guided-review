@@ -21,6 +21,10 @@ pub enum ThreadAction {
     Unresolve {
         thread_id: ThreadId,
     },
+    /// Replaces the comment's text with its edit draft as it is saved when the request is made.
+    EditComment {
+        comment_id: CommentId,
+    },
     /// Adds the viewer's reaction to a comment, or takes it back.
     SetReaction {
         comment_id: CommentId,
@@ -41,8 +45,9 @@ pub enum ThreadActionResult {
 pub struct ThreadActionRequest {
     pub(super) pr: PullRequestUrl,
     pub(super) action: ThreadAction,
-    /// The reply draft of the thread a `Reply` is for.
-    pub(super) reply_body: Option<String>,
+    /// The reply draft of the thread a `Reply` is for, or the edit draft of the comment an
+    /// `EditComment` is for.
+    pub(super) draft_body: Option<String>,
     /// The tour is behind the PR head: the thread may sit on lines the tour does not show.
     pub(super) freshness: TourFreshness,
 }
@@ -86,7 +91,7 @@ impl ThreadActionRequest {
             }
             ThreadAction::Reply { thread_id, mode } => {
                 let Some(body) = self
-                    .reply_body
+                    .draft_body
                     .as_deref()
                     .filter(|body| !body.trim().is_empty())
                 else {
@@ -98,6 +103,16 @@ impl ThreadActionRequest {
                     ));
                 }
                 github.reply_to_thread(&self.pr, thread_id, body, *mode)?;
+            }
+            ThreadAction::EditComment { comment_id } => {
+                let Some(body) = self
+                    .draft_body
+                    .as_deref()
+                    .filter(|body| !body.trim().is_empty())
+                else {
+                    return Ok(ThreadActionResult::Refused(CommentRefusal::EmptyComment));
+                };
+                github.edit_comment(comment_id, body)?;
             }
             ThreadAction::Resolve { thread_id } => {
                 github.set_thread_resolved(thread_id, Resolution::Resolved)?;
