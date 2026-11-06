@@ -1,5 +1,6 @@
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::app_path::AppPath;
+use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
@@ -149,4 +150,125 @@ fn a_comment_sent_with_ask_agent_is_handed_off_whichever_way_it_is_posted() {
         assert_eq!(hand_off.mode(), mode);
         assert_eq!(hand_off.state(), &HandOffState::Queued);
     }
+}
+
+fn github_with_the_comment_as_a_thread(pull: &Pull, body: &str) -> FakeGitHub {
+    let mut github = pull.github();
+    github.threads = vec![thread_on_line_ten("T1", vec![comment("C1", "me", body)])];
+    github
+}
+
+#[test]
+fn a_comment_sent_with_the_plain_action_is_never_handed_off() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "nit");
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "nit");
+
+    let result = send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Author,
+        &github,
+    );
+
+    assert_eq!(result, CommentResult::Sent);
+    assert_eq!(review.hand_offs(), []);
+}
+
+#[test]
+fn a_comment_github_refused_is_not_handed_off() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    github.inject(GitHubFault::PendingReviewAppearsOnCommentNow);
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+
+    let result = send(
+        &mut review,
+        &place,
+        SendMode::CommentNow,
+        Audience::Agent,
+        &github,
+    );
+
+    assert!(matches!(result, CommentResult::Refused(_)));
+    assert_eq!(review.hand_offs(), []);
+}
+
+#[test]
+fn an_asked_comment_waiting_in_the_queue_is_handed_off_once_the_queue_gets_it_to_github() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    let offline = pull.github();
+    offline.inject(GitHubFault::ConnectionLost);
+    let result = send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Agent,
+        &offline,
+    );
+    assert!(matches!(result, CommentResult::Queued(_)));
+    assert_eq!(
+        review.hand_offs(),
+        [],
+        "GitHub does not have the comment yet"
+    );
+
+    review
+        .send_queued_comments(&github_with_the_comment_as_a_thread(&pull, "why ten?"))
+        .unwrap();
+
+    let [hand_off] = review.hand_offs() else {
+        panic!("the queue sent the comment, so it is handed off");
+    };
+    assert_eq!(hand_off.thread(), Some(&ThreadId::new("T1")));
+}
+
+#[test]
+fn a_hand_off_whose_thread_cannot_be_read_fails_and_says_why() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    github.inject(GitHubFault::ThreadReadsFail);
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+
+    send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Agent,
+        &github,
+    );
+
+    let [hand_off] = review.hand_offs() else {
+        panic!("the comment is on GitHub, so it is handed off");
+    };
+    let HandOffState::Failed(reason) = hand_off.state() else {
+        panic!("{:?}", hand_off.state());
+    };
+    assert!(reason.contains("network is down"), "{reason}");
+}
+
+#[test]
+fn hand_offs_survive_a_restart() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    send(
+        &mut review,
+        &place,
+        SendMode::AddToReview,
+        Audience::Agent,
+        &github,
+    );
+
+    let reopened = pull.open();
+
+    assert_eq!(reopened.hand_offs(), review.hand_offs());
+    assert_eq!(reopened.hand_offs().len(), 1);
 }
