@@ -15,6 +15,12 @@ Rust 2024 gpui app.
 - All integration tests are one crate, `tests/it/main.rs`, one module per topic. A new file needs a `mod` line there.
 - `tests/it/support/` holds the fixture repo, CLI runner and fake ports (`fake_ports.rs`). `tests/fixtures/` holds recorded data.
 - `src/viewer/` is the window-free core and is tested through those fakes. `src/app/` is gpui with no window tests, so put logic behind a viewer method.
+- New behaviour is test-first, one slice at a time: write the test, stub the new code with `todo!()`, see `cargo test <filter>` fail on that test, then implement. A test that was never red proves nothing.
+
+## herdr
+
+- herdr-core (`hc`) and herdr-app run the maintainer's live terminals. Focus, label, send to, kill or remove only terminals you started yourself for the task, and remove them when done.
+- `herdr-app commands` gives each command's arguments; `herdr-app do <cmd> --help` does not. macOS has no `timeout`; use `perl -e 'alarm 10; exec @ARGV' -- <cmd>`.
 
 ## Read before changing code
 
