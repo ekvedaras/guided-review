@@ -57,8 +57,8 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    Ask, CodeLink, CommentPlace, GitHubPort, LineLocation, MoreContext, NextScreen, Place,
-    QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
+    Ask, Audience, CodeLink, CommentPlace, GitHubPort, LineLocation, MoreContext, NextScreen,
+    Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
 };
 
 actions!(
@@ -528,6 +528,7 @@ impl OneStepLayout {
         let capabilities = CommentCapabilities {
             comment_now: review.can_comment_now(),
             suggest_change: review.can_suggest_change(place),
+            ask_agent: session.agent_link_is_on(),
         };
         let problem = session.comment_problem(place);
         let on_type = {
@@ -552,13 +553,25 @@ impl OneStepLayout {
             }),
             on_add_to_review: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::AddToReview, cx);
+                    session.send_comment(place, SendMode::AddToReview, Audience::Author, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
             on_comment_now: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::CommentNow, cx);
+                    session.send_comment(place, SendMode::CommentNow, Audience::Author, cx);
+                });
+                window.focus(&this.focus, cx);
+            }),
+            on_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session.update(cx, |session, cx| {
+                    session.send_comment(place, SendMode::AddToReview, Audience::Agent, cx);
+                });
+                window.focus(&this.focus, cx);
+            }),
+            on_ask_agent_now: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session.update(cx, |session, cx| {
+                    session.send_comment(place, SendMode::CommentNow, Audience::Agent, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
@@ -648,6 +661,7 @@ impl OneStepLayout {
         let id = view.thread.id.clone();
         let review = self.session.read(cx).review();
         let can_comment_now = review.can_comment_now();
+        let can_ask_agent = self.session.read(cx).agent_link_is_on();
         let reply = review.reply_draft(&view.thread.id).map(str::to_owned);
         let edits = view
             .thread
@@ -661,6 +675,7 @@ impl OneStepLayout {
         ThreadElement::new(
             Rc::clone(view),
             can_comment_now,
+            can_ask_agent,
             reply,
             edits,
             self.on_reply_draft(&view.thread.id),

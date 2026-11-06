@@ -62,6 +62,7 @@ struct ReplyBox<'a> {
     colors: Colors,
     thread_id: &'a ThreadId,
     can_reply_now: bool,
+    can_ask_agent: bool,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -75,6 +76,7 @@ struct ReplyBox<'a> {
 pub struct ThreadElement {
     view: Rc<ThreadView>,
     can_reply_now: bool,
+    can_ask_agent: bool,
     reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     edits: BTreeMap<CommentId, String>,
@@ -92,6 +94,7 @@ impl ThreadElement {
     pub fn new(
         view: Rc<ThreadView>,
         can_reply_now: bool,
+        can_ask_agent: bool,
         reply: Option<String>,
         edits: BTreeMap<CommentId, String>,
         on_reply_draft: OnReplyDraft,
@@ -102,6 +105,7 @@ impl ThreadElement {
         Self {
             view,
             can_reply_now,
+            can_ask_agent,
             reply,
             edits,
             on_reply_draft,
@@ -258,6 +262,7 @@ impl ThreadElement {
             colors,
             thread_id,
             can_reply_now,
+            can_ask_agent,
             on_action,
             on_reply_draft,
             ui,
@@ -282,6 +287,8 @@ impl ThreadElement {
         } else {
             let (ui, on_action, submitted_thread) =
                 (ui.clone(), Rc::clone(on_action), thread_id.clone());
+            let (ask_ui, ask_action, asked_thread) =
+                (ui.clone(), Rc::clone(&on_action), thread_id.clone());
             let (on_edit, on_cancel) = (Rc::clone(on_reply_draft), Rc::clone(on_reply_draft));
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
@@ -297,6 +304,16 @@ impl ThreadElement {
                     &submitted_thread,
                     SendMode::AddToReview,
                     Audience::Author,
+                    cx,
+                );
+            })
+            .on_submit_to_agent(can_ask_agent, move |_, cx| {
+                send_reply(
+                    &ask_ui,
+                    &ask_action,
+                    &asked_thread,
+                    SendMode::AddToReview,
+                    Audience::Agent,
                     cx,
                 );
             })
@@ -316,6 +333,22 @@ impl ThreadElement {
                     )
                     .on_click(send(SendMode::AddToReview, Audience::Author)),
                 )
+                .children(can_ask_agent.then(|| {
+                    small_button(
+                        &colors,
+                        SharedString::from(format!("reply-ask-{id}")),
+                        "Ask agent",
+                    )
+                    .on_click(send(SendMode::AddToReview, Audience::Agent))
+                }))
+                .children((can_ask_agent && can_reply_now).then(|| {
+                    small_button(
+                        &colors,
+                        SharedString::from(format!("reply-ask-now-{id}")),
+                        "Ask agent now",
+                    )
+                    .on_click(send(SendMode::CommentNow, Audience::Agent))
+                }))
                 .children(can_reply_now.then(|| {
                     small_button(
                         &colors,
@@ -601,7 +634,11 @@ impl RenderOnce for ThreadElement {
         });
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
-        let (can_reply_now, on_action) = (self.can_reply_now, Rc::clone(&self.on_action));
+        let (can_reply_now, can_ask_agent, on_action) = (
+            self.can_reply_now,
+            self.can_ask_agent,
+            Rc::clone(&self.on_action),
+        );
         let actions = (!self.view.is_folded).then(|| {
             let thread = &self.view.thread;
             let resolve_action = if thread.is_resolved {
@@ -650,6 +687,7 @@ impl RenderOnce for ThreadElement {
                             colors,
                             thread_id: &id,
                             can_reply_now,
+                            can_ask_agent,
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,

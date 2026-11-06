@@ -23,6 +23,8 @@ pub struct ComposerActions {
     pub on_stop: OnCompose,
     pub on_add_to_review: OnCompose,
     pub on_comment_now: OnCompose,
+    pub on_ask_agent: OnCompose,
+    pub on_ask_agent_now: OnCompose,
     pub on_suggest_change: OnCompose,
     pub on_discard: OnCompose,
 }
@@ -41,6 +43,8 @@ pub enum ComposerState {
 pub struct CommentCapabilities {
     pub comment_now: bool,
     pub suggest_change: bool,
+    /// The agent link is on, so the comment can also go to the tour agent.
+    pub ask_agent: bool,
 }
 
 /// The box a comment is written in, under the last selected row: the text and the buttons.
@@ -112,6 +116,8 @@ impl RenderOnce for CommentComposer {
                 Rc::clone(&actions.on_add_to_review),
                 Rc::clone(&actions.on_stop),
             );
+            let on_ask = Rc::clone(&actions.on_ask_agent);
+            let asks = self.capabilities.ask_agent;
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
                 &self.focus,
@@ -121,6 +127,7 @@ impl RenderOnce for CommentComposer {
             .on_edit(move |body, window, cx| on_type(body, window, cx))
             .on_submit(move |window, cx| on_submit(window, cx))
             .on_cancel(move |window, cx| on_stop(window, cx))
+            .on_submit_to_agent(asks, move |window, cx| on_ask(window, cx))
             .into_any_element()
         } else {
             div().child(self.draft.body.clone()).into_any_element()
@@ -143,6 +150,21 @@ impl RenderOnce for CommentComposer {
                         actions.on_comment_now,
                     )
                 }))
+                .children(
+                    self.capabilities
+                        .ask_agent
+                        .then(|| button(&colors, "ask-agent", "Ask agent", actions.on_ask_agent)),
+                )
+                .children(
+                    (self.capabilities.ask_agent && self.capabilities.comment_now).then(|| {
+                        button(
+                            &colors,
+                            "ask-agent-now",
+                            "Ask agent now",
+                            actions.on_ask_agent_now,
+                        )
+                    }),
+                )
                 .children(self.capabilities.suggest_change.then(|| {
                     button(
                         &colors,

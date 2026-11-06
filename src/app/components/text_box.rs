@@ -42,6 +42,7 @@ actions!(
         SelectAll,
         Newline,
         Submit,
+        SubmitToAgent,
         Cancel,
         Copy,
         Cut,
@@ -86,6 +87,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-v", Paste, single),
         KeyBinding::new("escape", Cancel, single),
         KeyBinding::new("cmd-enter", Submit, single),
+        KeyBinding::new("cmd-shift-enter", SubmitToAgent, single),
         KeyBinding::new("enter", Submit, Some(one_line.as_str())),
         KeyBinding::new("enter", Newline, multi),
         KeyBinding::new("shift-enter", Newline, multi),
@@ -112,6 +114,7 @@ pub struct TextBox {
     lines: Lines,
     on_edit: Option<OnText>,
     on_submit: Option<OnKey>,
+    on_submit_to_agent: Option<OnKey>,
     on_cancel: Option<OnKey>,
 }
 
@@ -125,6 +128,7 @@ impl TextBox {
             lines,
             on_edit: None,
             on_submit: None,
+            on_submit_to_agent: None,
             on_cancel: None,
         }
     }
@@ -136,6 +140,16 @@ impl TextBox {
 
     pub fn on_submit(mut self, on_submit: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         self.on_submit = Some(Rc::new(on_submit));
+        self
+    }
+
+    /// Cmd-shift-enter: sends the text with Ask agent. Without it the key does nothing.
+    pub fn on_submit_to_agent(
+        mut self,
+        enabled: bool,
+        on_submit_to_agent: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_submit_to_agent = enabled.then(|| Rc::new(on_submit_to_agent) as OnKey);
         self
     }
 
@@ -156,6 +170,7 @@ impl RenderOnce for TextBox {
             state.lines = self.lines;
             state.on_edit = self.on_edit;
             state.on_submit = self.on_submit;
+            state.on_submit_to_agent = self.on_submit_to_agent;
             state.on_cancel = self.on_cancel;
         });
         let key_context = match self.lines {
@@ -194,6 +209,7 @@ impl RenderOnce for TextBox {
             .on_action(window.listener_for(&state, EditState::select_all))
             .on_action(window.listener_for(&state, EditState::newline))
             .on_action(window.listener_for(&state, EditState::submit))
+            .on_action(window.listener_for(&state, EditState::submit_to_agent))
             .on_action(window.listener_for(&state, EditState::cancel))
             .on_action(window.listener_for(&state, EditState::copy))
             .on_action(window.listener_for(&state, EditState::cut))
@@ -226,6 +242,7 @@ struct EditState {
     goal_x: Option<Pixels>,
     on_edit: Option<OnText>,
     on_submit: Option<OnKey>,
+    on_submit_to_agent: Option<OnKey>,
     on_cancel: Option<OnKey>,
 }
 
@@ -284,6 +301,7 @@ impl EditState {
             goal_x: None,
             on_edit: None,
             on_submit: None,
+            on_submit_to_agent: None,
             on_cancel: None,
         }
     }
@@ -521,6 +539,12 @@ impl EditState {
 
     fn submit(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(on_submit) = self.on_submit.clone() {
+            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
+        }
+    }
+
+    fn submit_to_agent(&mut self, _: &SubmitToAgent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(on_submit) = self.on_submit_to_agent.clone() {
             cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
         }
     }

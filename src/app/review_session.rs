@@ -19,11 +19,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    CommentId, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentResult,
-    FinishResult, GitHubPort, ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief,
-    RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction,
-    ThreadActionResult, ThreadId, TourAgentState, TourAgents, TourRefresher, TourReloader,
-    TourRepinner, WorkingCopy,
+    AgentStatus, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem,
+    CommentRefusal, CommentResult, FinishResult, GitHubPort, ImageCache, LineLocation, OldHead,
+    Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId,
+    SyncState, ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -58,6 +58,8 @@ pub struct ReviewSession {
     show_agent_failed: Option<String>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
+    /// A hand-off being typed into the tour agent; the next one waits for it.
+    delivering: Option<Task<()>>,
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
@@ -150,6 +152,7 @@ impl ReviewSession {
             show_agent_failed: None,
             tour_agent_follow: None,
             show_agent: None,
+            delivering: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
             screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
@@ -351,8 +354,14 @@ impl ReviewSession {
         .ok();
     }
 
-    pub fn send_comment(&mut self, place: CommentPlace, mode: SendMode, cx: &mut Context<Self>) {
-        let Some(request) = self.review.comment_request(&place, mode) else {
+    pub fn send_comment(
+        &mut self,
+        place: CommentPlace,
+        mode: SendMode,
+        audience: Audience,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(request) = self.review.comment_request_for(&place, mode, audience) else {
             return;
         };
         self.sending_comments.insert(place.clone());
@@ -399,6 +408,7 @@ impl ReviewSession {
             };
             session.comment_problems.insert(place.clone(), problem);
         });
+        self.deliver_hand_offs(cx);
     }
 
     /// Runs a thread action in the background, then shows the threads as GitHub has them.
@@ -415,6 +425,7 @@ impl ReviewSession {
             move || request.run(github.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_thread_action(outcome));
+                this.deliver_hand_offs(cx);
                 on_done(&result, cx);
             },
         )
@@ -645,14 +656,51 @@ impl ReviewSession {
         self.tour_agent_follow = Some(cx.spawn(async move |this, cx| {
             while let Some(state) = futures::StreamExt::next(&mut arrived).await {
                 let shown = this.update(cx, |this, cx| {
+                    if let TourAgentState::Agent { status, .. } = &state {
+                        this.agent_status_is(*status);
+                    }
                     this.tour_agent = state;
                     this.show_problems(cx);
+                    this.deliver_hand_offs(cx);
                 });
                 if shown.is_err() {
                     break;
                 }
             }
         }));
+    }
+
+    /// Whether the comment box offers Ask agent.
+    pub fn agent_link_is_on(&self) -> bool {
+        !matches!(self.tour_agent, TourAgentState::LinkOff(_))
+    }
+
+    fn agent_status_is(&mut self, status: AgentStatus) {
+        if let Err(error) = self.review.agent_status_is(status) {
+            eprintln!("could not save where a hand-off is: {error:#}");
+        }
+    }
+
+    /// Types the oldest queued hand-off into the tour agent when it is idle. One at a time; the next goes
+    /// when the agent next turns idle.
+    fn deliver_hand_offs(&mut self, cx: &mut Context<Self>) {
+        if self.delivering.is_some() {
+            return;
+        }
+        let Some(request) = self.review.delivery_request() else {
+            return;
+        };
+        let agents = self.tour_work.tour_agents.clone();
+        self.delivering = Some(self.run_off_thread(
+            cx,
+            move || request.run(&agents),
+            |this, outcome, cx| {
+                this.delivering = None;
+                if let Err(error) = this.change(cx, |review| review.apply_delivery(outcome)) {
+                    eprintln!("could not save where a hand-off is: {error:#}");
+                }
+            },
+        ));
     }
 
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
