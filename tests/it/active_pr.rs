@@ -232,3 +232,56 @@ fn the_folder_a_pr_was_opened_from_is_remembered_for_a_later_switch() {
 
     assert_eq!(file.opened_from().unwrap().as_deref(), Some(repo.path()));
 }
+
+#[test]
+fn a_picked_pr_is_being_switched_to_until_it_is_shown() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+
+    active.picked(pr(B));
+    assert_eq!(active.switching_to(), Some(&pr(B)));
+    assert_eq!(active.shown(), Some(&pr(A)));
+
+    let OpenDecision::Build(ticket) = active.request(pr(B), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+    assert_eq!(active.switching_to(), Some(&pr(B)));
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(active.switching_to(), None);
+    assert_eq!(active.shown(), Some(&pr(B)));
+}
+
+#[test]
+fn a_switch_that_failed_is_no_longer_being_switched_to() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.picked(pr(B));
+    let OpenDecision::Build(ticket) = active.request(pr(B), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+
+    active.finished(ticket, Err::<(), _>(anyhow::anyhow!("no clone")));
+
+    assert_eq!(active.switching_to(), None);
+}
+
+#[test]
+fn picking_the_pr_on_screen_is_not_a_switch() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+
+    active.picked(pr(A));
+
+    assert_eq!(active.switching_to(), None);
+}
+
+#[test]
+fn a_build_started_by_a_request_is_a_switch_too() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+
+    active.request(pr(B), OpenOrigin::Reviewer);
+
+    assert_eq!(active.switching_to(), Some(&pr(B)));
+}

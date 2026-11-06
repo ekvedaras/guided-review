@@ -12,6 +12,8 @@ pub struct ActivePr {
     shown: Option<PullRequestUrl>,
     building: Option<(BuildTicket, PullRequestUrl)>,
     issued: u64,
+    /// The PR the reviewer picked or a build is making ready, which the window does not show yet.
+    switching: Option<PullRequestUrl>,
     writings: Vec<(PullRequestUrl, TourWriting)>,
     /// The PR whose writing the loading screen shows.
     waiting_for: Option<PullRequestUrl>,
@@ -63,6 +65,19 @@ impl ActivePr {
         self.shown.as_ref()
     }
 
+    /// The PR the window is about to show: picked, or being built.
+    pub fn switching_to(&self) -> Option<&PullRequestUrl> {
+        self.switching.as_ref()
+    }
+
+    /// The reviewer picked a PR to switch to. This is known before the app's open request is answered,
+    /// so the window can say so at once.
+    pub fn picked(&mut self, pr: PullRequestUrl) {
+        if self.shown.as_ref() != Some(&pr) {
+            self.switching = Some(pr);
+        }
+    }
+
     /// An open of a PR being written is its writer saying the tour is checked, which ends the writing.
     pub fn request(&mut self, pr: PullRequestUrl, origin: OpenOrigin) -> OpenDecision {
         let was_written = self.writings.iter().any(|(writing, _)| writing == &pr);
@@ -70,6 +85,7 @@ impl ActivePr {
         if self.shown.as_ref() == Some(&pr) {
             self.issued += 1;
             self.building = None;
+            self.switching = None;
             return OpenDecision::Reload;
         }
         let is_awaited = self.waiting_for.as_ref() == Some(&pr);
@@ -80,6 +96,7 @@ impl ActivePr {
         self.waiting_for = None;
         self.issued += 1;
         let ticket = BuildTicket(self.issued);
+        self.switching = Some(pr.clone());
         self.building = Some((ticket, pr));
         OpenDecision::Build(ticket)
     }
@@ -96,6 +113,7 @@ impl ActivePr {
             self.building = Some((current, pr));
             return Finished::Superseded;
         }
+        self.switching = None;
         match built {
             Ok(built) => {
                 self.unseen_replies.retain(|unseen| unseen != &pr);
@@ -112,6 +130,7 @@ impl ActivePr {
     /// one is on already. A build still running for another PR is superseded.
     pub fn write(&mut self, pr: PullRequestUrl) -> WriteDecision {
         self.building = None;
+        self.switching = None;
         self.waiting_for = Some(pr.clone());
         if self.writing_of(&pr).is_some() {
             return WriteDecision::Watch;
