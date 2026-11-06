@@ -176,6 +176,8 @@ pub enum CommentRefusal {
     /// numbers belong to the old code.
     CodeMoved,
     NotInsideHunk,
+    /// The row is a line of the head the step was read at: GitHub has no such line to comment on.
+    OlderHeadLine,
     /// An Ask about a step or the whole tour has no lines a comment could sit on.
     NoLines,
     /// The Ask was answered about an older head; its lines may sit elsewhere now.
@@ -198,6 +200,9 @@ impl CommentRefusal {
             Self::TourIsOld => "Update tour to comment",
             Self::CodeMoved => "Code moved, place the comment again",
             Self::NotInsideHunk => "GitHub takes comments only on lines of the diff",
+            Self::OlderHeadLine => {
+                "This line is from the code as you last read it: GitHub takes no comment on it, show the full diff to comment"
+            }
             Self::NoLines => "Only an Ask about lines can become a comment",
             Self::AskIsOnOlderCode => {
                 "This Ask is about older code: select the lines again to comment"

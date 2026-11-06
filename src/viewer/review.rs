@@ -418,7 +418,13 @@ impl Review {
                     .pieces
                     .iter()
                     .flat_map(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files))
-                    .map(|part| PieceDiff::since_read(&part, since_files, &since_display))
+                    .map(|part| {
+                        let pr_file = self
+                            .files
+                            .iter()
+                            .find(|file| file.path == *part.piece.id.path());
+                        PieceDiff::since_read(&part, since_files, pr_file, &since_display)
+                    })
                     .collect();
                 self.mark_repin_status(&mut page.pieces);
             }

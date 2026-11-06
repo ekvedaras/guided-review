@@ -1,3 +1,4 @@
+use super::comments::CommentRefusal;
 use super::step_page::{DiffLine, LineLocation};
 
 /// A drag over rows of one file: where the mouse went down and where it is now.
@@ -84,8 +85,13 @@ impl SelectedLines {
         self.lines.iter().any(|row| &row.location == location)
     }
 
+    /// Why the selection takes no comment: the first row GitHub takes none on says so.
+    pub fn comment_refusal(&self) -> Option<CommentRefusal> {
+        self.lines.iter().find_map(DiffLine::comment_refusal)
+    }
+
     /// True when every row takes a comment (`DiffLine::takes_comment`).
     pub fn take_comment(&self) -> bool {
-        self.lines.iter().all(DiffLine::takes_comment)
+        self.comment_refusal().is_none()
     }
 }

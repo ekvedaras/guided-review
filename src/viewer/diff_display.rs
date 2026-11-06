@@ -9,11 +9,19 @@ use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
 use super::highlight::Highlights;
-use super::step_page::{DiffLine, LineKind, LineLocation, Side};
+use super::step_page::{DiffLine, LineKind, LineLocation, RowView, Side};
 
 /// GitHub's diff shows this many unchanged lines around a change; only those take comments.
 const GITHUB_CONTEXT_LINES: usize = 3;
 const MORE_CONTEXT_LINES: usize = 20;
+
+/// Whether GitHub shows this head line in the diff of `hunks`: in a hunk or in the context around it.
+pub(super) fn is_in_github_diff(hunks: &[crate::code_source::Hunk], head_line: usize) -> bool {
+    hunks.iter().any(|hunk| {
+        head_line + GITHUB_CONTEXT_LINES > hunk.head_line_above()
+            && head_line < hunk.head_line_below() + GITHUB_CONTEXT_LINES
+    })
+}
 
 /// What to read at head for context lines, owned so it can move to a background thread.
 #[derive(Debug, Clone)]
@@ -396,13 +404,6 @@ impl FileLines<'_> {
         LineNumber::try_from(line).ok()
     }
 
-    fn is_in_github_diff(&self, head_line: usize) -> bool {
-        self.file.hunks.iter().any(|hunk| {
-            head_line + GITHUB_CONTEXT_LINES > hunk.head_line_above()
-                && head_line < hunk.head_line_below() + GITHUB_CONTEXT_LINES
-        })
-    }
-
     /// `None` for line 0, which a file does not have.
     fn context_row(&self, head_line: usize) -> Option<DiffLine> {
         let number = LineNumber::try_from(head_line).ok()?;
@@ -415,7 +416,7 @@ impl FileLines<'_> {
             Side::Head,
             LineKind::Context {
                 base_line: self.base_line_of(head_line),
-                is_expanded: !self.is_in_github_diff(head_line),
+                is_expanded: !is_in_github_diff(&self.file.hunks, head_line),
             },
             &Line { number, text },
         ))
@@ -436,14 +437,35 @@ impl FileLines<'_> {
                 .highlights
                 .spans(side, self.file.path.as_str(), line.number.into())
                 .to_vec(),
-            is_in_change_since_read: false,
+            view: RowView::PrDiff,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::FileText;
+    use super::{FileText, is_in_github_diff};
+    use crate::code_source::{Hunk, Line};
+    use crate::line_number::LineNumber;
+
+    #[test]
+    fn a_head_line_is_in_the_github_diff_within_three_lines_of_a_hunk() {
+        let hunk = Hunk {
+            header: "@@ -10 +10 @@".to_owned(),
+            head_start: 10,
+            removed: Vec::new(),
+            added: vec![Line {
+                number: LineNumber::try_from(10_usize).unwrap(),
+                text: String::new(),
+            }],
+        };
+
+        let shown: Vec<usize> = (1..=20)
+            .filter(|line| is_in_github_diff(std::slice::from_ref(&hunk), *line))
+            .collect();
+
+        assert_eq!(shown, (7..=13).collect::<Vec<_>>());
+    }
 
     #[test]
     fn a_file_text_cuts_lines_as_str_lines_does() {

@@ -10,8 +10,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    PieceDiff, Problem, Review, ReviewStateFile, Side, StepId, ThreadId, TourRepinner, ViewedState,
-    repin_tour,
+    CommentPlace, CommentRefusal, PieceDiff, Problem, Review, ReviewStateFile, Side, StepId,
+    ThreadId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
 
@@ -317,26 +317,77 @@ fn a_step_read_before_shows_only_what_changed_since_its_tick_and_a_toggle_shows_
     assert_eq!(lines_of(&review, "total"), ["-return 1;", "+return 3;"]);
 }
 
+fn drag_over(review: &mut Review, text: &str) -> Result<Option<CommentPlace>, CommentRefusal> {
+    let at = review
+        .current_step()
+        .unwrap()
+        .pieces
+        .iter()
+        .flat_map(PieceDiff::lines)
+        .find(|line| line.text.trim() == text)
+        .unwrap()
+        .location
+        .clone();
+    review.begin_selection(at.clone());
+    review.extend_selection(at);
+    review.finish_selection()
+}
+
 #[test]
-fn no_row_of_the_change_since_the_read_takes_a_comment_but_the_full_diff_rows_do() {
+fn since_the_read_a_head_line_takes_a_comment_and_an_older_head_line_says_why_not() {
     let shop = Shop::with_tour_at_first_head();
     shop.tick(&["total"]);
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);
     let mut review = shop.open();
     let total: StepId = "total".into();
-    let takes_comment = |review: &Review| -> Vec<bool> {
-        review.current_step().unwrap().pieces[0]
+    review.go_to(&total);
+    let full_diff_line = {
+        review.toggle_full_diff(&total);
+        let line = review.current_step().unwrap().pieces[0]
             .lines()
-            .map(guided_review::viewer::DiffLine::takes_comment)
-            .collect()
+            .find(|line| line.text.trim() == "return 3;")
+            .unwrap()
+            .location
+            .clone();
+        review.toggle_full_diff(&total);
+        line
     };
 
+    assert_eq!(
+        drag_over(&mut review, "return 2;"),
+        Err(CommentRefusal::OlderHeadLine)
+    );
+    assert_eq!(review.comment_drafts(), []);
+    let place = drag_over(&mut review, "return 3;").unwrap().unwrap();
+
+    assert_eq!(
+        place,
+        CommentPlace::Lines {
+            start: full_diff_line.clone(),
+            end: full_diff_line
+        }
+    );
+    assert_eq!(review.comment_drafts().len(), 1);
+}
+
+#[test]
+fn the_full_diff_rows_all_take_a_comment() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.tick(&["total"]);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+    let total: StepId = "total".into();
     review.go_to(&total);
-    assert_eq!(takes_comment(&review), [false, false]);
 
     review.toggle_full_diff(&total);
-    assert_eq!(takes_comment(&review), [true, true]);
+
+    assert!(
+        review.current_step().unwrap().pieces[0]
+            .lines()
+            .all(guided_review::viewer::DiffLine::takes_comment)
+    );
 }
 
 #[test]

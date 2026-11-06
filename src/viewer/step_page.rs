@@ -3,7 +3,8 @@ use std::ops::RangeInclusive;
 use serde::{Deserialize, Serialize};
 
 use super::code_link::CodeLink;
-use super::diff_display::{DiffDisplay, DiffHunk, PieceView};
+use super::comments::CommentRefusal;
+use super::diff_display::{DiffDisplay, DiffHunk, PieceView, is_in_github_diff};
 use super::highlight::Span;
 use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
@@ -44,6 +45,16 @@ pub enum LineKind {
     },
 }
 
+/// Which diff a row is drawn in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowView {
+    /// The PR's diff against its base.
+    PrDiff,
+    /// The "change since your read" view, whose removed rows are lines of the head the step was
+    /// read at, not of the PR's base. Its head rows are lines of the PR's head.
+    ChangeSinceRead { head_line_is_in_pr_diff: bool },
+}
+
 #[derive(Debug, Clone)]
 pub struct DiffLine {
     pub location: LineLocation,
@@ -53,9 +64,7 @@ pub struct DiffLine {
     pub spans: Vec<Span>,
     /// Opened through the `CodeOpener`.
     pub code_link: CodeLink,
-    /// The row belongs to the "change since your read" view, whose removed rows are lines of the
-    /// head the step was read at, not of the PR's base.
-    pub is_in_change_since_read: bool,
+    pub view: RowView,
 }
 
 impl DiffLine {
@@ -89,10 +98,35 @@ impl DiffLine {
 }
 
 impl DiffLine {
-    /// The one rule for a comment button and for a selection: whether GitHub takes a comment on this row.
-    /// Rows of other views (for example removed lines of an older head) must be refused here.
+    /// The one rule for a comment button and for a selection: why GitHub takes no comment on this
+    /// row, or `None` when it does. A head line keeps its number when it is commented on from the
+    /// change since the read, because that view's head is the PR's head.
+    pub fn comment_refusal(&self) -> Option<CommentRefusal> {
+        match (self.view, self.location.side) {
+            (RowView::PrDiff, _) => {
+                (!self.is_inside_hunk()).then_some(CommentRefusal::NotInsideHunk)
+            }
+            (RowView::ChangeSinceRead { .. }, Side::Base) => Some(CommentRefusal::OlderHeadLine),
+            (
+                RowView::ChangeSinceRead {
+                    head_line_is_in_pr_diff,
+                },
+                Side::Head,
+            ) => (!head_line_is_in_pr_diff).then_some(CommentRefusal::NotInsideHunk),
+        }
+    }
+
     pub fn takes_comment(&self) -> bool {
-        !self.is_in_change_since_read && self.is_inside_hunk()
+        self.comment_refusal().is_none()
+    }
+
+    /// A row shows the comment button when it could be a line of a GitHub diff, so that pressing
+    /// it can say why it takes no comment.
+    pub fn offers_comment_button(&self) -> bool {
+        match self.view {
+            RowView::PrDiff => self.is_inside_hunk(),
+            RowView::ChangeSinceRead { .. } => true,
+        }
     }
 }
 
@@ -236,6 +270,7 @@ impl PieceDiff {
     pub(super) fn since_read(
         part: &PiecePart,
         since_files: &[ChangedFile],
+        pr_file: Option<&ChangedFile>,
         display: &DiffDisplay,
     ) -> Self {
         let piece = part.piece;
@@ -288,7 +323,11 @@ impl PieceDiff {
         );
         // Removed lines are numbered at the read head, so the PR base's colours do not fit them.
         for row in diff.hunks.iter_mut().flat_map(|hunk| hunk.rows.iter_mut()) {
-            row.is_in_change_since_read = true;
+            row.view = RowView::ChangeSinceRead {
+                head_line_is_in_pr_diff: pr_file.is_some_and(|file| {
+                    is_in_github_diff(&file.hunks, usize::from(row.location.line))
+                }),
+            };
             if row.location.side == Side::Base {
                 row.spans.clear();
             }

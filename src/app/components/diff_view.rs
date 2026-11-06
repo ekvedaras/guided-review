@@ -57,8 +57,8 @@ pub struct DiffRowLine {
     /// Cut to char boundaries already; coloured when drawn, so a theme switch needs no rebuild.
     highlights: Vec<(Range<usize>, Capture)>,
     code_link: CodeLink,
-    /// Rows outside GitHub's hunks, and rows of the change since the read, take no comment.
-    takes_comment: bool,
+    /// Rows outside GitHub's hunks show no button. Rows of the change since the read show one, to say why they take no comment.
+    offers_comment_button: bool,
     /// A long line wraps onto more rows instead of being cut at the box's edge.
     pub wraps: bool,
 }
@@ -88,7 +88,7 @@ impl DiffRowLine {
             })
             .collect();
         Self {
-            takes_comment: line.takes_comment(),
+            offers_comment_button: line.offers_comment_button(),
             wraps,
             gutter: format!("{base_number:>5} {head_number:>5} {sign} ").into(),
             code: line.text.into(),
@@ -225,7 +225,11 @@ impl RenderOnce for DiffRow {
             .whitespace_nowrap()
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
-        let comment_button = match self.on_gesture.clone().filter(|_| line.takes_comment) {
+        let comment_button = match self
+            .on_gesture
+            .clone()
+            .filter(|_| line.offers_comment_button)
+        {
             Some(on_gesture) => {
                 let at = location.clone();
                 comment_button

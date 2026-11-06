@@ -117,8 +117,8 @@ impl CommentDesk {
         let Some(selected) = selection.resolve(screen_lines) else {
             return Ok(None);
         };
-        if !selected.take_comment() {
-            return Err(CommentRefusal::NotInsideHunk);
+        if let Some(refusal) = selected.comment_refusal() {
+            return Err(refusal);
         }
         if freshness == TourFreshness::Behind {
             return Err(CommentRefusal::TourIsOld);
