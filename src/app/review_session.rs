@@ -112,23 +112,31 @@ impl BoxHeight {
     }
 }
 
+/// What a session works with and reports to, all owned by whoever opens the review.
+pub struct SessionWiring {
+    pub source: Arc<dyn CodeSource>,
+    pub github: Arc<dyn GitHubPort>,
+    pub tour_work: TourWork,
+    pub asked_lines_of: AskedLinesOf,
+    pub frame_stats: FrameStatsHook,
+}
+
 impl EventEmitter<SessionEvent> for ReviewSession {}
 
 impl ReviewSession {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the view is built from its collaborators, which the caller owns"
-    )]
     pub fn new(
         review: Review,
-        source: Arc<dyn CodeSource>,
-        github: Arc<dyn GitHubPort>,
-        tour_work: TourWork,
-        asked_lines_of: AskedLinesOf,
-        frame_stats: FrameStatsHook,
+        wiring: SessionWiring,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let SessionWiring {
+            source,
+            github,
+            tour_work,
+            asked_lines_of,
+            frame_stats,
+        } = wiring;
         let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.pull_from_github(cx);

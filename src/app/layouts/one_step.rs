@@ -44,7 +44,8 @@ use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::thread_view::{
-    OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange, ThreadElement,
+    OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
+    ThreadChanges, ThreadDrafts, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use crate::app::components::tooltip::tooltip;
@@ -52,7 +53,9 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
     AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, ThreadRowPlace, Toolbar,
 };
-use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
+use crate::app::review_session::{
+    AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
+};
 use crate::app::sidebar_rows::SidebarTourAgent;
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
@@ -146,11 +149,13 @@ impl OneStepLayout {
         let session = cx.new(|cx| {
             ReviewSession::new(
                 review,
-                source,
-                github,
-                tour_work,
-                asked_lines_of,
-                frame_stats.clone(),
+                SessionWiring {
+                    source,
+                    github,
+                    tour_work,
+                    asked_lines_of,
+                    frame_stats: frame_stats.clone(),
+                },
                 window,
                 cx,
             )
@@ -697,17 +702,21 @@ impl OneStepLayout {
             .collect();
         ThreadElement::new(
             Rc::clone(view),
-            can_comment_now,
-            can_ask_agent,
-            reply,
-            edits,
-            self.on_reply_draft(&view.thread.id),
-            self.on_comment_edit(),
-            cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.toggle_thread_fold(&id));
-            }),
-            self.on_thread_action(),
-            self.on_try_hand_off_again(),
+            ThreadDrafts {
+                can_reply_now: can_comment_now,
+                can_ask_agent,
+                reply,
+                edits,
+            },
+            ThreadChanges {
+                on_reply_draft: self.on_reply_draft(&view.thread.id),
+                on_comment_edit: self.on_comment_edit(),
+                on_toggle: Box::new(cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| review.toggle_thread_fold(&id));
+                })),
+                on_action: self.on_thread_action(),
+                on_try_hand_off_again: self.on_try_hand_off_again(),
+            },
         )
     }
 

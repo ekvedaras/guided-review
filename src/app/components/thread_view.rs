@@ -19,7 +19,7 @@ use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
-type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+pub type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// Runs a thread action and calls back with how it went. The layout owns the review and the network.
 pub type OnThreadAction =
@@ -89,23 +89,39 @@ pub struct ThreadElement {
     on_try_hand_off_again: OnTryHandOffAgain,
 }
 
+/// What the review holds about one thread: what the reviewer may do and what they have typed.
+pub struct ThreadDrafts {
+    pub can_reply_now: bool,
+    pub can_ask_agent: bool,
+    pub reply: Option<String>,
+    /// The text of each comment being edited, as typed so far.
+    pub edits: BTreeMap<CommentId, String>,
+}
+
+/// What the reviewer's clicks and typing in a thread change.
+pub struct ThreadChanges {
+    pub on_reply_draft: OnReplyDraft,
+    pub on_comment_edit: OnCommentEdit,
+    pub on_toggle: OnToggle,
+    pub on_action: OnThreadAction,
+    pub on_try_hand_off_again: OnTryHandOffAgain,
+}
+
 impl ThreadElement {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the element is built from the texts the review holds and the callbacks that change them"
-    )]
-    pub fn new(
-        view: Rc<ThreadView>,
-        can_reply_now: bool,
-        can_ask_agent: bool,
-        reply: Option<String>,
-        edits: BTreeMap<CommentId, String>,
-        on_reply_draft: OnReplyDraft,
-        on_comment_edit: OnCommentEdit,
-        on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_action: OnThreadAction,
-        on_try_hand_off_again: OnTryHandOffAgain,
-    ) -> Self {
+    pub fn new(view: Rc<ThreadView>, drafts: ThreadDrafts, changes: ThreadChanges) -> Self {
+        let ThreadDrafts {
+            can_reply_now,
+            can_ask_agent,
+            reply,
+            edits,
+        } = drafts;
+        let ThreadChanges {
+            on_reply_draft,
+            on_comment_edit,
+            on_toggle,
+            on_action,
+            on_try_hand_off_again,
+        } = changes;
         Self {
             view,
             can_reply_now,
@@ -114,7 +130,7 @@ impl ThreadElement {
             edits,
             on_reply_draft,
             on_comment_edit,
-            on_toggle: Box::new(on_toggle),
+            on_toggle,
             on_action,
             on_try_hand_off_again,
         }
