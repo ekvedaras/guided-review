@@ -199,24 +199,36 @@ fn the_app_offers_the_same_brief_until_done() {
     assert!(brief.redo_suggested());
 }
 
+#[derive(Clone, Copy)]
+enum Writer {
+    Refreshes,
+    Fails,
+    /// Ends without an error but leaves the tour as it was, as claude does when a tool it needs is denied.
+    GivesUp,
+}
+
 struct SkillStandIn {
     home: PathBuf,
     pr: PullRequestUrl,
-    fails: bool,
+    writer: Writer,
 }
 
 impl RefreshWriter for SkillStandIn {
-    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
+    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
         assert_eq!(pr.to_string(), self.pr.to_string());
-        if self.fails {
-            anyhow::bail!("claude stopped");
+        match self.writer {
+            Writer::Fails => anyhow::bail!("claude stopped"),
+            Writer::GivesUp => Ok("I could not do the refresh. Bash is blocked.".into()),
+            Writer::Refreshes => {
+                ReviewStateFile::for_pr(&self.home, pr)
+                    .update(guided_review::viewer::ReviewState::finish_refresh)?;
+                Ok("Refreshed the tour.".into())
+            }
         }
-        ReviewStateFile::for_pr(&self.home, pr)
-            .update(guided_review::viewer::ReviewState::finish_refresh)
     }
 }
 
-fn refresher(shop: &Shop, fails: bool) -> TourRefresher {
+fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
     let source = shop.repo.path().to_path_buf();
     let pick: PickCodeSource = Arc::new(move |_| {
         Ok(Box::new(
@@ -230,7 +242,7 @@ fn refresher(shop: &Shop, fails: bool) -> TourRefresher {
         writer: Arc::new(SkillStandIn {
             home: shop.repo.home().to_path_buf(),
             pr: shop.pr(),
-            fails,
+            writer,
         }),
     }
 }
@@ -240,7 +252,7 @@ fn the_refresh_button_runs_the_writer_then_reopens_the_review_without_the_marks(
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
 
-    let refreshed = refresher(&shop, false).run().unwrap();
+    let refreshed = refresher(&shop, Writer::Refreshes).run().unwrap();
 
     assert!(refreshed.review.refresh_brief().is_empty());
 }
@@ -250,9 +262,23 @@ fn a_failed_writer_is_reported_and_leaves_the_marks() {
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
 
-    let error = refresher(&shop, true).run().err().unwrap();
+    let error = refresher(&shop, Writer::Fails).run().err().unwrap();
 
     assert!(format!("{error:#}").contains("claude stopped"));
+    assert!(shop.text_may_be_old("total"));
+}
+
+#[test]
+fn a_writer_that_ends_without_refreshing_fails_the_refresh_with_what_it_said() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.repin_onto_head_with_a_new_class();
+
+    let error = refresher(&shop, Writer::GivesUp).run().err().unwrap();
+
+    assert_eq!(
+        format!("{error:#}"),
+        "claude ended without refreshing the tour: I could not do the refresh. Bash is blocked."
+    );
     assert!(shop.text_may_be_old("total"));
 }
 
@@ -261,7 +287,7 @@ fn fake_claude(dir: &Path, exit_code: u8) -> PathBuf {
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\npwd > \"{dir}/cwd\"\necho 'no login' >&2\nexit {exit_code}\n",
+            "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\npwd > \"{dir}/cwd\"\necho 'Refreshed the tour.'\necho 'no login' >&2\nexit {exit_code}\n",
             dir = dir.display()
         ),
     )
@@ -278,8 +304,9 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
     let writer =
         ClaudeRefreshWriter::with_binary(fake_claude(dir.path(), 0), cwd.path().to_path_buf());
 
-    writer.refresh(&PR.parse().unwrap()).unwrap();
+    let said = writer.refresh(&PR.parse().unwrap()).unwrap();
 
+    assert_eq!(said, "Refreshed the tour.");
     let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
     assert!(args.contains("-p "), "{args}");
     assert!(args.contains(PR), "{args}");

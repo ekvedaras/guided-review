@@ -154,7 +154,7 @@ impl ClaudeRefreshWriter {
 }
 
 impl RefreshWriter for ClaudeRefreshWriter {
-    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
+    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
         let prompt = format!(
             "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh."
         );
@@ -172,7 +172,7 @@ impl RefreshWriter for ClaudeRefreshWriter {
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 }
 

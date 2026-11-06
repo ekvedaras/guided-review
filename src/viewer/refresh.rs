@@ -124,7 +124,7 @@ pub struct TourRefresher {
 impl TourRefresher {
     /// Blocks until the AI is done; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        self.writer.refresh(&self.pr)?;
+        let said = self.writer.refresh(&self.pr)?;
         let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
         let pinned = PullRequestTips {
             base_branch_tip: tour.base.clone(),
@@ -136,6 +136,9 @@ impl TourRefresher {
             source.as_ref(),
             ReviewStateFile::for_pr(&self.home, &self.pr),
         )?;
+        if !review.refresh_brief().is_empty() {
+            anyhow::bail!("claude ended without refreshing the tour: {said}");
+        }
         Ok(RepinnedTour {
             review,
             source: source.into(),
