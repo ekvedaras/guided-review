@@ -241,6 +241,10 @@ impl PageRow {
                 }
                 view.commented_lines.hash(&mut hasher);
                 reply_lines.hash(&mut hasher);
+                for (id, text) in &view.edit_drafts {
+                    id.hash(&mut hasher);
+                    line_count(text).hash(&mut hasher);
+                }
                 open_details.hash(&mut hasher);
                 place.hash(&mut hasher);
             }
@@ -1138,6 +1142,28 @@ mod tests {
         assert_ne!(
             thread_key(thread_view(), Some(1), Vec::new()),
             thread_key(thread_view(), Some(2), Vec::new())
+        );
+    }
+
+    fn thread_key_editing(text: Option<&str>) -> RowKey {
+        let mut view = thread_view();
+        view.edit_drafts = text
+            .map(|text| (CommentId::new("C1"), text.to_owned()))
+            .into_iter()
+            .collect();
+        thread_key(view, None, Vec::new())
+    }
+
+    #[test]
+    fn a_thread_row_is_measured_again_when_a_comment_edit_opens_or_changes_its_line_count() {
+        assert_ne!(thread_key_editing(None), thread_key_editing(Some("a")));
+        assert_ne!(
+            thread_key_editing(Some("a")),
+            thread_key_editing(Some("a\nb"))
+        );
+        assert_eq!(
+            thread_key_editing(Some("a")),
+            thread_key_editing(Some("a longer one"))
         );
     }
 

@@ -19,10 +19,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult,
-    GitHubPort, ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
-    ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
-    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    CommentId, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentResult,
+    FinishResult, GitHubPort, ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief,
+    RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction,
+    ThreadActionResult, ThreadId, TourAgentState, TourAgents, TourRefresher, TourReloader,
+    TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -311,6 +312,12 @@ impl ReviewSession {
     pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str, cx: &mut Context<Self>) {
         let lines_before = self.review.reply_draft(thread_id).map(line_count);
         let kept = self.review.type_in_reply(thread_id, text);
+        self.typed(&kept, BoxHeight::of(lines_before, text), cx);
+    }
+
+    pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str, cx: &mut Context<Self>) {
+        let lines_before = self.review.comment_edit(comment_id).map(line_count);
+        let kept = self.review.type_in_edit(comment_id, text);
         self.typed(&kept, BoxHeight::of(lines_before, text), cx);
     }
 

@@ -43,7 +43,7 @@ use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::thread_view::{
-    OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
+    OnCommentEdit, OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use crate::app::components::tooltip::tooltip;
@@ -614,6 +614,20 @@ impl OneStepLayout {
         })
     }
 
+    /// The text of an edit goes to the core, which keeps it until it is sent or given up.
+    fn on_comment_edit(&self) -> OnCommentEdit {
+        let session = self.session.clone();
+        Rc::new(move |comment_id, change, cx| {
+            session.update(cx, |session, cx| match change {
+                ReplyDraftChange::Edit(text) => session.type_in_edit(comment_id, &text, cx),
+                ReplyDraftChange::Open => session.change(cx, |review| review.open_edit(comment_id)),
+                ReplyDraftChange::Discard => {
+                    session.change(cx, |review| review.discard_edit(comment_id));
+                }
+            });
+        })
+    }
+
     fn on_finish_body_edit(&self) -> OnBodyEdit {
         let session = self.session.clone();
         Rc::new(move |text, cx| {
@@ -635,11 +649,22 @@ impl OneStepLayout {
         let review = self.session.read(cx).review();
         let can_comment_now = review.can_comment_now();
         let reply = review.reply_draft(&view.thread.id).map(str::to_owned);
+        let edits = view
+            .thread
+            .comments
+            .iter()
+            .filter_map(|comment| {
+                let text = review.comment_edit(&comment.id)?;
+                Some((comment.id.clone(), text.to_owned()))
+            })
+            .collect();
         ThreadElement::new(
             Rc::clone(view),
             can_comment_now,
             reply,
+            edits,
             self.on_reply_draft(&view.thread.id),
+            self.on_comment_edit(),
             cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| review.toggle_thread_fold(&id));
             }),

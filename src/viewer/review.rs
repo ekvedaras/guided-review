@@ -787,6 +787,14 @@ impl Review {
             .open_edit(&self.pulled_threads, comment_id);
     }
 
+    /// The text of the comment's open edit, as typed so far.
+    pub fn comment_edit(&self, comment_id: &CommentId) -> Option<&str> {
+        self.comment_desk
+            .comment_edits()
+            .get(comment_id)
+            .map(String::as_str)
+    }
+
     pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) -> anyhow::Result<()> {
         self.refuse_changes_while_repinning()?;
         self.comment_desk.type_in_edit(comment_id, text);

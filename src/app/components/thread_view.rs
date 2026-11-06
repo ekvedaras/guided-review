@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -9,8 +10,8 @@ use gpui::{
 
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult, ThreadComment,
-    ThreadId, ThreadView,
+    CommentId, ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult,
+    ThreadComment, ThreadId, ThreadView,
 };
 
 use super::markdown_view::{MarkdownView, parsed_markdown};
@@ -33,9 +34,14 @@ pub enum ReplyDraftChange {
 
 pub type OnReplyDraft = Rc<dyn Fn(ReplyDraftChange, &mut App)>;
 
+/// What happened to the edit of one comment; the core keeps its text, so it survives scrolling away.
+pub type OnCommentEdit = Rc<dyn Fn(&CommentId, ReplyDraftChange, &mut App)>;
+
 /// What the reviewer is doing in one thread: the action under way. The reply text is the core's.
 struct ThreadUi {
     is_busy: bool,
+    /// The comment whose new text is on its way to GitHub.
+    saving_edit: Option<CommentId>,
     problem: Option<String>,
     focus: FocusHandle,
 }
@@ -44,6 +50,7 @@ impl ThreadUi {
     fn new(cx: &mut Context<Self>) -> Self {
         Self {
             is_busy: false,
+            saving_edit: None,
             problem: None,
             focus: cx.focus_handle(),
         }
@@ -68,17 +75,26 @@ pub struct ThreadElement {
     view: Rc<ThreadView>,
     can_reply_now: bool,
     reply: Option<String>,
+    /// The text of each comment being edited, as typed so far.
+    edits: BTreeMap<CommentId, String>,
     on_reply_draft: OnReplyDraft,
+    on_comment_edit: OnCommentEdit,
     on_toggle: OnToggle,
     on_action: OnThreadAction,
 }
 
 impl ThreadElement {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the element is built from the texts the review holds and the callbacks that change them"
+    )]
     pub fn new(
         view: Rc<ThreadView>,
         can_reply_now: bool,
         reply: Option<String>,
+        edits: BTreeMap<CommentId, String>,
         on_reply_draft: OnReplyDraft,
+        on_comment_edit: OnCommentEdit,
         on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_action: OnThreadAction,
     ) -> Self {
@@ -86,7 +102,9 @@ impl ThreadElement {
             view,
             can_reply_now,
             reply,
+            edits,
             on_reply_draft,
+            on_comment_edit,
             on_toggle: Box::new(on_toggle),
             on_action,
         }
@@ -154,8 +172,13 @@ fn run_action(
     on_action: &OnThreadAction,
     cx: &mut App,
 ) {
+    let saving_edit = match &action {
+        ThreadAction::EditComment { comment_id } => Some(comment_id.clone()),
+        _ => None,
+    };
     ui.update(cx, |ui, cx| {
         ui.is_busy = true;
+        ui.saving_edit = saving_edit;
         ui.problem = None;
         cx.notify();
     });
@@ -165,6 +188,7 @@ fn run_action(
         Box::new(move |result, cx| {
             done_ui.update(cx, |ui, cx| {
                 ui.is_busy = false;
+                ui.saving_edit = None;
                 match result {
                     ThreadActionResult::Done => {}
                     ThreadActionResult::Refused(refusal) => ui.problem = Some(refusal.to_string()),
@@ -326,6 +350,102 @@ impl ThreadElement {
     }
 }
 
+/// Where a comment's new text is written, in place of the comment.
+struct EditBox<'a> {
+    colors: Colors,
+    comment_id: &'a CommentId,
+    on_action: &'a OnThreadAction,
+    on_comment_edit: &'a OnCommentEdit,
+    ui: &'a Entity<ThreadUi>,
+    focus: &'a FocusHandle,
+    is_saving: bool,
+}
+
+impl ThreadElement {
+    fn edit_box(
+        EditBox {
+            colors,
+            comment_id,
+            on_action,
+            on_comment_edit,
+            ui,
+            focus,
+            is_saving,
+        }: EditBox,
+        text: &str,
+    ) -> AnyElement {
+        let save = {
+            let (ui, on_action, comment_id) =
+                (ui.clone(), Rc::clone(on_action), comment_id.clone());
+            move |cx: &mut App| {
+                let action = ThreadAction::EditComment {
+                    comment_id: comment_id.clone(),
+                };
+                run_action(action, &ui, &on_action, cx);
+            }
+        };
+        let body = if is_saving {
+            div().child(text.to_owned()).into_any_element()
+        } else {
+            let (on_edit, on_cancel, submit) = (
+                Rc::clone(on_comment_edit),
+                Rc::clone(on_comment_edit),
+                save.clone(),
+            );
+            let (edited_id, cancelled_id) = (comment_id.clone(), comment_id.clone());
+            TextBox::new(
+                SharedString::from(format!("edit-text-{comment_id}")),
+                focus,
+                text,
+                Lines::Multi,
+            )
+            .on_edit(move |text, _, cx| on_edit(&edited_id, ReplyDraftChange::Edit(text), cx))
+            .on_submit(move |_, cx| submit(cx))
+            .on_cancel(move |_, cx| on_cancel(&cancelled_id, ReplyDraftChange::Discard, cx))
+            .into_any_element()
+        };
+        let buttons = (!is_saving).then(|| {
+            let on_comment_edit = Rc::clone(on_comment_edit);
+            let cancelled_id = comment_id.clone();
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    small_button(
+                        &colors,
+                        SharedString::from(format!("edit-save-{comment_id}")),
+                        "Save",
+                    )
+                    .on_click(move |_, _, cx| save(cx)),
+                )
+                .child(
+                    small_button(
+                        &colors,
+                        SharedString::from(format!("edit-cancel-{comment_id}")),
+                        "Cancel",
+                    )
+                    .on_click(move |_, _, cx| {
+                        on_comment_edit(&cancelled_id, ReplyDraftChange::Discard, cx);
+                    }),
+                )
+        });
+        div()
+            .id(SharedString::from(format!("edit-box-{comment_id}")))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(colors.border)
+            .bg(colors.surface)
+            .child(div().min_h(px(48.)).child(body))
+            .children(is_saving.then(|| div().text_sm().child("Saving…")))
+            .children(buttons)
+            .into_any_element()
+    }
+}
+
 fn send_reply(
     ui: &Entity<ThreadUi>,
     on_action: &OnThreadAction,
@@ -394,6 +514,15 @@ impl RenderOnce for ThreadElement {
                 .on_click(move |_, _, cx| open_link(&url, cx))
                 .child("Open on GitHub")
         });
+        let (is_busy, saving_edit, problem, focus) = {
+            let state = ui.read(cx);
+            (
+                state.is_busy,
+                state.saving_edit.clone(),
+                state.problem.clone(),
+                state.focus.clone(),
+            )
+        };
         let comments = (!self.view.is_folded).then(|| {
             div().flex().flex_col().gap_3().children(
                 self.view
@@ -402,28 +531,72 @@ impl RenderOnce for ThreadElement {
                     .iter()
                     .enumerate()
                     .map(|(index, comment)| {
+                        let being_edited = self.edits.get(&comment.id);
+                        let header = div()
+                            .flex()
+                            .gap_2()
+                            .child(div().text_sm().child(comment.author.clone()))
+                            .children((comment.by_viewer && being_edited.is_none()).then(|| {
+                                let (on_comment_edit, comment_id) =
+                                    (Rc::clone(&self.on_comment_edit), comment.id.clone());
+                                let edit_focus = window.use_keyed_state(
+                                    SharedString::from(format!("edit-focus-{}", comment.id)),
+                                    cx,
+                                    |_, cx| cx.focus_handle(),
+                                );
+                                small_button(
+                                    &colors,
+                                    SharedString::from(format!("edit-{}", comment.id)),
+                                    "Edit",
+                                )
+                                .on_click(move |_, window, cx| {
+                                    on_comment_edit(&comment_id, ReplyDraftChange::Open, cx);
+                                    let handle = edit_focus.read(cx).clone();
+                                    window.focus(&handle, cx);
+                                })
+                            }));
+                        let content = match being_edited {
+                            Some(text) => {
+                                let edit_focus = window
+                                    .use_keyed_state(
+                                        SharedString::from(format!("edit-focus-{}", comment.id)),
+                                        cx,
+                                        |_, cx| cx.focus_handle(),
+                                    )
+                                    .read(cx)
+                                    .clone();
+                                Self::edit_box(
+                                    EditBox {
+                                        colors,
+                                        comment_id: &comment.id,
+                                        on_action: &self.on_action,
+                                        on_comment_edit: &self.on_comment_edit,
+                                        ui: &ui,
+                                        focus: &edit_focus,
+                                        is_saving: saving_edit.as_ref() == Some(&comment.id),
+                                    },
+                                    text,
+                                )
+                            }
+                            None => MarkdownView::new(
+                                format!("thread-{id}-{index}"),
+                                parsed_markdown(&comment.body),
+                            )
+                            .on_lines(Arc::clone(&self.view.commented_lines))
+                            .into_any_element(),
+                        };
                         div()
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().text_sm().child(comment.author.clone()))
-                            .child(
-                                MarkdownView::new(
-                                    format!("thread-{id}-{index}"),
-                                    parsed_markdown(&comment.body),
-                                )
-                                .on_lines(Arc::clone(&self.view.commented_lines)),
-                            )
+                            .child(header)
+                            .child(content)
                             .child(Self::reactions(&colors, comment, &ui, &reaction_on_action))
                     }),
             )
         });
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
-        let (is_busy, problem, focus) = {
-            let state = ui.read(cx);
-            (state.is_busy, state.problem.clone(), state.focus.clone())
-        };
         let (can_reply_now, on_action) = (self.can_reply_now, Rc::clone(&self.on_action));
         let actions = (!self.view.is_folded).then(|| {
             let thread = &self.view.thread;
