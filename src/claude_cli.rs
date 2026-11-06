@@ -15,7 +15,7 @@ use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnSt
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
 /// Reads and writes only what the tour skill needs: its own CLI, `gh pr view`, and the tour files.
-const REFRESH_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
+const REFRESH_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
 
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
 pub struct ClaudeCli {
@@ -156,7 +156,10 @@ impl ClaudeRefreshWriter {
 impl RefreshWriter for ClaudeRefreshWriter {
     fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
         let prompt = format!(
-            "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh."
+            "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh. \
+             Only the listed tools are allowed and a command outside them is denied, never asked: \
+             run each `guided-review` and `gh` command as its own Bash call with the PR url written out, \
+             without shell variables, `&&`, `;` or `$(...)`."
         );
         let output = Command::new(&self.binary)
             .args(["-p", &prompt])

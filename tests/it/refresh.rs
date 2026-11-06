@@ -334,6 +334,8 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
     assert!(args.contains("--permission-mode dontAsk"), "{args}");
     assert!(args.contains("--allowedTools"), "{args}");
     assert!(args.contains("Bash(guided-review refresh:*)"), "{args}");
+    assert!(args.contains("Bash(guided-review tour-path:*)"), "{args}");
+    assert!(args.contains("as its own Bash call"), "{args}");
     assert!(args.contains("Write(~/.guided-review/tours/**)"), "{args}");
     assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
     assert!(
