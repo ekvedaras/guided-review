@@ -333,16 +333,12 @@ impl ReviewSession {
             cx,
             move || request.run(github.as_ref()),
             move |this, outcome, cx| {
-                let is_sent = this.change_session(cx, |session| {
+                this.change_session(cx, |session| {
                     session.sending_comments.remove(&place);
                     let problem = match session.review.apply_comment(outcome) {
-                        Ok(CommentResult::Sent) => {
+                        Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
                             session.composing = None;
-                            return true;
-                        }
-                        Ok(CommentResult::Queued(_)) => {
-                            session.composing = None;
-                            return false;
+                            return;
                         }
                         Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
                         Ok(CommentResult::Rejected(reason)) => {
@@ -351,11 +347,7 @@ impl ReviewSession {
                         Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
                     };
                     session.comment_problems.insert(place, problem);
-                    false
                 });
-                if is_sent {
-                    this.pull_threads(cx);
-                }
             },
         )
         .detach();
@@ -700,7 +692,6 @@ impl ReviewSession {
                 this.is_retrying_comments = false;
                 match this.change(cx, |review| review.apply_comment(outcome)) {
                     Ok(CommentResult::Sent) => {
-                        this.pull_threads(cx);
                         this.retry_queued_comments(cx);
                     }
                     Ok(_) => {}

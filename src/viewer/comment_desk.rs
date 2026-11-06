@@ -215,7 +215,7 @@ impl CommentDesk {
         state: &mut ReviewState,
         outcome: CommentOutcome,
     ) -> CommentResult {
-        let CommentOutcome { request, how } = outcome;
+        let CommentOutcome { request, how, .. } = outcome;
         let place = request.draft.place.clone();
         match how {
             Outcome::Sent => {

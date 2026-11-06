@@ -792,12 +792,16 @@ impl Review {
                 self.saves.typed();
             }
         }
-        match &outcome.threads {
+        self.show_pulled_threads(outcome.threads.as_ref());
+        outcome.result
+    }
+
+    fn show_pulled_threads(&mut self, threads: Option<&Result<Vec<ReviewThread>, String>>) {
+        match threads {
             Some(Ok(threads)) => self.set_threads(threads),
             Some(Err(reason)) => self.threads_not_read = Some(reason.clone()),
             None => {}
         }
-        outcome.result
     }
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
@@ -1011,7 +1015,9 @@ impl Review {
     }
 
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
+        let threads = outcome.threads.clone();
         let result = self.comment_desk.apply_comment(&mut self.state, outcome);
+        self.show_pulled_threads(threads.as_ref());
         self.save_viewer_sections()?;
         Ok(result)
     }

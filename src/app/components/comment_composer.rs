@@ -183,7 +183,7 @@ impl RenderOnce for CommentComposer {
                     .map(|problem| div().text_sm().text_color(red()).child(shown(problem))),
             )
             .children(
-                (self.state == ComposerState::Sending).then(|| div().text_sm().child("Sending...")),
+                (self.state == ComposerState::Sending).then(|| div().text_sm().child("Posting…")),
             )
             .children(buttons)
     }

@@ -8,9 +8,10 @@ use crate::file_path::FilePath;
 use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
-use super::ports::{GitHubError, PullRequestTipsPort, ReviewWritesPort};
+use super::ports::{GitHubError, PullRequestTipsPort, ReviewThreadsPort, ReviewWritesPort};
 use super::row_selection::SelectedLines;
 use super::step_page::{LineLocation, Side};
+use super::threads::ReviewThread;
 
 /// Where a comment sits: on a whole file, or on one line or a range that may cross hunks and sides.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -258,6 +259,9 @@ pub struct CommentRequest {
 pub struct CommentOutcome {
     pub(super) request: CommentRequest,
     pub(super) how: Outcome,
+    /// The threads as GitHub has them after the comment went in, read in the same background run,
+    /// so the comment box is replaced by its thread in one step; `None` when nothing was sent.
+    pub(super) threads: Option<Result<Vec<ReviewThread>, String>>,
 }
 
 pub(super) enum Outcome {
@@ -287,10 +291,19 @@ impl CommentRequest {
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
     pub fn run(
         self,
-        github: &(impl PullRequestTipsPort + ReviewWritesPort + ?Sized),
+        github: &(impl PullRequestTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
     ) -> CommentOutcome {
         let how = self.send(github);
-        CommentOutcome { request: self, how }
+        let threads = matches!(how, Outcome::Sent).then(|| {
+            github
+                .review_threads(&self.pr)
+                .map_err(|error| format!("{error:#}"))
+        });
+        CommentOutcome {
+            request: self,
+            how,
+            threads,
+        }
     }
 
     fn send(&self, github: &(impl PullRequestTipsPort + ReviewWritesPort + ?Sized)) -> Outcome {

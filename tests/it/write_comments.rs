@@ -1,15 +1,39 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
-use crate::support::line;
+use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation, Review,
-    ReviewStateFile, SendMode, Side,
+    CommentId, CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation, Problem,
+    Review, ReviewStateFile, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
 };
 use serde_json::json;
+
+fn thread_on_line_ten(body: &str) -> ReviewThread {
+    ReviewThread {
+        id: ThreadId::new("T1"),
+        is_resolved: false,
+        is_outdated: false,
+        path: file_path("notes.txt"),
+        line: Some(line(10)),
+        start_line: None,
+        side: Side::Head,
+        is_file_comment: false,
+        original_line: Some(line(10)),
+        original_start_line: None,
+        original_commit: None,
+        comments: vec![ThreadComment {
+            id: CommentId::new("C1"),
+            author: "me".into(),
+            is_bot: false,
+            body: body.into(),
+            url: String::new(),
+            reactions: Vec::new(),
+        }],
+    }
+}
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -210,7 +234,7 @@ fn a_comment_goes_into_the_pending_review_by_default() {
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(
-        pull.sent.github_calls().last().unwrap(),
+        pull.sent.github_calls().iter().rev().nth(1).unwrap(),
         &GitHubCall::AddThread {
             pr: PR.parse().unwrap(),
             place,
@@ -234,7 +258,7 @@ fn a_range_from_a_removed_line_to_an_added_one_goes_left_to_right() {
         .unwrap();
 
     assert_eq!(
-        pull.sent.github_calls().last().unwrap(),
+        pull.sent.github_calls().iter().rev().nth(1).unwrap(),
         &GitHubCall::AddThread {
             pr: PR.parse().unwrap(),
             place: place.clone(),
@@ -295,6 +319,43 @@ fn comment_now_posts_at_once_and_leaves_no_pending_review() {
         body: "now".into()
     }));
     assert!(review.can_comment_now());
+}
+
+#[test]
+fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_vanishes() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    github.threads = vec![thread_on_line_ten("what I sent")];
+    let mut review = pull.open();
+    let place = comment_on(&mut review, "line ten");
+    typed(&mut review, &place, "what I sent");
+
+    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+
+    assert_eq!(result.unwrap(), Some(CommentResult::Sent));
+    assert_eq!(review.comment_drafts(), []);
+    let threads = review.current_step().unwrap().threads;
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].thread.comments[0].body, "what I sent");
+}
+
+#[test]
+fn a_sent_comment_whose_thread_cannot_be_read_back_is_still_sent_and_the_read_is_named() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    let place = comment_on(&mut review, "line ten");
+    typed(&mut review, &place, "what I sent");
+    github.inject(GitHubFault::ThreadReadsFail);
+
+    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+
+    assert_eq!(result.unwrap(), Some(CommentResult::Sent));
+    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(
+        review.problems(),
+        [Problem::ThreadsNotRead("network is down".into())]
+    );
 }
 
 #[test]
@@ -515,7 +576,7 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
     std::fs::write(&state_path, written.to_string()).unwrap();
 
     let mut review = pull.open();
-    let file = CommentPlace::File(guided_review::file_path::FilePath::new("notes.txt").unwrap());
+    let file = CommentPlace::File(file_path("notes.txt"));
     let drafts = review.comment_drafts().to_vec();
     assert_eq!(drafts.len(), 2);
     assert_eq!(drafts[0].place, file);
@@ -556,13 +617,13 @@ fn a_comment_problem_reads_as_the_refusal_or_the_reason_github_gave() {
 #[test]
 fn a_comment_place_says_where_the_comment_goes() {
     let at = |number| LineLocation {
-        path: crate::support::file_path("app/Order.php"),
+        path: file_path("app/Order.php"),
         side: Side::Head,
         line: line(number),
     };
 
     assert_eq!(
-        CommentPlace::on_file(&crate::support::file_path("app/Order.php")).describe(),
+        CommentPlace::on_file(&file_path("app/Order.php")).describe(),
         "Comment on app/Order.php"
     );
     assert_eq!(
