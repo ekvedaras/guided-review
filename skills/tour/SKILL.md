@@ -90,7 +90,7 @@ Rewrite only what the new commits made stale; every other step stays as it is, w
    - Each new piece: add a pointer to the step it belongs to. Noise goes to the `skim` step. Add a new step only when no step fits.
    - Leave all other steps untouched.
 5. `guided-review check <pr-url>` until `0 errors, 0 warnings`.
-6. `guided-review refresh <pr-url> --done` clears the marks, then **open** the app as above.
+6. `guided-review refresh <pr-url> --done` clears the marks, then `guided-review open <pr-url>` as above.
 7. If the brief has a `redo:` line, tell the user a full `/tour --redo <pr-url>` may read better. Never start a redo yourself.
 
 ## Reviewer questions
