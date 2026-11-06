@@ -23,6 +23,7 @@ mod ports;
 mod problems;
 mod reactions;
 mod refresh;
+mod relevant_prs;
 mod review;
 mod review_state;
 mod row_selection;
@@ -68,6 +69,9 @@ pub use ports::{
 pub use problems::{Problem, Read};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
+pub use relevant_prs::{
+    RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
+};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, SafetyNetSize, Screen,
     SidebarEntry, StepId,

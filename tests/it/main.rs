@@ -48,6 +48,7 @@ mod piece_id;
 mod pr_description;
 mod read_ticks;
 mod refresh;
+mod relevant_prs;
 mod repin;
 mod review_threads;
 mod show;

@@ -12,6 +12,7 @@
 pub mod app_path;
 pub mod fake_ports;
 pub mod fake_tour_agent;
+pub mod graphql;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;

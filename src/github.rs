@@ -24,7 +24,11 @@ pub struct GitHub {
     token: Option<String>,
     /// GraphQL mutations address a PR by node id, so it is looked up once per PR.
     pull_request_ids: Arc<Mutex<HashMap<String, String>>>,
+    /// The viewer's teams change rarely, so they are read once per app run.
+    viewer_teams: Arc<Mutex<Option<Vec<String>>>>,
 }
+
+mod relevant_prs;
 
 #[derive(Deserialize)]
 struct PullJson {
@@ -84,6 +88,7 @@ impl GitHub {
                 .unwrap_or_else(|_| "https://api.github.com".to_owned()),
             token: token_from_gh_cli().or_else(|| std::env::var("GITHUB_TOKEN").ok()),
             pull_request_ids: Arc::default(),
+            viewer_teams: Arc::default(),
         }
     }
 
@@ -100,6 +105,7 @@ impl GitHub {
             api: api.to_owned(),
             token: None,
             pull_request_ids: Arc::default(),
+            viewer_teams: Arc::default(),
         }
     }
 

@@ -1,0 +1,10 @@
+{"data":{"viewer":{"login":"ekvedaras"},
+ "s0":{"nodes":[
+  {"number":7,"url":"https://github.com/acme/shop/pull/7","title":"Add checkout","isDraft":false,"updatedAt":"2026-11-04T09:00:00Z","author":{"login":"alice"},"reviewRequests":{"nodes":[{"requestedReviewer":{"login":"ekvedaras"}}]}},
+  {"number":7,"url":"https://github.com/acme/blog/pull/7","title":"Fix feed","isDraft":true,"updatedAt":"2026-11-06T07:00:00Z","author":{"login":"ekvedaras"},"reviewRequests":{"nodes":[]}},
+  {"number":12,"url":"https://github.com/acme/shop/pull/12","title":"Old idea","isDraft":false,"updatedAt":"2025-01-02T10:00:00Z","author":{"login":"bob"},"reviewRequests":{"nodes":[{"requestedReviewer":{"login":"carol"}}]}},
+  {}]},
+ "s1":{"nodes":[
+  {"number":7,"url":"https://github.com/acme/shop/pull/7","title":"Add checkout","isDraft":false,"updatedAt":"2026-11-04T09:00:00Z","author":{"login":"alice"},"reviewRequests":{"nodes":[{"requestedReviewer":{"login":"ekvedaras"}}]}},
+  {"number":31,"url":"https://github.com/acme/api/pull/31","title":"Rate limits","isDraft":false,"updatedAt":"2026-11-05T12:00:00Z","author":null,"reviewRequests":{"nodes":[{"requestedReviewer":{"combinedSlug":"acme/platform"}}]}}]},
+ "s2":{"nodes":[]}}}
