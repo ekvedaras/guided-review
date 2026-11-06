@@ -48,6 +48,7 @@ pub fn open_review(
     let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
     let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
     review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
+    opened.state_file().remember_folder(clones_from)?;
 
     let clone = code.source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(home)?;

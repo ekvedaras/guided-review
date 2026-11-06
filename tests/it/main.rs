@@ -11,6 +11,7 @@
 
 mod support;
 
+mod active_pr;
 mod app_link;
 mod ask;
 mod ask_adapters;

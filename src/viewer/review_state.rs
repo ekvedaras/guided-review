@@ -30,6 +30,9 @@ pub struct ReviewState {
     asks: Vec<Ask>,
     #[serde(default)]
     last_repin: Option<RepinRecord>,
+    /// The folder the PR was last opened from, so a switch back to it finds the same clone.
+    #[serde(default)]
+    opened_from: Option<PathBuf>,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -454,6 +457,15 @@ impl ReviewStateFile {
             Some(text) => self.parse(&text),
             None => Ok(ReviewState::default()),
         }
+    }
+
+    pub fn remember_folder(&self, folder: &Path) -> anyhow::Result<()> {
+        self.update(|state| state.opened_from = Some(folder.to_path_buf()))
+    }
+
+    /// The folder the PR was last opened from, when it was opened before.
+    pub fn opened_from(&self) -> anyhow::Result<Option<PathBuf>> {
+        Ok(self.load()?.opened_from)
     }
 
     /// Opens the app on a file it cannot parse: the file is moved aside, before anything new is

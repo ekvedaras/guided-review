@@ -1,6 +1,7 @@
 //! The viewer core: everything the app does, with no GPUI in it.
 //! Views read its state and send it user actions; tests drive it the same way.
 
+mod active_pr;
 mod agent_event;
 mod agent_pool;
 mod ask;
@@ -33,6 +34,7 @@ mod threads;
 mod typing_save;
 mod viewed_sync;
 
+pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision};
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
