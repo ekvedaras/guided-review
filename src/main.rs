@@ -19,7 +19,7 @@ use guided_review::tour_check;
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GUIDED_REVIEW_GIT"), ")"), about)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
