@@ -42,13 +42,26 @@ if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
     script
 }
 
+/// A stand-in `herdr-app` that logs each call; `<dir>/no-window` makes it find no window, and
+/// `<dir>/not-taken-up` makes its next call find no such space, as before the window takes a terminal up.
 fn fake_herdr_app(dir: &Path) -> PathBuf {
     let script = dir.join("herdr-app");
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\necho \"$@\" >> \"{}/app-calls\"\n",
-            dir.display()
+            r#"#!/bin/sh
+echo "$@" >> "{dir}/app-calls"
+if [ -f "{dir}/no-window" ]; then
+  echo "herdr-app: no Herdr window at {dir}/herdr-app.sock" >&2
+  exit 2
+fi
+if [ -f "{dir}/not-taken-up" ]; then
+  rm "{dir}/not-taken-up"
+  echo '{{"error": "no space \"guided-review\""}}'
+  exit 1
+fi
+"#,
+            dir = dir.display()
         ),
     )
     .unwrap();
@@ -392,6 +405,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
         format!(
             "run --bg --json --outlive-parent --no-parent --name tour-acme-shop-7 --cwd /clones/shop \
              --label app=guided-review --label gr.pr={PR} --label gr.started-by=app \
+             --label herdr.space=guided-review --label herdr.tab=tour-acme-shop-7 \
              -- env PATH=/opt/gr/bin:/usr/bin claude You are the tour agent --permission-mode dontAsk"
         )
     );
@@ -411,6 +425,65 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
             "{tool} could change something other than the tour"
         );
     }
+}
+
+fn start_shop_agent(agents: &HcTourAgents) -> anyhow::Result<TerminalId> {
+    agents.start(&TourAgentStart {
+        pr: pr(),
+        name: "tour-acme-shop-7".to_owned(),
+        folder: PathBuf::from("/clones/shop"),
+        first_task: "You are the tour agent".to_owned(),
+    })
+}
+
+#[test]
+fn a_started_tour_agent_gets_the_guided_review_space_and_a_tab_named_after_its_pr_in_the_herdr_app()
+{
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+
+    start_shop_agent(&adapter(dir.path())).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "app-calls"),
+        [
+            "do space.rename --id guided-review --name guided-review agents",
+            "do tab.rename --id tour-acme-shop-7 --name acme/shop#7"
+        ]
+    );
+}
+
+#[test]
+fn a_tour_agent_starts_placed_with_the_herdr_app_closed_and_naming_is_not_tried_again() {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+    std::fs::write(dir.path().join("no-window"), "").unwrap();
+
+    let started = start_shop_agent(&adapter(dir.path())).unwrap();
+
+    assert_eq!(started, TerminalId::new("t9"));
+    assert_eq!(
+        calls(dir.path(), "app-calls"),
+        ["do space.rename --id guided-review --name guided-review agents"]
+    );
+}
+
+#[test]
+fn naming_waits_for_the_herdr_app_to_take_the_new_terminal_up() {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+    std::fs::write(dir.path().join("not-taken-up"), "").unwrap();
+
+    start_shop_agent(&adapter(dir.path())).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "app-calls"),
+        [
+            "do space.rename --id guided-review --name guided-review agents",
+            "do space.rename --id guided-review --name guided-review agents",
+            "do tab.rename --id tour-acme-shop-7 --name acme/shop#7"
+        ]
+    );
 }
 
 #[test]

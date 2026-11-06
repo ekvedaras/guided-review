@@ -4,7 +4,8 @@ use std::ffi::OsStr;
 use std::io::{BufRead, BufReader};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, bail};
 use serde_json::Value;
@@ -18,6 +19,19 @@ use crate::viewer::{
 
 const APP_LABEL: &str = "app=guided-review";
 const STARTED_BY_APP_LABEL: &str = "gr.started-by=app";
+
+/// The herdr-app space every agent the app starts is shown in, one tab each. Herdr-app shows a terminal
+/// labelled `herdr.space=<id>`, making a space or tab for an id it does not know, so the agents are
+/// placed while the window is closed too.
+const AGENTS_SPACE: &str = "guided-review";
+/// Not plain "guided-review": a space nobody named is called after its repo, and the maintainer's own
+/// space of this repo already is.
+const AGENTS_SPACE_NAME: &str = "guided-review agents";
+
+/// Herdr-app takes up a newly labelled terminal a moment after `hc run` returns; until then it knows
+/// no space or tab to name.
+const ADOPTION_TRIES: u32 = 30;
+const ADOPTION_WAIT: Duration = Duration::from_millis(100);
 
 pub struct HcTourAgents {
     hc: PathBuf,
@@ -301,6 +315,9 @@ impl TourAgentPort for HcTourAgents {
         let folder = start.folder.display().to_string();
         let pr_label = label_of(&start.pr);
         let path = format!("PATH={}", self.agents_path);
+        let tab = &start.name;
+        let space_label = format!("herdr.space={AGENTS_SPACE}");
+        let tab_label = format!("herdr.tab={tab}");
         let args = [
             "run",
             "--bg",
@@ -317,6 +334,10 @@ impl TourAgentPort for HcTourAgents {
             &pr_label,
             "--label",
             STARTED_BY_APP_LABEL,
+            "--label",
+            &space_label,
+            "--label",
+            &tab_label,
             "--",
             "env",
             &path,
@@ -331,6 +352,7 @@ impl TourAgentPort for HcTourAgents {
         let address = at(&started, "/address")
             .as_str()
             .context("`hc run` did not say which terminal it started")?;
+        self.name_place(tab, &start.pr);
         Ok(TerminalId::new(address))
     }
 
@@ -384,7 +406,62 @@ fn above_claudes_prompt_box<'a>(lines: &'a [&'a str]) -> &'a [&'a str] {
     box_top.and_then(|top| lines.get(..top)).unwrap_or(lines)
 }
 
+/// What came of asking herdr-app to name an agent's space and tab.
+enum Naming {
+    Named,
+    NotTakenUpYet,
+    /// No window to ask, or it refused: the agent runs on unnamed, which is no reason to fail its start.
+    GivenUp,
+}
+
 impl HcTourAgents {
+    fn herdr_app(&self, args: &[&str]) -> anyhow::Result<Output> {
+        Command::new(&self.herdr_app)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .with_context(|| format!("could not run `{}`", self.herdr_app.display()))
+    }
+
+    /// Names the agents' space and the agent's tab once herdr-app has taken the terminal up.
+    fn name_place(&self, tab: &str, pr: &PullRequestUrl) {
+        for _ in 0..ADOPTION_TRIES {
+            match self.try_naming(tab, pr) {
+                Naming::Named | Naming::GivenUp => return,
+                Naming::NotTakenUpYet => std::thread::sleep(ADOPTION_WAIT),
+            }
+        }
+    }
+
+    fn try_naming(&self, tab: &str, pr: &PullRequestUrl) -> Naming {
+        let renames = [
+            [
+                "do",
+                "space.rename",
+                "--id",
+                AGENTS_SPACE,
+                "--name",
+                AGENTS_SPACE_NAME,
+            ],
+            ["do", "tab.rename", "--id", tab, "--name", &pr.short()],
+        ];
+        for rename in renames {
+            let Ok(output) = self.herdr_app(&rename) else {
+                return Naming::GivenUp;
+            };
+            if output.status.success() {
+                continue;
+            }
+            let said = String::from_utf8_lossy(&output.stdout);
+            return if said.contains("no space") || said.contains("no tab") {
+                Naming::NotTakenUpYet
+            } else {
+                Naming::GivenUp
+            };
+        }
+        Naming::Named
+    }
+
     fn hc_is_missing(&self) -> bool {
         Command::new(&self.hc)
             .arg("--version")
