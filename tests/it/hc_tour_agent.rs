@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -154,7 +155,10 @@ fn status_changes_follow_the_events_of_the_terminal_and_skip_repeats() {
     let mut seen = Vec::new();
 
     adapter(dir.path())
-        .follow(&TerminalId::new("t7"), &mut |status| seen.push(status))
+        .follow(&TerminalId::new("t7"), &mut |status| {
+            seen.push(status);
+            ControlFlow::Continue(())
+        })
         .unwrap();
 
     assert_eq!(

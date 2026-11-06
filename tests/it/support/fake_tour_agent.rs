@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::ops::ControlFlow;
 use std::sync::Mutex;
 
 use guided_review::pull_request::PullRequestUrl;
@@ -122,10 +123,12 @@ impl TourAgentPort for FakeTourAgent {
     fn follow(
         &self,
         _terminal: &TerminalId,
-        on_status: &mut dyn FnMut(AgentStatus),
+        on_status: &mut dyn FnMut(AgentStatus) -> ControlFlow<()>,
     ) -> anyhow::Result<()> {
         while let Some(status) = self.coming.lock().unwrap().pop_front() {
-            on_status(status);
+            if on_status(status).is_break() {
+                break;
+            }
         }
         Ok(())
     }

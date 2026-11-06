@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
@@ -79,11 +80,12 @@ pub trait TourAgentPort: Send + Sync {
 
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus>;
 
-    /// Blocks, passing every status the terminal reports from now on, until herdr's stream ends.
+    /// Blocks, passing every status the terminal reports from now on, until herdr's stream ends or
+    /// `on_status` breaks.
     fn follow(
         &self,
         terminal: &TerminalId,
-        on_status: &mut dyn FnMut(AgentStatus),
+        on_status: &mut dyn FnMut(AgentStatus) -> ControlFlow<()>,
     ) -> anyhow::Result<()>;
 
     /// Brings the terminal up in the herdr app.
@@ -164,13 +166,20 @@ impl TourAgents {
     }
 
     /// Passes the agent's state now and at each status change, blocking until herdr's stream ends.
-    pub fn follow(&self, pr: &PullRequestUrl, on_change: &mut dyn FnMut(TourAgentState)) {
+    /// `on_change` breaks when nobody wants the changes any more, which ends the follow.
+    pub fn follow(
+        &self,
+        pr: &PullRequestUrl,
+        on_change: &mut dyn FnMut(TourAgentState) -> ControlFlow<()>,
+    ) {
         let state = self.lookup(pr);
         let followed = match &state {
             TourAgentState::Agent { terminal, .. } => Some(terminal.clone()),
             _ => None,
         };
-        on_change(state);
+        if on_change(state).is_break() {
+            return;
+        }
         let Some(terminal) = followed else {
             return;
         };
@@ -178,10 +187,11 @@ impl TourAgents {
             on_change(TourAgentState::Agent {
                 terminal: terminal.clone(),
                 status,
-            });
+            })
         });
         if let Err(error) = followed {
-            on_change(TourAgentState::LinkOff(format!("{error:#}")));
+            // The stream is over either way, so there is nothing left to break.
+            let _ended = on_change(TourAgentState::LinkOff(format!("{error:#}")));
         }
     }
 

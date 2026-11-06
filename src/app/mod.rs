@@ -266,6 +266,7 @@ fn new_layout(
             repinner: Arc::new(opened.repinner),
             refresher: Arc::new(opened.refresher),
             reloader: Arc::new(opened.reloader),
+            tour_agents: opened.tour_agents,
         },
     };
     let layout = OneStepLayout::new(

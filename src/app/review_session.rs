@@ -3,6 +3,7 @@
 
 use crate::file_path::FilePath;
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,7 +22,7 @@ use crate::viewer::{
     CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentResult, FinishResult,
     GitHubPort, ImageCache, LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
     ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
-    TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -34,6 +35,7 @@ pub struct TourWork {
     pub repinner: Arc<TourRepinner>,
     pub refresher: Arc<TourRefresher>,
     pub reloader: Arc<TourReloader>,
+    pub tour_agents: TourAgents,
 }
 
 /// The selected lines with Asks on a screen. They live in the Ask panel, and each gets a row marker.
@@ -50,6 +52,11 @@ pub struct ReviewSession {
     review: Review,
     rows: PageRows,
     sidebar: SidebarRows,
+    tour_agent: TourAgentState,
+    /// Why the last Show agent failed, until the next one goes through.
+    show_agent_failed: Option<String>,
+    tour_agent_follow: Option<Task<()>>,
+    show_agent: Option<Task<()>>,
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
@@ -137,7 +144,11 @@ impl ReviewSession {
             },
         );
         let mut session = Self {
-            sidebar: SidebarRows::of(&review),
+            sidebar: SidebarRows::of(&review, &TourAgentState::Unknown, None),
+            tour_agent: TourAgentState::Unknown,
+            show_agent_failed: None,
+            tour_agent_follow: None,
+            show_agent: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
             screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
@@ -534,7 +545,7 @@ impl ReviewSession {
             RowsChange::Unchanged => {}
         }
         self.rows = rows;
-        self.sidebar = SidebarRows::of(&self.review);
+        self.sidebar = self.sidebar_rows();
         self.old_head = self.review.old_head();
         self.refresh_brief = self.review.refresh_brief();
         if self.rows.has_images_to_load() {
@@ -564,7 +575,7 @@ impl ReviewSession {
     }
 
     fn show_problems(&mut self, cx: &mut Context<Self>) {
-        self.sidebar = SidebarRows::of(&self.review);
+        self.sidebar = self.sidebar_rows();
         cx.notify();
     }
 
@@ -608,7 +619,54 @@ impl ReviewSession {
             },
         )
         .detach();
+        self.follow_tour_agent(cx);
         self.pull_from_github(cx);
+    }
+
+    /// Looks for the PR's tour agent and keeps its status. The follow is a thread of its own because it
+    /// blocks on herdr's events for as long as the session lives, and ends when the session is gone.
+    fn follow_tour_agent(&mut self, cx: &mut Context<Self>) {
+        let (changes, mut arrived) = futures::channel::mpsc::unbounded();
+        let agents = self.tour_work.tour_agents.clone();
+        let pr = self.review.pr().clone();
+        std::thread::spawn(move || {
+            agents.follow(&pr, &mut |state| match changes.unbounded_send(state) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(_) => ControlFlow::Break(()),
+            });
+        });
+        self.tour_agent_follow = Some(cx.spawn(async move |this, cx| {
+            while let Some(state) = futures::StreamExt::next(&mut arrived).await {
+                let shown = this.update(cx, |this, cx| {
+                    this.tour_agent = state;
+                    this.show_problems(cx);
+                });
+                if shown.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
+        let agents = self.tour_work.tour_agents.clone();
+        let pr = self.review.pr().clone();
+        self.show_agent = Some(self.run_off_thread(
+            cx,
+            move || agents.show(&pr),
+            |this, shown, cx| {
+                this.show_agent_failed = shown.err().map(|error| format!("{error:#}"));
+                this.show_problems(cx);
+            },
+        ));
+    }
+
+    fn sidebar_rows(&self) -> SidebarRows {
+        SidebarRows::of(
+            &self.review,
+            &self.tour_agent,
+            self.show_agent_failed.as_deref(),
+        )
     }
 
     fn pull_from_github(&mut self, cx: &mut Context<Self>) {

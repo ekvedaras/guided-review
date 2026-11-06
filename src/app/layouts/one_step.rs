@@ -51,6 +51,7 @@ use crate::app::page_rows::{
     AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{AskedLinesOf, ReviewSession, SessionEvent, TourWork};
+use crate::app::sidebar_rows::SidebarTourAgent;
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
@@ -723,6 +724,43 @@ impl OneStepLayout {
         self.change_review(cx, Review::toggle_wrap_lines);
     }
 
+    /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
+    fn tour_agent_block(
+        colors: &Colors,
+        agent: &SidebarTourAgent,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let show = agent.can_show.then(|| {
+            button(
+                colors,
+                "show-tour-agent",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+            .child("Show agent")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::show_tour_agent);
+            }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.muted_text)
+                    .child(agent.line.clone()),
+            )
+            .children(show)
+            .children(
+                agent
+                    .show_failed
+                    .clone()
+                    .map(|reason| div().text_xs().text_color(colors.danger).child(reason)),
+            )
+    }
+
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let session = self.session.read(cx);
@@ -759,6 +797,7 @@ impl OneStepLayout {
             .changes_not_shown
             .clone()
             .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
+        let tour_agent = Self::tour_agent_block(&colors, &sidebar.tour_agent, cx);
         let finish_dialog = FinishReviewDialog::new(
             progress.total > 0 && progress.read == progress.total,
             sidebar.can_judge,
@@ -829,6 +868,7 @@ impl OneStepLayout {
             .border_color(colors.subtle_border)
             .child(progress_meter(&colors, progress))
             .child(finish_dialog)
+            .child(tour_agent)
             .children(changes_not_shown)
             .children(problems)
             .children(sync_notices);

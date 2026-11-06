@@ -1,6 +1,7 @@
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{AgentStatus, TerminalId, TourAgentPort, TourAgentState, TourAgents};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -96,7 +97,10 @@ fn status_changes_are_followed_until_the_stream_ends() {
     );
     let mut seen = Vec::new();
 
-    agents(&fake).follow(&pr(), &mut |state| seen.push(state));
+    agents(&fake).follow(&pr(), &mut |state| {
+        seen.push(state);
+        ControlFlow::Continue(())
+    });
 
     assert_eq!(
         seen,
@@ -106,6 +110,27 @@ fn status_changes_are_followed_until_the_stream_ends() {
             on("t1", AgentStatus::WaitingForYou)
         ]
     );
+}
+
+#[test]
+fn following_stops_when_nobody_wants_the_changes_any_more() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("t1", Some(PR), AgentStatus::Idle)
+            .then_reports(&[AgentStatus::Working, AgentStatus::WaitingForYou]),
+    );
+    let mut seen = Vec::new();
+
+    agents(&fake).follow(&pr(), &mut |state| {
+        seen.push(state);
+        if seen.len() == 2 {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+
+    assert_eq!(seen.len(), 2);
 }
 
 #[test]

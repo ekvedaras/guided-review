@@ -1,6 +1,7 @@
 //! The tour agent port over herdr's `hc` CLI, and `herdr-app` to show a terminal.
 
 use std::io::{BufRead, BufReader};
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -117,7 +118,7 @@ impl TourAgentPort for HcTourAgents {
     fn follow(
         &self,
         terminal: &TerminalId,
-        on_status: &mut dyn FnMut(AgentStatus),
+        on_status: &mut dyn FnMut(AgentStatus) -> ControlFlow<()>,
     ) -> anyhow::Result<()> {
         let mut events = Command::new(&self.hc)
             .args(["events", "--json", "--terminal", terminal.as_str()])
@@ -142,7 +143,11 @@ impl TourAgentPort for HcTourAgents {
             let status = state_of(changed);
             if last != Some(status) {
                 last = Some(status);
-                on_status(status);
+                if on_status(status).is_break() {
+                    events.kill().context("could not stop `hc events`")?;
+                    events.wait().context("`hc events` did not end")?;
+                    return Ok(());
+                }
             }
         }
         events.wait().context("`hc events` did not end cleanly")?;

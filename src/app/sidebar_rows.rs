@@ -3,7 +3,7 @@
 
 use gpui::SharedString;
 
-use crate::viewer::{ApproveWarning, ReadProgress, Review, Screen, StepId};
+use crate::viewer::{ApproveWarning, ReadProgress, Review, Screen, StepId, TourAgentState};
 
 pub struct SidebarStep {
     pub id: StepId,
@@ -31,7 +31,16 @@ pub struct SidebarLastReview {
     pub is_old: bool,
 }
 
+/// The PR's tour agent as the sidebar says it.
+pub struct SidebarTourAgent {
+    pub line: SharedString,
+    pub can_show: bool,
+    /// Why the last Show agent did not bring the terminal up.
+    pub show_failed: Option<SharedString>,
+}
+
 pub struct SidebarRows {
+    pub tour_agent: SidebarTourAgent,
     pub progress: ReadProgress,
     pub last_review: Option<SidebarLastReview>,
     /// Approve and Request changes show only on someone else's PR.
@@ -49,7 +58,7 @@ pub struct SidebarRows {
 }
 
 impl SidebarRows {
-    pub fn of(review: &Review) -> Self {
+    pub fn of(review: &Review, tour_agent: &TourAgentState, show_failed: Option<&str>) -> Self {
         let progress = review.progress();
         let steps = review
             .sidebar()
@@ -71,6 +80,12 @@ impl SidebarRows {
         });
         let is_old = review.last_review_is_old();
         Self {
+            tour_agent: SidebarTourAgent {
+                line: tour_agent.to_string().into(),
+                can_show: tour_agent.can_show(),
+                show_failed: show_failed
+                    .map(|reason| format!("Could not show the agent: {reason}").into()),
+            },
             last_review: review.last_review().map(|last| SidebarLastReview {
                 headline: last.headline(is_old).into(),
                 body: last.body.clone().into(),

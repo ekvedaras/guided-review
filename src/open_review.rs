@@ -5,12 +5,13 @@ use crate::app::AskSetup;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
 use crate::config::Config;
+use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
 use crate::viewer::{
-    Asks, GitHubPort, Review, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    Asks, GitHubPort, Review, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -24,6 +25,7 @@ pub struct OpenedReview {
     pub repinner: TourRepinner,
     pub refresher: TourRefresher,
     pub reloader: TourReloader,
+    pub tour_agents: TourAgents,
 }
 
 /// The refusal `open` gives before it asks or starts any app.
@@ -87,5 +89,6 @@ pub fn open_review(
         repinner,
         refresher,
         reloader,
+        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new())),
     })
 }
