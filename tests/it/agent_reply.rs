@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use guided_review::app_link::AppFolder;
 use guided_review::viewer::{HandOffState, ReviewState, ReviewStateFile};
 
+use crate::support::fake_app::accept_request;
 use crate::support::graphql::serve_graphql;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 
@@ -68,7 +69,7 @@ fn fake_app(home: &Path, answer: &str) -> (std::thread::JoinHandle<()>, Arc<Mute
     let log = Arc::clone(&seen);
     let line = format!(r#"{{"version":"{BUILD}","answer":{answer}}}"#);
     let thread = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let stream = accept_request(&listener, "the agent-reply request from the CLI");
         let mut request = String::new();
         BufReader::new(&stream).read_line(&mut request).unwrap();
         log.lock().unwrap().push(request);

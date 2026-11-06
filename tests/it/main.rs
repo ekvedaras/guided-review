@@ -25,6 +25,7 @@ mod diagrams;
 mod diff_hunks;
 mod eval;
 mod eval_adapters;
+mod fake_app;
 mod file_path;
 mod file_reads;
 mod finish_review;

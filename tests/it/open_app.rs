@@ -8,6 +8,7 @@ use guided_review::app_link::AppFolder;
 
 const BUILD: &str = "test-build";
 
+use crate::support::fake_app::accept_request;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -60,7 +61,7 @@ fn fake_app(
         }
         let listener = listener.unwrap_or_else(|| bind(&socket));
         for answer in answers {
-            let (stream, _) = listener.accept().unwrap();
+            let stream = accept_request(&listener, "a request line from the CLI");
             let mut line = String::new();
             BufReader::new(&stream).read_line(&mut line).unwrap();
             seen.lock().unwrap().push(line);
