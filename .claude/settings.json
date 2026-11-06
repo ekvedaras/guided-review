@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(guided-review show *)",
+      "Bash(guided-review tour-path *)",
+      "Bash(guided-review outline *)",
+      "Bash(hc ls *)"
+    ]
+  }
+}
