@@ -10,8 +10,8 @@ use gpui::{
 
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    Audience, CommentId, ReactionChange, ReactionCount, SendMode, ThreadAction, ThreadActionResult,
-    ThreadComment, ThreadId, ThreadView,
+    Audience, CommentId, HandOffId, ReactionChange, ReactionCount, SendMode, ThreadAction,
+    ThreadActionResult, ThreadComment, ThreadId, ThreadView,
 };
 
 use super::markdown_view::{MarkdownView, parsed_markdown};
@@ -33,6 +33,9 @@ pub enum ReplyDraftChange {
 }
 
 pub type OnReplyDraft = Rc<dyn Fn(ReplyDraftChange, &mut App)>;
+
+/// Queues a failed hand-off again.
+pub type OnTryHandOffAgain = Rc<dyn Fn(HandOffId, &mut App)>;
 
 /// What happened to the edit of one comment; the core keeps its text, so it survives scrolling away.
 pub type OnCommentEdit = Rc<dyn Fn(&CommentId, ReplyDraftChange, &mut App)>;
@@ -83,6 +86,7 @@ pub struct ThreadElement {
     on_comment_edit: OnCommentEdit,
     on_toggle: OnToggle,
     on_action: OnThreadAction,
+    on_try_hand_off_again: OnTryHandOffAgain,
 }
 
 impl ThreadElement {
@@ -100,6 +104,7 @@ impl ThreadElement {
         on_comment_edit: OnCommentEdit,
         on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_action: OnThreadAction,
+        on_try_hand_off_again: OnTryHandOffAgain,
     ) -> Self {
         Self {
             view,
@@ -111,6 +116,7 @@ impl ThreadElement {
             on_comment_edit,
             on_toggle: Box::new(on_toggle),
             on_action,
+            on_try_hand_off_again,
         }
     }
 
@@ -721,10 +727,23 @@ impl RenderOnce for ThreadElement {
             )
             .children(comments)
             .children(self.view.hand_off_line.as_ref().map(|line| {
+                let try_again = self.view.failed_hand_off.map(|hand_off| {
+                    let on_try_again = Rc::clone(&self.on_try_hand_off_again);
+                    small_button(
+                        &colors,
+                        SharedString::from(format!("try-hand-off-again-{id}")),
+                        "Try again",
+                    )
+                    .on_click(move |_, _, cx| on_try_again(hand_off, cx))
+                });
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_sm()
                     .text_color(colors.muted_text)
                     .child(SharedString::from(Arc::clone(line)))
+                    .children(try_again)
             }))
             .children(actions)
     }

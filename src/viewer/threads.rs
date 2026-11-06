@@ -10,7 +10,7 @@ use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
-use super::hand_offs::HandOffs;
+use super::hand_offs::{HandOffId, HandOffs};
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
@@ -149,6 +149,8 @@ pub struct ThreadView {
     pub edit_drafts: BTreeMap<CommentId, String>,
     /// Where the comment sent with Ask agent is, when this thread has one.
     pub hand_off_line: Option<Arc<str>>,
+    /// The thread's latest hand-off failed and can be tried again.
+    pub failed_hand_off: Option<HandOffId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -242,6 +244,7 @@ pub(super) fn views(
                 })
                 .collect(),
             hand_off_line: hand_offs.line_for(&thread.id),
+            failed_hand_off: hand_offs.failed_in(&thread.id),
             thread: thread.clone(),
         })
         .collect()

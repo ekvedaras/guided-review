@@ -78,7 +78,7 @@ impl HcTourAgents {
             bail!(
                 "`hc {}` failed: {}",
                 args.join(" "),
-                String::from_utf8_lossy(&output.stderr).trim()
+                herdr_words(&output.stderr)
             );
         }
         if output.stdout.iter().all(u8::is_ascii_whitespace) {
@@ -238,8 +238,8 @@ impl TourAgentPort for HcTourAgents {
         }
         if at(&refusal, "/error/kind") != "status_mismatch" {
             bail!(
-                "`hc send` failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
+                "herdr did not type it into {terminal}: {}",
+                herdr_words(&output.stderr)
             );
         }
         let reason = at(&refusal, "/error/message")
@@ -359,6 +359,15 @@ impl TourAgentPort for HcTourAgents {
             .map(|line| (*line).to_owned())
             .collect())
     }
+}
+
+/// What herdr said on stderr, in words: the message of its JSON error, or the text as it is.
+fn herdr_words(stderr: &[u8]) -> String {
+    let said = String::from_utf8_lossy(stderr);
+    serde_json::from_str::<Value>(&said)
+        .ok()
+        .and_then(|error| at(&error, "/error/message").as_str().map(str::to_owned))
+        .unwrap_or_else(|| said.trim().to_owned())
 }
 
 /// Claude keeps its prompt box and status bar at the bottom of a screen of mostly blank rows, so the

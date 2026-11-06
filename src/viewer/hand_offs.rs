@@ -24,7 +24,7 @@ pub enum Audience {
     Agent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct HandOffId(u32);
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -354,6 +354,34 @@ impl HandOffs {
             .iter()
             .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
             .map(|hand_off| hand_off.state.line().into())
+    }
+
+    /// The thread's latest hand-off, when it failed and so can be tried again.
+    pub(super) fn failed_in(&self, thread: &ThreadId) -> Option<HandOffId> {
+        self.0
+            .iter()
+            .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
+            .filter(|hand_off| matches!(hand_off.state, HandOffState::Failed(_)))
+            .map(|hand_off| hand_off.id)
+    }
+
+    /// Queues a failed hand-off again. One with no thread cannot go: the agent would have nowhere to answer.
+    pub(super) fn try_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
+        let hand_off = self
+            .0
+            .iter_mut()
+            .find(|hand_off| hand_off.id == id)
+            .ok_or_else(|| anyhow::anyhow!("no hand-off {id} on this PR"))?;
+        match (&hand_off.state, &hand_off.thread) {
+            (HandOffState::Failed(_), Some(_)) => {
+                hand_off.state = HandOffState::Queued;
+                Ok(())
+            }
+            (HandOffState::Failed(reason), None) => {
+                anyhow::bail!("hand-off {id} has no thread to answer in: {reason}")
+            }
+            _ => Ok(()),
+        }
     }
 
     /// The agent's answer arrived, whatever the hand-off was doing before.

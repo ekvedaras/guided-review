@@ -323,6 +323,25 @@ fn an_agent_whose_screen_has_not_settled_since_it_started_is_still_starting_and_
 }
 
 #[test]
+fn a_send_herdr_refuses_for_another_reason_fails_with_herdrs_words_not_its_json() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("refuse-idle"),
+        r#"{"error":{"hint":"see hc ls","kind":"not_found","message":"no terminal t2b"}}"#,
+    )
+    .unwrap();
+
+    let error = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t2b"), "a question")
+        .unwrap_err();
+
+    assert_eq!(
+        format!("{error:#}"),
+        "herdr did not type it into t2b: no terminal t2b"
+    );
+}
+
+#[test]
 fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_done_not_idle() {
     let dir = TempDir::new().unwrap();
     std::fs::write(

@@ -718,6 +718,13 @@ impl ReviewSession {
         ));
     }
 
+    pub fn try_hand_off_again(&mut self, hand_off: HandOffId, cx: &mut Context<Self>) {
+        if let Err(error) = self.change(cx, |review| review.try_hand_off_again(hand_off)) {
+            eprintln!("could not queue hand-off {hand_off} again: {error:#}");
+        }
+        self.deliver_hand_offs(cx);
+    }
+
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
         let agents = self.tour_work.tour_agents.clone();
         let pr = self.review.pr().clone();

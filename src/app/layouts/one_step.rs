@@ -44,7 +44,7 @@ use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::thread_view::{
-    OnCommentEdit, OnReplyDraft, OnThreadAction, ReplyDraftChange, ThreadElement,
+    OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use crate::app::components::tooltip::tooltip;
@@ -620,6 +620,13 @@ impl OneStepLayout {
         })
     }
 
+    fn on_try_hand_off_again(&self) -> OnTryHandOffAgain {
+        let session = self.session.clone();
+        Rc::new(move |hand_off, cx| {
+            session.update(cx, |session, cx| session.try_hand_off_again(hand_off, cx));
+        })
+    }
+
     /// Reply text goes to the core, which saves it, so it survives scrolling and restarts.
     fn on_reply_draft(&self, thread_id: &ThreadId) -> OnReplyDraft {
         let (session, thread_id) = (self.session.clone(), thread_id.clone());
@@ -700,6 +707,7 @@ impl OneStepLayout {
                 this.change_review(cx, |review| review.toggle_thread_fold(&id));
             }),
             self.on_thread_action(),
+            self.on_try_hand_off_again(),
         )
     }
 

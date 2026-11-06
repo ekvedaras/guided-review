@@ -1109,6 +1109,12 @@ impl Review {
         self.save_viewer_sections()
     }
 
+    /// Queues a failed hand-off again; it goes to the tour agent like a new one.
+    pub fn try_hand_off_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
+        self.state.hand_offs_mut().try_again(id)?;
+        self.save_viewer_sections()
+    }
+
     pub fn agent_status_is(&mut self, status: AgentStatus) -> anyhow::Result<()> {
         self.state.hand_offs_mut().agent_status_is(status);
         self.save_viewer_sections()

@@ -241,6 +241,7 @@ impl PageRow {
                 }
                 view.commented_lines.hash(&mut hasher);
                 view.hand_off_line.hash(&mut hasher);
+                view.failed_hand_off.hash(&mut hasher);
                 reply_lines.hash(&mut hasher);
                 for (id, text) in &view.edit_drafts {
                     id.hash(&mut hasher);
@@ -1108,6 +1109,7 @@ mod tests {
             reply_draft: None,
             edit_drafts: std::collections::BTreeMap::new(),
             hand_off_line: None,
+            failed_hand_off: None,
         }
     }
 

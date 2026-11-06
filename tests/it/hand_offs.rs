@@ -598,6 +598,37 @@ fn a_thread_sent_with_ask_agent_shows_each_hand_off_state_as_a_line_under_it() {
 }
 
 #[test]
+fn a_hand_off_that_failed_in_its_thread_can_be_tried_again_and_then_goes_to_the_agent() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let no_room = Arc::new(FakeTourAgent::new());
+    deliver(&mut review, &agents_of(&no_room));
+    assert!(matches!(states(&review)[0], HandOffState::Failed(_)));
+    let offered: Vec<Option<HandOffId>> = review
+        .current_step()
+        .unwrap()
+        .threads
+        .iter()
+        .map(|view| view.failed_hand_off)
+        .collect();
+    let first = review.hand_offs()[0].id();
+    assert_eq!(offered, [Some(first), None]);
+
+    review.try_hand_off_again(first).unwrap();
+
+    assert_eq!(states(&review)[0], HandOffState::Queued);
+    let idle = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    deliver(&mut review, &agents_of(&idle));
+    assert_eq!(states(&review)[0], HandOffState::Delivered);
+    assert_eq!(
+        pull.open().hand_offs()[0].state(),
+        &HandOffState::Delivered,
+        "kept in the state file"
+    );
+}
+
+#[test]
 fn every_hand_off_state_has_its_own_line() {
     let lines: Vec<String> = [
         HandOffState::Queued,
