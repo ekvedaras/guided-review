@@ -14,6 +14,7 @@ mod review_session;
 mod sidebar_rows;
 #[cfg(feature = "snapshots")]
 mod snapshots;
+mod tour_writer;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -24,8 +25,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Context, KeyBinding, TitlebarOptions, Window, WindowBounds,
-    WindowHandle, WindowOptions, point, px, size,
+    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, TitlebarOptions, Window,
+    WindowBounds, WindowHandle, WindowOptions, point, px, size,
 };
 use gpui_platform::application;
 
@@ -66,27 +67,33 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             .recv_timeout(Duration::from_secs(10))
             .unwrap_or_else(|_| refused("the app did not answer in time"))
     });
-    let switching = pr_switching(&requests_to_self, &home);
     application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
-            cx.set_global(switching);
+            let active = cx.new(|_| ActivePr::default());
+            cx.set_global(pr_switching(&requests_to_self, &home, active.clone()));
             dock_icon::show();
             bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
-            cx.spawn(async move |cx| answer_requests(asked, home, cx).await)
+            cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
         });
 }
 
 /// Picking a PR in the switcher is an open request the app makes of itself, so it takes the same path
 /// as one from the command line. No one waits for its answer; a failed build shows in the window.
-fn pr_switching(requests: &UnboundedSender<Asked>, home: &Path) -> PrSwitching {
+fn pr_switching(
+    requests: &UnboundedSender<Asked>,
+    home: &Path,
+    active: Entity<ActivePr>,
+) -> PrSwitching {
     let requests = requests.clone();
     let home_folder = home.to_path_buf();
     PrSwitching {
         relevant: Arc::new(GitHub::from_env()),
         home: home.to_path_buf(),
+        active,
+        agents: Arc::new(HcTourAgents::new()),
         show: Arc::new(move |pr| {
             // An unreadable state file only loses the remembered clone folder.
             let folder = ReviewStateFile::for_pr(&home_folder, &pr)
@@ -118,15 +125,20 @@ fn refused(reason: &str) -> Answer {
 
 /// What the app shows now. The window is there once the first review is built.
 struct Screen {
-    active: ActivePr,
+    active: Entity<ActivePr>,
     window: Option<WindowHandle<OneStepLayout>>,
 }
 
 type SharedScreen = Rc<RefCell<Screen>>;
 
-async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx: &mut AsyncApp) {
+async fn answer_requests(
+    mut asked: UnboundedReceiver<Asked>,
+    active: Entity<ActivePr>,
+    home: PathBuf,
+    cx: &mut AsyncApp,
+) {
     let screen: SharedScreen = Rc::new(RefCell::new(Screen {
-        active: ActivePr::default(),
+        active,
         window: None,
     }));
     while let Some((request, reply)) = asked.next().await {
@@ -148,7 +160,12 @@ async fn answer_requests(mut asked: UnboundedReceiver<Asked>, home: PathBuf, cx:
                 };
                 claim_terminal(&pr, &open, cx);
                 let origin = origin_of(&open, cx).await;
-                let decision = screen.borrow_mut().active.request(pr.clone(), origin);
+                let active = screen.borrow().active.clone();
+                let decision = active.update(cx, |active, cx| {
+                    let decision = active.request(pr.clone(), origin);
+                    cx.notify();
+                    decision
+                });
                 match decision {
                     OpenDecision::KeepInBackground => {
                         reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
@@ -186,14 +203,19 @@ fn mark_answered(
     hand_off: HandOffId,
     cx: &mut AsyncApp,
 ) -> Answer {
-    let window = {
+    let (active, window) = {
         let screen = screen.borrow();
-        let shown = screen.active.shown().map(ToString::to_string);
-        screen
-            .window
-            .filter(|_| shown.as_deref() == Some(pr.as_str()))
+        (screen.active.clone(), screen.window)
     };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
     let Some(window) = window else {
+        if let Ok(replied) = pr.parse::<PullRequestUrl>() {
+            active.update(cx, |active, cx| {
+                active.agent_replied(&replied);
+                cx.notify();
+            });
+        }
         return Answer::NotShown { pr };
     };
     let marked = cx.update(|cx| {
@@ -261,7 +283,12 @@ async fn build_and_show(
         .background_executor()
         .spawn(async move { open_review(&build_pr, &folder, &home) })
         .await;
-    let finished = screen.borrow_mut().active.finished(ticket, built);
+    let active = screen.borrow().active.clone();
+    let finished = active.update(cx, |active, cx| {
+        let finished = active.finished(ticket, built);
+        cx.notify();
+        finished
+    });
     let window = screen.borrow().window;
     match (finished, window) {
         (Finished::Superseded, _) => {}

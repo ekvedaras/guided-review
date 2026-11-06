@@ -33,6 +33,7 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::icon::{Icon, icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
+use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, PreparedMarkdown, parsed_markdown,
 };
@@ -112,6 +113,7 @@ pub struct OneStepLayout {
     snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
+    loading: Entity<LoadingScreen>,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -165,6 +167,7 @@ impl OneStepLayout {
         let diagrams = Self::new_diagrams(cx);
         let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
         let switching = cx.global::<PrSwitching>().clone();
+        let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
         let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
         cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
             JumpEvent::QueryChanged(query) => {
@@ -234,6 +237,7 @@ impl OneStepLayout {
             snapshots: crate::app::snapshots::Snapshots::from_env(),
             jump,
             pr_switcher,
+            loading,
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -1746,6 +1750,7 @@ impl Render for OneStepLayout {
             .when(self.ask.read(cx).is_open(), |row| {
                 row.child(self.ask.clone())
             })
+            .child(self.loading.clone())
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
             .children(frame_painted_marker)

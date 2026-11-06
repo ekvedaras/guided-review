@@ -5,8 +5,8 @@ use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    NotPickable, PrSwitcher, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
-    TourFact, WhyListed,
+    ActivePr, NotPickable, Pick, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
+    RelevantPullRequestsPort, TourFact, WhyListed,
 };
 use tempfile::TempDir;
 
@@ -105,7 +105,7 @@ fn a_tour_written_since_the_list_loaded_shows_when_the_tours_are_checked_again()
     let mut switcher = loaded(&three_pull_requests(), home.path());
     write_tour(home.path(), SHOP_7);
 
-    switcher.check_tours(home.path());
+    switcher.check_tours(home.path(), &ActivePr::default());
 
     let tours: Vec<_> = switcher.visible().map(|row| row.tour).collect();
     assert_eq!(
@@ -137,15 +137,69 @@ fn picking_a_pull_request_with_a_tour_switches_to_it() {
     let home = home_with_tour_of(API_31);
     let switcher = loaded(&three_pull_requests(), home.path());
 
-    assert_eq!(switcher.pick(1).unwrap(), pr(API_31));
+    assert_eq!(switcher.pick(1).unwrap(), Pick::Show(pr(API_31)));
 }
 
 #[test]
-fn a_pull_request_with_no_tour_cannot_be_picked_yet() {
+fn picking_a_pull_request_with_no_tour_writes_it() {
     let home = TempDir::new().unwrap();
     let switcher = loaded(&three_pull_requests(), home.path());
 
-    assert_eq!(switcher.pick(0), Err(NotPickable::NoTourYet));
+    assert_eq!(switcher.pick(0).unwrap(), Pick::Write(pr(BLOG_7)));
+    assert_eq!(
+        switcher.tour_label(switcher.visible().next().unwrap()),
+        "no tour yet"
+    );
+}
+
+#[test]
+fn without_herdr_a_pull_request_with_no_tour_says_writing_one_needs_herdr() {
+    let home = home_with_tour_of(API_31);
+    let mut switcher = loaded(&three_pull_requests(), home.path());
+
+    switcher.agent_link(Err("`hc` is not on PATH".to_owned()));
+
+    let refusal = switcher.pick(0).unwrap_err().to_string();
+    assert!(
+        refusal.contains("needs herdr") && refusal.contains("not on PATH"),
+        "{refusal}"
+    );
+    assert_eq!(switcher.pick(1).unwrap(), Pick::Show(pr(API_31)));
+    let rows: Vec<_> = switcher.visible().collect();
+    let [no_tour, with_tour, _] = rows.as_slice() else {
+        panic!("three rows");
+    };
+    assert_eq!(switcher.tour_label(no_tour), "needs herdr");
+    assert_eq!(switcher.tour_label(with_tour), "tour");
+}
+
+#[test]
+fn rows_say_which_tours_are_being_written_failed_or_have_an_unseen_agent_reply() {
+    let home = home_with_tour_of(API_31);
+    let mut switcher = loaded(&three_pull_requests(), home.path());
+    let mut active = ActivePr::default();
+    active.write(pr(BLOG_7));
+    active.write(pr(SHOP_7));
+    active.writer_started(&pr(SHOP_7), Err(anyhow::anyhow!("no room")));
+    active.agent_replied(&pr(API_31));
+
+    switcher.check_tours(home.path(), &active);
+
+    let rows: Vec<_> = switcher.visible().collect();
+    let tours: Vec<_> = rows.iter().map(|row| row.tour).collect();
+    assert_eq!(
+        tours,
+        [TourFact::Writing, TourFact::Ready, TourFact::WritingFailed]
+    );
+    let labels: Vec<_> = rows.iter().map(|row| switcher.tour_label(row)).collect();
+    assert_eq!(labels, ["writing", "tour", "writing failed"]);
+    let unseen: Vec<_> = rows.iter().map(|row| row.has_unseen_reply).collect();
+    assert_eq!(unseen, [false, true, false]);
+    assert_eq!(
+        switcher.pick(0).unwrap(),
+        Pick::Write(pr(BLOG_7)),
+        "shows its writing"
+    );
 }
 
 #[test]
@@ -155,7 +209,7 @@ fn picking_counts_rows_as_filtered() {
 
     switcher.filter("checkout");
 
-    assert_eq!(switcher.pick(0).unwrap(), pr(SHOP_7));
+    assert_eq!(switcher.pick(0).unwrap(), Pick::Show(pr(SHOP_7)));
     assert_eq!(switcher.pick(1), Err(NotPickable::NoSuchRow));
 }
 

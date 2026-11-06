@@ -8,6 +8,7 @@ pub mod fold_toggle;
 pub mod icon;
 pub mod image_row;
 pub mod jump_palette;
+pub mod loading_screen;
 pub mod markdown_view;
 pub mod new_commits_banner;
 pub mod palette;

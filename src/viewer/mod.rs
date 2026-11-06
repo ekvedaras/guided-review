@@ -73,7 +73,7 @@ pub use ports::{
     PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
     ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
-pub use pr_switcher::{NotPickable, PrSwitcher, SwitcherRow, TourFact};
+pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
 pub use problems::{Problem, Read};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};

@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use crate::support::FixtureRepo;
 use crate::support::fake_tour_agent::FakeTourAgent;
+use guided_review::open_review::writer_folder;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    ActivePr, AgentStatus, Finished, OpenDecision, OpenOrigin, TerminalId, TourAgentPort,
-    TourAgents, TourFact, WriteDecision, WritingStage,
+    ActivePr, AgentStatus, Finished, OpenDecision, OpenOrigin, ReviewStateFile, TerminalId,
+    TourAgentPort, TourAgents, TourFact, WriteDecision, WritingStage,
 };
 
 const SHOWN: &str = "https://github.com/acme/shop/pull/7";
@@ -43,6 +45,30 @@ fn loading_stage(active: &ActivePr) -> WritingStage {
     let (writing_for, writing) = active.loading().expect("the loading screen shows");
     assert_eq!(writing_for, &pr(NO_TOUR));
     writing.stage.clone()
+}
+
+#[test]
+fn a_writer_works_in_the_clone_the_pr_was_opened_from_else_in_the_guided_review_home() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let elsewhere = FixtureRepo::cloned_from("acme/blog");
+
+    assert_eq!(
+        writer_folder(&pr(NO_TOUR), repo.home()),
+        repo.home(),
+        "nothing remembered"
+    );
+    ReviewStateFile::for_pr(repo.home(), &pr(NO_TOUR))
+        .remember_folder(elsewhere.path())
+        .unwrap();
+    assert_eq!(
+        writer_folder(&pr(NO_TOUR), repo.home()),
+        repo.home(),
+        "a folder that is no clone of the repo"
+    );
+    ReviewStateFile::for_pr(repo.home(), &pr(NO_TOUR))
+        .remember_folder(repo.path())
+        .unwrap();
+    assert_eq!(writer_folder(&pr(NO_TOUR), repo.home()), repo.path());
 }
 
 #[test]

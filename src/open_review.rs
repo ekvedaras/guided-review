@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::app::AskSetup;
@@ -7,11 +7,13 @@ use crate::code_source::CodeSource;
 use crate::config::Config;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
+use crate::local_git::LocalGit;
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
 use crate::viewer::{
-    Asks, GitHubPort, Review, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    Asks, GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader,
+    TourRepinner, WorkingCopy,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -34,6 +36,21 @@ pub fn require_tour(pr: &PullRequestUrl, home: &Path) -> anyhow::Result<()> {
         anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
     }
     Ok(())
+}
+
+/// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else the
+/// clone `config.toml` names, else the guided-review home, where the skill reads code through `show`.
+pub fn writer_folder(pr: &PullRequestUrl, home: &Path) -> PathBuf {
+    // An unreadable state file or config only costs the clone: the skill still reads code through `show`.
+    let remembered = ReviewStateFile::for_pr(home, pr)
+        .opened_from()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| home.to_path_buf());
+    LocalGit::find(&pr.repo, &remembered)
+        .ok()
+        .flatten()
+        .map_or_else(|| home.to_path_buf(), |clone| clone.root().to_path_buf())
 }
 
 /// Builds the review of `pr` at the commits its tour is pinned to. `clones_from` is the folder a local

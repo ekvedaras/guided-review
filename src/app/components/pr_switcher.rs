@@ -3,12 +3,17 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, FocusHandle, FontWeight, Global, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    Context, Entity, FocusHandle, FontWeight, Global, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    div, px,
 };
 
+use crate::app::tour_writer;
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{PrSwitcher, RelevantPullRequestsPort, SwitcherRow, TourFact, WhyListed};
+use crate::viewer::{
+    ActivePr, Pick, PrSwitcher, RelevantPullRequestsPort, SwitcherRow, TourAgentPort, TourFact,
+    WhyListed,
+};
 
 use super::palette::{Colors, TEXT_FONT};
 use super::text_box::TextBox;
@@ -23,6 +28,10 @@ pub struct PrSwitching {
     pub relevant: Arc<dyn RelevantPullRequestsPort>,
     pub home: PathBuf,
     pub show: Arc<dyn Fn(PullRequestUrl) + Send + Sync>,
+    /// The PR shown, the tours being written and the agent replies not seen.
+    pub active: Entity<ActivePr>,
+    /// Herdr, where tour agents write tours.
+    pub agents: Arc<dyn TourAgentPort>,
 }
 
 impl Global for PrSwitching {}
@@ -50,10 +59,12 @@ struct ShownRow {
     why: &'static str,
     is_draft: bool,
     tour: TourFact,
+    tour_label: &'static str,
+    has_unseen_reply: bool,
 }
 
 impl ShownRow {
-    fn of(row: &SwitcherRow) -> Self {
+    fn of(row: &SwitcherRow, switcher: &PrSwitcher) -> Self {
         let pull_request = &row.pull_request;
         Self {
             pr: pull_request.url.short().into(),
@@ -66,6 +77,8 @@ impl ShownRow {
             },
             is_draft: pull_request.is_draft,
             tour: row.tour,
+            tour_label: switcher.tour_label(row),
+            has_unseen_reply: row.has_unseen_reply,
         }
     }
 }
@@ -96,7 +109,7 @@ impl PrSwitcherView {
         self.is_open = true;
         self.query.clear();
         self.core.filter("");
-        self.core.check_tours(&self.switching.home);
+        self.check_tours(cx);
         self.refusal = None;
         self.refresh_shown();
         window.focus(&self.focus, cx);
@@ -110,16 +123,25 @@ impl PrSwitcherView {
         cx.notify();
     }
 
-    /// The list is read off the UI thread; what was shown stays until the answer is in.
+    fn check_tours(&mut self, cx: &Context<Self>) {
+        let active = self.switching.active.read(cx);
+        self.core.check_tours(&self.switching.home, active);
+    }
+
+    /// The list and whether herdr answers are read off the UI thread; what was shown stays until the
+    /// answers are in.
     fn load(&self, cx: &mut Context<Self>) {
         let relevant = Arc::clone(&self.switching.relevant);
+        let agents = Arc::clone(&self.switching.agents);
         cx.spawn(async move |this, cx| {
-            let answer = cx
+            let (answer, link) = cx
                 .background_executor()
-                .spawn(async move { relevant.relevant_pull_requests() })
+                .spawn(async move { (relevant.relevant_pull_requests(), agents.link()) })
                 .await;
             this.update(cx, |this, cx| {
                 this.core.loaded(answer, &this.switching.home);
+                this.core.agent_link(link);
+                this.check_tours(cx);
                 this.refresh_shown();
                 cx.notify();
             })
@@ -129,16 +151,24 @@ impl PrSwitcherView {
     }
 
     fn refresh_shown(&mut self) {
-        self.shown = self.core.visible().map(ShownRow::of).collect();
+        self.shown = self
+            .core
+            .visible()
+            .map(|row| ShownRow::of(row, &self.core))
+            .collect();
         self.selected = self.selected.min(self.shown.len().saturating_sub(1));
         self.notice = self.core.notice().map(Into::into);
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.core.pick(self.selected) {
-            Ok(pr) => {
+            Ok(Pick::Show(pr)) => {
                 self.close(window, cx);
                 (self.switching.show)(pr);
+            }
+            Ok(Pick::Write(pr)) => {
+                self.close(window, cx);
+                tour_writer::write(pr, cx);
             }
             Err(refusal) => {
                 self.refusal = Some(refusal.to_string().into());
@@ -178,7 +208,11 @@ impl PrSwitcherView {
         let colors = Colors::active(cx);
         let is_selected = index == self.selected;
         let has_tour = shown.tour == TourFact::Ready;
-        let tour_label = if has_tour { "tour" } else { "no tour yet" };
+        let tour_color = match shown.tour {
+            TourFact::Ready => colors.accent,
+            TourFact::WritingFailed => colors.warning,
+            TourFact::Missing | TourFact::Writing => colors.muted_text,
+        };
         div()
             .id(SharedString::from(format!("pr-switcher-row-{index}")))
             .mx_2()
@@ -241,17 +275,22 @@ impl PrSwitcherView {
                     .text_color(colors.muted_text)
                     .child(shown.why),
             )
+            .when(shown.has_unseen_reply, |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(colors.accent)
+                        .child("agent replied"),
+                )
+            })
             .child(
                 div()
                     .flex_none()
-                    .w(px(72.))
+                    .w(px(88.))
                     .text_xs()
-                    .text_color(if has_tour {
-                        colors.accent
-                    } else {
-                        colors.muted_text
-                    })
-                    .child(tour_label),
+                    .text_color(tour_color)
+                    .child(shown.tour_label),
             )
     }
 }
