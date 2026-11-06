@@ -418,7 +418,7 @@ fn agents_get_a_path_that_finds_the_running_guided_review_before_the_rest_of_the
 }
 
 #[test]
-fn the_last_screen_lines_are_read_with_their_history_and_trailing_blank_lines_dropped() {
+fn the_last_screen_lines_are_read_with_their_history_and_blank_lines_dropped() {
     let dir = TempDir::new().unwrap();
     let recorded = include_str!("../fixtures/hc/read-lines.json");
     answer(
@@ -432,10 +432,33 @@ fn the_last_screen_lines_are_read_with_their_history_and_trailing_blank_lines_dr
         .unwrap();
 
     assert_eq!(lines.len(), 3);
-    assert_eq!(lines[0], "");
+    assert_eq!(lines[0], "hello-probe");
     assert!(lines[1].starts_with("╭─"), "{lines:?}");
     assert_eq!(lines[2], "╰─");
     assert_eq!(calls(dir.path(), "calls"), ["read t9 --json --lines 3"]);
+}
+
+#[test]
+fn the_last_lines_of_a_claude_terminal_are_its_work_above_the_prompt_box_without_blank_lines() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "read",
+        include_str!("../fixtures/hc/read-claude-after-turn.json"),
+    );
+
+    let lines = adapter(dir.path())
+        .screen_lines(&TerminalId::new("t2r"), 3)
+        .unwrap();
+
+    assert_eq!(
+        lines,
+        [
+            "  1. Find out where guided-review is installed. Then add that folder to the PATH that this session gets. (PATH is the list of folders the shell looks in for commands.)",
+            "  2. Start the tour again from the app.",
+            "✻ Cooked for 9s · done 11:19 AM",
+        ]
+    );
 }
 
 #[test]

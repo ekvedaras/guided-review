@@ -346,14 +346,33 @@ impl TourAgentPort for HcTourAgents {
             "--lines",
             &count.to_string(),
         ])?;
-        let text = at(&read, "/text").as_str().unwrap_or_default().trim_end();
+        let text = at(&read, "/text").as_str().unwrap_or_default();
         let lines: Vec<&str> = text.lines().collect();
-        Ok(lines
+        let work: Vec<&str> = above_claudes_prompt_box(&lines)
             .iter()
-            .skip(lines.len().saturating_sub(count))
-            .map(|line| line.trim_end().to_owned())
+            .map(|line| line.trim_end())
+            .filter(|line| !line.is_empty())
+            .collect();
+        Ok(work
+            .iter()
+            .skip(work.len().saturating_sub(count))
+            .map(|line| (*line).to_owned())
             .collect())
     }
+}
+
+/// Claude keeps its prompt box and status bar at the bottom of a screen of mostly blank rows, so the
+/// last lines of its screen show none of its work. The box starts with a rule over the `❯` line.
+fn above_claudes_prompt_box<'a>(lines: &'a [&'a str]) -> &'a [&'a str] {
+    let is_rule = |line: &str| {
+        let line = line.trim();
+        !line.is_empty() && line.chars().all(|c| c == '─')
+    };
+    let box_top = lines.windows(2).rposition(|pair| match pair {
+        [rule, prompt] => is_rule(rule) && prompt.trim_start().starts_with('❯'),
+        _ => false,
+    });
+    box_top.and_then(|top| lines.get(..top)).unwrap_or(lines)
 }
 
 impl HcTourAgents {

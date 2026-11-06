@@ -154,7 +154,7 @@ pub trait TourAgentPort: Send + Sync {
 
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()>;
 
-    /// The last `count` lines the terminal shows, as plain text, blank lines at the bottom left out.
+    /// The last `count` non-blank lines the terminal shows, as plain text; of a Claude terminal, the ones above its prompt box.
     fn screen_lines(&self, terminal: &TerminalId, count: usize) -> anyhow::Result<Vec<String>>;
 }
 
