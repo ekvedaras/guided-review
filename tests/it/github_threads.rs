@@ -153,6 +153,10 @@ fn pr() -> PullRequestUrl {
 const LATEST_REVIEW_COMMENTED: &str =
     include_str!("../fixtures/github/viewer_latest_review_commented.json");
 
+/// Recorded from a PR on which the viewer had only a pending review: GitHub answered null.
+const LATEST_REVIEW_ONLY_PENDING: &str =
+    include_str!("../fixtures/github/viewer_latest_review_only_pending.json");
+
 fn latest_review_answer(state: &str) -> String {
     LATEST_REVIEW_COMMENTED.replace("COMMENTED", state)
 }
@@ -207,7 +211,7 @@ fn every_way_a_review_can_end_is_named() {
 #[test]
 fn no_review_sent_and_a_pending_one_are_both_no_last_review() {
     let (url, _) = serve_graphql(vec![
-        r#"{"data":{"repository":{"pullRequest":{"viewerLatestReview":null}}}}"#.into(),
+        LATEST_REVIEW_ONLY_PENDING.into(),
         latest_review_answer("PENDING"),
     ]);
     let github = GitHub::at(&url);
