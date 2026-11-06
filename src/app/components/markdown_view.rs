@@ -1,8 +1,8 @@
 use gpui::{
-    AnyElement, App, FontStyle, FontWeight, HighlightStyle, InteractiveElement, InteractiveText,
-    IntoElement, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement,
-    StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle, Window, canvas, div, fill,
-    point, px,
+    AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
+    InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
+    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
+    Window, canvas, div, fill, point, px,
 };
 
 use std::cell::RefCell;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
-use crate::viewer::{Block, Capture, Markdown, Run, Span};
+use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines};
 
 use super::palette::{CODE_FONT, Colors};
 
@@ -141,6 +141,7 @@ struct CodeLine {
     text: SharedString,
     /// Only the colours that cut the line on char boundaries.
     highlights: Vec<(Range<usize>, Capture)>,
+    kind: FenceLine,
 }
 
 fn prepare(blocks: &[Block]) -> Vec<PreparedBlock> {
@@ -182,7 +183,7 @@ fn prepare_block(block: &Block) -> PreparedBlock {
             text,
             spans,
         } => {
-            let lines = code_lines(text, spans);
+            let lines = code_lines(language.as_deref(), text, spans);
             if language.as_deref() == Some("suggestion") {
                 PreparedBlock::Suggestion {
                     added: text
@@ -215,10 +216,12 @@ fn details_title(summary: &[Run]) -> Vec<Run> {
     }
 }
 
-fn code_lines(text: &str, spans: &[Vec<Span>]) -> Vec<CodeLine> {
+fn code_lines(language: Option<&str>, text: &str, spans: &[Vec<Span>]) -> Vec<CodeLine> {
     text.lines()
         .zip(spans)
-        .map(|(line, spans)| CodeLine {
+        .zip(fence_lines(language, text))
+        .map(|((line, spans), kind)| CodeLine {
+            kind,
             text: SharedString::from(line.to_owned()),
             highlights: spans
                 .iter()
@@ -379,10 +382,10 @@ fn block_element(
                     )))
             }))
             .into_any_element(),
-        PreparedBlock::Code { lines } => code_block(&colors, lines),
+        PreparedBlock::Code { lines } => code_block(&colors, key, lines),
         PreparedBlock::Suggestion { added, lines } => {
             if commented_lines.is_empty() {
-                code_block(&colors, lines)
+                code_block(&colors, key, lines)
             } else {
                 suggestion_view(&colors, commented_lines, added)
             }
@@ -445,11 +448,11 @@ trait WhenOpen: ParentElement + Sized {
 
 impl<E: ParentElement> WhenOpen for E {}
 
-fn code_block(colors: &Colors, lines: &[CodeLine]) -> AnyElement {
+/// Long lines scroll sideways, as on GitHub; the "Wrap lines" setting does not reach markdown.
+fn code_block(colors: &Colors, key: &str, lines: &[CodeLine]) -> AnyElement {
     div()
+        .id(SharedString::from(format!("code-block-{key}")))
         .flex()
-        .flex_col()
-        .px_2()
         .py_1()
         .rounded_md()
         .bg(colors.surface)
@@ -457,27 +460,42 @@ fn code_block(colors: &Colors, lines: &[CodeLine]) -> AnyElement {
         .border_color(colors.border)
         .font_family(CODE_FONT)
         .text_sm()
-        .overflow_hidden()
-        .children(lines.iter().map(|line| {
-            let highlights: Vec<_> = line
-                .highlights
-                .iter()
-                .map(|(range, capture)| {
-                    (
-                        range.clone(),
-                        HighlightStyle {
-                            color: Some(colors.code(*capture).into()),
-                            ..Default::default()
-                        },
-                    )
-                })
-                .collect();
+        .overflow_x_scroll()
+        .child(
             div()
-                .whitespace_nowrap()
-                .min_h(px(14.))
-                .child(StyledText::new(line.text.clone()).with_highlights(highlights))
-        }))
+                .flex()
+                .flex_col()
+                .flex_none()
+                .min_w_full()
+                .children(lines.iter().map(|line| code_line(colors, line))),
+        )
         .into_any_element()
+}
+
+fn code_line(colors: &Colors, line: &CodeLine) -> Div {
+    let highlights: Vec<_> = line
+        .highlights
+        .iter()
+        .map(|(range, capture)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(colors.code(*capture).into()),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    let row = div()
+        .px_2()
+        .whitespace_nowrap()
+        .min_h(px(14.))
+        .child(StyledText::new(line.text.clone()).with_highlights(highlights));
+    match line.kind {
+        FenceLine::Added => row.bg(colors.added_line).text_color(colors.success),
+        FenceLine::Removed => row.bg(colors.removed_line).text_color(colors.danger),
+        FenceLine::Plain => row,
+    }
 }
 
 /// Tour text the writer wrote: a title, a bullet, a note. One line of runs that takes its size and colour
@@ -770,6 +788,19 @@ mod tests {
                 .map(|line| line.text.as_ref())
                 .collect::<Vec<_>>(),
             ["$a = 1;", "$b = 2;"]
+        );
+    }
+
+    #[test]
+    fn a_diff_fence_is_prepared_with_the_kind_of_each_line() {
+        let blocks = prepared("```diff\n same\n-old\n+new\n```");
+
+        let [PreparedBlock::Code { lines }] = &blocks[..] else {
+            panic!("expected a code block");
+        };
+        assert_eq!(
+            lines.iter().map(|line| line.kind).collect::<Vec<_>>(),
+            [FenceLine::Plain, FenceLine::Removed, FenceLine::Added]
         );
     }
 
