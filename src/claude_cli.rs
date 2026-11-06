@@ -17,6 +17,12 @@ const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 /// Reads and writes only what the tour skill needs: its own CLI, `gh pr view`, and the tour files.
 const REFRESH_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
 
+/// What a tour agent the app starts may do: the refresh writer's tools, plus answering and reopening. It
+/// cannot edit the repo, which is what keeps the PR's code unchanged.
+pub fn tour_agent_tools() -> String {
+    format!("{REFRESH_WRITER_TOOLS},Bash(guided-review open:*),Bash(guided-review agent-reply:*)")
+}
+
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
 pub struct ClaudeCli {
     binary: PathBuf,

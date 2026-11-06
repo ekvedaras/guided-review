@@ -3,7 +3,11 @@ use std::ops::ControlFlow;
 use std::sync::Mutex;
 
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, LiveTerminal, SendOutcome, TerminalId, TourAgentPort};
+use std::path::PathBuf;
+
+use guided_review::viewer::{
+    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+};
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +18,13 @@ pub enum TourAgentCall {
     },
     Release(TerminalId),
     Show(TerminalId),
+    Start {
+        name: String,
+        pr: PullRequestUrl,
+        folder: PathBuf,
+        first_task: String,
+    },
+    Kill(TerminalId),
     /// Text typed into the terminal.
     Send {
         terminal: TerminalId,
@@ -29,6 +40,8 @@ pub struct FakeTourAgent {
     coming: Mutex<VecDeque<AgentStatus>>,
     calls: Mutex<Vec<TourAgentCall>>,
     live: Mutex<Vec<LiveTerminal>>,
+    /// The terminals the app started, with when their status last changed.
+    started_by_app: Mutex<BTreeMap<TerminalId, u64>>,
 }
 
 impl FakeTourAgent {
@@ -39,6 +52,7 @@ impl FakeTourAgent {
             coming: Mutex::default(),
             calls: Mutex::default(),
             live: Mutex::default(),
+            started_by_app: Mutex::default(),
         }
     }
 
@@ -53,6 +67,35 @@ impl FakeTourAgent {
             (pr.map(|pr| pr.parse().unwrap()), status),
         );
         self
+    }
+
+    /// A tour agent the app started, last changed `since_ms` after the epoch.
+    pub fn app_started(self, terminal: &str, pr: &str, status: AgentStatus, since_ms: u64) -> Self {
+        self.started_by_app
+            .lock()
+            .unwrap()
+            .insert(TerminalId::new(terminal), since_ms);
+        self.with_terminal(terminal, Some(pr), status)
+    }
+
+    pub fn set_status(&self, terminal: &str, status: AgentStatus) {
+        if let Some((_, current)) = self
+            .terminals
+            .lock()
+            .unwrap()
+            .get_mut(&TerminalId::new(terminal))
+        {
+            *current = status;
+        }
+    }
+
+    pub fn live_terminal_addresses(&self) -> Vec<String> {
+        self.terminals
+            .lock()
+            .unwrap()
+            .keys()
+            .map(ToString::to_string)
+            .collect()
     }
 
     /// A live terminal running Claude in a herdr space; it can be claimed.
@@ -184,6 +227,52 @@ impl TourAgentPort for FakeTourAgent {
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {
         self.record(TourAgentCall::Show(terminal.clone()));
+        Ok(())
+    }
+
+    fn app_started(&self) -> anyhow::Result<Vec<AppAgent>> {
+        let terminals = self.terminals.lock().unwrap();
+        Ok(self
+            .started_by_app
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(terminal, since)| {
+                let (pr, status) = terminals.get(terminal)?;
+                Some(AppAgent {
+                    terminal: terminal.clone(),
+                    pr: pr.clone(),
+                    status: *status,
+                    status_since_ms: *since,
+                })
+            })
+            .collect())
+    }
+
+    fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
+        self.record(TourAgentCall::Start {
+            name: start.name.clone(),
+            pr: start.pr.clone(),
+            folder: start.folder.clone(),
+            first_task: start.first_task.clone(),
+        });
+        let mut terminals = self.terminals.lock().unwrap();
+        let terminal = TerminalId::new(format!("t{}", 100 + terminals.len()));
+        terminals.insert(
+            terminal.clone(),
+            (Some(start.pr.clone()), AgentStatus::Working),
+        );
+        self.started_by_app
+            .lock()
+            .unwrap()
+            .insert(terminal.clone(), u64::MAX);
+        Ok(terminal)
+    }
+
+    fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()> {
+        self.record(TourAgentCall::Kill(terminal.clone()));
+        self.terminals.lock().unwrap().remove(terminal);
+        self.started_by_app.lock().unwrap().remove(terminal);
         Ok(())
     }
 }

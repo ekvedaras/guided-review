@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::viewer::{AgentStatus, LiveTerminal, SendOutcome, TerminalId, TourAgentPort};
+use guided_review::viewer::{
+    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+};
 use tempfile::TempDir;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -317,5 +319,100 @@ fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_d
     assert_eq!(
         calls(dir.path(), "calls"),
         ["send t2b --if idle a question", "send t2b a question"]
+    );
+}
+
+#[test]
+fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_and_tools() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "run",
+        r#"{"address":"t9","name":"tour-acme-shop-7"}"#,
+    );
+
+    let started = adapter(dir.path())
+        .start(&TourAgentStart {
+            pr: pr(),
+            name: "tour-acme-shop-7".to_owned(),
+            folder: PathBuf::from("/clones/shop"),
+            first_task: "You are the tour agent".to_owned(),
+        })
+        .unwrap();
+
+    assert_eq!(started, TerminalId::new("t9"));
+    let calls = calls(dir.path(), "calls");
+    let [call] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    let (before_tools, tools) = call.split_once(" --allowedTools ").unwrap();
+    assert_eq!(
+        before_tools,
+        format!(
+            "run --bg --json --outlive-parent --no-parent --name tour-acme-shop-7 --cwd /clones/shop \
+             --label app=guided-review --label gr.pr={PR} --label gr.started-by=app \
+             -- claude You are the tour agent --permission-mode dontAsk"
+        )
+    );
+    let tools: Vec<&str> = tools.split(',').collect();
+    for needed in [
+        "Bash(guided-review open:*)",
+        "Bash(guided-review agent-reply:*)",
+        "Bash(guided-review check:*)",
+        "Skill(tour)",
+    ] {
+        assert!(tools.contains(&needed), "{needed} missing from {tools:?}");
+    }
+    for tool in &tools {
+        assert!(
+            !tool.starts_with("Write(") && !tool.starts_with("Edit(")
+                || tool.contains("~/.guided-review/tours/"),
+            "{tool} could change something other than the tour"
+        );
+    }
+}
+
+#[test]
+fn a_tour_agent_is_ended_with_hc_kill() {
+    let dir = TempDir::new().unwrap();
+
+    adapter(dir.path()).kill(&TerminalId::new("t9")).unwrap();
+
+    assert_eq!(calls(dir.path(), "calls"), ["kill t9"]);
+}
+
+#[test]
+fn the_app_started_agents_are_listed_with_their_pr_status_and_when_it_changed() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[{"address":"t9","state":"live"}]}"#,
+    );
+    answer(
+        dir.path(),
+        "get",
+        &format!(
+            r#"{{"address":"t9","labels":{{"gr.pr":"{PR}","gr.started-by":"app"}},"status":{{"app":"claude-code","state":"idle"}},"status_ms":1793954000972}}"#
+        ),
+    );
+
+    let agents = adapter(dir.path()).app_started().unwrap();
+
+    assert_eq!(
+        agents,
+        [AppAgent {
+            terminal: TerminalId::new("t9"),
+            pr: Some(pr()),
+            status: AgentStatus::Idle,
+            status_since_ms: 1_793_954_000_972,
+        }]
+    );
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            "ls --label app=guided-review --label gr.started-by=app --json",
+            "get t9 --json"
+        ]
     );
 }

@@ -167,6 +167,10 @@ impl DeliveryRequest {
         let how = match agents.send_if_idle(&self.pr, &self.text) {
             Ok(SendOutcome::Delivered) => Delivery::Delivered,
             Ok(SendOutcome::Refused(_)) => Delivery::Waiting,
+            Ok(SendOutcome::NoAgent) => match agents.start(&self.pr, &self.pr) {
+                Ok(()) => Delivery::AgentStarted,
+                Err(error) => Delivery::Failed(format!("{error:#}")),
+            },
             Err(error) => Delivery::Failed(format!("{error:#}")),
         };
         DeliveryOutcome { id: self.id, how }
@@ -178,8 +182,17 @@ pub struct DeliveryOutcome {
     how: Delivery,
 }
 
+impl DeliveryOutcome {
+    /// A tour agent was started, so there is a new terminal to follow.
+    pub fn started_an_agent(&self) -> bool {
+        matches!(self.how, Delivery::AgentStarted)
+    }
+}
+
 enum Delivery {
     Delivered,
+    /// A new tour agent was started; the hand-off is sent once it is idle.
+    AgentStarted,
     /// The agent is not ready; the hand-off stays queued.
     Waiting,
     Failed(String),
@@ -307,7 +320,7 @@ impl HandOffs {
     pub(super) fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
         let state = match outcome.how {
             Delivery::Delivered => HandOffState::Delivered,
-            Delivery::Waiting => return,
+            Delivery::Waiting | Delivery::AgentStarted => return,
             Delivery::Failed(reason) => HandOffState::Failed(reason),
         };
         if let Some(hand_off) = self.0.iter_mut().find(|h| h.id == outcome.id) {

@@ -1,5 +1,6 @@
 use std::fmt;
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
@@ -80,7 +81,32 @@ pub enum SendOutcome {
     Delivered,
     /// Nothing was typed; herdr's reason, such as "t7 is working, not idle".
     Refused(String),
+    /// The PR has no tour agent to send to.
+    NoAgent,
 }
+
+/// A tour agent the app started, as far as ending the right one needs to know it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppAgent {
+    pub terminal: TerminalId,
+    pub pr: Option<PullRequestUrl>,
+    pub status: AgentStatus,
+    /// Milliseconds since the epoch when the status last changed: for an idle agent, when it last finished.
+    pub status_since_ms: u64,
+}
+
+/// What a new tour agent is started with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TourAgentStart {
+    pub pr: PullRequestUrl,
+    /// Names the terminal after the repo and the PR number.
+    pub name: String,
+    pub folder: PathBuf,
+    pub first_task: String,
+}
+
+/// At most this many tour agents the app started stay alive.
+const MAX_APP_AGENTS: usize = 3;
 
 /// Herdr behind the viewer: where a PR's tour agent runs and what it does. One adapter, `hc`.
 pub trait TourAgentPort: Send + Sync {
@@ -115,6 +141,15 @@ pub trait TourAgentPort: Send + Sync {
 
     /// Brings the terminal up in the herdr app.
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()>;
+
+    /// The live tour agents the app started, never the ones the reviewer started.
+    fn app_started(&self) -> anyhow::Result<Vec<AppAgent>>;
+
+    /// Starts an interactive Claude in a new terminal that outlives the app, labelled as the app's tour
+    /// agent of the PR.
+    fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId>;
+
+    fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()>;
 }
 
 /// What the sidebar says of a PR's tour agent.
@@ -157,11 +192,37 @@ impl fmt::Display for TourAgentState {
 #[derive(Clone)]
 pub struct TourAgents {
     port: Arc<dyn TourAgentPort>,
+    /// Where a tour agent the app starts works. `None`: the app starts none.
+    folder: Option<PathBuf>,
 }
 
 impl TourAgents {
     pub fn new(port: Arc<dyn TourAgentPort>) -> Self {
-        Self { port }
+        Self { port, folder: None }
+    }
+
+    pub fn starting_in(mut self, folder: PathBuf) -> Self {
+        self.folder = Some(folder);
+        self
+    }
+
+    /// Starts the tour agent of a PR that has none, ending the idle app-started agent used longest ago when
+    /// three live, never the one of `active`. Refuses, naming the busy ones, when none is idle.
+    pub fn start(&self, pr: &PullRequestUrl, active: &PullRequestUrl) -> anyhow::Result<()> {
+        let Some(folder) = &self.folder else {
+            bail!("no folder to start a tour agent for {pr} in");
+        };
+        if let Err(reason) = self.port.link() {
+            bail!("tour agents are off: {reason}");
+        }
+        self.make_room(active)?;
+        self.port.start(&TourAgentStart {
+            pr: pr.clone(),
+            name: terminal_name(pr),
+            folder: folder.clone(),
+            first_task: first_task(pr),
+        })?;
+        Ok(())
     }
 
     /// Makes the terminal the one tour agent of the PR: every other terminal with the PR's label loses it,
@@ -208,6 +269,36 @@ impl TourAgents {
             (Some(only), None) => self.claim(pr, &only.terminal),
             _ => Ok(()),
         }
+    }
+
+    fn make_room(&self, active: &PullRequestUrl) -> anyhow::Result<()> {
+        let mut agents = self.port.app_started()?;
+        if agents.len() < MAX_APP_AGENTS {
+            return Ok(());
+        }
+        agents.sort_by_key(|agent| agent.status_since_ms);
+        let to_end = agents
+            .iter()
+            .find(|agent| agent.status == AgentStatus::Idle && agent.pr.as_ref() != Some(active));
+        let Some(to_end) = to_end else {
+            let busy: Vec<String> = agents
+                .iter()
+                .filter(|agent| agent.status != AgentStatus::Idle)
+                .map(|agent| {
+                    agent
+                        .pr
+                        .as_ref()
+                        .map_or_else(|| agent.terminal.to_string(), ToString::to_string)
+                })
+                .collect();
+            bail!(
+                "{MAX_APP_AGENTS} tour agents are already running and none can be ended; busy: {}",
+                busy.join(", ")
+            );
+        };
+        self.port
+            .kill(&to_end.terminal)
+            .with_context(|| format!("could not end the tour agent {}", to_end.terminal))
     }
 
     pub fn lookup(&self, pr: &PullRequestUrl) -> TourAgentState {
@@ -264,9 +355,7 @@ impl TourAgents {
             TourAgentState::LinkOff(reason) => Ok(SendOutcome::Refused(format!(
                 "tour agents are off: {reason}"
             ))),
-            TourAgentState::None | TourAgentState::Unknown => {
-                Ok(SendOutcome::Refused(format!("no tour agent for {pr}")))
-            }
+            TourAgentState::None | TourAgentState::Unknown => Ok(SendOutcome::NoAgent),
         }
     }
 
@@ -285,4 +374,32 @@ impl TourAgents {
         let status = self.port.status(&terminal)?;
         Ok(TourAgentState::Agent { terminal, status })
     }
+}
+
+/// Herdr names are 1-32 of a-z 0-9 - _, so a long repo name is cut and the PR number stays.
+fn terminal_name(pr: &PullRequestUrl) -> String {
+    let number = format!("-{}", pr.number);
+    let repo: String = format!("tour-{}-{}", pr.repo.owner(), pr.repo.name())
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(32 - number.len())
+        .collect();
+    format!("{repo}{number}")
+}
+
+/// What a tour agent the app started is told first. Hand-offs follow as messages that carry the rest of the protocol.
+fn first_task(pr: &PullRequestUrl) -> String {
+    format!(
+        "You are the tour agent of {pr}: you wrote or know its guided-review tour, and the reviewer's comments on it \
+         reach you here as messages. Find the tour file with `guided-review tour-path {pr}` and read it now, so you \
+         can answer. Answer each comment as its message says, fix the tour when a comment shows it is wrong, and never \
+         change the PR's code. Then wait for the next message."
+    )
 }

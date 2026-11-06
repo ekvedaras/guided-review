@@ -56,6 +56,7 @@ pub fn open_review(
     let config = Config::load_from(home)?;
     let pick_code_source = opened.code_source_picker();
 
+    let agent_folder = clone.clone().unwrap_or_else(|| home.to_path_buf());
     let ask = AskSetup {
         asks: Asks::load(Arc::new(opened.state_file()))?,
         launcher: Arc::new(ClaudeCli::new()),
@@ -89,6 +90,6 @@ pub fn open_review(
         repinner,
         refresher,
         reloader,
-        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new())),
+        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new())).starting_in(agent_folder),
     })
 }

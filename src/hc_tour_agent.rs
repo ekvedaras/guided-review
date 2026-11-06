@@ -8,11 +8,15 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, bail};
 use serde_json::Value;
 
+use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
-use crate::viewer::{AgentStatus, LiveTerminal, SendOutcome, TerminalId, TourAgentPort};
+use crate::viewer::{
+    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+};
 
 const APP_LABEL: &str = "app=guided-review";
+const STARTED_BY_APP_LABEL: &str = "gr.started-by=app";
 
 pub struct HcTourAgents {
     hc: PathBuf,
@@ -222,6 +226,72 @@ impl TourAgentPort for HcTourAgents {
             );
         }
         Ok(())
+    }
+
+    fn app_started(&self) -> anyhow::Result<Vec<AppAgent>> {
+        let listed = self.hc(&[
+            "ls",
+            "--label",
+            APP_LABEL,
+            "--label",
+            STARTED_BY_APP_LABEL,
+            "--json",
+        ])?;
+        at(&listed, "/terminals")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|terminal| at(terminal, "/address").as_str())
+            .map(|address| {
+                let got = self.hc(&["get", address, "--json"])?;
+                Ok(AppAgent {
+                    terminal: TerminalId::new(address),
+                    pr: at(&got, "/labels/gr.pr")
+                        .as_str()
+                        .and_then(|pr| pr.parse().ok()),
+                    status: state_of(&got),
+                    status_since_ms: at(&got, "/status_ms").as_u64().unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+
+    fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
+        let folder = start.folder.display().to_string();
+        let pr_label = label_of(&start.pr);
+        let args = [
+            "run",
+            "--bg",
+            "--json",
+            "--outlive-parent",
+            "--no-parent",
+            "--name",
+            &start.name,
+            "--cwd",
+            &folder,
+            "--label",
+            APP_LABEL,
+            "--label",
+            &pr_label,
+            "--label",
+            STARTED_BY_APP_LABEL,
+            "--",
+            "claude",
+            &start.first_task,
+            "--permission-mode",
+            "dontAsk",
+            "--allowedTools",
+            &tour_agent_tools(),
+        ];
+        let started = self.hc(&args)?;
+        let address = at(&started, "/address")
+            .as_str()
+            .context("`hc run` did not say which terminal it started")?;
+        Ok(TerminalId::new(address))
+    }
+
+    fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()> {
+        self.hc(&["kill", terminal.as_str()]).map(drop)
     }
 }
 

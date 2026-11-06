@@ -474,15 +474,42 @@ fn an_agent_waiting_for_the_reviewer_is_never_sent_to() {
 }
 
 #[test]
-fn with_no_agent_for_the_pr_the_hand_off_waits() {
+fn with_no_agent_for_the_pr_one_is_started_and_the_hand_off_goes_once_it_is_idle() {
     let pull = Pull::new();
     let mut github = pull.github();
     let mut review = asked_twice(&pull, &mut github);
     let fake = Arc::new(FakeTourAgent::new());
+    let agents = agents_of(&fake).starting_in("/clones/shop".into());
 
-    deliver(&mut review, &agents_of(&fake));
+    deliver(&mut review, &agents);
 
+    let calls = fake.calls();
+    let [
+        TourAgentCall::Start {
+            name,
+            pr,
+            folder,
+            first_task,
+        },
+    ] = calls.as_slice()
+    else {
+        panic!("{calls:?}");
+    };
+    assert_eq!(name, "tour-acme-shop-7");
+    assert_eq!(pr.to_string(), PR);
+    assert_eq!(folder, &std::path::PathBuf::from("/clones/shop"));
+    for part in [PR, "tour agent", "guided-review tour-path"] {
+        assert!(
+            first_task.contains(part),
+            "{part} missing from {first_task}"
+        );
+    }
     assert_eq!(states(&review)[0], HandOffState::Queued);
+    deliver(&mut review, &agents);
+    assert_eq!(fake.calls().len(), 1, "the new agent is working, not asked");
+    fake.set_status("t100", AgentStatus::Idle);
+    deliver(&mut review, &agents);
+    assert_eq!(states(&review)[0], HandOffState::Delivered);
 }
 
 #[test]

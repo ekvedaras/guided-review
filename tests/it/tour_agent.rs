@@ -260,3 +260,84 @@ fn the_sidebar_line_names_the_agent_and_its_status() {
             .contains("hc is not on PATH")
     );
 }
+
+const PR_9: &str = "https://github.com/acme/shop/pull/9";
+const PR_10: &str = "https://github.com/acme/shop/pull/10";
+const PR_11: &str = "https://github.com/acme/shop/pull/11";
+
+fn starting(fake: &Arc<FakeTourAgent>) -> TourAgents {
+    agents(fake).starting_in("/clones/shop".into())
+}
+
+fn kills(fake: &FakeTourAgent) -> Vec<TourAgentCall> {
+    fake.calls()
+        .into_iter()
+        .filter(|call| matches!(call, TourAgentCall::Kill(_)))
+        .collect()
+}
+
+fn url(pr: &str) -> PullRequestUrl {
+    pr.parse().unwrap()
+}
+
+#[test]
+fn a_fourth_app_started_agent_ends_the_idle_one_used_longest_ago_that_is_not_the_active_prs() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .app_started("t1", OTHER_PR, AgentStatus::Idle, 100)
+            .app_started("t2", PR_9, AgentStatus::Idle, 200)
+            .app_started("t3", PR_10, AgentStatus::Idle, 300),
+    );
+
+    starting(&fake).start(&pr(), &url(OTHER_PR)).unwrap();
+
+    assert_eq!(kills(&fake), [TourAgentCall::Kill(TerminalId::new("t2"))]);
+    assert_eq!(fake.agents_of(PR).len(), 1, "a new agent runs for the PR");
+}
+
+#[test]
+fn a_fourth_app_started_agent_is_refused_naming_the_working_ones_when_none_is_idle() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .app_started("t1", OTHER_PR, AgentStatus::Working, 100)
+            .app_started("t2", PR_9, AgentStatus::Working, 200)
+            .app_started("t3", PR_10, AgentStatus::Idle, 300),
+    );
+
+    let refused = starting(&fake).start(&pr(), &url(PR_10)).unwrap_err();
+
+    let reason = format!("{refused:#}");
+    assert!(
+        reason.contains(OTHER_PR) && reason.contains(PR_9),
+        "{reason}"
+    );
+    assert!(!reason.contains(PR_10), "{reason}");
+    assert_eq!(kills(&fake), []);
+    assert_eq!(fake.agents_of(PR), Vec::<String>::new());
+}
+
+#[test]
+fn agents_the_reviewer_started_are_neither_counted_nor_ended() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("mine1", Some(OTHER_PR), AgentStatus::Idle)
+            .with_terminal("mine2", Some(PR_9), AgentStatus::Idle)
+            .app_started("t1", PR_10, AgentStatus::Idle, 300),
+    );
+
+    starting(&fake).start(&pr(), &url(PR_10)).unwrap();
+
+    assert_eq!(kills(&fake), [], "one of the app's agents is below the cap");
+    let full = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("mine1", Some(OTHER_PR), AgentStatus::Idle)
+            .app_started("t1", PR_9, AgentStatus::Idle, 300)
+            .app_started("t2", PR_10, AgentStatus::Idle, 400)
+            .app_started("t3", PR_11, AgentStatus::Idle, 500),
+    );
+
+    starting(&full).start(&pr(), &url(PR_10)).unwrap();
+
+    assert_eq!(kills(&full), [TourAgentCall::Kill(TerminalId::new("t1"))]);
+    assert!(full.live_terminal_addresses().contains(&"mine1".to_owned()));
+}

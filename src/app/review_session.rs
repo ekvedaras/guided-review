@@ -696,8 +696,12 @@ impl ReviewSession {
             move || request.run(&agents),
             |this, outcome, cx| {
                 this.delivering = None;
+                let started_an_agent = outcome.started_an_agent();
                 if let Err(error) = this.change(cx, |review| review.apply_delivery(outcome)) {
                     eprintln!("could not save where a hand-off is: {error:#}");
+                }
+                if started_an_agent {
+                    this.follow_tour_agent(cx);
                 }
             },
         ));
