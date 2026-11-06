@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use guided_review::claude_cli::{refresh_writer_tools, tour_agent_tools};
 
 const SKILL: &str = include_str!("../../skills/tour/SKILL.md");
@@ -47,7 +49,7 @@ fn a_tour_agent_may_run_every_command_the_tour_skill_asks_for() {
     let commands = commands_in(SKILL);
     assert!(commands.len() > 10, "{commands:?}");
 
-    let tools = tour_agent_tools();
+    let tools = tour_agent_tools(Path::new("/clones/shop"));
     assert_eq!(denied_by(&tools, commands), Vec::<&str>::new(), "{tools}");
 }
 
@@ -56,6 +58,6 @@ fn the_refresh_writer_may_run_every_command_the_refresh_section_asks_for() {
     let commands = commands_in(refresh_section());
     assert!(commands.len() >= 6, "{commands:?}");
 
-    let tools = refresh_writer_tools();
-    assert_eq!(denied_by(tools, commands), Vec::<&str>::new(), "{tools}");
+    let tools = refresh_writer_tools(Path::new("/clones/shop"));
+    assert_eq!(denied_by(&tools, commands), Vec::<&str>::new(), "{tools}");
 }

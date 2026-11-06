@@ -58,7 +58,7 @@ Found from `hc get`/`hc read` of t2q and t2r and their Claude transcripts:
 
 Fixed: an agent the app starts runs under `env PATH=<the running guided-review's folder>:<the app's PATH>` (checked on a probe: herdr still sees `claude-code`, and `guided-review` runs). "Still starting" keeps the hand-off queued and the app tries again after 3 s. Herdr's errors read as its message, not its JSON, and a failed hand-off in a thread has Try again. The loading screen shows the last non-blank lines above Claude's prompt box.
 
-Open: the agents' Read, Grep and Glob are not limited to the clone and the tours folder, so an agent that goes searching can still touch the whole home folder and raise permission prompts.
+Later the same day: the writer's and the tour agent's tool lists name `Read(//<clone>/**)` and `Read(~/.guided-review/tours/**)` and no bare Read, Grep or Glob, so `dontAsk` denies a search of the home folder. Only `Read(path)` rules match: Claude Code's docs say `Grep(path)` and `Glob(path)` are accepted but never applied. Open: that an allow `Read` rule also governs Grep and Glob outside the clone is not stated in the docs and not yet tried on a live agent.
 
 ## Agents the app started were not in herdr-app (2026-11-06)
 

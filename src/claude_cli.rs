@@ -14,17 +14,30 @@ use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnSt
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
-/// Reads and writes only what the tour skill needs: its own CLI, `gh pr view`, and the tour files.
-const REFRESH_WRITER_TOOLS: &str = "Skill(tour),Read,Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write(~/.guided-review/tours/**),Edit(~/.guided-review/tours/**)";
+const TOURS_FOLDER_RULE: &str = "~/.guided-review/tours/**";
 
-pub fn refresh_writer_tools() -> &'static str {
-    REFRESH_WRITER_TOOLS
+/// Reads, searches and writes only what the tour skill needs: its own CLI, `gh pr view`, the tour files, and
+/// the code in `clone`. Reading is limited to those two folders, so an agent that goes searching cannot
+/// roam the home folder and raise macOS permission prompts. Only `Read(path)` rules match: Claude Code
+/// accepts `Grep(path)` and `Glob(path)` but never applies them, and a bare `Grep` or `Glob` allows every
+/// path, so neither is listed.
+pub fn refresh_writer_tools(clone: &Path) -> String {
+    let clone_rule = format!(
+        "//{}/**",
+        clone.display().to_string().trim_start_matches('/')
+    );
+    format!(
+        "Skill(tour),Read({clone_rule}),Read({TOURS_FOLDER_RULE}),Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({TOURS_FOLDER_RULE}),Edit({TOURS_FOLDER_RULE})"
+    )
 }
 
 /// What a tour agent the app starts may do: the refresh writer's tools, plus answering. It
 /// cannot edit the repo, which is what keeps the PR's code unchanged.
-pub fn tour_agent_tools() -> String {
-    format!("{REFRESH_WRITER_TOOLS},Bash(guided-review agent-reply:*)")
+pub fn tour_agent_tools(clone: &Path) -> String {
+    format!(
+        "{},Bash(guided-review agent-reply:*)",
+        refresh_writer_tools(clone)
+    )
 }
 
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
@@ -174,7 +187,7 @@ impl RefreshWriter for ClaudeRefreshWriter {
         let output = Command::new(&self.binary)
             .args(["-p", &prompt])
             .args(["--permission-mode", "dontAsk"])
-            .args(["--allowedTools", REFRESH_WRITER_TOOLS])
+            .args(["--allowedTools", &refresh_writer_tools(&self.cwd)])
             .current_dir(&self.cwd)
             .stdin(Stdio::null())
             .output()

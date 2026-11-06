@@ -487,6 +487,32 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
     }
 }
 
+#[test]
+fn a_started_tour_agent_reads_only_its_clone_and_the_tours_folder() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "run",
+        r#"{"address":"t9","name":"tour-acme-shop-7"}"#,
+    );
+
+    start_shop_agent(&adapter(dir.path())).unwrap();
+
+    let calls = calls(dir.path(), "calls");
+    let (_, tools) = calls[0].split_once(" --allowedTools ").unwrap();
+    let tools: Vec<&str> = tools.split(',').collect();
+    for unlimited in ["Read", "Grep", "Glob"] {
+        assert!(
+            !tools.contains(&unlimited),
+            "{unlimited} is not limited: {tools:?}"
+        );
+    }
+    for folder in ["//clones/shop/**", "~/.guided-review/tours/**"] {
+        let rule = format!("Read({folder})");
+        assert!(tools.contains(&rule.as_str()), "{rule} not in {tools:?}");
+    }
+}
+
 fn start_shop_agent(agents: &HcTourAgents) -> anyhow::Result<TerminalId> {
     agents.start(&TourAgentStart {
         pr: pr(),

@@ -336,6 +336,12 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
     assert!(args.contains("Bash(guided-review refresh:*)"), "{args}");
     assert!(args.contains("Bash(guided-review tour-path:*)"), "{args}");
     assert!(args.contains("as its own Bash call"), "{args}");
+    let reads_in_cwd = format!(
+        "Read(//{}/**)",
+        cwd.path().display().to_string().trim_start_matches('/')
+    );
+    assert!(args.contains(&reads_in_cwd), "{args}");
+    assert!(!args.contains(",Read,"), "{args}");
     assert!(args.contains("Write(~/.guided-review/tours/**)"), "{args}");
     assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
     assert!(
