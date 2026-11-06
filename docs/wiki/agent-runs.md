@@ -9,13 +9,13 @@ The maintainer reported that Refresh spun, then showed the old tour and asked to
 - The refresh writer runs `claude -p` with `--permission-mode dontAsk` and a fixed tool list. Claude chained `guided-review tour-path … && …` in one Bash call. `dontAsk` denied it, because `tour-path` was not on the list and chained calls do not match a single-command rule. Claude said so and exited 0.
 - The app took exit 0 as success and threw away what Claude said.
 
-Fixed in `ekvedaras/guided-review@82c5045`, `ef90f2f` and `0b6647a`: a run that leaves the refresh marks fails with Claude's words, the sidebar names it until a refresh goes through, `tour-path` is allowed, and the prompt asks for one command per Bash call.
+Fixed in `ekvedaras/guided-review@8030ad0`, `a8cdb64` and `8a99930`: a run that leaves the refresh marks fails with Claude's words, the sidebar names it until a refresh goes through, `tour-path` is allowed, and the prompt asks for one command per Bash call.
 
 Lessons that hold beyond this bug:
 
 - Exit 0 from an agent proves nothing. Check the outcome the run was meant to produce (here: the marks are gone).
 - An agent with a fixed tool list fails on chained shell commands. Prompts and skills it reads should ask for one command per call.
-- As of `0b6647a` the app keeps no log of an agent run's output, so the only evidence was Claude Code's own transcripts. Open.
+- As of `8a99930` the app keeps no log of an agent run's output, so the only evidence was Claude Code's own transcripts. Open.
 
 ## One window, a PR switcher, and the tour agent hears comments (2026-11-06)
 
@@ -69,7 +69,7 @@ The maintainer could not see or watch the agents the app starts: live in herdr-c
 - A terminal labelled after it started is taken up too. Relabelling one already shown does not move it.
 - A program that ends at once closes its pane, and the last tab closing closes the space.
 
-Decided (`ekvedaras/guided-review@60d4824`, `3ffefb4`): every agent the app starts is labelled `herdr.space=guided-review`, `herdr.tab=<its terminal name>`. The adapter then renames the space "guided-review agents" and the tab `owner/repo#N`, retrying for up to 3 s, and gives up quietly with no window. Not plain "guided-review": the maintainer's own space of this repo is already called that. Show agent labels an app-started agent that has no place yet (one started before this change), names a place made while the window was closed, and never moves a terminal the reviewer started.
+Decided (`ekvedaras/guided-review@1fbdb5a`, `a8bad50`): every agent the app starts is labelled `herdr.space=guided-review`, `herdr.tab=<its terminal name>`. The adapter then renames the space "guided-review agents" and the tab `owner/repo#N`, retrying for up to 3 s, and gives up quietly with no window. Not plain "guided-review": the maintainer's own space of this repo is already called that. Show agent labels an app-started agent that has no place yet (one started before this change), names a place made while the window was closed, and never moves a terminal the reviewer started.
 
 Open: an agent started while the window is closed shows in an unnamed space (called after its clone's repo) and a tab called by its number, until Show agent or the next start with the window open names them.
 
