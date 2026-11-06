@@ -77,14 +77,16 @@ fn state_of(terminal: &Value) -> AgentStatus {
     AgentStatus::from_herdr(reported)
 }
 
-/// The terminal of an event line: a snapshot lists terminals, a change may name one.
-fn terminal_in<'a>(line: &'a Value, address: &str) -> Option<&'a Value> {
-    let listed = at(line, "/terminals")
+/// The status an event line reports for the terminal: the snapshot `hc events` starts with lists terminals,
+/// and each change after it is a JSON-RPC `status` event naming one.
+fn status_in(line: &Value, address: &str) -> Option<AgentStatus> {
+    let snapshot = at(line, "/terminals")
         .as_array()
-        .and_then(|terminals| terminals.iter().find(|t| at(t, "/address") == address));
-    let named = Some(at(line, "/terminal")).filter(|t| at(t, "/address") == address);
-    let bare = Some(line).filter(|t| at(t, "/address") == address);
-    listed.or(named).or(bare)
+        .and_then(|terminals| terminals.iter().find(|t| at(t, "/address") == address))
+        .map(state_of);
+    let change = (at(line, "/params/type") == "status" && at(line, "/params/terminal") == address)
+        .then(|| AgentStatus::from_herdr(at(line, "/params/data/status/state").as_str()));
+    snapshot.or(change)
 }
 
 impl TourAgentPort for HcTourAgents {
@@ -163,10 +165,9 @@ impl TourAgentPort for HcTourAgents {
             let Ok(json) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            let Some(changed) = terminal_in(&json, terminal.as_str()) else {
+            let Some(status) = status_in(&json, terminal.as_str()) else {
                 continue;
             };
-            let status = state_of(changed);
             if last != Some(status) {
                 last = Some(status);
                 if on_status(status).is_break() {

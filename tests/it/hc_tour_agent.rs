@@ -173,6 +173,29 @@ fn status_changes_follow_the_events_of_the_terminal_and_skip_repeats() {
 }
 
 #[test]
+fn status_changes_are_read_from_the_event_lines_herdr_really_writes() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "events",
+        include_str!("../fixtures/hc/events-claude-turn.jsonl"),
+    );
+    let mut seen = Vec::new();
+
+    adapter(dir.path())
+        .follow(&TerminalId::new("t2b"), &mut |status| {
+            seen.push(status);
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+
+    assert_eq!(
+        seen,
+        [AgentStatus::Idle, AgentStatus::Working, AgentStatus::Idle]
+    );
+}
+
+#[test]
 fn the_link_is_on_while_the_server_answers_and_off_with_its_reason_when_not() {
     let dir = TempDir::new().unwrap();
     let agents = adapter(dir.path());
