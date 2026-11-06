@@ -17,17 +17,17 @@ const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 const TOURS_FOLDER_RULE: &str = "~/.guided-review/tours/**";
 
 /// Reads, searches and writes only what the tour skill needs: its own CLI, `gh pr view`, the tour files, and
-/// the code in `clone`. Reading is limited to those two folders, so an agent that goes searching cannot
-/// roam the home folder and raise macOS permission prompts. Only `Read(path)` rules match: Claude Code
-/// accepts `Grep(path)` and `Glob(path)` but never applies them, and a bare `Grep` or `Glob` allows every
-/// path, so neither is listed.
+/// the code in `clone`. `Read` is limited to those two folders. `Grep` and `Glob` are bare, because under
+/// `dontAsk` a `Grep(path)` or `Glob(path)` rule is accepted but never applies, so listing only those is a
+/// silent denial (tried live, 2026-11-06). The agent runs with `clone` as its cwd, which is where its
+/// searches start.
 pub fn refresh_writer_tools(clone: &Path) -> String {
     let clone_rule = format!(
         "//{}/**",
         clone.display().to_string().trim_start_matches('/')
     );
     format!(
-        "Skill(tour),Read({clone_rule}),Read({TOURS_FOLDER_RULE}),Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({TOURS_FOLDER_RULE}),Edit({TOURS_FOLDER_RULE})"
+        "Skill(tour),Read({clone_rule}),Read({TOURS_FOLDER_RULE}),Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({TOURS_FOLDER_RULE}),Edit({TOURS_FOLDER_RULE})"
     )
 }
 

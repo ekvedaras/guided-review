@@ -488,7 +488,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
 }
 
 #[test]
-fn a_started_tour_agent_reads_only_its_clone_and_the_tours_folder() {
+fn a_started_tour_agent_reads_only_its_clone_and_the_tours_folder_but_may_grep_and_glob() {
     let dir = TempDir::new().unwrap();
     answer(
         dir.path(),
@@ -501,10 +501,11 @@ fn a_started_tour_agent_reads_only_its_clone_and_the_tours_folder() {
     let calls = calls(dir.path(), "calls");
     let (_, tools) = calls[0].split_once(" --allowedTools ").unwrap();
     let tools: Vec<&str> = tools.split(',').collect();
-    for unlimited in ["Read", "Grep", "Glob"] {
+    assert!(!tools.contains(&"Read"), "Read is not limited: {tools:?}");
+    for search in ["Grep", "Glob"] {
         assert!(
-            !tools.contains(&unlimited),
-            "{unlimited} is not limited: {tools:?}"
+            tools.contains(&search),
+            "{search} is missing, dontAsk would deny it: {tools:?}"
         );
     }
     for folder in ["//clones/shop/**", "~/.guided-review/tours/**"] {
