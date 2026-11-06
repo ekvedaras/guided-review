@@ -239,14 +239,74 @@ fn the_link_is_off_when_hc_is_not_installed() {
 }
 
 #[test]
-fn showing_an_agent_asks_the_herdr_app_to_focus_its_terminal() {
+fn showing_an_agent_the_reviewer_started_focuses_its_terminal_and_never_moves_it() {
     let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "get",
+        &format!(r#"{{"address":"t7","labels":{{"app":"guided-review","gr.pr":"{PR}"}}}}"#),
+    );
 
     adapter(dir.path()).show(&TerminalId::new("t7")).unwrap();
 
+    assert_eq!(calls(dir.path(), "calls"), ["get t7 --json"]);
     assert_eq!(
         calls(dir.path(), "app-calls"),
         ["do agent.focus --terminal t7"]
+    );
+}
+
+#[test]
+fn showing_an_agent_the_app_started_without_a_place_puts_it_in_the_guided_review_space_first() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "get",
+        &format!(
+            r#"{{"address":"t9","name":"tour-acme-shop-7","labels":{{"app":"guided-review","gr.pr":"{PR}","gr.started-by":"app"}}}}"#
+        ),
+    );
+
+    adapter(dir.path()).show(&TerminalId::new("t9")).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            "get t9 --json",
+            "label t9 herdr.space=guided-review herdr.tab=tour-acme-shop-7"
+        ]
+    );
+    assert_eq!(
+        calls(dir.path(), "app-calls"),
+        [
+            "do space.rename --id guided-review --name guided-review agents",
+            "do tab.rename --id tour-acme-shop-7 --name acme/shop#7",
+            "do agent.focus --terminal t9"
+        ]
+    );
+}
+
+#[test]
+fn showing_an_agent_placed_while_the_herdr_app_was_closed_names_its_space_and_tab() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "get",
+        &format!(
+            r#"{{"address":"t9","name":"tour-acme-shop-7","labels":{{"gr.pr":"{PR}","gr.started-by":"app","herdr.space":"guided-review","herdr.tab":"tour-acme-shop-7"}}}}"#
+        ),
+    );
+
+    adapter(dir.path()).show(&TerminalId::new("t9")).unwrap();
+
+    assert_eq!(calls(dir.path(), "calls"), ["get t9 --json"]);
+    assert_eq!(
+        calls(dir.path(), "app-calls"),
+        [
+            "do space.rename --id guided-review --name guided-review agents",
+            "do tab.rename --id tour-acme-shop-7 --name acme/shop#7",
+            "do agent.focus --terminal t9"
+        ]
     );
 }
 

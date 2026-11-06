@@ -269,11 +269,11 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {
-        let output = Command::new(&self.herdr_app)
-            .args(["do", "agent.focus", "--terminal", terminal.as_str()])
-            .stdin(Stdio::null())
-            .output()
-            .with_context(|| format!("could not run `{}`", self.herdr_app.display()))?;
+        let got = self.hc(&["get", terminal.as_str(), "--json"])?;
+        if at(&got, "/labels/gr.started-by") == "app" {
+            self.place_in_agents_space(terminal, &got)?;
+        }
+        let output = self.herdr_app(&["do", "agent.focus", "--terminal", terminal.as_str()])?;
         if !output.status.success() {
             bail!(
                 "`herdr-app do agent.focus` failed: {}",
@@ -421,6 +421,35 @@ impl HcTourAgents {
             .stdin(Stdio::null())
             .output()
             .with_context(|| format!("could not run `{}`", self.herdr_app.display()))
+    }
+
+    /// An agent started before the app placed its agents runs hidden from herdr-app; labelling it puts it
+    /// in the window. One placed while the window was closed has no names yet.
+    fn place_in_agents_space(&self, terminal: &TerminalId, got: &Value) -> anyhow::Result<()> {
+        let space = at(got, "/labels/herdr.space");
+        let tab = if space.is_null() {
+            let tab = at(got, "/name").as_str().unwrap_or(terminal.as_str());
+            self.hc(&[
+                "label",
+                terminal.as_str(),
+                &format!("herdr.space={AGENTS_SPACE}"),
+                &format!("herdr.tab={tab}"),
+            ])?;
+            tab
+        } else if space == AGENTS_SPACE
+            && let Some(tab) = at(got, "/labels/herdr.tab").as_str()
+        {
+            tab
+        } else {
+            return Ok(());
+        };
+        if let Some(pr) = at(got, "/labels/gr.pr")
+            .as_str()
+            .and_then(|pr| pr.parse().ok())
+        {
+            self.name_place(tab, &pr);
+        }
+        Ok(())
     }
 
     /// Names the agents' space and the agent's tab once herdr-app has taken the terminal up.
