@@ -28,6 +28,7 @@ use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
+use super::hand_offs::{Audience, HandOff};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget};
@@ -1058,7 +1059,21 @@ impl Review {
 
     /// `None` when there is no such draft.
     pub fn comment_request(&self, place: &CommentPlace, mode: SendMode) -> Option<CommentRequest> {
-        CommentDesk::comment_request(&self.state, place, mode, &self.head, &self.pr)
+        self.comment_request_for(place, mode, Audience::Author)
+    }
+
+    /// `None` when there is no such draft.
+    pub fn comment_request_for(
+        &self,
+        place: &CommentPlace,
+        mode: SendMode,
+        audience: Audience,
+    ) -> Option<CommentRequest> {
+        CommentDesk::comment_request(&self.state, place, mode, audience, &self.head, &self.pr)
+    }
+
+    pub fn hand_offs(&self) -> &[HandOff] {
+        self.state.hand_offs().all()
     }
 
     /// The oldest comment in the queue, to send again.
@@ -1077,7 +1092,13 @@ impl Review {
 
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
-        let result = self.comment_desk.apply_comment(&mut self.state, outcome);
+        let step = match &self.screen {
+            Screen::Step(id) => Some(id.clone()),
+            _ => None,
+        };
+        let result = self
+            .comment_desk
+            .apply_comment(&mut self.state, outcome, step);
         self.show_pulled_threads(threads.as_ref());
         self.save_viewer_sections()?;
         Ok(result)

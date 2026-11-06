@@ -7,6 +7,8 @@ use super::comments::{
 use super::finish_review::{
     FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
+use super::hand_offs::{Audience, SentComment};
+use super::review::StepId;
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::step_page::{DiffLine, LineLocation, Side};
@@ -186,6 +188,7 @@ impl CommentDesk {
         state: &ReviewState,
         place: &CommentPlace,
         mode: SendMode,
+        audience: Audience,
         tour_head: &Sha,
         pr: &PullRequestUrl,
     ) -> Option<CommentRequest> {
@@ -194,6 +197,7 @@ impl CommentDesk {
             Origin::Draft,
             draft,
             mode,
+            audience,
             tour_head.clone(),
             pr.clone(),
         ))
@@ -210,6 +214,7 @@ impl CommentDesk {
             Origin::Queue,
             queued.draft.clone(),
             queued.mode,
+            queued.audience,
             tour_head.clone(),
             pr.clone(),
         ))
@@ -219,13 +224,30 @@ impl CommentDesk {
         &mut self,
         state: &mut ReviewState,
         outcome: CommentOutcome,
+        step: Option<StepId>,
     ) -> CommentResult {
-        let CommentOutcome { request, how, .. } = outcome;
+        let CommentOutcome {
+            request,
+            how,
+            threads,
+        } = outcome;
         let place = request.draft.place.clone();
         match how {
             Outcome::Sent => {
                 self.pending_review = PendingReview::exists(request.mode == SendMode::AddToReview);
                 leave(state, &request.origin, &place);
+                if request.audience == Audience::Agent {
+                    state.hand_offs_mut().record_new_thread(
+                        &SentComment {
+                            path: place.path(),
+                            place: place.describe(),
+                            step,
+                            mode: request.mode,
+                            body: &request.draft.body,
+                        },
+                        threads.as_ref(),
+                    );
+                }
                 CommentResult::Sent
             }
             Outcome::Failed(reason) => {
@@ -373,7 +395,7 @@ impl CommentOutcome {
     /// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
     pub fn land_in(self, file: &ReviewStateFile) -> anyhow::Result<()> {
         file.update(|state| {
-            CommentDesk::default().apply_comment(state, self);
+            CommentDesk::default().apply_comment(state, self, None);
         })
     }
 }
@@ -404,6 +426,7 @@ fn keep_for_retry(state: &mut ReviewState, request: &CommentRequest, reason: &st
             state.queue_comment(QueuedComment {
                 draft: request.draft.clone(),
                 mode: request.mode,
+                audience: request.audience,
                 failed_because: reason.to_owned(),
             });
         }

@@ -8,6 +8,7 @@ use crate::file_path::FilePath;
 use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
+use super::hand_offs::Audience;
 use super::ports::{GitHubError, PullRequestTipsPort, ReviewThreadsPort, ReviewWritesPort};
 use super::row_selection::SelectedLines;
 use super::step_page::{LineLocation, Side};
@@ -161,6 +162,8 @@ pub enum SendMode {
 pub struct QueuedComment {
     pub draft: CommentDraft,
     pub mode: SendMode,
+    #[serde(default)]
+    pub audience: Audience,
     pub failed_because: String,
 }
 
@@ -255,6 +258,7 @@ pub struct CommentRequest {
     pub(super) origin: Origin,
     pub(super) draft: CommentDraft,
     pub(super) mode: SendMode,
+    pub(super) audience: Audience,
     tour_head: Sha,
     pr: PullRequestUrl,
 }
@@ -279,6 +283,7 @@ impl CommentRequest {
         origin: Origin,
         draft: CommentDraft,
         mode: SendMode,
+        audience: Audience,
         tour_head: Sha,
         pr: PullRequestUrl,
     ) -> Self {
@@ -286,6 +291,7 @@ impl CommentRequest {
             origin,
             draft,
             mode,
+            audience,
             tour_head,
             pr,
         }

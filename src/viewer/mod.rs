@@ -14,6 +14,7 @@ mod diff_display;
 mod display_options;
 mod file_block;
 mod finish_review;
+mod hand_offs;
 mod highlight;
 mod image_preview;
 mod jump;
@@ -55,6 +56,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
+pub use hand_offs::{Audience, HandOff, HandOffId, HandOffState, HandOffs, ThreadMessage};
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,

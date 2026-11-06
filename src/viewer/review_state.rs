@@ -13,6 +13,7 @@ use crate::timestamp::UtcTimestamp;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
+use super::hand_offs::HandOffs;
 use super::ports::Viewed;
 use super::review::StepId;
 use super::threads::ThreadId;
@@ -64,6 +65,9 @@ struct ViewerSections {
     /// The PR's body at the last pull, so the summary shows it before GitHub answers.
     #[serde(default)]
     pr_description: String,
+    /// The comments sent with Ask agent and where each is with the tour agent.
+    #[serde(default)]
+    hand_offs: HandOffs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +294,14 @@ impl ReviewState {
         if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
             self.viewer.unsent_viewed.remove(path);
         }
+    }
+
+    pub(super) fn hand_offs(&self) -> &HandOffs {
+        &self.viewer.hand_offs
+    }
+
+    pub(super) fn hand_offs_mut(&mut self) -> &mut HandOffs {
+        &mut self.viewer.hand_offs
     }
 
     pub(super) fn pr_description(&self) -> &str {
