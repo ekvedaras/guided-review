@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Agents in this repo may not drive herdr terminals directly (.claude/settings.json denies it),
+# because those are the maintainer's live terminals. This script is the one way in: it starts
+# throwaway terminals labelled gr.probe=1 and refuses to touch any other terminal.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+scripts/herdr-probe start [program args...]   start a probe terminal (default: a shell), print its address
+scripts/herdr-probe focus <t>                  show it in herdr-app (herdr-app do agent.focus)
+scripts/herdr-probe events <t>                 hc events --terminal <t> --json
+scripts/herdr-probe <hc-verb> <t> [args...]    any hc verb on a probe terminal: send, keys, label, read, get, wait, interrupt, kill, rm
+scripts/herdr-probe clean                      kill and remove every probe terminal
+EOF
+}
+
+is_probe() {
+  [ "$(hc get --json "$1" | jq -r '.labels["gr.probe"] // empty')" = "1" ]
+}
+
+require_probe() {
+  if ! is_probe "$1"; then
+    echo "herdr-probe: $1 is not a probe terminal; start one with: scripts/herdr-probe start" >&2
+    exit 2
+  fi
+}
+
+[ $# -ge 1 ] || { usage; exit 2; }
+verb=$1; shift
+
+case "$verb" in
+  start)
+    hc run --bg --json --no-notify --label gr.probe=1 "$@" | jq -r '.address'
+    ;;
+  clean)
+    for t in $(hc ls --all --json --label gr.probe=1 | jq -r '.. | objects | .address? // empty'); do
+      hc kill "$t" >/dev/null 2>&1 || true
+      hc rm "$t" >/dev/null 2>&1 || true
+      echo "removed $t"
+    done
+    ;;
+  focus)
+    [ $# -eq 1 ] || { usage; exit 2; }
+    require_probe "$1"
+    herdr-app do agent.focus --terminal "$1"
+    ;;
+  events)
+    [ $# -ge 1 ] || { usage; exit 2; }
+    require_probe "$1"
+    t=$1; shift
+    hc events --terminal "$t" --json "$@"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    [ $# -ge 1 ] || { usage; exit 2; }
+    require_probe "$1"
+    hc "$verb" "$@"
+    ;;
+esac

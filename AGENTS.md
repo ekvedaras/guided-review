@@ -19,7 +19,7 @@ Rust 2024 gpui app.
 
 ## herdr
 
-- herdr-core (`hc`) and herdr-app run the maintainer's live terminals. Focus, label, send to, kill or remove only terminals you started yourself for the task, and remove them when done.
+- herdr-core (`hc`) and herdr-app run the maintainer's live terminals. `.claude/settings.json` denies driving them directly. To try herdr, use `scripts/herdr-probe`: `start` gives a throwaway terminal, every other verb works only on those, and `clean` removes them when done.
 - `herdr-app commands` gives each command's arguments; `herdr-app do <cmd> --help` does not. macOS has no `timeout`; use `perl -e 'alarm 10; exec @ARGV' -- <cmd>`.
 
 ## Read before changing code
