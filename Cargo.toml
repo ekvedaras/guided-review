@@ -3,6 +3,9 @@ name = "guided-review"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/ekvedaras/guided-review"
+rust-version = "1.99"
+publish = false
 description = "Turn a PR diff into a top-down guided review"
 
 [dependencies]
