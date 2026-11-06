@@ -4,7 +4,17 @@
       "Bash(guided-review show *)",
       "Bash(guided-review tour-path *)",
       "Bash(guided-review outline *)",
-      "Bash(hc ls *)"
+      "Bash(hc ls *)",
+      "Bash(scripts/herdr-probe *)"
+    ],
+    "deny": [
+      "Bash(herdr-app do *)",
+      "Bash(hc send *)",
+      "Bash(hc keys *)",
+      "Bash(hc interrupt *)",
+      "Bash(hc label *)",
+      "Bash(hc kill *)",
+      "Bash(hc rm *)"
     ]
   }
 }
