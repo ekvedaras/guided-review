@@ -59,3 +59,16 @@ Found from `hc get`/`hc read` of t2q and t2r and their Claude transcripts:
 Fixed: an agent the app starts runs under `env PATH=<the running guided-review's folder>:<the app's PATH>` (checked on a probe: herdr still sees `claude-code`, and `guided-review` runs). "Still starting" keeps the hand-off queued and the app tries again after 3 s. Herdr's errors read as its message, not its JSON, and a failed hand-off in a thread has Try again. The loading screen shows the last non-blank lines above Claude's prompt box.
 
 Open: the agents' Read, Grep and Glob are not limited to the clone and the tours folder, so an agent that goes searching can still touch the whole home folder and raise permission prompts.
+
+## Agents the app started were not in herdr-app (2026-11-06)
+
+The maintainer could not see or watch the agents the app starts: live in herdr-core, absent from the herdr-app window. Herdr-app shows only terminals labelled `herdr.space=<id>` (and `herdr.tab=<id>`); `hc run` without them stays a hidden worker. Checked on probe terminals with `scripts/herdr-probe start-placed`:
+
+- Any id string works. An id herdr-app does not know becomes a new space or tab, so labelling at `hc run` places the agent with the window closed too; the window takes it up when it opens.
+- Herdr-app takes a new terminal up about a second after `hc run` returns. Before that `herdr-app do space.rename` answers `{"error":"no space …"}` with exit 1. With no window, every `herdr-app do` exits 2 ("no Herdr window"); it does not open one.
+- A terminal labelled after it started is taken up too. Relabelling one already shown does not move it.
+- A program that ends at once closes its pane, and the last tab closing closes the space.
+
+Decided (`ekvedaras/guided-review@7f304f2`, `599eeca`): every agent the app starts is labelled `herdr.space=guided-review`, `herdr.tab=<its terminal name>`. The adapter then renames the space "guided-review agents" and the tab `owner/repo#N`, retrying for up to 3 s, and gives up quietly with no window. Not plain "guided-review": the maintainer's own space of this repo is already called that. Show agent labels an app-started agent that has no place yet (one started before this change), names a place made while the window was closed, and never moves a terminal the reviewer started.
+
+Open: an agent started while the window is closed shows in an unnamed space (called after its clone's repo) and a tab called by its number, until Show agent or the next start with the window open names them.
