@@ -15,6 +15,7 @@ mod sidebar_rows;
 #[cfg(feature = "snapshots")]
 mod snapshots;
 mod tour_writer;
+mod word_keys;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -78,6 +79,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             tour_writer::resume(cx);
             dock_icon::show();
             bind_keys(cx);
+            word_keys::take_before_macos(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();

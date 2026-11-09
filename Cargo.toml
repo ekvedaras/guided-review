@@ -40,8 +40,9 @@ ureq = { version = "3.4.2", features = ["json"] }
 usvg = { version = "0.46", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSImage", "NSResponder"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
 
 [features]
