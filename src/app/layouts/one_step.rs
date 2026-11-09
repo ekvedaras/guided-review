@@ -43,6 +43,7 @@ use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
+use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
     OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
     ThreadChanges, ThreadDrafts, ThreadElement,
@@ -1050,12 +1051,6 @@ impl OneStepLayout {
                     .font_weight(FontWeight::MEDIUM)
                     .child(InlineMarkdown::new("title-bar-title", &title)),
             );
-        let switching_to = cx
-            .global::<PrSwitching>()
-            .active
-            .read(cx)
-            .switching_to()
-            .map(|pr| SharedString::from(format!("Switching to {}...", pr.short())));
         TitleBarArea::new("title-bar", colors.background).child(
             div()
                 .flex_1()
@@ -1066,13 +1061,6 @@ impl OneStepLayout {
                 .gap_2()
                 .text_sm()
                 .child(switch_pr)
-                .children(switching_to.map(|label| {
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.accent)
-                        .child(label)
-                }))
                 .child(div().flex_1())
                 .child(jump)
                 .child(github),
@@ -1670,6 +1658,12 @@ impl Render for OneStepLayout {
             Self::KEY_CONTEXT.to_owned()
         };
         let frame_painted_marker = self.frame_stats.frame_started();
+        let switching_veil = cx
+            .global::<PrSwitching>()
+            .active
+            .read(cx)
+            .switching_to()
+            .map(SwitchingVeil::to);
         self.run_scroll_script(window, cx);
         self.note_seen_end(cx);
         #[cfg(feature = "snapshots")]
@@ -1783,6 +1777,7 @@ impl Render for OneStepLayout {
                 row.child(self.ask.clone())
             })
             .child(self.loading.clone())
+            .children(switching_veil)
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
             .children(frame_painted_marker)
