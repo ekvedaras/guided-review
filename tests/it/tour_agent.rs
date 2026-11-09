@@ -1,7 +1,7 @@
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    AgentStatus, OpenOrigin, TerminalId, TourAgentPort, TourAgentState, TourAgents,
+    AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort, TourAgentState, TourAgents,
 };
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -407,4 +407,67 @@ fn agents_the_reviewer_started_are_neither_counted_nor_ended() {
 
     assert_eq!(kills(&full), [TourAgentCall::Kill(TerminalId::new("t1"))]);
     assert!(full.live_terminal_addresses().contains(&"mine1".to_owned()));
+}
+
+fn sends(fake: &FakeTourAgent) -> Vec<TourAgentCall> {
+    fake.calls()
+        .into_iter()
+        .filter(|call| matches!(call, TourAgentCall::Send { .. }))
+        .collect()
+}
+
+#[test]
+fn an_ask_is_handed_only_to_an_idle_agent_the_reviewer_started() {
+    let mine = Arc::new(FakeTourAgent::new().with_terminal("mine", Some(PR), AgentStatus::Idle));
+    assert_eq!(
+        agents(&mine).hand_to_own_agent(&pr(), "do it"),
+        OwnAgentHandOff::Delivered(TerminalId::new("mine"))
+    );
+    assert_eq!(
+        sends(&mine),
+        [TourAgentCall::Send {
+            terminal: TerminalId::new("mine"),
+            text: "do it".to_owned()
+        }]
+    );
+
+    let by_app = Arc::new(FakeTourAgent::new().app_started("t1", PR, AgentStatus::Idle, 100));
+    assert_eq!(
+        agents(&by_app).hand_to_own_agent(&pr(), "do it"),
+        OwnAgentHandOff::StartedByApp(TerminalId::new("t1"))
+    );
+    assert_eq!(sends(&by_app), []);
+
+    let busy = Arc::new(FakeTourAgent::new().with_terminal("mine", Some(PR), AgentStatus::Working));
+    assert_eq!(
+        agents(&busy).hand_to_own_agent(&pr(), "do it"),
+        OwnAgentHandOff::NotSent("mine is working".to_owned())
+    );
+    assert_eq!(sends(&busy), []);
+
+    let none = Arc::new(FakeTourAgent::new());
+    assert_eq!(
+        agents(&none).hand_to_own_agent(&pr(), "do it"),
+        OwnAgentHandOff::NoAgent
+    );
+}
+
+#[test]
+fn the_ask_panel_line_says_what_became_of_the_hand_off() {
+    assert_eq!(
+        OwnAgentHandOff::Delivered(TerminalId::new("t2")).line(),
+        "Handed to your agent t2"
+    );
+    assert_eq!(
+        OwnAgentHandOff::StartedByApp(TerminalId::new("t1")).line(),
+        "Not handed: the tour agent t1 was started by the app and cannot change files. Run `guided-review open` from your own Claude in herdr to make it the tour agent"
+    );
+    assert_eq!(
+        OwnAgentHandOff::NotSent("t2 is working".to_owned()).line(),
+        "Not handed: t2 is working. Try again when it is free"
+    );
+    assert_eq!(
+        OwnAgentHandOff::NoAgent.line(),
+        "Not handed: this PR has no tour agent. Run `guided-review open` from your own Claude in herdr to make it the tour agent"
+    );
 }

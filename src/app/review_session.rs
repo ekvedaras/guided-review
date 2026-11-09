@@ -19,11 +19,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    AgentStatus, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal,
-    CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, OldHead, Place,
-    Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
-    ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, WorkingCopy,
+    AgentStatus, Ask, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem,
+    CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation,
+    OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode,
+    StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -680,6 +680,16 @@ impl ReviewSession {
                 }
             }
         }));
+    }
+
+    /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
+    /// Ends with what the Ask panel says of it.
+    pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
+        let agents = self.tour_work.tour_agents.clone();
+        let pr = self.review.pr().clone();
+        let text = ask.hand_off_text(&pr, place);
+        cx.background_executor()
+            .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
     }
 
     /// Whether the comment box offers Ask agent.

@@ -74,3 +74,11 @@ Decided (`ekvedaras/guided-review@1fbdb5a`, `a8bad50`): every agent the app star
 Open: an agent started while the window is closed shows in an unnamed space (called after its clone's repo) and a tab called by its number, until Show agent or the next start with the window open names them.
 
 2026-11-06, tried live with `scripts/herdr-probe` (`claude --permission-mode dontAsk`, cwd the clone): with only `Read(//<clone>/**)` and `Read(~/.guided-review/tours/**)` listed, the agent had no Grep and no Glob tool at all, and said so; Read inside the clone was allowed and Read of `~/.zshrc` was denied. With bare `Grep,Glob` added, both ran and `Read(~/.zshrc)` was still denied. So the tour agent's and the writer's lists now carry bare `Grep` and `Glob`; the agent's cwd is the clone, but a Grep or Glob given another path is not stopped. Supersedes the "Open" note above.
+
+## An Ask handed to the reviewer's own agent may change files (2026-11-09)
+
+The maintainer asked Ask for a flow diagram saved as a markdown file near the code. Ask runs Claude with read-only tools, so it pasted the file into its answer instead. Comment hand-offs could not do it either: they tell the tour agent "Never change the PR's code", and an agent the app started has no tool that writes outside the tours folder.
+
+Decided: an Ask stays a fast, private, read-only chat. Its "Hand to your agent" action types the whole chat into the PR's tour agent with leave to change files in the agent's own folder, and nothing goes to GitHub. It goes only to an agent the reviewer started (one their `guided-review open` claimed), never to one the app started, which cannot write; then the panel says why and how to claim one. There is no queue: a busy agent is a "try again" line. Comment hand-offs keep "Never change the PR's code".
+
+Considered and turned down: an Ask that answers through the tour agent. It needs a reply path back into the panel, fills the agent's context with every small question, and loses the three Asks that run side by side.

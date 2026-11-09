@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    Context, Div, ElementId, EventEmitter, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement,
-    Styled, Window, div, px, red,
+    ClipboardItem, Context, Div, ElementId, EventEmitter, FocusHandle, InteractiveElement,
+    IntoElement, KeyDownEvent, ParentElement, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, px, red,
 };
 
 use crate::config::AskSettings;
@@ -18,6 +18,7 @@ use crate::viewer::{
     Review, Screen, StepId, TurnStopper,
 };
 
+use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::palette::{Colors, TEXT_FONT};
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -99,6 +100,12 @@ impl Worker {
 /// Asks the layout to put an answer into the comment box; only the review can place it.
 pub struct UseAsComment(pub Ask);
 
+/// Asks the layout to type the Ask into the reviewer's own tour agent; only the session knows the agent.
+pub struct HandToAgent {
+    pub ask: Ask,
+    pub place: String,
+}
+
 /// Why the last question did not go out.
 #[derive(Clone, Copy)]
 enum AskNotice {
@@ -124,6 +131,8 @@ pub struct AskPanel {
     /// Asks a re-pin changed the code under, as of the review last shown.
     code_changed: HashSet<AskId>,
     notice: Option<AskNotice>,
+    /// What became of each Ask handed to the tour agent, or that it is being handed.
+    hand_offs: HashMap<AskId, SharedString>,
     from_workers: UnboundedSender<(AskId, WorkerMessage)>,
     /// The panel's, so escape closes it when no question can be typed.
     focus: FocusHandle,
@@ -166,6 +175,7 @@ impl AskPanel {
             workers: HashMap::new(),
             code_changed: HashSet::new(),
             notice: None,
+            hand_offs: HashMap::new(),
             from_workers,
             focus: cx.focus_handle(),
             question_focus: cx.focus_handle(),
@@ -389,16 +399,14 @@ impl AskPanel {
         .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
-    fn ask_block(&self, ask: &Ask, cx: &mut Context<Self>) -> impl IntoElement {
+    fn ask_block(&self, ask: &Ask, place: &str, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let id = ask.id;
         let is_selected = self.selected == Some(id);
-        let messages = ask.messages.iter().map(|message| {
-            let text = div().flex().flex_col().children(
-                message
-                    .text
-                    .lines()
-                    .map(|line| div().min_h(px(16.)).child(line.to_owned())),
+        let messages = ask.messages.iter().enumerate().map(|(index, message)| {
+            let text = MarkdownView::new(
+                format!("ask-{}-{index}", id_label(id)),
+                parsed_markdown(&message.text),
             );
             match message.author {
                 Author::Reviewer => div().font_weight(gpui::FontWeight::BOLD).child(text),
@@ -446,6 +454,18 @@ impl AskPanel {
                     .child("Stop"),
             );
         }
+        if let Some(answer) = ask.latest_answer().filter(|_| !is_answering) {
+            let answer = answer.to_owned();
+            actions = actions.child(
+                div()
+                    .id(SharedString::from(format!("copy-answer-{}", id_label(id))))
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(answer.clone()));
+                    })
+                    .child("Copy answer"),
+            );
+        }
         let has_lines = matches!(ask.place, Place::Lines { .. } | Place::Piece { .. });
         if has_lines && !is_answering && ask.latest_answer().is_some() {
             let ask_to_use = ask.clone();
@@ -477,13 +497,44 @@ impl AskPanel {
                     .child("Follow up"),
             );
         }
-        block.child(actions)
+        if !is_answering && !ask.messages.is_empty() {
+            let (ask_to_hand, place) = (ask.clone(), place.to_owned());
+            actions = actions.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "hand-to-agent-{}",
+                        id_label(id)
+                    )))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.hand_offs.insert(id, "Handing to your agent...".into());
+                        cx.emit(HandToAgent {
+                            ask: ask_to_hand.clone(),
+                            place: place.clone(),
+                        });
+                        cx.notify();
+                    }))
+                    .child("Hand to your agent"),
+            );
+        }
+        let hand_off = self
+            .hand_offs
+            .get(&id)
+            .map(|line| div().text_color(colors.muted_text).child(line.clone()));
+        block.child(actions).children(hand_off)
+    }
+
+    /// The layout's word on an Ask it handed, or tried to hand, to the tour agent.
+    pub fn hand_off_ended(&mut self, id: AskId, line: String, cx: &mut Context<Self>) {
+        self.hand_offs.insert(id, line.into());
+        cx.notify();
     }
 }
 
 const QUESTION_NOT_SENT: &str = "The AI stopped before it got the question, and three other Asks are answering: ask again when one is done";
 
 impl EventEmitter<UseAsComment> for AskPanel {}
+impl EventEmitter<HandToAgent> for AskPanel {}
 
 fn id_label(id: AskId) -> String {
     serde_json::to_string(&id).unwrap_or_default()
@@ -501,7 +552,7 @@ impl Render for AskPanel {
             .asks
             .at(target.place())
             .into_iter()
-            .map(|ask| self.ask_block(ask, cx).into_any_element())
+            .map(|ask| self.ask_block(ask, &place, cx).into_any_element())
             .collect();
         let is_answering = self.selected.is_some_and(|id| self.pool.is_answering(id));
         let input = match target {

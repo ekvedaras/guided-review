@@ -16,7 +16,9 @@ use crate::app::code_links::{
     open_code, open_code_hint, open_code_label, open_link, use_code_opener,
 };
 use crate::app::code_selection::{CodeSelection, CodeSpot};
-use crate::app::components::ask_panel::{AskPanel, AskSetup, UseAsComment, ask_button};
+use crate::app::components::ask_panel::{
+    AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
+};
 use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
@@ -198,6 +200,16 @@ impl OneStepLayout {
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
                 this.use_as_comment(ask, window, cx);
             });
+        cx.subscribe(&ask, |this, panel, HandToAgent { ask, place }, cx| {
+            let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
+            let id = ask.id;
+            cx.spawn(async move |_, cx| {
+                let line = handing.await;
+                panel.update(cx, |panel, cx| panel.hand_off_ended(id, line, cx));
+            })
+            .detach();
+        })
+        .detach();
         let asked_lines_subscription = cx.observe(&ask, |this, _, cx| {
             this.session.update(cx, ReviewSession::asks_changed);
         });

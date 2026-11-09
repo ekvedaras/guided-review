@@ -1,5 +1,5 @@
 use crate::pieces::PieceId;
-use crate::pull_request::Sha;
+use crate::pull_request::{PullRequestUrl, Sha};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,27 @@ impl Ask {
             .rev()
             .find(|message| message.author == Author::Ai && !message.text.is_empty())
             .map(|message| message.text.as_str())
+    }
+
+    /// What the reviewer's own agent is typed: the whole chat, and leave to change files.
+    pub fn hand_off_text(&self, pr: &PullRequestUrl, place: &str) -> String {
+        let mut lines = vec![
+            format!("The reviewer hands you an Ask about {pr}"),
+            format!("Place: {place}"),
+        ];
+        lines.extend(self.messages.iter().map(|message| {
+            let who = match message.author {
+                Author::Reviewer => "Reviewer",
+                Author::Ai => "Answer",
+            };
+            format!("{who}: {}", message.text)
+        }));
+        lines.push(
+            "Do what the reviewer's last message asks. You may change files in your working folder. \
+             Answer here in the terminal; nothing goes to GitHub."
+                .to_owned(),
+        );
+        lines.join("\n")
     }
 }
 

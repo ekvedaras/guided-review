@@ -99,8 +99,8 @@ pub use thread_actions::{
 };
 pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use tour_agent::{
-    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
-    TourAgentState, TourAgents,
+    AgentStatus, AppAgent, LiveTerminal, OwnAgentHandOff, SendOutcome, TerminalId, TourAgentPort,
+    TourAgentStart, TourAgentState, TourAgents,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;

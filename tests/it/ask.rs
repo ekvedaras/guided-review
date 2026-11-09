@@ -405,3 +405,32 @@ fn without_a_clone_or_with_the_place_gone_a_place_cannot_be_asked_about_and_says
         "These lines are not in the tour any more: select them again to ask"
     );
 }
+
+#[test]
+fn an_ask_handed_to_the_reviewers_own_agent_carries_the_chat_and_lets_it_change_files() {
+    let ask: guided_review::viewer::Ask = serde_json::from_value(json!({
+        "id": 3,
+        "place": {"kind": "step", "step": "order"},
+        "head": "h",
+        "messages": [
+            {"author": "reviewer", "text": "Draw the flow"},
+            {"author": "ai", "text": "Here is the flow"},
+            {"author": "reviewer", "text": "Save it next to the code"},
+        ],
+    }))
+    .unwrap();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+
+    let text = ask.hand_off_text(&pr, "Step: Total changes");
+
+    assert_eq!(
+        text,
+        "The reviewer hands you an Ask about https://github.com/acme/shop/pull/7\n\
+         Place: Step: Total changes\n\
+         Reviewer: Draw the flow\n\
+         Answer: Here is the flow\n\
+         Reviewer: Save it next to the code\n\
+         Do what the reviewer's last message asks. You may change files in your working folder. \
+         Answer here in the terminal; nothing goes to GitHub."
+    );
+}

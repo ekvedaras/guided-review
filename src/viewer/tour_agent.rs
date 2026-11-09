@@ -194,6 +194,32 @@ impl fmt::Display for TourAgentState {
     }
 }
 
+/// What became of an Ask handed to the reviewer's own tour agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnAgentHandOff {
+    Delivered(TerminalId),
+    StartedByApp(TerminalId),
+    /// Nothing was typed, for this reason.
+    NotSent(String),
+    NoAgent,
+}
+
+impl OwnAgentHandOff {
+    /// What the Ask panel says under the Ask.
+    pub fn line(&self) -> String {
+        const MAKE_YOURS: &str =
+            "Run `guided-review open` from your own Claude in herdr to make it the tour agent";
+        match self {
+            Self::Delivered(terminal) => format!("Handed to your agent {terminal}"),
+            Self::StartedByApp(terminal) => format!(
+                "Not handed: the tour agent {terminal} was started by the app and cannot change files. {MAKE_YOURS}"
+            ),
+            Self::NotSent(reason) => format!("Not handed: {reason}. Try again when it is free"),
+            Self::NoAgent => format!("Not handed: this PR has no tour agent. {MAKE_YOURS}"),
+        }
+    }
+}
+
 /// The tour agents of PRs, found by the herdr label `gr.pr=<url>`, never by a stored terminal id.
 #[derive(Clone)]
 pub struct TourAgents {
@@ -421,6 +447,34 @@ impl TourAgents {
                 "tour agents are off: {reason}"
             ))),
             TourAgentState::None | TourAgentState::Unknown => Ok(SendOutcome::NoAgent),
+        }
+    }
+
+    /// Types an Ask into the PR's tour agent, but only one the reviewer started: an app-started agent
+    /// cannot change files, and the reviewer's own one may.
+    pub fn hand_to_own_agent(&self, pr: &PullRequestUrl, text: &str) -> OwnAgentHandOff {
+        let terminal = match self.lookup(pr) {
+            TourAgentState::Agent { terminal, .. } => terminal,
+            TourAgentState::LinkOff(reason) => {
+                return OwnAgentHandOff::NotSent(format!("tour agents are off: {reason}"));
+            }
+            TourAgentState::None | TourAgentState::Unknown => return OwnAgentHandOff::NoAgent,
+        };
+        match self.port.app_started() {
+            Ok(by_app) if by_app.iter().any(|agent| agent.terminal == terminal) => {
+                return OwnAgentHandOff::StartedByApp(terminal);
+            }
+            Ok(_) => {}
+            Err(error) => return OwnAgentHandOff::NotSent(format!("{error:#}")),
+        }
+        match self.send_if_idle(pr, text) {
+            Ok(SendOutcome::Delivered) => OwnAgentHandOff::Delivered(terminal),
+            Ok(SendOutcome::Refused(reason)) => OwnAgentHandOff::NotSent(reason),
+            Ok(SendOutcome::Starting) => {
+                OwnAgentHandOff::NotSent(format!("{terminal} is still starting"))
+            }
+            Ok(SendOutcome::NoAgent) => OwnAgentHandOff::NoAgent,
+            Err(error) => OwnAgentHandOff::NotSent(format!("{error:#}")),
         }
     }
 
