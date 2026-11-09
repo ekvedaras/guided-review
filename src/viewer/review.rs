@@ -864,7 +864,29 @@ impl Review {
             }
         }
         self.show_pulled_threads(outcome.threads.as_ref());
+        if outcome.result == ThreadActionResult::Done {
+            match &outcome.action {
+                ThreadAction::Resolve { thread_id } => self.fold_thread(thread_id, true),
+                ThreadAction::Unresolve { thread_id } => self.fold_thread(thread_id, false),
+                _ => {}
+            }
+        }
         outcome.result
+    }
+
+    fn fold_thread(&mut self, thread_id: &ThreadId, folded: bool) {
+        let Some(thread) = self
+            .pulled_threads
+            .iter()
+            .find(|thread| &thread.id == thread_id)
+        else {
+            return;
+        };
+        if thread.is_folded_by_default() == folded {
+            self.thread_fold_flipped.remove(thread_id);
+        } else {
+            self.thread_fold_flipped.insert(thread_id.clone());
+        }
     }
 
     fn show_pulled_threads(&mut self, threads: Option<&Result<Vec<ReviewThread>, String>>) {

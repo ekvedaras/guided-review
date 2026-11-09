@@ -125,7 +125,7 @@ impl ReviewThread {
         })
     }
 
-    fn is_folded_by_default(&self) -> bool {
+    pub(super) fn is_folded_by_default(&self) -> bool {
         self.is_resolved
             || self.is_outdated
             || self.comments.first().is_some_and(|comment| comment.is_bot)

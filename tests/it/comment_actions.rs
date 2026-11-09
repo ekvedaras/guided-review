@@ -184,6 +184,60 @@ fn unresolving_a_thread_tells_github_and_shows_it_open() {
     assert!(!shown_thread(&review).is_resolved);
 }
 
+fn shown_thread_is_folded(review: &Review) -> bool {
+    review
+        .current_step()
+        .unwrap()
+        .threads
+        .first()
+        .unwrap()
+        .is_folded
+}
+
+#[test]
+fn a_thread_folds_once_it_is_resolved_even_when_the_reviewer_opened_it() {
+    let pull = Pull::new();
+    let by_bot = ThreadComment {
+        is_bot: true,
+        ..comment("C1", "nit")
+    };
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![by_bot]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.toggle_thread_fold(&ThreadId::new("T1"));
+    assert!(!shown_thread_is_folded(&review));
+
+    review.act_on_thread(
+        ThreadAction::Resolve {
+            thread_id: ThreadId::new("T1"),
+        },
+        &github,
+    );
+
+    assert!(shown_thread_is_folded(&review));
+}
+
+#[test]
+fn an_opened_resolved_thread_stays_open_once_it_is_unresolved() {
+    let pull = Pull::new();
+    let mut resolved = thread_on_line_ten(vec![comment("C1", "why?")]);
+    resolved.is_resolved = true;
+    let github = github_with_thread(&pull, resolved);
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.toggle_thread_fold(&ThreadId::new("T1"));
+    assert!(!shown_thread_is_folded(&review));
+
+    review.act_on_thread(
+        ThreadAction::Unresolve {
+            thread_id: ThreadId::new("T1"),
+        },
+        &github,
+    );
+
+    assert!(!shown_thread_is_folded(&review));
+}
+
 #[test]
 fn a_reaction_is_added_and_removed_on_a_click() {
     let pull = Pull::new();
