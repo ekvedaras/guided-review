@@ -10,6 +10,7 @@ use futures::channel::mpsc::unbounded;
 use gpui::{App, AsyncApp, Entity};
 
 use super::components::pr_switcher::PrSwitching;
+use crate::config::Config;
 use crate::open_review::writer_folder;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision};
@@ -90,7 +91,18 @@ fn start(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
         let started = cx
             .background_executor()
             .spawn(async move {
+                let summary_skill = match Config::load_from(&home) {
+                    Ok(config) => config
+                        .summary_instructions(&home)
+                        .skill()
+                        .map(str::to_owned),
+                    Err(error) => {
+                        eprintln!("warning: summary instructions not read: {error:#}");
+                        None
+                    }
+                };
                 TourAgents::new(writer_port)
+                    .with_summary_skill(summary_skill)
                     .starting_in(writer_folder(&writer_pr, &home))
                     .write_tour(&writer_pr, &shown)
             })

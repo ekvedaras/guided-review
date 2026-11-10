@@ -299,3 +299,68 @@ fn a_wrongly_typed_summary_instructions_is_a_warning_and_the_rest_of_the_config_
     );
     assert!(config.ide_template().is_some());
 }
+
+#[test]
+fn outline_names_the_skill_the_config_asks_for() {
+    let shop = Shop::with_pull();
+    shop.guided_review_file("summary.md", "default text\n");
+    shop.config("summary_instructions = { skill = \"recap\" }\n");
+
+    let run = shop.outline();
+
+    assert!(run.success, "{}", run.stderr);
+    assert!(
+        run.stdout
+            .ends_with("\nsummary instructions: run the skill recap\n"),
+        "{}",
+        run.stdout
+    );
+    assert!(!run.stdout.contains("default text"), "{}", run.stdout);
+}
+
+#[test]
+fn a_plugin_skill_name_is_kept_as_it_is() {
+    let shop = Shop::with_pull();
+    shop.config("summary_instructions = { skill = \"team:recap\" }\n");
+
+    let run = shop.outline();
+
+    assert!(
+        run.stdout
+            .contains("summary instructions: run the skill team:recap\n"),
+        "{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn the_eval_variable_turns_a_skill_off_too() {
+    let shop = Shop::with_pull();
+    shop.config("summary_instructions = { skill = \"recap\" }\n");
+
+    let run = GuidedReview::new(&shop.repo, &shop.github)
+        .with_env(Config::SUMMARY_INSTRUCTIONS_OFF_ENV, Path::new("1"))
+        .run(&["outline", PR]);
+
+    assert!(
+        !run.stdout.contains("summary instructions"),
+        "{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn check_warns_when_a_skill_is_set_but_the_tour_has_no_reviewer_summary() {
+    let shop = Shop::with_pull();
+    shop.config("summary_instructions = { skill = \"recap\" }\n");
+    shop.tour_with(&json!({}));
+
+    let run = shop.check();
+
+    assert!(
+        run.stdout
+            .contains("warning: summary instructions are set but the tour has no reviewer summary"),
+        "{}",
+        run.stdout
+    );
+}

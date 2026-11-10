@@ -106,6 +106,8 @@ pub struct TourAgentStart {
     pub name: String,
     pub folder: PathBuf,
     pub first_task: String,
+    /// The reviewer's summary instructions skill, allowed to the agent so it is not silently denied.
+    pub summary_skill: Option<String>,
 }
 
 /// At most this many tour agents the app started stay alive.
@@ -226,11 +228,21 @@ pub struct TourAgents {
     port: Arc<dyn TourAgentPort>,
     /// Where a tour agent the app starts works. `None`: the app starts none.
     folder: Option<PathBuf>,
+    summary_skill: Option<String>,
 }
 
 impl TourAgents {
     pub fn new(port: Arc<dyn TourAgentPort>) -> Self {
-        Self { port, folder: None }
+        Self {
+            port,
+            folder: None,
+            summary_skill: None,
+        }
+    }
+
+    pub fn with_summary_skill(mut self, skill: Option<String>) -> Self {
+        self.summary_skill = skill;
+        self
     }
 
     pub fn starting_in(mut self, folder: PathBuf) -> Self {
@@ -262,6 +274,7 @@ impl TourAgents {
             name: terminal_name(pr),
             folder: folder.clone(),
             first_task,
+            summary_skill: self.summary_skill.clone(),
         })
     }
 

@@ -109,6 +109,8 @@ pub fn open_review(
         repinner,
         refresher,
         reloader,
-        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new())).starting_in(agent_folder),
+        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new()))
+            .starting_in(agent_folder)
+            .with_summary_skill(config.summary_instructions(home).skill().map(str::to_owned)),
     })
 }

@@ -21,7 +21,6 @@ pub struct Config {
     /// `idea://open?file={path}&line={line}` or a shell command such as `code --goto {path}:{line}`.
     #[serde(default)]
     ide: Option<String>,
-    /// A path to a file with the instructions, or `"off"`.
     #[serde(default)]
     summary_instructions: SummaryInstructionsChoice,
 }

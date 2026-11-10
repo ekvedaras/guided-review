@@ -33,12 +33,17 @@ pub fn refresh_writer_tools(clone: &Path) -> String {
 }
 
 /// What a tour agent the app starts may do without the auto mode classifier: the refresh writer's tools, plus
-/// answering. It runs in auto mode, because a comment may ask it to change the PR's code (decided 2026-11-10).
-pub fn tour_agent_tools(clone: &Path) -> String {
-    format!(
+/// answering, plus the reviewer's summary skill. It runs in auto mode, because a comment may ask it to change
+/// the PR's code (decided 2026-11-10).
+pub fn tour_agent_tools(clone: &Path, summary_skill: Option<&str>) -> String {
+    let tools = format!(
         "{},Bash(guided-review agent-reply:*)",
         refresh_writer_tools(clone)
-    )
+    );
+    match summary_skill {
+        Some(skill) => format!("{tools},Skill({skill})"),
+        None => tools,
+    }
 }
 
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.

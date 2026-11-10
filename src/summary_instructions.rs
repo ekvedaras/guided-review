@@ -9,6 +9,7 @@ pub const DEFAULT_FILE: &str = ".guided-review/summary.md";
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SummaryInstructions {
     text: Option<String>,
+    skill: Option<String>,
     warning: Option<String>,
 }
 
@@ -21,6 +22,8 @@ pub enum SummaryInstructionsChoice {
     /// A path as written, which may start with `~/`.
     OtherFile(String),
     Off,
+    /// A skill name as written.
+    Skill(String),
     /// What the config holds when it is none of the above, as written.
     Unreadable(String),
 }
@@ -32,7 +35,10 @@ impl SummaryInstructionsChoice {
         match value.as_str() {
             Some(Self::OFF) => Self::Off,
             Some(path) => Self::OtherFile(path.to_owned()),
-            None => Self::Unreadable(value.to_string().trim().to_owned()),
+            None => match value.get("skill").and_then(toml::Value::as_str) {
+                Some(name) => Self::Skill(name.to_owned()),
+                None => Self::Unreadable(value.to_string().trim().to_owned()),
+            },
         }
     }
 
@@ -40,6 +46,7 @@ impl SummaryInstructionsChoice {
         match self {
             Self::Off => SummaryInstructions::none(),
             Self::OtherFile(path) => read_file(&expand_home(path, home)),
+            Self::Skill(name) => SummaryInstructions::from_skill(name),
             Self::Unreadable(written) => SummaryInstructions::unreadable(written),
             Self::DefaultFile => {
                 let default = home.join(DEFAULT_FILE);
@@ -80,7 +87,7 @@ impl SummaryInstructions {
             Ok(text) if text.trim().is_empty() => Self::none(),
             Ok(text) => Self {
                 text: Some(text),
-                warning: None,
+                ..Self::none()
             },
             Err(error) => Self::broken(path, &error),
         }
@@ -89,20 +96,40 @@ impl SummaryInstructions {
     fn unreadable(written: &str) -> Self {
         Self {
             warning: Some(format!(
-                "summary_instructions {written} is not a file path or \"{}\"",
+                "summary_instructions {written} is not a file path, \"{}\" or {{ skill = \"<name>\" }}",
                 SummaryInstructionsChoice::OFF
             )),
             ..Self::none()
         }
     }
 
+    /// A name that would add more than one rule to the tour agent's allowed tools is a warning, not a skill.
+    pub fn from_skill(name: &str) -> Self {
+        let name = name.trim();
+        if name.is_empty() {
+            return Self::none();
+        }
+        if name.contains(|c: char| c.is_whitespace() || matches!(c, ',' | '(' | ')')) {
+            return Self {
+                warning: Some(format!(
+                    "summary instructions skill {name:?} is not a skill name"
+                )),
+                ..Self::none()
+            };
+        }
+        Self {
+            skill: Some(name.to_owned()),
+            ..Self::none()
+        }
+    }
+
     fn broken(path: &Path, error: &std::io::Error) -> Self {
         Self {
-            text: None,
             warning: Some(format!(
                 "summary instructions file {} could not be read: {error}",
                 path.display()
             )),
+            ..Self::none()
         }
     }
 
@@ -110,12 +137,17 @@ impl SummaryInstructions {
         self.text.as_deref()
     }
 
+    /// The skill the tour writer runs for the reviewer summary.
+    pub fn skill(&self) -> Option<&str> {
+        self.skill.as_deref()
+    }
+
     pub fn warning(&self) -> Option<&str> {
         self.warning.as_deref()
     }
 
     pub fn are_set(&self) -> bool {
-        self.text.is_some()
+        self.text.is_some() || self.skill.is_some()
     }
 }
 
@@ -123,6 +155,9 @@ impl fmt::Display for SummaryInstructions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(warning) = &self.warning {
             writeln!(f, "\nwarning: {warning}")?;
+        }
+        if let Some(skill) = &self.skill {
+            writeln!(f, "\nsummary instructions: run the skill {skill}")?;
         }
         if let Some(text) = &self.text {
             write!(f, "\nsummary instructions:\n{text}")?;

@@ -49,7 +49,7 @@ fn a_tour_agent_may_run_every_command_the_tour_skill_asks_for() {
     let commands = commands_in(SKILL);
     assert!(commands.len() > 10, "{commands:?}");
 
-    let tools = tour_agent_tools(Path::new("/clones/shop"));
+    let tools = tour_agent_tools(Path::new("/clones/shop"), None);
     assert_eq!(denied_by(&tools, commands), Vec::<&str>::new(), "{tools}");
 }
 

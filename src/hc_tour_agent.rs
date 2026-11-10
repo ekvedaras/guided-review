@@ -346,7 +346,7 @@ impl TourAgentPort for HcTourAgents {
             "--permission-mode",
             "auto",
             "--allowedTools",
-            &tour_agent_tools(&start.folder),
+            &tour_agent_tools(&start.folder, start.summary_skill.as_deref()),
         ];
         let started = self.hc(&args)?;
         let address = at(&started, "/address")
