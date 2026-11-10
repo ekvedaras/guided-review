@@ -19,8 +19,9 @@ use crate::viewer::{
     Review, Screen, StepId, TurnStopper,
 };
 
-use super::button::{ButtonKind, ButtonSize, button};
+use super::button::{ButtonKind, ButtonSize, icon_button, icon_label_button};
 use super::card::card;
+use super::icon::Icon;
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in};
 use super::palette::{Colors, TEXT_FONT};
@@ -454,69 +455,76 @@ impl AskPanel {
             );
         }
         let is_answering = self.pool.is_answering(id);
-        let action = |name: String| {
-            button(
+        let action = |name: String, icon: Icon, label: &'static str| {
+            icon_label_button(
                 &colors,
                 SharedString::from(format!("{name}-{}", id_label(id))),
                 ButtonKind::Ghost,
                 ButtonSize::Small,
+                icon,
+                label,
             )
         };
         let mut actions = div().flex().flex_wrap().gap_1().ml(px(-8.));
         if is_answering {
             actions = actions.child(
-                action("stop-turn".to_owned())
-                    .on_click(cx.listener(move |this, _, _, cx| this.stop_turn(id, cx)))
-                    .child("Stop"),
+                action("stop-turn".to_owned(), Icon::Square, "Stop")
+                    .on_click(cx.listener(move |this, _, _, cx| this.stop_turn(id, cx))),
             );
         }
         if let Some(answer) = ask.latest_answer().filter(|_| !is_answering) {
             let answer = answer.to_owned();
             actions = actions.child(
-                action("copy-answer".to_owned())
-                    .on_click(move |_, _, cx| {
+                action("copy-answer".to_owned(), Icon::Copy, "Copy answer").on_click(
+                    move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(answer.clone()));
-                    })
-                    .child("Copy answer"),
+                    },
+                ),
             );
         }
         let has_lines = matches!(ask.place, Place::Lines { .. } | Place::Piece { .. });
         if has_lines && !is_answering && ask.latest_answer().is_some() {
             let ask_to_use = ask.clone();
             actions = actions.child(
-                action("use-as-comment".to_owned())
-                    .on_click(
-                        cx.listener(move |_, _, _, cx| cx.emit(UseAsComment(ask_to_use.clone()))),
-                    )
-                    .child("Use as comment"),
+                action(
+                    "use-as-comment".to_owned(),
+                    Icon::MessageSquare,
+                    "Use as comment",
+                )
+                .on_click(
+                    cx.listener(move |_, _, _, cx| cx.emit(UseAsComment(ask_to_use.clone()))),
+                ),
             );
         }
         if !is_selected {
             actions = actions.child(
-                action("follow-up".to_owned())
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                action("follow-up".to_owned(), Icon::Reply, "Follow up").on_click(cx.listener(
+                    move |this, _, _, cx| {
                         this.selected = Some(id);
                         this.question.clear();
                         this.notice = None;
                         this.ensure_worker(id);
                         cx.notify();
-                    }))
-                    .child("Follow up"),
+                    },
+                )),
             );
         }
         if !is_answering && !ask.messages.is_empty() {
             let (ask_to_hand, place) = (ask.clone(), place.to_owned());
             actions = actions.child(
-                action("hand-to-agent".to_owned())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.hand_offs.insert(id, "Handing to your agent...".into());
-                        cx.emit(HandToAgent {
-                            ask: ask_to_hand.clone(),
-                            place: place.clone(),
-                        });
-                        cx.notify();
-                    }))
-                    .child("Hand to your agent"),
+                action(
+                    "hand-to-agent".to_owned(),
+                    Icon::Terminal,
+                    "Hand to your agent",
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.hand_offs.insert(id, "Handing to your agent...".into());
+                    cx.emit(HandToAgent {
+                        ask: ask_to_hand.clone(),
+                        place: place.clone(),
+                    });
+                    cx.notify();
+                })),
             );
         }
         let hand_off = self
@@ -624,9 +632,15 @@ impl Render for AskPanel {
                             .child(format!("Ask: {place}")),
                     )
                     .child(
-                        button(&colors, "ask-close", ButtonKind::Ghost, ButtonSize::Small)
-                            .on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))
-                            .child("Close"),
+                        icon_button(
+                            &colors,
+                            "ask-close",
+                            ButtonKind::Ghost,
+                            ButtonSize::Small,
+                            Icon::Close,
+                            "Close",
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
                     ),
             )
             .child(
@@ -652,12 +666,31 @@ impl Render for AskPanel {
     }
 }
 
-/// The button on a place. It shows how many Asks the place already has.
-pub fn ask_button(colors: &Colors, id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
-    let ask = button(colors, id, ButtonKind::Secondary, ButtonSize::Small).child("Ask");
+/// The button on a place, `Tinted` where it is the accent action of a bar and `Ghost` beside a
+/// file's name. It shows how many Asks the place already has.
+pub fn ask_button(
+    colors: &Colors,
+    id: impl Into<ElementId>,
+    count: usize,
+    kind: ButtonKind,
+) -> Stateful<Div> {
+    let ask = icon_label_button(colors, id, kind, ButtonSize::Small, Icon::Sparkles, "Ask");
     if count == 0 {
         return ask;
     }
-    ask.child(div().size(px(5.)).rounded_full().bg(colors.accent))
-        .child(count.to_string())
+    ask.child(
+        div()
+            .min_w(px(16.))
+            .h(px(16.))
+            .px_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .bg(colors.current)
+            .border_1()
+            .border_color(colors.current_border)
+            .text_color(colors.accent)
+            .child(count.to_string()),
+    )
 }

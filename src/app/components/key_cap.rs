@@ -1,7 +1,7 @@
 use gpui::{IntoElement, ParentElement, Styled, div, px};
 
 use super::icon::{Icon, sized_icon};
-use super::palette::{CONTROL_RADIUS, Colors};
+use super::palette::{Colors, INNER_RADIUS};
 
 /// What a key cap shows: the key's name, or a drawn arrow for the keys that have no word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub fn key_cap(colors: &Colors, key: KeyLabel) -> impl IntoElement {
         .flex_none()
         .items_center()
         .justify_center()
-        .rounded(px(CONTROL_RADIUS))
+        .rounded(px(INNER_RADIUS))
         .border_1()
         .border_color(colors.border)
         .bg(colors.header_band())

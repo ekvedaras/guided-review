@@ -4,6 +4,7 @@
 use gpui::{App, Global, SharedString};
 
 use crate::app::active_session::session_of;
+use crate::app::components::icon::Icon;
 use crate::viewer::{CodeLink, CodeOpener, Destination, Opened, Review};
 
 struct ActiveCodeOpener(CodeOpener);
@@ -28,6 +29,14 @@ pub fn open_link(url: &str, cx: &mut App) {
 /// "Open in IDE" or "Open on GitHub", for the button that opens `link`.
 pub fn open_code_label(link: &CodeLink, cx: &App) -> &'static str {
     cx.global::<ActiveCodeOpener>().0.destination(link).label()
+}
+
+/// The icon beside that label: code for the IDE, a link out for the browser.
+pub fn open_code_icon(link: &CodeLink, cx: &App) -> Icon {
+    match cx.global::<ActiveCodeOpener>().0.destination(link) {
+        Destination::Ide { .. } => Icon::Code,
+        Destination::GitHub { .. } | Destination::Browser(_) => Icon::ExternalLink,
+    }
 }
 
 /// For a tooltip on what opens `link`: where it goes, why not the IDE, or what to mind there.

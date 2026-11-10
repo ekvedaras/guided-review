@@ -5,8 +5,9 @@ use gpui::{
 
 use crate::viewer::RefreshBrief;
 
-use super::button::{ButtonKind, ButtonSize, button};
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{dropping_in, notice_band};
+use super::icon::Icon;
 use super::palette::{Colors, Tone};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,14 +63,15 @@ impl RenderOnce for RefreshBanner {
             RefreshProgress::Idle | RefreshProgress::Running => "Refresh",
         };
         let button = (self.progress != RefreshProgress::Running).then(|| {
-            button(
+            icon_label_button(
                 &colors,
                 "refresh-tour",
-                ButtonKind::Primary,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
+                Icon::Refresh,
+                button_label,
             )
             .on_click(self.on_refresh)
-            .child(button_label)
         });
         let redo_hint = self.brief.redo_hint().map(|hint| {
             div().child(SharedString::from(format!(

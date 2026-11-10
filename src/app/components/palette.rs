@@ -11,9 +11,11 @@ pub const CODE_FONT: &str = "Menlo";
 /// Diagrams measure their text with this file, so it must hold `TEXT_FONT`.
 pub const TEXT_FONT_FILE: &str = "/System/Library/Fonts/HelveticaNeue.ttc";
 
-/// One radius for every card on the page and one for every control, so corners agree.
-pub const CARD_RADIUS: f32 = 8.;
-pub const CONTROL_RADIUS: f32 = 6.;
+/// One radius for every card on the page, one for every control and one for what sits inside a
+/// control or is too small for the control's (a segment's thumb, a chip, a key cap), so corners agree.
+pub const CARD_RADIUS: f32 = 12.;
+pub const CONTROL_RADIUS: f32 = 8.;
+pub const INNER_RADIUS: f32 = 6.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Appearance {
@@ -200,6 +202,15 @@ impl Gradient {
         )
     }
 
+    /// From the top left corner to the bottom right one.
+    pub fn diagonal(self) -> Background {
+        linear_gradient(
+            135.,
+            linear_color_stop(self.start, 0.),
+            linear_color_stop(self.end, 1.),
+        )
+    }
+
     /// The same run at a share of its opacity, for a fill that fades in or out.
     pub fn opacity(self, factor: f32) -> Self {
         Self {
@@ -223,6 +234,16 @@ pub struct Colors {
     pub surface_sheen: Rgba,
     /// What floats over the page: palettes, the switcher, dialogs, tooltips; with `overlay_shadow`.
     pub overlay: Rgba,
+    /// A control that stands up from the page like a key: a secondary button, a segment's thumb.
+    pub raised: Gradient,
+    /// What a control is sunk into: the track of a segmented control.
+    pub inset: Rgba,
+    /// The edge of a raised control under the mouse, leaning to the accent.
+    pub accent_border: Rgba,
+    /// The ground of a section's icon tile, iris running to azure.
+    pub icon_tile: Gradient,
+    /// The ground of a button for something finished.
+    pub success_fill: Gradient,
     /// Under the mouse on anything clickable that is not a primary button.
     pub hover: Rgba,
     /// Under the mouse button while it is held down (`.active()`).
@@ -268,6 +289,8 @@ pub struct Colors {
     pub shadow: Rgba,
     /// The faint lift of a card on the page; transparent in the dark, where cards do not cast.
     pub card_shadow: Rgba,
+    /// What a raised control casts, in both appearances: it reads as a key that can be pushed in.
+    pub control_shadow: Rgba,
     /// A quiet iris wash at the top of a screen, behind its heading, fading into `background`.
     pub page_wash: Gradient,
     pub checker_light: Rgba,
@@ -337,6 +360,11 @@ impl Colors {
             surface: rgb(0xf7f8fd),
             surface_sheen: rgb(0xf1f2f9),
             overlay: rgb(WHITE),
+            raised: Gradient::of(WHITE, ink::S2),
+            inset: rgb(0xeceef6),
+            accent_border: rgb(iris::S300),
+            icon_tile: Gradient::of(iris::S100, azure::S100),
+            success_fill: Gradient::of(green::S50, green::S100),
             hover: rgb(0xeceef6),
             pressed: rgb(ink::S4),
             border: rgb(0xc9ccd8),
@@ -369,6 +397,7 @@ impl Colors {
             scrim: translucent(ink::S15, 0.32),
             shadow: translucent(ink::S15, 0.16),
             card_shadow: translucent(ink::S15, 0.06),
+            control_shadow: translucent(ink::S15, 0.12),
             page_wash: Gradient::of(0xeff1fe, WHITE),
             checker_light: rgb(WHITE),
             checker_dark: rgb(ink::S3),
@@ -399,6 +428,11 @@ impl Colors {
             surface: rgb(0x1b1e2b),
             surface_sheen: rgb(0x181b27),
             overlay: rgb(ink::S12),
+            raised: Gradient::of(0x2a2d3f, 0x222535),
+            inset: rgb(0x10121c),
+            accent_border: rgb(iris::S600),
+            icon_tile: Gradient::of(iris::S900, azure::S900),
+            success_fill: Gradient::of(0x163220, green::S950),
             hover: rgb(0x262939),
             pressed: rgb(ink::S10),
             border: rgb(0x383c4f),
@@ -431,6 +465,7 @@ impl Colors {
             scrim: translucent(BLACK, 0.55),
             shadow: translucent(BLACK, 0.5),
             card_shadow: translucent(BLACK, 0.),
+            control_shadow: translucent(BLACK, 0.45),
             page_wash: Gradient::of(0x1b1d36, 0x141622),
             checker_light: rgb(0x2b2b2b),
             checker_dark: rgb(0x3b3b3b),
@@ -560,12 +595,28 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(1.), self.card_shadow.into()).blur_radius(px(2.))]
     }
 
-    /// A primary button sits a little above the page.
+    /// A primary button sits above the page and casts its own colour.
     pub fn primary_shadow(&self) -> Vec<BoxShadow> {
         vec![
-            BoxShadow::new(px(0.), px(1.), translucent(iris::S900, 0.35).into())
-                .blur_radius(px(3.)),
+            BoxShadow::new(px(0.), px(1.), translucent(iris::S900, 0.4).into()).blur_radius(px(2.)),
+            BoxShadow::new(px(0.), px(4.), translucent(iris::S600, 0.28).into())
+                .blur_radius(px(10.)),
         ]
+    }
+
+    /// A raised control (a secondary button, a segment's thumb): a short, soft drop.
+    pub fn control_shadow(&self) -> Vec<BoxShadow> {
+        vec![BoxShadow::new(px(0.), px(1.), self.control_shadow.into()).blur_radius(px(2.))]
+    }
+
+    /// A bar pinned to the bottom of a panel casts upwards over what scrolls under it.
+    pub fn bar_shadow(&self) -> Vec<BoxShadow> {
+        vec![BoxShadow::new(px(0.), px(-6.), self.shadow.opacity(0.5).into()).blur_radius(px(20.))]
+    }
+
+    /// The ground of a secondary button, top down.
+    pub fn raised_fill(&self) -> Background {
+        self.raised.top_down()
     }
 
     /// Around a focused text box, with a 1 px `accent` border: a soft accent ring outside it.

@@ -6,8 +6,9 @@ use gpui::{
 use crate::pull_request::Sha;
 use crate::viewer::OldHead;
 
-use super::button::{ButtonKind, ButtonSize, button};
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{dropping_in, notice_band};
+use super::icon::Icon;
 use super::palette::{Colors, Tone};
 
 type OnRepin = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -57,14 +58,15 @@ impl RenderOnce for NewCommitsBanner {
             RepinProgress::Idle | RepinProgress::Running => "Update tour",
         };
         let button = (self.progress != RepinProgress::Running).then(|| {
-            button(
+            icon_label_button(
                 &colors,
                 "update-tour",
-                ButtonKind::Primary,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
+                Icon::Refresh,
+                button_label,
             )
             .on_click(self.on_repin)
-            .child(button_label)
         });
         let error = match &self.progress {
             RepinProgress::Failed(error) => Some(

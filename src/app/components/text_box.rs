@@ -57,6 +57,7 @@ actions!(
 pub struct Field {
     frame: gpui::Div,
     focus: FocusHandle,
+    is_invalid: bool,
 }
 
 impl Field {
@@ -64,7 +65,14 @@ impl Field {
         Self {
             frame: div(),
             focus: focus.clone(),
+            is_invalid: false,
         }
+    }
+
+    /// What is typed cannot be saved: the edge turns danger until it is fixed.
+    pub fn invalid(mut self, is_invalid: bool) -> Self {
+        self.is_invalid = is_invalid;
+        self
     }
 }
 
@@ -93,6 +101,8 @@ impl RenderOnce for Field {
             frame
                 .border_color(colors.accent)
                 .shadow(colors.focus_ring())
+        } else if self.is_invalid {
+            frame.border_color(colors.danger)
         } else {
             frame
                 .border_color(colors.border)

@@ -8,13 +8,15 @@ use gpui::{
 
 use crate::viewer::{CommentDraft, CommentPlace, CommentProblem, QueuedComment};
 
-use super::button::{ButtonKind, ButtonSize, button as styled_button};
+use super::button::{ButtonKind, ButtonSize, button as styled_button, icon_label_button, joined};
 use super::card::card;
 use super::chip::callout;
+use super::icon::Icon;
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in};
 use super::palette::{Colors, Tone};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
+use super::tooltip::tooltip;
 
 pub type OnCompose = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OnType = Rc<dyn Fn(String, &mut Window, &mut App)>;
@@ -88,13 +90,13 @@ impl CommentComposer {
 fn button(
     colors: &Colors,
     id: &'static str,
+    icon: Icon,
     label: &'static str,
     kind: ButtonKind,
     on_click: OnCompose,
-) -> impl IntoElement {
-    styled_button(colors, id, kind, ButtonSize::Regular)
+) -> gpui::Stateful<gpui::Div> {
+    icon_label_button(colors, id, kind, ButtonSize::Regular, icon, label)
         .on_click(move |_, window, cx| on_click(window, cx))
-        .child(label)
 }
 
 impl RenderOnce for CommentComposer {
@@ -130,60 +132,78 @@ impl RenderOnce for CommentComposer {
             div().child(self.draft.body.clone()).into_any_element()
         };
         let buttons = (self.state != ComposerState::Sending).then(|| {
+            let capabilities = self.capabilities;
+            let ask_agent = capabilities.ask_agent.then(|| {
+                let mut parts = vec![button(
+                    &colors,
+                    "ask-agent",
+                    Icon::Sparkles,
+                    "Ask agent",
+                    ButtonKind::Joined,
+                    actions.on_ask_agent,
+                )];
+                if capabilities.comment_now {
+                    let on_ask_now = actions.on_ask_agent_now;
+                    parts.push(
+                        styled_button(
+                            &colors,
+                            "ask-agent-now",
+                            ButtonKind::Joined,
+                            ButtonSize::Regular,
+                        )
+                        .child("now")
+                        .tooltip(tooltip(|_| {
+                            "Ask agent now: posts the comment at once".into()
+                        }))
+                        .on_click(move |_, window, cx| on_ask_now(window, cx)),
+                    );
+                }
+                joined(&colors, parts)
+            });
+            let on_add = actions.on_add_to_review;
             div()
                 .flex()
                 .flex_wrap()
+                .items_center()
                 .gap_2()
-                .child(button(
-                    &colors,
-                    "add-to-review",
-                    "Add to review",
-                    ButtonKind::Primary,
-                    actions.on_add_to_review,
-                ))
-                .children(self.capabilities.comment_now.then(|| {
+                .child(
+                    styled_button(
+                        &colors,
+                        "add-to-review",
+                        ButtonKind::Primary,
+                        ButtonSize::Regular,
+                    )
+                    .child("Add to review")
+                    .on_click(move |_, window, cx| on_add(window, cx)),
+                )
+                .children(capabilities.comment_now.then(|| {
                     button(
                         &colors,
                         "comment-now",
+                        Icon::Send,
                         "Comment now",
                         ButtonKind::Secondary,
                         actions.on_comment_now,
                     )
                 }))
-                .children(self.capabilities.ask_agent.then(|| {
-                    button(
-                        &colors,
-                        "ask-agent",
-                        "Ask agent",
-                        ButtonKind::Secondary,
-                        actions.on_ask_agent,
-                    )
-                }))
-                .children(
-                    (self.capabilities.ask_agent && self.capabilities.comment_now).then(|| {
-                        button(
-                            &colors,
-                            "ask-agent-now",
-                            "Ask agent now",
-                            ButtonKind::Secondary,
-                            actions.on_ask_agent_now,
-                        )
-                    }),
-                )
-                .children(self.capabilities.suggest_change.then(|| {
+                .children(capabilities.suggest_change.then(|| {
                     button(
                         &colors,
                         "suggest-change",
+                        Icon::Diff,
                         "Suggest change",
                         ButtonKind::Secondary,
                         actions.on_suggest_change,
                     )
                 }))
+                .children(ask_agent)
+                .child(div().flex_1())
                 .child(button(
                     &colors,
                     "discard-comment",
+                    Icon::Trash,
                     "Discard",
-                    ButtonKind::Ghost,
+                    ButtonKind::Danger,
                     actions.on_discard,
                 ))
         });
@@ -271,14 +291,15 @@ impl RenderOnce for QueuedCommentNote {
             )))
             .child(
                 div().flex().ml(px(-8.)).child(
-                    styled_button(
+                    icon_label_button(
                         &colors,
                         "discard-queued",
-                        ButtonKind::Ghost,
+                        ButtonKind::Danger,
                         ButtonSize::Small,
+                        Icon::Trash,
+                        "Discard",
                     )
-                    .on_click(move |_, window, cx| on_discard(window, cx))
-                    .child("Discard"),
+                    .on_click(move |_, window, cx| on_discard(window, cx)),
                 ),
             )
     }

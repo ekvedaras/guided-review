@@ -13,13 +13,15 @@ use std::time::Instant;
 
 use crate::app::active_session::use_active_session;
 use crate::app::code_links::{
-    open_code, open_code_hint, open_code_label, open_link, use_code_opener,
+    open_code, open_code_hint, open_code_icon, open_code_label, open_link, use_code_opener,
 };
 use crate::app::code_selection::{CodeSelection, CodeSpot};
 use crate::app::components::ask_panel::{
     AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
 };
-use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
+use crate::app::components::button::{
+    ButtonKind, ButtonSize, button, button_icon, icon_label_button, joined, toggle_button,
+};
 use crate::app::components::card::card;
 use crate::app::components::chip::{chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
@@ -37,7 +39,7 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
-use crate::app::components::key_cap::{KeyLabel, key_hint};
+use crate::app::components::key_cap::{KeyLabel, key_cap, key_hint};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, PreparedMarkdown, bullet, parsed_markdown,
@@ -46,7 +48,9 @@ use crate::app::components::motion::{
     Edge, SCREEN, SCREEN_SLIDE, glide_to_share, grow_when_shown, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
-use crate::app::components::palette::{CONTROL_RADIUS, Colors, TEXT_FONT, Tone, TrailStage};
+use crate::app::components::palette::{
+    CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
+};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
@@ -438,10 +442,11 @@ impl OneStepLayout {
         key: String,
         place: Place,
         label: String,
+        kind: ButtonKind,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let count = self.ask.read(cx).count_at(&place);
-        ask_button(&Colors::active(cx), SharedString::from(key), count).on_click(cx.listener(
+        ask_button(&Colors::active(cx), SharedString::from(key), count, kind).on_click(cx.listener(
             move |this, _, window, cx| {
                 let ask = this.ask.clone();
                 this.session.update(cx, |session, cx| {
@@ -885,9 +890,14 @@ impl OneStepLayout {
     fn open_code_button(key: String, link: &CodeLink, cx: &mut Context<Self>) -> Stateful<Div> {
         let link = link.clone();
         let hint = link.clone();
-        tool_button(&Colors::active(cx), key, open_code_label(&link, cx))
-            .tooltip(tooltip(move |cx| open_code_hint(&hint, cx)))
-            .on_click(move |_, _, cx| open_code(&link, cx))
+        tool_button(
+            &Colors::active(cx),
+            key,
+            open_code_icon(&link, cx),
+            open_code_label(&link, cx),
+        )
+        .tooltip(tooltip(move |cx| open_code_hint(&hint, cx)))
+        .on_click(move |_, _, cx| open_code(&link, cx))
     }
 
     /// The opener follows the review: a re-pin moves its head, a focus re-checks the clone.
@@ -969,13 +979,14 @@ impl OneStepLayout {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let show = agent.can_show.then(|| {
-            button(
+            icon_label_button(
                 colors,
                 "show-tour-agent",
                 ButtonKind::Ghost,
                 ButtonSize::Small,
+                Icon::Terminal,
+                "Show agent",
             )
-            .child("Show agent")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.session.update(cx, ReviewSession::show_tour_agent);
             }))
@@ -1165,12 +1176,20 @@ impl OneStepLayout {
                     colors,
                     "sidebar-settings",
                     ButtonKind::Ghost,
-                    ButtonSize::Small,
+                    ButtonSize::Regular,
                 )
-                .child(icon(Icon::Settings, colors.muted_text))
-                .child("Settings")
-                .child(div().pl_1().text_color(colors.muted_text).child("⌘,"))
-                .tooltip(tooltip(|_| "Settings".into()))
+                .flex_1()
+                .justify_start()
+                .px_2()
+                .child(button_icon(
+                    colors,
+                    ButtonKind::Ghost,
+                    ButtonSize::Regular,
+                    Icon::Settings,
+                ))
+                .child(div().flex_1().child("Settings"))
+                .child(key_cap(colors, KeyLabel::Text("⌘")))
+                .child(key_cap(colors, KeyLabel::Text(",")))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.toggle_settings(&ToggleSettings, window, cx);
                 })),
@@ -1189,9 +1208,21 @@ impl OneStepLayout {
             ButtonKind::Ghost,
             ButtonSize::Small,
         )
-        .child(icon(Icon::Search, colors.muted_text))
+        .child(button_icon(
+            &colors,
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+            Icon::Search,
+        ))
         .child("Jump")
-        .child(div().pl_1().text_color(colors.muted_text).child("⌘K"))
+        .child(
+            div()
+                .flex()
+                .gap_0p5()
+                .pl_1()
+                .child(key_cap(&colors, KeyLabel::Text("⌘")))
+                .child(key_cap(&colors, KeyLabel::Text("K"))),
+        )
         .on_click(cx.listener(|this, _, window, cx| this.toggle_jump(&ToggleJump, window, cx)));
         let pr_link = pr.to_string();
         let github = button(
@@ -1200,7 +1231,12 @@ impl OneStepLayout {
             ButtonKind::Ghost,
             ButtonSize::Small,
         )
-        .child(icon(Icon::ExternalLink, colors.muted_text))
+        .child(button_icon(
+            &colors,
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+            Icon::ExternalLink,
+        ))
         .child("GitHub")
         .on_click(move |_, _, cx| open_link(&pr_link, cx));
         let switch_pr = div()
@@ -1230,7 +1266,8 @@ impl OneStepLayout {
                     .truncate()
                     .font_weight(FontWeight::MEDIUM)
                     .child(InlineMarkdown::new("title-bar-title", &title)),
-            );
+            )
+            .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
         let progress = self.session.read(cx).sidebar().progress;
         TitleBarArea::new("title-bar", colors.background)
             .edge(TitleBarEdge::Open)
@@ -1343,7 +1380,10 @@ impl OneStepLayout {
                 let open_code = heading.code_link.as_ref().map(|link| {
                     Self::open_code_button(format!("open-piece-{}", heading.piece), link, cx)
                 });
-                let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
+                let ask = heading
+                    .ask
+                    .as_ref()
+                    .map(|ask| self.ask_at(ask, ButtonKind::Ghost, cx));
                 let header = PieceHeader::new(
                     heading.label.clone(),
                     heading.repin_label,
@@ -1360,7 +1400,7 @@ impl OneStepLayout {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(px(CONTROL_RADIUS))
+                                .rounded(px(INNER_RADIUS))
                                 .cursor_pointer()
                                 .hover(|chevron| chevron.bg(colors.hover))
                                 .active(|chevron| chevron.bg(colors.pressed))
@@ -1384,7 +1424,10 @@ impl OneStepLayout {
                 let open_code = heading.code_link.as_ref().map(|link| {
                     Self::open_code_button(format!("open-marker-{}", heading.piece), link, cx)
                 });
-                let ask = heading.ask.as_ref().map(|ask| self.ask_at(ask, cx));
+                let ask = heading
+                    .ask
+                    .as_ref()
+                    .map(|ask| self.ask_at(ask, ButtonKind::Ghost, cx));
                 PieceMarker::new(
                     heading.label.clone(),
                     heading.repin_label,
@@ -1462,7 +1505,7 @@ impl OneStepLayout {
                 .flex()
                 .px_2()
                 .py_1()
-                .child(self.ask_at(&ask, cx))
+                .child(self.ask_at(&ask, ButtonKind::Ghost, cx))
                 .into_any_element(),
             PageRow::PieceEnd => piece_end(&colors).into_any_element(),
         }
@@ -1520,21 +1563,30 @@ impl OneStepLayout {
             .child("Full diff, not only the change since your read")
         });
         let whitespace = toolbar.ignores_whitespace.map(|is_on| {
-            toggle_button(&colors, "ignore-whitespace", is_on, ButtonSize::Small)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.change_review(cx, Review::toggle_ignore_whitespace);
-                }))
-                .child("Hide whitespace")
+            toolbar_toggle(
+                &colors,
+                "ignore-whitespace",
+                is_on,
+                Icon::Space,
+                "Hide whitespace",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, Review::toggle_ignore_whitespace);
+            }))
         });
         let wrap = toolbar.wraps_lines.map(|is_on| {
-            toggle_button(&colors, "wrap-lines", is_on, ButtonSize::Small)
+            toolbar_toggle(&colors, "wrap-lines", is_on, Icon::WrapText, "Wrap lines")
                 .tooltip(tooltip(|_| "Wrap long lines (W)".into()))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.change_review(cx, Review::toggle_wrap_lines);
                 }))
-                .child("Wrap lines")
         });
-        let ask = toolbar.ask.as_ref().map(|ask| self.ask_at(ask, cx));
+        let toggles: Vec<Stateful<Div>> = whitespace.into_iter().chain(wrap).collect();
+        let toggles = (!toggles.is_empty()).then(|| joined(&colors, toggles));
+        let ask = toolbar
+            .ask
+            .as_ref()
+            .map(|ask| self.ask_at(ask, ButtonKind::Tinted, cx));
         div()
             .w_full()
             .pb_3()
@@ -1545,17 +1597,23 @@ impl OneStepLayout {
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
-            .children(whitespace)
-            .children(wrap)
-            .children(ask)
+            .children(toggles)
+            .children(ask.map(|ask| div().pl_1().child(ask)))
     }
 
     fn notes_button(&self, diagram: &DiagramRow, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let small = |kind| button(&colors, "diagram-to-notes", kind, ButtonSize::Small);
+        let small = |kind, icon| {
+            button(&colors, "diagram-to-notes", kind, ButtonSize::Small).child(button_icon(
+                &colors,
+                kind,
+                ButtonSize::Small,
+                icon,
+            ))
+        };
         let session = self.session.clone();
         let step = diagram.step.clone();
-        let add = small(ButtonKind::Ghost)
+        let add = small(ButtonKind::Ghost, Icon::FilePlus)
             .tooltip(tooltip(|_| {
                 "Put this diagram under Notes in the PR description".into()
             }))
@@ -1565,8 +1623,14 @@ impl OneStepLayout {
             .child("Add to PR notes");
         let (shown, failure) = match &diagram.notes_button {
             NotesButton::Add => (add, None),
-            NotesButton::Adding => (small(ButtonKind::Ghost).child("Adding to PR notes…"), None),
-            NotesButton::InNotes => (small(ButtonKind::Done).child("In PR notes"), None),
+            NotesButton::Adding => (
+                small(ButtonKind::Ghost, Icon::FilePlus).child("Adding to PR notes…"),
+                None,
+            ),
+            NotesButton::InNotes => (
+                small(ButtonKind::Done, Icon::Check).child("In PR notes"),
+                None,
+            ),
             NotesButton::Failed(reason) => (
                 add,
                 Some(
@@ -1588,8 +1652,14 @@ impl OneStepLayout {
             .children(failure)
     }
 
-    fn ask_at(&self, ask: &AskAt, cx: &mut Context<Self>) -> Stateful<Div> {
-        self.ask_button(ask.id.to_string(), ask.place.clone(), ask.label.clone(), cx)
+    fn ask_at(&self, ask: &AskAt, kind: ButtonKind, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.ask_button(
+            ask.id.to_string(),
+            ask.place.clone(),
+            ask.label.clone(),
+            kind,
+            cx,
+        )
     }
 
     fn on_more_context(&self, cx: &mut Context<Self>) -> OnMoreContext {
@@ -1854,9 +1924,36 @@ enum Onward {
 fn tool_button(
     colors: &Colors,
     id: impl Into<gpui::ElementId>,
+    icon: Icon,
     label: &'static str,
 ) -> Stateful<Div> {
-    button(colors, id, ButtonKind::Ghost, ButtonSize::Small).child(label)
+    icon_label_button(
+        colors,
+        id,
+        ButtonKind::Ghost,
+        ButtonSize::Small,
+        icon,
+        label,
+    )
+}
+
+/// A diff toolbar toggle, a part of the toolbar's joined group: its icon and name, and a check
+/// while it is on.
+fn toolbar_toggle(
+    colors: &Colors,
+    id: &'static str,
+    is_on: bool,
+    icon: Icon,
+    label: &'static str,
+) -> Stateful<Div> {
+    let kind = if is_on {
+        ButtonKind::JoinedOn
+    } else {
+        ButtonKind::Joined
+    };
+    icon_label_button(colors, id, kind, ButtonSize::Small, icon, label).when(is_on, |toggle| {
+        toggle.child(sized_icon(Icon::Check, colors.accent, px(12.)))
+    })
 }
 
 fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
@@ -2089,8 +2186,10 @@ impl Render for OneStepLayout {
                                     "ask-selected-lines".into(),
                                     place,
                                     label,
+                                    ButtonKind::Tinted,
                                     cx,
-                                )),
+                                ))
+                                .child("about the selected lines"),
                             "ask-selected-lines-band",
                         )
                     }))

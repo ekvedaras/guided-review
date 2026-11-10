@@ -116,6 +116,39 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
             ),
         ],
     );
+    let control_grounds = [
+        ("raised top", colors.raised.start),
+        ("raised bottom", colors.raised.end),
+        ("inset", colors.inset),
+    ];
+    on("text", colors.text, &control_grounds);
+    on("muted_text", colors.muted_text, &control_grounds);
+    on("accent", colors.accent, &control_grounds);
+    on(
+        "danger",
+        colors.danger,
+        &[
+            ("surface", colors.surface),
+            ("raised top", colors.raised.start),
+            ("overlay", colors.overlay),
+        ],
+    );
+    on(
+        "success",
+        colors.success,
+        &[
+            ("success_fill top", colors.success_fill.start),
+            ("success_fill bottom", colors.success_fill.end),
+        ],
+    );
+    on(
+        "accent",
+        colors.accent,
+        &[
+            ("icon_tile top", colors.icon_tile.start),
+            ("icon_tile bottom", colors.icon_tile.end),
+        ],
+    );
     pairs
         .into_iter()
         .filter_map(|(name, text, ground)| {

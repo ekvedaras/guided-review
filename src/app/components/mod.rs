@@ -20,6 +20,7 @@ pub mod palette;
 pub mod pr_switcher;
 pub mod refresh_banner;
 pub mod safety_net_view;
+pub mod segmented;
 pub mod settings_panel;
 pub mod sidebar_row;
 pub mod step_notes;

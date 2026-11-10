@@ -1,7 +1,7 @@
 use gpui::{AnimationElement, Div, ElementId, Styled, div, px};
 
 use super::motion::{BANNER_DROP, Edge, STATE, slide_in};
-use super::palette::{CARD_RADIUS, CONTROL_RADIUS, Colors, Tone};
+use super::palette::{CARD_RADIUS, Colors, INNER_RADIUS, Tone};
 
 /// A small mark of a state beside a name: "Resolved", "draft", "changed since your read".
 pub fn chip(colors: &Colors, tone: Tone) -> Div {
@@ -12,7 +12,7 @@ pub fn chip(colors: &Colors, tone: Tone) -> Div {
         .items_center()
         .gap_1()
         .px_1p5()
-        .rounded(px(CONTROL_RADIUS))
+        .rounded(px(INNER_RADIUS))
         .border_1()
         .border_color(tone.border)
         .bg(tone.background)

@@ -49,6 +49,8 @@ pub fn ease_out(delta: f32) -> f32 {
 /// The trail's spring: critically damped, so a share glides to its new length without overshoot,
 /// mostly there within `OVERLAY` and still within half a second.
 const TRAIL_SPRING: SpringConfig = SpringConfig::new(400., 40., 1.);
+/// A thumb's spring: critically damped and a little quicker than the trail, about `STATE` to land.
+const GLIDE_SPRING: SpringConfig = SpringConfig::new(900., 60., 1.);
 /// A chevron's spring: critically damped and quick, about `FEEDBACK` to turn.
 const TURN_SPRING: SpringConfig = SpringConfig::new(1600., 80., 1.);
 /// The read mark's spring: a touch under critical, so a new check lands with a small, single pop.
@@ -120,6 +122,23 @@ pub fn glide_to_share<E: IntoElement + Styled + 'static>(
             .to(share.clamp(0., 1.))
             .with_epsilon(0.002),
         |element, share| element.w(relative(share.clamp(0., 1.))),
+    )
+}
+
+/// Something that moves to a new place along one coordinate (a segment's thumb sliding to the
+/// picked option): it glides there from where it was, and starts at `target` on first drawing.
+pub fn glide_to<E: IntoElement + Styled + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    target: f32,
+    place: impl FnOnce(E, f32) -> E + 'static,
+) -> SpringAnimationElement<E> {
+    element.with_spring(
+        id,
+        SpringAnimation::new(GLIDE_SPRING)
+            .to(target)
+            .with_epsilon(0.002),
+        place,
     )
 }
 

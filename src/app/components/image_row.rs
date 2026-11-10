@@ -11,10 +11,10 @@ use crate::file_path::FilePath;
 use crate::image_facts::{self, PixelSize};
 use crate::viewer::{ImageMark, ImagePreview, ImageSide};
 
-use super::button::{ButtonKind, ButtonSize, button};
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::chip;
 use super::diff_view::OnImageComment;
-use super::icon::{Icon, sized_icon};
+use super::icon::Icon;
 use super::palette::{CONTROL_RADIUS, Colors, Tone};
 
 const PICTURE_BOX: (f32, f32) = (460., 360.);
@@ -187,15 +187,15 @@ impl RenderOnce for ImageRow {
             )
             .child(
                 div().flex().child(
-                    button(
+                    icon_label_button(
                         &colors,
                         ElementId::from(SharedString::from(format!("comment-on-image-{path}"))),
                         ButtonKind::Secondary,
                         ButtonSize::Small,
+                        Icon::MessageSquare,
+                        "Comment on this image",
                     )
-                    .on_click(move |_, window, cx| on_comment(window, cx))
-                    .child(sized_icon(Icon::Plus, colors.muted_text, px(12.)))
-                    .child("Comment on this image"),
+                    .on_click(move |_, window, cx| on_comment(window, cx)),
                 ),
             )
             .into_any_element()

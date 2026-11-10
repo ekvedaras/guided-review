@@ -4,7 +4,8 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use super::button::{ButtonKind, ButtonSize, button};
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
+use super::icon::Icon;
 use super::motion::{OVERLAY, busy_dot, busy_sweep, fade_in};
 use super::palette::{CARD_RADIUS, CODE_FONT, Colors, TEXT_FONT};
 use super::title_bar::TITLE_BAR_HEIGHT;
@@ -85,34 +86,37 @@ impl Render for LoadingScreen {
             .gap_2()
             .when(shown.failure.is_some(), |actions| {
                 actions.child(
-                    button(
+                    icon_label_button(
                         &colors,
                         "loading-try-again",
                         ButtonKind::Primary,
                         ButtonSize::Regular,
+                        Icon::Refresh,
+                        "Try again",
                     )
-                    .child("Try again")
                     .on_click(move |_, _, cx| tour_writer::try_again(retry_pr.clone(), cx)),
                 )
             })
             .child(
-                button(
+                icon_label_button(
                     &colors,
                     "loading-show-agent",
                     ButtonKind::Secondary,
                     ButtonSize::Regular,
+                    Icon::Terminal,
+                    "Show agent",
                 )
-                .child("Show agent")
                 .on_click(move |_, _, cx| tour_writer::show_agent(show_pr.clone(), cx)),
             )
             .children(shown.back_to.clone().map(|back_to| {
-                button(
+                icon_label_button(
                     &colors,
                     "loading-back",
                     ButtonKind::Ghost,
                     ButtonSize::Regular,
+                    Icon::ArrowLeft,
+                    back_to,
                 )
-                .child(back_to)
                 .on_click(|_, _, cx| tour_writer::stop_waiting(cx))
             }));
         let is_busy = shown.failure.is_none();

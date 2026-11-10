@@ -9,10 +9,11 @@ use crate::viewer::{ApproveWarning, CLAMPED_BODY_LINES, FinishResult, ReviewVerd
 
 use crate::app::sidebar_rows::SidebarLastReview;
 
-use super::button::{ButtonKind, ButtonSize, button, toggle_button};
+use super::button::{ButtonKind, ButtonSize, button, button_icon};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
-use super::palette::Colors;
+use super::palette::{Colors, Tone};
+use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
@@ -103,6 +104,23 @@ impl FinishReviewDialog {
             on_body_edit,
             on_finish,
         }
+    }
+}
+
+fn icon_of(verdict: ReviewVerdict) -> Icon {
+    match verdict {
+        ReviewVerdict::Comment => Icon::MessageSquare,
+        ReviewVerdict::Approve => Icon::CircleCheck,
+        ReviewVerdict::RequestChanges => Icon::Diff,
+    }
+}
+
+/// The picked verdict's thumb wears what it tells the author.
+fn tone_of(verdict: ReviewVerdict) -> Tone {
+    match verdict {
+        ReviewVerdict::Comment => Tone::Neutral,
+        ReviewVerdict::Approve => Tone::Success,
+        ReviewVerdict::RequestChanges => Tone::Danger,
     }
 }
 
@@ -205,25 +223,20 @@ impl RenderOnce for FinishReviewDialog {
 
         let open_button = {
             let (ui, focus) = (ui.clone(), focus);
-            let open_button = if is_open {
-                toggle_button(&colors, "finish-review", true, ButtonSize::Regular)
+            let kind = if is_open {
+                ButtonKind::Pressed
             } else if self.is_everything_read {
-                button(
-                    &colors,
-                    "finish-review",
-                    ButtonKind::Primary,
-                    ButtonSize::Regular,
-                )
+                ButtonKind::Primary
             } else {
-                button(
-                    &colors,
-                    "finish-review",
-                    ButtonKind::Secondary,
-                    ButtonSize::Regular,
-                )
+                ButtonKind::Secondary
             };
-            open_button
-                .justify_center()
+            button(&colors, "finish-review", kind, ButtonSize::Regular)
+                .child(button_icon(
+                    &colors,
+                    kind,
+                    ButtonSize::Regular,
+                    Icon::ListChecks,
+                ))
                 .child(if self.last_review.is_some() {
                     "Update review"
                 } else {
@@ -298,7 +311,7 @@ impl RenderOnce for FinishReviewDialog {
             return wrapper.into_any_element();
         }
 
-        let verdicts = [
+        let shown_verdicts: Vec<ReviewVerdict> = [
             ReviewVerdict::Comment,
             ReviewVerdict::Approve,
             ReviewVerdict::RequestChanges,
@@ -307,22 +320,28 @@ impl RenderOnce for FinishReviewDialog {
         .filter(|verdict| {
             self.finishing == Finishing::AnyVerdict || *verdict == ReviewVerdict::Comment
         })
-        .map(|choice| {
-            let ui = ui.clone();
-            toggle_button(
-                &colors,
-                SharedString::from(format!("verdict-{}", choice.github_name())),
-                choice == verdict,
-                ButtonSize::Small,
-            )
-            .child(label(choice))
-            .on_click(move |_, _, cx| {
-                update(&ui, cx, |ui| {
-                    ui.verdict = choice;
-                    ui.is_confirming_approval = false;
-                });
+        .collect();
+        let picked = shown_verdicts.iter().position(|shown| *shown == verdict);
+        let segments = shown_verdicts
+            .iter()
+            .map(|&choice| {
+                let ui = ui.clone();
+                Segment::new(
+                    SharedString::from(format!("verdict-{}", choice.github_name())),
+                    label(choice),
+                    move |_, _, cx| {
+                        update(&ui, cx, |ui| {
+                            ui.verdict = choice;
+                            ui.is_confirming_approval = false;
+                        });
+                    },
+                )
+                .icon(icon_of(choice))
             })
-        });
+            .collect();
+        let verdicts = Segmented::new("verdict", SegmentLayout::Column, segments)
+            .picked(picked)
+            .thumb_tone(tone_of(verdict));
 
         let unread_warning = (verdict == ReviewVerdict::Approve)
             .then_some(self.warning)
@@ -336,7 +355,12 @@ impl RenderOnce for FinishReviewDialog {
                 ButtonKind::Primary,
                 ButtonSize::Regular,
             )
-            .justify_center()
+            .child(button_icon(
+                &colors,
+                ButtonKind::Primary,
+                ButtonSize::Regular,
+                Icon::Send,
+            ))
             .child(if must_confirm {
                 "Approve..."
             } else {
@@ -367,7 +391,7 @@ impl RenderOnce for FinishReviewDialog {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().flex().flex_wrap().gap_1().children(verdicts))
+            .child(verdicts)
             .child(
                 Field::new(&focus_of_body)
                     .min_h(px(64.))

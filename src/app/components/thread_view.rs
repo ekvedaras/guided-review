@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
@@ -13,7 +14,7 @@ use crate::viewer::{
     ThreadActionResult, ThreadComment, ThreadId, ThreadView,
 };
 
-use super::button::{ButtonKind, ButtonSize, button, toggle_button};
+use super::button::{ButtonKind, ButtonSize, button, icon_button, icon_label_button, joined};
 use super::card::card;
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
@@ -22,6 +23,7 @@ use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
 use super::palette::{Colors, Tone};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
+use super::tooltip::tooltip;
 
 pub type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -178,8 +180,67 @@ impl ThreadElement {
     }
 }
 
-fn small_button(colors: &Colors, id: SharedString, label: &str) -> gpui::Stateful<gpui::Div> {
-    button(colors, id, ButtonKind::Secondary, ButtonSize::Small).child(label.to_owned())
+fn small_button(
+    colors: &Colors,
+    id: SharedString,
+    kind: ButtonKind,
+    icon: Icon,
+    label: &'static str,
+) -> gpui::Stateful<gpui::Div> {
+    icon_label_button(colors, id, kind, ButtonSize::Small, icon, label)
+}
+
+fn plain_button(
+    colors: &Colors,
+    id: SharedString,
+    kind: ButtonKind,
+    label: &'static str,
+) -> gpui::Stateful<gpui::Div> {
+    button(colors, id, kind, ButtonSize::Small).child(label)
+}
+
+/// A reaction: just the emoji until someone reacts, then a pill with the count, on `current`
+/// when the reviewer is one of them.
+fn reaction_pill(
+    colors: &Colors,
+    id: SharedString,
+    label: String,
+    count: usize,
+    viewer_has_reacted: bool,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1()
+        .h(px(24.))
+        .min_w(px(28.))
+        .px_1p5()
+        .justify_center()
+        .rounded_full()
+        .border_1()
+        .cursor_pointer()
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .map(|pill| {
+            if viewer_has_reacted {
+                pill.bg(colors.current)
+                    .border_color(colors.current_border)
+                    .text_color(colors.accent)
+                    .hover(|pill| pill.border_color(colors.accent_border))
+            } else if count > 0 {
+                pill.bg(colors.surface)
+                    .border_color(colors.subtle_border)
+                    .text_color(colors.muted_text)
+                    .hover(|pill| pill.bg(colors.hover).border_color(colors.border))
+            } else {
+                pill.border_color(gpui::transparent_black())
+                    .hover(|pill| pill.bg(colors.hover))
+            }
+        })
+        .active(|pill| pill.bg(colors.pressed))
+        .child(label)
 }
 
 /// Starts an action and shows it as under way until GitHub answers.
@@ -227,7 +288,9 @@ impl ThreadElement {
     ) -> AnyElement {
         div()
             .flex()
-            .gap_1()
+            .flex_wrap()
+            .gap_0p5()
+            .ml(px(-4.))
             .children(comment.reaction_summary().into_iter().map(
                 |ReactionCount {
                      reaction,
@@ -241,18 +304,17 @@ impl ThreadElement {
                     } else {
                         reaction.emoji().to_owned()
                     };
-                    let button = toggle_button(
+                    let button = reaction_pill(
                         colors,
                         SharedString::from(format!(
                             "react-{}-{}",
                             comment.id,
                             reaction.github_name()
                         )),
+                        label,
+                        count,
                         viewer_has_reacted,
-                        ButtonSize::Small,
-                    )
-                    .child(label)
-                    .when_else(count == 0, |b| b.opacity(0.5));
+                    );
                     button.on_click(move |_, _, cx| {
                         let action = ThreadAction::SetReaction {
                             comment_id: comment_id.clone(),
@@ -335,9 +397,40 @@ impl ThreadElement {
         };
         let id = thread_id;
         let buttons = (!is_busy).then(|| {
+            let ask_agent = can_ask_agent.then(|| {
+                let mut parts = vec![
+                    icon_label_button(
+                        &colors,
+                        SharedString::from(format!("reply-ask-{id}")),
+                        ButtonKind::Joined,
+                        ButtonSize::Small,
+                        Icon::Sparkles,
+                        "Agent",
+                    )
+                    .tooltip(tooltip(|_| {
+                        "Ask agent: adds the reply to the review for your agent".into()
+                    }))
+                    .on_click(send(SendMode::AddToReview, Audience::Agent)),
+                ];
+                if can_reply_now {
+                    parts.push(
+                        button(
+                            &colors,
+                            SharedString::from(format!("reply-ask-now-{id}")),
+                            ButtonKind::Joined,
+                            ButtonSize::Small,
+                        )
+                        .child("now")
+                        .tooltip(tooltip(|_| "Ask agent now: posts the reply at once".into()))
+                        .on_click(send(SendMode::CommentNow, Audience::Agent)),
+                    );
+                }
+                joined(&colors, parts)
+            });
             div()
                 .flex()
                 .flex_wrap()
+                .items_center()
                 .gap_2()
                 .child(
                     button(
@@ -349,35 +442,25 @@ impl ThreadElement {
                     .child("Add to review")
                     .on_click(send(SendMode::AddToReview, Audience::Author)),
                 )
-                .children(can_ask_agent.then(|| {
-                    small_button(
-                        &colors,
-                        SharedString::from(format!("reply-ask-{id}")),
-                        "Ask agent",
-                    )
-                    .on_click(send(SendMode::AddToReview, Audience::Agent))
-                }))
-                .children((can_ask_agent && can_reply_now).then(|| {
-                    small_button(
-                        &colors,
-                        SharedString::from(format!("reply-ask-now-{id}")),
-                        "Ask agent now",
-                    )
-                    .on_click(send(SendMode::CommentNow, Audience::Agent))
-                }))
                 .children(can_reply_now.then(|| {
-                    small_button(
+                    plain_button(
                         &colors,
                         SharedString::from(format!("reply-now-{id}")),
+                        ButtonKind::Secondary,
                         "Reply now",
                     )
                     .on_click(send(SendMode::CommentNow, Audience::Author))
                 }))
+                .children(ask_agent)
+                .child(div().flex_1())
                 .child(
-                    small_button(
+                    icon_button(
                         &colors,
                         SharedString::from(format!("reply-cancel-{id}")),
-                        "Cancel",
+                        ButtonKind::Ghost,
+                        ButtonSize::Small,
+                        Icon::Close,
+                        "Cancel the reply",
                     )
                     .on_click({
                         let on_reply_draft = Rc::clone(on_reply_draft);
@@ -473,11 +556,13 @@ impl ThreadElement {
                     .on_click(move |_, _, cx| save(cx)),
                 )
                 .child(
-                    small_button(
+                    button(
                         &colors,
                         SharedString::from(format!("edit-cancel-{comment_id}")),
-                        "Cancel",
+                        ButtonKind::Ghost,
+                        ButtonSize::Small,
                     )
+                    .child("Cancel")
                     .on_click(move |_, _, cx| {
                         on_comment_edit(&cancelled_id, ReplyDraftChange::Discard, cx);
                     }),
@@ -528,14 +613,6 @@ fn send_reply(
     run_action(action, ui, on_action, cx);
 }
 
-trait WhenElse: Sized {
-    fn when_else(self, condition: bool, then: impl FnOnce(Self) -> Self) -> Self {
-        if condition { then(self) } else { self }
-    }
-}
-
-impl<E> WhenElse for E {}
-
 impl RenderOnce for ThreadElement {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
@@ -583,15 +660,15 @@ impl RenderOnce for ThreadElement {
             .child(div().min_w_0().truncate().child(summary));
         let conversation_link = self.view.thread.comments.first().map(|comment| {
             let url = comment.url.clone();
-            button(
+            icon_button(
                 &colors,
                 SharedString::from(format!("thread-link-{id}")),
                 ButtonKind::Ghost,
                 ButtonSize::Small,
+                Icon::ExternalLink,
+                "Open on GitHub",
             )
             .on_click(move |_, _, cx| open_link(&url, cx))
-            .child(sized_icon(Icon::ExternalLink, colors.muted_text, px(12.)))
-            .child("Open on GitHub")
         });
         let (is_busy, saving_edit, problem, focus) = {
             let state = ui.read(cx);
@@ -629,10 +706,13 @@ impl RenderOnce for ThreadElement {
                                     cx,
                                     |_, cx| cx.focus_handle(),
                                 );
-                                small_button(
+                                icon_button(
                                     &colors,
                                     SharedString::from(format!("edit-{}", comment.id)),
-                                    "Edit",
+                                    ButtonKind::Ghost,
+                                    ButtonSize::Small,
+                                    Icon::Pencil,
+                                    "Edit your comment",
                                 )
                                 .on_click(move |_, window, cx| {
                                     on_comment_edit(&comment_id, ReplyDraftChange::Open, cx);
@@ -701,25 +781,37 @@ impl RenderOnce for ThreadElement {
             let (resolve_ui, resolve_on_action) = (ui.clone(), Rc::clone(&on_action));
             let open_reply = Rc::clone(&on_reply_draft);
             let reply_focus = focus.clone();
+            let is_replying = reply.is_some();
+            let (resolve_icon, resolve_label) = if thread.is_resolved {
+                (Icon::RotateCcw, "Unresolve")
+            } else {
+                (Icon::CircleCheck, "Resolve")
+            };
             let buttons = div()
                 .flex()
+                .items_center()
                 .gap_2()
-                .child(
-                    small_button(&colors, SharedString::from(format!("reply-{id}")), "Reply")
-                        .on_click(move |_, window, cx| {
-                            open_reply(ReplyDraftChange::Open, cx);
-                            window.focus(&reply_focus, cx);
-                        }),
-                )
+                .children((!is_replying).then(|| {
+                    small_button(
+                        &colors,
+                        SharedString::from(format!("reply-{id}")),
+                        ButtonKind::Secondary,
+                        Icon::Reply,
+                        "Reply",
+                    )
+                    .on_click(move |_, window, cx| {
+                        open_reply(ReplyDraftChange::Open, cx);
+                        window.focus(&reply_focus, cx);
+                    })
+                }))
+                .child(div().flex_1())
                 .child(
                     small_button(
                         &colors,
                         SharedString::from(format!("resolve-{id}")),
-                        if thread.is_resolved {
-                            "Unresolve"
-                        } else {
-                            "Resolve"
-                        },
+                        ButtonKind::Ghost,
+                        resolve_icon,
+                        resolve_label,
                     )
                     .on_click(move |_, _, cx| {
                         run_action(resolve_action.clone(), &resolve_ui, &resolve_on_action, cx);
@@ -745,7 +837,7 @@ impl RenderOnce for ThreadElement {
                         text,
                     )
                 }))
-                .child(buttons.when_else(is_busy, |row| row.opacity(0.5)))
+                .child(buttons.when(is_busy, |row| row.opacity(0.5)))
                 .children(is_busy.then(|| busy_line(&colors, "Working...")))
                 .children(
                     problem.map(|problem| div().text_sm().text_color(colors.danger).child(problem)),
@@ -774,6 +866,8 @@ impl RenderOnce for ThreadElement {
                     small_button(
                         &colors,
                         SharedString::from(format!("try-hand-off-again-{id}")),
+                        ButtonKind::Secondary,
+                        Icon::Refresh,
                         "Try again",
                     )
                     .on_click(move |_, _, cx| on_try_again(hand_off, cx))
