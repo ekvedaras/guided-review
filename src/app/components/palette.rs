@@ -1,4 +1,4 @@
-use gpui::{App, Global, Rgba, WindowAppearance, rgb};
+use gpui::{App, Global, Rgba, Window, WindowAppearance, rgb};
 
 use crate::viewer::Capture;
 
@@ -22,7 +22,15 @@ impl Appearance {
         *cx.global::<Self>()
     }
 
-    pub fn of_window(appearance: WindowAppearance) -> Self {
+    pub fn of(window: &Window) -> Self {
+        #[cfg(feature = "snapshots")]
+        if let Some(staged) = crate::app::snapshots::appearance() {
+            return staged;
+        }
+        Self::of_window(window.appearance())
+    }
+
+    fn of_window(appearance: WindowAppearance) -> Self {
         match appearance {
             WindowAppearance::Light | WindowAppearance::VibrantLight => Self::Light,
             WindowAppearance::Dark | WindowAppearance::VibrantDark => Self::Dark,

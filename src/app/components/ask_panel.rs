@@ -277,7 +277,7 @@ impl AskPanel {
         cx.notify();
     }
 
-    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.target = None;
         window.focus(&self.layout_focus, cx);
         cx.notify();

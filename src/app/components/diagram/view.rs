@@ -24,7 +24,7 @@ impl Diagrams {
     pub fn show(&mut self, source: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         let showing = source.map(|source| Showing {
             source,
-            appearance: Appearance::of_window(window.appearance()),
+            appearance: Appearance::of(window),
             scale: window.scale_factor(),
         });
         for bitmap in self.memory.show(showing) {

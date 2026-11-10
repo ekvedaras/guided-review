@@ -160,12 +160,31 @@ fn body_box(
 }
 
 impl RenderOnce for FinishReviewDialog {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(
+        #[cfg_attr(
+            not(feature = "snapshots"),
+            expect(unused_mut, reason = "staged below")
+        )]
+        mut self,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
         let colors = Colors::active(cx);
         let ui = window.use_keyed_state("finish-review-ui", cx, {
             let has_draft = !self.body.is_empty();
             move |_, cx| FinishUi::new(has_draft, cx)
         });
+        // The demo PR is the maintainer's own, which offers no finishing; the picture needs the form.
+        #[cfg(feature = "snapshots")]
+        if let Some(staged) = cx.try_global::<crate::app::snapshots::StagedFinishReview>() {
+            let is_open = staged.0;
+            if is_open {
+                self.finishing = Finishing::AnyVerdict;
+            }
+            if is_open != ui.read(cx).is_open {
+                update(&ui, cx, |ui| ui.is_open = is_open);
+            }
+        }
         let state = ui.read(cx);
         let (is_open, verdict, is_busy, is_confirming) = (
             state.is_open,

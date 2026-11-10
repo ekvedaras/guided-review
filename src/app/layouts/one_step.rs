@@ -70,6 +70,9 @@ use crate::viewer::{
     ReopenAfterSave, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
 };
 
+#[cfg(feature = "snapshots")]
+mod scenes;
+
 actions!(
     one_step,
     [
@@ -118,7 +121,7 @@ pub struct OneStepLayout {
     lines_to_ask: Option<Place>,
     frame_stats: FrameStatsHook,
     #[cfg(feature = "snapshots")]
-    snapshots: Option<crate::app::snapshots::Snapshots>,
+    _snapshots: Option<gpui::Task<()>>,
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
     settings: Entity<SettingsPanel>,
@@ -151,6 +154,8 @@ impl OneStepLayout {
             tour_work,
         } = collaborators;
         let focus = cx.focus_handle();
+        #[cfg(feature = "snapshots")]
+        let ask = crate::app::snapshots::quiet_ask(ask);
         let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
         let frame_stats = FrameStatsHook::from_env();
         let asks = ask.clone();
@@ -288,7 +293,7 @@ impl OneStepLayout {
             lines_to_ask: None,
             frame_stats,
             #[cfg(feature = "snapshots")]
-            snapshots: crate::app::snapshots::Snapshots::from_env(),
+            _snapshots: scenes::start(window, cx),
             jump,
             pr_switcher,
             settings,
@@ -411,28 +416,6 @@ impl OneStepLayout {
             }
         }
         window.request_animation_frame();
-    }
-
-    #[cfg(feature = "snapshots")]
-    fn run_snapshots(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::app::snapshots::SnapshotMove;
-        let Some(snapshots) = self.snapshots.as_mut() else {
-            return;
-        };
-        match snapshots.frame(window) {
-            SnapshotMove::Wait => {}
-            SnapshotMove::ScrollToEnd => self.screen_list.scroll_to(ListOffset {
-                item_ix: self.screen_list.item_count(),
-                offset_in_item: px(0.),
-            }),
-            SnapshotMove::NextScreen => {
-                let has_next = self.change_review(cx, Review::go_forward);
-                if !has_next {
-                    cx.quit();
-                }
-            }
-            SnapshotMove::Done => cx.quit(),
-        }
     }
 
     fn ask_button(
@@ -1892,8 +1875,6 @@ impl Render for OneStepLayout {
             .map(SwitchingVeil::to);
         self.run_scroll_script(window, cx);
         self.note_seen_end(cx);
-        #[cfg(feature = "snapshots")]
-        self.run_snapshots(window, cx);
         self.show_diagram(window, cx);
         let session = self.session.read(cx);
         let selected = Rc::new(

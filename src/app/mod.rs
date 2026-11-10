@@ -39,8 +39,8 @@ use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, FailedBuild,
-    Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher, ReviewStateFile, ShowReview,
-    ShowSettings, TourAgents,
+    Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher, RelevantPullRequestsPort,
+    ReviewStateFile, ShowReview, ShowSettings, TourAgents,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -111,7 +111,7 @@ fn pr_switching(
     let reopen_requests = requests.clone();
     let home_folder = home.to_path_buf();
     PrSwitching {
-        relevant: Arc::new(GitHub::from_env()),
+        relevant: relevant_pull_requests(),
         home: home.to_path_buf(),
         active,
         agents: Arc::new(HcTourAgents::new()),
@@ -132,6 +132,14 @@ fn pr_switching(
             }
         }),
     }
+}
+
+fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
+    #[cfg(feature = "snapshots")]
+    if snapshots::is_on() {
+        return Arc::new(snapshots::SamplePullRequests);
+    }
+    Arc::new(GitHub::from_env())
 }
 
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
@@ -544,7 +552,7 @@ fn open_window(
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     let options = window_options(window_title(&opened, pr), cx);
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.set_global(Appearance::of(window));
         cx.new(|cx| new_layout(opened, pr, None, window, cx))
     })
 }
@@ -553,7 +561,7 @@ fn open_settings_window(home: &Path, cx: &mut App) -> anyhow::Result<WindowHandl
     let options = window_options("Settings".to_owned(), cx);
     let home = home.to_path_buf();
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.set_global(Appearance::of(window));
         cx.new(|cx| SettingsWindow::new(home, window, cx))
     })
 }
@@ -604,7 +612,7 @@ fn new_layout(
         cx,
     );
     cx.observe_window_appearance(window, |_, window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.set_global(Appearance::of(window));
         cx.notify();
     })
     .detach();
