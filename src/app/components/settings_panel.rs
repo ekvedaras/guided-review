@@ -205,6 +205,8 @@ pub struct SettingsPanel {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     placement: Placement,
+    /// What the panel's owner has to say that is not about a setting, such as a PR that failed to open.
+    notice: Option<SharedString>,
     clone_focus: Vec<FocusHandle>,
     /// Where the reviewer was going when the unsaved changes made the panel ask first.
     after_discard: Option<AfterDiscard>,
@@ -225,9 +227,15 @@ impl SettingsPanel {
             focus: cx.focus_handle(),
             owner_focus,
             placement,
+            notice: None,
             clone_focus: Vec::new(),
             after_discard: None,
         }
+    }
+
+    pub fn show_notice(&mut self, notice: SharedString, cx: &mut Context<Self>) {
+        self.notice = Some(notice);
+        cx.notify();
     }
 
     /// The window that held only Settings now holds a PR: the panel stays as it is, with what is being
@@ -240,6 +248,7 @@ impl SettingsPanel {
     ) {
         self.owner_focus = owner_focus;
         self.placement = placement;
+        self.notice = None;
         cx.notify();
     }
 
@@ -1157,6 +1166,17 @@ impl Render for SettingsPanel {
             .text_sm()
             .text_color(colors.text)
             .child(header)
+            .children(self.notice.clone().map(|notice| {
+                div()
+                    .flex_none()
+                    .px_6()
+                    .py_3()
+                    .bg(colors.warning_background)
+                    .border_b_1()
+                    .border_color(colors.subtle_border)
+                    .text_color(colors.danger)
+                    .child(notice)
+            }))
             .when(is_confirming, |panel| {
                 panel.child(Self::discard_question(&colors, cx))
             })

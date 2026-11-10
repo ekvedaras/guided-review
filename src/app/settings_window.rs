@@ -9,7 +9,8 @@ use super::components::palette::{Appearance, Colors};
 use super::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 
 /// The root of the app's one window while no PR is open: Settings and nothing else. Settings closing,
-/// by Save or Close, closes the window, as there is nothing behind it to go back to.
+/// by Save or Close, closes the window, as there is nothing behind it to go back to; whether the app
+/// ends with it is `AppWindow::closed`'s to say.
 pub struct SettingsWindow {
     panel: Entity<SettingsPanel>,
     focus: FocusHandle,
@@ -37,6 +38,12 @@ impl SettingsWindow {
             _panel_events: panel_events,
             _appearance: appearance,
         }
+    }
+
+    /// An `open` that would have taken this window over failed; the reviewer would see nothing otherwise.
+    pub fn build_failed(&mut self, reason: String, cx: &mut Context<Self>) {
+        self.panel
+            .update(cx, |panel, cx| panel.show_notice(reason.into(), cx));
     }
 
     /// The panel, with whatever is being edited, for the PR that takes the window over.

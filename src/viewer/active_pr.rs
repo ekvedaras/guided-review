@@ -143,6 +143,10 @@ impl ActivePr {
         self.shown.as_ref()
     }
 
+    pub fn is_building(&self) -> bool {
+        self.building.is_some()
+    }
+
     /// The PR the window is about to show: picked, or being built.
     pub fn switching_to(&self) -> Option<&PullRequestUrl> {
         self.switching.as_ref()

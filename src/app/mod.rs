@@ -38,8 +38,9 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, AgentReplied, AppStateFile, AppWindow, BuildTicket, FailedBuild, Finished, HandOffId,
-    OpenDecision, OpenOrigin, PrSwitcher, ReviewStateFile, ShowReview, ShowSettings, TourAgents,
+    ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, FailedBuild,
+    Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher, ReviewStateFile, ShowReview,
+    ShowSettings, TourAgents,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -62,7 +63,8 @@ enum Asked {
     ReopenShown,
 }
 
-/// The one running app. It blocks until the window is closed or a quit request comes. The window opens
+/// The one running app. It blocks until a quit request comes or the window closes with no build left to
+/// wait for (`AppWindow::closed`). The window opens
 /// when the first `open` request has built its review, or earlier holding only Settings when they are
 /// asked for.
 pub fn serve(listener: AppListener, home: PathBuf) {
@@ -92,7 +94,6 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             dock_icon::show();
             bind_keys(cx);
             word_keys::take_before_macos(cx);
-            cx.on_window_closed(|cx, _| cx.quit()).detach();
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
         });
@@ -174,6 +175,17 @@ async fn answer_requests(
         active,
         window: AppWindow::Closed,
     }));
+    let closed_screen = Rc::clone(&screen);
+    cx.update(|cx| {
+        cx.on_window_closed(move |cx, _| {
+            let mut screen = closed_screen.borrow_mut();
+            let active = screen.active.clone();
+            if screen.window.closed(active.read(cx)) == AfterClose::EndApp {
+                cx.quit();
+            }
+        })
+        .detach();
+    });
     while let Some(asked) = asked.next().await {
         let (request, reply) = match asked {
             Asked::Request(request, reply) => (request, reply),
@@ -382,8 +394,8 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
 }
 
 /// The review is built off the UI thread while the PR on screen stays. When a build fails with no window
-/// open, the app ends with the reason in its log; while only Settings shows, the reason goes to the log
-/// and Settings stays; with a PR on screen, the reason is shown in its window.
+/// open, the app ends with the reason in its log; otherwise the reason is also shown in the window, over
+/// Settings or the PR on screen, whichever it holds.
 async fn build_and_show(
     screen: SharedScreen,
     ticket: BuildTicket,
@@ -410,8 +422,14 @@ async fn build_and_show(
             eprintln!("{reason}");
             match window.build_failed() {
                 FailedBuild::EndApp => std::process::exit(1),
-                FailedBuild::KeepSettings => {}
-                FailedBuild::ShowIn(window) => cx.update(|cx| {
+                FailedBuild::ShowInSettings(window) => cx.update(|cx| {
+                    window
+                        .update(cx, |settings_window, _, cx| {
+                            settings_window.build_failed(reason, cx);
+                        })
+                        .ok();
+                }),
+                FailedBuild::ShowInReview(window) => cx.update(|cx| {
                     window
                         .update(cx, |layout, _, cx| layout.switch_failed(reason, cx))
                         .ok();

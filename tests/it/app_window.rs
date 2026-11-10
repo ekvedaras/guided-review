@@ -1,4 +1,7 @@
-use guided_review::viewer::{AppWindow, FailedBuild, ShowReview, ShowSettings};
+use guided_review::viewer::{
+    ActivePr, AfterClose, AppWindow, FailedBuild, OpenDecision, OpenOrigin, ShowReview,
+    ShowSettings,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SettingsOnlyWindow;
@@ -59,10 +62,10 @@ fn a_failed_build_with_no_window_ends_the_app() {
 }
 
 #[test]
-fn a_failed_build_while_only_settings_shows_keeps_settings_open() {
+fn a_failed_build_while_only_settings_shows_says_why_in_the_settings_window() {
     assert_eq!(
         Window::SettingsOnly(SettingsOnlyWindow).build_failed(),
-        FailedBuild::KeepSettings
+        FailedBuild::ShowInSettings(SettingsOnlyWindow)
     );
 }
 
@@ -70,8 +73,41 @@ fn a_failed_build_while_only_settings_shows_keeps_settings_open() {
 fn a_failed_build_while_a_pr_shows_says_why_in_its_window() {
     assert_eq!(
         Window::Review(ReviewWindow).build_failed(),
-        FailedBuild::ShowIn(ReviewWindow)
+        FailedBuild::ShowInReview(ReviewWindow)
     );
+}
+
+fn building() -> ActivePr {
+    let mut active = ActivePr::default();
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let OpenDecision::Build(_) = active.request(pr, OpenOrigin::Reviewer) else {
+        panic!("the first open of a PR builds it");
+    };
+    active
+}
+
+#[test]
+fn closing_settings_with_no_pr_open_and_nothing_building_ends_the_app() {
+    let mut window = Window::SettingsOnly(SettingsOnlyWindow);
+
+    assert_eq!(window.closed(&ActivePr::default()), AfterClose::EndApp);
+    assert_eq!(window, Window::Closed);
+}
+
+#[test]
+fn closing_settings_while_a_pr_builds_keeps_the_app_for_the_review() {
+    let mut window = Window::SettingsOnly(SettingsOnlyWindow);
+
+    assert_eq!(window.closed(&building()), AfterClose::WaitForBuild);
+    assert_eq!(window, Window::Closed);
+    assert_eq!(window.show_review(), ShowReview::OpenWindow);
+}
+
+#[test]
+fn closing_the_review_ends_the_app_even_while_another_pr_builds() {
+    let mut window = Window::Review(ReviewWindow);
+
+    assert_eq!(window.closed(&building()), AfterClose::EndApp);
 }
 
 #[test]
