@@ -1142,9 +1142,12 @@ impl OneStepLayout {
                     &bullet,
                 )))
                 .into_any_element(),
-            PageRow::PrDescription(description) => {
-                self.pr_description(description, cx).into_any_element()
-            }
+            PageRow::ReviewerSummary(summary) => self
+                .markdown_card("Reviewer summary", "reviewer-summary", summary, cx)
+                .into_any_element(),
+            PageRow::PrDescription(description) => self
+                .markdown_card("PR description", "pr-description", description, cx)
+                .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
                 .pb_4()
@@ -1290,9 +1293,11 @@ impl OneStepLayout {
         }
     }
 
-    fn pr_description(
+    fn markdown_card(
         &self,
-        description: Rc<PreparedMarkdown>,
+        eyebrow_text: &'static str,
+        id: &'static str,
+        markdown: Rc<PreparedMarkdown>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = Colors::active(cx);
@@ -1304,7 +1309,7 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_2()
-            .child(eyebrow(&colors, "PR description"))
+            .child(eyebrow(&colors, eyebrow_text))
             .child(
                 div()
                     .px_4()
@@ -1314,7 +1319,7 @@ impl OneStepLayout {
                     .border_color(colors.subtle_border)
                     .bg(colors.surface)
                     .text_sm()
-                    .child(MarkdownView::new("pr-description", description)),
+                    .child(MarkdownView::new(id, markdown)),
             )
     }
 
