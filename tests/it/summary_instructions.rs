@@ -1,5 +1,6 @@
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run};
 use guided_review::config::Config;
+use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::tour::Tour;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -362,5 +363,43 @@ fn check_warns_when_a_skill_is_set_but_the_tour_has_no_reviewer_summary() {
             .contains("warning: summary instructions are set but the tour has no reviewer summary"),
         "{}",
         run.stdout
+    );
+}
+
+#[test]
+fn a_launch_runs_the_skill_the_config_asks_for() {
+    let shop = Shop::with_pull();
+    shop.config("summary_instructions = { skill = \"recap\" }\n");
+
+    let instructions = SummaryInstructions::of_home(shop.repo.home());
+
+    assert_eq!(instructions.skill(), Some("recap"));
+    assert_eq!(instructions.warning(), None);
+}
+
+#[test]
+fn a_launch_runs_no_skill_when_the_config_names_none() {
+    let shop = Shop::with_pull();
+
+    let instructions = SummaryInstructions::of_home(shop.repo.home());
+
+    assert_eq!(instructions.skill(), None);
+    assert_eq!(instructions.warning(), None);
+}
+
+#[test]
+fn a_launch_with_an_unreadable_config_runs_no_skill_and_says_why() {
+    let shop = Shop::with_pull();
+    shop.config("this is not toml");
+
+    let instructions = SummaryInstructions::of_home(shop.repo.home());
+
+    assert_eq!(instructions.skill(), None);
+    assert!(
+        instructions
+            .warning()
+            .is_some_and(|warning| warning.contains("config.toml")),
+        "{:?}",
+        instructions.warning()
     );
 }

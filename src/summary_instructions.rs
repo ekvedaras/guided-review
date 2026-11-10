@@ -133,6 +133,26 @@ impl SummaryInstructions {
         }
     }
 
+    /// What a launch of the tour agent goes by: a config that cannot be read is no instructions and a warning.
+    pub fn of_home(home: &Path) -> Self {
+        match crate::config::Config::load_from(home) {
+            Ok(config) => config.summary_instructions(home),
+            Err(error) => Self {
+                warning: Some(format!("summary instructions not read: {error:#}")),
+                ..Self::none()
+            },
+        }
+    }
+
+    /// The skill a launch of the tour agent runs for the reviewer summary, after saying what could not be read.
+    pub fn skill_for_launch(home: &Path) -> Option<String> {
+        let instructions = Self::of_home(home);
+        if let Some(warning) = instructions.warning() {
+            eprintln!("warning: {warning}");
+        }
+        instructions.skill().map(str::to_owned)
+    }
+
     pub fn text(&self) -> Option<&str> {
         self.text.as_deref()
     }

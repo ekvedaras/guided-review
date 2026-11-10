@@ -10,6 +10,7 @@ use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
+use crate::summary_instructions::SummaryInstructions;
 use crate::tour::Tour;
 use crate::viewer::{
     Asks, GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader,
@@ -111,6 +112,6 @@ pub fn open_review(
         reloader,
         tour_agents: TourAgents::new(Arc::new(HcTourAgents::new()))
             .starting_in(agent_folder)
-            .with_summary_skill(config.summary_instructions(home).skill().map(str::to_owned)),
+            .with_summary_skill(SummaryInstructions::skill_for_launch(home)),
     })
 }
