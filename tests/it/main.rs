@@ -57,6 +57,7 @@ mod refresh;
 mod relevant_prs;
 mod repin;
 mod review_threads;
+mod settings;
 mod show;
 mod step_details;
 mod summary_instructions;

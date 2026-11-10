@@ -13,6 +13,10 @@ impl IdeTemplate {
         Self(text)
     }
 
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     fn fill(&self, path: &str, line: LineNumber) -> String {
         self.0
             .replace("{path}", path)

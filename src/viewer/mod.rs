@@ -32,6 +32,7 @@ mod relevant_prs;
 mod review;
 mod review_state;
 mod row_selection;
+mod settings;
 mod step_page;
 mod suggestion;
 mod sync_state;
@@ -95,6 +96,10 @@ pub use review::{
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
+pub use settings::{
+    CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings, SkillName,
+    SummaryInstructionsChoice,
+};
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
 };
