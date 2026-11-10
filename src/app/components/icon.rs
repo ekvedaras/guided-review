@@ -14,10 +14,16 @@ pub enum Icon {
     ArrowLeft,
     ArrowRight,
     Close,
+    ArrowUp,
+    ArrowDown,
+    Enter,
+    Ellipsis,
+    ListChecks,
+    Plus,
 }
 
 impl Icon {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 17] = [
         Self::Search,
         Self::ExternalLink,
         Self::PullRequest,
@@ -29,6 +35,12 @@ impl Icon {
         Self::ArrowLeft,
         Self::ArrowRight,
         Self::Close,
+        Self::ArrowUp,
+        Self::ArrowDown,
+        Self::Enter,
+        Self::Ellipsis,
+        Self::ListChecks,
+        Self::Plus,
     ];
 
     pub fn path(self) -> &'static str {
@@ -44,6 +56,12 @@ impl Icon {
             Self::ArrowLeft => "icons/arrow-left.svg",
             Self::ArrowRight => "icons/arrow-right.svg",
             Self::Close => "icons/x.svg",
+            Self::ArrowUp => "icons/arrow-up.svg",
+            Self::ArrowDown => "icons/arrow-down.svg",
+            Self::Enter => "icons/corner-down-left.svg",
+            Self::Ellipsis => "icons/ellipsis.svg",
+            Self::ListChecks => "icons/list-checks.svg",
+            Self::Plus => "icons/plus.svg",
         }
     }
 }

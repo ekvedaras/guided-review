@@ -13,7 +13,9 @@ use crate::app::components::tooltip::tooltip;
 use crate::pieces::PieceId;
 use crate::viewer::{Capture, CodeLink, DiffLine, Edge, LineKind, LineLocation, MoreContext};
 
-use super::palette::{CODE_FONT, Colors};
+use super::chip::chip;
+use super::icon::{Icon, sized_icon};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
 
 pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
 
@@ -202,7 +204,7 @@ impl RenderOnce for DiffRow {
         };
         let link = line.code_link.clone();
         let gutter_background = match line.kind {
-            _ if self.is_selected => colors.current,
+            _ if self.is_selected => colors.current_border,
             LineKind::Removed => colors.removed_gutter,
             LineKind::Added => colors.added_gutter,
             LineKind::Context { .. } => colors.background,
@@ -215,7 +217,11 @@ impl RenderOnce for DiffRow {
             .flex_none()
             .cursor_pointer()
             .bg(gutter_background)
-            .text_color(colors.muted_text)
+            .text_color(if self.is_selected {
+                colors.text
+            } else {
+                colors.muted_text
+            })
             .hover(|gutter| gutter.text_color(colors.accent))
             .tooltip(tooltip({
                 let link = link.clone();
@@ -233,14 +239,17 @@ impl RenderOnce for DiffRow {
             Some(on_gesture) => {
                 let at = location.clone();
                 comment_button
-                    .text_color(colors.muted_text)
+                    .self_stretch()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .opacity(0.)
                     .group_hover("diff-row", |button| button.opacity(1.))
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         on_gesture(RowGesture::Press, &at, window, cx);
                     })
-                    .child("+")
+                    .child(sized_icon(Icon::Plus, colors.accent, px(12.)))
                     .into_any_element()
             }
             None => comment_button.into_any_element(),
@@ -323,7 +332,10 @@ fn with_selection(
 
 /// Every row of a piece sits between the box's side borders.
 pub fn piece_row(colors: &Colors) -> Div {
-    div().w_full().border_x_1().border_color(colors.border)
+    div()
+        .w_full()
+        .border_x_1()
+        .border_color(colors.subtle_border)
 }
 
 /// A piece's name cut into what is shown, once, so a frame shares the text instead of copying it.
@@ -392,10 +404,10 @@ impl RenderOnce for PieceHeader {
             .items_center()
             .px_3()
             .gap_2()
-            .bg(colors.surface)
+            .bg(colors.header_band())
             .border_1()
-            .rounded_t_md()
-            .border_color(colors.border)
+            .rounded_t(px(CARD_RADIUS))
+            .border_color(colors.subtle_border)
             .text_sm()
             .children(self.fold_toggle)
             .child(
@@ -430,16 +442,10 @@ impl RenderOnce for PieceHeader {
                     )
                     .children(symbol),
             )
-            .children(self.repin_label.map(|label| {
-                div()
-                    .flex_none()
-                    .px_1p5()
-                    .rounded_md()
-                    .bg(colors.warning_background)
-                    .text_xs()
-                    .text_color(colors.warning)
-                    .child(label)
-            }))
+            .children(
+                self.repin_label
+                    .map(|label| chip(&colors, Tone::Warning).child(label)),
+            )
             .children(self.buttons)
     }
 }
@@ -491,15 +497,10 @@ impl RenderOnce for PieceMarker {
                     .text_ellipsis()
                     .child(name),
             )
-            .children(self.repin_label.map(|label| {
-                div()
-                    .flex_none()
-                    .px_1p5()
-                    .rounded_md()
-                    .bg(colors.warning_background)
-                    .text_color(colors.warning)
-                    .child(label)
-            }))
+            .children(
+                self.repin_label
+                    .map(|label| chip(&colors, Tone::Warning).child(label)),
+            )
             .child(
                 div()
                     .flex()
@@ -514,13 +515,14 @@ impl RenderOnce for PieceMarker {
 
 /// The bottom edge of a piece box, and the space before the next one.
 pub fn piece_end(colors: &Colors) -> impl IntoElement {
-    div().pb_3().child(
+    div().pb_4().child(
         div()
-            .h_1()
+            .h_1p5()
             .border_x_1()
             .border_b_1()
-            .rounded_b_md()
-            .border_color(colors.border),
+            .rounded_b(px(CARD_RADIUS))
+            .border_color(colors.subtle_border)
+            .shadow(colors.card_shadow()),
     )
 }
 
@@ -576,20 +578,27 @@ pub fn hunk_gap(
 ) -> impl IntoElement {
     let band = div()
         .id(id)
+        .h(px(24.))
         .px_2()
+        .flex()
+        .items_center()
+        .gap_1p5()
         .bg(colors.surface)
         .text_xs()
         .text_color(colors.muted_text);
     let band = match more {
-        None => band.child("⋯"),
+        None => band.child(sized_icon(Icon::Ellipsis, colors.muted_text, px(12.))),
         Some(more) => {
-            let label = match more.edge {
-                Edge::Above => "↑ Show more lines",
-                Edge::Below => "↓ Show more lines",
+            let arrow = match more.edge {
+                Edge::Above => Icon::ArrowUp,
+                Edge::Below => Icon::ArrowDown,
             };
             band.cursor_pointer()
+                .hover(|band| band.bg(colors.hover).text_color(colors.text))
+                .active(|band| band.bg(colors.pressed).text_color(colors.text))
                 .on_click(move |_, window, cx| on_more_context(&more, window, cx))
-                .child(label)
+                .child(sized_icon(arrow, colors.accent, px(12.)))
+                .child("Show more lines")
         }
     };
     piece_row(colors).child(band)

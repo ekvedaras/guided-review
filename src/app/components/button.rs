@@ -21,6 +21,8 @@ pub enum ButtonKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonSize {
+    /// The screen's way on, at the foot of the page.
+    Large,
     Regular,
     /// Inside a header band or next to a line.
     Small,
@@ -29,6 +31,7 @@ pub enum ButtonSize {
 impl ButtonSize {
     fn height(self) -> Pixels {
         match self {
+            Self::Large => px(36.),
             Self::Regular => px(28.),
             Self::Small => px(22.),
         }
@@ -51,6 +54,7 @@ pub fn button(
         .gap_1()
         .h(size.height())
         .px(match size {
+            ButtonSize::Large => px(16.),
             ButtonSize::Regular => px(12.),
             ButtonSize::Small => px(8.),
         })
@@ -59,7 +63,7 @@ pub fn button(
         .whitespace_nowrap()
         .cursor_pointer()
         .map(|button| match size {
-            ButtonSize::Regular => button.text_sm(),
+            ButtonSize::Large | ButtonSize::Regular => button.text_sm(),
             ButtonSize::Small => button.text_xs(),
         });
     match kind {

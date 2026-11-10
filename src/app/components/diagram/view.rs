@@ -6,7 +6,7 @@ use gpui::{
     Styled, Window, canvas, div, px,
 };
 
-use crate::app::components::palette::{Appearance, Colors};
+use crate::app::components::palette::{Appearance, CARD_RADIUS, Colors};
 
 use super::drawer::DiagramDrawer;
 use super::memory::{DiagramMemory, Showing};
@@ -132,9 +132,11 @@ impl RenderOnce for DiagramView {
         let frame = div()
             .id("diagram")
             .overflow_x_scroll()
-            .rounded_md()
+            .rounded(px(CARD_RADIUS))
             .border_1()
-            .border_color(colors.border);
+            .border_color(colors.subtle_border)
+            .bg(colors.background)
+            .shadow(colors.card_shadow());
         if let Some(svg) = memory.svg() {
             let width = svg.width();
             let strips = memory.strips().into_iter().map(|strip| {

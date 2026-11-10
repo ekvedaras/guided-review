@@ -268,6 +268,8 @@ pub struct Colors {
     pub shadow: Rgba,
     /// The faint lift of a card on the page; transparent in the dark, where cards do not cast.
     pub card_shadow: Rgba,
+    /// A quiet iris wash at the top of a screen, behind its heading, fading into `background`.
+    pub page_wash: Gradient,
     pub checker_light: Rgba,
     pub checker_dark: Rgba,
     code: CodeColors,
@@ -288,6 +290,24 @@ struct CodeColors {
     variable: Rgba,
     parameter: Rgba,
     punctuation: Rgba,
+}
+
+/// What a mark, note or band says about its state, which picks its text, ground and edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Neutral,
+    Accent,
+    Success,
+    Warning,
+    Danger,
+}
+
+/// The three roles one `Tone` is drawn with.
+#[derive(Debug, Clone, Copy)]
+pub struct ToneColors {
+    pub text: Rgba,
+    pub background: Rgba,
+    pub border: Rgba,
 }
 
 /// Whether the trail has reached the end of the tour.
@@ -349,6 +369,7 @@ impl Colors {
             scrim: translucent(ink::S15, 0.32),
             shadow: translucent(ink::S15, 0.16),
             card_shadow: translucent(ink::S15, 0.06),
+            page_wash: Gradient::of(0xeff1fe, WHITE),
             checker_light: rgb(WHITE),
             checker_dark: rgb(ink::S3),
             code: CodeColors {
@@ -410,6 +431,7 @@ impl Colors {
             scrim: translucent(BLACK, 0.55),
             shadow: translucent(BLACK, 0.5),
             card_shadow: translucent(BLACK, 0.),
+            page_wash: Gradient::of(0x1b1d36, 0x141622),
             checker_light: rgb(0x2b2b2b),
             checker_dark: rgb(0x3b3b3b),
             code: CodeColors {
@@ -464,6 +486,26 @@ impl Colors {
             | Capture::PunctuationDelimiter
             | Capture::PunctuationSpecial => code.punctuation,
         }
+    }
+
+    pub fn tone(&self, tone: Tone) -> ToneColors {
+        let (text, background, border) = match tone {
+            Tone::Neutral => (self.muted_text, self.surface, self.subtle_border),
+            Tone::Accent => (self.accent, self.current, self.current_border),
+            Tone::Success => (self.success, self.success_background, self.success_border),
+            Tone::Warning => (self.warning, self.warning_background, self.warning_border),
+            Tone::Danger => (self.danger, self.danger_background, self.danger_border),
+        };
+        ToneColors {
+            text,
+            background,
+            border,
+        }
+    }
+
+    /// The top of a screen, behind its heading.
+    pub fn page_wash_fill(&self) -> Background {
+        self.page_wash.top_down()
     }
 
     /// The sidebar's ground, lighter (light) or deeper (dark) at the top.

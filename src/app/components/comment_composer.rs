@@ -3,13 +3,17 @@ use std::rc::Rc;
 
 use gpui::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, red,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::viewer::{CommentDraft, CommentPlace, CommentProblem, QueuedComment};
 
-use super::palette::Colors;
-use super::text_box::TextBox;
+use super::button::{ButtonKind, ButtonSize, button as styled_button};
+use super::card::card;
+use super::chip::callout;
+use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in};
+use super::palette::{Colors, Tone};
+use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
 pub type OnCompose = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -85,17 +89,10 @@ fn button(
     colors: &Colors,
     id: &'static str,
     label: &'static str,
+    kind: ButtonKind,
     on_click: OnCompose,
 ) -> impl IntoElement {
-    div()
-        .id(id)
-        .px_3()
-        .py_1()
-        .rounded_md()
-        .border_1()
-        .border_color(colors.border)
-        .cursor_pointer()
-        .text_sm()
+    styled_button(colors, id, kind, ButtonSize::Regular)
         .on_click(move |_, window, cx| on_click(window, cx))
         .child(label)
 }
@@ -140,6 +137,7 @@ impl RenderOnce for CommentComposer {
                     &colors,
                     "add-to-review",
                     "Add to review",
+                    ButtonKind::Primary,
                     actions.on_add_to_review,
                 ))
                 .children(self.capabilities.comment_now.then(|| {
@@ -147,20 +145,26 @@ impl RenderOnce for CommentComposer {
                         &colors,
                         "comment-now",
                         "Comment now",
+                        ButtonKind::Secondary,
                         actions.on_comment_now,
                     )
                 }))
-                .children(
-                    self.capabilities
-                        .ask_agent
-                        .then(|| button(&colors, "ask-agent", "Ask agent", actions.on_ask_agent)),
-                )
+                .children(self.capabilities.ask_agent.then(|| {
+                    button(
+                        &colors,
+                        "ask-agent",
+                        "Ask agent",
+                        ButtonKind::Secondary,
+                        actions.on_ask_agent,
+                    )
+                }))
                 .children(
                     (self.capabilities.ask_agent && self.capabilities.comment_now).then(|| {
                         button(
                             &colors,
                             "ask-agent-now",
                             "Ask agent now",
+                            ButtonKind::Secondary,
                             actions.on_ask_agent_now,
                         )
                     }),
@@ -170,6 +174,7 @@ impl RenderOnce for CommentComposer {
                         &colors,
                         "suggest-change",
                         "Suggest change",
+                        ButtonKind::Secondary,
                         actions.on_suggest_change,
                     )
                 }))
@@ -177,20 +182,18 @@ impl RenderOnce for CommentComposer {
                     &colors,
                     "discard-comment",
                     "Discard",
+                    ButtonKind::Ghost,
                     actions.on_discard,
                 ))
         });
-        div()
+        let rise_id = SharedString::from(format!("{id}-rise"));
+        let composer = card(&colors)
             .id(id)
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_2p5()
             .m_2()
-            .p_2()
-            .rounded_md()
-            .border_1()
-            .border_color(colors.border)
-            .bg(colors.surface)
+            .p_3()
             .font_family(super::palette::TEXT_FONT)
             .on_click(move |_, window, cx| on_focus(window, cx))
             .child(
@@ -199,15 +202,31 @@ impl RenderOnce for CommentComposer {
                     .text_color(colors.muted_text)
                     .child(place.describe()),
             )
-            .child(div().min_h(gpui::px(48.)).child(body))
-            .children(
-                self.problem
-                    .map(|problem| div().text_sm().text_color(red()).child(shown(problem))),
+            .child(
+                Field::new(&self.focus)
+                    .px_2()
+                    .py_1p5()
+                    .min_h(px(64.))
+                    .child(body),
             )
-            .children(
-                (self.state == ComposerState::Sending).then(|| div().text_sm().child("Posting…")),
-            )
-            .children(buttons)
+            .children(self.problem.map(|problem| {
+                div()
+                    .text_sm()
+                    .text_color(colors.danger)
+                    .child(shown(problem))
+            }))
+            .children((self.state == ComposerState::Sending).then(|| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .text_color(colors.muted_text)
+                    .child(busy_dot(&colors, "composer-posting-dot"))
+                    .child("Posting…")
+            }))
+            .children(buttons);
+        slide_in(composer, rise_id, STATE, Edge::Bottom, BOX_RISE)
     }
 }
 
@@ -238,29 +257,28 @@ impl RenderOnce for QueuedCommentNote {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let on_discard = self.on_discard;
-        div()
+        callout(&colors, Tone::Warning)
             .flex()
             .flex_col()
             .gap_1()
             .m_2()
-            .p_2()
-            .rounded_md()
-            .border_1()
-            .border_color(colors.border)
             .text_sm()
             .child(self.queued.draft.body.clone())
-            .child(div().text_xs().text_color(colors.muted_text).child(format!(
+            .child(div().text_xs().text_color(colors.warning).child(format!(
                 "Not sent yet, will be tried again: {}",
                 self.queued.failed_because
             )))
             .child(
-                div()
-                    .id("discard-queued")
-                    .text_xs()
-                    .cursor_pointer()
-                    .text_color(colors.muted_text)
+                div().flex().ml(px(-8.)).child(
+                    styled_button(
+                        &colors,
+                        "discard-queued",
+                        ButtonKind::Ghost,
+                        ButtonSize::Small,
+                    )
                     .on_click(move |_, window, cx| on_discard(window, cx))
                     .child("Discard"),
+                ),
             )
     }
 }

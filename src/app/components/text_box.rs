@@ -10,7 +10,7 @@ use gpui::{
     point, px, relative, size,
 };
 
-use super::palette::Colors;
+use super::palette::{CONTROL_RADIUS, Colors};
 use super::text_input::{Caret, Direction, Lines, Step, TextDraft};
 
 actions!(
@@ -49,6 +49,57 @@ actions!(
         Paste,
     ]
 );
+
+/// The frame a text box is typed in: its edge darkens under the mouse, and while the box takes
+/// keys the edge turns accent with a soft ring around it. The caller sizes and pads it and puts the
+/// box in.
+#[derive(IntoElement)]
+pub struct Field {
+    frame: gpui::Div,
+    focus: FocusHandle,
+}
+
+impl Field {
+    pub fn new(focus: &FocusHandle) -> Self {
+        Self {
+            frame: div(),
+            focus: focus.clone(),
+        }
+    }
+}
+
+impl Styled for Field {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        self.frame.style()
+    }
+}
+
+impl ParentElement for Field {
+    fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+        self.frame.extend(elements);
+    }
+}
+
+impl RenderOnce for Field {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let frame = self
+            .frame
+            .rounded(px(CONTROL_RADIUS))
+            .border_1()
+            .bg(colors.background)
+            .cursor(CursorStyle::IBeam);
+        if self.focus.is_focused(window) {
+            frame
+                .border_color(colors.accent)
+                .shadow(colors.focus_ring())
+        } else {
+            frame
+                .border_color(colors.border)
+                .hover(|frame| frame.border_color(colors.muted_text))
+        }
+    }
+}
 
 const KEY_CONTEXT: &str = "TextBox";
 const MULTI_LINE: &str = "MultiLine";
@@ -909,7 +960,7 @@ impl Element for TextBoxElement {
             cx,
         );
         for row in &painted.selection {
-            window.paint_quad(fill(*row, colors.current));
+            window.paint_quad(fill(*row, colors.text_selection));
         }
         let mut top = bounds.top();
         for (_, line) in &painted.lines {
@@ -925,7 +976,7 @@ impl Element for TextBoxElement {
             top += line.size(painted.line_height).height;
         }
         if let Some(caret) = painted.caret {
-            window.paint_quad(fill(caret, colors.text));
+            window.paint_quad(fill(caret, colors.accent));
         }
         let lines = std::mem::take(&mut painted.lines);
         let line_height = painted.line_height;

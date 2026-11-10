@@ -7,7 +7,8 @@ use crate::pull_request::Sha;
 use crate::viewer::OldHead;
 
 use super::button::{ButtonKind, ButtonSize, button};
-use super::palette::Colors;
+use super::chip::{dropping_in, notice_band};
+use super::palette::{Colors, Tone};
 
 type OnRepin = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -73,16 +74,11 @@ impl RenderOnce for NewCommitsBanner {
             ),
             RepinProgress::Idle | RepinProgress::Running => None,
         };
-        div()
-            .px_6()
+        let band = notice_band(&colors, Tone::Warning)
             .py_2()
-            .flex()
             .flex_col()
+            .items_start()
             .gap_1()
-            .bg(colors.warning_background)
-            .border_b_1()
-            .border_color(colors.border)
-            .text_sm()
             .child(
                 div()
                     .flex()
@@ -91,7 +87,8 @@ impl RenderOnce for NewCommitsBanner {
                     .child(message)
                     .children(button),
             )
-            .children(error)
+            .children(error);
+        dropping_in(band, "new-commits-banner")
     }
 }
 

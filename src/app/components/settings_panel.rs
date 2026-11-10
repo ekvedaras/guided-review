@@ -13,8 +13,10 @@ use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{SaveOutcome, SettingProblem, Settings};
 
 use super::button::{ButtonKind, ButtonSize, button, toggle_button};
-use super::palette::{CODE_FONT, Colors, TEXT_FONT};
-use super::text_box::TextBox;
+use super::chip::{dropping_in, notice_band};
+use super::motion::{OVERLAY, fade_in};
+use super::palette::{CODE_FONT, Colors, TEXT_FONT, Tone};
+use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 
@@ -456,16 +458,11 @@ impl SettingsPanel {
         on_edit: impl Fn(&mut Editing, String) + 'static,
     ) -> impl IntoElement {
         let (panel, cancel) = (cx.entity(), cx.entity());
-        let colors = Colors::active(cx);
-        div()
+        Field::new(focus)
             .px_2()
             .h(px(28.))
             .flex()
             .items_center()
-            .rounded_md()
-            .border_1()
-            .border_color(colors.border)
-            .bg(colors.surface)
             .text_sm()
             .child(
                 TextBox::new(id, focus, text, Lines::Single)
@@ -1010,19 +1007,9 @@ impl SettingsPanel {
         )
     }
 
-    fn discard_question(colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
-        div()
-            .flex_none()
-            .px_6()
+    fn discard_question(colors: &Colors, cx: &Context<Self>) -> gpui::Div {
+        notice_band(colors, Tone::Warning)
             .py_3()
-            .flex()
-            .items_center()
-            .gap_3()
-            .bg(colors.warning_background)
-            .border_b_1()
-            .border_color(colors.subtle_border)
-            .text_sm()
-            .text_color(colors.warning)
             .child(
                 div()
                     .flex_1()
@@ -1148,7 +1135,7 @@ impl Render for SettingsPanel {
         };
         let is_confirming =
             matches!(loaded, Loaded::Ready(editing) if editing.is_confirming_discard);
-        div()
+        let panel = div()
             .id("settings-panel")
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
@@ -1167,20 +1154,18 @@ impl Render for SettingsPanel {
             .text_color(colors.text)
             .child(header)
             .children(self.notice.clone().map(|notice| {
-                div()
-                    .flex_none()
-                    .px_6()
-                    .py_3()
-                    .bg(colors.warning_background)
-                    .border_b_1()
-                    .border_color(colors.subtle_border)
-                    .text_color(colors.danger)
-                    .child(notice)
+                dropping_in(
+                    notice_band(&colors, Tone::Danger).py_3().child(notice),
+                    "settings-notice-band",
+                )
             }))
             .when(is_confirming, |panel| {
-                panel.child(Self::discard_question(&colors, cx))
+                panel.child(dropping_in(
+                    Self::discard_question(&colors, cx),
+                    "settings-discard-band",
+                ))
             })
-            .child(body)
-            .into_any_element()
+            .child(body);
+        fade_in(panel, "settings-panel-fade", OVERLAY).into_any_element()
     }
 }

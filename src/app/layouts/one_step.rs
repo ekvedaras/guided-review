@@ -20,6 +20,8 @@ use crate::app::components::ask_panel::{
     AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
 };
 use crate::app::components::button::{ButtonKind, ButtonSize, button, toggle_button};
+use crate::app::components::card::card;
+use crate::app::components::chip::{chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
     QueuedCommentNote,
@@ -35,20 +37,22 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
+use crate::app::components::key_cap::{KeyLabel, key_hint};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
-    InlineMarkdown, MarkdownView, PreparedMarkdown, parsed_markdown,
+    InlineMarkdown, MarkdownView, PreparedMarkdown, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
     Edge, SCREEN, SCREEN_SLIDE, glide_to_share, grow_when_shown, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
-use crate::app::components::palette::{CONTROL_RADIUS, Colors, TEXT_FONT, TrailStage};
+use crate::app::components::palette::{CONTROL_RADIUS, Colors, TEXT_FONT, Tone, TrailStage};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
+use crate::app::components::step_notes::note_label;
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
     OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
@@ -1276,11 +1280,12 @@ impl OneStepLayout {
         };
         match row {
             PageRow::SummaryTitle(title) => div()
-                .pb_4()
+                .pb_5()
                 .flex()
                 .flex_col()
-                .gap_1()
-                .child(eyebrow(&colors, "Summary"))
+                .items_start()
+                .gap_2()
+                .child(tour_chip(&colors, "SUMMARY", ChipVoice::OnTheTrail))
                 .child(
                     div()
                         .text_2xl()
@@ -1288,30 +1293,23 @@ impl OneStepLayout {
                         .child(InlineMarkdown::new("summary-title", &title)),
                 )
                 .into_any_element(),
-            PageRow::SummaryBullet(bullet) => div()
+            PageRow::SummaryBullet(summary_bullet) => div()
                 .pb_2()
                 .flex()
                 .items_start()
                 .gap_3()
                 .max_w(READING_WIDTH)
-                .child(
-                    div()
-                        .flex_none()
-                        .h(px(24.))
-                        .flex()
-                        .items_center()
-                        .child(div().size(px(6.)).rounded_full().bg(colors.accent)),
-                )
+                .child(bullet(&colors, SUMMARY_LINE))
                 .child(div().flex_1().child(InlineMarkdown::new(
                     format!("summary-bullet-{index}"),
-                    &bullet,
+                    &summary_bullet,
                 )))
                 .into_any_element(),
             PageRow::ReviewerSummary(summary) => self
-                .markdown_card("Reviewer summary", "reviewer-summary", summary, cx)
+                .markdown_card("REVIEWER SUMMARY", "reviewer-summary", summary, cx)
                 .into_any_element(),
             PageRow::PrDescription(description) => self
-                .markdown_card("PR description", "pr-description", description, cx)
+                .markdown_card("PR DESCRIPTION", "pr-description", description, cx)
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
@@ -1470,29 +1468,25 @@ impl OneStepLayout {
 
     fn markdown_card(
         &self,
-        eyebrow_text: &'static str,
+        label: &'static str,
         id: &'static str,
         markdown: Rc<PreparedMarkdown>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = Colors::active(cx);
         div()
-            .pt_2()
+            .pt_6()
             .pb_4()
             .w_full()
             .max_w(READING_WIDTH)
             .flex()
             .flex_col()
             .gap_2()
-            .child(eyebrow(&colors, eyebrow_text))
+            .child(note_label(label).text_color(colors.muted_text))
             .child(
-                div()
-                    .px_4()
-                    .py_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(colors.subtle_border)
-                    .bg(colors.surface)
+                card(&colors)
+                    .px_5()
+                    .py_4()
                     .text_sm()
                     .child(MarkdownView::new(id, markdown)),
             )
@@ -1611,12 +1605,33 @@ impl OneStepLayout {
 /// Keeps prose at a readable line length on a wide window; code still takes the full width.
 const READING_WIDTH: Pixels = px(760.);
 
-fn eyebrow(colors: &Colors, text: impl Into<SharedString>) -> impl IntoElement {
-    div()
-        .text_xs()
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(colors.muted_text)
-        .child(text.into().to_uppercase())
+/// The line height of the summary's bullets, which their dots centre on.
+const SUMMARY_LINE: Pixels = px(26.);
+/// How far the wash at the top of a screen reaches down before it is all `background`.
+const PAGE_WASH_HEIGHT: Pixels = px(184.);
+/// The list's top padding, which the wash reaches up through to the column's top edge.
+const PAGE_TOP: Pixels = px(24.);
+
+/// Every row of the page column takes the column's side margins; the first one also carries the
+/// wash behind the screen's heading, so the wash scrolls away with it.
+fn page_column_row(colors: &Colors, index: usize, row: AnyElement) -> AnyElement {
+    let column = div().relative().px_6();
+    if index == 0 {
+        column
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(-PAGE_TOP)
+                    .h(PAGE_WASH_HEIGHT)
+                    .bg(colors.page_wash_fill()),
+            )
+            .child(row)
+            .into_any_element()
+    } else {
+        column.child(row).into_any_element()
+    }
 }
 
 fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
@@ -1664,6 +1679,23 @@ fn step_chip(colors: &Colors, heading: &StepHeading) -> impl IntoElement {
         (Some((number, count)), false) => format!("Step {number} of {count}"),
         (None, false) => "Step".to_owned(),
     };
+    let voice = if heading.is_gone {
+        ChipVoice::Quiet
+    } else {
+        ChipVoice::OnTheTrail
+    };
+    tour_chip(colors, text.to_uppercase(), voice)
+}
+
+/// Whether a place chip is a stop on the trail, or a step no longer on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChipVoice {
+    OnTheTrail,
+    Quiet,
+}
+
+/// A screen's place on the tour, over its heading.
+fn tour_chip(colors: &Colors, text: impl Into<SharedString>, voice: ChipVoice) -> impl IntoElement {
     let chip = div()
         .flex()
         .items_center()
@@ -1674,7 +1706,7 @@ fn step_chip(colors: &Colors, heading: &StepHeading) -> impl IntoElement {
         .border_1()
         .text_xs()
         .font_weight(FontWeight::MEDIUM);
-    let chip = if heading.is_gone {
+    let chip = if voice == ChipVoice::Quiet {
         chip.bg(colors.surface)
             .border_color(colors.subtle_border)
             .text_color(colors.muted_text)
@@ -1689,19 +1721,11 @@ fn step_chip(colors: &Colors, heading: &StepHeading) -> impl IntoElement {
                     .bg(colors.trail.left_right()),
             )
     };
-    chip.child(text.to_uppercase())
+    chip.child(text.into())
 }
 
 fn repin_notes(colors: &Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
-    let note = |text: String| {
-        div()
-            .px_2()
-            .py_0p5()
-            .rounded_md()
-            .bg(colors.warning_background)
-            .text_color(colors.warning)
-            .child(text)
-    };
+    let note = |text: String| chip(colors, Tone::Warning).py_0p5().child(text);
     div()
         .pb_3()
         .flex()
@@ -1750,7 +1774,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
             &colors,
             "footer-next",
             ButtonKind::Primary,
-            ButtonSize::Regular,
+            ButtonSize::Large,
         )
         .on_click(cx.listener(move |this, _, _, cx| {
             if let Some(id) = &ticks {
@@ -1765,19 +1789,28 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
     });
     let up_next = next_label.map(|title| {
         div()
+            .flex_1()
+            .min_w_0()
             .flex()
-            .gap_1()
-            .text_sm()
-            .text_color(colors.muted_text)
-            .child("Up next:")
+            .flex_col()
+            .gap_0p5()
+            .child(
+                note_label("Up next:")
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(colors.muted_text),
+            )
             .child(
                 div()
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(colors.text)
+                    .truncate()
                     .child(InlineMarkdown::new("footer-up-next", &title)),
             )
     });
     let the_end = (footer.next.is_none()).then(|| {
         div()
+            .flex_1()
+            .min_w_0()
             .text_sm()
             .text_color(colors.muted_text)
             .child(if footer.ticks.is_some() {
@@ -1786,20 +1819,27 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
                 "That was the last step. Finish the review in the sidebar."
             })
     });
-    div().pt_4().pb_10().child(
-        div()
-            .pt_4()
-            .border_t_1()
-            .border_color(colors.subtle_border)
-            .flex()
-            .items_center()
-            .gap_3()
-            .children(previous)
-            .child(div().flex_1())
-            .children(up_next)
-            .children(the_end)
-            .children(primary),
-    )
+    div()
+        .pt_8()
+        .pb_10()
+        .flex()
+        .items_center()
+        .gap_3()
+        .children(previous)
+        .child(
+            card(&colors)
+                .flex_1()
+                .min_w_0()
+                .pl_5()
+                .pr_3()
+                .py_3()
+                .flex()
+                .items_center()
+                .gap_4()
+                .children(up_next)
+                .children(the_end)
+                .children(primary),
+        )
 }
 
 /// Whether the footer's primary action moves on to another screen, which its arrow says.
@@ -1893,14 +1933,7 @@ fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
 }
 
 fn key_hints(colors: &Colors) -> impl IntoElement {
-    let hint = |keys: &'static [&'static str], what: &'static str| {
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .children(keys.iter().map(|key| key_cap(colors, key)))
-            .child(div().pl_1().child(what))
-    };
+    let hint = |keys: &'static [KeyLabel], what: &'static str| key_hint(colors, keys, what);
     div()
         .flex_none()
         .px_4()
@@ -1912,26 +1945,18 @@ fn key_hints(colors: &Colors) -> impl IntoElement {
         .border_color(colors.subtle_border)
         .text_xs()
         .text_color(colors.muted_text)
-        .child(hint(&["←", "→"], "previous / next screen"))
-        .child(hint(&["⌘", "K"], "jump to a step, file or symbol"))
-        .child(hint(&["W"], "wrap long lines"))
-}
-
-fn key_cap(colors: &Colors, key: &'static str) -> impl IntoElement {
-    div()
-        .min_w(px(18.))
-        .h(px(18.))
-        .px_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.header_band())
-        .shadow(colors.card_shadow())
-        .text_color(colors.text)
-        .child(key)
+        .child(hint(
+            &[
+                KeyLabel::Icon(Icon::ArrowLeft),
+                KeyLabel::Icon(Icon::ArrowRight),
+            ],
+            "previous / next screen",
+        ))
+        .child(hint(
+            &[KeyLabel::Text("⌘"), KeyLabel::Text("K")],
+            "jump to a step, file or symbol",
+        ))
+        .child(hint(&[KeyLabel::Text("W")], "wrap long lines"))
 }
 
 impl Focusable for OneStepLayout {
@@ -1970,13 +1995,15 @@ impl Render for OneStepLayout {
         let repin_progress = session.repin_progress().clone();
         let refresh_brief = session.refresh_brief().clone();
         let refresh_progress = session.refresh_progress().clone();
-        let screen = div().flex_1().min_h_0().px_6().pt_6().child(
+        let screen = div().flex_1().min_h_0().child(
             list(
                 self.screen_list.clone(),
                 cx.processor(move |this, index, _window, cx| {
-                    this.render_row(index, selected.as_ref().as_ref(), cx)
+                    let row = this.render_row(index, selected.as_ref().as_ref(), cx);
+                    page_column_row(&Colors::active(cx), index, row)
                 }),
             )
+            .pt(PAGE_TOP)
             .size_full(),
         );
         let screen = slide_in(
@@ -2028,6 +2055,7 @@ impl Render for OneStepLayout {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
@@ -2043,30 +2071,29 @@ impl Render for OneStepLayout {
                     }))
                     .children(self.lines_to_ask.clone().map(|place| {
                         let label = place.lines_label().unwrap_or_default();
-                        div().px_6().py_1().flex().child(self.ask_button(
-                            "ask-selected-lines".into(),
-                            place,
-                            label,
-                            cx,
-                        ))
+                        dropping_in(
+                            notice_band(&colors, Tone::Neutral)
+                                .py_1()
+                                .child(self.ask_button(
+                                    "ask-selected-lines".into(),
+                                    place,
+                                    label,
+                                    cx,
+                                )),
+                            "ask-selected-lines-band",
+                        )
                     }))
                     .children(self.reopen_after_save.waiting_line().map(|line| {
-                        div()
-                            .px_6()
-                            .py_1()
-                            .text_sm()
-                            .bg(colors.warning_background)
-                            .text_color(colors.warning)
-                            .child(line.to_owned())
+                        dropping_in(
+                            notice_band(&colors, Tone::Warning).child(line.to_owned()),
+                            "waiting-line-band",
+                        )
                     }))
                     .children(self.selection_notice.clone().map(|notice| {
-                        div()
-                            .px_6()
-                            .py_1()
-                            .text_sm()
-                            .bg(colors.warning_background)
-                            .text_color(colors.warning)
-                            .child(notice)
+                        dropping_in(
+                            notice_band(&colors, Tone::Warning).child(notice),
+                            "selection-notice-band",
+                        )
                     }))
                     .children(
                         Some(refresh_brief)

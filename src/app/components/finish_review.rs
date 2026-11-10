@@ -10,8 +10,10 @@ use crate::viewer::{ApproveWarning, CLAMPED_BODY_LINES, FinishResult, ReviewVerd
 use crate::app::sidebar_rows::SidebarLastReview;
 
 use super::button::{ButtonKind, ButtonSize, button, toggle_button};
+use super::icon::{Icon, sized_icon};
+use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
 use super::palette::Colors;
-use super::text_box::TextBox;
+use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
 /// Sends the review and calls back with how it went. The layout owns the review and the network.
@@ -194,6 +196,7 @@ impl RenderOnce for FinishReviewDialog {
         );
         let is_last_review_body_open = state.is_last_review_body_open;
         let (problem, focus) = (state.problem.clone(), state.focus.clone());
+        let focus_of_body = focus.clone();
         let body = if is_busy {
             div().child(self.body.clone()).into_any_element()
         } else {
@@ -260,17 +263,27 @@ impl RenderOnce for FinishReviewDialog {
                     let ui = ui.clone();
                     div()
                         .id("last-review-body-toggle")
+                        .flex()
+                        .items_center()
+                        .gap_1()
                         .cursor_pointer()
                         .text_color(colors.muted_text)
+                        .hover(|toggle| toggle.text_color(colors.text))
                         .on_click(move |_, _, cx| {
                             update(&ui, cx, |ui| {
                                 ui.is_last_review_body_open = !ui.is_last_review_body_open;
                             });
                         })
+                        .child(turn_to(
+                            sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                            "last-review-chevron",
+                            is_last_review_body_open,
+                            1.,
+                        ))
                         .child(if is_last_review_body_open {
-                            "▾ Show less"
+                            "Show less"
                         } else {
-                            "▸ Show all"
+                            "Show all"
                         })
                 }))
         });
@@ -350,17 +363,16 @@ impl RenderOnce for FinishReviewDialog {
                 },
             ))
         });
-        wrapper
+        let form = div()
+            .flex()
+            .flex_col()
+            .gap_2()
             .child(div().flex().flex_wrap().gap_1().children(verdicts))
             .child(
-                div()
-                    .id("finish-review-body")
+                Field::new(&focus_of_body)
                     .min_h(px(64.))
-                    .p_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.background)
+                    .px_2()
+                    .py_1p5()
                     .text_sm()
                     .child(body),
             )
@@ -370,13 +382,25 @@ impl RenderOnce for FinishReviewDialog {
             )
             .child(if is_busy {
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_sm()
                     .text_color(colors.muted_text)
+                    .child(busy_dot(&colors, "finish-review-sending-dot"))
                     .child("Sending...")
                     .into_any_element()
             } else {
                 submit_button.into_any_element()
-            })
+            });
+        wrapper
+            .child(slide_in(
+                form,
+                "finish-review-form",
+                STATE,
+                Edge::Bottom,
+                BOX_RISE,
+            ))
             .into_any_element()
     }
 }

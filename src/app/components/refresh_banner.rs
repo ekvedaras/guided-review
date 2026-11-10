@@ -6,7 +6,8 @@ use gpui::{
 use crate::viewer::RefreshBrief;
 
 use super::button::{ButtonKind, ButtonSize, button};
-use super::palette::Colors;
+use super::chip::{dropping_in, notice_band};
+use super::palette::{Colors, Tone};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshProgress {
@@ -80,16 +81,11 @@ impl RenderOnce for RefreshBanner {
                 .text_color(colors.danger)
                 .child("The last refresh did not go through, the sidebar says why.")
         });
-        div()
-            .px_6()
+        let band = notice_band(&colors, Tone::Warning)
             .py_2()
-            .flex()
             .flex_col()
+            .items_start()
             .gap_1()
-            .bg(colors.warning_background)
-            .border_b_1()
-            .border_color(colors.border)
-            .text_sm()
             .child(
                 div()
                     .flex()
@@ -99,7 +95,8 @@ impl RenderOnce for RefreshBanner {
                     .children(button),
             )
             .children(redo_hint)
-            .children(failed)
+            .children(failed);
+        dropping_in(band, "refresh-banner")
     }
 }
 

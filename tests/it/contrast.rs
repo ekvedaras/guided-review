@@ -42,6 +42,7 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
         ("hover", colors.hover),
         ("current", colors.current),
         ("overlay", colors.overlay),
+        ("page_wash top", colors.page_wash.start),
     ];
     on("text", colors.text, &page_grounds);
     on("muted_text", colors.muted_text, &page_grounds);
@@ -52,6 +53,7 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
             ("background", colors.background),
             ("surface", colors.surface),
             ("current", colors.current),
+            ("page_wash top", colors.page_wash.start),
             ("sidebar top", colors.sidebar.start),
             ("sidebar bottom", colors.sidebar.end),
         ],
@@ -106,7 +108,13 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
     on(
         "text",
         colors.text,
-        &[("text_selection", colors.text_selection)],
+        &[
+            ("text_selection", colors.text_selection),
+            (
+                "current_border, the gutter of selected lines",
+                colors.current_border,
+            ),
+        ],
     );
     pairs
         .into_iter()

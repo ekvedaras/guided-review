@@ -1,4 +1,4 @@
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
+use gpui::{App, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
 use super::palette::Colors;
 
@@ -17,9 +17,14 @@ impl RenderOnce for SafetyNetIntro {
         div()
             .flex()
             .flex_col()
-            .gap_3()
-            .pb_3()
-            .child(div().text_xl().child(Self::TITLE))
+            .gap_2()
+            .pb_5()
+            .child(
+                div()
+                    .text_2xl()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(Self::TITLE),
+            )
             .child(
                 div()
                     .text_color(colors.muted_text)

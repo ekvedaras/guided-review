@@ -6,10 +6,11 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use gpui::prelude::FluentBuilder;
 use gpui::{
     ClipboardItem, Context, Div, ElementId, EventEmitter, FocusHandle, InteractiveElement,
     IntoElement, KeyDownEvent, ParentElement, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Window, div, px, red,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::config::AskSettings;
@@ -18,9 +19,12 @@ use crate::viewer::{
     Review, Screen, StepId, TurnStopper,
 };
 
+use super::button::{ButtonKind, ButtonSize, button};
+use super::card::card;
 use super::markdown_view::{MarkdownView, parsed_markdown};
+use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in};
 use super::palette::{Colors, TEXT_FONT};
-use super::text_box::TextBox;
+use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
 /// Everything the panel needs to talk to the AI, built once at startup.
@@ -417,43 +421,51 @@ impl AskPanel {
                 Author::Ai => div().child(text),
             }
         });
-        let mut block = div()
+        let mut block = card(&colors)
             .flex()
             .flex_col()
             .gap_2()
-            .p_2()
-            .border_1()
-            .border_color(if is_selected {
-                colors.text
-            } else {
-                colors.border
-            })
-            .rounded_md()
+            .px_3()
+            .py_2p5()
+            .when(is_selected, |block| block.border_color(colors.accent))
             .children(messages);
         if let Some(activity) = &ask.activity {
             block = block.child(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_color(colors.muted_text)
+                    .child(busy_dot(
+                        &colors,
+                        SharedString::from(format!("ask-activity-{}", id_label(id))),
+                    ))
                     .child(format!("{activity}...")),
             );
         }
         if let Some(failure) = &ask.failure {
-            block = block.child(div().text_color(red()).child(failure.clone()));
+            block = block.child(div().text_color(colors.danger).child(failure.clone()));
         }
         if self.code_changed.contains(&id) {
             block = block.child(
                 div()
-                    .text_color(colors.muted_text)
+                    .text_color(colors.warning)
                     .child("Code changed since: this answer may be old"),
             );
         }
         let is_answering = self.pool.is_answering(id);
-        let mut actions = div().flex().gap_3().text_color(colors.muted_text);
+        let action = |name: String| {
+            button(
+                &colors,
+                SharedString::from(format!("{name}-{}", id_label(id))),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+        };
+        let mut actions = div().flex().flex_wrap().gap_1().ml(px(-8.));
         if is_answering {
             actions = actions.child(
-                div()
-                    .id(SharedString::from(format!("stop-turn-{}", id_label(id))))
-                    .cursor_pointer()
+                action("stop-turn".to_owned())
                     .on_click(cx.listener(move |this, _, _, cx| this.stop_turn(id, cx)))
                     .child("Stop"),
             );
@@ -461,9 +473,7 @@ impl AskPanel {
         if let Some(answer) = ask.latest_answer().filter(|_| !is_answering) {
             let answer = answer.to_owned();
             actions = actions.child(
-                div()
-                    .id(SharedString::from(format!("copy-answer-{}", id_label(id))))
-                    .cursor_pointer()
+                action("copy-answer".to_owned())
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(answer.clone()));
                     })
@@ -474,12 +484,7 @@ impl AskPanel {
         if has_lines && !is_answering && ask.latest_answer().is_some() {
             let ask_to_use = ask.clone();
             actions = actions.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "use-as-comment-{}",
-                        id_label(id)
-                    )))
-                    .cursor_pointer()
+                action("use-as-comment".to_owned())
                     .on_click(
                         cx.listener(move |_, _, _, cx| cx.emit(UseAsComment(ask_to_use.clone()))),
                     )
@@ -488,9 +493,7 @@ impl AskPanel {
         }
         if !is_selected {
             actions = actions.child(
-                div()
-                    .id(SharedString::from(format!("follow-up-{}", id_label(id))))
-                    .cursor_pointer()
+                action("follow-up".to_owned())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = Some(id);
                         this.question.clear();
@@ -504,12 +507,7 @@ impl AskPanel {
         if !is_answering && !ask.messages.is_empty() {
             let (ask_to_hand, place) = (ask.clone(), place.to_owned());
             actions = actions.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "hand-to-agent-{}",
-                        id_label(id)
-                    )))
-                    .cursor_pointer()
+                action("hand-to-agent".to_owned())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.hand_offs.insert(id, "Handing to your agent...".into());
                         cx.emit(HandToAgent {
@@ -560,22 +558,36 @@ impl Render for AskPanel {
             .collect();
         let is_answering = self.selected.is_some_and(|id| self.pool.is_answering(id));
         let input = match target {
-            AskTarget::Unavailable { why, .. } => div().text_color(red()).child(why.message()),
+            AskTarget::Unavailable { why, .. } => {
+                div().text_color(colors.danger).child(why.message())
+            }
             AskTarget::Ready { .. } => div()
                 .flex()
                 .flex_col()
+                .gap_2()
                 .children(is_answering.then(|| {
                     div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
                         .text_color(colors.muted_text)
+                        .child(busy_dot(&colors, "ask-waiting-dot"))
                         .child("Waiting for the answer...")
                 }))
                 .children(
                     self.notice
-                        .map(|notice| div().text_color(red()).child(notice.message())),
+                        .map(|notice| div().text_color(colors.danger).child(notice.message())),
                 )
-                .child(self.question_box(cx)),
+                .child(
+                    Field::new(&self.question_focus)
+                        .px_2()
+                        .h(px(30.))
+                        .flex()
+                        .items_center()
+                        .child(self.question_box(cx)),
+                ),
         };
-        div()
+        let panel = div()
             .id("ask-panel")
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
@@ -585,23 +597,34 @@ impl Render for AskPanel {
             .h_full()
             .flex()
             .flex_col()
-            .bg(colors.surface)
+            .bg(colors.overlay)
             .border_l_1()
             .border_color(colors.border)
             .font_family(TEXT_FONT)
             .text_sm()
+            .text_color(colors.text)
             .child(
                 div()
+                    .flex_none()
+                    .h(px(40.))
+                    .pl_4()
+                    .pr_2()
                     .flex()
-                    .justify_between()
-                    .p_2()
+                    .items_center()
+                    .gap_2()
+                    .bg(colors.header_band())
                     .border_b_1()
-                    .border_color(colors.border)
-                    .child(div().child(format!("Ask: {place}")))
+                    .border_color(colors.subtle_border)
                     .child(
                         div()
-                            .id("ask-close")
-                            .cursor_pointer()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(format!("Ask: {place}")),
+                    )
+                    .child(
+                        button(&colors, "ask-close", ButtonKind::Ghost, ButtonSize::Small)
                             .on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))
                             .child("Close"),
                     ),
@@ -613,33 +636,28 @@ impl Render for AskPanel {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap_2()
-                    .p_2()
+                    .gap_3()
+                    .p_3()
                     .children(blocks),
             )
             .child(
                 div()
-                    .p_2()
+                    .flex_none()
+                    .p_3()
                     .border_t_1()
-                    .border_color(colors.border)
+                    .border_color(colors.subtle_border)
                     .child(input),
-            )
-            .into_any_element()
+            );
+        slide_in(panel, "ask-panel-slide", OVERLAY, Edge::Right, PANEL_SLIDE).into_any_element()
     }
 }
 
 /// The button on a place. It shows how many Asks the place already has.
 pub fn ask_button(colors: &Colors, id: impl Into<ElementId>, count: usize) -> Stateful<Div> {
-    let label = if count == 0 {
-        "Ask".to_owned()
-    } else {
-        format!("Ask \u{25cf} {count}")
-    };
-    super::button::button(
-        colors,
-        id,
-        super::button::ButtonKind::Secondary,
-        super::button::ButtonSize::Small,
-    )
-    .child(label)
+    let ask = button(colors, id, ButtonKind::Secondary, ButtonSize::Small).child("Ask");
+    if count == 0 {
+        return ask;
+    }
+    ask.child(div().size(px(5.)).rounded_full().bg(colors.accent))
+        .child(count.to_string())
 }

@@ -8,8 +8,12 @@ use crate::pieces::PieceId;
 use crate::viewer::{JumpPlace, JumpTarget};
 
 use super::diff_view::PieceLabel;
+use super::icon::{Icon, sized_icon};
+use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::InlineMarkdown;
-use super::palette::{Colors, TEXT_FONT};
+use super::motion::rise_in;
+use super::overlay::{modal_layer, overlay_panel, picker_footer, picker_row};
+use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
@@ -162,42 +166,30 @@ impl JumpPalette {
                 .text_color(colors.muted_text)
                 .child(InlineMarkdown::new(format!("jump-detail-{index}"), detail))
         });
-        div()
-            .id(SharedString::from(format!("jump-{index}")))
-            .mx_2()
-            .px_2()
-            .h(px(32.))
-            .flex()
-            .items_center()
-            .gap_3()
-            .rounded_md()
-            .overflow_hidden()
-            .cursor_pointer()
-            .map(|row| {
-                if is_selected {
-                    row.bg(colors.current)
+        picker_row(
+            &colors,
+            SharedString::from(format!("jump-{index}")),
+            is_selected,
+        )
+        .h(px(32.))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.selected = index;
+            this.pick(window, cx);
+        }))
+        .child(
+            div()
+                .flex_none()
+                .w(px(52.))
+                .text_xs()
+                .text_color(if is_selected {
+                    colors.accent
                 } else {
-                    row.hover(|row| row.bg(colors.hover))
-                }
-            })
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.selected = index;
-                this.pick(window, cx);
-            }))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(52.))
-                    .text_xs()
-                    .text_color(if is_selected {
-                        colors.accent
-                    } else {
-                        colors.muted_text
-                    })
-                    .child(kind),
-            )
-            .child(div().flex_1().min_w_0().overflow_hidden().child(label))
-            .children(detail)
+                    colors.muted_text
+                })
+                .child(kind),
+        )
+        .child(div().flex_1().min_w_0().overflow_hidden().child(label))
+        .children(detail)
     }
 }
 
@@ -260,22 +252,13 @@ impl Render for JumpPalette {
             .take(VISIBLE_ROWS)
             .map(|(index, target)| self.row(index, target, cx).into_any_element())
             .collect();
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .flex()
-            .items_start()
-            .justify_center()
-            .bg(colors.scrim)
-            .occlude()
+        modal_layer(&colors, "jump-palette-scrim")
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),
             )
-            .child(
-                div()
+            .child(rise_in(
+                overlay_panel(&colors)
                     .id("jump-palette")
                     .key_context(Self::KEY_CONTEXT)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -283,25 +266,18 @@ impl Render for JumpPalette {
                     .mt(px(80.))
                     .w(px(720.))
                     .h_auto()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .bg(colors.background)
-                    .border_1()
-                    .border_color(colors.border)
-                    .rounded_lg()
-                    .shadow_lg()
-                    .font_family(TEXT_FONT)
-                    .text_sm()
-                    .text_color(colors.text)
                     .child(
                         div()
                             .px_4()
                             .py_3()
+                            .flex()
+                            .items_center()
+                            .gap_3()
                             .text_base()
                             .border_b_1()
-                            .border_color(colors.border)
-                            .child(self.query_box(cx)),
+                            .border_color(colors.subtle_border)
+                            .child(sized_icon(Icon::Search, colors.muted_text, px(16.)))
+                            .child(div().flex_1().min_w_0().child(self.query_box(cx))),
                     )
                     .child(div().py_2().flex().flex_col().children(rows).when(
                         self.targets.is_empty(),
@@ -314,22 +290,20 @@ impl Render for JumpPalette {
                         },
                     ))
                     .child(
-                        div()
-                            .px_4()
-                            .py_2()
-                            .flex()
-                            .gap_4()
-                            .border_t_1()
-                            .border_color(colors.subtle_border)
-                            .bg(colors.surface)
-                            .rounded_b_md()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child("↑ ↓  move")
-                            .child("↵  open")
-                            .child("esc  close"),
+                        picker_footer(&colors)
+                            .child(key_hint(
+                                &colors,
+                                &[
+                                    KeyLabel::Icon(Icon::ArrowUp),
+                                    KeyLabel::Icon(Icon::ArrowDown),
+                                ],
+                                "move",
+                            ))
+                            .child(key_hint(&colors, &[KeyLabel::Icon(Icon::Enter)], "open"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("esc")], "close")),
                     ),
-            )
+                "jump-palette-rise",
+            ))
             .into_any_element()
     }
 }
