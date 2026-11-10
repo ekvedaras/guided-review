@@ -59,6 +59,7 @@ mod repin;
 mod review_threads;
 mod show;
 mod step_details;
+mod summary_instructions;
 mod symbol_edges;
 mod timestamp;
 mod tour_agent;

@@ -27,6 +27,9 @@ pub struct Tour {
     pub title: String,
     #[serde(default)]
     pub summary: Vec<String>,
+    /// Markdown the tour writer wrote to the reviewer's summary instructions.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reviewer_summary: String,
     #[serde(default)]
     pub steps: Vec<Step>,
 }

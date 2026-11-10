@@ -19,6 +19,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
 1. Intent: `gh pr view <pr-url> --json title,body`.
 2. Outline: `guided-review outline <pr-url>`. It is the plan; start from it, not from the full diff.
    - `small PR` hint: read the whole diff with `guided-review show <pr-url> <every piece id>` and skip step 3.
+   - A `summary instructions:` block at the end holds the reviewer's own instructions for an extra summary. Follow its text and write the result as Markdown in the tour's `reviewer_summary` field, next to `summary`. It has no length limit, and `summary` stays at most 3 bullets. Without the block, leave `reviewer_summary` out. A `warning:` line there means the instructions file could not be read: write no `reviewer_summary` and mention the warning in your reply.
    - `worktree at head: yes`: you may grep and read the working tree. With `no`, the working tree is another version of the code; read code only through `show --around`.
    - A test piece lists up to 3 `subjects`, best first (`+N more` hides the rest; `same` repeats the line above). Put a test next to its subject, or in a late proof step.
 3. Open only the pieces you need to understand the flow: `guided-review show <pr-url> <piece id>…`. A file path as id opens every piece of that file. Add `--around` when the change needs the code near it at head. Pieces you can place from signature and size alone stay closed.
@@ -41,6 +42,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
 A reviewer skims: short lines, visuals over prose. Text fields are small Markdown (inline code, bold).
 
 - `summary`: at most 3 bullets, about 12 words each.
+- `reviewer_summary`: only with summary instructions. Markdown, as long as they ask for.
 - `why`: one or two lines. What this is and why it comes here.
 - `check`: risky steps only. One line saying what to verify.
 - `tldr`: only when a step has several separate points.
@@ -52,6 +54,7 @@ A reviewer skims: short lines, visuals over prose. Text fields are small Markdow
 {
   "title": "Short name of the change",
   "summary": ["Max three bullets"],
+  "reviewer_summary": "Optional Markdown, only with summary instructions",
   "steps": [
     {
       "id": "kebab-id",
@@ -80,7 +83,7 @@ A reviewer skims: short lines, visuals over prose. Text fields are small Markdow
 
 ## Refresh
 
-Rewrite only what the new commits made stale; every other step stays as it is, word for word.
+Rewrite only what the new commits made stale; every other step stays as it is, word for word. `summary` and `reviewer_summary` stay word for word too; only a redo writes the reviewer summary again.
 
 1. `guided-review repin <pr-url>` moves the tour to the PR's current head (a no-op when it is there already).
 2. `guided-review refresh <pr-url>` prints the brief: `stale steps` (their text may be old) and `new pieces no step holds`. `nothing to refresh` means stop and say so.

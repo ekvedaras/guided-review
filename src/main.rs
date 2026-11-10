@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use guided_review::agent_reply::{AgentReply, agent_reply};
 use guided_review::app_link::{Answer, AppFolder, AppListener, BindError, OpenRequest, hand_over};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
+use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
 use guided_review::open_review::require_tour;
@@ -12,6 +13,7 @@ use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
+use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::Tour;
@@ -127,7 +129,20 @@ fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A config that cannot be read must not stop `outline` or `check`, which work without it.
+fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
+    let home = home_folder()?;
+    match Config::load_from(&home) {
+        Ok(config) => Ok(config.summary_instructions(&home)),
+        Err(error) => {
+            eprintln!("warning: summary instructions not read: {error:#}");
+            Ok(SummaryInstructions::none())
+        }
+    }
+}
+
 fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let summary_instructions = summary_instructions()?;
     let code = OpenedPr::new(pr)?.at_live_tips()?;
     let (base, files) = code.pieces_since_merge_base()?;
     print!(
@@ -139,6 +154,7 @@ fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
             files: &files,
             worktree_at_head: code.source.working_tree_is_at(&code.tips.head),
             subjects: &SubjectCandidates::find(code.source.as_ref(), &code.tips.head, &files),
+            summary_instructions: &summary_instructions,
         }
     );
     Ok(())
@@ -180,7 +196,7 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     tour.save(&tour_path)?;
     let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
 
-    let report = tour_check::check(&tour, &files);
+    let report = tour_check::check(&tour, &files, &summary_instructions()?);
     print!("{report}");
     if !report.errors.is_empty() {
         std::process::exit(1);

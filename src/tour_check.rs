@@ -3,6 +3,7 @@ use std::fmt;
 use crate::coverage;
 use crate::language::Language;
 use crate::pieces::ChangedFile;
+use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{PieceRef, Step, StepId, Tour};
 
 pub const MAX_SUMMARY_BULLETS: usize = 3;
@@ -43,6 +44,7 @@ pub enum Warning {
         pieces: usize,
     },
     TooManyTopLevelSteps(usize),
+    ReviewerSummaryMissing,
 }
 
 #[derive(Debug, Default)]
@@ -52,7 +54,11 @@ pub struct Report {
     pub rest_notes: Vec<String>,
 }
 
-pub fn check(tour: &Tour, files: &[ChangedFile]) -> Report {
+pub fn check(
+    tour: &Tour,
+    files: &[ChangedFile],
+    summary_instructions: &SummaryInstructions,
+) -> Report {
     let mut report = Report::default();
 
     for step in tour.steps() {
@@ -91,6 +97,9 @@ pub fn check(tour: &Tour, files: &[ChangedFile]) -> Report {
         report
             .warnings
             .push(Warning::TooManyTopLevelSteps(tour.steps.len()));
+    }
+    if summary_instructions.are_set() && tour.reviewer_summary.trim().is_empty() {
+        report.warnings.push(Warning::ReviewerSummaryMissing);
     }
     report
 }
@@ -193,6 +202,9 @@ impl fmt::Display for Warning {
             Self::TooManyTopLevelSteps(steps) => write!(
                 f,
                 "{steps} top-level steps, nest details to keep it to {MAX_TOP_LEVEL_STEPS}"
+            ),
+            Self::ReviewerSummaryMissing => f.write_str(
+                "summary instructions are set but the tour has no reviewer summary: write `reviewer_summary` following them",
             ),
         }
     }

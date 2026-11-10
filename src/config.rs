@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde::Deserialize;
 
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
+use crate::summary_instructions::SummaryInstructions;
 
 /// `~/.guided-review/config.toml`
 #[derive(Default, Deserialize)]
@@ -20,6 +21,9 @@ pub struct Config {
     /// `idea://open?file={path}&line={line}` or a shell command such as `code --goto {path}:{line}`.
     #[serde(default)]
     ide: Option<String>,
+    /// A path to a file with the instructions, or `"off"`.
+    #[serde(default)]
+    summary_instructions: Option<String>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -45,6 +49,8 @@ impl AskSettings {
 }
 
 impl Config {
+    pub const SUMMARY_INSTRUCTIONS_OFF_ENV: &'static str = "GUIDED_REVIEW_SUMMARY_INSTRUCTIONS_OFF";
+
     pub fn from_text(text: &str) -> anyhow::Result<Self> {
         Self::parse(text, "the config")
     }
@@ -64,12 +70,31 @@ impl Config {
         Self::load_from(&home)
     }
 
-    pub fn load_from(home: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn load_from(home: &Path) -> anyhow::Result<Self> {
         let path = home.join(".guided-review/config.toml");
         match std::fs::read_to_string(&path) {
             Ok(text) => Self::parse(&text, &path.display().to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error).with_context(|| format!("could not read {}", path.display())),
+        }
+    }
+
+    /// What the config says, or the default file `~/.guided-review/summary.md` when it says nothing and the file exists.
+    pub fn summary_instructions(&self, home: &Path) -> SummaryInstructions {
+        if std::env::var_os(Self::SUMMARY_INSTRUCTIONS_OFF_ENV).is_some() {
+            return SummaryInstructions::none();
+        }
+        match self.summary_instructions.as_deref() {
+            Some("off") => SummaryInstructions::none(),
+            Some(path) => read_instructions(&expand_home(path)),
+            None => {
+                let default = home.join(DEFAULT_SUMMARY_INSTRUCTIONS);
+                if default.is_file() {
+                    read_instructions(&default)
+                } else {
+                    SummaryInstructions::none()
+                }
+            }
         }
     }
 
@@ -90,6 +115,12 @@ impl Config {
             })
             .map(|(_, path)| expand_home(path))
     }
+}
+
+const DEFAULT_SUMMARY_INSTRUCTIONS: &str = ".guided-review/summary.md";
+
+fn read_instructions(path: &Path) -> SummaryInstructions {
+    SummaryInstructions::from_file(path, std::fs::read_to_string(path))
 }
 
 fn expand_home(path: &str) -> PathBuf {

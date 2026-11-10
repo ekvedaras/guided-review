@@ -27,6 +27,7 @@ pub mod pieces;
 pub mod pull_request;
 pub mod repin;
 pub mod show;
+pub mod summary_instructions;
 pub mod symbols;
 pub mod test_pairing;
 pub mod timestamp;
