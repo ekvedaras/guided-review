@@ -607,3 +607,42 @@ fn a_skill_folder_whose_name_is_not_a_skill_name_is_not_listed() {
 
     assert_eq!(Settings::load(home.path()).unwrap().skills(), Vec::new());
 }
+
+#[test]
+fn a_blank_custom_ask_model_is_refused_with_a_message_and_nothing_is_written() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\"\n");
+
+    settings.set_ask_model(&AskModelChoice::Custom("  ".to_owned()));
+    let outcome = settings.save().unwrap();
+
+    let SaveOutcome::Refused(problems) = outcome else {
+        panic!("expected a refusal, got {outcome:?}");
+    };
+    assert_eq!(problems, vec![SettingProblem::AskModelBlank]);
+    assert_eq!(
+        problems[0].message(),
+        "Type the model name, or pick another choice"
+    );
+    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\"\n");
+}
+
+#[test]
+fn a_blank_custom_ide_template_is_refused_with_a_message_and_nothing_is_written() {
+    let (home, mut settings) = loaded_from("ide = \"zed://file{path}:{line}\"\n");
+
+    settings.set_ide(&IdeChoice::Custom(IdeTemplate::new(String::new())));
+    let outcome = settings.save().unwrap();
+
+    let SaveOutcome::Refused(problems) = outcome else {
+        panic!("expected a refusal, got {outcome:?}");
+    };
+    assert_eq!(problems, vec![SettingProblem::IdeTemplateBlank]);
+    assert_eq!(
+        problems[0].message(),
+        "Type the command or link, with {path} and {line}, or pick another choice"
+    );
+    assert_eq!(
+        config_text(home.path()),
+        "ide = \"zed://file{path}:{line}\"\n"
+    );
+}

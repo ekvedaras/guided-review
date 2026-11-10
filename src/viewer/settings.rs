@@ -85,6 +85,10 @@ pub enum SettingProblem {
     SummaryInstructionsUnreadable(String),
     /// The config holds an `ask_effort` that `claude --effort` does not accept.
     AskEffortUnknown(String),
+    /// Custom is picked and no model is typed.
+    AskModelBlank,
+    /// Custom is picked and no template is typed.
+    IdeTemplateBlank,
 }
 
 impl SettingProblem {
@@ -98,6 +102,11 @@ impl SettingProblem {
                     "{written} is not a file, \"{}\" or a skill name",
                     SummaryInstructionsChoice::OFF
                 )
+            }
+            Self::AskModelBlank => "Type the model name, or pick another choice".to_owned(),
+            Self::IdeTemplateBlank => {
+                "Type the command or link, with {path} and {line}, or pick another choice"
+                    .to_owned()
             }
             Self::AskEffortUnknown(text) => {
                 format!("{text:?} is not an effort Claude accepts: low, medium, high, xhigh or max")
@@ -332,6 +341,13 @@ impl Settings {
             .collect();
         if let AskEffortChoice::Unknown(text) = self.ask_effort() {
             problems.push(SettingProblem::AskEffortUnknown(text));
+        }
+        if matches!(self.ask_model(), AskModelChoice::Custom(text) if text.trim().is_empty()) {
+            problems.push(SettingProblem::AskModelBlank);
+        }
+        if matches!(self.ide(), IdeChoice::Custom(template) if template.as_str().trim().is_empty())
+        {
+            problems.push(SettingProblem::IdeTemplateBlank);
         }
         match &self.edited.summary_instructions {
             SummaryInstructionsChoice::OtherFile(path) if !self.in_home(path).is_file() => {
