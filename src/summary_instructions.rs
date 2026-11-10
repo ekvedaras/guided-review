@@ -76,6 +76,36 @@ pub fn expand_home(path: &str, home: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from(path), |rest| home.join(rest))
 }
 
+/// A skill the tour writer runs through the Skill tool, such as `warm-up` or `plugin:skill`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SkillName(String);
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct NotASkillName;
+
+impl fmt::Display for NotASkillName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("not a skill name")
+    }
+}
+
+impl std::error::Error for NotASkillName {}
+
+impl SkillName {
+    /// Whitespace, `,`, `(` and `)` would add more than one rule to the tour agent's allowed tools.
+    pub fn parse(name: &str) -> Result<Self, NotASkillName> {
+        let is_one_rule = !name.is_empty()
+            && !name.contains(|c: char| c.is_whitespace() || matches!(c, ',' | '(' | ')'));
+        is_one_rule
+            .then(|| Self(name.to_owned()))
+            .ok_or(NotASkillName)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 impl SummaryInstructions {
     pub fn none() -> Self {
         Self::default()
@@ -109,17 +139,17 @@ impl SummaryInstructions {
         if name.is_empty() {
             return Self::none();
         }
-        if name.contains(|c: char| c.is_whitespace() || matches!(c, ',' | '(' | ')')) {
-            return Self {
+        match SkillName::parse(name) {
+            Ok(skill) => Self {
+                skill: Some(skill.0),
+                ..Self::none()
+            },
+            Err(NotASkillName) => Self {
                 warning: Some(format!(
                     "summary instructions skill {name:?} is not a skill name"
                 )),
                 ..Self::none()
-            };
-        }
-        Self {
-            skill: Some(name.to_owned()),
-            ..Self::none()
+            },
         }
     }
 

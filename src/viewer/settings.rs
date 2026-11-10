@@ -6,6 +6,7 @@ use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 use crate::ide::IdeTemplate;
 use crate::local_git::{CloneProblem, LocalGit};
 use crate::pull_request::RepoName;
+use crate::summary_instructions::SkillName;
 
 /// The reviewer's settings in `~/.guided-review/config.toml`, as the Settings panel shows and edits them.
 /// Save writes only the keys that changed, so the reviewer's comments and key order survive.
@@ -130,14 +131,12 @@ impl SummaryInstructionsChoice {
                 Self::OtherFile(PathBuf::from(text))
             });
         }
-        item.get(SKILL)
-            .and_then(Item::as_str)
-            .map(|name| Self::Skill(SkillName::new(name)))
-            .with_context(|| {
-                format!(
-                    "{SUMMARY_INSTRUCTIONS} is not a path, \"{OFF}\" or {{ {SKILL} = \"<name>\" }}"
-                )
-            })
+        let name = item.get(SKILL).and_then(Item::as_str).with_context(|| {
+            format!("{SUMMARY_INSTRUCTIONS} is not a path, \"{OFF}\" or {{ {SKILL} = \"<name>\" }}")
+        })?;
+        let skill = SkillName::parse(name)
+            .with_context(|| format!("{SUMMARY_INSTRUCTIONS} skill {name:?}"))?;
+        Ok(Self::Skill(skill))
     }
 
     fn to_value(&self) -> anyhow::Result<Option<Value>> {
@@ -151,20 +150,6 @@ impl SummaryInstructionsChoice {
                 Some(Value::InlineTable(table))
             }
         })
-    }
-}
-
-/// A skill the tour writer runs through the Skill tool, such as `warm-up` or `plugin:skill`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SkillName(String);
-
-impl SkillName {
-    pub fn new(name: &str) -> Self {
-        Self(name.to_owned())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
     }
 }
 
@@ -286,7 +271,7 @@ impl Settings {
         let mut skills: Vec<SkillName> = entries
             .filter_map(Result::ok)
             .filter(|entry| entry.path().join("SKILL.md").is_file())
-            .filter_map(|entry| entry.file_name().to_str().map(SkillName::new))
+            .filter_map(|entry| SkillName::parse(entry.file_name().to_str()?).ok())
             .collect();
         skills.sort();
         skills

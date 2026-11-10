@@ -97,8 +97,7 @@ pub use review::{
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
 pub use settings::{
-    CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings, SkillName,
-    SummaryInstructionsChoice,
+    CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings, SummaryInstructionsChoice,
 };
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,

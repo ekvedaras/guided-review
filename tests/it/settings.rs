@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
+use guided_review::summary_instructions::SkillName;
 use guided_review::viewer::{
-    CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings, SkillName,
-    SummaryInstructionsChoice,
+    CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings, SummaryInstructionsChoice,
 };
 use std::path::{Path, PathBuf};
 
@@ -17,6 +17,10 @@ ide = "zed {{path}}:{{line}}"
 "#,
         shop.path().display()
     )
+}
+
+fn skill(name: &str) -> SkillName {
+    SkillName::parse(name).unwrap()
 }
 
 fn write_config(home: &Path, text: &str) {
@@ -131,7 +135,7 @@ fn summary_instructions_are_read_as_the_default_file_another_file_a_skill_or_off
     );
     assert_eq!(
         summary_instructions_from("summary_instructions = { skill = \"warm-up\" }\n"),
-        SummaryInstructionsChoice::Skill(SkillName::new("warm-up"))
+        SummaryInstructionsChoice::Skill(skill("warm-up"))
     );
     assert_eq!(
         summary_instructions_from("summary_instructions = \"off\"\n"),
@@ -143,9 +147,7 @@ fn summary_instructions_are_read_as_the_default_file_another_file_a_skill_or_off
 fn a_skill_is_written_as_a_table_so_it_is_never_read_as_a_path() {
     let (shop, config, mut settings) = loaded_with_commented_config();
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::Skill(SkillName::new(
-        "acme:warm-up",
-    )));
+    settings.set_summary_instructions(SummaryInstructionsChoice::Skill(skill("acme:warm-up")));
     settings.save().unwrap();
 
     assert_eq!(
@@ -329,10 +331,7 @@ fn the_skill_list_holds_the_skills_in_claude_skills_and_follows_symlinks() {
 
     let settings = Settings::load(home.path()).unwrap();
 
-    assert_eq!(
-        settings.skills(),
-        [SkillName::new("linked"), SkillName::new("real")]
-    );
+    assert_eq!(settings.skills(), [skill("linked"), skill("real")]);
 }
 
 #[test]
@@ -343,4 +342,27 @@ fn the_default_file_choice_knows_whether_the_default_file_exists() {
     std::fs::write(shop.home().join(".guided-review/summary.md"), "Warm me up").unwrap();
 
     assert!(Settings::load(shop.home()).unwrap().default_file_exists());
+}
+
+#[test]
+fn a_skill_name_outline_would_reject_is_not_a_skill_name_here_either() {
+    for name in ["two words", "a,b", "a(b)", ""] {
+        assert!(SkillName::parse(name).is_err(), "{name:?}");
+    }
+    let home = tempfile::TempDir::new().unwrap();
+    write_config(
+        home.path(),
+        "summary_instructions = { skill = \"two words\" }\n",
+    );
+    assert!(Settings::load(home.path()).is_err());
+}
+
+#[test]
+fn a_skill_folder_whose_name_is_not_a_skill_name_is_not_listed() {
+    let home = tempfile::tempdir().unwrap();
+    let folder = home.path().join(".claude/skills/two words");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("SKILL.md"), "").unwrap();
+
+    assert_eq!(Settings::load(home.path()).unwrap().skills(), Vec::new());
 }
