@@ -26,10 +26,12 @@ enum Scene {
     SwitchingVeil,
     LoadingScreen,
     Gallery,
+    SettingsEdited,
+    SettingsEditedEnd,
 }
 
 impl Scene {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 11] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -39,6 +41,8 @@ impl Scene {
         Self::SwitchingVeil,
         Self::LoadingScreen,
         Self::Gallery,
+        Self::SettingsEdited,
+        Self::SettingsEditedEnd,
     ];
 
     fn file_name(self) -> &'static str {
@@ -52,6 +56,8 @@ impl Scene {
             Self::SwitchingVeil => "26-switching-veil",
             Self::LoadingScreen => "27-loading-screen",
             Self::Gallery => "28-gallery",
+            Self::SettingsEdited => "29-settings-edited",
+            Self::SettingsEditedEnd => "30-settings-edited-end",
         }
     }
 }
@@ -171,13 +177,22 @@ impl OneStepLayout {
                 }
             }
             Scene::Gallery => cx.set_global(StagedGallery(true)),
+            Scene::SettingsEdited => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_sample_edits(cx);
+            }),
+            Scene::SettingsEditedEnd => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_sample_edits(cx);
+                settings.scroll_to_end();
+            }),
         }
         cx.notify();
     }
 
     fn unstage(&mut self, scene: Scene, window: &mut Window, cx: &mut Context<Self>) {
         match scene {
-            Scene::Settings => self
+            Scene::Settings | Scene::SettingsEdited | Scene::SettingsEditedEnd => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
             Scene::JumpPalette => self
