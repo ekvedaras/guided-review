@@ -65,9 +65,9 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, LineLocation,
-    MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Review, Screen,
-    SendMode, StepId, ThreadId, ThreadView,
+    AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, InFlight,
+    LineLocation, MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Reopen,
+    ReopenAfterSave, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
 };
 
 actions!(
@@ -123,6 +123,11 @@ pub struct OneStepLayout {
     pr_switcher: Entity<PrSwitcherView>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
+    /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
+    /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
+    reopen_after_save: ReopenAfterSave,
+    /// Asks being typed into the reviewer's own agent; the `HandToAgent` tasks are the layout's.
+    asks_being_handed_to_agent: u16,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -169,6 +174,7 @@ impl OneStepLayout {
         let session_subscriptions = [
             cx.observe(&session, |this, _, cx| {
                 this.use_code_opener_of_review(cx);
+                this.reopen_if_work_ended(cx);
                 cx.notify();
             }),
             cx.subscribe(&session, |this, _, SessionEvent::Reopened, cx| {
@@ -216,15 +222,23 @@ impl OneStepLayout {
         cx.subscribe(&ask, |this, panel, HandToAgent { ask, place }, cx| {
             let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
             let id = ask.id;
-            cx.spawn(async move |_, cx| {
+            this.asks_being_handed_to_agent += 1;
+            cx.spawn(async move |this, cx| {
                 let line = handing.await;
                 panel.update(cx, |panel, cx| panel.hand_off_ended(id, line, cx));
+                this.update(cx, |this, cx| {
+                    this.asks_being_handed_to_agent =
+                        this.asks_being_handed_to_agent.saturating_sub(1);
+                    this.reopen_if_work_ended(cx);
+                })
+                .ok();
             })
             .detach();
         })
         .detach();
         let asked_lines_subscription = cx.observe(&ask, |this, _, cx| {
             this.session.update(cx, ReviewSession::asks_changed);
+            this.reopen_if_work_ended(cx);
         });
         let layout_handle = cx.weak_entity();
         let on_row_gesture: OnRowGesture = Rc::new(move |gesture, at, _window, cx| {
@@ -272,6 +286,8 @@ impl OneStepLayout {
             pr_switcher,
             settings,
             loading,
+            reopen_after_save: ReopenAfterSave::default(),
+            asks_being_handed_to_agent: 0,
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -749,6 +765,9 @@ impl OneStepLayout {
     }
 
     fn toggle_jump(&mut self, _: &ToggleJump, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         let targets = self.session.read(cx).review().jump_targets("");
         self.jump.update(cx, |palette, cx| {
             if palette.is_open() {
@@ -760,6 +779,9 @@ impl OneStepLayout {
     }
 
     fn toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.settings.update(cx, |settings, cx| {
             if settings.is_open() {
                 settings.request_close(window, cx);
@@ -769,12 +791,49 @@ impl OneStepLayout {
         });
     }
 
-    /// The one place that reacts to Save having written `config.toml`. The settings the open PR was built
-    /// with are now out of date; for now the panel closes, and the reopen of the PR (see
-    /// `ReopenAfterSave` and `ActivePr::reopen`) is started from here.
+    /// The one place that reacts to Save having written `config.toml`. The PR on screen was built with the
+    /// old settings, so it opens again, once no Ask answers and no hand-off is being typed; the panel
+    /// closes either way and the wait shows in the window (see `waiting_for_reopen`).
     fn settings_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings
             .update(cx, |settings, cx| settings.close(window, cx));
+        let in_flight = self.in_flight(cx);
+        let reopen = self.reopen_after_save.saved(in_flight);
+        self.start_reopen_if_now(reopen, cx);
+        cx.notify();
+    }
+
+    fn in_flight(&self, cx: &App) -> InFlight {
+        InFlight {
+            asks_answering: self.ask.read(cx).answering(),
+            asks_handed_to_agent: self.asks_being_handed_to_agent,
+            delivering_hand_offs: self.session.read(cx).is_delivering_hand_offs(),
+        }
+    }
+
+    /// Called whenever an Ask turn, a hand-off or an Ask handed to the agent may have ended.
+    fn reopen_if_work_ended(&mut self, cx: &mut Context<Self>) {
+        let in_flight = self.in_flight(cx);
+        let reopen = self.reopen_after_save.in_flight_is(in_flight);
+        self.start_reopen_if_now(reopen, cx);
+    }
+
+    fn start_reopen_if_now(&mut self, reopen: Reopen, cx: &mut Context<Self>) {
+        if reopen == Reopen::Now {
+            (cx.global::<PrSwitching>().reopen)();
+        }
+    }
+
+    /// Typing is saved and focus leaves every box, so nothing the reviewer does reaches the session whose
+    /// state file the reopen's build is reading. The veil keeps the mouse out; `is_reopening` the keys.
+    pub fn hold_for_reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.flush_typing(cx);
+        window.focus(&self.focus, cx);
+    }
+
+    fn is_reopening(&self, cx: &App) -> bool {
+        cx.global::<PrSwitching>().active.read(cx).switching_to()
+            == Some(self.session.read(cx).review().pr())
     }
 
     fn toggle_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -804,6 +863,9 @@ impl OneStepLayout {
     /// Like the footer's button, the arrow key ticks the step it leaves, but only once the reader
     /// has seen the step's end, so skipping ahead does not count as reading.
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.note_seen_end(cx);
         let review = self.session.read(cx).review();
         if let Screen::Step(id) = review.screen().clone()
@@ -851,10 +913,16 @@ impl OneStepLayout {
     }
 
     fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.change_review(cx, Review::go_back);
     }
 
     fn toggle_wrap_lines(&mut self, _: &ToggleWrapLines, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.change_review(cx, Review::toggle_wrap_lines);
     }
 
@@ -1869,6 +1937,15 @@ impl Render for OneStepLayout {
                             label,
                             cx,
                         ))
+                    }))
+                    .children(self.reopen_after_save.waiting_line().map(|line| {
+                        div()
+                            .px_6()
+                            .py_1()
+                            .text_sm()
+                            .bg(colors.warning_background)
+                            .text_color(colors.warning)
+                            .child(line.to_owned())
                     }))
                     .children(self.selection_notice.clone().map(|notice| {
                         div()

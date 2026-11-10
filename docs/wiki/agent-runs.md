@@ -94,3 +94,13 @@ The maintainer asked Ask for a flow diagram saved as a markdown file near the co
 Decided: an Ask stays a fast, private, read-only chat. Its "Hand to your agent" action types the whole chat into the PR's tour agent with leave to change files in the agent's own folder, and nothing goes to GitHub. It goes only to an agent the reviewer started (one their `guided-review open` claimed), never to one the app started, which cannot write; then the panel says why and how to claim one. There is no queue: a busy agent is a "try again" line. Comment hand-offs keep "Never change the PR's code".
 
 Considered and turned down: an Ask that answers through the tour agent. It needs a reply path back into the panel, fills the agent's context with every small question, and loses the three Asks that run side by side.
+
+## Save in Settings reopens the PR, but waits for work in flight (2026-11-10)
+
+A saved `config.toml` only reaches a PR when it is built, so Save opens the PR on screen again behind the Opening veil. Reopening swaps the window's root, and the old root owns the Ask processes and the tasks that type hand-offs into the tour agent: dropping it mid-turn would cut an Ask's answer and a hand-off half typed (`ekvedaras/guided-review@fb856ef`, `fcbda27`).
+
+Decided: the reopen waits until no Ask turn is answering, no Ask is being handed to the reviewer's agent and no hand-off is being delivered, and the window says which in a line under the title bar (`ReopenAfterSave`, `InFlight`). Saving again while it waits is still one reopen. The wait lives in the layout, so a switch to another PR, which drops the layout, ends it.
+
+An agent reply that lands while the build runs is applied to the old window as before and also held by `ActivePr`, because the build may have read the state file before the old session saved the reply; the new window applies the held replies again (harmless, it only sets a hand-off's state). Likewise the old session must not save reviewer input after the build read the state file, since the new session writes its sections whole: while the reopen builds, the layout saves typing and takes focus out of the boxes, and ignores the navigation, wrap, jump and settings keys; the veil keeps the mouse out.
+
+Open: a reopen that finds another PR building is dropped (the build reads the new config anyway), and a failed reopen shows the reason in the window and does not retry.

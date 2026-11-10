@@ -183,6 +183,10 @@ impl AskPanel {
         }
     }
 
+    pub fn answering(&self) -> u16 {
+        self.pool.answering()
+    }
+
     pub fn is_open(&self) -> bool {
         self.target.is_some()
     }

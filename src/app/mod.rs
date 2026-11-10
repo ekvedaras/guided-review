@@ -54,7 +54,11 @@ use layouts::one_step::{
 };
 use review_session::TourWork;
 
-type Asked = (Request, std::sync::mpsc::Sender<Answer>);
+/// What the app's loop takes in: requests from outside, and the app's own asks of itself.
+enum Asked {
+    Request(Request, std::sync::mpsc::Sender<Answer>),
+    ReopenShown,
+}
 
 /// The one running app. It blocks until the window is closed or a quit request comes. The window opens
 /// when the first `open` request has built its review.
@@ -63,7 +67,10 @@ pub fn serve(listener: AppListener, home: PathBuf) {
     let requests_to_self = requests.clone();
     listener.serve(move |request| {
         let (reply, answer) = std::sync::mpsc::channel();
-        if requests.unbounded_send((request, reply)).is_err() {
+        if requests
+            .unbounded_send(Asked::Request(request, reply))
+            .is_err()
+        {
             return refused("the app is closing");
         }
         answer
@@ -97,6 +104,7 @@ fn pr_switching(
     cx: &mut App,
 ) -> PrSwitching {
     let requests = requests.clone();
+    let reopen_requests = requests.clone();
     let home_folder = home.to_path_buf();
     PrSwitching {
         relevant: Arc::new(GitHub::from_env()),
@@ -105,25 +113,35 @@ fn pr_switching(
         agents: Arc::new(HcTourAgents::new()),
         list: cx.new(|_| PrSwitcher::default()),
         show: Arc::new(move |pr| {
-            // An unreadable state file only loses the remembered clone folder.
-            let folder = ReviewStateFile::for_pr(&home_folder, &pr)
-                .opened_from()
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| home_folder.clone());
             let (reply, _) = std::sync::mpsc::channel();
-            let open = OpenRequest {
-                pr: pr.to_string(),
-                folder,
-                terminal: None,
-            };
+            let open = open_request_of(&home_folder, &pr);
             if requests
-                .unbounded_send((Request::Open(open), reply))
+                .unbounded_send(Asked::Request(Request::Open(open), reply))
                 .is_err()
             {
                 eprintln!("could not switch to {pr}: the app is closing");
             }
         }),
+        reopen: Arc::new(move || {
+            if reopen_requests.unbounded_send(Asked::ReopenShown).is_err() {
+                eprintln!("could not reopen the PR: the app is closing");
+            }
+        }),
+    }
+}
+
+/// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
+/// state file only loses the remembered clone folder.
+fn open_request_of(home: &Path, pr: &PullRequestUrl) -> OpenRequest {
+    let folder = ReviewStateFile::for_pr(home, pr)
+        .opened_from()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| home.to_path_buf());
+    OpenRequest {
+        pr: pr.to_string(),
+        folder,
+        terminal: None,
     }
 }
 
@@ -151,7 +169,14 @@ async fn answer_requests(
         active,
         window: None,
     }));
-    while let Some((request, reply)) = asked.next().await {
+    while let Some(asked) = asked.next().await {
+        let (request, reply) = match asked {
+            Asked::Request(request, reply) => (request, reply),
+            Asked::ReopenShown => {
+                reopen_shown(&screen, &home, cx);
+                continue;
+            }
+        };
         match request {
             Request::Quit => {
                 reply.send(Answer::Quitting).ok();
@@ -209,6 +234,33 @@ async fn answer_requests(
     }
 }
 
+/// The save of the settings asks for the PR on screen to be built again. The window is held first (typing
+/// saved, focus out of the boxes) so the build reads the state file the old session no longer changes;
+/// `reopen` then raises the Opening veil and gives the ticket, and the build takes the path of any switch.
+fn reopen_shown(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window)
+    };
+    if let Some(window) = window {
+        cx.update(|cx| {
+            window.update(cx, OneStepLayout::hold_for_reopen).ok();
+        });
+    }
+    let reopening = active.update(cx, |active, cx| {
+        let reopening = active.reopen();
+        cx.notify();
+        reopening
+    });
+    let Some((ticket, pr)) = reopening else {
+        return;
+    };
+    let open = open_request_of(home, &pr);
+    let (screen, home) = (Rc::clone(screen), home.to_path_buf());
+    cx.spawn(async move |cx| build_and_show(screen, ticket, pr, open, home, cx).await)
+        .detach();
+}
+
 /// Only the PR in the window is marked here, because its session holds the state it writes back. For
 /// any other PR the command marks the state file.
 fn mark_replied(
@@ -241,7 +293,14 @@ fn mark_replied(
             .and_then(|marked| marked)
     });
     match marked {
-        Ok(()) => Answer::HandOffAnswered { pr },
+        Ok(()) => {
+            if let Ok(replied_pr) = pr.parse::<PullRequestUrl>() {
+                active.update(cx, |active, _| {
+                    active.hold_reply_for_reopen(&replied_pr, hand_off, replied);
+                });
+            }
+            Answer::HandOffAnswered { pr }
+        }
         Err(error) => refused(&format!("{error:#}")),
     }
 }
@@ -331,12 +390,37 @@ async fn build_and_show(
                 shown
             });
             match shown {
-                Ok(window) => screen.borrow_mut().window = Some(window),
+                Ok(window) => {
+                    screen.borrow_mut().window = Some(window);
+                    apply_replies_held_for_reopen(&active, window, cx);
+                }
                 Err(error) => {
                     eprintln!("could not show {pr}: {error:#}");
                     std::process::exit(1);
                 }
             }
+        }
+    }
+}
+
+/// The replies that landed while the PR reopened were applied to the old window, whose state the build
+/// may have read too early; the new window gets them again.
+fn apply_replies_held_for_reopen(
+    active: &Entity<ActivePr>,
+    window: WindowHandle<OneStepLayout>,
+    cx: &mut AsyncApp,
+) {
+    let held = active.update(cx, |active, _| active.take_replies_for_reopened());
+    for (id, replied) in held {
+        let applied = cx.update(|cx| {
+            window
+                .update(cx, |layout, _, cx| {
+                    layout.hand_off_replied(id, &replied, cx)
+                })
+                .and_then(|applied| applied)
+        });
+        if let Err(error) = applied {
+            eprintln!("could not apply an agent reply to the reopened PR: {error:#}");
         }
     }
 }
