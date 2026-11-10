@@ -8,7 +8,7 @@
 
 **Summary instructions**: What tells the tour writer how to write the reviewer summary: a file, a skill (`summary_instructions = { skill = "<name>" }`) or off, set in `config.toml` as `summary_instructions`. With no key, `~/.guided-review/summary.md` is used when it exists. `guided-review outline` hands the text to the writer. Avoid: prompt, template.
 
-**Settings**: Where a reviewer edits their settings in the app: summary instructions, clones, IDE, Ask model and Ask effort. Save checks every setting first and writes nothing while one is wrong; it writes only the keys that changed back to `~/.guided-review/config.toml`, so the reviewer's comments stay. A custom IDE template or Ask model is kept when a preset is picked, in `ide_custom` and `ask_model_custom` beside `ide` and `ask_model`; only Settings reads those two keys. With no PR open, `guided-review settings` shows it alone in the app's one window. Avoid: settings screen (**Screen** means summary, step or safety net), preferences.
+**Settings**: Where a reviewer edits their settings in the app: summary instructions, clones, IDE, Ask model and Ask effort. Save checks every setting first and writes nothing while one is wrong; it writes only the keys that changed back to `~/.guided-review/config.toml`, so the reviewer's comments stay. A custom IDE template or Ask model is kept when a preset is picked, in `ide_custom` and `ask_model_custom` beside `ide` and `ask_model`; only Settings reads those two keys. With a PR open it is a sheet over the whole window; with no PR open, `guided-review settings` shows it alone in the app's one window. Avoid: settings screen (**Screen** means summary, step or safety net), preferences.
 
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 
@@ -65,3 +65,11 @@
 **Seen mark**: The 👀 the viewer puts on the reviewer's comment on GitHub when its hand-off is delivered to the tour agent. The agent's first reply takes it off; so does the viewer when the agent ends without answering. When GitHub refuses either, the line under the thread says so.
 
 **PR notes**: The `Notes` section of the PR description. A step's diagram can be added to it from the button under the diagram; a description with no such section gets one at its end.
+
+**Shortcuts sheet**: The overlay that lists every key the app answers, by heading (Navigate, Read, Comment, View, App), opened with `?`. It reads the same table the keys are bound from. Avoid: cheat sheet, help.
+
+**Palette action**: Something the cmd+k palette does rather than a place it goes to, such as Settings or Mark step as read. A query that starts with `>` lists only actions.
+
+**Gap row**: The one row of a file box that stands for unchanged lines it does not show, between two changes or at either end, with how many and the buttons that show them.
+
+**Toast**: A short note at the bottom right of the window about an outcome that is otherwise easy to miss. It leaves by itself unless it tells of a failure. Avoid: notification, snackbar.
