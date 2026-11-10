@@ -51,16 +51,24 @@ impl IdeChoice {
         }
     }
 
+    /// The template a preset hands to the system, so the reviewer sees what it opens.
+    pub fn shown_template(&self) -> Option<&'static str> {
+        match self {
+            Self::JetBrains => Some("idea://open?file={path}&line={line}"),
+            Self::VsCode => Some("vscode://file{path}:{line}"),
+            Self::Zed => Some("zed://file{path}:{line}"),
+            Self::None | Self::Custom(_) => None,
+        }
+    }
+
     const PRESETS: [Self; 3] = [Self::JetBrains, Self::VsCode, Self::Zed];
 
     pub fn template(&self) -> Option<IdeTemplate> {
-        let preset = |url: &str| Some(IdeTemplate::new(url.to_owned()));
         match self {
-            Self::JetBrains => preset("idea://open?file={path}&line={line}"),
-            Self::VsCode => preset("vscode://file{path}:{line}"),
-            Self::Zed => preset("zed://file{path}:{line}"),
-            Self::None => None,
             Self::Custom(template) => Some(template.clone()),
+            preset => preset
+                .shown_template()
+                .map(|url| IdeTemplate::new(url.to_owned())),
         }
     }
 

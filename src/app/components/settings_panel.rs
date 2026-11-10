@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled,
-    Window, div, px,
+    App, Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, PathPromptOptions, Render, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
@@ -13,7 +13,7 @@ use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{SaveOutcome, SettingProblem, Settings};
 
 use super::button::{ButtonKind, ButtonSize, button, toggle_button};
-use super::palette::{Colors, TEXT_FONT};
+use super::palette::{CODE_FONT, Colors, TEXT_FONT};
 use super::text_box::TextBox;
 use super::text_input::Lines;
 use super::title_bar::TitleBarArea;
@@ -28,6 +28,8 @@ pub enum SettingsEvent {
     /// The config file was written, so everything that read it before is out of date.
     Saved,
 }
+
+type AfterDiscard = Box<dyn FnOnce(&mut App)>;
 
 impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
@@ -101,14 +103,21 @@ impl Editing {
                 (skill, label)
             })
             .collect();
-        let entry = |custom_text: Option<&str>| CustomEntry {
-            is_open: custom_text.is_some(),
-            text: custom_text.unwrap_or_default().to_owned(),
+        let entry = |is_open: bool, text: &str| CustomEntry {
+            is_open,
+            text: text.to_owned(),
             focus: Some(cx.focus_handle()),
         };
-        let ide = entry(settings.ide().custom_text());
-        let model = entry(settings.ask_model().custom_text());
-        let skill = entry(settings.summary_instructions().skill_text());
+        let ide = entry(
+            settings.ide().custom_text().is_some(),
+            settings.ide_custom_text(),
+        );
+        let model = entry(
+            settings.ask_model().custom_text().is_some(),
+            settings.ask_model_custom_text(),
+        );
+        let skill_text = settings.summary_instructions().skill_text();
+        let skill = entry(skill_text.is_some(), skill_text.unwrap_or_default());
         let problems = settings
             .problems_on_open()
             .iter()
@@ -171,6 +180,8 @@ pub struct SettingsPanel {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     clone_focus: Vec<FocusHandle>,
+    /// Where the reviewer was going when the unsaved changes made the panel ask first.
+    after_discard: Option<AfterDiscard>,
 }
 
 impl SettingsPanel {
@@ -183,6 +194,7 @@ impl SettingsPanel {
             focus: cx.focus_handle(),
             owner_focus,
             clone_focus: Vec::new(),
+            after_discard: None,
         }
     }
 
@@ -213,8 +225,46 @@ impl SettingsPanel {
         }
     }
 
+    pub fn has_unsaved_changes(&self) -> bool {
+        match &self.loaded {
+            Some(Loaded::Ready(editing)) => editing.settings.has_unsaved_changes(),
+            _ => false,
+        }
+    }
+
+    /// Asks the discard question; `then` runs only if the reviewer discards, and Keep editing drops it.
+    pub fn ask_before_leaving(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut App) + 'static,
+    ) {
+        self.request_close(window, cx);
+        if self.is_confirming_discard() {
+            self.after_discard = Some(Box::new(then));
+        }
+    }
+
+    fn is_confirming_discard(&self) -> bool {
+        matches!(&self.loaded, Some(Loaded::Ready(editing)) if editing.is_confirming_discard)
+    }
+
+    fn keep_editing(&mut self, cx: &mut Context<Self>) {
+        self.after_discard = None;
+        self.edit(cx, |editing| editing.is_confirming_discard = false);
+    }
+
+    fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let then = self.after_discard.take();
+        self.close(window, cx);
+        if let Some(then) = then {
+            then(cx);
+        }
+    }
+
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.loaded = None;
+        self.after_discard = None;
         window.focus(&self.owner_focus, cx);
         cx.notify();
     }
@@ -337,10 +387,7 @@ impl SettingsPanel {
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.editing_mut() {
-            Some(editing) if editing.is_confirming_discard => {
-                editing.is_confirming_discard = false;
-                cx.notify();
-            }
+            Some(editing) if editing.is_confirming_discard => self.keep_editing(cx),
             _ => self.request_close(window, cx),
         }
     }
@@ -376,6 +423,15 @@ impl SettingsPanel {
                         cancel.update(cx, |this, cx| this.escape(window, cx));
                     }),
             )
+    }
+
+    /// A preset's template, to read and not to edit.
+    fn shown_text(colors: &Colors, text: impl Into<SharedString>) -> impl IntoElement {
+        div()
+            .text_xs()
+            .font_family(CODE_FONT)
+            .text_color(colors.muted_text)
+            .child(text.into())
     }
 
     fn problem_lines(editing: &Editing, slot: Slot, colors: &Colors) -> impl IntoElement {
@@ -601,6 +657,7 @@ impl SettingsPanel {
     fn ide(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let current = editing.settings.ide();
         let is_custom = editing.ide.is_open;
+        let shown_template = current.shown_template().filter(|_| !is_custom);
         let preset = |id: &'static str, label: &'static str, choice: IdeChoice| {
             let is_on = !is_custom && current == choice;
             Self::choice(colors, id, label, is_on).on_click(cx.listener(move |this, _, _, cx| {
@@ -649,9 +706,10 @@ impl SettingsPanel {
                                 this.edit(cx, |editing| {
                                     if !editing.ide.is_open {
                                         editing.ide.is_open = true;
-                                        editing.ide.text.clear();
+                                        editing.ide.text =
+                                            editing.settings.ide_custom_text().to_owned();
                                         editing.settings.set_ide(&IdeChoice::Custom(
-                                            IdeTemplate::new(String::new()),
+                                            IdeTemplate::new(editing.ide.text.clone()),
                                         ));
                                     }
                                 });
@@ -659,6 +717,7 @@ impl SettingsPanel {
                         ),
                     ),
             )
+            .children(shown_template.map(|template| Self::shown_text(colors, template)))
             .children(custom_box.map(|custom_box| {
                 div()
                     .flex()
@@ -678,6 +737,7 @@ impl SettingsPanel {
     fn ask(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let model = editing.settings.ask_model();
         let is_custom = editing.model.is_open;
+        let shown_command = model.shown_command().filter(|_| !is_custom);
         let model_choice = |id: SharedString, label: SharedString, choice: AskModelChoice| {
             let is_on = !is_custom && model == choice;
             Self::choice(colors, id, label, is_on).on_click(cx.listener(move |this, _, _, cx| {
@@ -770,15 +830,21 @@ impl SettingsPanel {
                                         this.edit(cx, |editing| {
                                             if !editing.model.is_open {
                                                 editing.model.is_open = true;
-                                                editing.model.text.clear();
+                                                editing.model.text = editing
+                                                    .settings
+                                                    .ask_model_custom_text()
+                                                    .to_owned();
                                                 editing.settings.set_ask_model(
-                                                    &AskModelChoice::Custom(String::new()),
+                                                    &AskModelChoice::Custom(
+                                                        editing.model.text.clone(),
+                                                    ),
                                                 );
                                             }
                                         });
                                     })),
                             ),
                     )
+                    .children(shown_command.map(|command| Self::shown_text(colors, command)))
                     .children(custom_box)
                     .child(Self::problem_lines(editing, Slot::AskModel, colors)),
             )
@@ -915,9 +981,7 @@ impl SettingsPanel {
                     ButtonSize::Regular,
                 )
                 .child("Keep editing")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.edit(cx, |editing| editing.is_confirming_discard = false);
-                })),
+                .on_click(cx.listener(|this, _, _, cx| this.keep_editing(cx))),
             )
             .child(
                 button(
@@ -927,7 +991,7 @@ impl SettingsPanel {
                     ButtonSize::Regular,
                 )
                 .child("Discard changes")
-                .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
+                .on_click(cx.listener(|this, _, window, cx| this.discard(window, cx))),
             )
     }
 }

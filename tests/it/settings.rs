@@ -70,7 +70,7 @@ fn a_changed_ask_model_rewrites_only_its_value_and_keeps_the_comment_after_it() 
 }
 
 #[test]
-fn a_cleared_ide_removes_only_its_line() {
+fn a_cleared_ide_removes_only_its_line_and_keeps_its_template_as_ide_custom() {
     let (shop, config, mut settings) = loaded_with_commented_config();
 
     settings.set_ide(&IdeChoice::None);
@@ -78,7 +78,10 @@ fn a_cleared_ide_removes_only_its_line() {
 
     assert_eq!(
         config_text(shop.home()),
-        config.replace("ide = \"zed {path}:{line}\"\n", "")
+        config.replace("ide = \"zed {path}:{line}\"\n", "").replace(
+            "# quick answers\n",
+            "# quick answers\nide_custom = \"zed {path}:{line}\"\n"
+        )
     );
 }
 
@@ -454,7 +457,7 @@ fn the_ide_reads_as_a_preset_none_or_custom() {
 
 #[test]
 fn picking_an_ide_writes_its_template_and_none_removes_the_key() {
-    let (home, mut settings) = loaded_from("ide = \"zed {path}:{line}\"\n");
+    let (home, mut settings) = loaded_from("");
 
     settings.set_ide(&IdeChoice::VsCode);
     settings.save().unwrap();
@@ -472,7 +475,56 @@ fn picking_an_ide_writes_its_template_and_none_removes_the_key() {
 
     settings.set_ide(&IdeChoice::None);
     settings.save().unwrap();
-    assert_eq!(config_text(home.path()), "");
+    assert_eq!(
+        config_text(home.path()),
+        "ide_custom = \"code --goto {path}:{line}\"\n"
+    );
+}
+
+#[test]
+fn the_last_custom_ide_comes_back_when_custom_is_picked_again() {
+    let (_home, mut settings) = loaded_from("ide = \"zed {path}:{line}\"\n");
+    assert_eq!(settings.ide_custom_text(), "zed {path}:{line}");
+
+    settings.set_ide(&IdeChoice::Zed);
+
+    assert_eq!(settings.ide_custom_text(), "zed {path}:{line}");
+}
+
+#[test]
+fn a_custom_ide_survives_save_with_a_preset_in_ide_custom_beside_ide() {
+    let (home, mut settings) =
+        loaded_from("ide = \"zed {path}:{line}\" # mine\nask_effort = \"low\"\n");
+
+    settings.set_ide(&IdeChoice::VsCode);
+    settings.save().unwrap();
+
+    let config = config_text(home.path());
+    assert_eq!(
+        config,
+        "ide = \"vscode://file{path}:{line}\" # mine\nask_effort = \"low\"\nide_custom = \"zed {path}:{line}\"\n"
+    );
+    let reloaded = Settings::load(home.path()).unwrap();
+    assert_eq!(reloaded.ide(), IdeChoice::VsCode);
+    assert_eq!(reloaded.ide_custom_text(), "zed {path}:{line}");
+}
+
+#[test]
+fn ide_custom_is_not_written_while_the_custom_ide_is_the_active_one_or_blank() {
+    let (home, mut settings) =
+        loaded_from("ide = \"zed://file{path}:{line}\"\nide_custom = \"zed {path}:{line}\"\n");
+
+    settings.set_ide(&custom_ide("code {path}"));
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "ide = \"code {path}\"\n");
+
+    settings.set_ide(&custom_ide("  "));
+    settings.set_ide(&IdeChoice::Zed);
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ide = \"zed://file{path}:{line}\"\n"
+    );
 }
 
 #[test]
@@ -511,7 +563,10 @@ fn picking_the_app_default_model_removes_the_key_and_a_custom_one_is_written_as_
 
     settings.set_ask_model(&AskModelChoice::AppDefault);
     settings.save().unwrap();
-    assert_eq!(config_text(home.path()), "");
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model_custom = \"claude-opus-4-1\"\n"
+    );
 }
 
 #[test]
@@ -718,4 +773,47 @@ fn a_clone_row_with_no_folder_says_so() {
         CloneRow::new("acme/shop", PathBuf::from("~/Code/shop")).folder_label(),
         "~/Code/shop"
     );
+}
+
+#[test]
+fn the_last_custom_ask_model_comes_back_and_survives_save_in_ask_model_custom() {
+    let (home, mut settings) = loaded_from("ask_model = \"claude-opus-4-1\" # pinned\n");
+    assert_eq!(settings.ask_model_custom_text(), "claude-opus-4-1");
+
+    settings.set_ask_model(&AskModelChoice::Haiku);
+    assert_eq!(settings.ask_model_custom_text(), "claude-opus-4-1");
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"haiku\" # pinned\nask_model_custom = \"claude-opus-4-1\"\n"
+    );
+    let reloaded = Settings::load(home.path()).unwrap();
+    assert_eq!(reloaded.ask_model(), AskModelChoice::Haiku);
+    assert_eq!(reloaded.ask_model_custom_text(), "claude-opus-4-1");
+}
+
+#[test]
+fn the_config_the_app_runs_on_ignores_the_custom_keys() {
+    let config = "ide = \"zed://file{path}:{line}\"\nide_custom = \"x {path}\"\nask_model = \"haiku\"\nask_model_custom = \"m\"\n";
+
+    assert_eq!(
+        AskSettings::from_config_text(config).unwrap().model,
+        "haiku"
+    );
+}
+
+#[test]
+fn a_preset_shows_the_template_it_uses() {
+    assert_eq!(
+        IdeChoice::JetBrains.shown_template(),
+        Some("idea://open?file={path}&line={line}")
+    );
+    assert_eq!(IdeChoice::None.shown_template(), None);
+    assert_eq!(custom_ide("code {path}").shown_template(), None);
+    assert_eq!(
+        AskModelChoice::Sonnet.shown_command(),
+        Some("claude --model sonnet".to_owned())
+    );
+    assert_eq!(AskModelChoice::AppDefault.shown_command(), None);
 }

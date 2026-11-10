@@ -62,6 +62,13 @@ impl AskModelChoice {
         }
     }
 
+    /// What an alias runs `claude` with, so the reviewer sees what it means.
+    pub fn shown_command(&self) -> Option<String> {
+        Self::PICKABLE
+            .contains(self)
+            .then(|| format!("claude --model {}", self.config_text().unwrap_or_default()))
+    }
+
     pub fn of(config_text: Option<&str>) -> Self {
         match config_text {
             None => Self::AppDefault,

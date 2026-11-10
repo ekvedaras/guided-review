@@ -25,6 +25,9 @@ struct Values {
     ask_model: AskModelChoice,
     ask_effort: AskEffortChoice,
     ide: Option<IdeTemplate>,
+    /// The last custom value: `ide` while it is not a preset, else what `ide_custom` keeps beside it.
+    ide_custom: String,
+    ask_model_custom: String,
     summary_instructions: SummaryInstructionsChoice,
     clones: Vec<CloneRow>,
 }
@@ -32,10 +35,22 @@ struct Values {
 impl Values {
     fn read(document: &DocumentMut) -> Self {
         let text = |key: &str| document.get(key).and_then(Item::as_str).map(str::to_owned);
+        let ask_model = AskModelChoice::of(text(ASK_MODEL).as_deref());
+        let ide = text(IDE).map(IdeTemplate::new);
         Self {
-            ask_model: AskModelChoice::of(text(ASK_MODEL).as_deref()),
+            ask_model_custom: ask_model
+                .custom_text()
+                .map(str::to_owned)
+                .or_else(|| text(ASK_MODEL_CUSTOM))
+                .unwrap_or_default(),
+            ide_custom: IdeChoice::of(ide.as_ref())
+                .custom_text()
+                .map(str::to_owned)
+                .or_else(|| text(IDE_CUSTOM))
+                .unwrap_or_default(),
+            ask_model,
             ask_effort: AskEffortChoice::of(text(ASK_EFFORT).as_deref()),
-            ide: text(IDE).map(IdeTemplate::new),
+            ide,
             summary_instructions: summary_instructions_in(document),
             clones: document
                 .get(CLONES)
@@ -47,6 +62,23 @@ impl Values {
                 })
                 .collect(),
         }
+    }
+
+    /// What `ide_custom` holds: the custom text, kept only while another choice is active and there is text.
+    fn ide_custom_key(&self) -> Option<&str> {
+        let is_active = matches!(IdeChoice::of(self.ide.as_ref()), IdeChoice::Custom(_));
+        Self::kept_custom(&self.ide_custom, is_active)
+    }
+
+    fn ask_model_custom_key(&self) -> Option<&str> {
+        Self::kept_custom(
+            &self.ask_model_custom,
+            self.ask_model.custom_text().is_some(),
+        )
+    }
+
+    fn kept_custom(custom: &str, is_active: bool) -> Option<&str> {
+        (!is_active && !custom.trim().is_empty()).then_some(custom)
     }
 }
 
@@ -156,6 +188,9 @@ impl From<CloneProblem> for CloneRowProblem {
 const ASK_MODEL: &str = "ask_model";
 const ASK_EFFORT: &str = "ask_effort";
 const IDE: &str = "ide";
+/// Only Settings reads the `_custom` keys; the config the app runs on does not know them.
+const ASK_MODEL_CUSTOM: &str = "ask_model_custom";
+const IDE_CUSTOM: &str = "ide_custom";
 const CLONES: &str = "clones";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
@@ -236,6 +271,9 @@ impl Settings {
     }
 
     pub fn set_ask_model(&mut self, model: &AskModelChoice) {
+        if let Some(text) = model.custom_text() {
+            text.clone_into(&mut self.edited.ask_model_custom);
+        }
         self.edited.ask_model = model.clone();
     }
 
@@ -247,11 +285,23 @@ impl Settings {
         self.edited.ask_effort = effort.clone();
     }
 
+    /// What a Custom box opens with: the last custom IDE template, even while a preset is picked.
+    pub fn ide_custom_text(&self) -> &str {
+        &self.edited.ide_custom
+    }
+
+    pub fn ask_model_custom_text(&self) -> &str {
+        &self.edited.ask_model_custom
+    }
+
     pub fn ide(&self) -> IdeChoice {
         IdeChoice::of(self.edited.ide.as_ref())
     }
 
     pub fn set_ide(&mut self, ide: &IdeChoice) {
+        if let Some(text) = ide.custom_text() {
+            text.clone_into(&mut self.edited.ide_custom);
+        }
         self.edited.ide = ide.template();
     }
 
@@ -426,6 +476,12 @@ impl Settings {
         }
         if saved.ide != edited.ide {
             set_text(root, IDE, edited.ide.as_ref().map(IdeTemplate::as_str));
+        }
+        if saved.ide_custom_key() != edited.ide_custom_key() {
+            set_text(root, IDE_CUSTOM, edited.ide_custom_key());
+        }
+        if saved.ask_model_custom_key() != edited.ask_model_custom_key() {
+            set_text(root, ASK_MODEL_CUSTOM, edited.ask_model_custom_key());
         }
         if saved.summary_instructions != edited.summary_instructions {
             set_value(

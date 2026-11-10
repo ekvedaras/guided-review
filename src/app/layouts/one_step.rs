@@ -304,6 +304,30 @@ impl OneStepLayout {
         diagrams
     }
 
+    /// A click in the sidebar goes to its item and closes Settings, which asks first when it holds
+    /// unsaved changes; Keep editing stays in Settings and the click goes nowhere.
+    fn go_from_sidebar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        go: impl FnOnce(&mut Review) + 'static,
+    ) {
+        if !self.settings.read(cx).is_open() {
+            self.change_review(cx, go);
+        } else if !self.settings.read(cx).has_unsaved_changes() {
+            self.settings
+                .update(cx, |settings, cx| settings.close(window, cx));
+            self.change_review(cx, go);
+        } else {
+            let layout = cx.entity();
+            self.settings.update(cx, |settings, cx| {
+                settings.ask_before_leaving(window, cx, move |cx| {
+                    layout.update(cx, |this, cx| this.change_review(cx, go));
+                });
+            });
+        }
+    }
+
     fn change_review<T>(&self, cx: &mut App, change: impl FnOnce(&mut Review) -> T) -> T {
         self.session
             .update(cx, |session, cx| session.change(cx, change))
@@ -971,8 +995,8 @@ impl OneStepLayout {
             sidebar.is_summary_current,
             RowMark::Page,
         )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, Review::go_to_summary);
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.go_from_sidebar(window, cx, Review::go_to_summary);
         }))
         .child("Summary");
         let sync_notices = sidebar
@@ -1021,8 +1045,9 @@ impl OneStepLayout {
                 step.is_current,
                 mark,
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to(&id));
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let id = id.clone();
+                this.go_from_sidebar(window, cx, move |review| review.go_to(&id));
             }))
             .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
                 format!("sidebar-{}", step.id),
@@ -1038,8 +1063,8 @@ impl OneStepLayout {
                 safety_net.is_current,
                 RowMark::Page,
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, Review::go_to_safety_net);
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.go_from_sidebar(window, cx, Review::go_to_safety_net);
             }))
             .child(div().flex_1().child(SafetyNetIntro::TITLE))
             .child(
