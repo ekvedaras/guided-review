@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
+use crate::config::Config;
+use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::local_git::{CloneProblem, LocalGit};
 use crate::pull_request::RepoName;
-use crate::summary_instructions::SkillName;
+use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 
 /// The reviewer's settings in `~/.guided-review/config.toml`, as the Settings panel shows and edits them.
 /// Save writes only the keys that changed, so the reviewer's comments and key order survive.
@@ -34,9 +36,7 @@ impl Values {
             ask_model: text(ASK_MODEL),
             ask_effort: text(ASK_EFFORT),
             ide: text(IDE).map(IdeTemplate::new),
-            summary_instructions: SummaryInstructionsChoice::read(
-                document.get(SUMMARY_INSTRUCTIONS),
-            )?,
+            summary_instructions: summary_instructions_in(document)?,
             clones: document
                 .get(CLONES)
                 .and_then(Item::as_table_like)
@@ -104,53 +104,42 @@ const ASK_EFFORT: &str = "ask_effort";
 const IDE: &str = "ide";
 const CLONES: &str = "clones";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
-const SKILL: &str = "skill";
-const OFF: &str = "off";
-const DEFAULT_SUMMARY_FILE: &str = ".guided-review/summary.md";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
-/// How `summary_instructions` is set in the config, before it is resolved to the instructions themselves.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SummaryInstructionsChoice {
-    /// No key: `~/.guided-review/summary.md`, when it exists.
-    DefaultFile,
-    OtherFile(PathBuf),
-    Skill(SkillName),
-    Off,
+fn summary_instructions_in(document: &DocumentMut) -> anyhow::Result<SummaryInstructionsChoice> {
+    let table = document.to_string().parse::<toml::Table>()?;
+    let choice = table
+        .get(SUMMARY_INSTRUCTIONS)
+        .map(SummaryInstructionsChoice::from_value)
+        .unwrap_or_default();
+    match choice {
+        SummaryInstructionsChoice::Unreadable(written) => anyhow::bail!(
+            "{SUMMARY_INSTRUCTIONS} {written} is not a path, \"{}\" or {{ {} = \"<name>\" }}",
+            SummaryInstructionsChoice::OFF,
+            SummaryInstructionsChoice::SKILL_KEY
+        ),
+        readable => Ok(readable),
+    }
 }
 
-impl SummaryInstructionsChoice {
-    fn read(item: Option<&Item>) -> anyhow::Result<Self> {
-        let Some(item) = item else {
-            return Ok(Self::DefaultFile);
-        };
-        if let Some(text) = item.as_str() {
-            return Ok(if text == OFF {
-                Self::Off
-            } else {
-                Self::OtherFile(PathBuf::from(text))
-            });
+/// Writing is all Settings adds to what the domain reads.
+fn summary_instructions_value(choice: &SummaryInstructionsChoice) -> anyhow::Result<Option<Value>> {
+    Ok(match choice {
+        SummaryInstructionsChoice::DefaultFile => None,
+        SummaryInstructionsChoice::Off => Some(Value::from(SummaryInstructionsChoice::OFF)),
+        SummaryInstructionsChoice::OtherFile(path) => Some(Value::from(config_path(path)?)),
+        SummaryInstructionsChoice::Skill(name) => {
+            let mut table = InlineTable::new();
+            table.insert(
+                SummaryInstructionsChoice::SKILL_KEY,
+                Value::from(name.as_str()),
+            );
+            Some(Value::InlineTable(table))
         }
-        let name = item.get(SKILL).and_then(Item::as_str).with_context(|| {
-            format!("{SUMMARY_INSTRUCTIONS} is not a path, \"{OFF}\" or {{ {SKILL} = \"<name>\" }}")
-        })?;
-        let skill = SkillName::parse(name)
-            .with_context(|| format!("{SUMMARY_INSTRUCTIONS} skill {name:?}"))?;
-        Ok(Self::Skill(skill))
-    }
-
-    fn to_value(&self) -> anyhow::Result<Option<Value>> {
-        Ok(match self {
-            Self::DefaultFile => None,
-            Self::Off => Some(Value::from(OFF)),
-            Self::OtherFile(path) => Some(Value::from(config_path(path)?)),
-            Self::Skill(name) => {
-                let mut table = InlineTable::new();
-                table.insert(SKILL, Value::from(name.as_str()));
-                Some(Value::InlineTable(table))
-            }
-        })
-    }
+        SummaryInstructionsChoice::Unreadable(written) => {
+            anyhow::bail!("{written} is not a {SUMMARY_INSTRUCTIONS} that can be saved")
+        }
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -164,7 +153,7 @@ pub enum SaveOutcome {
 
 impl Settings {
     pub fn load(home: &Path) -> anyhow::Result<Self> {
-        let file = home.join(".guided-review/config.toml");
+        let file = Config::file_in(home);
         let text = match std::fs::read_to_string(&file) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -219,7 +208,7 @@ impl Settings {
     }
 
     pub fn default_file(&self) -> PathBuf {
-        self.home.join(DEFAULT_SUMMARY_FILE)
+        SummaryInstructionsChoice::default_file_in(&self.home)
     }
 
     pub fn default_file_exists(&self) -> bool {
@@ -308,10 +297,8 @@ impl Settings {
             .map(CloneRowProblem::from)
     }
 
-    /// `~/` in a setting is the home Settings was loaded from.
     fn in_home(&self, path: &Path) -> PathBuf {
-        path.strip_prefix("~")
-            .map_or_else(|_| path.to_path_buf(), |rest| self.home.join(rest))
+        expand_home(path, &self.home)
     }
 
     pub fn has_unsaved_changes(&self) -> bool {
@@ -341,7 +328,7 @@ impl Settings {
             set_value(
                 root,
                 SUMMARY_INSTRUCTIONS,
-                edited.summary_instructions.to_value()?,
+                summary_instructions_value(&edited.summary_instructions)?,
             );
         }
         if saved.clones != edited.clones {

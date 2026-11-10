@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 
-pub const DEFAULT_FILE: &str = ".guided-review/summary.md";
+use crate::home::expand_home;
 
 /// What tells the tour writer how to write the reviewer summary, as far as it could be read.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -20,23 +20,36 @@ pub enum SummaryInstructionsChoice {
     #[default]
     DefaultFile,
     /// A path as written, which may start with `~/`.
-    OtherFile(String),
+    OtherFile(PathBuf),
+    Skill(SkillName),
     Off,
-    /// A skill name as written.
-    Skill(String),
     /// What the config holds when it is none of the above, as written.
     Unreadable(String),
 }
 
 impl SummaryInstructionsChoice {
     pub const OFF: &'static str = "off";
+    pub const SKILL_KEY: &'static str = "skill";
+    const DEFAULT_FILE: &'static str = ".guided-review/summary.md";
+
+    pub fn default_file_in(home: &Path) -> PathBuf {
+        home.join(Self::DEFAULT_FILE)
+    }
+
+    /// A typed skill name is a choice only when outline would accept it.
+    pub fn skill_named(name: &str) -> Self {
+        SkillName::parse(name.trim()).map_or_else(
+            |_| Self::Unreadable(format!("{{ {} = {name:?} }}", Self::SKILL_KEY)),
+            Self::Skill,
+        )
+    }
 
     pub fn from_value(value: &toml::Value) -> Self {
         match value.as_str() {
             Some(Self::OFF) => Self::Off,
-            Some(path) => Self::OtherFile(path.to_owned()),
-            None => match value.get("skill").and_then(toml::Value::as_str) {
-                Some(name) => Self::Skill(name.to_owned()),
+            Some(path) => Self::OtherFile(PathBuf::from(path)),
+            None => match value.get(Self::SKILL_KEY).and_then(toml::Value::as_str) {
+                Some(name) => Self::skill_named(name),
                 None => Self::Unreadable(value.to_string().trim().to_owned()),
             },
         }
@@ -46,10 +59,10 @@ impl SummaryInstructionsChoice {
         match self {
             Self::Off => SummaryInstructions::none(),
             Self::OtherFile(path) => read_file(&expand_home(path, home)),
-            Self::Skill(name) => SummaryInstructions::from_skill(name),
+            Self::Skill(name) => SummaryInstructions::of_skill(name),
             Self::Unreadable(written) => SummaryInstructions::unreadable(written),
             Self::DefaultFile => {
-                let default = home.join(DEFAULT_FILE);
+                let default = Self::default_file_in(home);
                 if default.is_file() {
                     read_file(&default)
                 } else {
@@ -68,12 +81,6 @@ impl<'de> Deserialize<'de> for SummaryInstructionsChoice {
 
 fn read_file(path: &Path) -> SummaryInstructions {
     SummaryInstructions::from_file(path, std::fs::read_to_string(path))
-}
-
-/// `~/` is the given home, so a config means the same wherever it is read.
-pub fn expand_home(path: &str, home: &Path) -> PathBuf {
-    path.strip_prefix("~/")
-        .map_or_else(|| PathBuf::from(path), |rest| home.join(rest))
 }
 
 /// A skill the tour writer runs through the Skill tool, such as `warm-up` or `plugin:skill`.
@@ -126,30 +133,18 @@ impl SummaryInstructions {
     fn unreadable(written: &str) -> Self {
         Self {
             warning: Some(format!(
-                "summary_instructions {written} is not a file path, \"{}\" or {{ skill = \"<name>\" }}",
-                SummaryInstructionsChoice::OFF
+                "summary_instructions {written} is not a file path, \"{}\" or {{ {} = \"<name>\" }}",
+                SummaryInstructionsChoice::OFF,
+                SummaryInstructionsChoice::SKILL_KEY
             )),
             ..Self::none()
         }
     }
 
-    /// A name that would add more than one rule to the tour agent's allowed tools is a warning, not a skill.
-    pub fn from_skill(name: &str) -> Self {
-        let name = name.trim();
-        if name.is_empty() {
-            return Self::none();
-        }
-        match SkillName::parse(name) {
-            Ok(skill) => Self {
-                skill: Some(skill.0),
-                ..Self::none()
-            },
-            Err(NotASkillName) => Self {
-                warning: Some(format!(
-                    "summary instructions skill {name:?} is not a skill name"
-                )),
-                ..Self::none()
-            },
+    fn of_skill(name: &SkillName) -> Self {
+        Self {
+            skill: Some(name.as_str().to_owned()),
+            ..Self::none()
         }
     }
 

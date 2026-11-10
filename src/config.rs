@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
-use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice, expand_home};
+use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice};
 
 /// `~/.guided-review/config.toml`
 #[derive(Default, Deserialize)]
@@ -62,6 +63,10 @@ impl Config {
         self.ide.clone().map(IdeTemplate::new)
     }
 
+    pub fn file_in(home: &Path) -> PathBuf {
+        home.join(".guided-review/config.toml")
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         let Some(home) = std::env::home_dir() else {
             return Ok(Self::default());
@@ -70,7 +75,7 @@ impl Config {
     }
 
     pub fn load_from(home: &Path) -> anyhow::Result<Self> {
-        let path = home.join(".guided-review/config.toml");
+        let path = Self::file_in(home);
         match std::fs::read_to_string(&path) {
             Ok(text) => Self::parse(&text, &path.display().to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
@@ -101,10 +106,10 @@ impl Config {
                 name.split_once('/')
                     .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
             })
-            .map(|(_, path)| config_path(path))
+            .map(|(_, path)| expand_env_home(Path::new(path)))
     }
 }
 
-fn config_path(path: &str) -> PathBuf {
+fn expand_env_home(path: &Path) -> PathBuf {
     std::env::home_dir().map_or_else(|| PathBuf::from(path), |home| expand_home(path, &home))
 }

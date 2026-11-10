@@ -1,8 +1,6 @@
 use crate::support::FixtureRepo;
-use guided_review::summary_instructions::SkillName;
-use guided_review::viewer::{
-    CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings, SummaryInstructionsChoice,
-};
+use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
+use guided_review::viewer::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 use std::path::{Path, PathBuf};
 
 fn commented_config(shop: &FixtureRepo) -> String {

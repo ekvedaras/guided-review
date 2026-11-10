@@ -12,6 +12,7 @@ pub mod file_rules;
 pub mod github;
 pub mod hc_tour_agent;
 pub mod hex;
+pub mod home;
 pub mod ide;
 pub mod image_facts;
 pub mod json;

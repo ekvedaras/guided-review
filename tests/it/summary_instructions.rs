@@ -403,3 +403,13 @@ fn a_launch_with_an_unreadable_config_runs_no_skill_and_says_why() {
         instructions.warning()
     );
 }
+
+#[test]
+fn an_empty_skill_name_is_a_warning_as_it_is_in_settings() {
+    let config = Config::from_text("summary_instructions = { skill = \"\" }\n").unwrap();
+
+    let instructions = config.summary_instructions(Path::new("/nowhere"));
+
+    assert!(!instructions.are_set());
+    assert!(instructions.warning().is_some());
+}
