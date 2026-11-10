@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
-use crate::summary_instructions::SummaryInstructions;
+use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice, expand_home};
 
 /// `~/.guided-review/config.toml`
 #[derive(Default, Deserialize)]
@@ -23,7 +23,7 @@ pub struct Config {
     ide: Option<String>,
     /// A path to a file with the instructions, or `"off"`.
     #[serde(default)]
-    summary_instructions: Option<String>,
+    summary_instructions: SummaryInstructionsChoice,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -84,18 +84,7 @@ impl Config {
         if std::env::var_os(Self::SUMMARY_INSTRUCTIONS_OFF_ENV).is_some() {
             return SummaryInstructions::none();
         }
-        match self.summary_instructions.as_deref() {
-            Some("off") => SummaryInstructions::none(),
-            Some(path) => read_instructions(&expand_home(path)),
-            None => {
-                let default = home.join(DEFAULT_SUMMARY_INSTRUCTIONS);
-                if default.is_file() {
-                    read_instructions(&default)
-                } else {
-                    SummaryInstructions::none()
-                }
-            }
-        }
+        self.summary_instructions.resolve(home)
     }
 
     pub fn ask_settings(&self) -> AskSettings {
@@ -113,19 +102,10 @@ impl Config {
                 name.split_once('/')
                     .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
             })
-            .map(|(_, path)| expand_home(path))
+            .map(|(_, path)| config_path(path))
     }
 }
 
-const DEFAULT_SUMMARY_INSTRUCTIONS: &str = ".guided-review/summary.md";
-
-fn read_instructions(path: &Path) -> SummaryInstructions {
-    SummaryInstructions::from_file(path, std::fs::read_to_string(path))
-}
-
-fn expand_home(path: &str) -> PathBuf {
-    match (path.strip_prefix("~/"), std::env::home_dir()) {
-        (Some(rest), Some(home)) => home.join(rest),
-        _ => PathBuf::from(path),
-    }
+fn config_path(path: &str) -> PathBuf {
+    std::env::home_dir().map_or_else(|| PathBuf::from(path), |home| expand_home(path, &home))
 }

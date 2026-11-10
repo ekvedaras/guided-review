@@ -282,3 +282,20 @@ fn the_reviewer_summary_survives_a_read_and_write_of_the_tour_file() {
             .contains("\"reviewer_summary\": \"warm-up\"")
     );
 }
+
+#[test]
+fn a_wrongly_typed_summary_instructions_is_a_warning_and_the_rest_of_the_config_still_loads() {
+    let config = Config::from_text("ide = \"zed {path}\"\nsummary_instructions = 5\n").unwrap();
+
+    let instructions = config.summary_instructions(Path::new("/nowhere"));
+
+    assert!(!instructions.are_set());
+    assert!(
+        instructions
+            .warning()
+            .is_some_and(|warning| warning.contains('5')),
+        "{:?}",
+        instructions.warning()
+    );
+    assert!(config.ide_template().is_some());
+}

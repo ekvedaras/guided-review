@@ -1,11 +1,72 @@
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Deserializer};
+
+pub const DEFAULT_FILE: &str = ".guided-review/summary.md";
 
 /// What tells the tour writer how to write the reviewer summary, as far as it could be read.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SummaryInstructions {
     text: Option<String>,
     warning: Option<String>,
+}
+
+/// How `summary_instructions` is set in the config, before it is resolved to the instructions themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SummaryInstructionsChoice {
+    /// No key: `~/.guided-review/summary.md`, when it exists.
+    #[default]
+    DefaultFile,
+    /// A path as written, which may start with `~/`.
+    OtherFile(String),
+    Off,
+    /// What the config holds when it is none of the above, as written.
+    Unreadable(String),
+}
+
+impl SummaryInstructionsChoice {
+    pub const OFF: &'static str = "off";
+
+    pub fn from_value(value: &toml::Value) -> Self {
+        match value.as_str() {
+            Some(Self::OFF) => Self::Off,
+            Some(path) => Self::OtherFile(path.to_owned()),
+            None => Self::Unreadable(value.to_string().trim().to_owned()),
+        }
+    }
+
+    pub fn resolve(&self, home: &Path) -> SummaryInstructions {
+        match self {
+            Self::Off => SummaryInstructions::none(),
+            Self::OtherFile(path) => read_file(&expand_home(path, home)),
+            Self::Unreadable(written) => SummaryInstructions::unreadable(written),
+            Self::DefaultFile => {
+                let default = home.join(DEFAULT_FILE);
+                if default.is_file() {
+                    read_file(&default)
+                } else {
+                    SummaryInstructions::none()
+                }
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SummaryInstructionsChoice {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        toml::Value::deserialize(deserializer).map(|value| Self::from_value(&value))
+    }
+}
+
+fn read_file(path: &Path) -> SummaryInstructions {
+    SummaryInstructions::from_file(path, std::fs::read_to_string(path))
+}
+
+/// `~/` is the given home, so a config means the same wherever it is read.
+pub fn expand_home(path: &str, home: &Path) -> PathBuf {
+    path.strip_prefix("~/")
+        .map_or_else(|| PathBuf::from(path), |rest| home.join(rest))
 }
 
 impl SummaryInstructions {
@@ -22,6 +83,16 @@ impl SummaryInstructions {
                 warning: None,
             },
             Err(error) => Self::broken(path, &error),
+        }
+    }
+
+    fn unreadable(written: &str) -> Self {
+        Self {
+            warning: Some(format!(
+                "summary_instructions {written} is not a file path or \"{}\"",
+                SummaryInstructionsChoice::OFF
+            )),
+            ..Self::none()
         }
     }
 
