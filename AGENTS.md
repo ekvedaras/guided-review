@@ -23,7 +23,9 @@ The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/gu
 
 ## Seeing the app
 
-`scripts/snapshot <pr-url>` writes a PNG of the top and end of every screen of that PR's tour to `/tmp/guided-review-snapshots`, downsized for reading (it builds the `snapshots` feature and runs on a throwaway HOME, so the maintainer's app stays untouched). The PR needs a tour in `~/.guided-review/tours`. `screencapture` is blocked in auto mode.
+`scripts/snapshot <pr-url> [out-dir]` writes PNGs of the app to `<out>/light` and `<out>/dark` (default `/tmp/guided-review-snapshots`): `NN-top`/`NN-end` of every tour screen, then `20-settings` to `27-loading-screen`, staged in `src/app/layouts/one_step/scenes.rs`. It builds the `snapshots` feature, runs on a throwaway HOME with only that PR's tour, and draws on a timer, so it works with the screen locked. A scene is taken once its picture is unchanged for 1s (20s cap), so finite animations end first. The PR needs a tour in `~/.guided-review/tours`; use public PRs only (ekvedaras/guided-review#12 has one) for pictures that leave the machine. `screencapture` is blocked in auto mode.
+
+`scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]` puts each scene side by side, before left. Markers number spots on the after picture, in its pixels: `{ "21-jump-palette": [{ "x": 640, "y": 260, "n": 1 }] }`.
 
 ## Releasing
 
