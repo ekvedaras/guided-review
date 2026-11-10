@@ -187,7 +187,7 @@ impl PageRow {
                 heading.number.hash(&mut hasher);
             }
             Self::ReviewerSummary(summary) | Self::PrDescription(summary) => {
-                summary.hash(&mut hasher)
+                summary.hash(&mut hasher);
             }
             Self::AskMarker(ask) => ask.id.hash(&mut hasher),
             Self::Toolbar(toolbar) => {
