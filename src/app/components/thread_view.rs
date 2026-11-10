@@ -396,6 +396,20 @@ impl ThreadElement {
             .into_any_element()
         };
         let id = thread_id;
+        let cancel = (!is_busy).then(|| {
+            icon_button(
+                &colors,
+                SharedString::from(format!("reply-cancel-{id}")),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Close,
+                "Cancel the reply",
+            )
+            .on_click({
+                let on_reply_draft = Rc::clone(on_reply_draft);
+                move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
+            })
+        });
         let buttons = (!is_busy).then(|| {
             let ask_agent = can_ask_agent.then(|| {
                 let mut parts = vec![
@@ -452,28 +466,27 @@ impl ThreadElement {
                     .on_click(send(SendMode::CommentNow, Audience::Author))
                 }))
                 .children(ask_agent)
-                .child(div().flex_1())
-                .child(
-                    icon_button(
-                        &colors,
-                        SharedString::from(format!("reply-cancel-{id}")),
-                        ButtonKind::Ghost,
-                        ButtonSize::Small,
-                        Icon::Close,
-                        "Cancel the reply",
-                    )
-                    .on_click({
-                        let on_reply_draft = Rc::clone(on_reply_draft);
-                        move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
-                    }),
-                )
         });
         slide_in(
             div()
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(Field::new(focus).px_2().py_1p5().min_h(px(56.)).child(text))
+                .child(
+                    div()
+                        .relative()
+                        .child(
+                            Field::new(focus)
+                                .pl_2()
+                                .pr_8()
+                                .py_1p5()
+                                .min_h(px(56.))
+                                .child(text),
+                        )
+                        .children(cancel.map(|cancel| {
+                            div().absolute().top(px(4.)).right(px(4.)).child(cancel)
+                        })),
+                )
                 .children(buttons),
             SharedString::from(format!("reply-box-{id}")),
             STATE,
