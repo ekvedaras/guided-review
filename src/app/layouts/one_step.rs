@@ -24,7 +24,7 @@ use crate::app::components::button::{
     toggle_button,
 };
 use crate::app::components::card::card;
-use crate::app::components::chip::{chip, dropping_in, notice_band};
+use crate::app::components::chip::{callout, chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
     QueuedCommentNote,
@@ -45,7 +45,8 @@ use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, PreparedMarkdown, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
-    Edge, SCREEN, SCREEN_SLIDE, glide_to_share, grow_when_shown, slide_in, turn_to,
+    BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to_share, grow_when_shown, pop_in,
+    slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
@@ -56,7 +57,9 @@ use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
-use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
+use crate::app::components::sidebar_row::{
+    RowMark, check_flag, count_badge, sidebar_row, skim_chip,
+};
 use crate::app::components::step_notes::note_label;
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
@@ -64,10 +67,12 @@ use crate::app::components::thread_view::{
     ThreadChanges, ThreadDrafts, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
+use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
-    AskAt, DiagramRow, PageRow, ScreenFooter, SelectedRows, StepHeading, ThreadRowPlace, Toolbar,
+    AskAt, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows, StepHeading,
+    SummaryStatsRow, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
@@ -80,7 +85,7 @@ use crate::viewer::{
     AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
     LineLocation, NextScreen, NotesButton, PaletteAction, Place, QueuedComment, ReadProgress,
     Reopen, ReopenAfterSave, Review, Screen, ScreenTravel, SendMode, StepId, ThreadId, ThreadView,
-    Travel,
+    ToastTone, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -217,12 +222,12 @@ impl OneStepLayout {
             .detach();
         let settings = if let Some(settings) = carried_settings {
             settings.update(cx, |settings, cx| {
-                settings.move_to(focus.clone(), Placement::BesideSidebar, cx);
+                settings.move_to(focus.clone(), Placement::SheetOverReview, cx);
             });
             settings
         } else {
             let home = switching.home.clone();
-            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::BesideSidebar, cx))
+            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::SheetOverReview, cx))
         };
         cx.subscribe_in(
             &settings,
@@ -351,30 +356,6 @@ impl OneStepLayout {
         })
         .detach();
         diagrams
-    }
-
-    /// A click in the sidebar goes to its item and closes Settings, which asks first when it holds
-    /// unsaved changes; Keep editing stays in Settings and the click goes nowhere.
-    fn go_from_sidebar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        go: impl FnOnce(&mut Review) + 'static,
-    ) {
-        if !self.settings.read(cx).is_open() {
-            self.change_review(cx, go);
-        } else if !self.settings.read(cx).has_unsaved_changes() {
-            self.settings
-                .update(cx, |settings, cx| settings.close(window, cx));
-            self.change_review(cx, go);
-        } else {
-            let layout = cx.entity();
-            self.settings.update(cx, |settings, cx| {
-                settings.ask_before_leaving(window, cx, move |cx| {
-                    layout.update(cx, |this, cx| this.change_review(cx, go));
-                });
-            });
-        }
     }
 
     fn change_review<T>(&self, cx: &mut App, change: impl FnOnce(&mut Review) -> T) -> T {
@@ -513,7 +494,17 @@ impl OneStepLayout {
             PageRow::Line(line) => Some(line.code()),
             _ => None,
         });
+        let lines = text.lines().count();
         cx.write_to_clipboard(ClipboardItem::new_string(text));
+        post_toast(
+            cx,
+            ToastTone::Neutral,
+            if lines == 1 {
+                "Copied 1 line".to_owned()
+            } else {
+                format!("Copied {lines} lines")
+            },
+        );
     }
 
     fn end_row_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -813,8 +804,13 @@ impl OneStepLayout {
         )
     }
 
+    /// Settings is a modal sheet: while it is open, the other overlays wait.
+    fn is_settings_open(&self, cx: &App) -> bool {
+        self.settings.read(cx).is_open()
+    }
+
     fn toggle_jump(&mut self, _: &ToggleJump, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
+        if self.is_reopening(cx) || self.is_settings_open(cx) {
             return;
         }
         let groups = self.session.read(cx).review().palette("");
@@ -912,6 +908,7 @@ impl OneStepLayout {
     fn settings_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings
             .update(cx, |settings, cx| settings.close(window, cx));
+        post_toast(cx, ToastTone::Success, "Settings saved");
         let in_flight = self.in_flight(cx);
         let reopen = self.reopen_after_save.saved(in_flight);
         self.reopen_if_due(reopen, cx);
@@ -951,6 +948,9 @@ impl OneStepLayout {
     }
 
     fn toggle_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_settings_open(cx) {
+            return;
+        }
         self.pr_switcher.update(cx, |switcher, cx| {
             if switcher.is_open() {
                 switcher.close(window, cx);
@@ -1125,8 +1125,8 @@ impl OneStepLayout {
             sidebar.is_summary_current,
             RowMark::Page,
         )
-        .on_click(cx.listener(|this, _, window, cx| {
-            this.go_from_sidebar(window, cx, Review::go_to_summary);
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.change_review(cx, Review::go_to_summary);
         }))
         .child("Summary");
         let sync_notices = sidebar
@@ -1149,7 +1149,10 @@ impl OneStepLayout {
             .changes_not_shown
             .clone()
             .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
-        let tour_agent = Self::tour_agent_block(&colors, &sidebar.tour_agent, cx);
+        let tour_agent = sidebar
+            .tour_agent
+            .is_shown
+            .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
         let finish_dialog = FinishReviewDialog::new(
             progress.total > 0 && progress.read == progress.total,
             sidebar.finishing,
@@ -1176,14 +1179,18 @@ impl OneStepLayout {
                 step.is_current,
                 mark,
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                let id = id.clone();
-                this.go_from_sidebar(window, cx, move |review| review.go_to(&id));
+            .when(step.is_skim && !step.is_current, |row| {
+                row.text_color(colors.muted_text)
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| review.go_to(&id));
             }))
             .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
                 format!("sidebar-{}", step.id),
                 &step.label,
             )))
+            .children(step.has_check.then(|| check_flag(&colors)))
+            .children(step.is_skim.then(|| skim_chip(&colors)))
             .children(count_badge(&colors, step.thread_count))
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
@@ -1194,8 +1201,8 @@ impl OneStepLayout {
                 safety_net.is_current,
                 RowMark::Page,
             )
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.go_from_sidebar(window, cx, Review::go_to_safety_net);
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, Review::go_to_safety_net);
             }))
             .child(div().flex_1().child(SafetyNetIntro::TITLE))
             .child(
@@ -1218,11 +1225,9 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_3()
-            .border_b_1()
-            .border_color(colors.subtle_border)
             .child(progress_meter(&colors, progress))
             .child(finish_dialog)
-            .child(tour_agent)
+            .children(tour_agent)
             .children(changes_not_shown)
             .children(problems)
             .children(sync_notices);
@@ -1234,7 +1239,7 @@ impl OneStepLayout {
             .flex_col()
             .bg(colors.sidebar_ground())
             .border_r_1()
-            .border_color(colors.border)
+            .border_color(colors.subtle_border)
             .text_sm()
             .child(
                 TitleBarArea::new("sidebar-title-bar", gpui::transparent_black())
@@ -1293,8 +1298,6 @@ impl OneStepLayout {
             .flex()
             .items_center()
             .gap_1()
-            .border_t_1()
-            .border_color(colors.subtle_border)
             .child(
                 button(
                     colors,
@@ -1405,6 +1408,53 @@ impl OneStepLayout {
             .child(trail_hairline(&colors, progress))
     }
 
+    /// Once the step's heading has scrolled away, a slim bar under the title bar keeps where the
+    /// reader is and the tick in reach. Read from the list's own scroll state; nothing is built.
+    fn sticky_step_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let Some(PageRow::StepHeading(heading)) = self.session.read(cx).rows().row(0) else {
+            return None;
+        };
+        let is_scrolled_away = self.screen_list.logical_scroll_top().item_ix > 0;
+        if !is_scrolled_away {
+            return None;
+        }
+        let heading = Rc::clone(heading);
+        let colors = Colors::active(cx);
+        let bar = div()
+            .w_full()
+            .h(px(44.))
+            .px_6()
+            .flex()
+            .items_center()
+            .gap_3()
+            .bg(colors.background.opacity(0.97))
+            .border_b_1()
+            .border_color(colors.subtle_border)
+            .shadow(colors.sticky_shadow())
+            .child(step_chip(&colors, &heading))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(InlineMarkdown::new("sticky-step-title", &heading.title)),
+            )
+            .child(tick_button(
+                heading.is_ticked,
+                heading.id.clone(),
+                ButtonSize::Small,
+                cx,
+            ));
+        Some(div().absolute().top_0().left_0().right_0().child(slide_in(
+            bar,
+            ("sticky-step-bar", self.screen_travel.arrival().count()),
+            STATE,
+            Edge::Top,
+            BANNER_DROP,
+        )))
+    }
+
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
     fn show_diagram(&self, window: &mut Window, cx: &mut Context<Self>) {
         let screen_list = &self.screen_list;
@@ -1448,6 +1498,34 @@ impl OneStepLayout {
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(InlineMarkdown::new("summary-title", &title)),
                 )
+                .into_any_element(),
+            PageRow::SummaryStats(stats) => summary_stats(&colors, &stats).into_any_element(),
+            PageRow::RouteHeading => div()
+                .pt_6()
+                .pb_3()
+                .text_lg()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("The tour")
+                .into_any_element(),
+            PageRow::RouteStop(stop) => route_stop(&stop, cx).into_any_element(),
+            PageRow::TourLead(lead) => div()
+                .pt_5()
+                .pb_2()
+                .max_w(READING_WIDTH)
+                .flex()
+                .children(match lead.as_ref() {
+                    TourLead::Finish { steps, can_finish } => Some(
+                        finish_card(
+                            *steps,
+                            *can_finish,
+                            ReviewAgain::Offered,
+                            "summary-lead",
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                    other => lead_button(other, "summary-lead", cx),
+                })
                 .into_any_element(),
             PageRow::SummaryBullet(summary_bullet) => div()
                 .pb_2()
@@ -1867,7 +1945,12 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
                 .child(step_chip(&colors, heading))
                 .child(title),
         )
-        .child(tick_button(heading.is_ticked, heading.id.clone(), cx))
+        .child(tick_button(
+            heading.is_ticked,
+            heading.id.clone(),
+            ButtonSize::Regular,
+            cx,
+        ))
 }
 
 /// The step's place on the tour, in a chip that carries the trail's dot; a gone step's is quiet.
@@ -1940,7 +2023,7 @@ fn repin_notes(colors: &Colors, gone_pieces: usize, text_may_be_old: bool) -> im
         })
 }
 
-fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyElement {
     let colors = Colors::active(cx);
     let previous = footer.has_previous.then(|| {
         button(
@@ -1964,13 +2047,33 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
         NextScreen::Step { title } => title.clone(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
+    if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {
+        return div()
+            .pt_8()
+            .pb_10()
+            .flex()
+            .items_center()
+            .gap_3()
+            .children(previous)
+            .child(finish_card(
+                *steps,
+                *can_finish,
+                ReviewAgain::from(footer.is_summary),
+                "footer",
+                cx,
+            ))
+            .into_any_element();
+    }
     let action = match (&footer.ticks, footer.next.is_some(), footer.is_summary) {
-        (_, true, true) => Some(("Start the tour", Onward::Goes)),
         (Some(_), true, false) => Some(("Mark as read and go on", Onward::Goes)),
-        (Some(_), false, _) => Some(("Mark as read", Onward::Stays)),
+        (Some(_), false, false) => Some(("Mark as read", Onward::Stays)),
         (None, true, false) => Some(("Next", Onward::Goes)),
-        (None, false, _) => None,
+        (_, _, true) | (None, false, _) => None,
     };
+    let lead = footer
+        .lead
+        .as_ref()
+        .and_then(|lead| lead_button(lead, "footer-lead", cx));
     let primary = action.map(|(label, onward)| {
         let ticks = footer.ticks.clone();
         button(
@@ -2046,8 +2149,317 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
                 .gap_4()
                 .children(up_next)
                 .children(the_end)
+                .children(lead)
                 .children(primary),
         )
+        .into_any_element()
+}
+
+/// How big the PR is, in the numbers the review truly has.
+fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
+    let item = |icon_name: Icon, text: SharedString| {
+        div()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .child(sized_icon(icon_name, colors.muted_text, px(14.)))
+            .child(text)
+    };
+    let dot = || div().size(px(3.)).rounded_full().bg(colors.border);
+    div()
+        .pb_5()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_3()
+        .text_sm()
+        .text_color(colors.muted_text)
+        .child(item(Icon::Milestone, stats.steps.clone()))
+        .child(dot())
+        .child(item(Icon::FileText, stats.files.clone()))
+        .child(dot())
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .font_family(crate::app::components::palette::CODE_FONT)
+                .child(div().text_color(colors.success).child(stats.added.clone()))
+                .child(div().text_color(colors.danger).child(stats.removed.clone())),
+        )
+        .children(stats.open_threads.clone().map(|threads| {
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(dot())
+                .child(item(Icon::MessageSquare, threads))
+        }))
+}
+
+/// One top-level step on the route: its number on the route line, its title and why, and whether
+/// it is read or has something to check. A click goes there.
+fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+    let colors = Colors::active(cx);
+    let disc = div()
+        .size(px(24.))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .border_1()
+        .map(|disc| {
+            if stop.is_read {
+                disc.bg(colors.success_background)
+                    .border_color(colors.success_border)
+                    .child(sized_icon(Icon::Check, colors.success, px(13.)))
+            } else {
+                disc.bg(colors.background)
+                    .border_color(colors.current_border)
+                    .text_color(colors.accent)
+                    .child(stop.number.clone())
+            }
+        });
+    let line = |is_shown: bool| {
+        div()
+            .w(px(2.))
+            .flex_1()
+            .when(is_shown, |line| line.bg(colors.current_border))
+    };
+    let id = stop.id.clone();
+    div()
+        .id(SharedString::from(format!("route-{}", stop.id)))
+        .max_w(READING_WIDTH)
+        .flex()
+        .gap_3()
+        .px_2()
+        .rounded(px(CONTROL_RADIUS))
+        .cursor_pointer()
+        .hover(|row| row.bg(colors.hover))
+        .active(|row| row.bg(colors.pressed))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let id = id.clone();
+            this.change_review(cx, move |review| review.go_to(&id));
+        }))
+        .child(
+            div()
+                .flex_none()
+                .w(px(24.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(
+                    div()
+                        .h(px(10.))
+                        .w(px(2.))
+                        .when(!stop.is_first, |line| line.bg(colors.current_border)),
+                )
+                .child(disc)
+                .child(line(!stop.is_last)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .py_2p5()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(if stop.is_read {
+                                    colors.muted_text
+                                } else {
+                                    colors.text
+                                })
+                                .child(InlineMarkdown::new(
+                                    format!("route-title-{}", stop.id),
+                                    &stop.title,
+                                )),
+                        )
+                        .children(stop.has_check.then(|| check_flag(&colors)))
+                        .children(stop.details.clone().map(|details| {
+                            div()
+                                .flex_none()
+                                .text_xs()
+                                .text_color(colors.muted_text)
+                                .child(details)
+                        })),
+                )
+                .children((!stop.why.is_empty()).then(|| {
+                    div()
+                        .text_sm()
+                        .text_color(colors.muted_text)
+                        .line_clamp(2)
+                        .child(InlineMarkdown::new(
+                            format!("route-why-{}", stop.id),
+                            &stop.why,
+                        ))
+                })),
+        )
+}
+
+/// Whether the finish card also offers to read the tour again from its first step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewAgain {
+    Offered,
+    NotOffered,
+}
+
+impl From<bool> for ReviewAgain {
+    fn from(is_offered: bool) -> Self {
+        if is_offered {
+            Self::Offered
+        } else {
+            Self::NotOffered
+        }
+    }
+}
+
+/// The way into the tour: its start, or the first step not read yet. Finishing has its own card.
+fn lead_button(
+    lead: &TourLead,
+    id: &'static str,
+    cx: &mut Context<OneStepLayout>,
+) -> Option<AnyElement> {
+    let colors = Colors::active(cx);
+    let (step, label, command) = match lead {
+        TourLead::Start(first) => (
+            first.id.clone(),
+            div().child("Start the tour").into_any_element(),
+            Command::NextScreen,
+        ),
+        TourLead::Continue(next) => (
+            next.id.clone(),
+            div()
+                .flex()
+                .min_w_0()
+                .gap_1()
+                .child(div().flex_none().child("Continue at"))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(InlineMarkdown::new(format!("{id}-title"), &next.title)),
+                )
+                .into_any_element(),
+            Command::NextUnreadStep,
+        ),
+        TourLead::Finish { .. } | TourLead::Nowhere => return None,
+    };
+    Some(
+        button(&colors, id, ButtonKind::Primary, ButtonSize::Large)
+            .flex_shrink(1.)
+            .min_w_0()
+            .max_w(px(460.))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let step = step.clone();
+                this.change_review(cx, move |review| review.go_to(&step));
+            }))
+            .child(label)
+            .child(button_keys(&colors, ButtonKind::Primary, command))
+            .into_any_element(),
+    )
+}
+
+/// The tour's end once every step is read: a calm success card whose check pops in once, with
+/// Finish review when the PR takes a review from the reader.
+fn finish_card(
+    steps: usize,
+    can_finish: bool,
+    review_again: ReviewAgain,
+    id: &'static str,
+    cx: &mut Context<OneStepLayout>,
+) -> impl IntoElement {
+    let colors = Colors::active(cx);
+    let title = if steps == 1 {
+        "The one step is read".to_owned()
+    } else {
+        format!("All {steps} steps read")
+    };
+    let finish = can_finish.then(|| {
+        icon_label_button(
+            &colors,
+            SharedString::from(format!("{id}-finish")),
+            ButtonKind::Primary,
+            ButtonSize::Large,
+            Icon::ListChecks,
+            "Finish review",
+        )
+        .on_click(cx.listener(|this, _, _, cx| this.open_finish_form(cx)))
+    });
+    let again = (review_again == ReviewAgain::Offered).then(|| {
+        icon_label_button(
+            &colors,
+            SharedString::from(format!("{id}-again")),
+            ButtonKind::Ghost,
+            ButtonSize::Regular,
+            Icon::RotateCcw,
+            "Review again",
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.change_review(cx, |review| {
+                review.go_to_summary();
+                review.go_forward();
+            });
+        }))
+    });
+    callout(&colors, Tone::Success)
+        .flex_1()
+        .min_w_0()
+        .pl_4()
+        .pr_3()
+        .flex()
+        .items_center()
+        .gap_4()
+        .child(
+            div()
+                .flex_none()
+                .size(px(36.))
+                .rounded_full()
+                .bg(colors.trail_done.diagonal())
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(pop_in(
+                    sized_icon(Icon::Check, colors.on_accent_fill, px(20.)),
+                    SharedString::from(format!("{id}-check")),
+                )),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors.text)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(colors.muted_text)
+                        .child(if can_finish {
+                            "Every step of the tour is read. Send your review when you are ready."
+                        } else {
+                            "Every step of the tour is read."
+                        }),
+                ),
+        )
+        .children(again)
+        .children(finish)
 }
 
 /// Whether the footer's primary action moves on to another screen, which its key says.
@@ -2092,14 +2504,19 @@ fn toolbar_toggle(
     })
 }
 
-fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> impl IntoElement {
+fn tick_button(
+    is_ticked: bool,
+    id: StepId,
+    size: ButtonSize,
+    cx: &mut Context<OneStepLayout>,
+) -> impl IntoElement {
     let colors = Colors::active(cx);
     let kind = if is_ticked {
         ButtonKind::Done
     } else {
         ButtonKind::Secondary
     };
-    button(&colors, "tick", kind, ButtonSize::Regular)
+    button(&colors, "tick", kind, size)
         .gap_0()
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
         .child(grow_when_shown(
@@ -2204,7 +2621,12 @@ impl Render for OneStepLayout {
         let repin_progress = session.repin_progress().clone();
         let refresh_brief = session.refresh_brief().clone();
         let refresh_progress = session.refresh_progress().clone();
-        let screen = div().flex_1().min_h_0().child(
+        #[cfg_attr(
+            not(feature = "snapshots"),
+            expect(unused_mut, reason = "the gallery picture has no step")
+        )]
+        let mut sticky_bar = self.sticky_step_bar(cx);
+        let screen = div().size_full().child(
             list(
                 self.screen_list.clone(),
                 cx.processor(move |this, index, _window, cx| {
@@ -2230,10 +2652,17 @@ impl Render for OneStepLayout {
             .try_global::<crate::app::snapshots::StagedGallery>()
             .is_some_and(|staged| staged.0)
         {
+            sticky_bar = None;
             gallery::gallery(&colors)
         } else {
             screen.into_any_element()
         };
+        let screen = div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .child(screen)
+            .children(sticky_bar);
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
@@ -2342,6 +2771,7 @@ impl Render for OneStepLayout {
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
             .child(self.shortcuts.clone())
+            .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)
     }
 }

@@ -4,9 +4,11 @@ use gpui::{
     Stateful, StatefulInteractiveElement, Styled, div, px,
 };
 
+use super::chip::chip;
 use super::icon::{Icon, sized_icon};
 use super::motion::pop_when_shown;
-use super::palette::{CONTROL_RADIUS, Colors};
+use super::palette::{CONTROL_RADIUS, Colors, Tone};
+use super::tooltip::tooltip;
 
 const FLAT_INDENT: f32 = 8.;
 const INDENT_PER_DEPTH: f32 = 16.;
@@ -35,6 +37,7 @@ pub fn sidebar_row(
 ) -> Stateful<Div> {
     div()
         .id(id)
+        .relative()
         .mx_2()
         .pl(indent(depth))
         .pr_2()
@@ -46,8 +49,9 @@ pub fn sidebar_row(
         .border_1()
         .cursor_pointer()
         .text_color(match mark {
-            RowMark::Read | RowMark::Gone if !is_current => colors.muted_text,
-            _ => colors.text,
+            _ if is_current => colors.text,
+            RowMark::Read | RowMark::Gone => colors.muted_text,
+            RowMark::Unread | RowMark::Page => colors.sidebar_text,
         })
         .map(|row| {
             if is_current {
@@ -60,7 +64,42 @@ pub fn sidebar_row(
                     .active(|row| row.bg(colors.pressed))
             }
         })
+        .children((1..=depth).map(|level| guide_line(colors, level)))
         .child(mark_element(colors, mark, is_current))
+}
+
+/// A nested step hangs off a thin line under its parent's mark, one per level, so the tree reads
+/// without leaning on indentation alone.
+fn guide_line(colors: &Colors, level: usize) -> impl IntoElement {
+    div()
+        .absolute()
+        .top(px(-1.))
+        .bottom(px(-1.))
+        .left(indent(level - 1) + px(MARK_SIZE / 2. - 0.5))
+        .w(px(1.))
+        .bg(colors.border)
+}
+
+/// A step that has something to check carries a small flag.
+pub fn check_flag(colors: &Colors) -> impl IntoElement {
+    div()
+        .id("check-flag")
+        .flex_none()
+        .h(px(LINE_HEIGHT))
+        .flex()
+        .items_center()
+        .tooltip(tooltip(|_| "Has something to check".into()))
+        .child(sized_icon(Icon::Flag, colors.warning, px(12.)))
+}
+
+/// A step the reviewer only needs to glance at.
+pub fn skim_chip(colors: &Colors) -> impl IntoElement {
+    div()
+        .flex_none()
+        .h(px(LINE_HEIGHT))
+        .flex()
+        .items_center()
+        .child(chip(colors, Tone::Neutral).child("skim"))
 }
 
 /// The current step wears the trail's dot; elsewhere a ring, a check or a dash says what was read.

@@ -159,6 +159,15 @@ pub fn pop_when_shown(
     )
 }
 
+/// An icon that pops in once when it first appears: the finish card's check. It grows from a little
+/// under its size with the arrival easing, so it lands without a bounce.
+pub fn pop_in(icon: Svg, id: impl Into<ElementId>) -> AnimationElement<Svg> {
+    icon.with_animation(id, one_shot(STATE), |icon, delta| {
+        let scale = 0.4 + 0.6 * delta;
+        icon.with_transformation(Transformation::scale(size(scale, scale)))
+    })
+}
+
 /// Like `pop_when_shown`, for an icon inside a label: it grows from no width to `size` and its
 /// `gap` after it, so the label makes room as the icon pops in, and takes none while hidden.
 pub fn grow_when_shown(

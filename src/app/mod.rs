@@ -99,6 +99,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             tour_writer::resume(cx);
             dock_icon::show();
             bind_keys(cx);
+            components::toast_stack::Toaster::install(cx);
             word_keys::take_before_macos(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();

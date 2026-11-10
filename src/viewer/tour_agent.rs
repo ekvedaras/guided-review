@@ -178,6 +178,11 @@ impl TourAgentState {
     pub fn can_show(&self) -> bool {
         matches!(self, Self::Agent { .. })
     }
+
+    /// There is an agent, or news about why there cannot be one; "none" and "looking" say nothing.
+    pub fn is_worth_a_line(&self) -> bool {
+        matches!(self, Self::Agent { .. } | Self::LinkOff(_))
+    }
 }
 
 impl fmt::Display for TourAgentState {

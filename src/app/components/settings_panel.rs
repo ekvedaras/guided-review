@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
+    ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, px, relative,
 };
 
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
@@ -18,15 +18,17 @@ use super::button::{
 use super::card::card;
 use super::chip::{chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
-use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, slide_in};
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone};
+use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
+use super::palette::{
+    CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone,
+};
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::title_bar::TitleBarArea;
 
-/// Where the panel starts: the sidebar's width, so the sidebar stays beside it.
-const SIDEBAR_WIDTH: f32 = 300.;
+/// The widest a sheet over a review grows on a wide window.
+const SHEET_WIDTH: f32 = 860.;
 /// The column the header, the sections and the action bar's contents line up in.
 const COLUMN_WIDTH: f32 = 780.;
 
@@ -38,23 +40,13 @@ pub enum SettingsEvent {
     Closed,
 }
 
-/// What the panel covers: the page area beside a PR's sidebar, or a window that holds only Settings.
+/// What the panel covers: a sheet over the whole review, sidebar too, so nothing behind it is live;
+/// or a window that holds only Settings, as its whole page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
-    BesideSidebar,
+    SheetOverReview,
     WholeWindow,
 }
-
-impl Placement {
-    fn left(self) -> f32 {
-        match self {
-            Self::BesideSidebar => SIDEBAR_WIDTH,
-            Self::WholeWindow => 0.,
-        }
-    }
-}
-
-type AfterDiscard = Box<dyn FnOnce(&mut App)>;
 
 impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
@@ -245,8 +237,6 @@ pub struct SettingsPanel {
     /// What the panel's owner has to say that is not about a setting, such as a PR that failed to open.
     notice: Option<SharedString>,
     clone_focus: Vec<FocusHandle>,
-    /// Where the reviewer was going when the unsaved changes made the panel ask first.
-    after_discard: Option<AfterDiscard>,
     scroll: ScrollHandle,
 }
 
@@ -267,7 +257,6 @@ impl SettingsPanel {
             placement,
             notice: None,
             clone_focus: Vec::new(),
-            after_discard: None,
             scroll: ScrollHandle::new(),
         }
     }
@@ -318,46 +307,16 @@ impl SettingsPanel {
         }
     }
 
-    pub fn has_unsaved_changes(&self) -> bool {
-        match &self.loaded {
-            Some(Loaded::Ready(editing)) => editing.settings.has_unsaved_changes(),
-            _ => false,
-        }
-    }
-
-    /// Asks the discard question; `then` runs only if the reviewer discards, and Keep editing drops it.
-    pub fn ask_before_leaving(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        then: impl FnOnce(&mut App) + 'static,
-    ) {
-        self.request_close(window, cx);
-        if self.is_confirming_discard() {
-            self.after_discard = Some(Box::new(then));
-        }
-    }
-
-    fn is_confirming_discard(&self) -> bool {
-        matches!(&self.loaded, Some(Loaded::Ready(editing)) if editing.is_confirming_discard)
-    }
-
     fn keep_editing(&mut self, cx: &mut Context<Self>) {
-        self.after_discard = None;
         self.edit(cx, |editing| editing.is_confirming_discard = false);
     }
 
     fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let then = self.after_discard.take();
         self.close(window, cx);
-        if let Some(then) = then {
-            then(cx);
-        }
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.loaded = None;
-        self.after_discard = None;
         window.focus(&self.owner_focus, cx);
         cx.emit(SettingsEvent::Closed);
         cx.notify();
@@ -1667,34 +1626,53 @@ impl Render for SettingsPanel {
         let Some(loaded) = &self.loaded else {
             return div().into_any_element();
         };
-        let title_bar = TitleBarArea::new("settings-title-bar", colors.page_wash.start);
+        let close = icon_button(
+            &colors,
+            "settings-close-sheet",
+            ButtonKind::Ghost,
+            ButtonSize::Regular,
+            Icon::Close,
+            "Close Settings",
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.request_close(window, cx)));
         let header = div()
+            .flex_none()
             .w_full()
-            .bg(colors.page_wash_fill())
-            .pb_6()
+            .pt_5()
+            .pb_4()
+            .border_b_1()
+            .border_color(colors.subtle_border)
             .child(column(
                 div()
-                    .pt_4()
                     .flex()
-                    .flex_col()
-                    .gap_1p5()
+                    .items_start()
+                    .gap_3()
                     .child(
                         div()
-                            .text_2xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Settings"),
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_2xl()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Settings"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(colors.muted_text)
+                                    .child("How tours are summarised, where code opens, how Ask thinks and where your clones live."),
+                            ),
                     )
-                    .child(
-                        div()
-                            .text_color(colors.muted_text)
-                            .child("How tours are summarised, where code opens, how Ask thinks and where your clones live."),
-                    ),
+                    .child(close),
             ));
         let (body, bar) = match loaded {
             Loaded::Failed(reason) => (
                 div()
                     .flex_1()
-                    .child(header)
+                    .pt_6()
                     .child(column(
                         div()
                             .flex()
@@ -1722,8 +1700,8 @@ impl Render for SettingsPanel {
                         .flex()
                         .flex_col()
                         .gap_5()
+                        .pt_6()
                         .pb_10()
-                        .child(header)
                         .child(Self::section(
                             &colors,
                             Icon::FileText,
@@ -1757,32 +1735,78 @@ impl Render for SettingsPanel {
                 )
             }
         };
+        let notice = self.notice.clone().map(|notice| {
+            dropping_in(
+                notice_band(&colors, Tone::Danger).py_3().child(notice),
+                "settings-notice-band",
+            )
+        });
         let panel = div()
             .id("settings-panel")
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key_down))
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .right_0()
-            .left(px(self.placement.left()))
             .flex()
             .flex_col()
-            .bg(colors.background)
-            .occlude()
             .font_family(TEXT_FONT)
             .text_sm()
-            .text_color(colors.text)
-            .child(title_bar)
-            .children(self.notice.clone().map(|notice| {
-                dropping_in(
-                    notice_band(&colors, Tone::Danger).py_3().child(notice),
-                    "settings-notice-band",
-                )
-            }))
-            .child(body)
-            .children(bar);
-        fade_in(panel, "settings-panel-fade", OVERLAY).into_any_element()
+            .text_color(colors.text);
+        match self.placement {
+            Placement::WholeWindow => fade_in(
+                panel
+                    .absolute()
+                    .inset_0()
+                    .bg(colors.background)
+                    .occlude()
+                    .child(TitleBarArea::new("settings-title-bar", colors.background))
+                    .child(header)
+                    .children(notice)
+                    .child(body)
+                    .children(bar),
+                "settings-panel-fade",
+                OVERLAY,
+            )
+            .into_any_element(),
+            Placement::SheetOverReview => div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .occlude()
+                .child(fade_in(
+                    div()
+                        .id("settings-scrim")
+                        .absolute()
+                        .inset_0()
+                        .bg(colors.scrim)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.request_close(window, cx)),
+                        ),
+                    "settings-scrim-fade",
+                    STATE,
+                ))
+                .child(rise_in(
+                    panel
+                        .relative()
+                        .w_full()
+                        .max_w(px(SHEET_WIDTH))
+                        .h(relative(0.9))
+                        .mx_8()
+                        .overflow_hidden()
+                        .bg(colors.overlay)
+                        .border_1()
+                        .border_color(colors.border)
+                        .rounded(px(CARD_RADIUS))
+                        .shadow(colors.overlay_shadow())
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(header)
+                        .children(notice)
+                        .child(body)
+                        .children(bar),
+                    "settings-sheet-rise",
+                ))
+                .into_any_element(),
+        }
     }
 }

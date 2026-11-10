@@ -42,6 +42,7 @@ mod suggestion;
 mod sync_state;
 mod thread_actions;
 mod threads;
+mod toasts;
 mod tour_agent;
 mod tour_writing;
 mod typing_save;
@@ -102,8 +103,8 @@ pub use relevant_prs::{
 };
 pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave};
 pub use review::{
-    NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, SafetyNetSize, Screen,
-    SidebarEntry, StepId, UnreadStep,
+    NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, RouteStop,
+    SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadStep,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
@@ -118,6 +119,7 @@ pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
+pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
     AgentStatus, AppAgent, LiveTerminal, OwnAgentHandOff, SendOutcome, TerminalId, TourAgentPort,
     TourAgentStart, TourAgentState, TourAgents,

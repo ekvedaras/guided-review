@@ -30,4 +30,5 @@ pub mod text_box;
 pub mod text_input;
 pub mod thread_view;
 pub mod title_bar;
+pub mod toast_stack;
 pub mod tooltip;

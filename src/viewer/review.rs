@@ -75,6 +75,9 @@ pub struct SidebarEntry<'a> {
     pub thread_count: usize,
     /// Shown greyed: every piece of the step is gone since the last version.
     pub is_gone: bool,
+    /// The step carries a check hint.
+    pub has_check: bool,
+    pub is_skim: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,11 +102,50 @@ impl ReadProgress {
 }
 
 /// A step the reader has not read yet, named for a button that leads there.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnreadStep {
     pub id: StepId,
     /// Its title is markdown.
     pub title: String,
+}
+
+/// What the summary leads the reader to: the start of the tour, the first step not read yet, or
+/// once every step is read, finishing the review.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TourLead {
+    /// A tour with no steps leads nowhere.
+    Nowhere,
+    Start(UnreadStep),
+    Continue(UnreadStep),
+    Finish {
+        steps: usize,
+        /// The PR takes a review from the viewer; an own PR with nothing to send does not.
+        can_finish: bool,
+    },
+}
+
+/// One top-level step of the tour as the summary lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteStop {
+    pub id: StepId,
+    /// Markdown.
+    pub title: String,
+    /// Markdown.
+    pub why: String,
+    /// How many steps sit under it.
+    pub details: usize,
+    pub is_read: bool,
+    pub has_check: bool,
+}
+
+/// What the summary counts about the PR, all of it known without GitHub but the threads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SummaryStats {
+    pub steps: usize,
+    pub files: usize,
+    pub added_lines: usize,
+    pub removed_lines: usize,
+    pub open_threads: usize,
 }
 
 /// Where the open screen sits in the reading order.
@@ -734,6 +776,8 @@ impl Review {
                     is_ticked: review.is_ticked(&id),
                     thread_count: review.threads.in_step(&id).len(),
                     is_gone: review.is_gone(step),
+                    has_check: step.check.is_some(),
+                    is_skim: step.skim,
                     id,
                     title: &step.title,
                     depth,
@@ -1434,6 +1478,56 @@ impl Review {
                 true
             }
             _ => false,
+        }
+    }
+
+    pub fn tour_lead(&self) -> TourLead {
+        let progress = self.progress();
+        if progress.total == 0 {
+            return TourLead::Nowhere;
+        }
+        if progress.is_complete() {
+            return TourLead::Finish {
+                steps: progress.total,
+                can_finish: self.can_finish_review(),
+            };
+        }
+        match self.first_unread_step() {
+            Some(first) if progress.read == 0 => TourLead::Start(first),
+            Some(next) => TourLead::Continue(next),
+            None => TourLead::Nowhere,
+        }
+    }
+
+    pub fn route(&self) -> Vec<RouteStop> {
+        fn count(steps: &[Step]) -> usize {
+            steps.iter().map(|step| 1 + count(&step.children)).sum()
+        }
+        self.tour
+            .steps
+            .iter()
+            .map(|step| RouteStop {
+                id: step.id.clone(),
+                title: step.title.clone(),
+                why: step.why.clone(),
+                details: count(&step.children),
+                is_read: self.is_ticked(&step.id),
+                has_check: step.check.is_some(),
+            })
+            .collect()
+    }
+
+    pub fn summary_stats(&self) -> SummaryStats {
+        SummaryStats {
+            steps: self.progress().total,
+            files: self.files.len(),
+            added_lines: self.files.iter().map(|file| file.added).sum(),
+            removed_lines: self.files.iter().map(|file| file.removed).sum(),
+            open_threads: self
+                .pulled_threads
+                .iter()
+                .filter(|thread| !thread.is_resolved)
+                .count(),
         }
     }
 

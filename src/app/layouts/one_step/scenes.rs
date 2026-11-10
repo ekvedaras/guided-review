@@ -7,7 +7,9 @@ use gpui::{App, AsyncWindowContext, Context, ListOffset, Task, WeakEntity, Windo
 use super::OneStepLayout;
 use crate::app::components::diff_view::RowGesture;
 use crate::app::components::pr_switcher::PrSwitching;
+use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::page_rows::PageRow;
+use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId};
 
@@ -30,10 +32,13 @@ enum Scene {
     SettingsEditedEnd,
     Shortcuts,
     JumpActions,
+    StickyStepBar,
+    Toasts,
+    AllRead,
 }
 
 impl Scene {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 16] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -47,6 +52,9 @@ impl Scene {
         Self::SettingsEditedEnd,
         Self::Shortcuts,
         Self::JumpActions,
+        Self::StickyStepBar,
+        Self::Toasts,
+        Self::AllRead,
     ];
 
     fn file_name(self) -> &'static str {
@@ -64,6 +72,9 @@ impl Scene {
             Self::SettingsEditedEnd => "30-settings-edited-end",
             Self::Shortcuts => "31-shortcuts",
             Self::JumpActions => "32-jump-actions",
+            Self::StickyStepBar => "33-sticky-step-bar",
+            Self::Toasts => "34-toasts",
+            Self::AllRead => "35-all-read",
         }
     }
 }
@@ -195,6 +206,20 @@ impl OneStepLayout {
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.toggle(window, cx)),
+            Scene::StickyStepBar => {
+                let rows = self.screen_list.item_count();
+                self.scroll_to_row(rows / 2);
+            }
+            Scene::Toasts => {
+                if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
+                    toaster.0.update(cx, ToastShelf::stage_samples);
+                }
+            }
+            Scene::AllRead => {
+                self.change_review(cx, |review| while review.go_forward() {});
+                self.session.update(cx, ReviewSession::stage_all_read);
+                self.scroll_to_row(self.screen_list.item_count());
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -251,6 +276,16 @@ impl OneStepLayout {
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.close(window, cx)),
+            Scene::StickyStepBar => self.scroll_to_row(0),
+            Scene::Toasts => {
+                if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
+                    toaster.0.update(cx, ToastShelf::clear);
+                }
+            }
+            Scene::AllRead => {
+                self.session.update(cx, ReviewSession::unstage);
+                self.go_to_first_open_code(cx);
+            }
         }
         cx.notify();
     }

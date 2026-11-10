@@ -4,7 +4,9 @@ use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
-use guided_review::viewer::{Problem, ReadProgress, Review, ReviewState, ReviewStateFile};
+use guided_review::viewer::{
+    Problem, ReadProgress, Review, ReviewState, ReviewStateFile, SummaryStats, TourLead,
+};
 use serde_json::{Value, json};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -431,4 +433,67 @@ fn the_first_unread_step_is_named_by_its_title() {
     let first = review.first_unread_step().unwrap();
     assert_eq!(first.id, "greeting".into());
     assert_eq!(first.title, "Greeting");
+}
+
+#[test]
+fn the_summary_leads_into_the_tour_from_where_the_reader_is() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+
+    match review.tour_lead() {
+        TourLead::Start(first) => assert_eq!(first.id, "readme".into()),
+        other => panic!("{other:?}"),
+    }
+    review.tick(&"readme".into()).unwrap();
+    match review.tour_lead() {
+        TourLead::Continue(next) => assert_eq!(next.title, "Greeting"),
+        other => panic!("{other:?}"),
+    }
+    review.tick(&"greeting".into()).unwrap();
+    review.tick(&"emails".into()).unwrap();
+    assert_eq!(
+        review.tour_lead(),
+        TourLead::Finish {
+            steps: 3,
+            can_finish: review.can_finish_review()
+        }
+    );
+}
+
+#[test]
+fn the_route_lists_the_top_level_steps_with_their_details_and_read_marks() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"emails".into()).unwrap();
+
+    let route: Vec<(String, usize, bool)> = review
+        .route()
+        .into_iter()
+        .map(|stop| (stop.title, stop.details, stop.is_read))
+        .collect();
+
+    assert_eq!(
+        route,
+        [
+            ("Readme".to_owned(), 1, false),
+            ("Emails".to_owned(), 0, true)
+        ]
+    );
+}
+
+#[test]
+fn the_summary_counts_what_the_pr_changes() {
+    let shop = Shop::with_pull();
+    let review = shop.open();
+
+    assert_eq!(
+        review.summary_stats(),
+        SummaryStats {
+            steps: 3,
+            files: 1,
+            added_lines: 1,
+            removed_lines: 0,
+            open_threads: 0,
+        }
+    );
 }

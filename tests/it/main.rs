@@ -69,6 +69,7 @@ mod step_details;
 mod summary_instructions;
 mod symbol_edges;
 mod timestamp;
+mod toasts;
 mod tour_agent;
 mod tour_file;
 mod tour_skill;

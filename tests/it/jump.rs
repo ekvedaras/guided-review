@@ -347,3 +347,17 @@ fn an_action_names_the_shortcut_that_does_it() {
         .unwrap();
     assert_eq!(settings.command(), Some(Command::Settings));
 }
+
+#[test]
+fn the_sidebar_flags_steps_with_something_to_check_and_marks_skim_steps() {
+    let review = open(vec![
+        json!({"id": "totals", "title": "Totals", "why": "w", "check": "Rounding", "pieces": [{"file": "app/Order.php"}]}),
+        json!({"id": "docs", "title": "Docs", "why": "w", "skim": true, "pieces": [{"file": "README.md"}]}),
+    ]);
+
+    let entries = review.sidebar();
+    assert!(entries[0].has_check);
+    assert!(!entries[0].is_skim);
+    assert!(!entries[1].has_check);
+    assert!(entries[1].is_skim);
+}

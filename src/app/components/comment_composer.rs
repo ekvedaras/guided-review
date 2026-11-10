@@ -8,7 +8,9 @@ use gpui::{
 
 use crate::viewer::{CommentDraft, CommentPlace, CommentProblem, QueuedComment};
 
-use super::button::{ButtonKind, ButtonSize, button as styled_button, icon_label_button, joined};
+use super::button::{
+    ButtonKind, ButtonSize, button as styled_button, button_icon, icon_label_button, joined,
+};
 use super::card::card;
 use super::chip::callout;
 use super::icon::Icon;
@@ -151,6 +153,12 @@ impl RenderOnce for CommentComposer {
                             ButtonKind::Joined,
                             ButtonSize::Regular,
                         )
+                        .child(button_icon(
+                            &colors,
+                            ButtonKind::Joined,
+                            ButtonSize::Regular,
+                            Icon::Zap,
+                        ))
                         .child("now")
                         .tooltip(tooltip(|_| {
                             "Ask agent now: posts the comment at once".into()

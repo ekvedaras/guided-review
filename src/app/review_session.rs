@@ -14,6 +14,7 @@ use crate::app::components::image_row::ImagePictures;
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::new_commits_banner::RepinProgress;
 use crate::app::components::refresh_banner::RefreshProgress;
+use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
@@ -22,8 +23,8 @@ use crate::viewer::{
     AgentReplied, AgentStatus, Ask, Audience, CommentId, CommentOutcome, CommentPlace,
     CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache,
     LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
-    SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, TourAgentState,
-    TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, ToastTone,
+    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -390,7 +391,7 @@ impl ReviewSession {
             let mut outcome = Some(outcome);
             let applied = this.update(cx, |this, cx| {
                 if let Some(outcome) = outcome.take() {
-                    this.comment_sent(&place, outcome, cx);
+                    this.comment_sent(&place, outcome, (mode, audience), cx);
                 }
             });
             // The window switched to another PR while this was in flight; the comment is not lost.
@@ -403,25 +404,36 @@ impl ReviewSession {
         .detach();
     }
 
+    /// A sent comment says so in a toast: its box goes away, which is easy to miss. A queued one
+    /// shows its own note where the box was.
     fn comment_sent(
         &mut self,
         place: &CommentPlace,
         outcome: CommentOutcome,
+        (mode, audience): (SendMode, Audience),
         cx: &mut Context<Self>,
     ) {
-        self.change_session(cx, |session| {
+        let is_sent = self.change_session(cx, |session| {
             session.sending_comments.remove(place);
             let problem = match session.review.apply_comment(outcome) {
-                Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
+                Ok(CommentResult::Sent) => {
                     session.composing = None;
-                    return;
+                    return true;
+                }
+                Ok(CommentResult::Queued(_)) => {
+                    session.composing = None;
+                    return false;
                 }
                 Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
                 Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.into()),
                 Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
             };
             session.comment_problems.insert(place.clone(), problem);
+            false
         });
+        if is_sent {
+            post_toast(cx, ToastTone::Success, sent_note("Comment", mode, audience));
+        }
         self.deliver_hand_offs(cx);
     }
 
@@ -432,6 +444,7 @@ impl ReviewSession {
         on_done: impl FnOnce(&ThreadActionResult, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
+        let note = thread_action_note(&action);
         let request = self.review.thread_action_request(action);
         let github = Arc::clone(&self.github);
         self.run_off_thread(
@@ -439,6 +452,9 @@ impl ReviewSession {
             move || request.run(github.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_thread_action(outcome));
+                if let (ThreadActionResult::Done, Some(note)) = (&result, note) {
+                    post_toast(cx, ToastTone::Success, note);
+                }
                 this.deliver_hand_offs(cx);
                 on_done(&result, cx);
             },
@@ -466,6 +482,7 @@ impl ReviewSession {
                 let result = this.change(cx, |review| review.apply_finish(outcome));
                 if result == FinishResult::Sent {
                     this.pull_last_review(cx);
+                    post_toast(cx, ToastTone::Success, finish_note(verdict));
                 }
                 on_done(&result, cx);
             },
@@ -577,7 +594,7 @@ impl ReviewSession {
             RowsChange::Unchanged => {}
         }
         self.rows = rows;
-        self.sidebar = self.sidebar_rows();
+        self.show_sidebar(cx);
         self.old_head = self.review.old_head();
         self.refresh_brief = self.review.refresh_brief();
         if self.rows.has_images_to_load() {
@@ -601,14 +618,47 @@ impl ReviewSession {
         }
     }
 
+    /// Shows the open screen and the sidebar as if every step were read, without ticking anything,
+    /// so no viewed mark goes to GitHub. The next rebuild of the rows undoes it.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_all_read(&mut self, cx: &mut Context<Self>) {
+        let total = self.sidebar.progress.total;
+        self.sidebar.progress.read = total;
+        for step in &mut self.sidebar.steps {
+            step.is_ticked = true;
+        }
+        self.rows.stage_all_read(total);
+        self.screen_list.reset(self.rows.len());
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage(&mut self, cx: &mut Context<Self>) {
+        self.screen_list.reset(0);
+        self.rows = PageRows::none();
+        self.rebuild_rows(cx);
+    }
+
     pub fn switch_failed(&mut self, reason: String, cx: &mut Context<Self>) {
         self.review.switch_failed(reason);
         self.show_problems(cx);
     }
 
     fn show_problems(&mut self, cx: &mut Context<Self>) {
-        self.sidebar = self.sidebar_rows();
+        self.show_sidebar(cx);
         cx.notify();
+    }
+
+    /// The sidebar lists what went wrong in small red lines far from where the reader acted, so a
+    /// problem that was not there before is also a toast that stays until dismissed.
+    fn show_sidebar(&mut self, cx: &mut Context<Self>) {
+        let sidebar = self.sidebar_rows();
+        for problem in &sidebar.problems {
+            if !self.sidebar.problems.contains(problem) {
+                post_toast(cx, ToastTone::Danger, problem.to_string());
+            }
+        }
+        self.sidebar = sidebar;
     }
 
     fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
@@ -1057,5 +1107,35 @@ impl ReviewSession {
         {
             eprintln!("could not save the text: {error:#}");
         }
+    }
+}
+
+/// What a toast says of a sent comment or reply.
+fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
+    let done = match mode {
+        SendMode::AddToReview => "added to your review",
+        SendMode::CommentNow => "posted on GitHub",
+    };
+    match audience {
+        Audience::Author => format!("{what} {done}"),
+        Audience::Agent => format!("{what} {done} and handed to your agent"),
+    }
+}
+
+/// What a toast says once a thread action went through; an edit or a reaction shows in place.
+fn thread_action_note(action: &ThreadAction) -> Option<String> {
+    match action {
+        ThreadAction::Reply { mode, audience, .. } => Some(sent_note("Reply", *mode, *audience)),
+        ThreadAction::Resolve { .. } => Some("Thread resolved".to_owned()),
+        ThreadAction::Unresolve { .. } => Some("Thread unresolved".to_owned()),
+        ThreadAction::EditComment { .. } | ThreadAction::SetReaction { .. } => None,
+    }
+}
+
+fn finish_note(verdict: ReviewVerdict) -> &'static str {
+    match verdict {
+        ReviewVerdict::Comment => "Review sent with your comments",
+        ReviewVerdict::Approve => "Review sent: approved",
+        ReviewVerdict::RequestChanges => "Review sent: changes requested",
     }
 }

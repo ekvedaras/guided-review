@@ -24,8 +24,8 @@ use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, CommentProblem, FileBlock, HiddenLines, JumpPlace, JumpTarget,
     LineKind, LineLocation, NextScreen, NotesButton, PieceDiff, Place, QueuedComment, Review,
-    RowSelection, SafetyNetPage, Screen, StepId, StepPage, ThreadView, hidden_lines_after,
-    hidden_lines_before,
+    RowSelection, SafetyNetPage, Screen, StepId, StepPage, SummaryStats, ThreadView, TourLead,
+    hidden_lines_after, hidden_lines_before,
 };
 
 /// An ask button and what it asks about.
@@ -79,6 +79,54 @@ pub struct ScreenFooter {
     pub has_previous: bool,
     pub next: Option<NextScreen>,
     pub is_summary: bool,
+    /// On the summary, and on the last screen once every step is read: where the tour leads.
+    pub lead: Option<TourLead>,
+}
+
+/// The summary's strip of counts, each cut when the rows are built.
+#[derive(Hash)]
+pub struct SummaryStatsRow {
+    pub steps: SharedString,
+    pub files: SharedString,
+    pub added: SharedString,
+    pub removed: SharedString,
+    /// `None` when no thread is open.
+    pub open_threads: Option<SharedString>,
+}
+
+impl SummaryStatsRow {
+    fn of(stats: SummaryStats) -> Self {
+        let count = |count: usize, one: &str, many: &str| -> SharedString {
+            if count == 1 {
+                format!("1 {one}").into()
+            } else {
+                format!("{count} {many}").into()
+            }
+        };
+        Self {
+            steps: count(stats.steps, "step", "steps"),
+            files: count(stats.files, "file changed", "files changed"),
+            added: format!("+{}", stats.added_lines).into(),
+            removed: format!("\u{2212}{}", stats.removed_lines).into(),
+            open_threads: (stats.open_threads > 0)
+                .then(|| count(stats.open_threads, "open thread", "open threads")),
+        }
+    }
+}
+
+/// One stop of the summary's route list.
+#[derive(Hash)]
+pub struct RouteStopRow {
+    pub id: StepId,
+    pub number: SharedString,
+    pub title: SharedString,
+    pub why: SharedString,
+    /// "+2 details"; `None` with none.
+    pub details: Option<SharedString>,
+    pub is_read: bool,
+    pub has_check: bool,
+    pub is_first: bool,
+    pub is_last: bool,
 }
 
 /// The fold of one file box of a step.
@@ -140,7 +188,11 @@ impl HunkGapRow {
 #[derive(Clone)]
 pub enum PageRow {
     SummaryTitle(SharedString),
+    SummaryStats(Rc<SummaryStatsRow>),
     SummaryBullet(SharedString),
+    RouteHeading,
+    RouteStop(Rc<RouteStopRow>),
+    TourLead(Rc<TourLead>),
     ReviewerSummary(Rc<PreparedMarkdown>),
     PrDescription(Rc<PreparedMarkdown>),
     StepHeading(Rc<StepHeading>),
@@ -219,6 +271,9 @@ impl PageRow {
                 toolbar.wraps_lines.hash(&mut hasher);
             }
             Self::ScreenFooter(footer) => footer.hash(&mut hasher),
+            Self::SummaryStats(stats) => stats.hash(&mut hasher),
+            Self::RouteStop(stop) => stop.hash(&mut hasher),
+            Self::TourLead(lead) => lead.hash(&mut hasher),
             Self::StepNotes(notes) => notes.hash(&mut hasher),
             Self::RepinNotes {
                 gone_pieces,
@@ -299,6 +354,7 @@ impl PageRow {
                 diagram.notes_button.hash(&mut hasher);
             }
             Self::SafetyNetIntro
+            | Self::RouteHeading
             | Self::NoChangeSinceRead
             | Self::OnlyWhitespace
             | Self::PieceEnd => {}
@@ -506,6 +562,39 @@ impl PageRows {
         })
     }
 
+    /// The footer of the screen as it is once every step is read, and its heading ticked.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_all_read(&mut self, steps: usize) {
+        for row in &mut self.rows {
+            match row {
+                PageRow::ScreenFooter(footer) => {
+                    *row = PageRow::ScreenFooter(Rc::new(ScreenFooter {
+                        ticks: None,
+                        has_previous: footer.has_previous,
+                        next: footer.next.clone(),
+                        is_summary: footer.is_summary,
+                        lead: Some(TourLead::Finish {
+                            steps,
+                            can_finish: true,
+                        }),
+                    }));
+                }
+                PageRow::StepHeading(heading) => {
+                    *row = PageRow::StepHeading(Rc::new(StepHeading {
+                        id: heading.id.clone(),
+                        title: heading.title.clone(),
+                        number: heading.number,
+                        is_ticked: true,
+                        is_gone: heading.is_gone,
+                        folds_on_title_click: heading.folds_on_title_click,
+                    }));
+                }
+                _ => {}
+            }
+        }
+        self.keys = self.rows.iter().map(PageRow::key).collect();
+    }
+
     pub fn change_from(&self, old: &Self) -> RowsChange {
         if self.screen != old.screen {
             return RowsChange::OtherScreen;
@@ -535,14 +624,45 @@ fn changed_span(old: &[RowKey], new: &[RowKey]) -> RowsChange {
     }
 }
 
+/// The summary is the tour's start page: what the PR is, how big, what it does, the route of the
+/// tour and the way in, then the reviewer summary and the PR's own description.
 fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
     rows.push(PageRow::SummaryTitle(review.title().to_owned().into()));
+    rows.push(PageRow::SummaryStats(Rc::new(SummaryStatsRow::of(
+        review.summary_stats(),
+    ))));
     rows.extend(
         review
             .summary()
             .iter()
             .map(|bullet| PageRow::SummaryBullet(bullet.clone().into())),
     );
+    let route = review.route();
+    if !route.is_empty() {
+        rows.push(PageRow::RouteHeading);
+    }
+    let last = route.len().saturating_sub(1);
+    rows.extend(route.into_iter().enumerate().map(|(index, stop)| {
+        PageRow::RouteStop(Rc::new(RouteStopRow {
+            id: stop.id,
+            number: (index + 1).to_string().into(),
+            title: stop.title.into(),
+            why: stop.why.into(),
+            details: match stop.details {
+                0 => None,
+                1 => Some("+1 detail".into()),
+                count => Some(format!("+{count} details").into()),
+            },
+            is_read: stop.is_read,
+            has_check: stop.has_check,
+            is_first: index == 0,
+            is_last: index == last,
+        }))
+    }));
+    let lead = review.tour_lead();
+    if lead != TourLead::Nowhere {
+        rows.push(PageRow::TourLead(Rc::new(lead)));
+    }
     rows.extend(
         review
             .reviewer_summary()
@@ -569,11 +689,19 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
 
 fn screen_footer(review: &Review, ticks: Option<StepId>) -> PageRow {
     let place = review.reading_place();
+    let is_summary = review.screen() == &Screen::Summary;
+    let lead = review.tour_lead();
+    let leads_on = match &lead {
+        TourLead::Finish { .. } => is_summary || (place.next.is_none() && ticks.is_none()),
+        TourLead::Start(_) | TourLead::Continue(_) => is_summary,
+        TourLead::Nowhere => false,
+    };
     PageRow::ScreenFooter(Rc::new(ScreenFooter {
         ticks,
         has_previous: place.has_previous,
         next: place.next,
-        is_summary: review.screen() == &Screen::Summary,
+        is_summary,
+        lead: leads_on.then_some(lead),
     }))
 }
 

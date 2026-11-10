@@ -251,6 +251,8 @@ pub struct Colors {
     pub border: Rgba,
     pub subtle_border: Rgba,
     pub text: Rgba,
+    /// The sidebar's labels: a step quieter than `text`, so the page leads.
+    pub sidebar_text: Rgba,
     pub muted_text: Rgba,
     /// Behind text the reader selected.
     pub text_selection: Rgba,
@@ -370,6 +372,7 @@ impl Colors {
             border: rgb(0xc9ccd8),
             subtle_border: rgb(0xe3e5ee),
             text,
+            sidebar_text: rgb(ink::S10),
             muted_text,
             current: rgb(0xe4e8fe),
             current_border: rgb(iris::S200),
@@ -438,6 +441,7 @@ impl Colors {
             border: rgb(0x383c4f),
             subtle_border: rgb(0x262a39),
             text,
+            sidebar_text: rgb(ink::S4),
             muted_text,
             current: rgb(0x272a55),
             current_border: rgb(iris::S800),
@@ -612,6 +616,11 @@ impl Colors {
     /// A bar pinned to the bottom of a panel casts upwards over what scrolls under it.
     pub fn bar_shadow(&self) -> Vec<BoxShadow> {
         vec![BoxShadow::new(px(0.), px(-6.), self.shadow.opacity(0.5).into()).blur_radius(px(20.))]
+    }
+
+    /// A bar pinned to the top of the page casts downwards over what scrolls under it.
+    pub fn sticky_shadow(&self) -> Vec<BoxShadow> {
+        vec![BoxShadow::new(px(0.), px(4.), self.shadow.opacity(0.35).into()).blur_radius(px(12.))]
     }
 
     /// The ground of a secondary button, top down.

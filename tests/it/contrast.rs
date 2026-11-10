@@ -149,6 +149,16 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
             ("icon_tile bottom", colors.icon_tile.end),
         ],
     );
+    on(
+        "sidebar_text",
+        colors.sidebar_text,
+        &[
+            ("sidebar top", colors.sidebar.start),
+            ("sidebar bottom", colors.sidebar.end),
+            ("hover", colors.hover),
+            ("pressed", colors.pressed),
+        ],
+    );
     pairs
         .into_iter()
         .filter_map(|(name, text, ground)| {
