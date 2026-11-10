@@ -15,6 +15,7 @@ mod active_pr;
 mod agent_reply;
 mod app_link;
 mod app_state;
+mod app_window;
 mod ask;
 mod ask_adapters;
 mod ask_lifecycle;

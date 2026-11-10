@@ -16,7 +16,7 @@ use super::button::{ButtonKind, ButtonSize, button, toggle_button};
 use super::palette::{CODE_FONT, Colors, TEXT_FONT};
 use super::text_box::TextBox;
 use super::text_input::Lines;
-use super::title_bar::TitleBarArea;
+use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 
 /// Where the panel starts: the sidebar's width, so the sidebar stays beside it.
 const SIDEBAR_WIDTH: f32 = 300.;
@@ -27,6 +27,31 @@ const FORM_WIDTH: f32 = 720.;
 pub enum SettingsEvent {
     /// The config file was written, so everything that read it before is out of date.
     Saved,
+    Closed,
+}
+
+/// What the panel covers: the page area beside a PR's sidebar, or a window that holds only Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    BesideSidebar,
+    WholeWindow,
+}
+
+impl Placement {
+    fn left(self) -> f32 {
+        match self {
+            Self::BesideSidebar => SIDEBAR_WIDTH,
+            Self::WholeWindow => 0.,
+        }
+    }
+
+    /// The title's indent, clear of the traffic lights when nothing sits left of the panel.
+    fn title_indent(self) -> f32 {
+        match self {
+            Self::BesideSidebar => 24.,
+            Self::WholeWindow => TRAFFIC_LIGHTS_WIDTH,
+        }
+    }
 }
 
 type AfterDiscard = Box<dyn FnOnce(&mut App)>;
@@ -172,13 +197,14 @@ enum Loaded {
     Ready(Box<Editing>),
 }
 
-/// The Settings panel: it covers the page area of the window, beside the sidebar. It draws a `Settings`
+/// The Settings panel: it covers what its `Placement` says. It draws a `Settings`
 /// model and passes clicks on to it; what is allowed, wrong or written is the model's.
 pub struct SettingsPanel {
     home: PathBuf,
     loaded: Option<Loaded>,
     focus: FocusHandle,
     owner_focus: FocusHandle,
+    placement: Placement,
     clone_focus: Vec<FocusHandle>,
     /// Where the reviewer was going when the unsaved changes made the panel ask first.
     after_discard: Option<AfterDiscard>,
@@ -187,15 +213,34 @@ pub struct SettingsPanel {
 impl SettingsPanel {
     pub const KEY_CONTEXT: &str = "SettingsPanel";
 
-    pub fn new(home: PathBuf, owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        home: PathBuf,
+        owner_focus: FocusHandle,
+        placement: Placement,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             home,
             loaded: None,
             focus: cx.focus_handle(),
             owner_focus,
+            placement,
             clone_focus: Vec::new(),
             after_discard: None,
         }
+    }
+
+    /// The window that held only Settings now holds a PR: the panel stays as it is, with what is being
+    /// edited, over that PR's page area.
+    pub fn move_to(
+        &mut self,
+        owner_focus: FocusHandle,
+        placement: Placement,
+        cx: &mut Context<Self>,
+    ) {
+        self.owner_focus = owner_focus;
+        self.placement = placement;
+        cx.notify();
     }
 
     pub fn is_open(&self) -> bool {
@@ -266,6 +311,7 @@ impl SettingsPanel {
         self.loaded = None;
         self.after_discard = None;
         window.focus(&self.owner_focus, cx);
+        cx.emit(SettingsEvent::Closed);
         cx.notify();
     }
 
@@ -1014,7 +1060,7 @@ impl Render for SettingsPanel {
         };
         let header = TitleBarArea::new("settings-title-bar", colors.background).child(
             div()
-                .pl(px(24.))
+                .pl(px(self.placement.title_indent()))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors.muted_text)
                 .child("Settings"),
@@ -1102,7 +1148,7 @@ impl Render for SettingsPanel {
             .top_0()
             .bottom_0()
             .right_0()
-            .left(px(SIDEBAR_WIDTH))
+            .left(px(self.placement.left()))
             .flex()
             .flex_col()
             .bg(colors.background)

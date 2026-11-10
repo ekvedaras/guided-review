@@ -44,7 +44,7 @@ use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
-use crate::app::components::settings_panel::{SettingsEvent, SettingsPanel};
+use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
@@ -141,6 +141,7 @@ impl OneStepLayout {
         source: Arc<dyn CodeSource>,
         ask: AskSetup,
         collaborators: Collaborators,
+        carried_settings: Option<Entity<SettingsPanel>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -185,13 +186,21 @@ impl OneStepLayout {
         let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
         cx.observe(&switching.active, |_, _, cx| cx.notify())
             .detach();
-        let home = switching.home.clone();
-        let settings = cx.new(|cx| SettingsPanel::new(home, focus.clone(), cx));
+        let settings = if let Some(settings) = carried_settings {
+            settings.update(cx, |settings, cx| {
+                settings.move_to(focus.clone(), Placement::BesideSidebar, cx);
+            });
+            settings
+        } else {
+            let home = switching.home.clone();
+            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::BesideSidebar, cx))
+        };
         cx.subscribe_in(
             &settings,
             window,
-            |this, _, SettingsEvent::Saved, window, cx| {
-                this.settings_saved(window, cx);
+            |this, _, event, window, cx| match event {
+                SettingsEvent::Saved => this.settings_saved(window, cx),
+                SettingsEvent::Closed => {}
             },
         )
         .detach();
@@ -810,6 +819,15 @@ impl OneStepLayout {
                 settings.open(window, cx);
             }
         });
+    }
+
+    /// Settings asked for from outside the window, by `guided-review settings`: opens it, never closes it.
+    pub fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) || self.settings.read(cx).is_open() {
+            return;
+        }
+        self.settings
+            .update(cx, |settings, cx| settings.open(window, cx));
     }
 
     /// The one place that reacts to Save having written `config.toml`. The PR on screen was built with the

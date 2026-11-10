@@ -104,3 +104,17 @@ Decided: the reopen waits until no Ask turn is answering, no Ask is being handed
 An agent reply that lands while the build runs is applied to the old window as before and also held by `ActivePr`, because the build may have read the state file before the old session saved the reply; the new window applies the held replies again (harmless, it only sets a hand-off's state). Likewise the old session must not save reviewer input after the build read the state file, since the new session writes its sections whole: while the reopen builds, the layout saves typing and takes focus out of the boxes, and ignores the navigation, wrap, jump and settings keys; the veil keeps the mouse out.
 
 Open: a reopen that finds another PR building is dropped (the build reads the new config anyway), and a failed reopen shows the reason in the window and does not retry.
+
+## The one window may hold only Settings (2026-11-10)
+
+The 2026-11-06 "one window" decision and the Save entry above assumed the window always holds a PR: it opened only once the first review was built, and `cmd-,` and the gear live in the review layout. Settings must also work before the first review (issue #13, story 20 of #1).
+
+Decided:
+
+- `guided-review settings` sends `show_settings` on the app's socket, starting the app the way `open` does (`hand_over` takes any request). With a PR on screen the Settings panel opens over it; with none the app opens its one window holding only Settings (`SettingsWindow`), with no sidebar, as the sidebar is the PR's.
+- `AppWindow` in the viewer owns the window's handle and says what each event does to it: Settings asked for, a review built (open the window, switch the PR, or turn the Settings-only window into the review), a build failed. Requests that reach a PR (`AgentReplied`, the reopen after Save, a reload) only ever get the review window.
+- A later `open` turns the Settings-only window into the review with `replace_root`, so the app stays one window. The panel moves over with whatever is being edited and stays open beside the new PR's sidebar, so nothing typed is lost.
+- Save in the Settings-only window writes the config and closes the window, which quits the app as closing any window does; nothing is reopened, as no PR is open. Close, Esc and the red button do the same, after the unsaved-changes question.
+- A failed build with no window still ends the app. A failed build while only Settings shows goes to the app log and Settings stays.
+
+Open: Save or Close in the Settings-only window while an `open` is still building quits the app and the build with it. A failed build behind the Settings-only window says nothing on screen. Both checked only by reading the code.

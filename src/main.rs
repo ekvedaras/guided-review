@@ -2,7 +2,9 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::agent_reply::{AgentReply, agent_reply};
-use guided_review::app_link::{Answer, AppFolder, AppListener, BindError, OpenRequest, hand_over};
+use guided_review::app_link::{
+    Answer, AppFolder, AppListener, BindError, OpenRequest, Request, hand_over,
+};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
@@ -55,6 +57,8 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
+    /// Show the app's Settings, also with no PR open
+    Settings,
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
         pr: PullRequestUrl,
@@ -98,6 +102,7 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
+        Command::Settings => settings(),
         Command::AgentReply {
             pr,
             hand_off,
@@ -277,14 +282,25 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     require_tour(pr, &home)?;
     let answer = hand_over(
         &AppFolder::in_home(&home),
-        OpenRequest {
+        &Request::Open(OpenRequest {
             pr: pr.to_string(),
             folder: std::env::current_dir().context("could not read the current folder")?,
             terminal: std::env::var("HC_TERMINAL_ID").ok(),
-        },
+        }),
     )?;
     match answer {
         Answer::Opening { .. } | Answer::Reloaded { .. } | Answer::KeptInBackground { .. } => {
+            println!("{answer}");
+            Ok(())
+        }
+        other => anyhow::bail!("{other}"),
+    }
+}
+
+fn settings() -> anyhow::Result<()> {
+    let answer = hand_over(&AppFolder::in_home(&home_folder()?), &Request::ShowSettings)?;
+    match answer {
+        Answer::ShowingSettings => {
             println!("{answer}");
             Ok(())
         }

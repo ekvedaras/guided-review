@@ -244,3 +244,29 @@ fn the_no_tour_refusal_comes_before_any_app_is_asked_or_started() {
     assert!(run.stderr.contains("run `/tour"), "stderr: {}", run.stderr);
     assert!(!repo.home().join("started").exists());
 }
+
+fn showing_settings_line() -> String {
+    answer_line(BUILD, r#""showing_settings""#)
+}
+
+#[test]
+fn settings_asks_the_running_app_to_show_settings_and_says_so() {
+    let (repo, github) = shop_with_a_tour_file();
+    let seen = Seen::default();
+    let app = fake_app(
+        repo.home(),
+        None,
+        vec![showing_settings_line()],
+        Arc::clone(&seen),
+    );
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["settings"]);
+
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(run.stdout.contains("Settings"), "stdout: {}", run.stdout);
+    let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
+    assert_eq!(request["request"], "show_settings");
+}
