@@ -55,6 +55,7 @@ mod pr_switcher;
 mod read_ticks;
 mod refresh;
 mod relevant_prs;
+mod reopen_after_save;
 mod repin;
 mod review_threads;
 mod settings;

@@ -29,6 +29,7 @@ mod problems;
 mod reactions;
 mod refresh;
 mod relevant_prs;
+mod reopen_after_save;
 mod review;
 mod review_state;
 mod row_selection;
@@ -90,6 +91,7 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
+pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, SafetyNetSize, Screen,
     SidebarEntry, StepId,

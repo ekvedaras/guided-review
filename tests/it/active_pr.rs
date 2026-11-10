@@ -5,7 +5,7 @@ use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    ActivePr, Finished, OpenDecision, OpenOrigin, Problem, ReviewStateFile,
+    ActivePr, AgentReplied, Finished, HandOffId, OpenDecision, OpenOrigin, Problem, ReviewStateFile,
 };
 use serde_json::json;
 
@@ -284,4 +284,188 @@ fn a_build_started_by_a_request_is_a_switch_too() {
     active.request(pr(B), OpenOrigin::Reviewer);
 
     assert_eq!(active.switching_to(), Some(&pr(B)));
+}
+
+#[test]
+fn a_reopen_builds_the_pr_on_screen_again_behind_the_opening_veil() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+
+    let (ticket, reopened) = active.reopen().unwrap();
+    assert_eq!(reopened, pr(A));
+    assert_eq!(active.switching_to(), Some(&pr(A)));
+
+    let finished = active.finished(ticket, Ok::<_, anyhow::Error>("again"));
+
+    assert!(matches!(finished, Finished::Switch("again")));
+    assert_eq!(active.shown(), Some(&pr(A)));
+    assert_eq!(active.switching_to(), None);
+}
+
+#[test]
+fn there_is_nothing_to_reopen_with_no_pr_on_screen() {
+    let mut active = ActivePr::default();
+
+    assert_eq!(active.reopen(), None);
+    assert_eq!(active.switching_to(), None);
+}
+
+#[test]
+fn a_reopen_leaves_a_switch_to_another_pr_to_build_as_it_reads_the_config_anyway() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let OpenDecision::Build(switch) = active.request(pr(B), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+
+    assert_eq!(active.reopen(), None);
+
+    assert!(matches!(
+        active.finished(switch, Ok::<_, anyhow::Error>("b")),
+        Finished::Switch("b")
+    ));
+    assert_eq!(active.shown(), Some(&pr(B)));
+}
+
+#[test]
+fn a_switch_to_another_pr_wins_over_a_reopen_still_building() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let (reopen, _) = active.reopen().unwrap();
+    let OpenDecision::Build(switch) = active.request(pr(B), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+
+    let late = active.finished(reopen, Ok::<_, anyhow::Error>("a"));
+    let current = active.finished(switch, Ok::<_, anyhow::Error>("b"));
+
+    assert!(matches!(late, Finished::Superseded));
+    assert!(matches!(current, Finished::Switch("b")));
+    assert_eq!(active.shown(), Some(&pr(B)));
+}
+
+#[test]
+fn a_second_reopen_wins_over_the_first_so_the_newest_config_applies() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let (first, _) = active.reopen().unwrap();
+    let (second, _) = active.reopen().unwrap();
+
+    assert!(matches!(
+        active.finished(first, Ok::<_, anyhow::Error>("first")),
+        Finished::Superseded
+    ));
+    assert!(matches!(
+        active.finished(second, Ok::<_, anyhow::Error>("second")),
+        Finished::Switch("second")
+    ));
+}
+
+#[test]
+fn an_open_of_the_pr_on_screen_while_it_reopens_builds_it_again_rather_than_cancel_the_reopen() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let (reopen, _) = active.reopen().unwrap();
+
+    let OpenDecision::Build(again) = active.request(pr(A), OpenOrigin::AppStartedAgent) else {
+        panic!("builds");
+    };
+
+    assert!(matches!(
+        active.finished(reopen, Ok::<_, anyhow::Error>("stale")),
+        Finished::Superseded
+    ));
+    assert!(matches!(
+        active.finished(again, Ok::<_, anyhow::Error>("fresh")),
+        Finished::Switch("fresh")
+    ));
+    assert_eq!(active.switching_to(), None);
+}
+
+fn hand_off(id: &str) -> HandOffId {
+    id.parse().unwrap()
+}
+
+#[test]
+fn an_agent_reply_while_the_pr_reopens_is_kept_for_the_window_it_opens_in() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let (ticket, _) = active.reopen().unwrap();
+
+    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(
+        active.take_replies_for_reopened(),
+        [(hand_off("h1"), AgentReplied::default())]
+    );
+    assert_eq!(active.take_replies_for_reopened(), []);
+}
+
+#[test]
+fn an_agent_reply_is_kept_only_while_its_pr_reopens() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    let (ticket, _) = active.reopen().unwrap();
+
+    active.hold_reply_for_reopen(&pr(B), hand_off("h2"), &AgentReplied::default());
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(active.take_replies_for_reopened(), []);
+}
+
+#[test]
+fn replies_kept_for_a_reopen_go_with_it_when_it_fails() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let (failing, _) = active.reopen().unwrap();
+    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.finished(failing, Err::<(), _>(anyhow::anyhow!("clone is gone")));
+
+    let (ticket, _) = active.reopen().unwrap();
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(active.take_replies_for_reopened(), []);
+}
+
+#[test]
+fn replies_kept_for_a_reopen_go_with_it_when_another_pr_wins() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.reopen().unwrap();
+    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+
+    shown_after(&mut active, B);
+
+    assert_eq!(active.take_replies_for_reopened(), []);
+}
+
+#[test]
+fn replies_kept_for_a_reopen_stay_kept_when_the_pr_is_built_again() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.reopen().unwrap();
+    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+
+    let (ticket, _) = active.reopen().unwrap();
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(
+        active.take_replies_for_reopened(),
+        [(hand_off("h1"), AgentReplied::default())]
+    );
+}
+
+#[test]
+fn a_failed_reopen_keeps_the_pr_on_screen_with_the_reason() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let (ticket, _) = active.reopen().unwrap();
+
+    let finished = active.finished(ticket, Err::<(), _>(anyhow::anyhow!("clone is gone")));
+
+    assert!(matches!(finished, Finished::Stay { reason } if reason.contains("clone is gone")));
+    assert_eq!(active.shown(), Some(&pr(A)));
+    assert_eq!(active.switching_to(), None);
 }
