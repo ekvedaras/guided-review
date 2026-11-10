@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
+use super::shortcuts::Command;
 use crate::file_path::FilePath;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::tour::Tour;
@@ -155,4 +156,150 @@ fn looseness(text: &str, query: &[char], query_text: &str) -> Option<usize> {
             Some(last + 1 - start - query.len())
         })
         .min()
+}
+
+/// Something the palette can do rather than a place it can go to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaletteAction {
+    NextUnreadStep,
+    MarkStepRead,
+    MarkStepUnread,
+    WrapLines,
+    StopWrappingLines,
+    HideWhitespace,
+    ShowWhitespace,
+    AskAboutStep,
+    FinishReview,
+    OpenOnGitHub,
+    SwitchPr,
+    Settings,
+    Shortcuts,
+}
+
+impl PaletteAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NextUnreadStep => "Next unread step",
+            Self::MarkStepRead => "Mark step as read",
+            Self::MarkStepUnread => "Mark step as unread",
+            Self::WrapLines => "Wrap lines",
+            Self::StopWrappingLines => "Stop wrapping lines",
+            Self::HideWhitespace => "Hide whitespace",
+            Self::ShowWhitespace => "Show whitespace",
+            Self::AskAboutStep => "Ask about this step",
+            Self::FinishReview => "Finish review",
+            Self::OpenOnGitHub => "Open on GitHub",
+            Self::SwitchPr => "Switch pull request",
+            Self::Settings => "Settings",
+            Self::Shortcuts => "Keyboard shortcuts",
+        }
+    }
+
+    /// The shortcut that does the same, for its key caps.
+    pub fn command(self) -> Option<Command> {
+        match self {
+            Self::NextUnreadStep => Some(Command::NextUnreadStep),
+            Self::MarkStepRead | Self::MarkStepUnread => Some(Command::ToggleRead),
+            Self::WrapLines | Self::StopWrappingLines => Some(Command::WrapLines),
+            Self::Settings => Some(Command::Settings),
+            Self::Shortcuts => Some(Command::Shortcuts),
+            Self::HideWhitespace
+            | Self::ShowWhitespace
+            | Self::AskAboutStep
+            | Self::FinishReview
+            | Self::OpenOnGitHub
+            | Self::SwitchPr => None,
+        }
+    }
+}
+
+/// The palette's headings, in the order they show when nothing is typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteGroupKind {
+    Steps,
+    Files,
+    Symbols,
+    Actions,
+}
+
+impl PaletteGroupKind {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Steps => "Steps",
+            Self::Files => "Files",
+            Self::Symbols => "Symbols",
+            Self::Actions => "Actions",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaletteEntry {
+    Place(JumpTarget),
+    Action(PaletteAction),
+}
+
+/// The entries under one heading, best match first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteGroup {
+    pub group: PaletteGroupKind,
+    pub entries: Vec<PaletteEntry>,
+}
+
+/// Places grouped by kind, the group with the best match first, then the actions that match. A query
+/// that starts with `>` asks for actions only.
+pub(super) fn palette(
+    places: Vec<JumpTarget>,
+    actions: &[PaletteAction],
+    query: &str,
+) -> Vec<PaletteGroup> {
+    let (actions_only, query) = match query.trim_start().strip_prefix('>') {
+        Some(rest) => (true, rest.trim()),
+        None => (false, query),
+    };
+    let mut groups: Vec<PaletteGroup> = Vec::new();
+    if !actions_only {
+        for target in rank(places, query) {
+            let kind = match target.place {
+                JumpPlace::StepTop => PaletteGroupKind::Steps,
+                JumpPlace::File(_) => PaletteGroupKind::Files,
+                JumpPlace::Piece(_) => PaletteGroupKind::Symbols,
+            };
+            let entry = PaletteEntry::Place(target);
+            match groups.iter_mut().find(|group| group.group == kind) {
+                Some(group) => group.entries.push(entry),
+                None => groups.push(PaletteGroup {
+                    group: kind,
+                    entries: vec![entry],
+                }),
+            }
+        }
+    }
+    let actions = rank_actions(actions, query);
+    if !actions.is_empty() {
+        groups.push(PaletteGroup {
+            group: PaletteGroupKind::Actions,
+            entries: actions.into_iter().map(PaletteEntry::Action).collect(),
+        });
+    }
+    groups
+}
+
+/// Like `rank`, on the actions' names.
+fn rank_actions(actions: &[PaletteAction], query: &str) -> Vec<PaletteAction> {
+    let query_text = query.to_lowercase();
+    let query: Vec<char> = query_text.chars().collect();
+    if query.is_empty() {
+        return actions.to_vec();
+    }
+    let mut scored: Vec<(usize, usize, PaletteAction)> = actions
+        .iter()
+        .filter_map(|action| {
+            let label = action.label();
+            let looseness = looseness(label, &query, &query_text)?;
+            Some((looseness, label.chars().count(), *action))
+        })
+        .collect();
+    scored.sort_by_key(|(looseness, length, _)| (*looseness, *length));
+    scored.into_iter().map(|(_, _, action)| action).collect()
 }

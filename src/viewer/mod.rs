@@ -36,6 +36,7 @@ mod review_state;
 mod row_selection;
 mod screen_travel;
 mod settings;
+mod shortcuts;
 mod step_page;
 mod suggestion;
 mod sync_state;
@@ -63,7 +64,10 @@ pub use comments::{
 pub use diagram_notes::{
     DiagramToNotes, DiagramToNotesOutcome, NotesButton, with_diagram_in_notes,
 };
-pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
+pub use diff_display::{
+    DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext, hidden_lines_after,
+    hidden_lines_before,
+};
 pub use diff_fence::{FenceLine, fence_lines};
 pub use file_block::FileBlock;
 pub use finish_review::{
@@ -79,7 +83,9 @@ pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snipp
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
-pub use jump::{JumpPlace, JumpTarget};
+pub use jump::{
+    JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
+};
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use ports::{
@@ -97,12 +103,13 @@ pub use relevant_prs::{
 pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, SafetyNetSize, Screen,
-    SidebarEntry, StepId,
+    SidebarEntry, StepId, UnreadStep,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
 pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
+pub use shortcuts::{Chord, Command, KeyCap, KeyScope, ShortcutGroup, in_group, keystroke};
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
 };

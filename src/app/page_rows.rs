@@ -22,9 +22,10 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CodeLink, CommentPlace, CommentProblem, FileBlock, JumpPlace, JumpTarget, LineKind,
-    LineLocation, MoreContext, NextScreen, NotesButton, PieceDiff, Place, QueuedComment, Review,
-    RowSelection, SafetyNetPage, Screen, StepId, StepPage, ThreadView,
+    CodeLink, CommentPlace, CommentProblem, FileBlock, HiddenLines, JumpPlace, JumpTarget,
+    LineKind, LineLocation, NextScreen, NotesButton, PieceDiff, Place, QueuedComment, Review,
+    RowSelection, SafetyNetPage, Screen, StepId, StepPage, ThreadView, hidden_lines_after,
+    hidden_lines_before,
 };
 
 /// An ask button and what it asks about.
@@ -112,7 +113,27 @@ pub struct DiagramRow {
 
 pub struct HunkGapRow {
     pub id: SharedString,
-    pub more: Option<MoreContext>,
+    pub gap: HiddenLines,
+    /// "12 hidden lines", cut when the rows are built.
+    pub label: SharedString,
+}
+
+impl HunkGapRow {
+    fn new(id: String, gap: HiddenLines) -> Self {
+        let label = match gap.count {
+            Some(1) => "1 hidden line".to_owned(),
+            Some(count) => format!("{count} hidden lines"),
+            None if gap.after_above.is_some() || gap.before_below.is_some() => {
+                "Show more lines".to_owned()
+            }
+            None => String::new(),
+        };
+        Self {
+            id: id.into(),
+            gap,
+            label: label.into(),
+        }
+    }
 }
 
 /// Rows are stored per line of a page, so a payload much bigger than a pointer goes behind an `Rc`.
@@ -221,7 +242,7 @@ impl PageRow {
             }
             Self::HunkGap(gap) => {
                 gap.id.hash(&mut hasher);
-                gap.more.is_some().hash(&mut hasher);
+                gap.gap.hash(&mut hasher);
             }
             Self::Line(line) => {
                 line.location.path.hash(&mut hasher);
@@ -888,11 +909,11 @@ impl RowsBuilder<'_> {
         };
         let shows_markers = !block.has_one_piece();
         for (index, hunk) in block.hunks.iter().enumerate() {
-            if index > 0 || hunk.more_above.is_some() {
-                self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow {
-                    id: format!("{row_id}-above-{index}").into(),
-                    more: hunk.more_above.clone(),
-                })));
+            if let Some(gap) = hidden_lines_before(&block.hunks, index) {
+                self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow::new(
+                    format!("{row_id}-above-{index}"),
+                    gap,
+                ))));
             }
             for line in &hunk.rows {
                 if shows_markers
@@ -916,12 +937,12 @@ impl RowsBuilder<'_> {
                 ))));
                 self.hang(here);
             }
-            if hunk.more_below.is_some() {
-                self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow {
-                    id: format!("{row_id}-below-{index}").into(),
-                    more: hunk.more_below.clone(),
-                })));
-            }
+        }
+        if let Some(gap) = hidden_lines_after(&block.hunks) {
+            self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow::new(
+                format!("{row_id}-below-end"),
+                gap,
+            ))));
         }
         self.rows.push(PageRow::PieceEnd);
     }

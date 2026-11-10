@@ -43,10 +43,21 @@ pub enum Icon {
     Globe,
     Copy,
     Square,
+    Flag,
+    Keyboard,
+    Zap,
+    SmilePlus,
+    FilePen,
+    ChevronsUpDown,
+    Milestone,
+    Braces,
+    CircleDot,
+    ChevronUp,
+    Clock,
 }
 
 impl Icon {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 51] = [
         Self::Search,
         Self::ExternalLink,
         Self::PullRequest,
@@ -87,6 +98,17 @@ impl Icon {
         Self::Globe,
         Self::Copy,
         Self::Square,
+        Self::Flag,
+        Self::Keyboard,
+        Self::Zap,
+        Self::SmilePlus,
+        Self::FilePen,
+        Self::ChevronsUpDown,
+        Self::Milestone,
+        Self::Braces,
+        Self::CircleDot,
+        Self::ChevronUp,
+        Self::Clock,
     ];
 
     pub fn path(self) -> &'static str {
@@ -131,6 +153,17 @@ impl Icon {
             Self::Globe => "icons/globe.svg",
             Self::Copy => "icons/copy.svg",
             Self::Square => "icons/square.svg",
+            Self::Flag => "icons/flag.svg",
+            Self::Keyboard => "icons/keyboard.svg",
+            Self::Zap => "icons/zap.svg",
+            Self::SmilePlus => "icons/smile-plus.svg",
+            Self::FilePen => "icons/file-pen.svg",
+            Self::ChevronsUpDown => "icons/chevrons-up-down.svg",
+            Self::Milestone => "icons/milestone.svg",
+            Self::Braces => "icons/braces.svg",
+            Self::CircleDot => "icons/circle-dot.svg",
+            Self::ChevronUp => "icons/chevron-up.svg",
+            Self::Clock => "icons/clock.svg",
         }
     }
 }

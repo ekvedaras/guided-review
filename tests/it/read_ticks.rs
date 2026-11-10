@@ -372,3 +372,63 @@ fn a_tour_without_steps_has_read_nothing_and_is_not_complete() {
     assert!((empty.share() - 0.).abs() < f32::EPSILON);
     assert!(!empty.is_complete());
 }
+
+#[test]
+fn next_unread_goes_to_the_first_unread_step_after_the_open_screen() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"greeting".into()).unwrap();
+
+    assert!(review.go_to_next_unread());
+    assert_eq!(
+        review.screen(),
+        &guided_review::viewer::Screen::Step("readme".into())
+    );
+    assert!(review.go_to_next_unread());
+    assert_eq!(
+        review.screen(),
+        &guided_review::viewer::Screen::Step("emails".into())
+    );
+}
+
+#[test]
+fn next_unread_starts_over_from_the_top_once_past_the_last_unread_step() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"greeting".into()).unwrap();
+    review.go_to(&"emails".into());
+
+    assert!(review.go_to_next_unread());
+    assert_eq!(
+        review.screen(),
+        &guided_review::viewer::Screen::Step("readme".into())
+    );
+}
+
+#[test]
+fn next_unread_stays_put_when_every_step_is_read() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    for step in ["readme", "greeting", "emails"] {
+        review.tick(&step.into()).unwrap();
+    }
+    review.go_to(&"greeting".into());
+
+    assert!(!review.go_to_next_unread());
+    assert_eq!(
+        review.screen(),
+        &guided_review::viewer::Screen::Step("greeting".into())
+    );
+    assert_eq!(review.first_unread_step(), None);
+}
+
+#[test]
+fn the_first_unread_step_is_named_by_its_title() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"readme".into()).unwrap();
+
+    let first = review.first_unread_step().unwrap();
+    assert_eq!(first.id, "greeting".into());
+    assert_eq!(first.title, "Greeting");
+}

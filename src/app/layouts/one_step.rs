@@ -20,7 +20,8 @@ use crate::app::components::ask_panel::{
     AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
 };
 use crate::app::components::button::{
-    ButtonKind, ButtonSize, button, button_icon, icon_label_button, joined, toggle_button,
+    ButtonKind, ButtonSize, button, button_icon, button_keys, icon_label_button, joined,
+    toggle_button,
 };
 use crate::app::components::card::card;
 use crate::app::components::chip::{chip, dropping_in, notice_band};
@@ -30,7 +31,7 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeSelectionHooks, DiffRow, OnImageComment, OnMoreContext, OnRowGesture, OnScrollX,
+    CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture, OnScrollX,
     PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
     only_whitespace_row, piece_end, piece_row,
 };
@@ -39,7 +40,6 @@ use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
-use crate::app::components::key_cap::{KeyLabel, key_cap, key_hint};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, PreparedMarkdown, bullet, parsed_markdown,
@@ -55,6 +55,7 @@ use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
+use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::step_notes::note_label;
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -76,9 +77,10 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, InFlight,
-    LineLocation, MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Reopen,
-    ReopenAfterSave, Review, Screen, ScreenTravel, SendMode, StepId, ThreadId, ThreadView, Travel,
+    AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
+    LineLocation, NextScreen, NotesButton, PaletteAction, Place, QueuedComment, ReadProgress,
+    Reopen, ReopenAfterSave, Review, Screen, ScreenTravel, SendMode, StepId, ThreadId, ThreadView,
+    Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -94,7 +96,10 @@ actions!(
         ToggleJump,
         CopySelection,
         ToggleWrapLines,
-        ToggleSettings
+        ToggleSettings,
+        GoToNextUnread,
+        ToggleRead,
+        ToggleShortcuts
     ]
 );
 
@@ -126,6 +131,8 @@ pub struct OneStepLayout {
     on_code_gesture: OnCodeSpot,
     /// The screen whose end the reader has had on screen; the arrow key ticks a step only then.
     seen_end_of: Option<Screen>,
+    /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
+    finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
     screen_travel: ScreenTravel,
     /// How far each file box on the screen is scrolled sideways, by path.
@@ -139,6 +146,7 @@ pub struct OneStepLayout {
     _snapshots: Option<gpui::Task<()>>,
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
+    shortcuts: Entity<ShortcutsSheet>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
     /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
@@ -226,22 +234,28 @@ impl OneStepLayout {
         )
         .detach();
         let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
-        cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
-            JumpEvent::QueryChanged(query) => {
-                let targets = this.session.read(cx).review().jump_targets(query);
-                palette.update(cx, |palette, _| palette.set_targets(targets));
-            }
-            JumpEvent::Picked(target) => {
-                let row = this.session.update(cx, |session, cx| {
-                    session.change(cx, |review| review.jump_to(target));
-                    session.rows().row_of_jump(target)
-                });
-                this.screen_list.scroll_to(ListOffset {
-                    item_ix: row,
-                    offset_in_item: px(0.),
-                });
-            }
-        })
+        let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
+        cx.subscribe_in(
+            &jump,
+            window,
+            |this, palette, event: &JumpEvent, window, cx| match event {
+                JumpEvent::QueryChanged(query) => {
+                    let groups = this.session.read(cx).review().palette(query);
+                    palette.update(cx, |palette, _| palette.set_groups(groups));
+                }
+                JumpEvent::Act(action) => this.palette_action(*action, window, cx),
+                JumpEvent::Picked(target) => {
+                    let row = this.session.update(cx, |session, cx| {
+                        session.change(cx, |review| review.jump_to(target));
+                        session.rows().row_of_jump(target)
+                    });
+                    this.screen_list.scroll_to(ListOffset {
+                        item_ix: row,
+                        offset_in_item: px(0.),
+                    });
+                }
+            },
+        )
         .detach();
         let use_as_comment_subscription =
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
@@ -298,6 +312,7 @@ impl OneStepLayout {
         Self {
             screen_list: session.read(cx).screen_list().clone(),
             seen_end_of: None,
+            finish_form_request: 0,
             screen_travel,
             code_scroll_x: CodeScrollX::default(),
             session,
@@ -315,6 +330,7 @@ impl OneStepLayout {
             _snapshots: scenes::start(window, cx),
             jump,
             pr_switcher,
+            shortcuts,
             settings,
             loading,
             reopen_after_save: ReopenAfterSave::default(),
@@ -801,13 +817,70 @@ impl OneStepLayout {
         if self.is_reopening(cx) {
             return;
         }
-        let targets = self.session.read(cx).review().jump_targets("");
+        let groups = self.session.read(cx).review().palette("");
         self.jump.update(cx, |palette, cx| {
             if palette.is_open() {
                 palette.close(window, cx);
             } else {
-                palette.open(targets, window, cx);
+                palette.open(groups, window, cx);
             }
+        });
+    }
+
+    /// What an action picked in the palette does: the same as its button or key.
+    fn palette_action(
+        &mut self,
+        action: PaletteAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            PaletteAction::NextUnreadStep => self.go_to_next_unread(&GoToNextUnread, window, cx),
+            PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => {
+                self.toggle_read(&ToggleRead, window, cx);
+            }
+            PaletteAction::WrapLines | PaletteAction::StopWrappingLines => {
+                self.toggle_wrap_lines(&ToggleWrapLines, window, cx);
+            }
+            PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => {
+                self.change_review(cx, Review::toggle_ignore_whitespace);
+            }
+            PaletteAction::AskAboutStep => self.ask_about_screen(window, cx),
+            PaletteAction::FinishReview => self.open_finish_form(cx),
+            PaletteAction::OpenOnGitHub => {
+                let pr = self.session.read(cx).review().pr().to_string();
+                open_link(&pr, cx);
+            }
+            PaletteAction::SwitchPr => self.toggle_pr_switcher(window, cx),
+            PaletteAction::Settings => self.toggle_settings(&ToggleSettings, window, cx),
+            PaletteAction::Shortcuts => self.toggle_shortcuts(&ToggleShortcuts, window, cx),
+        }
+    }
+
+    /// Opens the finish-review form in the sidebar with its body box taking the keys.
+    fn open_finish_form(&mut self, cx: &mut Context<Self>) {
+        self.finish_form_request = self.finish_form_request.wrapping_add(1);
+        cx.notify();
+    }
+
+    /// Asks about the screen, as its toolbar's Ask button does.
+    fn ask_about_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rows = self.session.read(cx).rows();
+        let ask = (0..rows.len()).find_map(|index| match rows.row(index) {
+            Some(PageRow::Toolbar(toolbar)) => toolbar
+                .ask
+                .as_ref()
+                .map(|ask| (ask.place.clone(), ask.label.clone())),
+            _ => None,
+        });
+        let Some((place, label)) = ask else {
+            return;
+        };
+        let ask = self.ask.clone();
+        self.session.update(cx, |session, cx| {
+            ask.update(cx, |panel, cx| {
+                panel.open(session.review(), place, label, window, cx);
+            });
         });
     }
 
@@ -965,6 +1038,36 @@ impl OneStepLayout {
         self.change_review(cx, Review::go_back);
     }
 
+    fn go_to_next_unread(&mut self, _: &GoToNextUnread, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
+        self.change_review(cx, Review::go_to_next_unread);
+    }
+
+    /// Ticks or unticks the step on screen; the summary and the safety net have no tick.
+    fn toggle_read(&mut self, _: &ToggleRead, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
+        if let Screen::Step(id) = self.session.read(cx).review().screen().clone() {
+            self.toggle_tick(&id, cx);
+        }
+    }
+
+    fn toggle_shortcuts(
+        &mut self,
+        _: &ToggleShortcuts,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_reopening(cx) {
+            return;
+        }
+        self.shortcuts
+            .update(cx, |sheet, cx| sheet.toggle(window, cx));
+    }
+
     fn toggle_wrap_lines(&mut self, _: &ToggleWrapLines, _: &mut Window, cx: &mut Context<Self>) {
         if self.is_reopening(cx) {
             return;
@@ -1055,7 +1158,8 @@ impl OneStepLayout {
             session.review().finish_body().to_owned(),
             self.on_finish_body_edit(),
             self.on_finish_review(),
-        );
+        )
+        .opened_by(self.finish_form_request);
         let step_rows = sidebar.steps.iter().map(|step| {
             let id: StepId = step.id.clone();
             let mark = if step.is_gone {
@@ -1158,17 +1262,37 @@ impl OneStepLayout {
                     .children(step_rows)
                     .children(safety_net_row),
             )
-            .child(key_hints(&colors))
             .child(self.settings_row(&colors, cx))
     }
 
+    /// Settings and the shortcuts sheet, at the foot of the sidebar.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
+        let shortcuts = button(
+            colors,
+            "sidebar-shortcuts",
+            ButtonKind::Ghost,
+            ButtonSize::Regular,
+        )
+        .px_2()
+        .gap_1p5()
+        .tooltip(tooltip(|_| "Keyboard shortcuts".into()))
+        .child(button_icon(
+            colors,
+            ButtonKind::Ghost,
+            ButtonSize::Regular,
+            Icon::Keyboard,
+        ))
+        .child(button_keys(colors, ButtonKind::Ghost, Command::Shortcuts))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.toggle_shortcuts(&ToggleShortcuts, window, cx);
+        }));
         div()
             .flex_none()
             .px_4()
             .py_2()
             .flex()
             .items_center()
+            .gap_1()
             .border_t_1()
             .border_color(colors.subtle_border)
             .child(
@@ -1188,12 +1312,12 @@ impl OneStepLayout {
                     Icon::Settings,
                 ))
                 .child(div().flex_1().child("Settings"))
-                .child(key_cap(colors, KeyLabel::Text("⌘")))
-                .child(key_cap(colors, KeyLabel::Text(",")))
+                .child(button_keys(colors, ButtonKind::Ghost, Command::Settings))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.toggle_settings(&ToggleSettings, window, cx);
                 })),
             )
+            .child(shortcuts)
     }
 
     /// The PR this review is of, and the window-wide actions.
@@ -1215,14 +1339,7 @@ impl OneStepLayout {
             Icon::Search,
         ))
         .child("Jump")
-        .child(
-            div()
-                .flex()
-                .gap_0p5()
-                .pl_1()
-                .child(key_cap(&colors, KeyLabel::Text("⌘")))
-                .child(key_cap(&colors, KeyLabel::Text("K"))),
-        )
+        .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump))
         .on_click(cx.listener(|this, _, window, cx| this.toggle_jump(&ToggleJump, window, cx)));
         let pr_link = pr.to_string();
         let github = button(
@@ -1450,8 +1567,9 @@ impl OneStepLayout {
             PageRow::HunkGap(gap) => hunk_gap(
                 &colors,
                 gap.id.clone(),
-                gap.more.clone(),
-                self.on_more_context(cx),
+                &gap.gap,
+                gap.label.clone(),
+                &self.on_gap_ask(cx),
             )
             .into_any_element(),
             PageRow::Line(line) => {
@@ -1662,10 +1780,18 @@ impl OneStepLayout {
         )
     }
 
-    fn on_more_context(&self, cx: &mut Context<Self>) -> OnMoreContext {
-        Rc::new(cx.listener(|this, more: &MoreContext, _, cx| {
-            this.change_review(cx, |review| review.show_more_context(more));
-        }))
+    fn on_gap_ask(&self, cx: &mut Context<Self>) -> OnGapAsk {
+        let layout = cx.weak_entity();
+        Rc::new(move |ask, _, cx| {
+            layout
+                .update(cx, |this, cx| {
+                    this.change_review(cx, |review| match ask {
+                        GapAsk::More(more) => review.show_more_context(more),
+                        GapAsk::All(gap) => review.show_hidden_lines(gap),
+                    });
+                })
+                .ok();
+        })
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
@@ -1828,6 +1954,11 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
         }))
         .child(icon(Icon::ArrowLeft, colors.muted_text))
         .child("Previous")
+        .child(button_keys(
+            &colors,
+            ButtonKind::Ghost,
+            Command::PreviousScreen,
+        ))
     });
     let next_label = footer.next.as_ref().map(|next| match next {
         NextScreen::Step { title } => title.clone(),
@@ -1855,9 +1986,14 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
             this.change_review(cx, Review::go_forward);
         }))
         .child(label)
-        .when(onward == Onward::Goes, |button| {
-            button.child(icon(Icon::ArrowRight, colors.on_accent_fill))
-        })
+        .child(button_keys(
+            &colors,
+            ButtonKind::Primary,
+            match onward {
+                Onward::Goes => Command::NextScreen,
+                Onward::Stays => Command::ToggleRead,
+            },
+        ))
     });
     let up_next = next_label.map(|title| {
         div()
@@ -1914,7 +2050,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
         )
 }
 
-/// Whether the footer's primary action moves on to another screen, which its arrow says.
+/// Whether the footer's primary action moves on to another screen, which its key says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Onward {
     Goes,
@@ -1974,6 +2110,7 @@ fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> 
             px(6.),
         ))
         .child(if is_ticked { "Read" } else { "Mark as read" })
+        .child(button_keys(&colors, kind, Command::ToggleRead).ml_2())
 }
 
 fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
@@ -2029,33 +2166,6 @@ fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
             "trail-hairline-fill",
             progress.share(),
         ))
-}
-
-fn key_hints(colors: &Colors) -> impl IntoElement {
-    let hint = |keys: &'static [KeyLabel], what: &'static str| key_hint(colors, keys, what);
-    div()
-        .flex_none()
-        .px_4()
-        .py_2()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .border_t_1()
-        .border_color(colors.subtle_border)
-        .text_xs()
-        .text_color(colors.muted_text)
-        .child(hint(
-            &[
-                KeyLabel::Icon(Icon::ArrowLeft),
-                KeyLabel::Icon(Icon::ArrowRight),
-            ],
-            "previous / next screen",
-        ))
-        .child(hint(
-            &[KeyLabel::Text("⌘"), KeyLabel::Text("K")],
-            "jump to a step, file or symbol",
-        ))
-        .child(hint(&[KeyLabel::Text("W")], "wrap long lines"))
 }
 
 impl Focusable for OneStepLayout {
@@ -2153,6 +2263,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::toggle_wrap_lines))
             .on_action(cx.listener(Self::toggle_jump))
             .on_action(cx.listener(Self::toggle_settings))
+            .on_action(cx.listener(Self::go_to_next_unread))
+            .on_action(cx.listener(Self::toggle_read))
+            .on_action(cx.listener(Self::toggle_shortcuts))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
@@ -2228,6 +2341,7 @@ impl Render for OneStepLayout {
             .children(switching_veil)
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
+            .child(self.shortcuts.clone())
             .children(frame_painted_marker)
     }
 }

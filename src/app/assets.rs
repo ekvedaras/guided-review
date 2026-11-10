@@ -56,6 +56,19 @@ impl AssetSource for Assets {
             "icons/globe.svg" => include_bytes!("../../assets/icons/globe.svg"),
             "icons/copy.svg" => include_bytes!("../../assets/icons/copy.svg"),
             "icons/square.svg" => include_bytes!("../../assets/icons/square.svg"),
+            "icons/flag.svg" => include_bytes!("../../assets/icons/flag.svg"),
+            "icons/keyboard.svg" => include_bytes!("../../assets/icons/keyboard.svg"),
+            "icons/zap.svg" => include_bytes!("../../assets/icons/zap.svg"),
+            "icons/smile-plus.svg" => include_bytes!("../../assets/icons/smile-plus.svg"),
+            "icons/file-pen.svg" => include_bytes!("../../assets/icons/file-pen.svg"),
+            "icons/chevrons-up-down.svg" => {
+                include_bytes!("../../assets/icons/chevrons-up-down.svg")
+            }
+            "icons/milestone.svg" => include_bytes!("../../assets/icons/milestone.svg"),
+            "icons/braces.svg" => include_bytes!("../../assets/icons/braces.svg"),
+            "icons/circle-dot.svg" => include_bytes!("../../assets/icons/circle-dot.svg"),
+            "icons/chevron-up.svg" => include_bytes!("../../assets/icons/chevron-up.svg"),
+            "icons/clock.svg" => include_bytes!("../../assets/icons/clock.svg"),
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(bytes)))

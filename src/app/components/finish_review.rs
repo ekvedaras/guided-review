@@ -34,11 +34,14 @@ struct FinishUi {
     is_busy: bool,
     problem: Option<String>,
     focus: FocusHandle,
+    /// The last ask to open the form from elsewhere (the palette, the finish card) it answered.
+    answered_open_request: u32,
 }
 
 impl FinishUi {
-    fn new(has_draft: bool, cx: &mut Context<Self>) -> Self {
+    fn new(has_draft: bool, open_request: u32, cx: &mut Context<Self>) -> Self {
         Self {
+            answered_open_request: open_request,
             is_open: has_draft,
             is_last_review_body_open: false,
             verdict: ReviewVerdict::Comment,
@@ -83,6 +86,7 @@ pub struct FinishReviewDialog {
     body: String,
     on_body_edit: OnBodyEdit,
     on_finish: OnFinish,
+    open_request: u32,
 }
 
 impl FinishReviewDialog {
@@ -103,7 +107,14 @@ impl FinishReviewDialog {
             body,
             on_body_edit,
             on_finish,
+            open_request: 0,
         }
+    }
+
+    /// A new count opens the form and puts the keys in its body box.
+    pub fn opened_by(mut self, open_request: u32) -> Self {
+        self.open_request = open_request;
+        self
     }
 }
 
@@ -111,7 +122,7 @@ fn icon_of(verdict: ReviewVerdict) -> Icon {
     match verdict {
         ReviewVerdict::Comment => Icon::MessageSquare,
         ReviewVerdict::Approve => Icon::CircleCheck,
-        ReviewVerdict::RequestChanges => Icon::Diff,
+        ReviewVerdict::RequestChanges => Icon::FilePen,
     }
 }
 
@@ -191,9 +202,18 @@ impl RenderOnce for FinishReviewDialog {
     ) -> impl IntoElement {
         let colors = Colors::active(cx);
         let ui = window.use_keyed_state("finish-review-ui", cx, {
-            let has_draft = !self.body.is_empty();
-            move |_, cx| FinishUi::new(has_draft, cx)
+            let (has_draft, open_request) = (!self.body.is_empty(), self.open_request);
+            move |_, cx| FinishUi::new(has_draft, open_request, cx)
         });
+        if ui.read(cx).answered_open_request != self.open_request {
+            let open_request = self.open_request;
+            update(&ui, cx, |ui| {
+                ui.is_open = true;
+                ui.answered_open_request = open_request;
+            });
+            let focus = ui.read(cx).focus.clone();
+            window.focus(&focus, cx);
+        }
         // The demo PR is the maintainer's own, which offers no finishing; the picture needs the form.
         #[cfg(feature = "snapshots")]
         if let Some(staged) = cx.try_global::<crate::app::snapshots::StagedFinishReview>() {

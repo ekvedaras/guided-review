@@ -63,6 +63,7 @@ mod repin;
 mod review_threads;
 mod screen_travel;
 mod settings;
+mod shortcuts;
 mod show;
 mod step_details;
 mod summary_instructions;

@@ -22,6 +22,7 @@ use super::comments::{
     QueuedComment, SendMode,
 };
 use super::diagram_notes::{DiagramNotes, DiagramToNotes, DiagramToNotesOutcome, NotesButton};
+use super::diff_display::HiddenLines;
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
@@ -35,7 +36,7 @@ use super::hand_offs::{
 };
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
-use super::jump::{self, JumpTarget};
+use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::ports::{AgentLaunch, GitHubError};
 use super::problems::{Problem, Read};
@@ -95,6 +96,14 @@ impl ReadProgress {
     pub fn is_complete(self) -> bool {
         self.total > 0 && self.read >= self.total
     }
+}
+
+/// A step the reader has not read yet, named for a button that leads there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadStep {
+    pub id: StepId,
+    /// Its title is markdown.
+    pub title: String,
 }
 
 /// Where the open screen sits in the reading order.
@@ -316,6 +325,17 @@ impl Review {
 
     pub fn show_more_context(&mut self, more: &MoreContext) {
         self.display_options.show_more_context(more);
+    }
+
+    /// Every line of the gap, from the side it can be shown from; a gap that does not say how many
+    /// lines it hides shows the usual few more.
+    pub fn show_hidden_lines(&mut self, gap: &HiddenLines) {
+        let either_side = gap.after_above.as_ref().or(gap.before_below.as_ref());
+        match (either_side, gap.count) {
+            (Some(more), Some(count)) => self.display_options.show_lines(more, count),
+            (Some(more), None) => self.display_options.show_more_context(more),
+            (None, _) => {}
+        }
     }
 
     pub fn ignores_whitespace(&self) -> bool {
@@ -1311,6 +1331,56 @@ impl Review {
         )
     }
 
+    /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
+    pub fn palette(&self, query: &str) -> Vec<PaletteGroup> {
+        jump::palette(self.jump_targets(""), &self.palette_actions(), query)
+    }
+
+    /// What the palette can do on the open screen.
+    pub fn palette_actions(&self) -> Vec<PaletteAction> {
+        let step = match &self.screen {
+            Screen::Step(id) => Some(id),
+            Screen::Summary | Screen::SafetyNet => None,
+        };
+        let tick = step.map(|id| {
+            if self.is_ticked(id) {
+                PaletteAction::MarkStepUnread
+            } else {
+                PaletteAction::MarkStepRead
+            }
+        });
+        let wrap = if self.wraps_lines() {
+            PaletteAction::StopWrappingLines
+        } else {
+            PaletteAction::WrapLines
+        };
+        let whitespace = if self.ignores_whitespace() {
+            PaletteAction::ShowWhitespace
+        } else {
+            PaletteAction::HideWhitespace
+        };
+        let next_unread = self
+            .first_unread_step()
+            .map(|_| PaletteAction::NextUnreadStep);
+        let ask = step.map(|_| PaletteAction::AskAboutStep);
+        let finish = self
+            .can_finish_review()
+            .then_some(PaletteAction::FinishReview);
+        next_unread
+            .into_iter()
+            .chain(tick)
+            .chain(ask)
+            .chain([wrap, whitespace])
+            .chain(finish)
+            .chain([
+                PaletteAction::OpenOnGitHub,
+                PaletteAction::SwitchPr,
+                PaletteAction::Settings,
+                PaletteAction::Shortcuts,
+            ])
+            .collect()
+    }
+
     /// A folded step opens for the session so the file or symbol the reviewer asked for is on screen.
     pub fn jump_to(&mut self, target: &JumpTarget) {
         self.go_to_screen(target.screen.clone());
@@ -1343,6 +1413,44 @@ impl Review {
     /// False on the summary, the first screen.
     pub fn go_back(&mut self) -> bool {
         self.step_by(-1)
+    }
+
+    /// The first step after the open screen that is not read yet, starting over from the top.
+    /// False when every step is read.
+    pub fn go_to_next_unread(&mut self) -> bool {
+        let reading_order = self.reading_order();
+        let here = reading_order
+            .iter()
+            .position(|screen| screen == &self.screen)
+            .unwrap_or(0);
+        let after = reading_order.iter().skip(here + 1);
+        let next = after
+            .chain(reading_order.iter().take(here + 1))
+            .find(|screen| matches!(screen, Screen::Step(id) if !self.is_ticked(id)))
+            .cloned();
+        match next {
+            Some(screen) if screen != self.screen => {
+                self.screen = screen;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The first step in reading order that is not read yet.
+    pub fn first_unread_step(&self) -> Option<UnreadStep> {
+        self.steps_in_reading_order.iter().find_map(|screen| {
+            let Screen::Step(id) = screen else {
+                return None;
+            };
+            (!self.is_ticked(id)).then(|| UnreadStep {
+                id: id.clone(),
+                title: self
+                    .step(id)
+                    .map(|step| step.title.clone())
+                    .unwrap_or_default(),
+            })
+        })
     }
 
     pub fn is_ticked(&self, id: &StepId) -> bool {

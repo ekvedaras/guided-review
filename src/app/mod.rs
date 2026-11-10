@@ -38,9 +38,9 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, FailedBuild,
-    Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher, RelevantPullRequestsPort,
-    ReviewStateFile, ShowReview, ShowSettings, TourAgents,
+    ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
+    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, PrSwitcher, RelevantPullRequestsPort,
+    ReviewStateFile, ShowReview, ShowSettings, TourAgents, keystroke,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -49,10 +49,11 @@ use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
 use components::pr_switcher::{PrSwitcherView, PrSwitching};
 use components::settings_panel::SettingsPanel;
+use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleSettings,
-    ToggleWrapLines,
+    Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout, ToggleJump,
+    ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -526,28 +527,46 @@ fn turn_into_review(
     Ok(WindowHandle::new(window.window_id()))
 }
 
+/// Every shortcut comes from the one table the shortcuts sheet lists (`viewer::Command`).
 fn bind_keys(cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
         SettingsPanel::KEY_CONTEXT,
+        ShortcutsSheet::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
     text_box::bind_keys(cx);
-    cx.bind_keys([
-        KeyBinding::new("right", GoForward, Some(&typing_is_not_navigation)),
-        KeyBinding::new("j", GoForward, Some(&typing_is_not_navigation)),
-        KeyBinding::new("left", GoBack, Some(&typing_is_not_navigation)),
-        KeyBinding::new("k", GoBack, Some(&typing_is_not_navigation)),
-        KeyBinding::new("w", ToggleWrapLines, Some(&typing_is_not_navigation)),
-        KeyBinding::new("cmd-k", ToggleJump, Some(OneStepLayout::KEY_CONTEXT)),
-        KeyBinding::new("cmd-,", ToggleSettings, Some(OneStepLayout::KEY_CONTEXT)),
-        KeyBinding::new("cmd-c", CopySelection, Some(&typing_is_not_navigation)),
-    ]);
+    let bindings = Command::ALL.into_iter().flat_map(|command| {
+        let context = match command.scope() {
+            KeyScope::Page => typing_is_not_navigation.clone(),
+            KeyScope::Window => OneStepLayout::KEY_CONTEXT.to_owned(),
+            KeyScope::TextBox => text_box::TYPING_CONTEXT.to_owned(),
+        };
+        command.chords().iter().map(move |chord| {
+            let keys = keystroke(chord);
+            let context = Some(context.as_str());
+            match command {
+                Command::NextScreen => KeyBinding::new(&keys, GoForward, context),
+                Command::PreviousScreen => KeyBinding::new(&keys, GoBack, context),
+                Command::NextUnreadStep => KeyBinding::new(&keys, GoToNextUnread, context),
+                Command::Jump => KeyBinding::new(&keys, ToggleJump, context),
+                Command::ToggleRead => KeyBinding::new(&keys, ToggleRead, context),
+                Command::CopyCode => KeyBinding::new(&keys, CopySelection, context),
+                Command::AddToReview => KeyBinding::new(&keys, text_box::Submit, context),
+                Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitToAgent, context),
+                Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
+                Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
+                Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
+                Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
+            }
+        })
+    });
+    cx.bind_keys(bindings);
 }
 
 fn open_window(

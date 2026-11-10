@@ -5,8 +5,10 @@ use gpui::{
 };
 
 use super::icon::{Icon, sized_icon};
+use super::key_cap::{CapGround, chord_caps};
 use super::palette::{CONTROL_RADIUS, Colors};
 use super::tooltip::tooltip;
+use crate::viewer::Command;
 
 /// How loud a button is. A screen has one `Primary`: the step the reader takes next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,4 +284,9 @@ pub fn toggle_button(
         ButtonKind::Secondary
     };
     button(colors, id, kind, size)
+}
+
+/// The keys that do what the button does, at its trailing end, on the button's own ground.
+pub fn button_keys(colors: &Colors, kind: ButtonKind, command: Command) -> Div {
+    chord_caps(colors, command.first_chord(), CapGround::of(kind)).ml_1()
 }

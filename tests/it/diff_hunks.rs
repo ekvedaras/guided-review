@@ -3,7 +3,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    DiffHunk, FileBlock, LineKind, LineLocation, Review, ReviewStateFile, Side,
+    DiffHunk, FileBlock, LineKind, LineLocation, Review, ReviewStateFile, Side, hidden_lines_after,
+    hidden_lines_before,
 };
 use serde_json::{Value, json};
 use std::fmt::Write;
@@ -394,4 +395,64 @@ fn ignoring_whitespace_changes_no_piece_and_no_read_tick() {
 
     assert_eq!((piece_ids(&review), review.progress()), before);
     assert!(review.is_ticked(&"notes".into()));
+}
+
+#[test]
+fn the_lines_between_two_changes_are_one_gap_that_says_how_many_are_hidden() {
+    let review = three_changes().open_step(json!([{"file": "notes.txt"}]));
+    let hunks = shown_hunks(&review);
+
+    let between = hidden_lines_before(&hunks, 1).unwrap();
+    assert_eq!(between.count, Some(9), "lines 18 to 26");
+    assert!(between.after_above.is_some());
+    assert!(between.before_below.is_some());
+
+    let top = hidden_lines_before(&hunks, 0).unwrap();
+    assert_eq!(top.count, Some(6), "lines 1 to 6");
+    assert!(
+        top.after_above.is_none(),
+        "nothing is above the top of the file"
+    );
+    assert!(top.before_below.is_some());
+
+    let end = hidden_lines_after(&hunks).unwrap();
+    assert!(end.after_above.is_some());
+    assert!(
+        end.before_below.is_none(),
+        "nothing is below the end of the file"
+    );
+}
+
+#[test]
+fn a_change_at_the_top_of_the_file_has_no_gap_above_it() {
+    let review = Pull::changing(
+        "notes.txt",
+        &numbered_lines(20, |_| None),
+        &numbered_lines(20, |number| (number == 1).then(|| "line one".into())),
+    )
+    .open_step(json!([{"file": "notes.txt"}]));
+
+    assert_eq!(hidden_lines_before(&shown_hunks(&review), 0), None);
+}
+
+#[test]
+fn showing_every_hidden_line_of_a_gap_joins_the_changes_around_it() {
+    let mut review = Pull::changing(
+        "notes.txt",
+        &numbered_lines(100, |_| None),
+        &numbered_lines(100, |number| match number {
+            10 => Some("line ten".into()),
+            80 => Some("line eighty".into()),
+            _ => None,
+        }),
+    )
+    .open_step(json!([{"file": "notes.txt"}]));
+    let between = hidden_lines_before(&shown_hunks(&review), 1).unwrap();
+    assert_eq!(between.count, Some(63), "lines 14 to 76");
+
+    review.show_hidden_lines(&between);
+
+    let hunks = shown_hunks(&review);
+    assert_eq!(hunks.len(), 1);
+    assert!(rows(&hunks).contains(&"~ 45|45 line 45".to_owned()));
 }

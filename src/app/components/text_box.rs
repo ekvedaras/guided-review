@@ -114,6 +114,7 @@ impl RenderOnce for Field {
 const KEY_CONTEXT: &str = "TextBox";
 const MULTI_LINE: &str = "MultiLine";
 
+/// The editing keys. The keys that send or close a box are the app's shortcuts, bound from its table.
 pub fn bind_keys(cx: &mut App) {
     let single = Some(KEY_CONTEXT);
     let multi_line = format!("{KEY_CONTEXT} && {MULTI_LINE}");
@@ -146,9 +147,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-c", Copy, single),
         KeyBinding::new("cmd-x", Cut, single),
         KeyBinding::new("cmd-v", Paste, single),
-        KeyBinding::new("escape", Cancel, single),
-        KeyBinding::new("cmd-enter", Submit, single),
-        KeyBinding::new("cmd-shift-enter", SubmitToAgent, single),
         KeyBinding::new("enter", Submit, Some(one_line.as_str())),
         KeyBinding::new("enter", Newline, multi),
         KeyBinding::new("shift-enter", Newline, multi),

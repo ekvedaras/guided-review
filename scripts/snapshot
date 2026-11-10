@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pictures of the app for looking at the UI, in both appearances: <out>/light/*.png and <out>/dark/*.png.
 # Usage: scripts/snapshot <pr-url> [out-dir]   (default out-dir: /tmp/guided-review-snapshots)
-# Scenes: NN-top / NN-end of every tour screen, then 20-settings ... 30-settings-edited-end (src/app/layouts/one_step/scenes.rs).
+# Scenes: NN-top / NN-end of every tour screen, then 20-settings ... 31-shortcuts and on (src/app/layouts/one_step/scenes.rs).
 # The PR needs a tour on disk (~/.guided-review/tours); only that tour is copied into the run. Runs the app on a
 # throwaway HOME, so the maintainer's running app is left alone, and draws without the display, so a locked
 # screen works. Code comes from this repo when the PR is this repo's, else from GitHub.

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Div, ElementId, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
+    App, Div, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Pixels, RenderOnce, Rgba, SharedString, Stateful, StatefulInteractiveElement,
     Styled, StyledText, TextLayout, Window, div, px,
 };
@@ -11,13 +11,22 @@ use gpui::{
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
 use crate::app::components::tooltip::tooltip;
 use crate::pieces::PieceId;
-use crate::viewer::{Capture, CodeLink, DiffLine, Edge, LineKind, LineLocation, MoreContext};
+use crate::viewer::{
+    Capture, CodeLink, DiffLine, HiddenLines, LineKind, LineLocation, MoreContext,
+};
 
+use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
 use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
 
-pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
+/// What a gap row asks for: a few more lines from one side, or every hidden line.
+pub enum GapAsk<'a> {
+    More(&'a MoreContext),
+    All(&'a HiddenLines),
+}
+
+pub type OnGapAsk = Rc<dyn Fn(GapAsk, &mut Window, &mut App)>;
 
 /// What the mouse does on a row. The release is handled above the rows, wherever the mouse is let go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -570,36 +579,86 @@ pub fn binary_file_row(
 }
 
 /// The band between hunks, like GitHub's `@@` line; clicking it shows more unchanged lines.
+/// The unchanged lines between two changes (or above the first, or under the last) as one row: how
+/// many, and small arrows that bring more in from each side, or all of them at once.
 pub fn hunk_gap(
     colors: &Colors,
-    id: impl Into<ElementId>,
-    more: Option<MoreContext>,
-    on_more_context: OnMoreContext,
+    id: SharedString,
+    gap: &HiddenLines,
+    label: SharedString,
+    on_ask: &OnGapAsk,
 ) -> impl IntoElement {
+    let is_top = gap.after_above.is_none();
+    let is_end = gap.before_below.is_none();
+    let arrow = |more: &MoreContext, icon: Icon, name: &'static str| {
+        let (more, on_ask) = (more.clone(), Rc::clone(on_ask));
+        icon_button(
+            colors,
+            SharedString::from(format!("{id}-{name}")),
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+            icon,
+            name,
+        )
+        .h(px(22.))
+        .w(px(22.))
+        .on_click(move |_, window, cx| on_ask(GapAsk::More(&more), window, cx))
+    };
+    let down = gap.after_above.as_ref().map(|more| {
+        arrow(
+            more,
+            Icon::ArrowDown,
+            if is_end {
+                "Show more lines below"
+            } else {
+                "Show more lines under the change above"
+            },
+        )
+    });
+    let up = gap.before_below.as_ref().map(|more| {
+        arrow(
+            more,
+            Icon::ArrowUp,
+            if is_top {
+                "Show more lines above"
+            } else {
+                "Show more lines over the change below"
+            },
+        )
+    });
+    let all = gap.count.filter(|_| !is_top || !is_end).and_then(|_| {
+        (down.is_some() || up.is_some()).then(|| {
+            let (gap, on_ask) = (gap.clone(), Rc::clone(on_ask));
+            icon_button(
+                colors,
+                SharedString::from(format!("{id}-all")),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ChevronsUpDown,
+                "Show every hidden line",
+            )
+            .h(px(22.))
+            .w(px(22.))
+            .on_click(move |_, window, cx| on_ask(GapAsk::All(&gap), window, cx))
+        })
+    });
+    let has_asks = down.is_some() || up.is_some();
     let band = div()
         .id(id)
-        .h(px(24.))
+        .h(px(28.))
         .px_2()
         .flex()
         .items_center()
-        .gap_1p5()
+        .gap_1()
         .bg(colors.surface)
         .text_xs()
-        .text_color(colors.muted_text);
-    let band = match more {
-        None => band.child(sized_icon(Icon::Ellipsis, colors.muted_text, px(12.))),
-        Some(more) => {
-            let arrow = match more.edge {
-                Edge::Above => Icon::ArrowUp,
-                Edge::Below => Icon::ArrowDown,
-            };
-            band.cursor_pointer()
-                .hover(|band| band.bg(colors.hover).text_color(colors.text))
-                .active(|band| band.bg(colors.pressed).text_color(colors.text))
-                .on_click(move |_, window, cx| on_more_context(&more, window, cx))
-                .child(sized_icon(arrow, colors.accent, px(12.)))
-                .child("Show more lines")
-        }
-    };
+        .text_color(colors.muted_text)
+        .children(up)
+        .children(down)
+        .children(all)
+        .when(!has_asks, |band| {
+            band.child(sized_icon(Icon::Ellipsis, colors.muted_text, px(12.)))
+        })
+        .child(div().pl_1().child(label));
     piece_row(colors).child(band)
 }

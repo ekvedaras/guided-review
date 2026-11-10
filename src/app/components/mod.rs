@@ -22,6 +22,7 @@ pub mod refresh_banner;
 pub mod safety_net_view;
 pub mod segmented;
 pub mod settings_panel;
+pub mod shortcuts_sheet;
 pub mod sidebar_row;
 pub mod step_notes;
 pub mod switching_veil;

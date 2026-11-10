@@ -28,10 +28,12 @@ enum Scene {
     Gallery,
     SettingsEdited,
     SettingsEditedEnd,
+    Shortcuts,
+    JumpActions,
 }
 
 impl Scene {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 13] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -43,6 +45,8 @@ impl Scene {
         Self::Gallery,
         Self::SettingsEdited,
         Self::SettingsEditedEnd,
+        Self::Shortcuts,
+        Self::JumpActions,
     ];
 
     fn file_name(self) -> &'static str {
@@ -58,6 +62,8 @@ impl Scene {
             Self::Gallery => "28-gallery",
             Self::SettingsEdited => "29-settings-edited",
             Self::SettingsEditedEnd => "30-settings-edited-end",
+            Self::Shortcuts => "31-shortcuts",
+            Self::JumpActions => "32-jump-actions",
         }
     }
 }
@@ -137,9 +143,9 @@ impl OneStepLayout {
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
             Scene::JumpPalette => {
-                let targets = self.session.read(cx).review().jump_targets("");
+                let groups = self.session.read(cx).review().palette("");
                 self.jump
-                    .update(cx, |palette, cx| palette.open(targets, window, cx));
+                    .update(cx, |palette, cx| palette.open(groups, window, cx));
             }
             Scene::PrSwitcher => self
                 .pr_switcher
@@ -186,6 +192,17 @@ impl OneStepLayout {
                 settings.stage_sample_edits(cx);
                 settings.scroll_to_end();
             }),
+            Scene::Shortcuts => self
+                .shortcuts
+                .update(cx, |sheet, cx| sheet.toggle(window, cx)),
+            Scene::JumpActions => {
+                let query = ">";
+                let groups = self.session.read(cx).review().palette(query);
+                self.jump.update(cx, |palette, cx| {
+                    palette.open(Vec::new(), window, cx);
+                    palette.stage_query(query, groups);
+                });
+            }
         }
         cx.notify();
     }
@@ -195,7 +212,7 @@ impl OneStepLayout {
             Scene::Settings | Scene::SettingsEdited | Scene::SettingsEditedEnd => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
-            Scene::JumpPalette => self
+            Scene::JumpPalette | Scene::JumpActions => self
                 .jump
                 .update(cx, |palette, cx| palette.close(window, cx)),
             Scene::PrSwitcher => self
@@ -231,6 +248,9 @@ impl OneStepLayout {
                 });
             }
             Scene::Gallery => cx.set_global(StagedGallery(false)),
+            Scene::Shortcuts => self
+                .shortcuts
+                .update(cx, |sheet, cx| sheet.close(window, cx)),
         }
         cx.notify();
     }
@@ -256,27 +276,6 @@ impl OneStepLayout {
             if let Some(place) = session.composing().cloned() {
                 session.type_in_comment(&place, "Should a blank value be refused here?", cx);
             }
-        });
-    }
-
-    fn ask_about_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let rows = self.session.read(cx).rows();
-        let ask = (0..rows.len()).find_map(|index| match rows.row(index) {
-            Some(PageRow::Toolbar(toolbar)) => toolbar
-                .ask
-                .as_ref()
-                .map(|ask| (ask.place.clone(), ask.label.clone())),
-            _ => None,
-        });
-        let Some((place, label)) = ask else {
-            eprintln!("no Ask button on this screen");
-            return;
-        };
-        let ask = self.ask.clone();
-        self.session.update(cx, |session, cx| {
-            ask.update(cx, |panel, cx| {
-                panel.open(session.review(), place, label, window, cx);
-            });
         });
     }
 }
