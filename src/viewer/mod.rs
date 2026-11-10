@@ -34,6 +34,7 @@ mod reopen_after_save;
 mod review;
 mod review_state;
 mod row_selection;
+mod screen_travel;
 mod settings;
 mod step_page;
 mod suggestion;
@@ -100,6 +101,7 @@ pub use review::{
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
+pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,

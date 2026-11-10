@@ -82,6 +82,21 @@ pub struct ReadProgress {
     pub total: usize,
 }
 
+impl ReadProgress {
+    /// How much of the tour is read, from 0 to 1: the length of the trail.
+    pub fn share(self) -> f32 {
+        if self.total == 0 {
+            return 0.;
+        }
+        self.read.min(self.total) as f32 / self.total as f32
+    }
+
+    /// Every step read; a tour without steps has nothing to complete.
+    pub fn is_complete(self) -> bool {
+        self.total > 0 && self.read >= self.total
+    }
+}
+
 /// Where the open screen sits in the reading order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadingPlace {
@@ -746,6 +761,17 @@ impl Review {
 
     fn display<'a>(&'a self, links: &'a CodeLinks<'a>) -> DiffDisplay<'a> {
         self.display_options.display(links)
+    }
+
+    /// Where a screen sits in the reading order, without building the order; the safety net is last.
+    pub fn reading_position(&self, screen: &Screen) -> Option<usize> {
+        match screen {
+            Screen::SafetyNet => Some(self.steps_in_reading_order.len()),
+            Screen::Summary | Screen::Step(_) => self
+                .steps_in_reading_order
+                .iter()
+                .position(|shown| shown == screen),
+        }
     }
 
     fn reading_order(&self) -> Vec<Screen> {

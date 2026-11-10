@@ -351,3 +351,24 @@ fn changes_made_to_the_same_state_file_at_once_are_all_kept() {
         .len();
     assert_eq!(ticks, 80);
 }
+
+#[test]
+fn the_read_share_runs_from_none_to_all_and_is_complete_only_at_all() {
+    let none = ReadProgress { read: 0, total: 4 };
+    let some = ReadProgress { read: 1, total: 4 };
+    let all = ReadProgress { read: 4, total: 4 };
+
+    assert!((none.share() - 0.).abs() < f32::EPSILON);
+    assert!((some.share() - 0.25).abs() < f32::EPSILON);
+    assert!((all.share() - 1.).abs() < f32::EPSILON);
+    assert!(!some.is_complete());
+    assert!(all.is_complete());
+}
+
+#[test]
+fn a_tour_without_steps_has_read_nothing_and_is_not_complete() {
+    let empty = ReadProgress { read: 0, total: 0 };
+
+    assert!((empty.share() - 0.).abs() < f32::EPSILON);
+    assert!(!empty.is_complete());
+}
