@@ -435,8 +435,8 @@ fn the_ide_reads_as_a_preset_none_or_custom() {
 
     assert_eq!(ide_of(""), IdeChoice::None);
     assert_eq!(
-        ide_of("ide = \"phpstorm://open?file={path}&line={line}\"\n"),
-        IdeChoice::PhpStorm
+        ide_of("ide = \"idea://open?file={path}&line={line}\"\n"),
+        IdeChoice::JetBrains
     );
     assert_eq!(
         ide_of("ide = \"vscode://file{path}:{line}\"\n"),

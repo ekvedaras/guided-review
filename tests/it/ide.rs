@@ -97,8 +97,8 @@ fn each_ide_preset_opens_the_file_at_the_line_through_its_url_scheme() {
     };
 
     assert_eq!(
-        launch(IdeChoice::PhpStorm),
-        IdeLaunch::Url("phpstorm://open?file=/code/shop/app/Order.php&line=7".into())
+        launch(IdeChoice::JetBrains),
+        IdeLaunch::Url("idea://open?file=/code/shop/app/Order.php&line=7".into())
     );
     assert_eq!(
         launch(IdeChoice::VsCode),

@@ -36,7 +36,7 @@ impl IdeTemplate {
 /// The IDE the reviewer picks in Settings: one with a known URL scheme, none, or their own template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdeChoice {
-    PhpStorm,
+    JetBrains,
     VsCode,
     Zed,
     None,
@@ -51,12 +51,12 @@ impl IdeChoice {
         }
     }
 
-    const PRESETS: [Self; 3] = [Self::PhpStorm, Self::VsCode, Self::Zed];
+    const PRESETS: [Self; 3] = [Self::JetBrains, Self::VsCode, Self::Zed];
 
     pub fn template(&self) -> Option<IdeTemplate> {
         let preset = |url: &str| Some(IdeTemplate::new(url.to_owned()));
         match self {
-            Self::PhpStorm => preset("phpstorm://open?file={path}&line={line}"),
+            Self::JetBrains => preset("idea://open?file={path}&line={line}"),
             Self::VsCode => preset("vscode://file{path}:{line}"),
             Self::Zed => preset("zed://file{path}:{line}"),
             Self::None => None,

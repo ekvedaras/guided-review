@@ -639,7 +639,7 @@ impl SettingsPanel {
                     .flex()
                     .flex_wrap()
                     .gap_2()
-                    .child(preset("ide-phpstorm", "PhpStorm", IdeChoice::PhpStorm))
+                    .child(preset("ide-jetbrains", "JetBrains", IdeChoice::JetBrains))
                     .child(preset("ide-vscode", "VS Code", IdeChoice::VsCode))
                     .child(preset("ide-zed", "Zed", IdeChoice::Zed))
                     .child(preset("ide-none", "None", IdeChoice::None))
