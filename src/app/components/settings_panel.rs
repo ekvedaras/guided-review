@@ -9,8 +9,8 @@ use gpui::{
 
 use crate::config::{AskEffortChoice, AskModelChoice};
 use crate::ide::{IdeChoice, IdeTemplate};
-use crate::summary_instructions::SkillName;
-use crate::viewer::{SaveOutcome, SettingProblem, Settings, SummaryInstructionsChoice};
+use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
+use crate::viewer::{SaveOutcome, SettingProblem, Settings};
 
 use super::button::{ButtonKind, ButtonSize, button, toggle_button};
 use super::palette::{Colors, TEXT_FONT};

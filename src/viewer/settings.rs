@@ -152,7 +152,7 @@ const CLONES: &str = "clones";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
-/// A document toml_edit accepts and toml refuses holds something this config cannot read, so the setting says so.
+/// A document `toml_edit` accepts and `toml` refuses holds something this config cannot read, so the setting says so.
 fn summary_instructions_in(document: &DocumentMut) -> SummaryInstructionsChoice {
     let Some(item) = document.get(SUMMARY_INSTRUCTIONS) else {
         return SummaryInstructionsChoice::DefaultFile;
