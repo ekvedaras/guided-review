@@ -601,11 +601,14 @@ impl SettingsPanel {
             Some(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
-                    .gap_3()
+                    .gap_x_3()
+                    .gap_y_1()
                     .text_sm()
                     .child(
                         div()
+                            .min_w_0()
                             .text_color(colors.muted_text)
                             .child(format!("{} {status}", editing.default_file)),
                     )

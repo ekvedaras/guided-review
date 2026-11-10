@@ -132,6 +132,7 @@ impl RenderOnce for CommentComposer {
         let buttons = (self.state != ComposerState::Sending).then(|| {
             div()
                 .flex()
+                .flex_wrap()
                 .gap_2()
                 .child(button(
                     &colors,

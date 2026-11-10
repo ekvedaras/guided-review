@@ -337,6 +337,7 @@ impl ThreadElement {
         let buttons = (!is_busy).then(|| {
             div()
                 .flex()
+                .flex_wrap()
                 .gap_2()
                 .child(
                     button(
@@ -459,6 +460,7 @@ impl ThreadElement {
             let cancelled_id = comment_id.clone();
             div()
                 .flex()
+                .flex_wrap()
                 .gap_2()
                 .child(
                     button(
