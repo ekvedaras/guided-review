@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
+use crate::config::Config;
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
@@ -32,12 +33,17 @@ pub fn refresh_writer_tools(clone: &Path) -> String {
 }
 
 /// What a tour agent the app starts may do without the auto mode classifier: the refresh writer's tools, plus
-/// answering. It runs in auto mode, because a comment may ask it to change the PR's code (decided 2026-11-10).
-pub fn tour_agent_tools(clone: &Path) -> String {
-    format!(
+/// answering, plus the reviewer's summary skill. It runs in auto mode, because a comment may ask it to change
+/// the PR's code (decided 2026-11-10).
+pub fn tour_agent_tools(clone: &Path, summary_skill: Option<&str>) -> String {
+    let tools = format!(
         "{},Bash(guided-review agent-reply:*)",
         refresh_writer_tools(clone)
-    )
+    );
+    match summary_skill {
+        Some(skill) => format!("{tools},Skill({skill})"),
+        None => tools,
+    }
 }
 
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
@@ -244,6 +250,7 @@ impl EvalWriter for ClaudeEvalWriter {
             .args(["--disallowedTools", EVAL_WRITER_BLOCKED])
             .args(["--append-system-prompt", brief.skill])
             .env(Tour::TOURS_DIR_ENV, brief.tours_dir)
+            .env(Config::SUMMARY_INSTRUCTIONS_OFF_ENV, "1")
             .current_dir(std::env::temp_dir());
         run_headless(
             command,

@@ -54,6 +54,8 @@ pub enum Request {
         #[serde(default)]
         replied: AgentReplied,
     },
+    /// Show Settings: over the PR on screen, or in a window of its own when no PR is open.
+    ShowSettings,
     Quit,
 }
 
@@ -102,6 +104,8 @@ pub enum Answer {
     NotShown {
         pr: String,
     },
+    /// Settings is on screen.
+    ShowingSettings,
     /// Saving what is typed, then quitting.
     Quitting,
     /// The request was written by another build and was not acted on.
@@ -122,6 +126,7 @@ impl std::fmt::Display for Answer {
                 write!(f, "guided-review app marked the hand-off answered on {pr}")
             }
             Self::NotShown { pr } => write!(f, "guided-review app does not show {pr}"),
+            Self::ShowingSettings => write!(f, "guided-review app is showing Settings"),
             Self::Quitting => write!(f, "guided-review app is quitting"),
             Self::OtherBuild => write!(f, "guided-review app is another build"),
         }
@@ -266,11 +271,11 @@ pub fn tell_app(folder: &AppFolder, request: &Request) -> anyhow::Result<Option<
         .map(|line| line.answer))
 }
 
-/// Hands `open` to the running app, starting one when none answers and replacing one of another build.
-pub fn hand_over(folder: &AppFolder, open: OpenRequest) -> anyhow::Result<Answer> {
-    let request = Request::Open(open);
+/// Hands the request to the running app, starting one when none answers and replacing one of another
+/// build.
+pub fn hand_over(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
     let socket = folder.socket();
-    match exchange(&socket, &request)? {
+    match exchange(&socket, request)? {
         Some(answer) if answer.version == build() => return Ok(answer.answer),
         Some(_) => {
             exchange(&socket, &Request::Quit)?;
@@ -282,7 +287,7 @@ pub fn hand_over(folder: &AppFolder, open: OpenRequest) -> anyhow::Result<Answer
     start_app(folder)?;
     let mut answer = None;
     wait_until(START_WAIT, || {
-        answer = exchange(&socket, &request).ok().flatten();
+        answer = exchange(&socket, request).ok().flatten();
         answer.is_some()
     })
     .context("the app did not start; see its log in the guided-review folder")?;

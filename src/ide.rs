@@ -13,6 +13,10 @@ impl IdeTemplate {
         Self(text)
     }
 
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     fn fill(&self, path: &str, line: LineNumber) -> String {
         self.0
             .replace("{path}", path)
@@ -26,6 +30,57 @@ impl IdeTemplate {
             && scheme
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    }
+}
+
+/// The IDE the reviewer picks in Settings: one with a known URL scheme, none, or their own template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdeChoice {
+    JetBrains,
+    VsCode,
+    Zed,
+    None,
+    Custom(IdeTemplate),
+}
+
+impl IdeChoice {
+    pub fn custom_text(&self) -> Option<&str> {
+        match self {
+            Self::Custom(template) => Some(template.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The template a preset hands to the system, so the reviewer sees what it opens.
+    pub fn shown_template(&self) -> Option<&'static str> {
+        match self {
+            Self::JetBrains => Some("idea://open?file={path}&line={line}"),
+            Self::VsCode => Some("vscode://file{path}:{line}"),
+            Self::Zed => Some("zed://file{path}:{line}"),
+            Self::None | Self::Custom(_) => None,
+        }
+    }
+
+    const PRESETS: [Self; 3] = [Self::JetBrains, Self::VsCode, Self::Zed];
+
+    pub fn template(&self) -> Option<IdeTemplate> {
+        match self {
+            Self::Custom(template) => Some(template.clone()),
+            preset => preset
+                .shown_template()
+                .map(|url| IdeTemplate::new(url.to_owned())),
+        }
+    }
+
+    /// A template equal to a preset's is that preset, so a config written by hand and one written by Settings read alike.
+    pub fn of(template: Option<&IdeTemplate>) -> Self {
+        let Some(template) = template else {
+            return Self::None;
+        };
+        Self::PRESETS
+            .into_iter()
+            .find(|preset| preset.template().as_ref() == Some(template))
+            .unwrap_or_else(|| Self::Custom(template.clone()))
     }
 }
 

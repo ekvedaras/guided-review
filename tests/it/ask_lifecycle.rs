@@ -497,3 +497,22 @@ fn use_as_comment_is_refused_for_an_ask_with_no_answer_yet() {
     assert_eq!(refused, Err(CommentRefusal::NoAnswerYet));
     assert_eq!(shop.open().comment_drafts().first(), None);
 }
+
+#[test]
+fn the_pool_counts_the_turns_answering_now() {
+    let at = Instant::now();
+    let mut pool = AgentPool::default();
+    pool.open(ask(1), at);
+    pool.open(ask(2), at);
+    assert_eq!(pool.answering(), 0);
+
+    pool.turn_started(ask(1), at);
+    pool.turn_started(ask(2), at);
+    assert_eq!(pool.answering(), 2);
+
+    pool.turn_ended(ask(1), at + minutes(1));
+    assert_eq!(pool.answering(), 1);
+
+    pool.ended(ask(2));
+    assert_eq!(pool.answering(), 0);
+}

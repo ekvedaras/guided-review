@@ -3,6 +3,7 @@ use std::fmt;
 use crate::image_facts::ImageChange;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
+use crate::summary_instructions::SummaryInstructions;
 use crate::test_pairing::SubjectCandidates;
 
 const MAX_SIGNATURE_CHARS: usize = 100;
@@ -15,6 +16,7 @@ pub struct Outline<'a> {
     pub files: &'a [ChangedFile],
     pub worktree_at_head: bool,
     pub subjects: &'a SubjectCandidates,
+    pub summary_instructions: &'a SummaryInstructions,
 }
 
 impl fmt::Display for Outline<'_> {
@@ -87,7 +89,7 @@ impl fmt::Display for Outline<'_> {
                 }
             }
         }
-        Ok(())
+        write!(f, "{}", self.summary_instructions)
     }
 }
 

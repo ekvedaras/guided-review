@@ -29,6 +29,8 @@ pub struct PrSwitching {
     pub relevant: Arc<dyn RelevantPullRequestsPort>,
     pub home: PathBuf,
     pub show: Arc<dyn Fn(PullRequestUrl) + Send + Sync>,
+    /// Asks the app to open the PR on screen again, after a save of the settings.
+    pub reopen: Arc<dyn Fn() + Send + Sync>,
     /// The PR shown, the tours being written and the agent replies not seen.
     pub active: Entity<ActivePr>,
     /// Herdr, where tour agents write tours.

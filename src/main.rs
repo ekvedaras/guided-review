@@ -2,8 +2,11 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::agent_reply::{AgentReply, agent_reply};
-use guided_review::app_link::{Answer, AppFolder, AppListener, BindError, OpenRequest, hand_over};
+use guided_review::app_link::{
+    Answer, AppFolder, AppListener, BindError, OpenRequest, Request, hand_over,
+};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
+use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
 use guided_review::open_review::require_tour;
@@ -12,6 +15,7 @@ use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
+use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::Tour;
@@ -53,6 +57,8 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
+    /// Show the app's Settings, also with no PR open
+    Settings,
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
         pr: PullRequestUrl,
@@ -96,6 +102,7 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
+        Command::Settings => settings(),
         Command::AgentReply {
             pr,
             hand_off,
@@ -127,7 +134,20 @@ fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A config that cannot be read must not stop `outline` or `check`, which work without it.
+fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
+    let home = home_folder()?;
+    match Config::load_from(&home) {
+        Ok(config) => Ok(config.summary_instructions(&home)),
+        Err(error) => {
+            eprintln!("warning: summary instructions not read: {error:#}");
+            Ok(SummaryInstructions::none())
+        }
+    }
+}
+
 fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let summary_instructions = summary_instructions()?;
     let code = OpenedPr::new(pr)?.at_live_tips()?;
     let (base, files) = code.pieces_since_merge_base()?;
     print!(
@@ -139,6 +159,7 @@ fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
             files: &files,
             worktree_at_head: code.source.working_tree_is_at(&code.tips.head),
             subjects: &SubjectCandidates::find(code.source.as_ref(), &code.tips.head, &files),
+            summary_instructions: &summary_instructions,
         }
     );
     Ok(())
@@ -180,7 +201,7 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     tour.save(&tour_path)?;
     let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
 
-    let report = tour_check::check(&tour, &files);
+    let report = tour_check::check(&tour, &files, &summary_instructions()?);
     print!("{report}");
     if !report.errors.is_empty() {
         std::process::exit(1);
@@ -261,14 +282,25 @@ fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
     require_tour(pr, &home)?;
     let answer = hand_over(
         &AppFolder::in_home(&home),
-        OpenRequest {
+        &Request::Open(OpenRequest {
             pr: pr.to_string(),
             folder: std::env::current_dir().context("could not read the current folder")?,
             terminal: std::env::var("HC_TERMINAL_ID").ok(),
-        },
+        }),
     )?;
     match answer {
         Answer::Opening { .. } | Answer::Reloaded { .. } | Answer::KeptInBackground { .. } => {
+            println!("{answer}");
+            Ok(())
+        }
+        other => anyhow::bail!("{other}"),
+    }
+}
+
+fn settings() -> anyhow::Result<()> {
+    let answer = hand_over(&AppFolder::in_home(&home_folder()?), &Request::ShowSettings)?;
+    match answer {
+        Answer::ShowingSettings => {
             println!("{answer}");
             Ok(())
         }

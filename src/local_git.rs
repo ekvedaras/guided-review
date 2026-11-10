@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -8,6 +9,22 @@ use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+
+/// Why a folder set as a repo's clone cannot be used as one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloneProblem {
+    FolderGone,
+    NoRemoteOfRepo,
+}
+
+impl fmt::Display for CloneProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::FolderGone => "that folder is gone",
+            Self::NoRemoteOfRepo => "no remote there points at that repo",
+        })
+    }
+}
 
 /// Reads git objects only, never the working tree, so uncommitted work never leaks into a tour.
 pub struct LocalGit {
@@ -25,14 +42,36 @@ impl LocalGit {
         let Some(configured) = Config::load()?.clone_of(repo) else {
             return Ok(None);
         };
-        let configured = Self { repo: configured };
-        if !configured.is_clone_of(repo) {
-            bail!(
-                "~/.guided-review/config.toml says {} is a clone of {repo}, but no remote there points at {repo}",
-                configured.repo.display()
-            );
+        match Self::configured_clone(repo, &configured) {
+            Ok(clone) => Ok(Some(clone)),
+            Err(problem) => bail!(
+                "~/.guided-review/config.toml says {} is a clone of {repo}, but {problem}",
+                configured.display()
+            ),
         }
-        Ok(Some(configured))
+    }
+
+    /// The rule a folder set as the clone of `repo` must pass, both when a PR opens and when Settings saves.
+    pub fn configured_clone(repo: &RepoName, folder: &Path) -> Result<Self, CloneProblem> {
+        if !folder.is_dir() {
+            return Err(CloneProblem::FolderGone);
+        }
+        let clone = Self {
+            repo: folder.to_path_buf(),
+        };
+        if !clone.is_clone_of(repo) {
+            return Err(CloneProblem::NoRemoteOfRepo);
+        }
+        Ok(clone)
+    }
+
+    /// The GitHub repo the folder's `origin` remote points at.
+    pub fn origin_of(folder: &Path) -> Option<RepoName> {
+        let clone = Self {
+            repo: folder.to_path_buf(),
+        };
+        let url = clone.git(&["config", "--get", "remote.origin.url"]).ok()?;
+        RepoName::from_github_remote(url.trim())
     }
 
     pub fn root(&self) -> &Path {

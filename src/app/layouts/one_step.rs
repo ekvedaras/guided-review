@@ -44,6 +44,7 @@ use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
@@ -64,9 +65,9 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, LineLocation,
-    MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Review, Screen,
-    SendMode, StepId, ThreadId, ThreadView,
+    AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, InFlight,
+    LineLocation, MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Reopen,
+    ReopenAfterSave, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
 };
 
 actions!(
@@ -76,7 +77,8 @@ actions!(
         GoBack,
         ToggleJump,
         CopySelection,
-        ToggleWrapLines
+        ToggleWrapLines,
+        ToggleSettings
     ]
 );
 
@@ -119,7 +121,11 @@ pub struct OneStepLayout {
     snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
+    settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
+    /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
+    /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
+    reopen_after_save: ReopenAfterSave,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -135,6 +141,7 @@ impl OneStepLayout {
         source: Arc<dyn CodeSource>,
         ask: AskSetup,
         collaborators: Collaborators,
+        carried_settings: Option<Entity<SettingsPanel>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -166,6 +173,7 @@ impl OneStepLayout {
         let session_subscriptions = [
             cx.observe(&session, |this, _, cx| {
                 this.use_code_opener_of_review(cx);
+                this.reopen_if_work_ended(cx);
                 cx.notify();
             }),
             cx.subscribe(&session, |this, _, SessionEvent::Reopened, cx| {
@@ -178,6 +186,24 @@ impl OneStepLayout {
         let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
         cx.observe(&switching.active, |_, _, cx| cx.notify())
             .detach();
+        let settings = if let Some(settings) = carried_settings {
+            settings.update(cx, |settings, cx| {
+                settings.move_to(focus.clone(), Placement::BesideSidebar, cx);
+            });
+            settings
+        } else {
+            let home = switching.home.clone();
+            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::BesideSidebar, cx))
+        };
+        cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, event, window, cx| match event {
+                SettingsEvent::Saved => this.settings_saved(window, cx),
+                SettingsEvent::Closed => {}
+            },
+        )
+        .detach();
         let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
         cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
             JumpEvent::QueryChanged(query) => {
@@ -203,15 +229,23 @@ impl OneStepLayout {
         cx.subscribe(&ask, |this, panel, HandToAgent { ask, place }, cx| {
             let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
             let id = ask.id;
-            cx.spawn(async move |_, cx| {
+            this.reopen_after_save.ask_handed_to_agent();
+            cx.spawn(async move |this, cx| {
                 let line = handing.await;
                 panel.update(cx, |panel, cx| panel.hand_off_ended(id, line, cx));
+                this.update(cx, |this, cx| {
+                    let in_flight = this.in_flight(cx);
+                    let reopen = this.reopen_after_save.ask_hand_off_ended(in_flight);
+                    this.reopen_if_due(reopen, cx);
+                })
+                .ok();
             })
             .detach();
         })
         .detach();
         let asked_lines_subscription = cx.observe(&ask, |this, _, cx| {
             this.session.update(cx, ReviewSession::asks_changed);
+            this.reopen_if_work_ended(cx);
         });
         let layout_handle = cx.weak_entity();
         let on_row_gesture: OnRowGesture = Rc::new(move |gesture, at, _window, cx| {
@@ -257,7 +291,9 @@ impl OneStepLayout {
             snapshots: crate::app::snapshots::Snapshots::from_env(),
             jump,
             pr_switcher,
+            settings,
             loading,
+            reopen_after_save: ReopenAfterSave::default(),
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -275,6 +311,30 @@ impl OneStepLayout {
         })
         .detach();
         diagrams
+    }
+
+    /// A click in the sidebar goes to its item and closes Settings, which asks first when it holds
+    /// unsaved changes; Keep editing stays in Settings and the click goes nowhere.
+    fn go_from_sidebar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        go: impl FnOnce(&mut Review) + 'static,
+    ) {
+        if !self.settings.read(cx).is_open() {
+            self.change_review(cx, go);
+        } else if !self.settings.read(cx).has_unsaved_changes() {
+            self.settings
+                .update(cx, |settings, cx| settings.close(window, cx));
+            self.change_review(cx, go);
+        } else {
+            let layout = cx.entity();
+            self.settings.update(cx, |settings, cx| {
+                settings.ask_before_leaving(window, cx, move |cx| {
+                    layout.update(cx, |this, cx| this.change_review(cx, go));
+                });
+            });
+        }
     }
 
     fn change_review<T>(&self, cx: &mut App, change: impl FnOnce(&mut Review) -> T) -> T {
@@ -735,6 +795,9 @@ impl OneStepLayout {
     }
 
     fn toggle_jump(&mut self, _: &ToggleJump, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         let targets = self.session.read(cx).review().jump_targets("");
         self.jump.update(cx, |palette, cx| {
             if palette.is_open() {
@@ -743,6 +806,72 @@ impl OneStepLayout {
                 palette.open(targets, window, cx);
             }
         });
+    }
+
+    fn toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
+        self.settings.update(cx, |settings, cx| {
+            if settings.is_open() {
+                settings.request_close(window, cx);
+            } else {
+                settings.open(window, cx);
+            }
+        });
+    }
+
+    /// Settings asked for from outside the window, by `guided-review settings`: opens it, never closes it.
+    pub fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) || self.settings.read(cx).is_open() {
+            return;
+        }
+        self.settings
+            .update(cx, |settings, cx| settings.open(window, cx));
+    }
+
+    /// The one place that reacts to Save having written `config.toml`. The PR on screen was built with the
+    /// old settings, so it opens again, once no Ask answers and no hand-off is being typed; the panel
+    /// closes either way and the wait shows in the window (see `waiting_for_reopen`).
+    fn settings_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings
+            .update(cx, |settings, cx| settings.close(window, cx));
+        let in_flight = self.in_flight(cx);
+        let reopen = self.reopen_after_save.saved(in_flight);
+        self.reopen_if_due(reopen, cx);
+        cx.notify();
+    }
+
+    fn in_flight(&self, cx: &App) -> InFlight {
+        InFlight {
+            asks_answering: self.ask.read(cx).answering(),
+            delivering_hand_offs: self.session.read(cx).is_delivering_hand_offs(),
+        }
+    }
+
+    /// Called whenever an Ask turn, a hand-off or an Ask handed to the agent may have ended.
+    fn reopen_if_work_ended(&mut self, cx: &mut Context<Self>) {
+        let in_flight = self.in_flight(cx);
+        let reopen = self.reopen_after_save.work_in_flight_changed(in_flight);
+        self.reopen_if_due(reopen, cx);
+    }
+
+    fn reopen_if_due(&mut self, reopen: Reopen, cx: &mut Context<Self>) {
+        if reopen == Reopen::Now {
+            (cx.global::<PrSwitching>().reopen)();
+        }
+    }
+
+    /// Typing is saved and focus leaves every box, so nothing the reviewer does reaches the session whose
+    /// state file the reopen's build is reading. The veil keeps the mouse out; `is_reopening` the keys.
+    pub fn hold_for_reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.flush_typing(cx);
+        window.focus(&self.focus, cx);
+    }
+
+    fn is_reopening(&self, cx: &App) -> bool {
+        cx.global::<PrSwitching>().active.read(cx).switching_to()
+            == Some(self.session.read(cx).review().pr())
     }
 
     fn toggle_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -772,6 +901,9 @@ impl OneStepLayout {
     /// Like the footer's button, the arrow key ticks the step it leaves, but only once the reader
     /// has seen the step's end, so skipping ahead does not count as reading.
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.note_seen_end(cx);
         let review = self.session.read(cx).review();
         if let Screen::Step(id) = review.screen().clone()
@@ -819,10 +951,16 @@ impl OneStepLayout {
     }
 
     fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.change_review(cx, Review::go_back);
     }
 
     fn toggle_wrap_lines(&mut self, _: &ToggleWrapLines, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_reopening(cx) {
+            return;
+        }
         self.change_review(cx, Review::toggle_wrap_lines);
     }
 
@@ -875,8 +1013,8 @@ impl OneStepLayout {
             sidebar.is_summary_current,
             RowMark::Page,
         )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, Review::go_to_summary);
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.go_from_sidebar(window, cx, Review::go_to_summary);
         }))
         .child("Summary");
         let sync_notices = sidebar
@@ -925,8 +1063,9 @@ impl OneStepLayout {
                 step.is_current,
                 mark,
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to(&id));
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let id = id.clone();
+                this.go_from_sidebar(window, cx, move |review| review.go_to(&id));
             }))
             .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
                 format!("sidebar-{}", step.id),
@@ -942,8 +1081,8 @@ impl OneStepLayout {
                 safety_net.is_current,
                 RowMark::Page,
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, Review::go_to_safety_net);
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.go_from_sidebar(window, cx, Review::go_to_safety_net);
             }))
             .child(div().flex_1().child(SafetyNetIntro::TITLE))
             .child(
@@ -1009,6 +1148,33 @@ impl OneStepLayout {
                     .children(safety_net_row),
             )
             .child(key_hints(&colors))
+            .child(self.settings_row(&colors, cx))
+    }
+
+    fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex_none()
+            .px_4()
+            .py_2()
+            .flex()
+            .items_center()
+            .border_t_1()
+            .border_color(colors.subtle_border)
+            .child(
+                button(
+                    colors,
+                    "sidebar-settings",
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                )
+                .child(icon(Icon::Settings, colors.muted_text))
+                .child("Settings")
+                .child(div().pl_1().text_color(colors.muted_text).child("⌘,"))
+                .tooltip(tooltip(|_| "Settings".into()))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_settings(&ToggleSettings, window, cx);
+                })),
+            )
     }
 
     /// The PR this review is of, and the window-wide actions.
@@ -1142,9 +1308,12 @@ impl OneStepLayout {
                     &bullet,
                 )))
                 .into_any_element(),
-            PageRow::PrDescription(description) => {
-                self.pr_description(description, cx).into_any_element()
-            }
+            PageRow::ReviewerSummary(summary) => self
+                .markdown_card("Reviewer summary", "reviewer-summary", summary, cx)
+                .into_any_element(),
+            PageRow::PrDescription(description) => self
+                .markdown_card("PR description", "pr-description", description, cx)
+                .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
                 .pb_4()
@@ -1290,9 +1459,11 @@ impl OneStepLayout {
         }
     }
 
-    fn pr_description(
+    fn markdown_card(
         &self,
-        description: Rc<PreparedMarkdown>,
+        eyebrow_text: &'static str,
+        id: &'static str,
+        markdown: Rc<PreparedMarkdown>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = Colors::active(cx);
@@ -1304,7 +1475,7 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_2()
-            .child(eyebrow(&colors, "PR description"))
+            .child(eyebrow(&colors, eyebrow_text))
             .child(
                 div()
                     .px_4()
@@ -1314,7 +1485,7 @@ impl OneStepLayout {
                     .border_color(colors.subtle_border)
                     .bg(colors.surface)
                     .text_sm()
-                    .child(MarkdownView::new("pr-description", description)),
+                    .child(MarkdownView::new(id, markdown)),
             )
     }
 
@@ -1772,6 +1943,7 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::toggle_wrap_lines))
             .on_action(cx.listener(Self::toggle_jump))
+            .on_action(cx.listener(Self::toggle_settings))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
@@ -1804,6 +1976,15 @@ impl Render for OneStepLayout {
                             cx,
                         ))
                     }))
+                    .children(self.reopen_after_save.waiting_line().map(|line| {
+                        div()
+                            .px_6()
+                            .py_1()
+                            .text_sm()
+                            .bg(colors.warning_background)
+                            .text_color(colors.warning)
+                            .child(line.to_owned())
+                    }))
                     .children(self.selection_notice.clone().map(|notice| {
                         div()
                             .px_6()
@@ -1831,6 +2012,7 @@ impl Render for OneStepLayout {
             .when(self.ask.read(cx).is_open(), |row| {
                 row.child(self.ask.clone())
             })
+            .child(self.settings.clone())
             .child(self.loading.clone())
             .children(switching_veil)
             .child(self.jump.clone())

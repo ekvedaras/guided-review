@@ -25,15 +25,22 @@ impl Shop {
     }
 
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        self.open_with(&json!({}))
+    }
+
+    fn open_with(&self, extra: &serde_json::Value) -> Review {
+        let mut tour = json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,
             "title": "Hello world",
             "summary": ["Greets the world"],
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
-        }))
-        .unwrap();
+        });
+        tour.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let tour: Tour = serde_json::from_value(tour).unwrap();
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
@@ -131,5 +138,30 @@ fn github_gives_the_pr_body_and_an_empty_description_for_none() {
             .pull_request_description(&pr)
             .unwrap(),
         ""
+    );
+}
+
+#[test]
+fn the_reviewer_summary_shows_as_markdown_on_the_summary_screen() {
+    let shop = Shop::with_pull();
+    let review =
+        shop.open_with(&json!({"reviewer_summary": "**Risk**: low.\n\n## Touches\n\nBilling."}));
+
+    let summary = review.reviewer_summary().unwrap();
+
+    assert_eq!(summary.blocks.len(), 3, "{:?}", summary.blocks);
+    assert_eq!(paragraph_texts(&summary.blocks[..1]), ["Risk: low."]);
+    assert!(matches!(summary.blocks[1], Block::Heading { level: 3, .. }));
+}
+
+#[test]
+fn a_tour_with_no_reviewer_summary_shows_none() {
+    let shop = Shop::with_pull();
+
+    assert!(shop.open().reviewer_summary().is_none());
+    assert!(
+        shop.open_with(&json!({"reviewer_summary": " \n "}))
+            .reviewer_summary()
+            .is_none()
     );
 }

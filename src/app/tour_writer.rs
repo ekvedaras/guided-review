@@ -12,6 +12,7 @@ use gpui::{App, AsyncApp, Entity};
 use super::components::pr_switcher::PrSwitching;
 use crate::open_review::writer_folder;
 use crate::pull_request::PullRequestUrl;
+use crate::summary_instructions::SummaryInstructions;
 use crate::viewer::{ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision};
 
 const SCREEN_LINES: usize = 20;
@@ -91,6 +92,7 @@ fn start(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
             .background_executor()
             .spawn(async move {
                 TourAgents::new(writer_port)
+                    .with_summary_skill(SummaryInstructions::skill_for_launch(&home))
                     .starting_in(writer_folder(&writer_pr, &home))
                     .write_tour(&writer_pr, &shown)
             })

@@ -72,6 +72,11 @@ impl AgentPool {
             .any(|agent| agent.ask == ask && agent.is_answering)
     }
 
+    pub fn answering(&self) -> u16 {
+        let answering = self.live.iter().filter(|agent| agent.is_answering).count();
+        u16::try_from(answering).unwrap_or(u16::MAX)
+    }
+
     pub fn turn_started(&mut self, ask: AskId, now: Instant) {
         self.touch(ask, now, true);
     }

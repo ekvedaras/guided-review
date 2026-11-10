@@ -362,6 +362,12 @@ impl Review {
         &self.tour.summary
     }
 
+    /// Under the summary's bullets and above the PR description. `None` when the tour has none.
+    pub fn reviewer_summary(&self) -> Option<Markdown> {
+        let body = &self.tour.reviewer_summary;
+        (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
+    }
+
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
     /// `None` for a PR with no description.
     pub fn pr_description(&self) -> Option<Markdown> {

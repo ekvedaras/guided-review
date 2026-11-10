@@ -451,6 +451,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
             name: "tour-acme-shop-7".to_owned(),
             folder: PathBuf::from("/clones/shop"),
             first_task: "You are the tour agent".to_owned(),
+            summary_skill: None,
         })
         .unwrap();
 
@@ -486,7 +487,41 @@ fn start_shop_agent(agents: &HcTourAgents) -> anyhow::Result<TerminalId> {
         name: "tour-acme-shop-7".to_owned(),
         folder: PathBuf::from("/clones/shop"),
         first_task: "You are the tour agent".to_owned(),
+        summary_skill: None,
     })
+}
+
+fn tools_of_started_agent(summary_skill: Option<&str>) -> Vec<String> {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+    adapter(dir.path())
+        .start(&TourAgentStart {
+            pr: pr(),
+            name: "tour-acme-shop-7".to_owned(),
+            folder: PathBuf::from("/clones/shop"),
+            first_task: "You are the tour agent".to_owned(),
+            summary_skill: summary_skill.map(str::to_owned),
+        })
+        .unwrap();
+    let calls = calls(dir.path(), "calls");
+    let [call] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    let (_, tools) = call.split_once(" --allowedTools ").unwrap();
+    tools.split(',').map(str::to_owned).collect()
+}
+
+#[test]
+fn a_tour_agent_may_run_the_summary_skill_the_reviewer_named_and_only_then() {
+    let with = tools_of_started_agent(Some("recap"));
+    let without = tools_of_started_agent(None);
+
+    assert!(with.contains(&"Skill(recap)".to_owned()), "{with:?}");
+    assert!(
+        !without.iter().any(|tool| tool == "Skill(recap)"),
+        "{without:?}"
+    );
+    assert_eq!(with.len(), without.len() + 1);
 }
 
 #[test]

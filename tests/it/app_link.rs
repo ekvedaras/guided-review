@@ -72,6 +72,7 @@ fn the_listener_answers_each_request_line_through_the_handler() {
         .serve(|request| match request {
             Request::Open(open) => Answer::Opening { pr: open.pr },
             Request::AgentReplied { pr, .. } => Answer::HandOffAnswered { pr },
+            Request::ShowSettings => Answer::ShowingSettings,
             Request::Quit => Answer::Quitting,
         });
 

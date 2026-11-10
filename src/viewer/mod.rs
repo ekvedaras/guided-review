@@ -5,6 +5,7 @@ mod active_pr;
 mod agent_event;
 mod agent_pool;
 mod app_state;
+mod app_window;
 mod ask;
 mod ask_context;
 mod ask_target;
@@ -29,9 +30,11 @@ mod problems;
 mod reactions;
 mod refresh;
 mod relevant_prs;
+mod reopen_after_save;
 mod review;
 mod review_state;
 mod row_selection;
+mod settings;
 mod step_page;
 mod suggestion;
 mod sync_state;
@@ -46,6 +49,7 @@ pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, W
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
+pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;
@@ -89,12 +93,14 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
+pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, SafetyNetSize, Screen,
     SidebarEntry, StepId,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
+pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
 };

@@ -687,6 +687,10 @@ impl ReviewSession {
 
     /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
     /// Ends with what the Ask panel says of it.
+    pub fn is_delivering_hand_offs(&self) -> bool {
+        self.delivering.is_some()
+    }
+
     pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
         let agents = self.tour_work.tour_agents.clone();
         let pr = self.review.pr().clone();
@@ -753,6 +757,7 @@ impl ReviewSession {
             move || request.run(&agents, github.as_ref()),
             |this, outcome, cx| {
                 this.delivering = None;
+                cx.notify();
                 let started_an_agent = outcome.started_an_agent();
                 let try_again_soon = outcome.wants_another_try_soon();
                 if let Err(error) = this.change(cx, |review| review.apply_delivery(outcome)) {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::support::{FixtureRepo, file_path};
 use guided_review::config::Config;
-use guided_review::ide::{Ide, IdeLaunch, NoIde};
+use guided_review::ide::{Ide, IdeChoice, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 
@@ -86,6 +86,28 @@ fn running_a_url_launch_hands_the_url_to_the_opener() {
         .unwrap();
 
     assert_eq!(opened, ["idea://open?file=/code/shop/a.php&line=2"]);
+}
+
+#[test]
+fn each_ide_preset_opens_the_file_at_the_line_through_its_url_scheme() {
+    let launch = |choice: IdeChoice| {
+        Ide::for_clone(Some(PathBuf::from("/code/shop")), choice.template())
+            .unwrap()
+            .launch(&file_path("app/Order.php"), line(7))
+    };
+
+    assert_eq!(
+        launch(IdeChoice::JetBrains),
+        IdeLaunch::Url("idea://open?file=/code/shop/app/Order.php&line=7".into())
+    );
+    assert_eq!(
+        launch(IdeChoice::VsCode),
+        IdeLaunch::Url("vscode://file/code/shop/app/Order.php:7".into())
+    );
+    assert_eq!(
+        launch(IdeChoice::Zed),
+        IdeLaunch::Url("zed://file/code/shop/app/Order.php:7".into())
+    );
 }
 
 #[test]

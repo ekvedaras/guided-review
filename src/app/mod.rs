@@ -11,6 +11,7 @@ mod frame_stats;
 mod layouts;
 mod page_rows;
 mod review_session;
+mod settings_window;
 mod sidebar_rows;
 #[cfg(feature = "snapshots")]
 mod snapshots;
@@ -37,8 +38,9 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, AgentReplied, AppStateFile, BuildTicket, Finished, HandOffId, OpenDecision,
-    OpenOrigin, PrSwitcher, ReviewStateFile, TourAgents,
+    ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, FailedBuild,
+    Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher, ReviewStateFile, ShowReview,
+    ShowSettings, TourAgents,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -46,22 +48,34 @@ use components::comment_composer::CommentComposer;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
 use components::pr_switcher::{PrSwitcherView, PrSwitching};
+use components::settings_panel::SettingsPanel;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleWrapLines,
+    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleSettings,
+    ToggleWrapLines,
 };
 use review_session::TourWork;
+use settings_window::SettingsWindow;
 
-type Asked = (Request, std::sync::mpsc::Sender<Answer>);
+/// What the app's loop takes in: requests from outside, and the app's own asks of itself.
+enum Asked {
+    Request(Request, std::sync::mpsc::Sender<Answer>),
+    ReopenShown,
+}
 
-/// The one running app. It blocks until the window is closed or a quit request comes. The window opens
-/// when the first `open` request has built its review.
+/// The one running app. It blocks until a quit request comes or the window closes with no build left to
+/// wait for (`AppWindow::closed`). The window opens
+/// when the first `open` request has built its review, or earlier holding only Settings when they are
+/// asked for.
 pub fn serve(listener: AppListener, home: PathBuf) {
     let (requests, asked) = unbounded::<Asked>();
     let requests_to_self = requests.clone();
     listener.serve(move |request| {
         let (reply, answer) = std::sync::mpsc::channel();
-        if requests.unbounded_send((request, reply)).is_err() {
+        if requests
+            .unbounded_send(Asked::Request(request, reply))
+            .is_err()
+        {
             return refused("the app is closing");
         }
         answer
@@ -80,7 +94,6 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             dock_icon::show();
             bind_keys(cx);
             word_keys::take_before_macos(cx);
-            cx.on_window_closed(|cx, _| cx.quit()).detach();
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
         });
@@ -95,6 +108,7 @@ fn pr_switching(
     cx: &mut App,
 ) -> PrSwitching {
     let requests = requests.clone();
+    let reopen_requests = requests.clone();
     let home_folder = home.to_path_buf();
     PrSwitching {
         relevant: Arc::new(GitHub::from_env()),
@@ -103,25 +117,35 @@ fn pr_switching(
         agents: Arc::new(HcTourAgents::new()),
         list: cx.new(|_| PrSwitcher::default()),
         show: Arc::new(move |pr| {
-            // An unreadable state file only loses the remembered clone folder.
-            let folder = ReviewStateFile::for_pr(&home_folder, &pr)
-                .opened_from()
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| home_folder.clone());
             let (reply, _) = std::sync::mpsc::channel();
-            let open = OpenRequest {
-                pr: pr.to_string(),
-                folder,
-                terminal: None,
-            };
+            let open = open_request_of(&home_folder, &pr);
             if requests
-                .unbounded_send((Request::Open(open), reply))
+                .unbounded_send(Asked::Request(Request::Open(open), reply))
                 .is_err()
             {
                 eprintln!("could not switch to {pr}: the app is closing");
             }
         }),
+        reopen: Arc::new(move || {
+            if reopen_requests.unbounded_send(Asked::ReopenShown).is_err() {
+                eprintln!("could not reopen the PR: the app is closing");
+            }
+        }),
+    }
+}
+
+/// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
+/// state file only loses the remembered clone folder.
+fn open_request_of(home: &Path, pr: &PullRequestUrl) -> OpenRequest {
+    let folder = ReviewStateFile::for_pr(home, pr)
+        .opened_from()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| home.to_path_buf());
+    OpenRequest {
+        pr: pr.to_string(),
+        folder,
+        terminal: None,
     }
 }
 
@@ -131,10 +155,12 @@ fn refused(reason: &str) -> Answer {
     }
 }
 
-/// What the app shows now. The window is there once the first review is built.
+type OneWindow = AppWindow<WindowHandle<SettingsWindow>, WindowHandle<OneStepLayout>>;
+
+/// What the app shows now. The window is there once the first review is built or Settings is asked for.
 struct Screen {
     active: Entity<ActivePr>,
-    window: Option<WindowHandle<OneStepLayout>>,
+    window: OneWindow,
 }
 
 type SharedScreen = Rc<RefCell<Screen>>;
@@ -147,13 +173,35 @@ async fn answer_requests(
 ) {
     let screen: SharedScreen = Rc::new(RefCell::new(Screen {
         active,
-        window: None,
+        window: AppWindow::Closed,
     }));
-    while let Some((request, reply)) = asked.next().await {
+    let closed_screen = Rc::clone(&screen);
+    cx.update(|cx| {
+        cx.on_window_closed(move |cx, _| {
+            let mut screen = closed_screen.borrow_mut();
+            let active = screen.active.clone();
+            if screen.window.closed(active.read(cx)) == AfterClose::EndApp {
+                cx.quit();
+            }
+        })
+        .detach();
+    });
+    while let Some(asked) = asked.next().await {
+        let (request, reply) = match asked {
+            Asked::Request(request, reply) => (request, reply),
+            Asked::ReopenShown => {
+                reopen_shown(&screen, &home, cx);
+                continue;
+            }
+        };
         match request {
             Request::Quit => {
                 reply.send(Answer::Quitting).ok();
                 cx.update(|cx| cx.quit());
+            }
+            Request::ShowSettings => {
+                let answer = show_settings(&screen, &home, cx);
+                reply.send(answer).ok();
             }
             Request::AgentReplied {
                 pr,
@@ -184,7 +232,7 @@ async fn answer_requests(
                     }
                     OpenDecision::Reload => {
                         reply.send(Answer::Reloaded { pr: open.pr }).ok();
-                        let window = screen.borrow().window;
+                        let window = screen.borrow().window.review();
                         if let Some(window) = window {
                             show_again(window, cx);
                         }
@@ -207,6 +255,62 @@ async fn answer_requests(
     }
 }
 
+/// Settings over the PR on screen, or with no PR open, in the one window holding only Settings.
+fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answer {
+    let window = screen.borrow().window;
+    let shown = cx.update(|cx| {
+        cx.activate(true);
+        match window.show_settings() {
+            ShowSettings::OverReview(window) => window
+                .update(cx, |layout, window, cx| {
+                    layout.show_settings(window, cx);
+                    window.activate_window();
+                })
+                .map(|()| AppWindow::Review(window)),
+            ShowSettings::Raise(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| AppWindow::SettingsOnly(window)),
+            ShowSettings::OpenSettingsOnly => {
+                open_settings_window(home, cx).map(AppWindow::SettingsOnly)
+            }
+        }
+    });
+    match shown {
+        Ok(window) => {
+            screen.borrow_mut().window = window;
+            Answer::ShowingSettings
+        }
+        Err(error) => refused(&format!("could not show Settings: {error:#}")),
+    }
+}
+
+/// The save of the settings asks for the PR on screen to be built again. The window is held first (typing
+/// saved, focus out of the boxes) so the build reads the state file the old session no longer changes;
+/// `reopen` then raises the Opening veil and gives the ticket, and the build takes the path of any switch.
+fn reopen_shown(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    if let Some(window) = window {
+        cx.update(|cx| {
+            window.update(cx, OneStepLayout::hold_for_reopen).ok();
+        });
+    }
+    let reopening = active.update(cx, |active, cx| {
+        let reopening = active.reopen();
+        cx.notify();
+        reopening
+    });
+    let Some((ticket, pr)) = reopening else {
+        return;
+    };
+    let open = open_request_of(home, &pr);
+    let (screen, home) = (Rc::clone(screen), home.to_path_buf());
+    cx.spawn(async move |cx| build_and_show(screen, ticket, pr, open, home, cx).await)
+        .detach();
+}
+
 /// Only the PR in the window is marked here, because its session holds the state it writes back. For
 /// any other PR the command marks the state file.
 fn mark_replied(
@@ -218,7 +322,7 @@ fn mark_replied(
 ) -> Answer {
     let (active, window) = {
         let screen = screen.borrow();
-        (screen.active.clone(), screen.window)
+        (screen.active.clone(), screen.window.review())
     };
     let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
     let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
@@ -239,7 +343,14 @@ fn mark_replied(
             .and_then(|marked| marked)
     });
     match marked {
-        Ok(()) => Answer::HandOffAnswered { pr },
+        Ok(()) => {
+            if let Ok(replied_pr) = pr.parse::<PullRequestUrl>() {
+                active.update(cx, |active, _| {
+                    active.hold_reply_for_reopen(&replied_pr, hand_off, replied);
+                });
+            }
+            Answer::HandOffAnswered { pr }
+        }
         Err(error) => refused(&format!("{error:#}")),
     }
 }
@@ -282,9 +393,9 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
     });
 }
 
-/// The review is built off the UI thread while the PR on screen stays. When the very first build fails
-/// there is no window to keep, so the app ends with the reason in its log; later, the reason is shown
-/// in the window that stays.
+/// The review is built off the UI thread while the PR on screen stays. When a build fails with no window
+/// open, the app ends with the reason in its log; otherwise the reason is also shown in the window, over
+/// Settings or the PR on screen, whichever it holds.
 async fn build_and_show(
     screen: SharedScreen,
     ticket: BuildTicket,
@@ -305,36 +416,70 @@ async fn build_and_show(
         finished
     });
     let window = screen.borrow().window;
-    match (finished, window) {
-        (Finished::Superseded, _) => {}
-        (Finished::Stay { reason }, None) => {
+    match finished {
+        Finished::Superseded => {}
+        Finished::Stay { reason } => {
             eprintln!("{reason}");
-            std::process::exit(1);
+            match window.build_failed() {
+                FailedBuild::EndApp => std::process::exit(1),
+                FailedBuild::ShowInSettings(window) => cx.update(|cx| {
+                    window
+                        .update(cx, |settings_window, _, cx| {
+                            settings_window.build_failed(reason, cx);
+                        })
+                        .ok();
+                }),
+                FailedBuild::ShowInReview(window) => cx.update(|cx| {
+                    window
+                        .update(cx, |layout, _, cx| layout.switch_failed(reason, cx))
+                        .ok();
+                }),
+            }
         }
-        (Finished::Stay { reason }, Some(window)) => {
-            eprintln!("{reason}");
-            cx.update(|cx| {
-                window
-                    .update(cx, |layout, _, cx| layout.switch_failed(reason, cx))
-                    .ok();
-            });
-        }
-        (Finished::Switch(opened), window) => {
+        Finished::Switch(opened) => {
             let shown = cx.update(|cx| {
-                let shown = match window {
-                    Some(window) => switch_window(window, opened, &pr, cx).map(|()| window),
-                    None => open_window(opened, &pr, cx),
+                let shown = match window.show_review() {
+                    ShowReview::Switch(window) => {
+                        switch_window(window, opened, &pr, cx).map(|()| window)
+                    }
+                    ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, &pr, cx),
+                    ShowReview::OpenWindow => open_window(opened, &pr, cx),
                 };
                 cx.activate(true);
                 shown
             });
             match shown {
-                Ok(window) => screen.borrow_mut().window = Some(window),
+                Ok(window) => {
+                    screen.borrow_mut().window = AppWindow::Review(window);
+                    apply_replies_held_for_reopen(&active, window, cx);
+                }
                 Err(error) => {
                     eprintln!("could not show {pr}: {error:#}");
                     std::process::exit(1);
                 }
             }
+        }
+    }
+}
+
+/// The replies that landed while the PR reopened were applied to the old window, whose state the build
+/// may have read too early; the new window gets them again.
+fn apply_replies_held_for_reopen(
+    active: &Entity<ActivePr>,
+    window: WindowHandle<OneStepLayout>,
+    cx: &mut AsyncApp,
+) {
+    let held = active.update(cx, |active, _| active.take_replies_for_reopened());
+    for (id, replied) in held {
+        let applied = cx.update(|cx| {
+            window
+                .update(cx, |layout, _, cx| {
+                    layout.hand_off_replied(id, &replied, cx)
+                })
+                .and_then(|applied| applied)
+        });
+        if let Err(error) = applied {
+            eprintln!("could not apply an agent reply to the reopened PR: {error:#}");
         }
     }
 }
@@ -348,17 +493,34 @@ fn switch_window(
 ) -> anyhow::Result<()> {
     window.update(cx, |layout, window, cx| {
         layout.flush_typing(cx);
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
     })
+}
+
+/// The window that held only Settings becomes the review's, with Settings still open over it.
+fn turn_into_review(
+    window: WindowHandle<SettingsWindow>,
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    window.update(cx, |settings_window, window, cx| {
+        let settings = settings_window.panel();
+        window.replace_root(cx, |window, cx| {
+            new_layout(opened, pr, Some(settings), window, cx)
+        });
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
 }
 
 fn bind_keys(cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
+        SettingsPanel::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
@@ -370,6 +532,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("k", GoBack, Some(&typing_is_not_navigation)),
         KeyBinding::new("w", ToggleWrapLines, Some(&typing_is_not_navigation)),
         KeyBinding::new("cmd-k", ToggleJump, Some(OneStepLayout::KEY_CONTEXT)),
+        KeyBinding::new("cmd-,", ToggleSettings, Some(OneStepLayout::KEY_CONTEXT)),
         KeyBinding::new("cmd-c", CopySelection, Some(&typing_is_not_navigation)),
     ]);
 }
@@ -379,20 +542,33 @@ fn open_window(
     pr: &PullRequestUrl,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    let options = window_options(window_title(&opened, pr), cx);
+    cx.open_window(options, |window, cx| {
+        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.new(|cx| new_layout(opened, pr, None, window, cx))
+    })
+}
+
+fn open_settings_window(home: &Path, cx: &mut App) -> anyhow::Result<WindowHandle<SettingsWindow>> {
+    let options = window_options("Settings".to_owned(), cx);
+    let home = home.to_path_buf();
+    cx.open_window(options, |window, cx| {
+        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.new(|cx| SettingsWindow::new(home, window, cx))
+    })
+}
+
+fn window_options(title: String, cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
-    let options = WindowOptions {
+    WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
-            title: Some(window_title(&opened, pr).into()),
+            title: Some(title.into()),
             appears_transparent: true,
             traffic_light_position: Some(point(px(14.), px(14.))),
         }),
         ..Default::default()
-    };
-    cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
-        cx.new(|cx| new_layout(opened, pr, window, cx))
-    })
+    }
 }
 
 fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
@@ -402,6 +578,7 @@ fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
 fn new_layout(
     opened: OpenedReview,
     pr: &PullRequestUrl,
+    carried_settings: Option<Entity<SettingsPanel>>,
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,
 ) -> OneStepLayout {
@@ -416,11 +593,13 @@ fn new_layout(
             tour_agents: opened.tour_agents,
         },
     };
+    let keeps_settings_focused = carried_settings.is_some();
     let layout = OneStepLayout::new(
         opened.review,
         opened.source,
         opened.ask,
         collaborators,
+        carried_settings,
         window,
         cx,
     );
@@ -429,6 +608,8 @@ fn new_layout(
         cx.notify();
     })
     .detach();
-    cx.focus_self(window);
+    if !keeps_settings_focused {
+        cx.focus_self(window);
+    }
     layout
 }

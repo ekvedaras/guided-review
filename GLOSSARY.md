@@ -4,6 +4,12 @@
 
 **Summary**: The short text at the start of a tour. At most three bullets that say what the PR does.
 
+**Reviewer summary**: An extra summary at the start of a tour, written to the reviewer's own summary instructions. It is saved in the tour file next to the summary (`reviewer_summary`, Markdown, no length limit). Avoid: custom summary, extra summary, brief.
+
+**Summary instructions**: What tells the tour writer how to write the reviewer summary: a file, a skill (`summary_instructions = { skill = "<name>" }`) or off, set in `config.toml` as `summary_instructions`. With no key, `~/.guided-review/summary.md` is used when it exists. `guided-review outline` hands the text to the writer. Avoid: prompt, template.
+
+**Settings**: Where a reviewer edits their settings in the app: summary instructions, clones, IDE, Ask model and Ask effort. Save checks every setting first and writes nothing while one is wrong; it writes only the keys that changed back to `~/.guided-review/config.toml`, so the reviewer's comments stay. A custom IDE template or Ask model is kept when a preset is picked, in `ide_custom` and `ask_model_custom` beside `ide` and `ask_model`; only Settings reads those two keys. With no PR open, `guided-review settings` shows it alone in the app's one window. Avoid: settings screen (**Screen** means summary, step or safety net), preferences.
+
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 
 **Step**: One stop in a tour. It holds diff pieces, a diagram, or both, and a short text that says what they do and why they come at this point. A step can have child steps: the details of that step. The reader sees a step first, then its child steps.

@@ -120,6 +120,7 @@ pub struct HunkGapRow {
 pub enum PageRow {
     SummaryTitle(SharedString),
     SummaryBullet(SharedString),
+    ReviewerSummary(Rc<PreparedMarkdown>),
     PrDescription(Rc<PreparedMarkdown>),
     StepHeading(Rc<StepHeading>),
     StepWhy(SharedString),
@@ -185,7 +186,9 @@ impl PageRow {
                 heading.title.hash(&mut hasher);
                 heading.number.hash(&mut hasher);
             }
-            Self::PrDescription(description) => description.hash(&mut hasher),
+            Self::ReviewerSummary(summary) | Self::PrDescription(summary) => {
+                summary.hash(&mut hasher);
+            }
             Self::AskMarker(ask) => ask.id.hash(&mut hasher),
             Self::Toolbar(toolbar) => {
                 toolbar.ask.as_ref().map(|ask| &ask.id).hash(&mut hasher);
@@ -518,6 +521,11 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
             .summary()
             .iter()
             .map(|bullet| PageRow::SummaryBullet(bullet.clone().into())),
+    );
+    rows.extend(
+        review
+            .reviewer_summary()
+            .map(|summary| PageRow::ReviewerSummary(Rc::new(PreparedMarkdown::of(summary)))),
     );
     rows.extend(
         review
