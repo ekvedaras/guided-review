@@ -268,7 +268,7 @@ impl Render for JumpPalette {
             .flex()
             .items_start()
             .justify_center()
-            .bg(gpui::rgba(0x00000066))
+            .bg(colors.scrim)
             .occlude()
             .on_mouse_down(
                 gpui::MouseButton::Left,

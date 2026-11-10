@@ -1,9 +1,10 @@
 use gpui::{
     AnyView, App, AppContext, Context, IntoElement, ParentElement, Render, SharedString, Styled,
-    Window, div,
+    Window, div, px,
 };
 
-use super::palette::Colors;
+use super::motion::{FEEDBACK, fade_in};
+use super::palette::{CONTROL_RADIUS, Colors};
 
 /// A one-line note shown while the pointer rests on an element.
 struct Tooltip {
@@ -13,16 +14,21 @@ struct Tooltip {
 impl Render for Tooltip {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        div()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(colors.border)
-            .bg(colors.surface)
-            .text_xs()
-            .text_color(colors.text)
-            .child(self.text.clone())
+        fade_in(
+            div()
+                .px_2()
+                .py_1()
+                .rounded(px(CONTROL_RADIUS))
+                .border_1()
+                .border_color(colors.border)
+                .bg(colors.overlay)
+                .shadow(colors.overlay_shadow())
+                .text_xs()
+                .text_color(colors.text)
+                .child(self.text.clone()),
+            "tooltip",
+            FEEDBACK,
+        )
     }
 }
 

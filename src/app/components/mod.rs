@@ -10,6 +10,7 @@ pub mod image_row;
 pub mod jump_palette;
 pub mod loading_screen;
 pub mod markdown_view;
+pub mod motion;
 pub mod new_commits_banner;
 pub mod palette;
 pub mod pr_switcher;

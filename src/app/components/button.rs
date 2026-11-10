@@ -1,7 +1,10 @@
 use gpui::prelude::FluentBuilder;
-use gpui::{Div, ElementId, FontWeight, InteractiveElement, Pixels, Stateful, Styled, div, px};
+use gpui::{
+    Div, ElementId, FontWeight, InteractiveElement, Pixels, Stateful, StatefulInteractiveElement,
+    Styled, div, px,
+};
 
-use super::palette::Colors;
+use super::palette::{CONTROL_RADIUS, Colors};
 
 /// How loud a button is. A screen has one `Primary`: the step the reader takes next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +35,8 @@ impl ButtonSize {
     }
 }
 
-/// The look every button of the app shares; the caller adds the label and the click.
+/// The look every button of the app shares, with its hover and pressed states; the caller adds the
+/// label and the click.
 pub fn button(
     colors: &Colors,
     id: impl Into<ElementId>,
@@ -50,7 +54,7 @@ pub fn button(
             ButtonSize::Regular => px(12.),
             ButtonSize::Small => px(8.),
         })
-        .rounded_md()
+        .rounded(px(CONTROL_RADIUS))
         .border_1()
         .whitespace_nowrap()
         .cursor_pointer()
@@ -60,33 +64,46 @@ pub fn button(
         });
     match kind {
         ButtonKind::Primary => base
-            .bg(colors.accent_fill)
-            .border_color(colors.accent_fill)
+            .bg(colors.primary_fill())
+            .border_color(colors.accent_fill.end)
+            .shadow(colors.primary_shadow())
             .text_color(colors.on_accent_fill)
             .font_weight(FontWeight::MEDIUM)
             .hover(|button| {
                 button
-                    .bg(colors.accent_fill_hover)
-                    .border_color(colors.accent_fill_hover)
+                    .bg(colors.primary_fill_hover())
+                    .border_color(colors.accent_fill_hover.end)
+            })
+            .active(|button| {
+                button
+                    .bg(colors.accent_fill_pressed)
+                    .border_color(colors.accent_fill_pressed)
+                    .shadow_none()
             }),
         ButtonKind::Secondary => base
             .bg(colors.surface)
             .border_color(colors.border)
+            .shadow(colors.card_shadow())
             .text_color(colors.text)
-            .hover(|button| button.bg(colors.hover)),
+            .hover(|button| button.bg(colors.hover))
+            .active(|button| button.bg(colors.pressed).shadow_none()),
         ButtonKind::Ghost => base
             .border_color(gpui::transparent_black())
             .text_color(colors.muted_text)
-            .hover(|button| button.bg(colors.hover).text_color(colors.text)),
+            .hover(|button| button.bg(colors.hover).text_color(colors.text))
+            .active(|button| button.bg(colors.pressed).text_color(colors.text)),
         ButtonKind::Pressed => base
             .bg(colors.current)
-            .border_color(colors.accent)
-            .text_color(colors.accent),
+            .border_color(colors.current_border)
+            .text_color(colors.accent)
+            .hover(|button| button.border_color(colors.accent))
+            .active(|button| button.bg(colors.pressed)),
         ButtonKind::Done => base
             .bg(colors.success_background)
-            .border_color(colors.success)
+            .border_color(colors.success_border)
             .text_color(colors.success)
-            .hover(|button| button.bg(colors.hover)),
+            .hover(|button| button.border_color(colors.success))
+            .active(|button| button.bg(colors.pressed)),
     }
 }
 

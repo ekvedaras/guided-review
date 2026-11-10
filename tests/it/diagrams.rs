@@ -111,8 +111,11 @@ fn a_strip_is_drawn_at_screen_scale_with_blue_and_red_swapped_for_gpui() {
     assert_eq!(size.width.0 as f32, (svg.width() * 2.0).ceil());
     assert_eq!(size.height.0, i32::try_from(last.rows().len()).unwrap());
     let corner = &bitmap.as_bytes(0).unwrap()[..4];
-    let dark_background_as_bgra = [0x17, 0x11, 0x0d, 0xff];
-    assert_eq!(corner, dark_background_as_bgra);
+    let dark_background_as_bgra = [0x22, 0x16, 0x14, 0xff];
+    assert_eq!(
+        corner, dark_background_as_bgra,
+        "the dark background #141622"
+    );
 }
 
 mod memory {

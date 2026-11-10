@@ -3,7 +3,7 @@ use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
     Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, list, px, relative,
+    Window, actions, div, list, px,
 };
 
 use std::collections::HashMap;
@@ -32,15 +32,18 @@ use crate::app::components::diff_view::{
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
-use crate::app::components::icon::{Icon, icon};
+use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, PreparedMarkdown, parsed_markdown,
 };
+use crate::app::components::motion::{
+    Edge, SCREEN, SCREEN_SLIDE, glide_to_share, grow_when_shown, slide_in, turn_to,
+};
 use crate::app::components::new_commits_banner::NewCommitsBanner;
-use crate::app::components::palette::{Colors, TEXT_FONT};
+use crate::app::components::palette::{CONTROL_RADIUS, Colors, TEXT_FONT, TrailStage};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
@@ -51,7 +54,7 @@ use crate::app::components::thread_view::{
     OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
     ThreadChanges, ThreadDrafts, ThreadElement,
 };
-use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
+use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
@@ -67,7 +70,7 @@ use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, InFlight,
     LineLocation, MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Reopen,
-    ReopenAfterSave, Review, Screen, SendMode, StepId, ThreadId, ThreadView,
+    ReopenAfterSave, Review, Screen, ScreenTravel, SendMode, StepId, ThreadId, ThreadView, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -113,6 +116,8 @@ pub struct OneStepLayout {
     on_code_gesture: OnCodeSpot,
     /// The screen whose end the reader has had on screen; the arrow key ticks a step only then.
     seen_end_of: Option<Screen>,
+    /// Which way the reader went to the screen on show, so its content comes in from that side.
+    screen_travel: ScreenTravel,
     /// How far each file box on the screen is scrolled sideways, by path.
     code_scroll_x: CodeScrollX,
     /// Why the last drag opened no comment box.
@@ -176,7 +181,8 @@ impl OneStepLayout {
             )
         });
         let session_subscriptions = [
-            cx.observe(&session, |this, _, cx| {
+            cx.observe(&session, |this, session, cx| {
+                this.screen_travel.arrive(session.read(cx).review());
                 this.use_code_opener_of_review(cx);
                 this.reopen_if_work_ended(cx);
                 cx.notify();
@@ -277,9 +283,12 @@ impl OneStepLayout {
         let opener = session.read(cx).review().code_opener(ide.clone());
         use_active_session(&session, cx);
         use_code_opener(opener, cx);
+        let mut screen_travel = ScreenTravel::default();
+        screen_travel.arrive(session.read(cx).review());
         Self {
             screen_list: session.read(cx).screen_list().clone(),
             seen_end_of: None,
+            screen_travel,
             code_scroll_x: CodeScrollX::default(),
             session,
             on_row_gesture,
@@ -1102,18 +1111,20 @@ impl OneStepLayout {
             .h_full()
             .flex()
             .flex_col()
-            .bg(colors.sidebar)
+            .bg(colors.sidebar_ground())
             .border_r_1()
             .border_color(colors.border)
             .text_sm()
             .child(
-                TitleBarArea::new("sidebar-title-bar", colors.sidebar).child(
-                    div()
-                        .pl(px(TRAFFIC_LIGHTS_WIDTH))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(colors.muted_text)
-                        .child("Guided review"),
-                ),
+                TitleBarArea::new("sidebar-title-bar", gpui::transparent_black())
+                    .edge(TitleBarEdge::Open)
+                    .child(
+                        div()
+                            .pl(px(TRAFFIC_LIGHTS_WIDTH))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors.muted_text)
+                            .child("Guided review"),
+                    ),
             )
             .child(header)
             .child(
@@ -1194,9 +1205,10 @@ impl OneStepLayout {
             .gap_2()
             .px_2()
             .py_1()
-            .rounded_md()
+            .rounded(px(CONTROL_RADIUS))
             .cursor_pointer()
             .hover(|button| button.bg(colors.hover))
+            .active(|button| button.bg(colors.pressed))
             .tooltip(tooltip(|_| "Switch pull request".into()))
             .on_click(cx.listener(|this, _, window, cx| this.toggle_pr_switcher(window, cx)))
             .child(icon(Icon::PullRequest, colors.success))
@@ -1213,20 +1225,24 @@ impl OneStepLayout {
                     .font_weight(FontWeight::MEDIUM)
                     .child(InlineMarkdown::new("title-bar-title", &title)),
             );
-        TitleBarArea::new("title-bar", colors.background).child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .px_2()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_sm()
-                .child(switch_pr)
-                .child(div().flex_1())
-                .child(jump)
-                .child(github),
-        )
+        let progress = self.session.read(cx).sidebar().progress;
+        TitleBarArea::new("title-bar", colors.background)
+            .edge(TitleBarEdge::Open)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .child(switch_pr)
+                    .child(div().flex_1())
+                    .child(jump)
+                    .child(github),
+            )
+            .child(trail_hairline(&colors, progress))
     }
 
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
@@ -1340,10 +1356,20 @@ impl OneStepLayout {
                                 .id(SharedString::from(format!("fold-box-{}", fold.path)))
                                 .flex_none()
                                 .w(px(14.))
+                                .h(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_sm()
                                 .cursor_pointer()
-                                .text_color(colors.muted_text)
-                                .hover(|chevron| chevron.text_color(colors.accent))
-                                .child(if fold.is_folded { "▸" } else { "▾" })
+                                .hover(|chevron| chevron.bg(colors.hover))
+                                .active(|chevron| chevron.bg(colors.pressed))
+                                .child(turn_to(
+                                    sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                                    "fold-box-chevron",
+                                    !fold.is_folded,
+                                    1.,
+                                ))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.change_review(cx, |review| {
                                         review.toggle_box_fold(&fold.step, &fold.path);
@@ -1610,11 +1636,6 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
     } else {
         title
     };
-    let eyebrow_text = match (heading.number, heading.is_gone) {
-        (_, true) => "Gone since the last version".to_owned(),
-        (Some((number, count)), false) => format!("Step {number} of {count}"),
-        (None, false) => "Step".to_owned(),
-    };
     div()
         .w_full()
         .pb_2()
@@ -1628,11 +1649,47 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap_1()
-                .child(eyebrow(&colors, eyebrow_text))
+                .items_start()
+                .gap_2()
+                .child(step_chip(&colors, heading))
                 .child(title),
         )
         .child(tick_button(heading.is_ticked, heading.id.clone(), cx))
+}
+
+/// The step's place on the tour, in a chip that carries the trail's dot; a gone step's is quiet.
+fn step_chip(colors: &Colors, heading: &StepHeading) -> impl IntoElement {
+    let text = match (heading.number, heading.is_gone) {
+        (_, true) => "Gone since the last version".to_owned(),
+        (Some((number, count)), false) => format!("Step {number} of {count}"),
+        (None, false) => "Step".to_owned(),
+    };
+    let chip = div()
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .px_2()
+        .py_0p5()
+        .rounded_full()
+        .border_1()
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM);
+    let chip = if heading.is_gone {
+        chip.bg(colors.surface)
+            .border_color(colors.subtle_border)
+            .text_color(colors.muted_text)
+    } else {
+        chip.bg(colors.current)
+            .border_color(colors.current_border)
+            .text_color(colors.accent)
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(colors.trail.left_right()),
+            )
+    };
+    chip.child(text.to_uppercase())
 }
 
 fn repin_notes(colors: &Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
@@ -1673,20 +1730,21 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
         .on_click(cx.listener(|this, _, _, cx| {
             this.change_review(cx, Review::go_back);
         }))
-        .child("← Previous")
+        .child(icon(Icon::ArrowLeft, colors.muted_text))
+        .child("Previous")
     });
     let next_label = footer.next.as_ref().map(|next| match next {
         NextScreen::Step { title } => title.clone(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
     let action = match (&footer.ticks, footer.next.is_some(), footer.is_summary) {
-        (_, true, true) => Some("Start the tour →"),
-        (Some(_), true, false) => Some("Mark as read and go on →"),
-        (Some(_), false, _) => Some("Mark as read"),
-        (None, true, false) => Some("Next →"),
+        (_, true, true) => Some(("Start the tour", Onward::Goes)),
+        (Some(_), true, false) => Some(("Mark as read and go on", Onward::Goes)),
+        (Some(_), false, _) => Some(("Mark as read", Onward::Stays)),
+        (None, true, false) => Some(("Next", Onward::Goes)),
         (None, false, _) => None,
     };
-    let primary = action.map(|label| {
+    let primary = action.map(|(label, onward)| {
         let ticks = footer.ticks.clone();
         button(
             &colors,
@@ -1701,6 +1759,9 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
             this.change_review(cx, Review::go_forward);
         }))
         .child(label)
+        .when(onward == Onward::Goes, |button| {
+            button.child(icon(Icon::ArrowRight, colors.on_accent_fill))
+        })
     });
     let up_next = next_label.map(|title| {
         div()
@@ -1741,6 +1802,13 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> impl
     )
 }
 
+/// Whether the footer's primary action moves on to another screen, which its arrow says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Onward {
+    Goes,
+    Stays,
+}
+
 fn tool_button(
     colors: &Colors,
     id: impl Into<gpui::ElementId>,
@@ -1757,25 +1825,24 @@ fn tick_button(is_ticked: bool, id: StepId, cx: &mut Context<OneStepLayout>) -> 
         ButtonKind::Secondary
     };
     button(&colors, "tick", kind, ButtonSize::Regular)
+        .gap_0()
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
-        .child(if is_ticked {
-            "✓ Read"
-        } else {
-            "Mark as read"
-        })
+        .child(grow_when_shown(
+            sized_icon(Icon::Check, colors.success, px(14.)),
+            "tick-check",
+            is_ticked,
+            px(14.),
+            px(6.),
+        ))
+        .child(if is_ticked { "Read" } else { "Mark as read" })
 }
 
 fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
-    let share = if progress.total == 0 {
-        0.
-    } else {
-        progress.read as f32 / progress.total as f32
-    };
-    let is_done = progress.total > 0 && progress.read == progress.total;
+    let share = progress.share();
     div()
         .flex()
         .flex_col()
-        .gap_1p5()
+        .gap_2()
         .child(
             div()
                 .flex()
@@ -1792,22 +1859,37 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
         )
         .child(
             div()
-                .h(px(4.))
+                .h(px(6.))
                 .w_full()
                 .rounded_full()
                 .bg(colors.subtle_border)
-                .child(
+                .child(glide_to_share(
                     div()
                         .h_full()
-                        .w(relative(share))
                         .rounded_full()
-                        .bg(if is_done {
-                            colors.success
-                        } else {
-                            colors.accent
-                        }),
-                ),
+                        .bg(colors.trail_fill(TrailStage::of(progress))),
+                    "progress-fill",
+                    share,
+                )),
         )
+}
+
+/// The title bar's lower edge is the trail: filled left to right as far as the tour is read.
+fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .h(px(2.))
+        .bg(colors.subtle_border)
+        .child(glide_to_share(
+            div()
+                .h_full()
+                .bg(colors.trail_fill(TrailStage::of(progress))),
+            "trail-hairline-fill",
+            progress.share(),
+        ))
 }
 
 fn key_hints(colors: &Colors) -> impl IntoElement {
@@ -1843,10 +1925,11 @@ fn key_cap(colors: &Colors, key: &'static str) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .rounded_sm()
+        .rounded(px(4.))
         .border_1()
         .border_color(colors.border)
-        .bg(colors.surface)
+        .bg(colors.header_band())
+        .shadow(colors.card_shadow())
         .text_color(colors.text)
         .child(key)
 }
@@ -1887,7 +1970,7 @@ impl Render for OneStepLayout {
         let repin_progress = session.repin_progress().clone();
         let refresh_brief = session.refresh_brief().clone();
         let refresh_progress = session.refresh_progress().clone();
-        let screen = div().flex_1().px_6().pt_6().child(
+        let screen = div().flex_1().min_h_0().px_6().pt_6().child(
             list(
                 self.screen_list.clone(),
                 cx.processor(move |this, index, _window, cx| {
@@ -1895,6 +1978,16 @@ impl Render for OneStepLayout {
                 }),
             )
             .size_full(),
+        );
+        let screen = slide_in(
+            screen,
+            ("screen", self.screen_travel.arrival().count()),
+            SCREEN,
+            match self.screen_travel.heading() {
+                Travel::Forward => Edge::Right,
+                Travel::Back => Edge::Left,
+            },
+            SCREEN_SLIDE,
         );
         div()
             .key_context(key_context.as_str())

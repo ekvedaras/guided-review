@@ -2,7 +2,7 @@
 //! around a `viewer::Review`, so a new layout later is one new file in `layouts`.
 
 mod active_session;
-mod assets;
+pub mod assets;
 mod code_links;
 mod code_selection;
 pub mod components;
@@ -85,6 +85,11 @@ pub fn serve(listener: AppListener, home: PathBuf) {
     application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
+            // A picture is taken once the window holds still, which an endless animation never does.
+            #[cfg(feature = "snapshots")]
+            if snapshots::is_on() {
+                cx.set_reduce_motion(true);
+            }
             let remembered = AppStateFile::in_home(&home);
             let active = cx.new(|_| ActivePr::remembering_in(remembered));
             let switching = pr_switching(&requests_to_self, &home, active.clone(), cx);

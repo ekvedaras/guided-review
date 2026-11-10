@@ -1,29 +1,63 @@
-use gpui::{Rgba, Styled, Svg, px, svg};
+use gpui::{Pixels, Rgba, Styled, Svg, px, svg};
 
-/// Lucide icons (ISC licence), drawn in one colour like text.
+/// Lucide icons (ISC licence), drawn in one stroke weight and one colour like text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Search,
     ExternalLink,
     PullRequest,
     Settings,
+    Check,
+    Minus,
+    ChevronRight,
+    ChevronDown,
+    ArrowLeft,
+    ArrowRight,
+    Close,
 }
 
 impl Icon {
-    fn path(self) -> &'static str {
+    pub const ALL: [Self; 11] = [
+        Self::Search,
+        Self::ExternalLink,
+        Self::PullRequest,
+        Self::Settings,
+        Self::Check,
+        Self::Minus,
+        Self::ChevronRight,
+        Self::ChevronDown,
+        Self::ArrowLeft,
+        Self::ArrowRight,
+        Self::Close,
+    ];
+
+    pub fn path(self) -> &'static str {
         match self {
             Self::Search => "icons/search.svg",
             Self::ExternalLink => "icons/external-link.svg",
             Self::PullRequest => "icons/git-pull-request.svg",
             Self::Settings => "icons/settings.svg",
+            Self::Check => "icons/check.svg",
+            Self::Minus => "icons/minus.svg",
+            Self::ChevronRight => "icons/chevron-right.svg",
+            Self::ChevronDown => "icons/chevron-down.svg",
+            Self::ArrowLeft => "icons/arrow-left.svg",
+            Self::ArrowRight => "icons/arrow-right.svg",
+            Self::Close => "icons/x.svg",
         }
     }
 }
 
+/// The icon at the size of `text_sm`.
 pub fn icon(icon: Icon, color: Rgba) -> Svg {
+    sized_icon(icon, color, px(14.))
+}
+
+/// The icon at another size, such as 12 px beside `text_xs`.
+pub fn sized_icon(icon: Icon, color: Rgba, size: Pixels) -> Svg {
     svg()
         .path(icon.path())
         .flex_none()
-        .size(px(14.))
+        .size(size)
         .text_color(color)
 }
