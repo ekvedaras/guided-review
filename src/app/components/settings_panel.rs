@@ -7,7 +7,7 @@ use gpui::{
     Window, div, px,
 };
 
-use crate::config::{AskEffortChoice, AskModelChoice};
+use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{SaveOutcome, SettingProblem, Settings};
@@ -101,40 +101,24 @@ impl Editing {
                 (skill, label)
             })
             .collect();
-        let entry = |is_open: bool, text: String| CustomEntry {
-            is_open,
-            text,
+        let entry = |custom_text: Option<&str>| CustomEntry {
+            is_open: custom_text.is_some(),
+            text: custom_text.unwrap_or_default().to_owned(),
             focus: Some(cx.focus_handle()),
         };
-        let ide = match settings.ide() {
-            IdeChoice::Custom(template) => entry(true, template.as_str().to_owned()),
-            _ => entry(false, String::new()),
-        };
-        let model = match settings.ask_model() {
-            AskModelChoice::Custom(text) => entry(true, text),
-            _ => entry(false, String::new()),
-        };
-        let skill = match settings.summary_instructions() {
-            SummaryInstructionsChoice::Skill(name) => entry(true, name.as_str().to_owned()),
-            _ => entry(false, String::new()),
-        };
+        let ide = entry(settings.ide().custom_text());
+        let model = entry(settings.ask_model().custom_text());
+        let skill = entry(settings.summary_instructions().skill_text());
         let problems = settings
-            .check()
+            .problems_on_open()
             .iter()
-            .filter(|problem| {
-                matches!(
-                    problem,
-                    SettingProblem::SummaryInstructionsUnreadable(_)
-                        | SettingProblem::AskEffortUnknown(_)
-                )
-            })
             .map(ShownProblem::of)
             .collect();
         let mut editing = Self {
             default_file: settings.default_file().display().to_string().into(),
             default_file_exists: settings.default_file_exists(),
-            default_model: format!("App default ({})", Settings::default_ask_model()).into(),
-            default_effort: format!("App default ({})", Settings::default_ask_effort()).into(),
+            default_model: format!("App default ({})", AskSettings::default().model).into(),
+            default_effort: format!("App default ({})", AskSettings::default().effort).into(),
             settings,
             skills,
             ide,
@@ -154,13 +138,7 @@ impl Editing {
             .settings
             .clones()
             .iter()
-            .map(|clone| {
-                if clone.folder.as_os_str().is_empty() {
-                    SharedString::from("No folder yet")
-                } else {
-                    clone.folder.display().to_string().into()
-                }
-            })
+            .map(|clone| SharedString::from(clone.folder_label()))
             .collect();
     }
 
@@ -263,7 +241,7 @@ impl SettingsPanel {
         };
         match editing.settings.save() {
             Ok(SaveOutcome::NothingChanged) => {}
-            Ok(SaveOutcome::ReopenOpenPr) => {
+            Ok(SaveOutcome::Written) => {
                 editing.problems.clear();
                 editing.note = None;
                 cx.emit(SettingsEvent::Saved);
@@ -700,7 +678,7 @@ impl SettingsPanel {
     fn ask(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let model = editing.settings.ask_model();
         let is_custom = editing.model.is_open;
-        let model_choice = |id: &'static str, label: SharedString, choice: AskModelChoice| {
+        let model_choice = |id: SharedString, label: SharedString, choice: AskModelChoice| {
             let is_on = !is_custom && model == choice;
             Self::choice(colors, id, label, is_on).on_click(cx.listener(move |this, _, _, cx| {
                 let choice = choice.clone();
@@ -757,6 +735,14 @@ impl SettingsPanel {
                 this.edit(cx, |editing| editing.settings.set_ask_effort(&choice));
             }))
         });
+        let model_choices = AskModelChoice::PICKABLE.into_iter().map(|choice| {
+            let label = SharedString::from(choice.config_text().unwrap_or_default().to_owned());
+            model_choice(
+                SharedString::from(format!("ask-model-{label}")),
+                label,
+                choice,
+            )
+        });
         div()
             .flex()
             .flex_col()
@@ -773,25 +759,11 @@ impl SettingsPanel {
                             .flex_wrap()
                             .gap_2()
                             .child(model_choice(
-                                "ask-model-default",
+                                "ask-model-default".into(),
                                 editing.default_model.clone(),
                                 AskModelChoice::AppDefault,
                             ))
-                            .child(model_choice(
-                                "ask-model-opus",
-                                "opus".into(),
-                                AskModelChoice::Opus,
-                            ))
-                            .child(model_choice(
-                                "ask-model-sonnet",
-                                "sonnet".into(),
-                                AskModelChoice::Sonnet,
-                            ))
-                            .child(model_choice(
-                                "ask-model-haiku",
-                                "haiku".into(),
-                                AskModelChoice::Haiku,
-                            ))
+                            .children(model_choices)
                             .child(
                                 Self::choice(colors, "ask-model-custom", "Custom", is_custom)
                                     .on_click(cx.listener(|this, _, _, cx| {

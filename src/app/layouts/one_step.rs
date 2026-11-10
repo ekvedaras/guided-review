@@ -126,8 +126,6 @@ pub struct OneStepLayout {
     /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
     /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
     reopen_after_save: ReopenAfterSave,
-    /// Asks being typed into the reviewer's own agent; the `HandToAgent` tasks are the layout's.
-    asks_being_handed_to_agent: u16,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -222,14 +220,14 @@ impl OneStepLayout {
         cx.subscribe(&ask, |this, panel, HandToAgent { ask, place }, cx| {
             let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
             let id = ask.id;
-            this.asks_being_handed_to_agent += 1;
+            this.reopen_after_save.ask_handed_to_agent();
             cx.spawn(async move |this, cx| {
                 let line = handing.await;
                 panel.update(cx, |panel, cx| panel.hand_off_ended(id, line, cx));
                 this.update(cx, |this, cx| {
-                    this.asks_being_handed_to_agent =
-                        this.asks_being_handed_to_agent.saturating_sub(1);
-                    this.reopen_if_work_ended(cx);
+                    let in_flight = this.in_flight(cx);
+                    let reopen = this.reopen_after_save.ask_hand_off_ended(in_flight);
+                    this.reopen_if_due(reopen, cx);
                 })
                 .ok();
             })
@@ -287,7 +285,6 @@ impl OneStepLayout {
             settings,
             loading,
             reopen_after_save: ReopenAfterSave::default(),
-            asks_being_handed_to_agent: 0,
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -799,14 +796,13 @@ impl OneStepLayout {
             .update(cx, |settings, cx| settings.close(window, cx));
         let in_flight = self.in_flight(cx);
         let reopen = self.reopen_after_save.saved(in_flight);
-        self.start_reopen_if_now(reopen, cx);
+        self.reopen_if_due(reopen, cx);
         cx.notify();
     }
 
     fn in_flight(&self, cx: &App) -> InFlight {
         InFlight {
             asks_answering: self.ask.read(cx).answering(),
-            asks_handed_to_agent: self.asks_being_handed_to_agent,
             delivering_hand_offs: self.session.read(cx).is_delivering_hand_offs(),
         }
     }
@@ -814,11 +810,11 @@ impl OneStepLayout {
     /// Called whenever an Ask turn, a hand-off or an Ask handed to the agent may have ended.
     fn reopen_if_work_ended(&mut self, cx: &mut Context<Self>) {
         let in_flight = self.in_flight(cx);
-        let reopen = self.reopen_after_save.in_flight_is(in_flight);
-        self.start_reopen_if_now(reopen, cx);
+        let reopen = self.reopen_after_save.work_in_flight_changed(in_flight);
+        self.reopen_if_due(reopen, cx);
     }
 
-    fn start_reopen_if_now(&mut self, reopen: Reopen, cx: &mut Context<Self>) {
+    fn reopen_if_due(&mut self, reopen: Reopen, cx: &mut Context<Self>) {
         if reopen == Reopen::Now {
             (cx.global::<PrSwitching>().reopen)();
         }
@@ -1112,7 +1108,6 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// The gear at the bottom of the sidebar, beside the key that does the same.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex_none()

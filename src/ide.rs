@@ -44,6 +44,13 @@ pub enum IdeChoice {
 }
 
 impl IdeChoice {
+    pub fn custom_text(&self) -> Option<&str> {
+        match self {
+            Self::Custom(template) => Some(template.as_str()),
+            _ => None,
+        }
+    }
+
     const PRESETS: [Self; 3] = [Self::PhpStorm, Self::VsCode, Self::Zed];
 
     pub fn template(&self) -> Option<IdeTemplate> {

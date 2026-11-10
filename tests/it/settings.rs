@@ -1,5 +1,5 @@
 use crate::support::FixtureRepo;
-use guided_review::config::{AskEffortChoice, AskModelChoice};
+use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use guided_review::viewer::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
@@ -62,7 +62,7 @@ fn a_changed_ask_model_rewrites_only_its_value_and_keeps_the_comment_after_it() 
     settings.set_ask_model(&AskModelChoice::Opus);
     let outcome = settings.save().unwrap();
 
-    assert_eq!(outcome, SaveOutcome::ReopenOpenPr);
+    assert_eq!(outcome, SaveOutcome::Written);
     assert_eq!(
         config_text(shop.home()),
         config.replace(r#"ask_model = "sonnet""#, r#"ask_model = "opus""#)
@@ -196,7 +196,7 @@ fn an_added_clone_is_written_as_its_own_key_and_the_other_rows_keep_their_commen
     settings.set_clone_folder(row, blog.path().to_path_buf());
     let outcome = settings.save().unwrap();
 
-    assert_eq!(outcome, SaveOutcome::ReopenOpenPr);
+    assert_eq!(outcome, SaveOutcome::Written);
     assert_eq!(
         config_text(shop.home()),
         format!("{config}\"acme/blog\" = \"{}\"\n", blog.path().display())
@@ -402,7 +402,7 @@ fn save_is_refused_on_an_unreadable_summary_instructions_until_another_choice_is
     assert_eq!(config_text(home.path()), config);
 
     settings.set_summary_instructions(SummaryInstructionsChoice::Off);
-    assert_eq!(settings.save().unwrap(), SaveOutcome::ReopenOpenPr);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
     assert_eq!(
         config_text(home.path()),
         "ask_model = \"haiku\"\nsummary_instructions = \"off\"\n"
@@ -495,7 +495,7 @@ fn the_ask_model_reads_as_the_app_default_an_alias_or_custom() {
         model_of("ask_model = \"claude-opus-4-1\"\n"),
         AskModelChoice::Custom("claude-opus-4-1".to_owned())
     );
-    assert_eq!(Settings::default_ask_model(), "opus");
+    assert_eq!(AskSettings::default().model, "opus");
 }
 
 #[test]
@@ -518,7 +518,7 @@ fn picking_the_app_default_model_removes_the_key_and_a_custom_one_is_written_as_
 fn the_ask_effort_is_the_app_default_or_one_of_the_list_and_is_written_as_its_word() {
     let (home, mut settings) = loaded_from("ask_effort = \"xhigh\"\n");
     assert_eq!(settings.ask_effort(), AskEffortChoice::XHigh);
-    assert_eq!(Settings::default_ask_effort(), "medium");
+    assert_eq!(AskSettings::default().effort, "medium");
 
     settings.set_ask_effort(&AskEffortChoice::Max);
     settings.save().unwrap();
@@ -547,7 +547,7 @@ fn an_ask_effort_outside_the_list_loads_and_blocks_the_save_until_another_is_pic
     assert_eq!(config_text(home.path()), config);
 
     settings.set_ask_effort(&AskEffortChoice::Low);
-    assert_eq!(settings.save().unwrap(), SaveOutcome::ReopenOpenPr);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
     assert_eq!(
         config_text(home.path()),
         "ask_effort = \"low\"\nask_model = \"haiku\"\n"
@@ -660,4 +660,62 @@ fn creating_the_default_file_makes_an_empty_one_and_keeps_one_that_is_there() {
     std::fs::write(&file, "Warm me up").unwrap();
     settings.create_default_file().unwrap();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "Warm me up");
+}
+
+#[test]
+fn the_ask_model_choices_to_pick_are_the_aliases_and_each_reads_back_as_itself() {
+    let words: Vec<_> = AskModelChoice::PICKABLE
+        .iter()
+        .map(|choice| choice.config_text().unwrap())
+        .collect();
+
+    assert_eq!(words, ["opus", "sonnet", "haiku"]);
+    for choice in AskModelChoice::PICKABLE {
+        assert_eq!(AskModelChoice::of(choice.config_text()), choice);
+    }
+}
+
+#[test]
+fn a_custom_text_box_opens_on_the_text_of_a_custom_choice_and_only_then() {
+    let (_home, settings) = loaded_from(
+        "ide = \"zed {path}:{line}\"\nask_model = \"claude-opus-4-1\"\nsummary_instructions = { skill = \"recap\" }\n",
+    );
+    assert_eq!(settings.ide().custom_text(), Some("zed {path}:{line}"));
+    assert_eq!(settings.ask_model().custom_text(), Some("claude-opus-4-1"));
+    assert_eq!(settings.summary_instructions().skill_text(), Some("recap"));
+
+    let (_home, settings) = loaded_from("ask_model = \"opus\"\nsummary_instructions = \"off\"\n");
+    assert_eq!(settings.ide().custom_text(), None);
+    assert_eq!(settings.ask_model().custom_text(), None);
+    assert_eq!(settings.summary_instructions().skill_text(), None);
+}
+
+#[test]
+fn settings_opens_showing_only_the_problems_the_config_already_has_in_it() {
+    let (_home, settings) =
+        loaded_from("summary_instructions = 5\nask_effort = \"turbo\"\nide = \"zed\"\n");
+    assert_eq!(
+        settings.problems_on_open(),
+        [
+            SettingProblem::AskEffortUnknown("turbo".to_owned()),
+            SettingProblem::SummaryInstructionsUnreadable("5".to_owned()),
+        ]
+    );
+
+    let (_home, settings) = loaded_from(
+        "summary_instructions = \"/gone/summary.md\"\n[clones]\n\"acme\" = \"/gone\"\n",
+    );
+    assert_eq!(settings.problems_on_open(), []);
+}
+
+#[test]
+fn a_clone_row_with_no_folder_says_so() {
+    assert_eq!(
+        CloneRow::new("acme/shop", PathBuf::new()).folder_label(),
+        "No folder yet"
+    );
+    assert_eq!(
+        CloneRow::new("acme/shop", PathBuf::from("~/Code/shop")).folder_label(),
+        "~/Code/shop"
+    );
 }

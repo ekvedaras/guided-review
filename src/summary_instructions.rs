@@ -28,6 +28,13 @@ pub enum SummaryInstructionsChoice {
 }
 
 impl SummaryInstructionsChoice {
+    pub fn skill_text(&self) -> Option<&str> {
+        match self {
+            Self::Skill(name) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
     pub const OFF: &'static str = "off";
     pub const SKILL_KEY: &'static str = "skill";
     const DEFAULT_FILE: &'static str = ".guided-review/summary.md";

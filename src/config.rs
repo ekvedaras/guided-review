@@ -53,6 +53,15 @@ pub enum AskModelChoice {
 }
 
 impl AskModelChoice {
+    pub const PICKABLE: [Self; 3] = [Self::Opus, Self::Sonnet, Self::Haiku];
+
+    pub fn custom_text(&self) -> Option<&str> {
+        match self {
+            Self::Custom(text) => Some(text),
+            _ => None,
+        }
+    }
+
     pub fn of(config_text: Option<&str>) -> Self {
         match config_text {
             None => Self::AppDefault,

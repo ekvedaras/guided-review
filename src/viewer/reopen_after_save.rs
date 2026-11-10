@@ -3,18 +3,23 @@
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InFlight {
     pub asks_answering: u16,
-    pub asks_handed_to_agent: u16,
     pub delivering_hand_offs: bool,
 }
 
-impl InFlight {
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Pending {
+    in_flight: InFlight,
+    asks_handed_to_agent: u16,
+}
+
+impl Pending {
     fn is_idle(self) -> bool {
-        self == Self::default()
+        self.in_flight == InFlight::default() && self.asks_handed_to_agent == 0
     }
 
     fn waiting_line(self) -> String {
         let mut waits = Vec::new();
-        match self.asks_answering {
+        match self.in_flight.asks_answering {
             0 => {}
             1 => waits.push("the Ask finishes answering".to_owned()),
             count => waits.push(format!("{count} Asks finish answering")),
@@ -24,7 +29,7 @@ impl InFlight {
             1 => waits.push("the Ask is handed to your agent".to_owned()),
             count => waits.push(format!("{count} Asks are handed to your agent")),
         }
-        if self.delivering_hand_offs {
+        if self.in_flight.delivering_hand_offs {
             waits.push("the hand-offs are delivered to the tour agent".to_owned());
         }
         let waits = match waits.split_last() {
@@ -54,24 +59,39 @@ pub enum Reopen {
 pub struct ReopenAfterSave {
     /// The line for the Settings panel while the reopen waits; kept so a render only borrows it.
     waiting: Option<String>,
+    asks_handed_to_agent: u16,
 }
 
 impl ReopenAfterSave {
     pub fn saved(&mut self, in_flight: InFlight) -> Reopen {
-        if in_flight.is_idle() {
+        let pending = Pending {
+            in_flight,
+            asks_handed_to_agent: self.asks_handed_to_agent,
+        };
+        if pending.is_idle() {
             self.waiting = None;
             return Reopen::Now;
         }
-        self.waiting = Some(in_flight.waiting_line());
+        self.waiting = Some(pending.waiting_line());
         Reopen::Waiting
     }
 
-    /// Called whenever the work in flight changes.
-    pub fn in_flight_is(&mut self, in_flight: InFlight) -> Reopen {
+    /// Called whenever the work in flight that the window counts changes.
+    pub fn work_in_flight_changed(&mut self, in_flight: InFlight) -> Reopen {
         if self.waiting.is_none() {
             return Reopen::NotAsked;
         }
         self.saved(in_flight)
+    }
+
+    /// An Ask is being typed into the reviewer's own agent.
+    pub fn ask_handed_to_agent(&mut self) {
+        self.asks_handed_to_agent += 1;
+    }
+
+    pub fn ask_hand_off_ended(&mut self, in_flight: InFlight) -> Reopen {
+        self.asks_handed_to_agent = self.asks_handed_to_agent.saturating_sub(1);
+        self.work_in_flight_changed(in_flight)
     }
 
     pub fn waiting_line(&self) -> Option<&str> {

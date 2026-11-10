@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
+use crate::config::{AskEffortChoice, AskModelChoice, Config};
 use crate::home::expand_home;
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::local_git::{CloneProblem, LocalGit};
@@ -22,8 +22,8 @@ pub struct Settings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Values {
-    ask_model: Option<String>,
-    ask_effort: Option<String>,
+    ask_model: AskModelChoice,
+    ask_effort: AskEffortChoice,
     ide: Option<IdeTemplate>,
     summary_instructions: SummaryInstructionsChoice,
     clones: Vec<CloneRow>,
@@ -33,8 +33,8 @@ impl Values {
     fn read(document: &DocumentMut) -> Self {
         let text = |key: &str| document.get(key).and_then(Item::as_str).map(str::to_owned);
         Self {
-            ask_model: text(ASK_MODEL),
-            ask_effort: text(ASK_EFFORT),
+            ask_model: AskModelChoice::of(text(ASK_MODEL).as_deref()),
+            ask_effort: AskEffortChoice::of(text(ASK_EFFORT).as_deref()),
             ide: text(IDE).map(IdeTemplate::new),
             summary_instructions: summary_instructions_in(document),
             clones: document
@@ -62,6 +62,14 @@ impl CloneRow {
         Self {
             repo: repo.to_owned(),
             folder,
+        }
+    }
+
+    pub fn folder_label(&self) -> String {
+        if self.folder.as_os_str().is_empty() {
+            "No folder yet".to_owned()
+        } else {
+            self.folder.display().to_string()
         }
     }
 
@@ -195,7 +203,7 @@ fn summary_instructions_value(choice: &SummaryInstructionsChoice) -> anyhow::Res
 pub enum SaveOutcome {
     NothingChanged,
     /// The config file was written; the open PR is opened again so the new settings apply.
-    ReopenOpenPr,
+    Written,
     /// Nothing was written; each problem goes under its setting.
     Refused(Vec<SettingProblem>),
 }
@@ -224,29 +232,19 @@ impl Settings {
     }
 
     pub fn ask_model(&self) -> AskModelChoice {
-        AskModelChoice::of(self.edited.ask_model.as_deref())
+        self.edited.ask_model.clone()
     }
 
     pub fn set_ask_model(&mut self, model: &AskModelChoice) {
-        self.edited.ask_model = model.config_text().map(str::to_owned);
-    }
-
-    /// What Ask uses when the config has no `ask_model`.
-    pub fn default_ask_model() -> String {
-        AskSettings::default().model
+        self.edited.ask_model = model.clone();
     }
 
     pub fn ask_effort(&self) -> AskEffortChoice {
-        AskEffortChoice::of(self.edited.ask_effort.as_deref())
+        self.edited.ask_effort.clone()
     }
 
     pub fn set_ask_effort(&mut self, effort: &AskEffortChoice) {
-        self.edited.ask_effort = effort.config_text().map(str::to_owned);
-    }
-
-    /// What Ask uses when the config has no `ask_effort`.
-    pub fn default_ask_effort() -> String {
-        AskSettings::default().effort
+        self.edited.ask_effort = effort.clone();
     }
 
     pub fn ide(&self) -> IdeChoice {
@@ -317,7 +315,6 @@ impl Settings {
         }
     }
 
-    /// A folder picked in the folder picker also fills the repo, from the folder's `origin` remote.
     pub fn pick_clone_folder(&mut self, row: usize, folder: PathBuf) {
         let origin = LocalGit::origin_of(&self.in_home(&folder));
         if let (Some(clone), Some(origin)) = (self.edited.clones.get_mut(row), origin) {
@@ -338,6 +335,20 @@ impl Settings {
             .collect();
         skills.sort();
         skills
+    }
+
+    /// The problems the config already has in it. The rest show once Save refuses them.
+    pub fn problems_on_open(&self) -> Vec<SettingProblem> {
+        self.check()
+            .into_iter()
+            .filter(|problem| {
+                matches!(
+                    problem,
+                    SettingProblem::SummaryInstructionsUnreadable(_)
+                        | SettingProblem::AskEffortUnknown(_)
+                )
+            })
+            .collect()
     }
 
     /// One problem per setting that would be wrong if saved.
@@ -408,10 +419,10 @@ impl Settings {
         let root = self.document.as_table_mut();
         let (saved, edited) = (&self.saved, &self.edited);
         if saved.ask_model != edited.ask_model {
-            set_text(root, ASK_MODEL, edited.ask_model.as_deref());
+            set_text(root, ASK_MODEL, edited.ask_model.config_text());
         }
         if saved.ask_effort != edited.ask_effort {
-            set_text(root, ASK_EFFORT, edited.ask_effort.as_deref());
+            set_text(root, ASK_EFFORT, edited.ask_effort.config_text());
         }
         if saved.ide != edited.ide {
             set_text(root, IDE, edited.ide.as_ref().map(IdeTemplate::as_str));
@@ -428,7 +439,7 @@ impl Settings {
         }
         self.write()?;
         self.saved = self.edited.clone();
-        Ok(SaveOutcome::ReopenOpenPr)
+        Ok(SaveOutcome::Written)
     }
 
     fn write(&self) -> anyhow::Result<()> {
