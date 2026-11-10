@@ -117,6 +117,12 @@ pub struct StagedFinishReview(pub bool);
 
 impl Global for StagedFinishReview {}
 
+/// Shows the gallery of surfaces the demo PR has none of, in place of the screen.
+#[derive(Default)]
+pub struct StagedGallery(pub bool);
+
+impl Global for StagedGallery {}
+
 /// A fixed list of this repo's PRs: the reviewer's real list may hold private repos.
 pub struct SamplePullRequests;
 

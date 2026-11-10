@@ -8,7 +8,7 @@ use super::OneStepLayout;
 use crate::app::components::diff_view::RowGesture;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::page_rows::PageRow;
-use crate::app::snapshots::{Camera, StagedFinishReview, sample_pr};
+use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId};
 
 const MAX_SCREENS: usize = 16;
@@ -25,10 +25,11 @@ enum Scene {
     AskPanel,
     SwitchingVeil,
     LoadingScreen,
+    Gallery,
 }
 
 impl Scene {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -37,6 +38,7 @@ impl Scene {
         Self::AskPanel,
         Self::SwitchingVeil,
         Self::LoadingScreen,
+        Self::Gallery,
     ];
 
     fn file_name(self) -> &'static str {
@@ -49,6 +51,7 @@ impl Scene {
             Self::AskPanel => "25-ask-panel",
             Self::SwitchingVeil => "26-switching-veil",
             Self::LoadingScreen => "27-loading-screen",
+            Self::Gallery => "28-gallery",
         }
     }
 }
@@ -167,6 +170,7 @@ impl OneStepLayout {
                     });
                 }
             }
+            Scene::Gallery => cx.set_global(StagedGallery(true)),
         }
         cx.notify();
     }
@@ -211,6 +215,7 @@ impl OneStepLayout {
                     cx.notify();
                 });
             }
+            Scene::Gallery => cx.set_global(StagedGallery(false)),
         }
         cx.notify();
     }

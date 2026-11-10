@@ -78,6 +78,8 @@ use crate::viewer::{
 };
 
 #[cfg(feature = "snapshots")]
+mod gallery;
+#[cfg(feature = "snapshots")]
 mod scenes;
 
 actions!(
@@ -1358,7 +1360,7 @@ impl OneStepLayout {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded_sm()
+                                .rounded(px(CONTROL_RADIUS))
                                 .cursor_pointer()
                                 .hover(|chevron| chevron.bg(colors.hover))
                                 .active(|chevron| chevron.bg(colors.pressed))
@@ -2016,6 +2018,15 @@ impl Render for OneStepLayout {
             },
             SCREEN_SLIDE,
         );
+        #[cfg(feature = "snapshots")]
+        let screen = if cx
+            .try_global::<crate::app::snapshots::StagedGallery>()
+            .is_some_and(|staged| staged.0)
+        {
+            gallery::gallery(&colors)
+        } else {
+            screen.into_any_element()
+        };
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
