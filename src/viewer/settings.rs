@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::config::Config;
+use crate::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use crate::home::expand_home;
-use crate::ide::IdeTemplate;
+use crate::ide::{IdeChoice, IdeTemplate};
 use crate::local_git::{CloneProblem, LocalGit};
 use crate::pull_request::RepoName;
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
@@ -30,13 +30,13 @@ struct Values {
 }
 
 impl Values {
-    fn read(document: &DocumentMut) -> anyhow::Result<Self> {
+    fn read(document: &DocumentMut) -> Self {
         let text = |key: &str| document.get(key).and_then(Item::as_str).map(str::to_owned);
-        Ok(Self {
+        Self {
             ask_model: text(ASK_MODEL),
             ask_effort: text(ASK_EFFORT),
             ide: text(IDE).map(IdeTemplate::new),
-            summary_instructions: summary_instructions_in(document)?,
+            summary_instructions: summary_instructions_in(document),
             clones: document
                 .get(CLONES)
                 .and_then(Item::as_table_like)
@@ -46,7 +46,7 @@ impl Values {
                     Some(CloneRow::new(repo, PathBuf::from(folder.as_str()?)))
                 })
                 .collect(),
-        })
+        }
     }
 }
 
@@ -77,9 +77,33 @@ impl CloneRow {
 pub enum SettingProblem {
     Clone {
         row: usize,
+        clone: CloneRow,
         problem: CloneRowProblem,
     },
     SummaryFileGone(PathBuf),
+    /// The config holds a `summary_instructions` that is not a path, `"off"` or a skill name; the value as written.
+    SummaryInstructionsUnreadable(String),
+    /// The config holds an `ask_effort` that `claude --effort` does not accept.
+    AskEffortUnknown(String),
+}
+
+impl SettingProblem {
+    /// The red line under the setting.
+    pub fn message(&self) -> String {
+        match self {
+            Self::Clone { clone, problem, .. } => problem.message(clone),
+            Self::SummaryFileGone(path) => format!("The summary file {} is gone", path.display()),
+            Self::SummaryInstructionsUnreadable(written) => {
+                format!(
+                    "{written} is not a file, \"{}\" or a skill name",
+                    SummaryInstructionsChoice::OFF
+                )
+            }
+            Self::AskEffortUnknown(text) => {
+                format!("{text:?} is not an effort Claude accepts: low, medium, high, xhigh or max")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +112,19 @@ pub enum CloneRowProblem {
     SameRepoTwice,
     FolderGone,
     NoRemoteOfRepo,
+}
+
+impl CloneRowProblem {
+    pub fn message(self, clone: &CloneRow) -> String {
+        match self {
+            Self::NotOwnerSlashRepo => "Write the repo as owner/repo".to_owned(),
+            Self::SameRepoTwice => format!("{} is set twice", clone.repo),
+            Self::FolderGone => "This folder is gone".to_owned(),
+            Self::NoRemoteOfRepo => {
+                format!("No remote of this clone points at {}", clone.repo)
+            }
+        }
+    }
 }
 
 impl From<CloneProblem> for CloneRowProblem {
@@ -106,20 +143,23 @@ const CLONES: &str = "clones";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
-fn summary_instructions_in(document: &DocumentMut) -> anyhow::Result<SummaryInstructionsChoice> {
-    let table = document.to_string().parse::<toml::Table>()?;
-    let choice = table
-        .get(SUMMARY_INSTRUCTIONS)
-        .map(SummaryInstructionsChoice::from_value)
-        .unwrap_or_default();
-    match choice {
-        SummaryInstructionsChoice::Unreadable(written) => anyhow::bail!(
-            "{SUMMARY_INSTRUCTIONS} {written} is not a path, \"{}\" or {{ {} = \"<name>\" }}",
-            SummaryInstructionsChoice::OFF,
-            SummaryInstructionsChoice::SKILL_KEY
-        ),
-        readable => Ok(readable),
-    }
+/// A document toml_edit accepts and toml refuses holds something this config cannot read, so the setting says so.
+fn summary_instructions_in(document: &DocumentMut) -> SummaryInstructionsChoice {
+    let Some(item) = document.get(SUMMARY_INSTRUCTIONS) else {
+        return SummaryInstructionsChoice::DefaultFile;
+    };
+    document
+        .to_string()
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|table| {
+            table
+                .get(SUMMARY_INSTRUCTIONS)
+                .map(SummaryInstructionsChoice::from_value)
+        })
+        .unwrap_or_else(|| {
+            SummaryInstructionsChoice::Unreadable(item.to_string().trim().to_owned())
+        })
 }
 
 /// Writing is all Settings adds to what the domain reads.
@@ -164,8 +204,7 @@ impl Settings {
         let document = text
             .parse::<DocumentMut>()
             .with_context(|| format!("could not read {}", file.display()))?;
-        let saved = Values::read(&document)
-            .with_context(|| format!("could not read {}", file.display()))?;
+        let saved = Values::read(&document);
         Ok(Self {
             home: home.to_path_buf(),
             file,
@@ -175,28 +214,38 @@ impl Settings {
         })
     }
 
-    pub fn ask_model(&self) -> Option<&str> {
-        self.edited.ask_model.as_deref()
+    pub fn ask_model(&self) -> AskModelChoice {
+        AskModelChoice::of(self.edited.ask_model.as_deref())
     }
 
-    pub fn set_ask_model(&mut self, model: Option<String>) {
-        self.edited.ask_model = model;
+    pub fn set_ask_model(&mut self, model: &AskModelChoice) {
+        self.edited.ask_model = model.config_text().map(str::to_owned);
     }
 
-    pub fn ask_effort(&self) -> Option<&str> {
-        self.edited.ask_effort.as_deref()
+    /// What Ask uses when the config has no `ask_model`.
+    pub fn default_ask_model() -> String {
+        AskSettings::default().model
     }
 
-    pub fn set_ask_effort(&mut self, effort: Option<String>) {
-        self.edited.ask_effort = effort;
+    pub fn ask_effort(&self) -> AskEffortChoice {
+        AskEffortChoice::of(self.edited.ask_effort.as_deref())
     }
 
-    pub fn ide(&self) -> Option<&IdeTemplate> {
-        self.edited.ide.as_ref()
+    pub fn set_ask_effort(&mut self, effort: &AskEffortChoice) {
+        self.edited.ask_effort = effort.config_text().map(str::to_owned);
     }
 
-    pub fn set_ide(&mut self, ide: Option<IdeTemplate>) {
-        self.edited.ide = ide;
+    /// What Ask uses when the config has no `ask_effort`.
+    pub fn default_ask_effort() -> String {
+        AskSettings::default().effort
+    }
+
+    pub fn ide(&self) -> IdeChoice {
+        IdeChoice::of(self.edited.ide.as_ref())
+    }
+
+    pub fn set_ide(&mut self, ide: &IdeChoice) {
+        self.edited.ide = ide.template();
     }
 
     pub fn summary_instructions(&self) -> &SummaryInstructionsChoice {
@@ -274,13 +323,24 @@ impl Settings {
             .enumerate()
             .filter_map(|(row, clone)| {
                 let problem = self.check_clone(clone, clones.get(..row)?)?;
-                Some(SettingProblem::Clone { row, problem })
+                Some(SettingProblem::Clone {
+                    row,
+                    clone: clone.clone(),
+                    problem,
+                })
             })
             .collect();
-        if let SummaryInstructionsChoice::OtherFile(path) = &self.edited.summary_instructions
-            && !self.in_home(path).is_file()
-        {
-            problems.push(SettingProblem::SummaryFileGone(path.clone()));
+        if let AskEffortChoice::Unknown(text) = self.ask_effort() {
+            problems.push(SettingProblem::AskEffortUnknown(text));
+        }
+        match &self.edited.summary_instructions {
+            SummaryInstructionsChoice::OtherFile(path) if !self.in_home(path).is_file() => {
+                problems.push(SettingProblem::SummaryFileGone(path.clone()));
+            }
+            SummaryInstructionsChoice::Unreadable(written) => problems.push(
+                SettingProblem::SummaryInstructionsUnreadable(written.clone()),
+            ),
+            _ => {}
         }
         problems
     }

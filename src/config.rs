@@ -42,6 +42,80 @@ impl Default for AskSettings {
     }
 }
 
+/// The `ask_model` the reviewer picks in Settings: no key (the app's default), a Claude alias, or any model name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AskModelChoice {
+    AppDefault,
+    Opus,
+    Sonnet,
+    Haiku,
+    Custom(String),
+}
+
+impl AskModelChoice {
+    pub fn of(config_text: Option<&str>) -> Self {
+        match config_text {
+            None => Self::AppDefault,
+            Some("opus") => Self::Opus,
+            Some("sonnet") => Self::Sonnet,
+            Some("haiku") => Self::Haiku,
+            Some(other) => Self::Custom(other.to_owned()),
+        }
+    }
+
+    /// What `ask_model` holds in the config, none for the app's default.
+    pub fn config_text(&self) -> Option<&str> {
+        match self {
+            Self::AppDefault => None,
+            Self::Opus => Some("opus"),
+            Self::Sonnet => Some("sonnet"),
+            Self::Haiku => Some("haiku"),
+            Self::Custom(text) => Some(text),
+        }
+    }
+}
+
+/// The `ask_effort` the reviewer picks in Settings: no key (the app's default) or one `claude --effort` accepts.
+/// A config can hold anything, so `Unknown` keeps what it says until the reviewer picks another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AskEffortChoice {
+    AppDefault,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+    Unknown(String),
+}
+
+impl AskEffortChoice {
+    pub const PICKABLE: [Self; 5] = [Self::Low, Self::Medium, Self::High, Self::XHigh, Self::Max];
+
+    pub fn of(config_text: Option<&str>) -> Self {
+        match config_text {
+            None => Self::AppDefault,
+            Some("low") => Self::Low,
+            Some("medium") => Self::Medium,
+            Some("high") => Self::High,
+            Some("xhigh") => Self::XHigh,
+            Some("max") => Self::Max,
+            Some(other) => Self::Unknown(other.to_owned()),
+        }
+    }
+
+    pub fn config_text(&self) -> Option<&str> {
+        match self {
+            Self::AppDefault => None,
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::XHigh => Some("xhigh"),
+            Self::Max => Some("max"),
+            Self::Unknown(text) => Some(text),
+        }
+    }
+}
+
 impl AskSettings {
     pub fn from_config_text(text: &str) -> anyhow::Result<Self> {
         Ok(Config::from_text(text)?.ask_settings())

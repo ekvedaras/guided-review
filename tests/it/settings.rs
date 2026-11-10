@@ -1,4 +1,6 @@
 use crate::support::FixtureRepo;
+use guided_review::config::{AskEffortChoice, AskModelChoice};
+use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use guided_review::viewer::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 use std::path::{Path, PathBuf};
@@ -55,9 +57,9 @@ fn loaded_with_commented_config() -> (FixtureRepo, String, Settings) {
 #[test]
 fn a_changed_ask_model_rewrites_only_its_value_and_keeps_the_comment_after_it() {
     let (shop, config, mut settings) = loaded_with_commented_config();
-    assert_eq!(settings.ask_model(), Some("sonnet"));
+    assert_eq!(settings.ask_model(), AskModelChoice::Sonnet);
 
-    settings.set_ask_model(Some("opus".to_owned()));
+    settings.set_ask_model(&AskModelChoice::Opus);
     let outcome = settings.save().unwrap();
 
     assert_eq!(outcome, SaveOutcome::ReopenOpenPr);
@@ -71,7 +73,7 @@ fn a_changed_ask_model_rewrites_only_its_value_and_keeps_the_comment_after_it() 
 fn a_cleared_ide_removes_only_its_line() {
     let (shop, config, mut settings) = loaded_with_commented_config();
 
-    settings.set_ide(None);
+    settings.set_ide(&IdeChoice::None);
     settings.save().unwrap();
 
     assert_eq!(
@@ -83,9 +85,9 @@ fn a_cleared_ide_removes_only_its_line() {
 #[test]
 fn a_new_ask_effort_is_added_among_the_top_keys_and_nothing_else_moves() {
     let (shop, config, mut settings) = loaded_with_commented_config();
-    assert_eq!(settings.ask_effort(), None);
+    assert_eq!(settings.ask_effort(), AskEffortChoice::AppDefault);
 
-    settings.set_ask_effort(Some("high".to_owned()));
+    settings.set_ask_effort(&AskEffortChoice::High);
     settings.save().unwrap();
 
     assert_eq!(
@@ -102,12 +104,12 @@ fn an_edit_is_unsaved_until_save_and_an_edit_back_to_the_saved_value_is_not() {
     let (_shop, _config, mut settings) = loaded_with_commented_config();
     assert!(!settings.has_unsaved_changes());
 
-    settings.set_ask_model(Some("opus".to_owned()));
+    settings.set_ask_model(&AskModelChoice::Opus);
     assert!(settings.has_unsaved_changes());
-    settings.set_ask_model(Some("sonnet".to_owned()));
+    settings.set_ask_model(&AskModelChoice::Sonnet);
     assert!(!settings.has_unsaved_changes());
 
-    settings.set_ask_model(Some("haiku".to_owned()));
+    settings.set_ask_model(&AskModelChoice::Haiku);
     settings.save().unwrap();
     assert!(!settings.has_unsaved_changes());
 }
@@ -252,6 +254,7 @@ fn a_clone_folder_that_is_gone_blocks_the_save_and_names_its_row() {
         refused(&mut settings, &shop, &config),
         [SettingProblem::Clone {
             row,
+            clone: CloneRow::new("acme/blog", shop.home().join("gone")),
             problem: CloneRowProblem::FolderGone
         }]
     );
@@ -270,6 +273,7 @@ fn a_clone_with_no_remote_pointing_at_its_repo_blocks_the_save_and_names_its_row
         refused(&mut settings, &shop, &config),
         [SettingProblem::Clone {
             row,
+            clone: CloneRow::new("acme/wiki", blog.path().to_path_buf()),
             problem: CloneRowProblem::NoRemoteOfRepo
         }]
     );
@@ -291,10 +295,12 @@ fn a_repo_that_is_not_owner_slash_repo_or_set_twice_blocks_the_save_and_names_it
         [
             SettingProblem::Clone {
                 row: unreadable,
+                clone: CloneRow::new("shop", shop.path().to_path_buf()),
                 problem: CloneRowProblem::NotOwnerSlashRepo
             },
             SettingProblem::Clone {
                 row: twice,
+                clone: CloneRow::new("acme/shop", shop.path().to_path_buf()),
                 problem: CloneRowProblem::SameRepoTwice
             }
         ]
@@ -347,12 +353,249 @@ fn a_skill_name_outline_would_reject_is_not_a_skill_name_here_either() {
     for name in ["two words", "a,b", "a(b)", ""] {
         assert!(SkillName::parse(name).is_err(), "{name:?}");
     }
-    let home = tempfile::TempDir::new().unwrap();
-    write_config(
-        home.path(),
-        "summary_instructions = { skill = \"two words\" }\n",
+    assert_eq!(
+        SummaryInstructionsChoice::skill_named("acme:warm-up"),
+        SummaryInstructionsChoice::Skill(skill("acme:warm-up"))
     );
-    assert!(Settings::load(home.path()).is_err());
+    assert_eq!(
+        SummaryInstructionsChoice::skill_named("two words"),
+        SummaryInstructionsChoice::Unreadable("{ skill = \"two words\" }".to_owned())
+    );
+}
+
+fn loaded_from(config: &str) -> (tempfile::TempDir, Settings) {
+    let home = tempfile::TempDir::new().unwrap();
+    write_config(home.path(), config);
+    let settings = Settings::load(home.path()).unwrap();
+    (home, settings)
+}
+
+#[test]
+fn summary_instructions_the_config_holds_wrongly_load_and_are_a_problem_on_that_setting() {
+    let bad_skill = "summary_instructions = { skill = \"two words\" }\n";
+    let (_home, settings) = loaded_from(bad_skill);
+    assert_eq!(
+        settings.check(),
+        [SettingProblem::SummaryInstructionsUnreadable(
+            "{ skill = \"two words\" }".to_owned()
+        )]
+    );
+
+    let (_home, settings) = loaded_from("summary_instructions = 7\n");
+    assert_eq!(
+        settings.check(),
+        [SettingProblem::SummaryInstructionsUnreadable(
+            "7".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn save_is_refused_on_an_unreadable_summary_instructions_until_another_choice_is_picked() {
+    let config = "ask_model = \"sonnet\"\nsummary_instructions = { skill = \"two words\" }\n";
+    let (home, mut settings) = loaded_from(config);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::NothingChanged);
+
+    settings.set_ask_model(&AskModelChoice::Haiku);
+    let outcome = settings.save().unwrap();
+    assert!(matches!(outcome, SaveOutcome::Refused(problems) if problems.len() == 1));
+    assert_eq!(config_text(home.path()), config);
+
+    settings.set_summary_instructions(SummaryInstructionsChoice::Off);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::ReopenOpenPr);
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"haiku\"\nsummary_instructions = \"off\"\n"
+    );
+}
+
+#[test]
+fn a_typed_skill_name_is_a_choice_or_a_problem() {
+    let (_home, mut settings) = loaded_from("");
+
+    settings.set_summary_instructions(SummaryInstructionsChoice::skill_named("plugin:skill"));
+    assert_eq!(settings.check(), []);
+
+    settings.set_summary_instructions(SummaryInstructionsChoice::skill_named("a,b"));
+    assert_eq!(
+        settings.check(),
+        [SettingProblem::SummaryInstructionsUnreadable(
+            "{ skill = \"a,b\" }".to_owned()
+        )]
+    );
+}
+
+fn custom_ide(template: &str) -> IdeChoice {
+    IdeChoice::Custom(IdeTemplate::new(template.to_owned()))
+}
+
+#[test]
+fn the_ide_reads_as_a_preset_none_or_custom() {
+    let ide_of = |config: &str| loaded_from(config).1.ide();
+
+    assert_eq!(ide_of(""), IdeChoice::None);
+    assert_eq!(
+        ide_of("ide = \"phpstorm://open?file={path}&line={line}\"\n"),
+        IdeChoice::PhpStorm
+    );
+    assert_eq!(
+        ide_of("ide = \"vscode://file{path}:{line}\"\n"),
+        IdeChoice::VsCode
+    );
+    assert_eq!(
+        ide_of("ide = \"zed://file{path}:{line}\"\n"),
+        IdeChoice::Zed
+    );
+    assert_eq!(
+        ide_of("ide = \"zed {path}:{line}\"\n"),
+        custom_ide("zed {path}:{line}")
+    );
+}
+
+#[test]
+fn picking_an_ide_writes_its_template_and_none_removes_the_key() {
+    let (home, mut settings) = loaded_from("ide = \"zed {path}:{line}\"\n");
+
+    settings.set_ide(&IdeChoice::VsCode);
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ide = \"vscode://file{path}:{line}\"\n"
+    );
+
+    settings.set_ide(&custom_ide("code --goto {path}:{line}"));
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ide = \"code --goto {path}:{line}\"\n"
+    );
+
+    settings.set_ide(&IdeChoice::None);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "");
+}
+
+#[test]
+fn a_custom_ide_equal_to_a_preset_reads_back_as_that_preset() {
+    let (_home, mut settings) = loaded_from("");
+
+    settings.set_ide(&custom_ide("zed://file{path}:{line}"));
+
+    assert_eq!(settings.ide(), IdeChoice::Zed);
+}
+
+#[test]
+fn the_ask_model_reads_as_the_app_default_an_alias_or_custom() {
+    let model_of = |config: &str| loaded_from(config).1.ask_model();
+
+    assert_eq!(model_of(""), AskModelChoice::AppDefault);
+    assert_eq!(model_of("ask_model = \"opus\"\n"), AskModelChoice::Opus);
+    assert_eq!(model_of("ask_model = \"haiku\"\n"), AskModelChoice::Haiku);
+    assert_eq!(
+        model_of("ask_model = \"claude-opus-4-1\"\n"),
+        AskModelChoice::Custom("claude-opus-4-1".to_owned())
+    );
+    assert_eq!(Settings::default_ask_model(), "opus");
+}
+
+#[test]
+fn picking_the_app_default_model_removes_the_key_and_a_custom_one_is_written_as_typed() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\"\n");
+
+    settings.set_ask_model(&AskModelChoice::Custom("claude-opus-4-1".to_owned()));
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"claude-opus-4-1\"\n"
+    );
+
+    settings.set_ask_model(&AskModelChoice::AppDefault);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "");
+}
+
+#[test]
+fn the_ask_effort_is_the_app_default_or_one_of_the_list_and_is_written_as_its_word() {
+    let (home, mut settings) = loaded_from("ask_effort = \"xhigh\"\n");
+    assert_eq!(settings.ask_effort(), AskEffortChoice::XHigh);
+    assert_eq!(Settings::default_ask_effort(), "medium");
+
+    settings.set_ask_effort(&AskEffortChoice::Max);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "ask_effort = \"max\"\n");
+
+    settings.set_ask_effort(&AskEffortChoice::AppDefault);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "");
+}
+
+#[test]
+fn an_ask_effort_outside_the_list_loads_and_blocks_the_save_until_another_is_picked() {
+    let config = "ask_effort = \"turbo\"\n";
+    let (home, mut settings) = loaded_from(config);
+    assert_eq!(
+        settings.ask_effort(),
+        AskEffortChoice::Unknown("turbo".to_owned())
+    );
+    assert_eq!(
+        settings.check(),
+        [SettingProblem::AskEffortUnknown("turbo".to_owned())]
+    );
+
+    settings.set_ask_model(&AskModelChoice::Haiku);
+    assert!(matches!(settings.save().unwrap(), SaveOutcome::Refused(_)));
+    assert_eq!(config_text(home.path()), config);
+
+    settings.set_ask_effort(&AskEffortChoice::Low);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::ReopenOpenPr);
+    assert_eq!(
+        config_text(home.path()),
+        "ask_effort = \"low\"\nask_model = \"haiku\"\n"
+    );
+}
+
+#[test]
+fn each_problem_words_the_red_line_under_its_setting() {
+    let clone = |repo: &str| CloneRow::new(repo, PathBuf::from("/code/shop"));
+    let clone_problem = |repo: &str, problem| SettingProblem::Clone {
+        row: 0,
+        clone: clone(repo),
+        problem,
+    };
+
+    assert_eq!(
+        clone_problem("acme/shop", CloneRowProblem::FolderGone).message(),
+        "This folder is gone"
+    );
+    assert_eq!(
+        clone_problem("acme/shop", CloneRowProblem::NoRemoteOfRepo).message(),
+        "No remote of this clone points at acme/shop"
+    );
+    assert_eq!(
+        clone_problem("shop", CloneRowProblem::NotOwnerSlashRepo).message(),
+        "Write the repo as owner/repo"
+    );
+    assert_eq!(
+        clone_problem("acme/shop", CloneRowProblem::SameRepoTwice).message(),
+        "acme/shop is set twice"
+    );
+    assert_eq!(
+        CloneRowProblem::FolderGone.message(&clone("acme/shop")),
+        "This folder is gone"
+    );
+    assert_eq!(
+        SettingProblem::SummaryFileGone(PathBuf::from("/notes/summary.md")).message(),
+        "The summary file /notes/summary.md is gone"
+    );
+    assert_eq!(
+        SettingProblem::SummaryInstructionsUnreadable("{ skill = \"two words\" }".to_owned())
+            .message(),
+        "{ skill = \"two words\" } is not a file, \"off\" or a skill name"
+    );
+    assert_eq!(
+        SettingProblem::AskEffortUnknown("turbo".to_owned()).message(),
+        "\"turbo\" is not an effort Claude accepts: low, medium, high, xhigh or max"
+    );
 }
 
 #[test]

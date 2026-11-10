@@ -33,6 +33,42 @@ impl IdeTemplate {
     }
 }
 
+/// The IDE the reviewer picks in Settings: one with a known URL scheme, none, or their own template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdeChoice {
+    PhpStorm,
+    VsCode,
+    Zed,
+    None,
+    Custom(IdeTemplate),
+}
+
+impl IdeChoice {
+    const PRESETS: [Self; 3] = [Self::PhpStorm, Self::VsCode, Self::Zed];
+
+    pub fn template(&self) -> Option<IdeTemplate> {
+        let preset = |url: &str| Some(IdeTemplate::new(url.to_owned()));
+        match self {
+            Self::PhpStorm => preset("phpstorm://open?file={path}&line={line}"),
+            Self::VsCode => preset("vscode://file{path}:{line}"),
+            Self::Zed => preset("zed://file{path}:{line}"),
+            Self::None => None,
+            Self::Custom(template) => Some(template.clone()),
+        }
+    }
+
+    /// A template equal to a preset's is that preset, so a config written by hand and one written by Settings read alike.
+    pub fn of(template: Option<&IdeTemplate>) -> Self {
+        let Some(template) = template else {
+            return Self::None;
+        };
+        Self::PRESETS
+            .into_iter()
+            .find(|preset| preset.template().as_ref() == Some(template))
+            .unwrap_or_else(|| Self::Custom(template.clone()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdeLaunch {
     /// Handed to the system, which starts the IDE that owns the scheme.
