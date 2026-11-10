@@ -1524,7 +1524,7 @@ impl OneStepLayout {
                         )
                         .into_any_element(),
                     ),
-                    other => lead_button(other, "summary-lead", cx),
+                    other => lead_button(other, LeadLabel::Named, "summary-lead", cx),
                 })
                 .into_any_element(),
             PageRow::SummaryBullet(summary_bullet) => div()
@@ -2043,10 +2043,16 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             Command::PreviousScreen,
         ))
     });
-    let next_label = footer.next.as_ref().map(|next| match next {
-        NextScreen::Step { title } => title.clone(),
-        NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
-    });
+    let (up_next_label, next_label) = match &footer.lead {
+        Some(TourLead::Continue(next)) => ("Where you left off:", Some(next.title.clone())),
+        _ => (
+            "Up next:",
+            footer.next.as_ref().map(|next| match next {
+                NextScreen::Step { title } => title.clone(),
+                NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
+            }),
+        ),
+    };
     if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {
         return div()
             .pt_8()
@@ -2073,7 +2079,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
     let lead = footer
         .lead
         .as_ref()
-        .and_then(|lead| lead_button(lead, "footer-lead", cx));
+        .and_then(|lead| lead_button(lead, LeadLabel::Short, "footer-lead", cx));
     let primary = action.map(|(label, onward)| {
         let ticks = footer.ticks.clone();
         button(
@@ -2106,7 +2112,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .flex_col()
             .gap_0p5()
             .child(
-                note_label("Up next:")
+                note_label(up_next_label)
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(colors.muted_text),
             )
@@ -2325,8 +2331,16 @@ impl From<bool> for ReviewAgain {
 }
 
 /// The way into the tour: its start, or the first step not read yet. Finishing has its own card.
+/// Whether the lead names the step it goes to, or a label beside it already does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeadLabel {
+    Named,
+    Short,
+}
+
 fn lead_button(
     lead: &TourLead,
+    label_kind: LeadLabel,
     id: &'static str,
     cx: &mut Context<OneStepLayout>,
 ) -> Option<AnyElement> {
@@ -2336,6 +2350,11 @@ fn lead_button(
             first.id.clone(),
             div().child("Start the tour").into_any_element(),
             Command::NextScreen,
+        ),
+        TourLead::Continue(next) if label_kind == LeadLabel::Short => (
+            next.id.clone(),
+            div().child("Continue").into_any_element(),
+            Command::NextUnreadStep,
         ),
         TourLead::Continue(next) => (
             next.id.clone(),
