@@ -63,8 +63,8 @@ fn the_refresh_writer_may_run_every_command_the_refresh_section_asks_for() {
 }
 
 #[test]
-fn a_tour_agent_may_read_grep_and_glob_but_reads_only_its_clone_and_the_tours_folder() {
-    let tools = tour_agent_tools(Path::new("/clones/shop"));
+fn the_refresh_writer_may_read_grep_and_glob_but_reads_only_its_clone_and_the_tours_folder() {
+    let tools = refresh_writer_tools(Path::new("/clones/shop"));
     let listed: Vec<&str> = tools.split(',').collect();
 
     assert!(listed.contains(&"Grep"), "{tools}");

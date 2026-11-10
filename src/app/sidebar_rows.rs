@@ -1,6 +1,7 @@
 //! What the sidebar shows, read from the review once per change (with `PageRows`), so a frame, which
 //! comes on every scroll step, asks the review nothing.
 
+use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{ApproveWarning, ReadProgress, Review, Screen, StepId, TourAgentState};
@@ -44,7 +45,7 @@ pub struct SidebarRows {
     pub progress: ReadProgress,
     pub last_review: Option<SidebarLastReview>,
     /// Approve and Request changes show only on someone else's PR.
-    pub can_judge: bool,
+    pub finishing: Finishing,
     pub approve_warning: Option<ApproveWarning>,
     pub sync_banner: Option<SharedString>,
     pub not_synced: bool,
@@ -92,7 +93,7 @@ impl SidebarRows {
                 is_body_long: last.body_is_long(),
                 is_old,
             }),
-            can_judge: review.can_approve_or_request_changes(),
+            finishing: Finishing::of(review),
             approve_warning: review.approve_warning(),
             progress,
             sync_banner: review

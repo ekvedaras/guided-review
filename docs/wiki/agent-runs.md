@@ -31,6 +31,18 @@ Superseding part of the above, on 2026-11-06 the maintainer decided that not eve
 
 On 2026-11-06 the maintainer set which terminal becomes a PR's tour agent on `open` (a side review found that a plain shell could be claimed, and `hc send` would run a question as a shell command): the Claude session that ran `open`; else, when `open` ran in a plain shell, a Claude terminal in the same herdr session; else the app starts its own agent. The coordinator added two limits: only a terminal that runs Claude is ever claimed, and with several Claude terminals in that session none is claimed, because a busy unrelated session would get the PR's questions mid-work.
 
+## The tour agent may change the PR's code (2026-11-10)
+
+The maintainer asked for a 👀 on a comment as soon as the agent gets it, taken off when it replies, and for a "Working on it…" reply that the agent's answer replaces when it goes off to change code. This reverses the 2026-11-06 decision that the agent never changes the PR's code.
+
+The maintainer decided on 2026-11-10:
+
+- The agent may change code on any PR, not only the maintainer's own.
+- It works in its own folder when that is a clone of the repo, with no restrictions; else in a cheap worktree. The message and the tour skill add: only when the clone is on the PR's branch with none of the reviewer's own changes, and the agent commits and pushes to the PR's branch.
+- An agent the app starts runs with `--permission-mode auto` instead of `dontAsk`, so it can edit, test and push. Chosen over `bypassPermissions` to keep auto mode's block on destructive commands, since the agent reads comments and code of other people's PRs. The tool list stays as the calls auto mode allows without its classifier. The writer of a new tour from the PR switcher is the same terminal, so it runs in auto mode too. The refresh writer (`claude -p`) keeps `dontAsk`.
+
+How it is built: the viewer puts the 👀 (the seen mark) when the delivery goes through, not the agent, so it cannot be forgotten. `agent-reply --working` posts the reply and the hand-off keeps its comment id; the next `agent-reply --body` edits that comment. Both take the 👀 off. Open: whether GitHub takes a reaction on a comment still in a pending review is not tried live; if it refuses, the line under the thread says so.
+
 ## Hand-offs and herdr, checked on a real terminal (2026-11-06)
 
 - `hc events --json` writes a snapshot line, then JSON-RPC lines: `params.type` is `status` (with `params.data.status.state`) or `turn`, and `params.terminal` names the terminal. Recorded in `tests/fixtures/hc/events-claude-turn.jsonl`. The first parser expected the snapshot shape for changes too and would never have seen one.

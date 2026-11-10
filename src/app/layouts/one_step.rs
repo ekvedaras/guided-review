@@ -54,7 +54,7 @@ use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
-    AskAt, PageRow, ScreenFooter, SelectedRows, StepHeading, ThreadRowPlace, Toolbar,
+    AskAt, DiagramRow, PageRow, ScreenFooter, SelectedRows, StepHeading, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
@@ -64,9 +64,9 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, LineLocation, MoreContext,
-    NextScreen, Place, QueuedComment, ReadProgress, Review, Screen, SendMode, StepId, ThreadId,
-    ThreadView,
+    AgentReplied, Ask, Audience, CodeLink, CommentPlace, GitHubPort, HandOffId, LineLocation,
+    MoreContext, NextScreen, NotesButton, Place, QueuedComment, ReadProgress, Review, Screen,
+    SendMode, StepId, ThreadId, ThreadView,
 };
 
 actions!(
@@ -292,13 +292,14 @@ impl OneStepLayout {
             .update(cx, |session, cx| session.switch_failed(reason, cx));
     }
 
-    pub fn hand_off_answered(
+    pub fn hand_off_replied(
         &mut self,
         id: HandOffId,
+        replied: &AgentReplied,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         self.session
-            .update(cx, |session, cx| session.hand_off_answered(id, cx))
+            .update(cx, |session, cx| session.hand_off_replied(id, replied, cx))
     }
 
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
@@ -901,7 +902,7 @@ impl OneStepLayout {
         let tour_agent = Self::tour_agent_block(&colors, &sidebar.tour_agent, cx);
         let finish_dialog = FinishReviewDialog::new(
             progress.total > 0 && progress.read == progress.total,
-            sidebar.can_judge,
+            sidebar.finishing,
             sidebar.approve_warning,
             sidebar.last_review.clone(),
             session.review().finish_body().to_owned(),
@@ -1154,9 +1155,13 @@ impl OneStepLayout {
                     parsed_markdown(&why),
                 ))
                 .into_any_element(),
-            PageRow::Diagram => div()
+            PageRow::Diagram(diagram) => div()
                 .pb_4()
+                .flex()
+                .flex_col()
+                .gap_2()
                 .child(DiagramView::new(self.diagrams.clone()))
+                .child(self.notes_button(&diagram, cx))
                 .into_any_element(),
             PageRow::StepNotes(notes) => div().pb_4().child(notes).into_any_element(),
             PageRow::RepinNotes {
@@ -1367,6 +1372,44 @@ impl OneStepLayout {
             .children(whitespace)
             .children(wrap)
             .children(ask)
+    }
+
+    fn notes_button(&self, diagram: &DiagramRow, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let small = |kind| button(&colors, "diagram-to-notes", kind, ButtonSize::Small);
+        let session = self.session.clone();
+        let step = diagram.step.clone();
+        let add = small(ButtonKind::Ghost)
+            .tooltip(tooltip(|_| {
+                "Put this diagram under Notes in the PR description".into()
+            }))
+            .on_click(move |_, _, cx| {
+                session.update(cx, |session, cx| session.add_diagram_to_notes(&step, cx));
+            })
+            .child("Add to PR notes");
+        let (shown, failure) = match &diagram.notes_button {
+            NotesButton::Add => (add, None),
+            NotesButton::Adding => (small(ButtonKind::Ghost).child("Adding to PR notes…"), None),
+            NotesButton::InNotes => (small(ButtonKind::Done).child("In PR notes"), None),
+            NotesButton::Failed(reason) => (
+                add,
+                Some(
+                    div()
+                        .flex()
+                        .gap_1()
+                        .child("Could not add it:")
+                        .child(SharedString::from(Arc::clone(reason))),
+                ),
+            ),
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(shown)
+            .children(failure)
     }
 
     fn ask_at(&self, ask: &AskAt, cx: &mut Context<Self>) -> Stateful<Div> {

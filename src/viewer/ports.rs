@@ -30,20 +30,22 @@ pub trait ViewedFilesPort: Send + Sync {
 pub trait PullRequestDescriptionPort: Send + Sync {
     /// The PR's body as markdown; empty when it has none.
     fn pull_request_description(&self, pr: &PullRequestUrl) -> anyhow::Result<String>;
+
+    fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
 }
 
 /// Reading review threads and acting on them: replies, resolving, reactions.
 pub trait ReviewThreadsPort: Send + Sync {
     fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError>;
 
-    /// Adds a reply to the pending review, or with `CommentNow` posts it at once.
+    /// Adds a reply to the pending review, or with `CommentNow` posts it at once. Returns the new comment.
     fn reply_to_thread(
         &self,
         pr: &PullRequestUrl,
         thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
-    ) -> Result<(), GitHubError>;
+    ) -> Result<CommentId, GitHubError>;
 
     fn set_thread_resolved(
         &self,

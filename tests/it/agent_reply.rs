@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use guided_review::app_link::AppFolder;
-use guided_review::viewer::{HandOffState, ReviewState, ReviewStateFile};
+use guided_review::viewer::{CommentId, HandOffState, ReviewState, ReviewStateFile};
 
 use crate::support::fake_app::accept_request;
 use crate::support::graphql::serve_graphql;
@@ -13,7 +13,7 @@ use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 const PR: &str = "https://github.com/acme/shop/pull/7";
 const BUILD: &str = "test-build";
 const PENDING: &str = r#"{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[{"id":"REVIEW_7","viewerDidAuthor":true}]}}}}}"#;
-const REPLIED: &str = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
+const REPLIED: &str = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"R1","pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
 
 fn state_file(home: &Path) -> ReviewStateFile {
     ReviewStateFile::for_pr(home, &PR.parse().unwrap())
@@ -53,10 +53,18 @@ fn run_reply(
     graphql: Vec<String>,
     id: &str,
 ) -> (crate::support::Run, Arc<Mutex<Vec<String>>>) {
+    run_agent_reply(repo, graphql, &[id, "--body", "Because of the loop."])
+}
+
+fn run_agent_reply(
+    repo: &FixtureRepo,
+    graphql: Vec<String>,
+    args: &[&str],
+) -> (crate::support::Run, Arc<Mutex<Vec<String>>>) {
     let (url, asked) = serve_graphql(graphql);
     let run = GuidedReview::new(repo, &FakeGitHub { url })
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
-        .run(&["agent-reply", PR, id, "--body", "Because of the loop."]);
+        .run(&[&["agent-reply", PR], args].concat());
     (run, asked)
 }
 
@@ -190,4 +198,27 @@ fn a_reply_github_refused_fails_and_leaves_the_hand_off_as_it_was() {
         run.stderr
     );
     assert_eq!(hand_off_state(repo.home()), HandOffState::Delivered);
+}
+
+#[test]
+fn working_on_it_from_the_cli_posts_the_progress_reply_and_the_state_file_keeps_its_id() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    with_one_hand_off(repo.home());
+
+    let (run, asked) = run_agent_reply(
+        &repo,
+        vec![PENDING.into(), PENDING.into(), REPLIED.into()],
+        &["h0", "--working"],
+    );
+
+    assert!(run.success, "stderr: {}", run.stderr);
+    let asked = asked.lock().unwrap();
+    let reply: serde_json::Value = serde_json::from_str(asked.last().unwrap()).unwrap();
+    assert_eq!(reply["variables"]["input"]["body"], "🤖 Working on it…");
+    assert_eq!(
+        hand_off_state(repo.home()),
+        HandOffState::WorkingOnIt {
+            reply: CommentId::new("R1")
+        }
+    );
 }

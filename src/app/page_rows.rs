@@ -23,8 +23,8 @@ use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, CommentProblem, FileBlock, JumpPlace, JumpTarget, LineKind,
-    LineLocation, MoreContext, NextScreen, PieceDiff, Place, QueuedComment, Review, RowSelection,
-    SafetyNetPage, Screen, StepId, StepPage, ThreadView,
+    LineLocation, MoreContext, NextScreen, NotesButton, PieceDiff, Place, QueuedComment, Review,
+    RowSelection, SafetyNetPage, Screen, StepId, StepPage, ThreadView,
 };
 
 /// An ask button and what it asks about.
@@ -105,6 +105,11 @@ pub struct BinaryFileRow {
     pub link: CodeLink,
 }
 
+pub struct DiagramRow {
+    pub step: StepId,
+    pub notes_button: NotesButton,
+}
+
 pub struct HunkGapRow {
     pub id: SharedString,
     pub more: Option<MoreContext>,
@@ -119,7 +124,7 @@ pub enum PageRow {
     StepHeading(Rc<StepHeading>),
     StepWhy(SharedString),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
-    Diagram,
+    Diagram(Rc<DiagramRow>),
     StepNotes(StepNotes),
     RepinNotes {
         gone_pieces: usize,
@@ -265,8 +270,11 @@ impl PageRow {
                 problem.hash(&mut hasher);
                 is_sending.hash(&mut hasher);
             }
-            Self::Diagram
-            | Self::SafetyNetIntro
+            Self::Diagram(diagram) => {
+                diagram.step.hash(&mut hasher);
+                diagram.notes_button.hash(&mut hasher);
+            }
+            Self::SafetyNetIntro
             | Self::NoChangeSinceRead
             | Self::OnlyWhitespace
             | Self::PieceEnd => {}
@@ -417,7 +425,7 @@ impl PageRows {
     pub fn diagram_row(&self) -> Option<usize> {
         self.rows
             .iter()
-            .position(|row| matches!(row, PageRow::Diagram))
+            .position(|row| matches!(row, PageRow::Diagram(_)))
     }
 
     pub fn asked_lines(&self) -> &[Place] {
@@ -691,8 +699,14 @@ impl RowsBuilder<'_> {
         if !notes.is_empty() {
             self.rows.push(PageRow::StepNotes(notes));
         }
-        if diagram.is_some() {
-            self.rows.push(PageRow::Diagram);
+        if let Some(notes_button) = diagram
+            .as_ref()
+            .and_then(|_| review.diagram_notes_button(&id))
+        {
+            self.rows.push(PageRow::Diagram(Rc::new(DiagramRow {
+                step: id.clone(),
+                notes_button,
+            })));
         }
         if page.gone_pieces > 0 || page.text_may_be_old {
             self.rows.push(PageRow::RepinNotes {

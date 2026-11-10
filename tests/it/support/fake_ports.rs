@@ -68,6 +68,10 @@ pub enum GitHubCall {
         verdict: ReviewVerdict,
         body: String,
     },
+    SetDescription {
+        pr: PullRequestUrl,
+        body: String,
+    },
 }
 
 impl SentLog {
@@ -125,6 +129,7 @@ pub struct FakeGitHub {
     resolved_now: Mutex<BTreeMap<ThreadId, bool>>,
     reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
     edited_now: Mutex<BTreeMap<CommentId, String>>,
+    description: Mutex<String>,
 }
 
 impl FakeGitHub {
@@ -142,7 +147,18 @@ impl FakeGitHub {
             resolved_now: Mutex::default(),
             reacted_now: Mutex::default(),
             edited_now: Mutex::default(),
+            description: Mutex::default(),
         }
+    }
+
+    /// The PR's body as it is on GitHub.
+    pub fn with_description(self, body: &str) -> Self {
+        body.clone_into(&mut self.description.lock().unwrap());
+        self
+    }
+
+    pub fn description_now(&self) -> String {
+        self.description.lock().unwrap().clone()
     }
 
     pub fn with_viewer_as_pull_author(self) -> Self {
@@ -247,7 +263,17 @@ impl PullRequestTipsPort for FakeGitHub {
 impl PullRequestDescriptionPort for FakeGitHub {
     fn pull_request_description(&self, _pr: &PullRequestUrl) -> anyhow::Result<String> {
         self.fail_if_reads_fail()?;
-        Ok(String::new())
+        Ok(self.description_now())
+    }
+
+    fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()> {
+        self.sent.record(GitHubCall::SetDescription {
+            pr: pr.clone(),
+            body: body.to_owned(),
+        });
+        self.fail_if_connection_lost()?;
+        body.clone_into(&mut self.description.lock().unwrap());
+        Ok(())
     }
 }
 
@@ -349,7 +375,7 @@ impl ReviewThreadsPort for FakeGitHub {
         thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<CommentId, GitHubError> {
         self.sent.record(GitHubCall::Reply {
             thread_id: thread_id.clone(),
             body: body.to_owned(),
@@ -365,7 +391,13 @@ impl ReviewThreadsPort for FakeGitHub {
         if mode == SendMode::AddToReview {
             self.has_pending_review.store(true, Ordering::SeqCst);
         }
-        Ok(())
+        let replies_so_far = self
+            .sent
+            .github_calls()
+            .iter()
+            .filter(|call| matches!(call, GitHubCall::Reply { .. }))
+            .count();
+        Ok(CommentId::new(&format!("R{replies_so_far}")))
     }
 
     fn set_thread_resolved(

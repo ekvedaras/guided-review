@@ -47,12 +47,33 @@ impl FinishUi {
     }
 }
 
+/// Which ways of finishing the review the PR allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finishing {
+    /// The viewer's own PR with no pending comments: there is nothing to send and no verdict to give.
+    NothingToFinish,
+    CommentOnly,
+    AnyVerdict,
+}
+
+impl Finishing {
+    pub fn of(review: &crate::viewer::Review) -> Self {
+        if review.can_approve_or_request_changes() {
+            Self::AnyVerdict
+        } else if review.can_finish_review() {
+            Self::CommentOnly
+        } else {
+            Self::NothingToFinish
+        }
+    }
+}
+
 /// The "Finish review" button and the form it opens: Comment, Approve or Request changes, with a body.
 #[derive(IntoElement)]
 pub struct FinishReviewDialog {
     /// Then finishing is what the reader does next, so its button is the primary one.
     is_everything_read: bool,
-    can_judge: bool,
+    finishing: Finishing,
     warning: Option<ApproveWarning>,
     /// A review of the viewer's is on GitHub already, so this one updates it.
     last_review: Option<SidebarLastReview>,
@@ -64,7 +85,7 @@ pub struct FinishReviewDialog {
 impl FinishReviewDialog {
     pub fn new(
         is_everything_read: bool,
-        can_judge: bool,
+        finishing: Finishing,
         warning: Option<ApproveWarning>,
         last_review: Option<SidebarLastReview>,
         body: String,
@@ -73,7 +94,7 @@ impl FinishReviewDialog {
     ) -> Self {
         Self {
             is_everything_read,
-            can_judge,
+            finishing,
             warning,
             last_review,
             body,
@@ -234,13 +255,14 @@ impl RenderOnce for FinishReviewDialog {
                         })
                 }))
         });
+        let can_finish = self.finishing != Finishing::NothingToFinish;
         let wrapper = div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(open_button)
+            .children(can_finish.then_some(open_button))
             .children(last_review);
-        if !is_open {
+        if !is_open || !can_finish {
             return wrapper.into_any_element();
         }
 
@@ -250,7 +272,9 @@ impl RenderOnce for FinishReviewDialog {
             ReviewVerdict::RequestChanges,
         ]
         .into_iter()
-        .filter(|verdict| self.can_judge || *verdict == ReviewVerdict::Comment)
+        .filter(|verdict| {
+            self.finishing == Finishing::AnyVerdict || *verdict == ReviewVerdict::Comment
+        })
         .map(|choice| {
             let ui = ui.clone();
             toggle_button(

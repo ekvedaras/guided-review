@@ -466,7 +466,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
             "run --bg --json --outlive-parent --no-parent --name tour-acme-shop-7 --cwd /clones/shop \
              --label app=guided-review --label gr.pr={PR} --label gr.started-by=app \
              --label herdr.space=guided-review --label herdr.tab=tour-acme-shop-7 \
-             -- env PATH=/opt/gr/bin:/usr/bin claude You are the tour agent --permission-mode dontAsk"
+             -- env PATH=/opt/gr/bin:/usr/bin claude You are the tour agent --permission-mode auto"
         )
     );
     let tools: Vec<&str> = tools.split(',').collect();
@@ -477,40 +477,6 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
         "Skill(tour)",
     ] {
         assert!(tools.contains(&needed), "{needed} missing from {tools:?}");
-    }
-    for tool in &tools {
-        assert!(
-            !tool.starts_with("Write(") && !tool.starts_with("Edit(")
-                || tool.contains("~/.guided-review/tours/"),
-            "{tool} could change something other than the tour"
-        );
-    }
-}
-
-#[test]
-fn a_started_tour_agent_reads_only_its_clone_and_the_tours_folder_but_may_grep_and_glob() {
-    let dir = TempDir::new().unwrap();
-    answer(
-        dir.path(),
-        "run",
-        r#"{"address":"t9","name":"tour-acme-shop-7"}"#,
-    );
-
-    start_shop_agent(&adapter(dir.path())).unwrap();
-
-    let calls = calls(dir.path(), "calls");
-    let (_, tools) = calls[0].split_once(" --allowedTools ").unwrap();
-    let tools: Vec<&str> = tools.split(',').collect();
-    assert!(!tools.contains(&"Read"), "Read is not limited: {tools:?}");
-    for search in ["Grep", "Glob"] {
-        assert!(
-            tools.contains(&search),
-            "{search} is missing, dontAsk would deny it: {tools:?}"
-        );
-    }
-    for folder in ["//clones/shop/**", "~/.guided-review/tours/**"] {
-        let rule = format!("Read({folder})");
-        assert!(tools.contains(&rule.as_str()), "{rule} not in {tools:?}");
     }
 }
 

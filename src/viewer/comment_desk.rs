@@ -85,6 +85,10 @@ impl CommentDesk {
         self.authorship == PullRequestAuthorship::OwnedBySomeoneElse
     }
 
+    pub(super) fn can_finish_review(&self) -> bool {
+        self.can_approve_or_request_changes() || self.pending_review == PendingReview::Exists
+    }
+
     pub(super) fn begin_selection(&mut self, row: LineLocation) {
         self.selection = Some(RowSelection::start_at(row));
     }

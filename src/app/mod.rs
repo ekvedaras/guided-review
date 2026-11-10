@@ -37,8 +37,8 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, AppStateFile, BuildTicket, Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher,
-    ReviewStateFile, TourAgents,
+    ActivePr, AgentReplied, AppStateFile, BuildTicket, Finished, HandOffId, OpenDecision,
+    OpenOrigin, PrSwitcher, ReviewStateFile, TourAgents,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -155,8 +155,12 @@ async fn answer_requests(
                 reply.send(Answer::Quitting).ok();
                 cx.update(|cx| cx.quit());
             }
-            Request::AgentReplied { pr, hand_off } => {
-                let answer = mark_answered(&screen, pr, hand_off, cx);
+            Request::AgentReplied {
+                pr,
+                hand_off,
+                replied,
+            } => {
+                let answer = mark_replied(&screen, pr, hand_off, &replied, cx);
                 reply.send(answer).ok();
             }
             Request::Open(open) => {
@@ -205,10 +209,11 @@ async fn answer_requests(
 
 /// Only the PR in the window is marked here, because its session holds the state it writes back. For
 /// any other PR the command marks the state file.
-fn mark_answered(
+fn mark_replied(
     screen: &SharedScreen,
     pr: String,
     hand_off: HandOffId,
+    replied: &AgentReplied,
     cx: &mut AsyncApp,
 ) -> Answer {
     let (active, window) = {
@@ -228,7 +233,9 @@ fn mark_answered(
     };
     let marked = cx.update(|cx| {
         window
-            .update(cx, |layout, _, cx| layout.hand_off_answered(hand_off, cx))
+            .update(cx, |layout, _, cx| {
+                layout.hand_off_replied(hand_off, replied, cx)
+            })
             .and_then(|marked| marked)
     });
     match marked {

@@ -344,7 +344,7 @@ impl TourAgentPort for HcTourAgents {
             "claude",
             &start.first_task,
             "--permission-mode",
-            "dontAsk",
+            "auto",
             "--allowedTools",
             &tour_agent_tools(&start.folder),
         ];

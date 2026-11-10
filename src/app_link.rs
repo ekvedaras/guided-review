@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::viewer::HandOffId;
+use crate::viewer::{AgentReplied, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
 const START_WAIT: Duration = Duration::from_secs(20);
@@ -51,6 +51,8 @@ pub enum Request {
     AgentReplied {
         pr: String,
         hand_off: HandOffId,
+        #[serde(default)]
+        replied: AgentReplied,
     },
     Quit,
 }

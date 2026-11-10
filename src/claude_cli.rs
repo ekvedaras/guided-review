@@ -31,8 +31,8 @@ pub fn refresh_writer_tools(clone: &Path) -> String {
     )
 }
 
-/// What a tour agent the app starts may do: the refresh writer's tools, plus answering. It
-/// cannot edit the repo, which is what keeps the PR's code unchanged.
+/// What a tour agent the app starts may do without the auto mode classifier: the refresh writer's tools, plus
+/// answering. It runs in auto mode, because a comment may ask it to change the PR's code (decided 2026-11-10).
 pub fn tour_agent_tools(clone: &Path) -> String {
     format!(
         "{},Bash(guided-review agent-reply:*)",

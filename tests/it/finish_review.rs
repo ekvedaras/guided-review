@@ -123,6 +123,36 @@ fn approve_and_request_changes_show_only_on_a_pr_someone_else_wrote() {
 }
 
 #[test]
+fn finish_review_is_offered_on_ones_own_pr_only_with_comments_to_send() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    assert!(!review.can_finish_review(), "not known yet");
+
+    review
+        .pull_viewer_authorship(&pull.github().with_viewer_as_pull_author())
+        .unwrap();
+    review.pending_review_is(false);
+    assert!(
+        !review.can_finish_review(),
+        "nothing to send and no verdict to give"
+    );
+
+    review.pending_review_is(true);
+    assert!(review.can_finish_review(), "the pending comments go out");
+}
+
+#[test]
+fn finish_review_is_offered_on_someone_elses_pr_with_nothing_pending() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+
+    review.pull_viewer_authorship(&pull.github()).unwrap();
+    review.pending_review_is(false);
+
+    assert!(review.can_finish_review());
+}
+
+#[test]
 fn finishing_sends_the_verdict_and_body() {
     let pull = Pull::new();
     let github = pull.github();

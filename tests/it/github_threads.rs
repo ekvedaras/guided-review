@@ -378,7 +378,7 @@ fn a_comment_now_that_could_not_be_posted_or_taken_back_says_it_waits_in_the_pen
 
 #[test]
 fn a_reply_now_without_a_review_id_from_github_sends_the_viewers_pending_review() {
-    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"","state":"PENDING"}}}}}"#;
+    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"R1","pullRequestReview":{"id":"","state":"PENDING"}}}}}"#;
     let (url, asked) = serve_graphql(vec![
         NO_PENDING.into(),
         replied.into(),
@@ -569,7 +569,7 @@ fn without_a_pending_review_a_new_review_carries_the_verdict() {
 
 #[test]
 fn a_reply_now_sends_the_review_it_started() {
-    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"REVIEW_8","state":"PENDING"}}}}}"#;
+    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"R1","pullRequestReview":{"id":"REVIEW_8","state":"PENDING"}}}}}"#;
     let (url, asked) = serve_graphql(vec![NO_PENDING.into(), replied.into(), OK.into()]);
 
     GitHub::at(&url)
@@ -590,7 +590,7 @@ fn a_reply_now_sends_the_review_it_started() {
 
 #[test]
 fn a_reply_into_the_pending_review_is_not_sent() {
-    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
+    let replied = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"R1","pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
     let (url, asked) = serve_graphql(vec![PENDING.into(), replied.into()]);
 
     GitHub::at(&url)

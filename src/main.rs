@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use guided_review::agent_reply::agent_reply;
+use guided_review::agent_reply::{AgentReply, agent_reply};
 use guided_review::app_link::{Answer, AppFolder, AppListener, BindError, OpenRequest, hand_over};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
@@ -58,8 +58,11 @@ enum Command {
         pr: PullRequestUrl,
         /// The hand-off id from the message, like `h0`
         hand_off: HandOffId,
+        #[arg(long, required_unless_present = "working", conflicts_with = "working")]
+        body: Option<String>,
+        /// Post "Working on it…" now; the answer with --body replaces it
         #[arg(long)]
-        body: String,
+        working: bool,
     },
     /// Run the app itself; `open` starts it when none answers
     #[command(hide = true)]
@@ -93,8 +96,17 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr),
-        Command::AgentReply { pr, hand_off, body } => {
-            let said = agent_reply(&GitHub::from_env(), &home_folder()?, &pr, hand_off, &body)?;
+        Command::AgentReply {
+            pr,
+            hand_off,
+            body,
+            working: _,
+        } => {
+            let reply = match &body {
+                Some(body) => AgentReply::Answer(body),
+                None => AgentReply::WorkingOnIt,
+            };
+            let said = agent_reply(&GitHub::from_env(), &home_folder()?, &pr, hand_off, &reply)?;
             println!("{said}");
             Ok(())
         }

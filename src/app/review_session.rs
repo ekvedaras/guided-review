@@ -19,11 +19,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    AgentStatus, Ask, Audience, CommentId, CommentOutcome, CommentPlace, CommentProblem,
-    CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation,
-    OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode,
-    StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    AgentReplied, AgentStatus, Ask, Audience, CommentId, CommentOutcome, CommentPlace,
+    CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache,
+    LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
+    SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, TourAgentState,
+    TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -85,6 +85,7 @@ pub struct ReviewSession {
     reload: Option<Task<()>>,
     threads_pull: Option<Task<()>>,
     pr_description_pull: Option<Task<()>>,
+    taking_seen_marks_off: Option<Task<()>>,
     working_copy_check: Option<Task<()>>,
     push_debounce: Option<Task<()>>,
     pending_review_check: Option<Task<()>>,
@@ -188,6 +189,7 @@ impl ReviewSession {
             reload: None,
             threads_pull: None,
             pr_description_pull: None,
+            taking_seen_marks_off: None,
             working_copy_check: None,
             push_debounce: None,
             pending_review_check: None,
@@ -670,6 +672,7 @@ impl ReviewSession {
                 let shown = this.update(cx, |this, cx| {
                     if let TourAgentState::Agent { status, .. } = &state {
                         this.agent_status_is(*status);
+                        this.take_seen_marks_off(cx);
                     }
                     this.tour_agent = state;
                     this.show_problems(cx);
@@ -703,6 +706,37 @@ impl ReviewSession {
         }
     }
 
+    /// One batch at a time, so a burst of status changes does not take a mark off twice.
+    fn take_seen_marks_off(&mut self, cx: &mut Context<Self>) {
+        if self.taking_seen_marks_off.is_some() {
+            return;
+        }
+        let requests = self.review.seen_marks_to_take_off();
+        if requests.is_empty() {
+            return;
+        }
+        let github = Arc::clone(&self.github);
+        self.taking_seen_marks_off = Some(self.run_off_thread(
+            cx,
+            move || {
+                requests
+                    .into_iter()
+                    .map(|request| request.run(github.as_ref()))
+                    .collect::<Vec<_>>()
+            },
+            |this, outcomes, cx| {
+                this.taking_seen_marks_off = None;
+                for outcome in outcomes {
+                    if let Err(error) =
+                        this.change(cx, |review| review.apply_seen_mark_off(outcome))
+                    {
+                        eprintln!("could not save where a hand-off is: {error:#}");
+                    }
+                }
+            },
+        ));
+    }
+
     /// Types the oldest queued hand-off into the tour agent when it is idle. One at a time; the next goes
     /// when the agent next turns idle.
     fn deliver_hand_offs(&mut self, cx: &mut Context<Self>) {
@@ -713,9 +747,10 @@ impl ReviewSession {
             return;
         };
         let agents = self.tour_work.tour_agents.clone();
+        let github = Arc::clone(&self.github);
         self.delivering = Some(self.run_off_thread(
             cx,
-            move || request.run(&agents),
+            move || request.run(&agents, github.as_ref()),
             |this, outcome, cx| {
                 this.delivering = None;
                 let started_an_agent = outcome.started_an_agent();
@@ -828,6 +863,24 @@ impl ReviewSession {
         ));
     }
 
+    pub fn add_diagram_to_notes(&mut self, step: &StepId, cx: &mut Context<Self>) {
+        let Some(request) = self.change(cx, |review| review.diagram_to_notes(step)) else {
+            return;
+        };
+        let github = Arc::clone(&self.github);
+        self.run_off_thread(
+            cx,
+            move || request.run(github.as_ref()),
+            |this, outcome, cx| {
+                if let Err(error) = this.change(cx, |review| review.apply_diagram_to_notes(outcome))
+                {
+                    eprintln!("warning: could not keep the PR's description: {error:#}");
+                }
+            },
+        )
+        .detach();
+    }
+
     fn pull_pr_description(&mut self, cx: &mut Context<Self>) {
         let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
         self.pr_description_pull = Some(self.run_off_thread(
@@ -877,12 +930,13 @@ impl ReviewSession {
 
     /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the pending
     /// review are read again so the reply shows under the asked comment.
-    pub fn hand_off_answered(
+    pub fn hand_off_replied(
         &mut self,
         id: HandOffId,
+        replied: &AgentReplied,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        self.change(cx, |review| review.hand_off_answered(id))?;
+        self.change(cx, |review| review.hand_off_replied(id, replied))?;
         self.pull_threads(cx);
         self.pull_pending_review(cx);
         Ok(())

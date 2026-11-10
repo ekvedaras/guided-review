@@ -22,6 +22,7 @@ mod check;
 mod code_links;
 mod code_source;
 mod comment_actions;
+mod diagram_notes;
 mod diagrams;
 mod diff_hunks;
 mod eval;

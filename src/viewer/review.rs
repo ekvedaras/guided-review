@@ -21,6 +21,7 @@ use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
 };
+use super::diagram_notes::{DiagramNotes, DiagramToNotes, DiagramToNotesOutcome, NotesButton};
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
@@ -29,7 +30,8 @@ use super::finish_review::{
     SubmittedReview,
 };
 use super::hand_offs::{
-    Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState,
+    AgentReplied, Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState,
+    SeenMarkOff, SeenMarkOffOutcome,
 };
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
@@ -168,6 +170,7 @@ pub struct Review {
     working_copy: WorkingCopy,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
+    diagram_notes: DiagramNotes,
     saves: Arc<Saves>,
 }
 
@@ -236,6 +239,7 @@ impl Review {
             working_copy: WorkingCopy::Elsewhere,
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
+            diagram_notes: DiagramNotes::default(),
             saves: Arc::default(),
         })
     }
@@ -363,6 +367,33 @@ impl Review {
     pub fn pr_description(&self) -> Option<Markdown> {
         let body = self.state.pr_description();
         (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
+    }
+
+    /// `None` when the step shows no diagram.
+    pub fn diagram_notes_button(&self, step: &StepId) -> Option<NotesButton> {
+        let diagram = self.step(step)?.diagram.as_deref()?;
+        Some(
+            self.diagram_notes
+                .button(step, self.state.pr_description(), diagram),
+        )
+    }
+
+    /// `None` while the step's diagram is being added, or when the description holds it.
+    pub fn diagram_to_notes(&mut self, step: &StepId) -> Option<DiagramToNotes> {
+        if self.diagram_notes_button(step)? == NotesButton::InNotes {
+            return None;
+        }
+        let found = self.tour.find_step(step)?;
+        let diagram = found.diagram.as_deref()?;
+        self.diagram_notes
+            .start(&self.pr, step, &found.title, diagram)
+    }
+
+    pub fn apply_diagram_to_notes(&mut self, outcome: DiagramToNotesOutcome) -> anyhow::Result<()> {
+        match self.diagram_notes.finish(outcome) {
+            Some(description) => self.set_pr_description(&description),
+            None => Ok(()),
+        }
     }
 
     /// Kept in the state file only when it changed, since every window focus pulls it again.
@@ -907,6 +938,11 @@ impl Review {
         self.comment_desk.can_approve_or_request_changes()
     }
 
+    /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments to send.
+    pub fn can_finish_review(&self) -> bool {
+        self.comment_desk.can_finish_review()
+    }
+
     /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
     pub fn approve_warning(&self) -> Option<ApproveWarning> {
         let progress = self.progress();
@@ -1126,8 +1162,21 @@ impl Review {
         self.save_viewer_sections()
     }
 
-    pub fn hand_off_answered(&mut self, id: HandOffId) -> anyhow::Result<()> {
-        self.state.hand_off_answered(id)?;
+    pub fn hand_off_replied(
+        &mut self,
+        id: HandOffId,
+        replied: &AgentReplied,
+    ) -> anyhow::Result<()> {
+        self.state.hand_off_replied(id, replied)?;
+        self.save_viewer_sections()
+    }
+
+    pub fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
+        self.state.hand_offs().seen_marks_to_take_off()
+    }
+
+    pub fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) -> anyhow::Result<()> {
+        self.state.hand_offs_mut().apply_seen_mark_off(outcome);
         self.save_viewer_sections()
     }
 

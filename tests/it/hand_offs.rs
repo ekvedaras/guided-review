@@ -7,10 +7,11 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentReplyRefused, AgentReplyRequest, AgentStatus, Audience, CommentId, CommentPlace,
-    CommentResult, HandOffId, HandOffState, LineLocation, Problem, ReplyPlacement, Review,
-    ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, ThreadAction, ThreadActionResult,
-    ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgents,
+    AgentReplied, AgentReplyRefused, AgentReplyRequest, AgentStatus, Audience, CommentId,
+    CommentPlace, CommentResult, HandOffId, HandOffState, LineLocation, Problem, Reaction,
+    ReactionChange, ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark, SendMode,
+    Side, TerminalId, ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadMessage,
+    TourAgentPort, TourAgents,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -384,8 +385,13 @@ fn agents_of(fake: &Arc<FakeTourAgent>) -> TourAgents {
 }
 
 fn deliver(review: &mut Review, agents: &TourAgents) {
+    let elsewhere = FakeGitHub::with_pull("main-tip", "head", &SentLog::default());
+    deliver_with(review, agents, &elsewhere);
+}
+
+fn deliver_with(review: &mut Review, agents: &TourAgents, github: &FakeGitHub) {
     if let Some(request) = review.delivery_request() {
-        review.apply_delivery(request.run(agents)).unwrap();
+        review.apply_delivery(request.run(agents, github)).unwrap();
     }
 }
 
@@ -417,6 +423,7 @@ fn an_idle_agent_gets_the_oldest_hand_off_as_a_self_contained_message() {
         "why ten?",
         "notes.txt",
         "guided-review agent-reply",
+        "--working",
     ] {
         assert!(text.contains(part), "{part} missing from {text}");
     }
@@ -521,13 +528,13 @@ fn an_agent_still_starting_keeps_the_hand_off_queued_and_asks_to_try_again_soon(
     fake.still_starting("t1");
     let agents = agents_of(&fake);
 
-    let outcome = review.delivery_request().unwrap().run(&agents);
+    let outcome = review.delivery_request().unwrap().run(&agents, &github);
     assert!(outcome.wants_another_try_soon());
     review.apply_delivery(outcome).unwrap();
 
     assert_eq!(states(&review)[0], HandOffState::Queued);
     fake.settled("t1");
-    let outcome = review.delivery_request().unwrap().run(&agents);
+    let outcome = review.delivery_request().unwrap().run(&agents, &github);
     assert!(!outcome.wants_another_try_soon());
     review.apply_delivery(outcome).unwrap();
     assert_eq!(states(&review)[0], HandOffState::Delivered);
@@ -764,7 +771,7 @@ fn an_agent_reply_joins_the_pending_review_and_does_not_send_it() {
         .run(&github)
         .unwrap();
 
-    assert_eq!(posted, ReplyPlacement::JoinedPendingReview);
+    assert_eq!(posted.placement(), ReplyPlacement::JoinedPendingReview);
     assert_eq!(
         replies(&pull.sent),
         [("🤖 Because of the loop.".to_owned(), SendMode::AddToReview)]
@@ -794,7 +801,7 @@ fn an_agent_reply_is_posted_at_once_when_the_reviewer_has_no_pending_review() {
         .run(&github)
         .unwrap();
 
-    assert_eq!(posted, ReplyPlacement::PostedAtOnce);
+    assert_eq!(posted.placement(), ReplyPlacement::PostedAtOnce);
     assert_eq!(
         replies(&pull.sent),
         [("🤖 Because of the loop.".to_owned(), SendMode::CommentNow)]
@@ -862,7 +869,9 @@ fn an_answered_hand_off_is_answered_in_the_review_and_in_the_state_file() {
     let mut review = asked_twice(&pull, &mut github);
     let first = review.hand_offs().first().unwrap().id();
 
-    review.hand_off_answered(first).unwrap();
+    review
+        .hand_off_replied(first, &AgentReplied::default())
+        .unwrap();
 
     assert_eq!(
         states(&review),
@@ -887,7 +896,7 @@ fn a_hand_off_answered_in_the_state_file_alone_is_answered_and_an_unknown_one_is
     let file = ReviewStateFile::for_pr(pull.repo.home(), &pr);
 
     let mut result = Ok(());
-    file.update(|state| result = state.hand_off_answered(id))
+    file.update(|state| result = state.hand_off_replied(id, &AgentReplied::default()))
         .unwrap();
 
     result.unwrap();
@@ -904,7 +913,200 @@ fn a_hand_off_answered_in_the_state_file_alone_is_answered_and_an_unknown_one_is
     let refused = file
         .load()
         .unwrap()
-        .hand_off_answered("h9".parse().unwrap())
+        .hand_off_replied("h9".parse().unwrap(), &AgentReplied::default())
         .unwrap_err();
     assert!(matches!(refused, AgentReplyRefused::Unknown { .. }));
+}
+
+fn reactions(sent: &SentLog) -> Vec<(CommentId, ReactionChange)> {
+    sent.github_calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GitHubCall::SetReaction {
+                comment_id,
+                reaction: Reaction::Eyes,
+                change,
+            } => Some((comment_id, change)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn seen_marks(review: &Review) -> Vec<SeenMark> {
+    review
+        .hand_offs()
+        .iter()
+        .map(|hand_off| hand_off.seen_mark().clone())
+        .collect()
+}
+
+/// One hand-off of "why ten?" in thread T1, comment C1, delivered to an idle agent.
+fn delivered_one(pull: &Pull, github: &FakeGitHub) -> (Review, HandOffId) {
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    send(
+        &mut review,
+        &place,
+        SendMode::CommentNow,
+        Audience::Agent,
+        github,
+    );
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    deliver_with(&mut review, &agents_of(&fake), github);
+    let id = review.hand_offs().first().unwrap().id();
+    (review, id)
+}
+
+fn working_on_it_request(pull: &Pull, id: HandOffId) -> AgentReplyRequest {
+    let pr: PullRequestUrl = PR.parse().unwrap();
+    ReviewStateFile::for_pr(pull.repo.home(), &pr)
+        .load()
+        .unwrap()
+        .hand_offs()
+        .agent_working_on_it(&pr, id)
+        .unwrap()
+}
+
+#[test]
+fn a_delivered_hand_off_puts_eyes_on_the_reviewers_comment() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+
+    let (review, _) = delivered_one(&pull, &github);
+
+    assert_eq!(
+        reactions(&pull.sent),
+        [(CommentId::new("C1"), ReactionChange::Add)]
+    );
+    assert_eq!(seen_marks(&review), [SeenMark::On]);
+}
+
+#[test]
+fn eyes_github_refuses_are_named_under_the_thread_and_the_hand_off_still_goes() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    send(
+        &mut review,
+        &place,
+        SendMode::CommentNow,
+        Audience::Agent,
+        &github,
+    );
+    github.inject(GitHubFault::ConnectionLost);
+
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    deliver_with(&mut review, &agents_of(&fake), &github);
+
+    assert_eq!(states(&review), [HandOffState::Delivered]);
+    let line = lines_under_the_threads(&review)[0].clone().unwrap();
+    assert!(
+        line.starts_with("Delivered to the agent")
+            && line.contains("👀")
+            && line.contains("network is down"),
+        "{line}"
+    );
+}
+
+#[test]
+fn the_agents_answer_takes_the_eyes_off() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let (mut review, id) = delivered_one(&pull, &github);
+
+    let done = reply_request(&pull, id, "Because of the loop.")
+        .unwrap()
+        .run(&github)
+        .unwrap();
+    review.hand_off_replied(id, done.replied()).unwrap();
+
+    assert_eq!(
+        reactions(&pull.sent),
+        [
+            (CommentId::new("C1"), ReactionChange::Add),
+            (CommentId::new("C1"), ReactionChange::Remove)
+        ]
+    );
+    assert_eq!(states(&review), [HandOffState::Answered]);
+    assert_eq!(seen_marks(&review), [SeenMark::Off]);
+}
+
+#[test]
+fn working_on_it_is_posted_at_once_and_the_answer_replaces_it() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let (mut review, id) = delivered_one(&pull, &github);
+
+    let working = working_on_it_request(&pull, id).run(&github).unwrap();
+    review.hand_off_replied(id, working.replied()).unwrap();
+
+    assert_eq!(
+        replies(&pull.sent),
+        [("🤖 Working on it…".to_owned(), SendMode::CommentNow)]
+    );
+    let progress = CommentId::new("R1");
+    assert_eq!(
+        states(&review),
+        [HandOffState::WorkingOnIt {
+            reply: progress.clone()
+        }]
+    );
+    assert_eq!(seen_marks(&review), [SeenMark::Off]);
+    assert_eq!(
+        lines_under_the_threads(&review)[0].as_deref(),
+        Some("The agent said it is working on it")
+    );
+
+    let answered = reply_request(&pull, id, "Done in abc123.")
+        .unwrap()
+        .run(&github)
+        .unwrap();
+    review.hand_off_replied(id, answered.replied()).unwrap();
+
+    assert_eq!(answered.placement(), ReplyPlacement::ReplacedWorkingOnIt);
+    assert_eq!(replies(&pull.sent).len(), 1, "no second reply");
+    assert!(pull.sent.github_calls().contains(&GitHubCall::EditComment {
+        comment_id: progress,
+        body: "🤖 Done in abc123.".to_owned(),
+    }));
+    assert_eq!(states(&review), [HandOffState::Answered]);
+}
+
+#[test]
+fn an_agent_that_stops_after_working_on_it_ended_without_an_answer() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let (mut review, id) = delivered_one(&pull, &github);
+    let working = working_on_it_request(&pull, id).run(&github).unwrap();
+    review.hand_off_replied(id, working.replied()).unwrap();
+
+    review.agent_status_is(AgentStatus::Working).unwrap();
+    review.agent_status_is(AgentStatus::Idle).unwrap();
+
+    assert_eq!(states(&review), [HandOffState::EndedWithoutAnswer]);
+}
+
+#[test]
+fn a_hand_off_the_agent_ends_without_answering_has_its_eyes_taken_off() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let (mut review, _) = delivered_one(&pull, &github);
+    assert_eq!(review.seen_marks_to_take_off().len(), 0, "still delivered");
+
+    review.agent_status_is(AgentStatus::Working).unwrap();
+    review.agent_status_is(AgentStatus::Idle).unwrap();
+    for request in review.seen_marks_to_take_off() {
+        review.apply_seen_mark_off(request.run(&github)).unwrap();
+    }
+
+    assert_eq!(
+        reactions(&pull.sent),
+        [
+            (CommentId::new("C1"), ReactionChange::Add),
+            (CommentId::new("C1"), ReactionChange::Remove)
+        ]
+    );
+    assert_eq!(seen_marks(&review), [SeenMark::Off]);
+    assert_eq!(review.seen_marks_to_take_off().len(), 0);
 }

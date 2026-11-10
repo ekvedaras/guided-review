@@ -11,6 +11,7 @@ mod ask_target;
 mod code_link;
 mod comment_desk;
 mod comments;
+mod diagram_notes;
 mod diff_display;
 mod diff_fence;
 mod display_options;
@@ -54,6 +55,9 @@ pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
     CommentResult, QueuedComment, SendMode,
 };
+pub use diagram_notes::{
+    DiagramToNotes, DiagramToNotesOutcome, NotesButton, with_diagram_in_notes,
+};
 pub use diff_display::{DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, MoreContext};
 pub use diff_fence::{FenceLine, fence_lines};
 pub use file_block::FileBlock;
@@ -62,8 +66,9 @@ pub use finish_review::{
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use hand_offs::{
-    AgentReplyRefused, AgentReplyRequest, Audience, DeliveryOutcome, DeliveryRequest, HandOff,
-    HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, ThreadMessage,
+    AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, DeliveryOutcome,
+    DeliveryRequest, HandOff, HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement,
+    SeenMark, SeenMarkOff, SeenMarkOffOutcome, ThreadMessage,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{

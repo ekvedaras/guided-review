@@ -341,6 +341,18 @@ impl PullRequestDescriptionPort for GitHub {
             .with_context(|| format!("could not read the description of {pr} from GitHub"))?;
         Ok(pull.body.unwrap_or_default())
     }
+
+    fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()> {
+        let id = self.pull_request_id(pr)?;
+        self.graphql(
+            "mutation($input: UpdatePullRequestInput!) {
+                updatePullRequest(input: $input) { pullRequest { id } }
+            }",
+            &serde_json::json!({"input": {"pullRequestId": id, "body": body}}),
+        )
+        .with_context(|| format!("could not change the description of {pr} on GitHub"))?;
+        Ok(())
+    }
 }
 
 impl ViewedFilesPort for GitHub {
@@ -438,7 +450,7 @@ impl ReviewThreadsPort for GitHub {
         thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<CommentId, GitHubError> {
         let input = ReplyInput {
             pull_request_review_thread_id: thread_id.as_str(),
             body,
@@ -448,16 +460,17 @@ impl ReviewThreadsPort for GitHub {
             .graphql(
                 "mutation($input: AddPullRequestReviewThreadReplyInput!) {
                     addPullRequestReviewThreadReply(input: $input) {
-                        comment { pullRequestReview { id state } }
+                        comment { id pullRequestReview { id state } }
                     }
                 }",
                 &serde_json::json!({"input": input}),
             )
             .map_err(|error| one_pending_review(error).context("could not reply"))?;
-        let review = at(
-            &data,
-            "/addPullRequestReviewThreadReply/comment/pullRequestReview",
-        );
+        let comment = at(&data, "/addPullRequestReviewThreadReply/comment");
+        let reply = non_empty_id(at(comment, "/id"))
+            .map(|id| CommentId::new(&id))
+            .context("GitHub did not say which comment the reply is")?;
+        let review = at(comment, "/pullRequestReview");
         if mode == SendMode::CommentNow && at(review, "/state") == "PENDING" {
             let review_id = self
                 .review_holding_new_comment(pr, non_empty_id(at(review, "/id")))
@@ -465,7 +478,7 @@ impl ReviewThreadsPort for GitHub {
             self.submit_pending_review(&review_id, ReviewVerdict::Comment, "")
                 .map_err(|error| error.context("could not post the reply"))?;
         }
-        Ok(())
+        Ok(reply)
     }
 
     fn set_thread_resolved(
