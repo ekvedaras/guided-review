@@ -37,6 +37,10 @@ impl DisplayOptions {
         DiffDisplay::more_lines(&mut self.more_context, more);
     }
 
+    pub(super) fn show_lines(&mut self, more: &MoreContext, count: usize) {
+        *self.more_context.entry(more.clone()).or_default() += count;
+    }
+
     pub(super) fn ignores_whitespace(&self) -> bool {
         self.ignores_whitespace
     }

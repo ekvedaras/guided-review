@@ -471,3 +471,11 @@ fn the_ask_panel_line_says_what_became_of_the_hand_off() {
         "Not handed: this PR has no tour agent. Run `guided-review open` from your own Claude in herdr to make it the tour agent"
     );
 }
+
+#[test]
+fn the_sidebar_names_the_tour_agent_only_when_there_is_one_or_it_cannot_be_reached() {
+    assert!(on("w1:t2", AgentStatus::Working).is_worth_a_line());
+    assert!(TourAgentState::LinkOff("no hc".into()).is_worth_a_line());
+    assert!(!TourAgentState::None.is_worth_a_line());
+    assert!(!TourAgentState::Unknown.is_worth_a_line());
+}

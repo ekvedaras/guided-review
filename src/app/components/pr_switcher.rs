@@ -15,7 +15,12 @@ use crate::viewer::{
     WhyListed,
 };
 
-use super::palette::{Colors, TEXT_FONT};
+use super::chip::{chip, notice_band};
+use super::icon::{Icon, sized_icon};
+use super::key_cap::{KeyLabel, key_hint};
+use super::motion::rise_in;
+use super::overlay::{modal_layer, overlay_panel, picker_footer, picker_row};
+use super::palette::{Colors, Tone};
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
@@ -247,105 +252,75 @@ impl PrSwitcherView {
             TourFact::WritingFailed => colors.warning,
             TourFact::Missing | TourFact::Writing => colors.muted_text,
         };
-        div()
-            .id(SharedString::from(format!("pr-switcher-row-{index}")))
-            .mx_2()
-            .px_2()
-            .h(px(36.))
-            .flex()
-            .items_center()
-            .gap_3()
-            .rounded_md()
-            .overflow_hidden()
-            .cursor_pointer()
-            .when(!has_tour, |row| row.text_color(colors.muted_text))
-            .map(|row| {
-                if is_selected {
-                    row.bg(colors.current)
+        picker_row(
+            &colors,
+            SharedString::from(format!("pr-switcher-row-{index}")),
+            is_selected,
+        )
+        .h(px(36.))
+        .when(!has_tour, |row| row.text_color(colors.muted_text))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.switching.list.update(cx, |list, _| list.select(index));
+            this.pick(window, cx);
+        }))
+        .child(
+            div()
+                .flex_none()
+                .size(px(6.))
+                .rounded_full()
+                .when(shown.is_active, |dot| dot.bg(colors.accent)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(if shown.is_active {
+                    colors.accent
                 } else {
-                    row.hover(|row| row.bg(colors.hover))
-                }
-            })
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.switching.list.update(cx, |list, _| list.select(index));
-                this.pick(window, cx);
-            }))
-            .child(
-                div()
-                    .flex_none()
-                    .size(px(6.))
-                    .rounded_full()
-                    .when(shown.is_active, |dot| dot.bg(colors.accent)),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(if shown.is_active {
-                        colors.accent
-                    } else {
-                        colors.muted_text
-                    })
-                    .child(shown.pr.clone()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(shown.title.clone()),
-            )
-            .when(shown.is_draft, |row| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.muted_text)
-                        .child("draft"),
-                )
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(shown.author.clone()),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(96.))
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(shown.why),
-            )
-            .when(shown.is_active, |row| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.accent)
-                        .child("viewing"),
-                )
-            })
-            .when(shown.has_unseen_reply, |row| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.accent)
-                        .child("agent replied"),
-                )
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(88.))
-                    .text_xs()
-                    .text_color(tour_color)
-                    .child(shown.tour_label),
-            )
+                    colors.muted_text
+                })
+                .child(shown.pr.clone()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .font_weight(FontWeight::MEDIUM)
+                .child(shown.title.clone()),
+        )
+        .when(shown.is_draft, |row| {
+            row.child(chip(&colors, Tone::Neutral).child("draft"))
+        })
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(shown.author.clone()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(px(96.))
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(shown.why),
+        )
+        .when(shown.is_active, |row| {
+            row.child(chip(&colors, Tone::Accent).child("viewing"))
+        })
+        .when(shown.has_unseen_reply, |row| {
+            row.child(chip(&colors, Tone::Accent).child("agent replied"))
+        })
+        .child(
+            div()
+                .flex_none()
+                .w(px(88.))
+                .text_xs()
+                .text_color(tour_color)
+                .child(shown.tour_label),
+        )
     }
 }
 
@@ -373,22 +348,13 @@ impl Render for PrSwitcherView {
             "No pull request matches."
         };
         let message = self.refusal.clone().or_else(|| self.notice.clone());
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .flex()
-            .items_start()
-            .justify_center()
-            .bg(gpui::rgba(0x00000066))
-            .occlude()
+        modal_layer(&colors, "pr-switcher-scrim")
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),
             )
-            .child(
-                div()
+            .child(rise_in(
+                overlay_panel(&colors)
                     .id("pr-switcher")
                     .key_context(Self::KEY_CONTEXT)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -396,25 +362,18 @@ impl Render for PrSwitcherView {
                     .mt(px(80.))
                     .w(px(860.))
                     .h_auto()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .bg(colors.background)
-                    .border_1()
-                    .border_color(colors.border)
-                    .rounded_lg()
-                    .shadow_lg()
-                    .font_family(TEXT_FONT)
-                    .text_sm()
-                    .text_color(colors.text)
                     .child(
                         div()
                             .px_4()
                             .py_3()
+                            .flex()
+                            .items_center()
+                            .gap_3()
                             .text_base()
                             .border_b_1()
-                            .border_color(colors.border)
-                            .child(self.query_box(cx)),
+                            .border_color(colors.subtle_border)
+                            .child(sized_icon(Icon::Search, colors.muted_text, px(16.)))
+                            .child(div().flex_1().min_w_0().child(self.query_box(cx))),
                     )
                     .child(
                         div()
@@ -437,35 +396,31 @@ impl Render for PrSwitcherView {
                             .children(scrollbar),
                     )
                     .children(message.map(|message| {
-                        div()
+                        notice_band(&colors, Tone::Warning)
                             .px_4()
-                            .py_2()
+                            .border_t_1()
                             .text_xs()
-                            .bg(colors.warning_background)
-                            .text_color(colors.warning)
                             .child(message)
                     }))
                     .child(
-                        div()
-                            .px_4()
-                            .py_2()
-                            .flex()
-                            .gap_4()
-                            .border_t_1()
-                            .border_color(colors.subtle_border)
-                            .bg(colors.surface)
-                            .rounded_b_md()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child("↑ ↓  move")
-                            .child("↵  open")
-                            .child("esc  close")
+                        picker_footer(&colors)
+                            .child(key_hint(
+                                &colors,
+                                &[
+                                    KeyLabel::Icon(Icon::ArrowUp),
+                                    KeyLabel::Icon(Icon::ArrowDown),
+                                ],
+                                "move",
+                            ))
+                            .child(key_hint(&colors, &[KeyLabel::Icon(Icon::Enter)], "open"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("esc")], "close"))
                             .child(div().flex_1())
                             .when(is_refreshing && !is_loading, |footer| {
                                 footer.child("Refreshing from GitHub...")
                             }),
                     ),
-            )
+                "pr-switcher-rise",
+            ))
             .into_any_element()
     }
 }

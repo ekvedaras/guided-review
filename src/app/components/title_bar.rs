@@ -1,6 +1,8 @@
+use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    RenderOnce, Rgba, StatefulInteractiveElement, Styled, Window, WindowControlArea, div, px,
+    AnyElement, App, Background, ElementId, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, WindowControlArea, div,
+    px,
 };
 
 use super::palette::Colors;
@@ -10,22 +12,38 @@ pub const TITLE_BAR_HEIGHT: f32 = 40.;
 /// Room left of the traffic lights' right edge, so nothing is drawn under them.
 pub const TRAFFIC_LIGHTS_WIDTH: f32 = 80.;
 
+/// How a title bar meets what is under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TitleBarEdge {
+    /// A hairline in `subtle_border`.
+    Border,
+    /// Nothing: the ground runs on, or the caller draws its own edge (the trail).
+    Open,
+}
+
 /// A strip of the window's top edge: it drags the window and a double click zooms it, like a
 /// native title bar, while its buttons still take their own clicks.
 #[derive(IntoElement)]
 pub struct TitleBarArea {
     id: ElementId,
-    background: Rgba,
+    background: Background,
+    edge: TitleBarEdge,
     children: Vec<AnyElement>,
 }
 
 impl TitleBarArea {
-    pub fn new(id: impl Into<ElementId>, background: Rgba) -> Self {
+    pub fn new(id: impl Into<ElementId>, background: impl Into<Background>) -> Self {
         Self {
             id: id.into(),
-            background,
+            background: background.into(),
+            edge: TitleBarEdge::Border,
             children: Vec::new(),
         }
+    }
+
+    pub fn edge(mut self, edge: TitleBarEdge) -> Self {
+        self.edge = edge;
+        self
     }
 }
 
@@ -56,9 +74,11 @@ impl RenderOnce for TitleBarArea {
             .h(px(TITLE_BAR_HEIGHT))
             .flex()
             .items_center()
+            .relative()
             .bg(self.background)
-            .border_b_1()
-            .border_color(colors.subtle_border)
+            .when(self.edge == TitleBarEdge::Border, |bar| {
+                bar.border_b_1().border_color(colors.subtle_border)
+            })
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 on_down.update(cx, |pressed, _| *pressed = true);
             })

@@ -41,7 +41,7 @@ pub enum Capture {
 }
 
 impl Capture {
-    const ALL: [Self; 24] = [
+    pub const ALL: [Self; 24] = [
         Self::Attribute,
         Self::Comment,
         Self::Constant,

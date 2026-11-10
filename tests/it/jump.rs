@@ -4,7 +4,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pieces::PieceId;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
-use guided_review::viewer::{JumpPlace, Review, ReviewStateFile, Screen};
+use guided_review::viewer::{Command, JumpPlace, PaletteEntry, Review, ReviewStateFile, Screen};
 use serde_json::{Value, json};
 
 fn open(steps: Vec<Value>) -> Review {
@@ -220,4 +220,144 @@ fn a_target_says_where_it_lands_whatever_its_label_says() {
             JumpPlace::File(FilePath::new("README.md").unwrap()),
         ]
     );
+}
+
+fn entry_name(entry: &PaletteEntry) -> String {
+    match entry {
+        PaletteEntry::Place(target) => target.label().into_owned(),
+        PaletteEntry::Action(action) => action.label().to_owned(),
+    }
+}
+
+/// Each group as `Heading: entry, entry`.
+fn palette(review: &Review, query: &str) -> Vec<String> {
+    review
+        .palette(query)
+        .iter()
+        .map(|group| {
+            let entries: Vec<String> = group.entries.iter().map(entry_name).collect();
+            format!("{}: {}", group.group.title(), entries.join(", "))
+        })
+        .collect()
+}
+
+fn actions(review: &Review) -> Vec<&'static str> {
+    review
+        .palette_actions()
+        .iter()
+        .map(|action| action.label())
+        .collect()
+}
+
+#[test]
+fn an_empty_query_groups_steps_files_and_symbols_in_reading_order_then_actions() {
+    let review = open(shop_tour());
+
+    let groups = palette(&review, "");
+
+    assert_eq!(
+        groups[..3],
+        [
+            "Steps: Order totals go up, Readme says hello",
+            "Files: app/Order.php, README.md",
+            "Symbols: app/Order.php#Order::total",
+        ]
+    );
+    assert!(groups[3].starts_with("Actions: "), "{groups:?}");
+}
+
+#[test]
+fn the_group_holding_the_best_match_comes_first_and_actions_come_after_places() {
+    let review = open(shop_tour());
+
+    assert_eq!(
+        palette(&review, "README"),
+        ["Files: README.md", "Steps: Readme says hello"]
+    );
+    assert_eq!(
+        palette(&review, "set"),
+        ["Actions: Settings"],
+        "actions match their names too"
+    );
+}
+
+#[test]
+fn a_query_that_starts_with_a_chevron_lists_only_actions() {
+    let review = open(shop_tour());
+
+    let only_actions = palette(&review, ">");
+    assert_eq!(only_actions.len(), 1);
+    assert!(only_actions[0].starts_with("Actions: "));
+    assert_eq!(palette(&review, "> readme"), [] as [String; 0]);
+    assert_eq!(palette(&review, ">sett"), ["Actions: Settings"]);
+}
+
+#[test]
+fn the_actions_follow_what_the_open_screen_allows() {
+    let mut review = open(shop_tour());
+
+    let on_summary = actions(&review);
+    assert!(on_summary.contains(&"Next unread step"));
+    assert!(on_summary.contains(&"Settings"));
+    assert!(on_summary.contains(&"Keyboard shortcuts"));
+    assert!(on_summary.contains(&"Switch pull request"));
+    assert!(on_summary.contains(&"Open on GitHub"));
+    assert!(!on_summary.contains(&"Mark step as read"));
+    assert!(!on_summary.contains(&"Ask about this step"));
+
+    review.go_to(&"totals".into());
+    let on_step = actions(&review);
+    assert!(on_step.contains(&"Mark step as read"));
+    assert!(on_step.contains(&"Ask about this step"));
+    assert!(on_step.contains(&"Hide whitespace"));
+    assert!(on_step.contains(&"Wrap lines"));
+
+    review.tick(&"totals".into()).unwrap();
+    review.toggle_ignore_whitespace();
+    review.toggle_wrap_lines();
+    let flipped = actions(&review);
+    assert!(flipped.contains(&"Mark step as unread"));
+    assert!(flipped.contains(&"Show whitespace"));
+    assert!(flipped.contains(&"Stop wrapping lines"));
+}
+
+#[test]
+fn finishing_the_review_is_an_action_only_where_the_pr_allows_it() {
+    let mut review = open(shop_tour());
+    review.viewer_authorship_is(false);
+    assert_eq!(
+        review.can_finish_review(),
+        actions(&review).contains(&"Finish review")
+    );
+    review.viewer_authorship_is(true);
+    assert_eq!(
+        review.can_finish_review(),
+        actions(&review).contains(&"Finish review")
+    );
+}
+
+#[test]
+fn an_action_names_the_shortcut_that_does_it() {
+    let review = open(shop_tour());
+
+    let settings = review
+        .palette_actions()
+        .into_iter()
+        .find(|action| action.label() == "Settings")
+        .unwrap();
+    assert_eq!(settings.command(), Some(Command::Settings));
+}
+
+#[test]
+fn the_sidebar_flags_steps_with_something_to_check_and_marks_skim_steps() {
+    let review = open(vec![
+        json!({"id": "totals", "title": "Totals", "why": "w", "check": "Rounding", "pieces": [{"file": "app/Order.php"}]}),
+        json!({"id": "docs", "title": "Docs", "why": "w", "skim": true, "pieces": [{"file": "README.md"}]}),
+    ]);
+
+    let entries = review.sidebar();
+    assert!(entries[0].has_check);
+    assert!(!entries[0].is_skim);
+    assert!(!entries[1].has_check);
+    assert!(entries[1].is_skim);
 }

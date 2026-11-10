@@ -11,8 +11,11 @@ use crate::file_path::FilePath;
 use crate::image_facts::{self, PixelSize};
 use crate::viewer::{ImageMark, ImagePreview, ImageSide};
 
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
+use super::chip::chip;
 use super::diff_view::OnImageComment;
-use super::palette::Colors;
+use super::icon::Icon;
+use super::palette::{CONTROL_RADIUS, Colors, Tone};
 
 const PICTURE_BOX: (f32, f32) = (460., 360.);
 const CHECKER_CELL: f32 = 8.;
@@ -183,15 +186,17 @@ impl RenderOnce for ImageRow {
                     })),
             )
             .child(
-                div()
-                    .id(ElementId::from(SharedString::from(format!(
-                        "comment-on-image-{path}"
-                    ))))
-                    .text_sm()
-                    .text_color(colors.accent)
-                    .cursor_pointer()
-                    .on_click(move |_, window, cx| on_comment(window, cx))
-                    .child("Comment on this image"),
+                div().flex().child(
+                    icon_label_button(
+                        &colors,
+                        ElementId::from(SharedString::from(format!("comment-on-image-{path}"))),
+                        ButtonKind::Secondary,
+                        ButtonSize::Small,
+                        Icon::MessageSquare,
+                        "Comment on this image",
+                    )
+                    .on_click(move |_, window, cx| on_comment(window, cx)),
+                ),
             )
             .into_any_element()
     }
@@ -233,11 +238,11 @@ fn side_column(
                 .text_color(colors.muted_text)
                 .child(label.to_owned())
                 .children(mark.map(|mark| {
-                    let color = match mark {
-                        ImageMark::Added => colors.success,
-                        ImageMark::Deleted => colors.danger,
+                    let tone = match mark {
+                        ImageMark::Added => Tone::Success,
+                        ImageMark::Deleted => Tone::Danger,
                     };
-                    div().text_color(color).child(mark.label())
+                    chip(colors, tone).child(mark.label())
                 })),
         )
         .child(match picture {
@@ -263,6 +268,10 @@ fn drawn(picture: &Picture, path: &SharedString, label: &str, colors: &Colors) -
         .relative()
         .w(px(width))
         .h(px(height))
+        .rounded(px(CONTROL_RADIUS))
+        .overflow_hidden()
+        .border_1()
+        .border_color(colors.subtle_border)
         .child(checkerboard(width, height, colors))
         .child(
             img(Arc::clone(&picture.image))

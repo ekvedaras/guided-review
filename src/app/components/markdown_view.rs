@@ -15,7 +15,22 @@ use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines};
 
-use super::palette::{CODE_FONT, Colors};
+use super::icon::{Icon, sized_icon};
+use super::motion::turn_to;
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors};
+
+/// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
+pub fn bullet(colors: &Colors, line_height: gpui::Pixels) -> Div {
+    div()
+        .flex_none()
+        .h(line_height)
+        .flex()
+        .items_center()
+        .child(div().size(px(5.)).rounded_full().bg(colors.muted_text))
+}
+
+/// The line height of `text_sm`, which markdown on cards is set in.
+const SMALL_LINE: gpui::Pixels = px(22.);
 
 /// The `<details>` the reader opened, by the key of the body they are in. Kept in one place, not in each
 /// body, so the layout can see them: an open one makes its row taller.
@@ -294,9 +309,10 @@ fn suggestion_view(colors: &Colors, removed: &[Arc<str>], added: &[SharedString]
     div()
         .flex()
         .flex_col()
-        .rounded_md()
+        .rounded(px(CONTROL_RADIUS))
         .border_1()
-        .border_color(colors.border)
+        .border_color(colors.subtle_border)
+        .bg(colors.background)
         .font_family(CODE_FONT)
         .text_sm()
         .overflow_hidden()
@@ -304,7 +320,9 @@ fn suggestion_view(colors: &Colors, removed: &[Arc<str>], added: &[SharedString]
             div()
                 .px_2()
                 .py_1()
-                .bg(colors.surface)
+                .bg(colors.header_band())
+                .border_b_1()
+                .border_color(colors.subtle_border)
                 .text_color(colors.muted_text)
                 .child("Suggested change"),
         )
@@ -366,13 +384,18 @@ fn block_element(
             .gap_1()
             .children(items.iter().enumerate().map(|(index, item)| {
                 let marker = match first_number {
-                    Some(first) => format!("{}.", first + index as u64),
-                    None => "•".to_owned(),
+                    Some(first) => div()
+                        .text_right()
+                        .child(format!("{}.", first + index as u64)),
+                    None => div()
+                        .flex()
+                        .justify_end()
+                        .child(bullet(&colors, SMALL_LINE)),
                 };
                 div()
                     .flex()
                     .gap_2()
-                    .child(div().flex_none().w(px(20.)).text_right().child(marker))
+                    .child(marker.flex_none().w(px(20.)))
                     .child(div().flex_1().min_w_0().child(blocks(
                         item,
                         &format!("{key}-{index}"),
@@ -392,13 +415,13 @@ fn block_element(
         }
         PreparedBlock::Quote(inner) => div()
             .pl_3()
-            .border_l_2()
+            .border_l_1()
             .border_color(colors.border)
             .text_color(colors.muted_text)
             .child(blocks(inner, key, &[], window, cx))
             .into_any_element(),
         PreparedBlock::Details { summary, body } => details(summary, body, key, window, cx),
-        PreparedBlock::Rule => div().h(px(1.)).bg(colors.border).into_any_element(),
+        PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
     }
 }
 
@@ -420,7 +443,19 @@ fn details(
         .on_click(move |_, _, cx| {
             toggle_details(&toggled_key, cx);
         })
-        .child(div().flex_none().child(if open { "▾" } else { "▸" }))
+        .child(
+            div()
+                .flex_none()
+                .h(SMALL_LINE)
+                .flex()
+                .items_center()
+                .child(turn_to(
+                    sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                    "details-chevron",
+                    open,
+                    1.,
+                )),
+        )
         .child(div().flex_1().min_w_0().child(inline_text(
             &colors,
             summary,
@@ -453,11 +488,11 @@ fn code_block(colors: &Colors, key: &str, lines: &[CodeLine]) -> AnyElement {
     div()
         .id(SharedString::from(format!("code-block-{key}")))
         .flex()
-        .py_1()
-        .rounded_md()
-        .bg(colors.surface)
+        .py_1p5()
+        .rounded(px(CONTROL_RADIUS))
+        .bg(colors.background)
         .border_1()
-        .border_color(colors.border)
+        .border_color(colors.subtle_border)
         .font_family(CODE_FONT)
         .text_sm()
         .overflow_x_scroll()
@@ -650,7 +685,8 @@ fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement
     canvas(
         |_, _, _| (),
         move |_, (), window, cx| {
-            let color = Colors::active(cx).hover;
+            let colors = Colors::active(cx);
+            let (color, edge) = (colors.surface, colors.subtle_border);
             let line_height = layout.line_height();
             let inset = line_height * 0.1;
             let text = layout.text();
@@ -666,12 +702,19 @@ fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement
                 let mut end = start;
                 for at in points {
                     if at.y != start.y {
-                        paint_code_background(window, start, end.x, line_height, inset, color);
+                        paint_code_background(
+                            window,
+                            start,
+                            end.x,
+                            line_height,
+                            inset,
+                            (color, edge),
+                        );
                         start = at;
                     }
                     end = at;
                 }
-                paint_code_background(window, start, end.x, line_height, inset, color);
+                paint_code_background(window, start, end.x, line_height, inset, (color, edge));
             }
         },
     )
@@ -686,7 +729,7 @@ fn paint_code_background(
     end_x: gpui::Pixels,
     line_height: gpui::Pixels,
     inset: gpui::Pixels,
-    color: gpui::Rgba,
+    (color, edge): (gpui::Rgba, gpui::Rgba),
 ) {
     if end_x <= start.x {
         return;
@@ -695,12 +738,17 @@ fn paint_code_background(
         point(start.x, start.y + inset),
         point(end_x, start.y + line_height - inset),
     );
-    window.paint_quad(fill(bounds, color).corner_radii(px(4.)));
+    window.paint_quad(
+        fill(bounds, color)
+            .corner_radii(px(4.))
+            .border_widths(px(1.))
+            .border_color(edge),
+    );
 }
 
 fn style_of(colors: &Colors, run: &Run) -> HighlightStyle {
     let color = if run.link.is_some() {
-        Some(colors.code(Capture::Function).into())
+        Some(colors.accent.into())
     } else if run.code {
         Some(colors.code(Capture::String).into())
     } else {
@@ -826,11 +874,11 @@ mod tests {
 
         assert_eq!(
             light.first().and_then(|(_, style)| style.color),
-            Some(Colors::of(Appearance::Light).code(Capture::Function).into())
+            Some(Colors::of(Appearance::Light).accent.into())
         );
         assert_eq!(
             dark.first().and_then(|(_, style)| style.color),
-            Some(Colors::of(Appearance::Dark).code(Capture::Function).into())
+            Some(Colors::of(Appearance::Dark).accent.into())
         );
     }
 

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Div, ElementId, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
+    App, Div, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Pixels, RenderOnce, Rgba, SharedString, Stateful, StatefulInteractiveElement,
     Styled, StyledText, TextLayout, Window, div, px,
 };
@@ -11,11 +11,22 @@ use gpui::{
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
 use crate::app::components::tooltip::tooltip;
 use crate::pieces::PieceId;
-use crate::viewer::{Capture, CodeLink, DiffLine, Edge, LineKind, LineLocation, MoreContext};
+use crate::viewer::{
+    Capture, CodeLink, DiffLine, HiddenLines, LineKind, LineLocation, MoreContext,
+};
 
-use super::palette::{CODE_FONT, Colors};
+use super::button::{ButtonKind, ButtonSize, icon_button};
+use super::chip::chip;
+use super::icon::{Icon, sized_icon};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
 
-pub type OnMoreContext = Rc<dyn Fn(&MoreContext, &mut Window, &mut App)>;
+/// What a gap row asks for: a few more lines from one side, or every hidden line.
+pub enum GapAsk<'a> {
+    More(&'a MoreContext),
+    All(&'a HiddenLines),
+}
+
+pub type OnGapAsk = Rc<dyn Fn(GapAsk, &mut Window, &mut App)>;
 
 /// What the mouse does on a row. The release is handled above the rows, wherever the mouse is let go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,7 +213,7 @@ impl RenderOnce for DiffRow {
         };
         let link = line.code_link.clone();
         let gutter_background = match line.kind {
-            _ if self.is_selected => colors.current,
+            _ if self.is_selected => colors.current_border,
             LineKind::Removed => colors.removed_gutter,
             LineKind::Added => colors.added_gutter,
             LineKind::Context { .. } => colors.background,
@@ -215,7 +226,11 @@ impl RenderOnce for DiffRow {
             .flex_none()
             .cursor_pointer()
             .bg(gutter_background)
-            .text_color(colors.muted_text)
+            .text_color(if self.is_selected {
+                colors.text
+            } else {
+                colors.muted_text
+            })
             .hover(|gutter| gutter.text_color(colors.accent))
             .tooltip(tooltip({
                 let link = link.clone();
@@ -233,14 +248,17 @@ impl RenderOnce for DiffRow {
             Some(on_gesture) => {
                 let at = location.clone();
                 comment_button
-                    .text_color(colors.muted_text)
+                    .self_stretch()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .opacity(0.)
                     .group_hover("diff-row", |button| button.opacity(1.))
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         on_gesture(RowGesture::Press, &at, window, cx);
                     })
-                    .child("+")
+                    .child(sized_icon(Icon::Plus, colors.accent, px(12.)))
                     .into_any_element()
             }
             None => comment_button.into_any_element(),
@@ -323,7 +341,10 @@ fn with_selection(
 
 /// Every row of a piece sits between the box's side borders.
 pub fn piece_row(colors: &Colors) -> Div {
-    div().w_full().border_x_1().border_color(colors.border)
+    div()
+        .w_full()
+        .border_x_1()
+        .border_color(colors.subtle_border)
 }
 
 /// A piece's name cut into what is shown, once, so a frame shares the text instead of copying it.
@@ -392,10 +413,10 @@ impl RenderOnce for PieceHeader {
             .items_center()
             .px_3()
             .gap_2()
-            .bg(colors.surface)
+            .bg(colors.header_band())
             .border_1()
-            .rounded_t_md()
-            .border_color(colors.border)
+            .rounded_t(px(CARD_RADIUS))
+            .border_color(colors.subtle_border)
             .text_sm()
             .children(self.fold_toggle)
             .child(
@@ -430,16 +451,10 @@ impl RenderOnce for PieceHeader {
                     )
                     .children(symbol),
             )
-            .children(self.repin_label.map(|label| {
-                div()
-                    .flex_none()
-                    .px_1p5()
-                    .rounded_md()
-                    .bg(colors.warning_background)
-                    .text_xs()
-                    .text_color(colors.warning)
-                    .child(label)
-            }))
+            .children(
+                self.repin_label
+                    .map(|label| chip(&colors, Tone::Warning).child(label)),
+            )
             .children(self.buttons)
     }
 }
@@ -491,15 +506,10 @@ impl RenderOnce for PieceMarker {
                     .text_ellipsis()
                     .child(name),
             )
-            .children(self.repin_label.map(|label| {
-                div()
-                    .flex_none()
-                    .px_1p5()
-                    .rounded_md()
-                    .bg(colors.warning_background)
-                    .text_color(colors.warning)
-                    .child(label)
-            }))
+            .children(
+                self.repin_label
+                    .map(|label| chip(&colors, Tone::Warning).child(label)),
+            )
             .child(
                 div()
                     .flex()
@@ -514,13 +524,14 @@ impl RenderOnce for PieceMarker {
 
 /// The bottom edge of a piece box, and the space before the next one.
 pub fn piece_end(colors: &Colors) -> impl IntoElement {
-    div().pb_3().child(
+    div().pb_4().child(
         div()
-            .h_1()
+            .h_1p5()
             .border_x_1()
             .border_b_1()
-            .rounded_b_md()
-            .border_color(colors.border),
+            .rounded_b(px(CARD_RADIUS))
+            .border_color(colors.subtle_border)
+            .shadow(colors.card_shadow()),
     )
 }
 
@@ -568,29 +579,86 @@ pub fn binary_file_row(
 }
 
 /// The band between hunks, like GitHub's `@@` line; clicking it shows more unchanged lines.
+/// The unchanged lines between two changes (or above the first, or under the last) as one row: how
+/// many, and small arrows that bring more in from each side, or all of them at once.
 pub fn hunk_gap(
     colors: &Colors,
-    id: impl Into<ElementId>,
-    more: Option<MoreContext>,
-    on_more_context: OnMoreContext,
+    id: SharedString,
+    gap: &HiddenLines,
+    label: SharedString,
+    on_ask: &OnGapAsk,
 ) -> impl IntoElement {
+    let is_top = gap.after_above.is_none();
+    let is_end = gap.before_below.is_none();
+    let arrow = |more: &MoreContext, icon: Icon, name: &'static str| {
+        let (more, on_ask) = (more.clone(), Rc::clone(on_ask));
+        icon_button(
+            colors,
+            SharedString::from(format!("{id}-{name}")),
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+            icon,
+            name,
+        )
+        .h(px(22.))
+        .w(px(22.))
+        .on_click(move |_, window, cx| on_ask(GapAsk::More(&more), window, cx))
+    };
+    let down = gap.after_above.as_ref().map(|more| {
+        arrow(
+            more,
+            Icon::ArrowDown,
+            if is_end {
+                "Show more lines below"
+            } else {
+                "Show more lines under the change above"
+            },
+        )
+    });
+    let up = gap.before_below.as_ref().map(|more| {
+        arrow(
+            more,
+            Icon::ArrowUp,
+            if is_top {
+                "Show more lines above"
+            } else {
+                "Show more lines over the change below"
+            },
+        )
+    });
+    let all = gap.count.filter(|_| !is_top || !is_end).and_then(|_| {
+        (down.is_some() || up.is_some()).then(|| {
+            let (gap, on_ask) = (gap.clone(), Rc::clone(on_ask));
+            icon_button(
+                colors,
+                SharedString::from(format!("{id}-all")),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ChevronsUpDown,
+                "Show every hidden line",
+            )
+            .h(px(22.))
+            .w(px(22.))
+            .on_click(move |_, window, cx| on_ask(GapAsk::All(&gap), window, cx))
+        })
+    });
+    let has_asks = down.is_some() || up.is_some();
     let band = div()
         .id(id)
+        .h(px(28.))
         .px_2()
+        .flex()
+        .items_center()
+        .gap_1()
         .bg(colors.surface)
         .text_xs()
-        .text_color(colors.muted_text);
-    let band = match more {
-        None => band.child("⋯"),
-        Some(more) => {
-            let label = match more.edge {
-                Edge::Above => "↑ Show more lines",
-                Edge::Below => "↓ Show more lines",
-            };
-            band.cursor_pointer()
-                .on_click(move |_, window, cx| on_more_context(&more, window, cx))
-                .child(label)
-        }
-    };
+        .text_color(colors.muted_text)
+        .children(up)
+        .children(down)
+        .children(all)
+        .when(!has_asks, |band| {
+            band.child(sized_icon(Icon::Ellipsis, colors.muted_text, px(12.)))
+        })
+        .child(div().pl_1().child(label));
     piece_row(colors).child(band)
 }

@@ -15,6 +15,8 @@ pub struct SidebarStep {
     pub is_ticked: bool,
     /// Every piece of the step went away in a re-pin.
     pub is_gone: bool,
+    pub has_check: bool,
+    pub is_skim: bool,
 }
 
 pub struct SidebarSafetyNet {
@@ -34,6 +36,8 @@ pub struct SidebarLastReview {
 
 /// The PR's tour agent as the sidebar says it.
 pub struct SidebarTourAgent {
+    /// An agent, or news about one; "none" is not worth the sidebar's room.
+    pub is_shown: bool,
     pub line: SharedString,
     pub can_show: bool,
     /// Why the last Show agent did not bring the terminal up.
@@ -72,6 +76,8 @@ impl SidebarRows {
                 is_current: entry.is_current,
                 is_ticked: entry.is_ticked,
                 is_gone: entry.is_gone,
+                has_check: entry.has_check,
+                is_skim: entry.is_skim,
             })
             .collect();
         let safety_net = review.safety_net_size().map(|size| SidebarSafetyNet {
@@ -82,6 +88,7 @@ impl SidebarRows {
         let is_old = review.last_review_is_old();
         Self {
             tour_agent: SidebarTourAgent {
+                is_shown: tour_agent.is_worth_a_line() || show_failed.is_some(),
                 line: tour_agent.to_string().into(),
                 can_show: tour_agent.can_show(),
                 show_failed: show_failed

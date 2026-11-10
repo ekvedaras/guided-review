@@ -10,7 +10,7 @@ use gpui::{
     point, px, relative, size,
 };
 
-use super::palette::Colors;
+use super::palette::{CONTROL_RADIUS, Colors};
 use super::text_input::{Caret, Direction, Lines, Step, TextDraft};
 
 actions!(
@@ -50,9 +50,71 @@ actions!(
     ]
 );
 
+/// The frame a text box is typed in: its edge darkens under the mouse, and while the box takes
+/// keys the edge turns accent with a soft ring around it. The caller sizes and pads it and puts the
+/// box in.
+#[derive(IntoElement)]
+pub struct Field {
+    frame: gpui::Div,
+    focus: FocusHandle,
+    is_invalid: bool,
+}
+
+impl Field {
+    pub fn new(focus: &FocusHandle) -> Self {
+        Self {
+            frame: div(),
+            focus: focus.clone(),
+            is_invalid: false,
+        }
+    }
+
+    /// What is typed cannot be saved: the edge turns danger until it is fixed.
+    pub fn invalid(mut self, is_invalid: bool) -> Self {
+        self.is_invalid = is_invalid;
+        self
+    }
+}
+
+impl Styled for Field {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        self.frame.style()
+    }
+}
+
+impl ParentElement for Field {
+    fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+        self.frame.extend(elements);
+    }
+}
+
+impl RenderOnce for Field {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let frame = self
+            .frame
+            .rounded(px(CONTROL_RADIUS))
+            .border_1()
+            .bg(colors.background)
+            .cursor(CursorStyle::IBeam);
+        if self.focus.is_focused(window) {
+            frame
+                .border_color(colors.accent)
+                .shadow(colors.focus_ring())
+        } else if self.is_invalid {
+            frame.border_color(colors.danger)
+        } else {
+            frame
+                .border_color(colors.border)
+                .hover(|frame| frame.border_color(colors.muted_text))
+        }
+    }
+}
+
 const KEY_CONTEXT: &str = "TextBox";
 const MULTI_LINE: &str = "MultiLine";
 
+/// The editing keys. The keys that send or close a box are the app's shortcuts, bound from its table.
 pub fn bind_keys(cx: &mut App) {
     let single = Some(KEY_CONTEXT);
     let multi_line = format!("{KEY_CONTEXT} && {MULTI_LINE}");
@@ -85,9 +147,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-c", Copy, single),
         KeyBinding::new("cmd-x", Cut, single),
         KeyBinding::new("cmd-v", Paste, single),
-        KeyBinding::new("escape", Cancel, single),
-        KeyBinding::new("cmd-enter", Submit, single),
-        KeyBinding::new("cmd-shift-enter", SubmitToAgent, single),
         KeyBinding::new("enter", Submit, Some(one_line.as_str())),
         KeyBinding::new("enter", Newline, multi),
         KeyBinding::new("shift-enter", Newline, multi),
@@ -909,7 +968,7 @@ impl Element for TextBoxElement {
             cx,
         );
         for row in &painted.selection {
-            window.paint_quad(fill(*row, colors.current));
+            window.paint_quad(fill(*row, colors.text_selection));
         }
         let mut top = bounds.top();
         for (_, line) in &painted.lines {
@@ -925,7 +984,7 @@ impl Element for TextBoxElement {
             top += line.size(painted.line_height).height;
         }
         if let Some(caret) = painted.caret {
-            window.paint_quad(fill(caret, colors.text));
+            window.paint_quad(fill(caret, colors.accent));
         }
         let lines = std::mem::take(&mut painted.lines);
         let line_height = painted.line_height;

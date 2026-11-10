@@ -2,7 +2,7 @@
 //! around a `viewer::Review`, so a new layout later is one new file in `layouts`.
 
 mod active_session;
-mod assets;
+pub mod assets;
 mod code_links;
 mod code_selection;
 pub mod components;
@@ -38,9 +38,9 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, FailedBuild,
-    Finished, HandOffId, OpenDecision, OpenOrigin, PrSwitcher, ReviewStateFile, ShowReview,
-    ShowSettings, TourAgents,
+    ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
+    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, PrSwitcher, RelevantPullRequestsPort,
+    ReviewStateFile, ShowReview, ShowSettings, TourAgents, keystroke,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -49,10 +49,11 @@ use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
 use components::pr_switcher::{PrSwitcherView, PrSwitching};
 use components::settings_panel::SettingsPanel;
+use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleSettings,
-    ToggleWrapLines,
+    Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout, ToggleJump,
+    ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -85,6 +86,11 @@ pub fn serve(listener: AppListener, home: PathBuf) {
     application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
+            // A picture is taken once the window holds still, which an endless animation never does.
+            #[cfg(feature = "snapshots")]
+            if snapshots::is_on() {
+                cx.set_reduce_motion(true);
+            }
             let remembered = AppStateFile::in_home(&home);
             let active = cx.new(|_| ActivePr::remembering_in(remembered));
             let switching = pr_switching(&requests_to_self, &home, active.clone(), cx);
@@ -93,6 +99,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             tour_writer::resume(cx);
             dock_icon::show();
             bind_keys(cx);
+            components::toast_stack::Toaster::install(cx);
             word_keys::take_before_macos(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
@@ -111,7 +118,7 @@ fn pr_switching(
     let reopen_requests = requests.clone();
     let home_folder = home.to_path_buf();
     PrSwitching {
-        relevant: Arc::new(GitHub::from_env()),
+        relevant: relevant_pull_requests(),
         home: home.to_path_buf(),
         active,
         agents: Arc::new(HcTourAgents::new()),
@@ -132,6 +139,14 @@ fn pr_switching(
             }
         }),
     }
+}
+
+fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
+    #[cfg(feature = "snapshots")]
+    if snapshots::is_on() {
+        return Arc::new(snapshots::SamplePullRequests);
+    }
+    Arc::new(GitHub::from_env())
 }
 
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
@@ -513,28 +528,46 @@ fn turn_into_review(
     Ok(WindowHandle::new(window.window_id()))
 }
 
+/// Every shortcut comes from the one table the shortcuts sheet lists (`viewer::Command`).
 fn bind_keys(cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
         SettingsPanel::KEY_CONTEXT,
+        ShortcutsSheet::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
     text_box::bind_keys(cx);
-    cx.bind_keys([
-        KeyBinding::new("right", GoForward, Some(&typing_is_not_navigation)),
-        KeyBinding::new("j", GoForward, Some(&typing_is_not_navigation)),
-        KeyBinding::new("left", GoBack, Some(&typing_is_not_navigation)),
-        KeyBinding::new("k", GoBack, Some(&typing_is_not_navigation)),
-        KeyBinding::new("w", ToggleWrapLines, Some(&typing_is_not_navigation)),
-        KeyBinding::new("cmd-k", ToggleJump, Some(OneStepLayout::KEY_CONTEXT)),
-        KeyBinding::new("cmd-,", ToggleSettings, Some(OneStepLayout::KEY_CONTEXT)),
-        KeyBinding::new("cmd-c", CopySelection, Some(&typing_is_not_navigation)),
-    ]);
+    let bindings = Command::ALL.into_iter().flat_map(|command| {
+        let context = match command.scope() {
+            KeyScope::Page => typing_is_not_navigation.clone(),
+            KeyScope::Window => OneStepLayout::KEY_CONTEXT.to_owned(),
+            KeyScope::TextBox => text_box::TYPING_CONTEXT.to_owned(),
+        };
+        command.chords().iter().map(move |chord| {
+            let keys = keystroke(chord);
+            let context = Some(context.as_str());
+            match command {
+                Command::NextScreen => KeyBinding::new(&keys, GoForward, context),
+                Command::PreviousScreen => KeyBinding::new(&keys, GoBack, context),
+                Command::NextUnreadStep => KeyBinding::new(&keys, GoToNextUnread, context),
+                Command::Jump => KeyBinding::new(&keys, ToggleJump, context),
+                Command::ToggleRead => KeyBinding::new(&keys, ToggleRead, context),
+                Command::CopyCode => KeyBinding::new(&keys, CopySelection, context),
+                Command::AddToReview => KeyBinding::new(&keys, text_box::Submit, context),
+                Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitToAgent, context),
+                Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
+                Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
+                Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
+                Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
+            }
+        })
+    });
+    cx.bind_keys(bindings);
 }
 
 fn open_window(
@@ -544,7 +577,7 @@ fn open_window(
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     let options = window_options(window_title(&opened, pr), cx);
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.set_global(Appearance::of(window));
         cx.new(|cx| new_layout(opened, pr, None, window, cx))
     })
 }
@@ -553,7 +586,7 @@ fn open_settings_window(home: &Path, cx: &mut App) -> anyhow::Result<WindowHandl
     let options = window_options("Settings".to_owned(), cx);
     let home = home.to_path_buf();
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.set_global(Appearance::of(window));
         cx.new(|cx| SettingsWindow::new(home, window, cx))
     })
 }
@@ -604,7 +637,7 @@ fn new_layout(
         cx,
     );
     cx.observe_window_appearance(window, |_, window, cx| {
-        cx.set_global(Appearance::of_window(window.appearance()));
+        cx.set_global(Appearance::of(window));
         cx.notify();
     })
     .detach();

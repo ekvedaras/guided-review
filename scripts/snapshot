@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Pictures of every screen of a tour, for looking at the UI: <n>-top.png and <n>-end.png in the output folder.
+# Pictures of the app for looking at the UI, in both appearances: <out>/light/*.png and <out>/dark/*.png.
 # Usage: scripts/snapshot <pr-url> [out-dir]   (default out-dir: /tmp/guided-review-snapshots)
-# The PR needs a tour on disk (~/.guided-review/tours). Runs the app on a throwaway HOME so the maintainer's
-# running app is left alone; waits until the snapshot run has quit.
+# Scenes: NN-top / NN-end of every tour screen, then 20-settings ... 31-shortcuts and on (src/app/layouts/one_step/scenes.rs).
+# The PR needs a tour on disk (~/.guided-review/tours); only that tour is copied into the run. Runs the app on a
+# throwaway HOME, so the maintainer's running app is left alone, and draws without the display, so a locked
+# screen works. Code comes from this repo when the PR is this repo's, else from GitHub.
 set -euo pipefail
 
 pr="${1:?usage: scripts/snapshot <pr-url> [out-dir]}"
@@ -15,30 +17,69 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
 
-repo="$PWD"
-real_home="$HOME"
 export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
 cargo build --features snapshots
-binary="$repo/target/debug/guided-review"
+binary="$PWD/target/debug/guided-review"
+
+tour="$("$binary" tour-path "$pr")"
+[ -f "$tour" ] || { echo "no tour at $tour: write one first" >&2; exit 1; }
+tours_root="${GUIDED_REVIEW_TOURS_DIR:-$HOME/.guided-review/tours}"
+tour_in_root="${tour#"$tours_root"/}"
+
+# A fixed, short path: Settings shows paths under HOME, so they match from run to run, and herdr refuses
+# socket paths longer than macOS allows. One run at a time.
+work=/tmp/guided-review-snapshot
+rm -rf "$work"
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/tours/$(dirname "$tour_in_root")"
+cp "$tour" "$work/tours/$tour_in_root"
 
 rm -rf "$out"
-mkdir -p "$out"
-home="$(mktemp -d)"
-trap 'rm -rf "$home"' EXIT
 
-export HOME="$home"
-export GUIDED_REVIEW_TOURS_DIR="$real_home/.guided-review/tours"
-export GUIDED_REVIEW_APP_COMMAND="$binary"
-export GUIDED_REVIEW_SNAPSHOTS="$out"
-"$binary" open "$pr"
+# One app run per appearance. The run's serve process is the one that was not there before its open,
+# so other guided-review processes on the machine do not count.
+shoot() {
+    local appearance="$1"
+    local home="$work/home"
+    local pictures="$out/$appearance"
+    rm -rf "$home"
+    mkdir -p "$home" "$pictures"
+    local started=$SECONDS
+    local others
+    others="$(pgrep -f "$binary serve" || true)"
+    HOME="$home" \
+        GUIDED_REVIEW_TOURS_DIR="$work/tours" \
+        GUIDED_REVIEW_APP_COMMAND="$binary" \
+        GUIDED_REVIEW_SNAPSHOTS="$pictures" \
+        GUIDED_REVIEW_SNAPSHOT_APPEARANCE="$appearance" \
+        "$binary" open "$pr"
 
-for _ in $(seq 1 240); do
-    [ -S "$home/.guided-review/app.sock" ] || break
-    pgrep -f "$binary serve" >/dev/null || break
-    sleep 1
-done
+    local pid=""
+    for _ in $(seq 1 120); do
+        if [ -S "$home/.guided-review/app.sock" ]; then
+            pid="$(pgrep -f "$binary serve" | grep -vxF "${others:-none}" | head -n 1 || true)"
+            [ -n "$pid" ] && break
+        fi
+        sleep 0.5
+    done
+    [ -n "$pid" ] || { echo "$appearance: the app never started" >&2; return 1; }
 
-for png in "$out"/*.png; do
+    for _ in $(seq 1 600); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "$appearance: the app did not quit in 10 minutes; stopping it" >&2
+        kill "$pid"
+        return 1
+    fi
+    echo "$appearance: $(ls "$pictures" | wc -l | tr -d ' ') pictures in $((SECONDS - started))s"
+}
+
+shoot light
+shoot dark
+
+for png in "$out"/*/*.png; do
     sips -Z 2000 "$png" >/dev/null
 done
-ls "$out"
+ls "$out"/light

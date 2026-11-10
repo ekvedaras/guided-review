@@ -161,6 +161,68 @@ pub struct DiffHunk {
     pub more_below: Option<MoreContext>,
 }
 
+/// The unchanged lines a file box does not show, between two of its changes or at either end, and the
+/// asks that bring them in from each side.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HiddenLines {
+    /// Shows the lines right under the change above: the gap's down arrow.
+    pub after_above: Option<MoreContext>,
+    /// Shows the lines right over the change below: the gap's up arrow.
+    pub before_below: Option<MoreContext>,
+    /// How many lines are hidden, when the shown lines tell.
+    pub count: Option<usize>,
+}
+
+/// The gap over `hunks[index]`; none over a change at the top of its file.
+pub fn hidden_lines_before(hunks: &[DiffHunk], index: usize) -> Option<HiddenLines> {
+    let below = hunks.get(index)?;
+    let Some(above) = index.checked_sub(1).and_then(|above| hunks.get(above)) else {
+        return below.more_above.clone().map(|more| HiddenLines {
+            after_above: None,
+            before_below: Some(more),
+            count: below
+                .first_head_line()
+                .and_then(|first| first.checked_sub(1)),
+        });
+    };
+    let count = match (above.last_head_line(), below.first_head_line()) {
+        (Some(last), Some(first)) => first.checked_sub(last + 1).filter(|count| *count > 0),
+        _ => None,
+    };
+    Some(HiddenLines {
+        after_above: above.more_below.clone(),
+        before_below: below.more_above.clone(),
+        count,
+    })
+}
+
+/// The gap under the last change; none when it reaches the end of its file. How long the file
+/// runs on is not known from its shown lines.
+pub fn hidden_lines_after(hunks: &[DiffHunk]) -> Option<HiddenLines> {
+    hunks.last()?.more_below.clone().map(|more| HiddenLines {
+        after_above: Some(more),
+        before_below: None,
+        count: None,
+    })
+}
+
+impl DiffHunk {
+    fn head_lines(&self) -> impl DoubleEndedIterator<Item = usize> + '_ {
+        self.rows
+            .iter()
+            .filter(|row| row.location.side == Side::Head)
+            .map(|row| usize::from(row.location.line))
+    }
+
+    fn first_head_line(&self) -> Option<usize> {
+        self.head_lines().next()
+    }
+
+    fn last_head_line(&self) -> Option<usize> {
+        self.head_lines().next_back()
+    }
+}
+
 /// Everything that decides how a piece's lines are shown. None of it changes pieces, coverage or ticks.
 pub(super) struct DiffDisplay<'a> {
     pub highlights: &'a Highlights,

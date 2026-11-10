@@ -9,9 +9,12 @@ use crate::viewer::{ApproveWarning, CLAMPED_BODY_LINES, FinishResult, ReviewVerd
 
 use crate::app::sidebar_rows::SidebarLastReview;
 
-use super::button::{ButtonKind, ButtonSize, button, toggle_button};
-use super::palette::Colors;
-use super::text_box::TextBox;
+use super::button::{ButtonKind, ButtonSize, button, button_icon};
+use super::icon::{Icon, sized_icon};
+use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
+use super::palette::{Colors, Tone};
+use super::segmented::{Segment, SegmentLayout, Segmented};
+use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
 /// Sends the review and calls back with how it went. The layout owns the review and the network.
@@ -31,11 +34,14 @@ struct FinishUi {
     is_busy: bool,
     problem: Option<String>,
     focus: FocusHandle,
+    /// The last ask to open the form from elsewhere (the palette, the finish card) it answered.
+    answered_open_request: u32,
 }
 
 impl FinishUi {
-    fn new(has_draft: bool, cx: &mut Context<Self>) -> Self {
+    fn new(has_draft: bool, open_request: u32, cx: &mut Context<Self>) -> Self {
         Self {
+            answered_open_request: open_request,
             is_open: has_draft,
             is_last_review_body_open: false,
             verdict: ReviewVerdict::Comment,
@@ -80,6 +86,7 @@ pub struct FinishReviewDialog {
     body: String,
     on_body_edit: OnBodyEdit,
     on_finish: OnFinish,
+    open_request: u32,
 }
 
 impl FinishReviewDialog {
@@ -100,7 +107,31 @@ impl FinishReviewDialog {
             body,
             on_body_edit,
             on_finish,
+            open_request: 0,
         }
+    }
+
+    /// A new count opens the form and puts the keys in its body box.
+    pub fn opened_by(mut self, open_request: u32) -> Self {
+        self.open_request = open_request;
+        self
+    }
+}
+
+fn icon_of(verdict: ReviewVerdict) -> Icon {
+    match verdict {
+        ReviewVerdict::Comment => Icon::MessageSquare,
+        ReviewVerdict::Approve => Icon::CircleCheck,
+        ReviewVerdict::RequestChanges => Icon::FilePen,
+    }
+}
+
+/// The picked verdict's thumb wears what it tells the author.
+fn tone_of(verdict: ReviewVerdict) -> Tone {
+    match verdict {
+        ReviewVerdict::Comment => Tone::Neutral,
+        ReviewVerdict::Approve => Tone::Success,
+        ReviewVerdict::RequestChanges => Tone::Danger,
     }
 }
 
@@ -160,12 +191,40 @@ fn body_box(
 }
 
 impl RenderOnce for FinishReviewDialog {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(
+        #[cfg_attr(
+            not(feature = "snapshots"),
+            expect(unused_mut, reason = "staged below")
+        )]
+        mut self,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
         let colors = Colors::active(cx);
         let ui = window.use_keyed_state("finish-review-ui", cx, {
-            let has_draft = !self.body.is_empty();
-            move |_, cx| FinishUi::new(has_draft, cx)
+            let (has_draft, open_request) = (!self.body.is_empty(), self.open_request);
+            move |_, cx| FinishUi::new(has_draft, open_request, cx)
         });
+        if ui.read(cx).answered_open_request != self.open_request {
+            let open_request = self.open_request;
+            update(&ui, cx, |ui| {
+                ui.is_open = true;
+                ui.answered_open_request = open_request;
+            });
+            let focus = ui.read(cx).focus.clone();
+            window.focus(&focus, cx);
+        }
+        // The demo PR is the maintainer's own, which offers no finishing; the picture needs the form.
+        #[cfg(feature = "snapshots")]
+        if let Some(staged) = cx.try_global::<crate::app::snapshots::StagedFinishReview>() {
+            let is_open = staged.0;
+            if is_open {
+                self.finishing = Finishing::AnyVerdict;
+            }
+            if is_open != ui.read(cx).is_open {
+                update(&ui, cx, |ui| ui.is_open = is_open);
+            }
+        }
         let state = ui.read(cx);
         let (is_open, verdict, is_busy, is_confirming) = (
             state.is_open,
@@ -175,6 +234,7 @@ impl RenderOnce for FinishReviewDialog {
         );
         let is_last_review_body_open = state.is_last_review_body_open;
         let (problem, focus) = (state.problem.clone(), state.focus.clone());
+        let focus_of_body = focus.clone();
         let body = if is_busy {
             div().child(self.body.clone()).into_any_element()
         } else {
@@ -183,25 +243,20 @@ impl RenderOnce for FinishReviewDialog {
 
         let open_button = {
             let (ui, focus) = (ui.clone(), focus);
-            let open_button = if is_open {
-                toggle_button(&colors, "finish-review", true, ButtonSize::Regular)
+            let kind = if is_open {
+                ButtonKind::Pressed
             } else if self.is_everything_read {
-                button(
-                    &colors,
-                    "finish-review",
-                    ButtonKind::Primary,
-                    ButtonSize::Regular,
-                )
+                ButtonKind::Primary
             } else {
-                button(
-                    &colors,
-                    "finish-review",
-                    ButtonKind::Secondary,
-                    ButtonSize::Regular,
-                )
+                ButtonKind::Secondary
             };
-            open_button
-                .justify_center()
+            button(&colors, "finish-review", kind, ButtonSize::Regular)
+                .child(button_icon(
+                    &colors,
+                    kind,
+                    ButtonSize::Regular,
+                    Icon::ListChecks,
+                ))
                 .child(if self.last_review.is_some() {
                     "Update review"
                 } else {
@@ -241,17 +296,27 @@ impl RenderOnce for FinishReviewDialog {
                     let ui = ui.clone();
                     div()
                         .id("last-review-body-toggle")
+                        .flex()
+                        .items_center()
+                        .gap_1()
                         .cursor_pointer()
                         .text_color(colors.muted_text)
+                        .hover(|toggle| toggle.text_color(colors.text))
                         .on_click(move |_, _, cx| {
                             update(&ui, cx, |ui| {
                                 ui.is_last_review_body_open = !ui.is_last_review_body_open;
                             });
                         })
+                        .child(turn_to(
+                            sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                            "last-review-chevron",
+                            is_last_review_body_open,
+                            1.,
+                        ))
                         .child(if is_last_review_body_open {
-                            "▾ Show less"
+                            "Show less"
                         } else {
-                            "▸ Show all"
+                            "Show all"
                         })
                 }))
         });
@@ -266,7 +331,7 @@ impl RenderOnce for FinishReviewDialog {
             return wrapper.into_any_element();
         }
 
-        let verdicts = [
+        let shown_verdicts: Vec<ReviewVerdict> = [
             ReviewVerdict::Comment,
             ReviewVerdict::Approve,
             ReviewVerdict::RequestChanges,
@@ -275,22 +340,28 @@ impl RenderOnce for FinishReviewDialog {
         .filter(|verdict| {
             self.finishing == Finishing::AnyVerdict || *verdict == ReviewVerdict::Comment
         })
-        .map(|choice| {
-            let ui = ui.clone();
-            toggle_button(
-                &colors,
-                SharedString::from(format!("verdict-{}", choice.github_name())),
-                choice == verdict,
-                ButtonSize::Small,
-            )
-            .child(label(choice))
-            .on_click(move |_, _, cx| {
-                update(&ui, cx, |ui| {
-                    ui.verdict = choice;
-                    ui.is_confirming_approval = false;
-                });
+        .collect();
+        let picked = shown_verdicts.iter().position(|shown| *shown == verdict);
+        let segments = shown_verdicts
+            .iter()
+            .map(|&choice| {
+                let ui = ui.clone();
+                Segment::new(
+                    SharedString::from(format!("verdict-{}", choice.github_name())),
+                    label(choice),
+                    move |_, _, cx| {
+                        update(&ui, cx, |ui| {
+                            ui.verdict = choice;
+                            ui.is_confirming_approval = false;
+                        });
+                    },
+                )
+                .icon(icon_of(choice))
             })
-        });
+            .collect();
+        let verdicts = Segmented::new("verdict", SegmentLayout::Column, segments)
+            .picked(picked)
+            .thumb_tone(tone_of(verdict));
 
         let unread_warning = (verdict == ReviewVerdict::Approve)
             .then_some(self.warning)
@@ -304,7 +375,12 @@ impl RenderOnce for FinishReviewDialog {
                 ButtonKind::Primary,
                 ButtonSize::Regular,
             )
-            .justify_center()
+            .child(button_icon(
+                &colors,
+                ButtonKind::Primary,
+                ButtonSize::Regular,
+                Icon::Send,
+            ))
             .child(if must_confirm {
                 "Approve..."
             } else {
@@ -331,17 +407,16 @@ impl RenderOnce for FinishReviewDialog {
                 },
             ))
         });
-        wrapper
-            .child(div().flex().flex_wrap().gap_1().children(verdicts))
+        let form = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(verdicts)
             .child(
-                div()
-                    .id("finish-review-body")
+                Field::new(&focus_of_body)
                     .min_h(px(64.))
-                    .p_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.background)
+                    .px_2()
+                    .py_1p5()
                     .text_sm()
                     .child(body),
             )
@@ -351,13 +426,25 @@ impl RenderOnce for FinishReviewDialog {
             )
             .child(if is_busy {
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_sm()
                     .text_color(colors.muted_text)
+                    .child(busy_dot(&colors, "finish-review-sending-dot"))
                     .child("Sending...")
                     .into_any_element()
             } else {
                 submit_button.into_any_element()
-            })
+            });
+        wrapper
+            .child(slide_in(
+                form,
+                "finish-review-form",
+                STATE,
+                Edge::Bottom,
+                BOX_RISE,
+            ))
             .into_any_element()
     }
 }

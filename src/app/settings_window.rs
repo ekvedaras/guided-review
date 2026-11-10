@@ -29,7 +29,7 @@ impl SettingsWindow {
             SettingsEvent::Saved | SettingsEvent::Closed => window.remove_window(),
         });
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            cx.set_global(Appearance::of_window(window.appearance()));
+            cx.set_global(Appearance::of(window));
             cx.notify();
         });
         Self {

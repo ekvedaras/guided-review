@@ -2,25 +2,35 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, PathPromptOptions, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
+    ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, px, relative,
 };
 
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
-use crate::viewer::{SaveOutcome, SettingProblem, Settings};
+use crate::viewer::{CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 
-use super::button::{ButtonKind, ButtonSize, button, toggle_button};
-use super::palette::{CODE_FONT, Colors, TEXT_FONT};
-use super::text_box::TextBox;
+use super::button::{
+    ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
+};
+use super::card::card;
+use super::chip::{chip, dropping_in, notice_band};
+use super::icon::{Icon, sized_icon};
+use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
+use super::palette::{
+    CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone,
+};
+use super::segmented::{Segment, SegmentLayout, Segmented};
+use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
+use super::title_bar::TitleBarArea;
 
-/// Where the panel starts: the sidebar's width, so the sidebar stays beside it.
-const SIDEBAR_WIDTH: f32 = 300.;
-const FORM_WIDTH: f32 = 720.;
+/// The widest a sheet over a review grows on a wide window.
+const SHEET_WIDTH: f32 = 860.;
+/// The column the header, the sections and the action bar's contents line up in.
+const COLUMN_WIDTH: f32 = 780.;
 
 /// What the panel tells the layout. The panel writes the config; what the new settings do to the PR on
 /// screen is the layout's to decide.
@@ -30,31 +40,13 @@ pub enum SettingsEvent {
     Closed,
 }
 
-/// What the panel covers: the page area beside a PR's sidebar, or a window that holds only Settings.
+/// What the panel covers: a sheet over the whole review, sidebar too, so nothing behind it is live;
+/// or a window that holds only Settings, as its whole page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
-    BesideSidebar,
+    SheetOverReview,
     WholeWindow,
 }
-
-impl Placement {
-    fn left(self) -> f32 {
-        match self {
-            Self::BesideSidebar => SIDEBAR_WIDTH,
-            Self::WholeWindow => 0.,
-        }
-    }
-
-    /// The title's indent, clear of the traffic lights when nothing sits left of the panel.
-    fn title_indent(self) -> f32 {
-        match self {
-            Self::BesideSidebar => 24.,
-            Self::WholeWindow => TRAFFIC_LIGHTS_WIDTH,
-        }
-    }
-}
-
-type AfterDiscard = Box<dyn FnOnce(&mut App)>;
 
 impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
@@ -68,13 +60,34 @@ enum Slot {
     Clone(usize),
 }
 
+/// Which half of a clone row a problem is about, so that half wears the danger edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClonePart {
+    Repo,
+    Folder,
+}
+
+impl ClonePart {
+    fn of(problem: CloneRowProblem) -> Self {
+        match problem {
+            CloneRowProblem::NotOwnerSlashRepo | CloneRowProblem::SameRepoTwice => Self::Repo,
+            CloneRowProblem::FolderGone | CloneRowProblem::NoRemoteOfRepo => Self::Folder,
+        }
+    }
+}
+
 struct ShownProblem {
     slot: Slot,
+    clone_part: Option<ClonePart>,
     message: SharedString,
 }
 
 impl ShownProblem {
     fn of(problem: &SettingProblem) -> Self {
+        let clone_part = match problem {
+            SettingProblem::Clone { problem, .. } => Some(ClonePart::of(*problem)),
+            _ => None,
+        };
         let slot = match problem {
             SettingProblem::Clone { row, .. } => Slot::Clone(*row),
             SettingProblem::SummaryFileGone(_)
@@ -85,6 +98,7 @@ impl ShownProblem {
         };
         Self {
             slot,
+            clone_part,
             message: problem.message().into(),
         }
     }
@@ -105,8 +119,10 @@ struct Editing {
     skills: Vec<(SkillName, SharedString)>,
     default_file: SharedString,
     default_file_exists: bool,
-    default_model: SharedString,
-    default_effort: SharedString,
+    /// What the Default segments stand for, said beside the setting's name.
+    default_model_note: SharedString,
+    default_effort_note: SharedString,
+    default_effort_level: usize,
     ide: CustomEntry,
     model: CustomEntry,
     skill: CustomEntry,
@@ -151,8 +167,11 @@ impl Editing {
         let mut editing = Self {
             default_file: settings.default_file().display().to_string().into(),
             default_file_exists: settings.default_file_exists(),
-            default_model: format!("App default ({})", AskSettings::default().model).into(),
-            default_effort: format!("App default ({})", AskSettings::default().effort).into(),
+            default_model_note: format!("Default is {}", AskSettings::default().model).into(),
+            default_effort_note: format!("Default is {}", AskSettings::default().effort).into(),
+            default_effort_level: effort_level(&AskEffortChoice::of(Some(
+                &AskSettings::default().effort,
+            ))),
             settings,
             skills,
             ide,
@@ -190,6 +209,16 @@ impl Editing {
             .filter(move |problem| problem.slot == slot)
             .map(|problem| &problem.message)
     }
+
+    fn has_problem_under(&self, slot: Slot) -> bool {
+        self.problems.iter().any(|problem| problem.slot == slot)
+    }
+
+    fn has_clone_problem(&self, row: usize, part: ClonePart) -> bool {
+        self.problems
+            .iter()
+            .any(|problem| problem.slot == Slot::Clone(row) && problem.clone_part == Some(part))
+    }
 }
 
 enum Loaded {
@@ -208,8 +237,7 @@ pub struct SettingsPanel {
     /// What the panel's owner has to say that is not about a setting, such as a PR that failed to open.
     notice: Option<SharedString>,
     clone_focus: Vec<FocusHandle>,
-    /// Where the reviewer was going when the unsaved changes made the panel ask first.
-    after_discard: Option<AfterDiscard>,
+    scroll: ScrollHandle,
 }
 
 impl SettingsPanel {
@@ -229,7 +257,7 @@ impl SettingsPanel {
             placement,
             notice: None,
             clone_focus: Vec::new(),
-            after_discard: None,
+            scroll: ScrollHandle::new(),
         }
     }
 
@@ -279,46 +307,16 @@ impl SettingsPanel {
         }
     }
 
-    pub fn has_unsaved_changes(&self) -> bool {
-        match &self.loaded {
-            Some(Loaded::Ready(editing)) => editing.settings.has_unsaved_changes(),
-            _ => false,
-        }
-    }
-
-    /// Asks the discard question; `then` runs only if the reviewer discards, and Keep editing drops it.
-    pub fn ask_before_leaving(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        then: impl FnOnce(&mut App) + 'static,
-    ) {
-        self.request_close(window, cx);
-        if self.is_confirming_discard() {
-            self.after_discard = Some(Box::new(then));
-        }
-    }
-
-    fn is_confirming_discard(&self) -> bool {
-        matches!(&self.loaded, Some(Loaded::Ready(editing)) if editing.is_confirming_discard)
-    }
-
     fn keep_editing(&mut self, cx: &mut Context<Self>) {
-        self.after_discard = None;
         self.edit(cx, |editing| editing.is_confirming_discard = false);
     }
 
     fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let then = self.after_discard.take();
         self.close(window, cx);
-        if let Some(then) = then {
-            then(cx);
-        }
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.loaded = None;
-        self.after_discard = None;
         window.focus(&self.owner_focus, cx);
         cx.emit(SettingsEvent::Closed);
         cx.notify();
@@ -452,20 +450,17 @@ impl SettingsPanel {
         id: impl Into<gpui::ElementId>,
         focus: &FocusHandle,
         text: &str,
+        is_invalid: bool,
         cx: &Context<Self>,
         on_edit: impl Fn(&mut Editing, String) + 'static,
-    ) -> impl IntoElement {
+    ) -> Field {
         let (panel, cancel) = (cx.entity(), cx.entity());
-        let colors = Colors::active(cx);
-        div()
-            .px_2()
-            .h(px(28.))
+        Field::new(focus)
+            .invalid(is_invalid)
+            .px_3()
+            .h(ButtonSize::Regular.height())
             .flex()
             .items_center()
-            .rounded_md()
-            .border_1()
-            .border_color(colors.border)
-            .bg(colors.surface)
             .text_sm()
             .child(
                 TextBox::new(id, focus, text, Lines::Single)
@@ -480,8 +475,8 @@ impl SettingsPanel {
             )
     }
 
-    /// A preset's template, to read and not to edit.
-    fn shown_text(colors: &Colors, text: impl Into<SharedString>) -> impl IntoElement {
+    /// A preset's template or command, to read and not to edit.
+    fn shown_text(colors: &Colors, text: impl Into<SharedString>) -> gpui::Div {
         div()
             .text_xs()
             .font_family(CODE_FONT)
@@ -493,44 +488,55 @@ impl SettingsPanel {
         div()
             .flex()
             .flex_col()
+            .gap_1()
             .children(editing.problems_under(slot).map(|message| {
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
                     .text_xs()
                     .text_color(colors.danger)
+                    .child(sized_icon(Icon::CircleAlert, colors.danger, px(13.)))
                     .child(message.clone())
             }))
     }
 
     fn section(
         colors: &Colors,
+        icon: Icon,
         title: &'static str,
         about: &'static str,
         body: impl IntoElement,
     ) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .pb_5()
-            .border_b_1()
-            .border_color(colors.subtle_border)
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_base()
-                    .child(title),
-            )
-            .child(div().text_xs().text_color(colors.muted_text).child(about))
-            .child(body)
-    }
-
-    fn choice(
-        colors: &Colors,
-        id: impl Into<gpui::ElementId>,
-        label: impl IntoElement,
-        is_on: bool,
-    ) -> gpui::Stateful<gpui::Div> {
-        toggle_button(colors, id, is_on, ButtonSize::Regular).child(label)
+        column(
+            card(colors)
+                .w_full()
+                .p_6()
+                .flex()
+                .flex_col()
+                .gap_5()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_4()
+                        .child(icon_tile(colors, icon))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .text_base()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(title),
+                                )
+                                .child(div().text_sm().text_color(colors.muted_text).child(about)),
+                        ),
+                )
+                .child(body),
+        )
     }
 
     fn summary_instructions(
@@ -540,108 +546,143 @@ impl SettingsPanel {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let choice = editing.settings.summary_instructions();
-        let is_default = matches!(choice, SummaryInstructionsChoice::DefaultFile);
-        let other_file = match choice {
-            SummaryInstructionsChoice::OtherFile(path) => Some(path),
-            _ => None,
-        };
-        let is_off = matches!(choice, SummaryInstructionsChoice::Off);
         let is_skill = editing.skill.is_open;
-        let choices = div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .child(
-                Self::choice(colors, "summary-default", "Default file", is_default).on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.edit(cx, |editing| {
-                            editing.skill.is_open = false;
-                            editing
-                                .settings
-                                .set_summary_instructions(SummaryInstructionsChoice::DefaultFile);
-                        });
-                    }),
-                ),
-            )
-            .child(
-                Self::choice(
-                    colors,
-                    "summary-other-file",
-                    "Other file...",
-                    other_file.is_some(),
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
+        let picked = if is_skill {
+            Some(2)
+        } else {
+            match choice {
+                SummaryInstructionsChoice::DefaultFile => Some(0),
+                SummaryInstructionsChoice::OtherFile(_) => Some(1),
+                SummaryInstructionsChoice::Skill(_) => Some(2),
+                SummaryInstructionsChoice::Off => Some(3),
+                SummaryInstructionsChoice::Unreadable(_) => None,
+            }
+        };
+        let segments = vec![
+            Segment::new(
+                "summary-default",
+                "Default file",
+                cx.listener(|this, _, _, cx| {
+                    this.edit(cx, |editing| {
+                        editing.skill.is_open = false;
+                        editing
+                            .settings
+                            .set_summary_instructions(SummaryInstructionsChoice::DefaultFile);
+                    });
+                }),
+            ),
+            Segment::new(
+                "summary-other-file",
+                "Other file…",
+                cx.listener(|this, _, _, cx| {
                     this.edit(cx, |editing| editing.skill.is_open = false);
                     this.pick_summary_file(cx);
-                })),
-            )
-            .child(
-                Self::choice(colors, "summary-skill", "Skill", is_skill).on_click(cx.listener(
-                    |this, _, _, cx| this.edit(cx, |editing| editing.skill.is_open = true),
-                )),
-            )
-            .child(
-                Self::choice(colors, "summary-off", "Off", is_off).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.edit(cx, |editing| {
-                            editing.skill.is_open = false;
-                            editing
-                                .settings
-                                .set_summary_instructions(SummaryInstructionsChoice::Off);
-                        });
-                    },
-                )),
-            );
-        let detail = if is_default {
-            let (status, action) = if editing.default_file_exists {
-                ("exists", "Open it")
+                }),
+            ),
+            Segment::new(
+                "summary-skill",
+                "Skill",
+                cx.listener(|this, _, _, cx| this.edit(cx, |editing| editing.skill.is_open = true)),
+            ),
+            Segment::new(
+                "summary-off",
+                "Off",
+                cx.listener(|this, _, _, cx| {
+                    this.edit(cx, |editing| {
+                        editing.skill.is_open = false;
+                        editing
+                            .settings
+                            .set_summary_instructions(SummaryInstructionsChoice::Off);
+                    });
+                }),
+            ),
+        ];
+        let has_problem = editing.has_problem_under(Slot::SummaryInstructions);
+        let control = Segmented::new(
+            "summary-mode",
+            SegmentLayout::Row {
+                segment_width: px(116.),
+            },
+            segments,
+        )
+        .picked(picked)
+        .invalid(matches!(choice, SummaryInstructionsChoice::Unreadable(_)));
+        let detail =
+            if is_skill {
+                Some(self.skill_picker(editing, colors, cx).into_any_element())
             } else {
-                (
-                    "does not exist yet, so there are no summary instructions",
-                    "Create and open it",
-                )
-            };
-            Some(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .text_sm()
-                    .child(
-                        div()
-                            .text_color(colors.muted_text)
-                            .child(format!("{} {status}", editing.default_file)),
-                    )
-                    .child(
-                        button(
-                            colors,
-                            "summary-default-open",
-                            ButtonKind::Secondary,
-                            ButtonSize::Small,
+                match choice {
+                    SummaryInstructionsChoice::DefaultFile => {
+                        let (status, action) = if editing.default_file_exists {
+                            (
+                                (Tone::Success, "Found"),
+                                icon_label_button(
+                                    colors,
+                                    "summary-default-open",
+                                    ButtonKind::Secondary,
+                                    ButtonSize::Small,
+                                    Icon::FileText,
+                                    "Open",
+                                ),
+                            )
+                        } else {
+                            (
+                                (Tone::Warning, "Not created yet"),
+                                icon_label_button(
+                                    colors,
+                                    "summary-default-open",
+                                    ButtonKind::Tinted,
+                                    ButtonSize::Small,
+                                    Icon::FilePlus,
+                                    "Create and open",
+                                ),
+                            )
+                        };
+                        Some(
+                            file_row(colors, editing.default_file.clone(), has_problem)
+                                .child(chip(colors, status.0).py_0p5().child(status.1))
+                                .child(action.on_click(
+                                    cx.listener(|this, _, _, cx| this.open_default_file(cx)),
+                                ))
+                                .into_any_element(),
                         )
-                        .child(action)
-                        .on_click(cx.listener(|this, _, _, cx| this.open_default_file(cx))),
-                    )
-                    .into_any_element(),
-            )
-        } else if let Some(path) = other_file {
-            Some(
-                div()
-                    .text_sm()
-                    .text_color(colors.muted_text)
-                    .child(path.display().to_string())
-                    .into_any_element(),
-            )
-        } else if is_skill {
-            Some(self.skill_picker(editing, colors, cx).into_any_element())
-        } else {
-            None
-        };
+                    }
+                    SummaryInstructionsChoice::OtherFile(path) => Some(
+                        file_row(colors, path.display().to_string().into(), has_problem)
+                            .when(has_problem, |row| {
+                                row.child(chip(colors, Tone::Danger).py_0p5().child("Missing"))
+                            })
+                            .child(
+                                icon_label_button(
+                                    colors,
+                                    "summary-other-file-pick",
+                                    ButtonKind::Secondary,
+                                    ButtonSize::Small,
+                                    Icon::FolderOpen,
+                                    "Choose…",
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| this.pick_summary_file(cx))),
+                            )
+                            .into_any_element(),
+                    ),
+                    SummaryInstructionsChoice::Skill(_) => {
+                        Some(self.skill_picker(editing, colors, cx).into_any_element())
+                    }
+                    SummaryInstructionsChoice::Off => Some(
+                        div()
+                            .text_sm()
+                            .text_color(colors.muted_text)
+                            .child("The tour writer gets no summary instructions.")
+                            .into_any_element(),
+                    ),
+                    SummaryInstructionsChoice::Unreadable(_) => None,
+                }
+            };
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(choices)
+            .gap_3()
+            .child(control)
             .children(detail)
             .child(Self::problem_lines(
                 editing,
@@ -666,12 +707,13 @@ impl SettingsPanel {
             .enumerate()
             .map(|(index, (name, label))| {
                 let picked = name.clone();
-                Self::choice(
+                toggle_button(
                     colors,
                     SharedString::from(format!("summary-skill-{index}")),
-                    label.clone(),
                     chosen == Some(name),
+                    ButtonSize::Small,
                 )
+                .child(label.clone())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let picked = picked.clone();
                     this.edit(cx, |editing| {
@@ -687,6 +729,7 @@ impl SettingsPanel {
                 "summary-skill-name",
                 focus,
                 &editing.skill.text,
+                false,
                 cx,
                 |editing, text| {
                     editing
@@ -696,26 +739,26 @@ impl SettingsPanel {
                 },
             )
         });
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div().text_xs().text_color(colors.muted_text).child(
+        rising(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_xs().text_color(colors.muted_text).child(
                     "Skills in ~/.claude/skills, or type any skill name, such as plugin:skill",
-                ),
-            )
-            .child(div().flex().flex_wrap().gap_2().children(skills))
-            .children(typed)
+                ))
+                .child(div().flex().flex_wrap().gap_2().children(skills))
+                .children(typed),
+            "summary-skill-rise",
+        )
     }
 
     fn ide(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let current = editing.settings.ide();
         let is_custom = editing.ide.is_open;
-        let shown_template = current.shown_template().filter(|_| !is_custom);
-        let preset = |id: &'static str, label: &'static str, choice: IdeChoice| {
+        let preset = |id: &'static str, name: &'static str, glyph: Glyph, choice: IdeChoice| {
             let is_on = !is_custom && current == choice;
-            Self::choice(colors, id, label, is_on).on_click(cx.listener(move |this, _, _, cx| {
+            ide_tile(colors, id, name, glyph, is_on).on_click(cx.listener(move |this, _, _, cx| {
                 let choice = choice.clone();
                 this.edit(cx, |editing| {
                     editing.ide.is_open = false;
@@ -723,205 +766,329 @@ impl SettingsPanel {
                 });
             }))
         };
-        let custom_box = editing
-            .ide
-            .focus
-            .as_ref()
-            .filter(|_| is_custom)
-            .map(|focus| {
-                self.text_box(
-                    "ide-template",
-                    focus,
-                    &editing.ide.text,
-                    cx,
-                    |editing, text| {
-                        editing
-                            .settings
-                            .set_ide(&IdeChoice::Custom(IdeTemplate::new(text.clone())));
-                        editing.ide.text = text;
-                    },
-                )
+        let custom = ide_tile(
+            colors,
+            "ide-custom",
+            "Custom",
+            Glyph::Icon(Icon::Terminal),
+            is_custom,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.edit(cx, |editing| {
+                if !editing.ide.is_open {
+                    editing.ide.is_open = true;
+                    editing.ide.text = editing.settings.ide_custom_text().to_owned();
+                    editing
+                        .settings
+                        .set_ide(&IdeChoice::Custom(IdeTemplate::new(
+                            editing.ide.text.clone(),
+                        )));
+                }
             });
+        }));
+        let tiles = div()
+            .flex()
+            .flex_wrap()
+            .gap_3()
+            .child(preset(
+                "ide-jetbrains",
+                "JetBrains",
+                Glyph::Monogram("JB"),
+                IdeChoice::JetBrains,
+            ))
+            .child(preset(
+                "ide-vscode",
+                "VS Code",
+                Glyph::Monogram("VS"),
+                IdeChoice::VsCode,
+            ))
+            .child(preset(
+                "ide-zed",
+                "Zed",
+                Glyph::Monogram("Z"),
+                IdeChoice::Zed,
+            ))
+            .child(preset(
+                "ide-none",
+                "None",
+                Glyph::Icon(Icon::Globe),
+                IdeChoice::None,
+            ))
+            .child(custom);
+        let detail = if is_custom {
+            editing.ide.focus.as_ref().map(|focus| {
+                rising(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            self.text_box(
+                                "ide-template",
+                                focus,
+                                &editing.ide.text,
+                                editing.has_problem_under(Slot::Ide),
+                                cx,
+                                |editing, text| {
+                                    editing
+                                        .settings
+                                        .set_ide(&IdeChoice::Custom(IdeTemplate::new(text.clone())));
+                                    editing.ide.text = text;
+                                },
+                            )
+                            .font_family(CODE_FONT),
+                        )
+                        .child(div().text_xs().text_color(colors.muted_text).child(
+                            "A link or a shell command. {path} and {line} become the file and the line.",
+                        )),
+                    "ide-custom-rise",
+                )
+                .into_any_element()
+            })
+        } else {
+            Some(match current.shown_template() {
+                Some(template) => note_row(colors, Icon::ExternalLink)
+                    .child(Self::shown_text(colors, template))
+                    .into_any_element(),
+                None => note_row(colors, Icon::Globe)
+                    .child("Code links open the file on GitHub.")
+                    .into_any_element(),
+            })
+        };
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(preset("ide-jetbrains", "JetBrains", IdeChoice::JetBrains))
-                    .child(preset("ide-vscode", "VS Code", IdeChoice::VsCode))
-                    .child(preset("ide-zed", "Zed", IdeChoice::Zed))
-                    .child(preset("ide-none", "None", IdeChoice::None))
-                    .child(
-                        Self::choice(colors, "ide-custom", "Custom", is_custom).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.edit(cx, |editing| {
-                                    if !editing.ide.is_open {
-                                        editing.ide.is_open = true;
-                                        editing.ide.text =
-                                            editing.settings.ide_custom_text().to_owned();
-                                        editing.settings.set_ide(&IdeChoice::Custom(
-                                            IdeTemplate::new(editing.ide.text.clone()),
-                                        ));
-                                    }
-                                });
-                            }),
-                        ),
-                    ),
-            )
-            .children(shown_template.map(|template| Self::shown_text(colors, template)))
-            .children(custom_box.map(|custom_box| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child("A link or a shell command. {path} and {line} become the file and the line."),
-                    )
-                    .child(custom_box)
-            }))
+            .gap_3()
+            .child(tiles)
+            .children(detail)
             .child(Self::problem_lines(editing, Slot::Ide, colors))
     }
 
     fn ask(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let model = editing.settings.ask_model();
         let is_custom = editing.model.is_open;
-        let shown_command = model.shown_command().filter(|_| !is_custom);
-        let model_choice = |id: SharedString, label: SharedString, choice: AskModelChoice| {
-            let is_on = !is_custom && model == choice;
-            Self::choice(colors, id, label, is_on).on_click(cx.listener(move |this, _, _, cx| {
-                let choice = choice.clone();
-                this.edit(cx, |editing| {
-                    editing.model.is_open = false;
-                    editing.settings.set_ask_model(&choice);
-                });
-            }))
+        let model_picked = if is_custom {
+            Some(4)
+        } else {
+            Some(match model {
+                AskModelChoice::AppDefault => 0,
+                AskModelChoice::Opus => 1,
+                AskModelChoice::Sonnet => 2,
+                AskModelChoice::Haiku => 3,
+                AskModelChoice::Custom(_) => 4,
+            })
         };
-        let custom_box = editing
+        let model_segment = |id: &'static str, label: &'static str, choice: AskModelChoice| {
+            Segment::new(
+                id,
+                label,
+                cx.listener(move |this, _, _, cx| {
+                    let choice = choice.clone();
+                    this.edit(cx, |editing| {
+                        editing.model.is_open = false;
+                        editing.settings.set_ask_model(&choice);
+                    });
+                }),
+            )
+        };
+        let model_segments = vec![
+            model_segment("ask-model-default", "Default", AskModelChoice::AppDefault),
+            model_segment("ask-model-opus", "opus", AskModelChoice::Opus),
+            model_segment("ask-model-sonnet", "sonnet", AskModelChoice::Sonnet),
+            model_segment("ask-model-haiku", "haiku", AskModelChoice::Haiku),
+            Segment::new(
+                "ask-model-custom",
+                "Custom",
+                cx.listener(|this, _, _, cx| {
+                    this.edit(cx, |editing| {
+                        if !editing.model.is_open {
+                            editing.model.is_open = true;
+                            editing.model.text =
+                                editing.settings.ask_model_custom_text().to_owned();
+                            editing
+                                .settings
+                                .set_ask_model(&AskModelChoice::Custom(editing.model.text.clone()));
+                        }
+                    });
+                }),
+            ),
+        ];
+        let model_note = if is_custom {
+            div()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child("Any model name claude accepts")
+        } else {
+            match model.shown_command() {
+                Some(command) => Self::shown_text(colors, command),
+                None => div()
+                    .text_xs()
+                    .text_color(colors.muted_text)
+                    .child(editing.default_model_note.clone()),
+            }
+        };
+        let custom_model = editing
             .model
             .focus
             .as_ref()
             .filter(|_| is_custom)
             .map(|focus| {
-                self.text_box(
-                    "ask-model-name",
-                    focus,
-                    &editing.model.text,
-                    cx,
-                    |editing, text| {
-                        editing
-                            .settings
-                            .set_ask_model(&AskModelChoice::Custom(text.clone()));
-                        editing.model.text = text;
-                    },
+                rising(
+                    self.text_box(
+                        "ask-model-name",
+                        focus,
+                        &editing.model.text,
+                        editing.has_problem_under(Slot::AskModel),
+                        cx,
+                        |editing, text| {
+                            editing
+                                .settings
+                                .set_ask_model(&AskModelChoice::Custom(text.clone()));
+                            editing.model.text = text;
+                        },
+                    ),
+                    "ask-model-rise",
                 )
             });
         let effort = editing.settings.ask_effort();
-        let default_effort = Self::choice(
-            colors,
-            "ask-effort-default",
-            editing.default_effort.clone(),
-            effort == AskEffortChoice::AppDefault,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.edit(cx, |editing| {
-                editing
-                    .settings
-                    .set_ask_effort(&AskEffortChoice::AppDefault);
+        let effort_picked = match effort {
+            AskEffortChoice::AppDefault => Some(0),
+            AskEffortChoice::Low => Some(1),
+            AskEffortChoice::Medium => Some(2),
+            AskEffortChoice::High => Some(3),
+            AskEffortChoice::XHigh => Some(4),
+            AskEffortChoice::Max => Some(5),
+            AskEffortChoice::Unknown(_) => None,
+        };
+        let effort_segments =
+            std::iter::once(("ask-effort-default", "Default", AskEffortChoice::AppDefault))
+                .chain([
+                    ("ask-effort-low", "low", AskEffortChoice::Low),
+                    ("ask-effort-medium", "medium", AskEffortChoice::Medium),
+                    ("ask-effort-high", "high", AskEffortChoice::High),
+                    ("ask-effort-xhigh", "xhigh", AskEffortChoice::XHigh),
+                    ("ask-effort-max", "max", AskEffortChoice::Max),
+                ])
+                .map(|(id, label, choice)| {
+                    Segment::new(
+                        id,
+                        label,
+                        cx.listener(move |this, _, _, cx| {
+                            let choice = choice.clone();
+                            this.edit(cx, |editing| editing.settings.set_ask_effort(&choice));
+                        }),
+                    )
+                })
+                .collect();
+        let level = match effort {
+            AskEffortChoice::AppDefault => editing.default_effort_level,
+            ref chosen => effort_level(chosen),
+        };
+        let effort_note = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(effort_meter(colors, level))
+            .when(effort == AskEffortChoice::AppDefault, |note| {
+                note.child(editing.default_effort_note.clone())
             });
-        }));
-        let efforts = AskEffortChoice::PICKABLE.into_iter().map(|choice| {
-            let label = SharedString::from(choice.config_text().unwrap_or_default().to_owned());
-            let is_on = effort == choice;
-            Self::choice(
-                colors,
-                SharedString::from(format!("ask-effort-{label}")),
-                label,
-                is_on,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let choice = choice.clone();
-                this.edit(cx, |editing| editing.settings.set_ask_effort(&choice));
-            }))
-        });
-        let model_choices = AskModelChoice::PICKABLE.into_iter().map(|choice| {
-            let label = SharedString::from(choice.config_text().unwrap_or_default().to_owned());
-            model_choice(
-                SharedString::from(format!("ask-model-{label}")),
-                label,
-                choice,
-            )
-        });
         div()
             .flex()
             .flex_col()
-            .gap_3()
+            .gap_4()
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_2()
-                    .child(div().text_sm().child("Model"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_2()
-                            .child(model_choice(
-                                "ask-model-default".into(),
-                                editing.default_model.clone(),
-                                AskModelChoice::AppDefault,
-                            ))
-                            .children(model_choices)
-                            .child(
-                                Self::choice(colors, "ask-model-custom", "Custom", is_custom)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.edit(cx, |editing| {
-                                            if !editing.model.is_open {
-                                                editing.model.is_open = true;
-                                                editing.model.text = editing
-                                                    .settings
-                                                    .ask_model_custom_text()
-                                                    .to_owned();
-                                                editing.settings.set_ask_model(
-                                                    &AskModelChoice::Custom(
-                                                        editing.model.text.clone(),
-                                                    ),
-                                                );
-                                            }
-                                        });
-                                    })),
-                            ),
-                    )
-                    .children(shown_command.map(|command| Self::shown_text(colors, command)))
-                    .children(custom_box)
+                    .gap_3()
+                    .child(setting_row(
+                        "Model",
+                        model_note,
+                        Segmented::new(
+                            "ask-model",
+                            SegmentLayout::Row {
+                                segment_width: px(80.),
+                            },
+                            model_segments,
+                        )
+                        .picked(model_picked),
+                    ))
+                    .children(custom_model)
                     .child(Self::problem_lines(editing, Slot::AskModel, colors)),
             )
+            .child(div().h_px().bg(colors.subtle_border))
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_2()
-                    .child(div().text_sm().child("Effort"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_2()
-                            .child(default_effort)
-                            .children(efforts),
-                    )
+                    .gap_3()
+                    .child(setting_row(
+                        "Effort",
+                        effort_note,
+                        Segmented::new(
+                            "ask-effort",
+                            SegmentLayout::Row {
+                                segment_width: px(70.),
+                            },
+                            effort_segments,
+                        )
+                        .picked(effort_picked)
+                        .invalid(editing.has_problem_under(Slot::AskEffort)),
+                    ))
                     .child(Self::problem_lines(editing, Slot::AskEffort, colors)),
             )
     }
 
     fn clones(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
+        let add_clone = |kind: ButtonKind, size: ButtonSize| {
+            icon_label_button(colors, "clone-add", kind, size, Icon::Plus, "Add clone").on_click(
+                cx.listener(|this, _, _, cx| {
+                    this.edit(cx, |editing| {
+                        editing.settings.add_clone();
+                    });
+                }),
+            )
+        };
+        if editing.settings.clones().is_empty() {
+            return div()
+                .py_4()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_3()
+                .rounded(px(CONTROL_RADIUS))
+                .border_1()
+                .border_dashed()
+                .border_color(colors.border)
+                .child(
+                    div()
+                        .size(px(40.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(colors.inset)
+                        .child(sized_icon(Icon::FolderGit, colors.muted_text, px(20.))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_1()
+                        .child(div().font_weight(FontWeight::MEDIUM).child("No clones yet"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.muted_text)
+                                .child("Add one so code links open files from your own checkout."),
+                        ),
+                )
+                .child(add_clone(ButtonKind::Tinted, ButtonSize::Regular))
+                .into_any_element();
+        }
         let rows = editing
             .settings
             .clones()
@@ -930,42 +1097,77 @@ impl SettingsPanel {
             .filter_map(|(row, clone)| {
                 let focus = self.clone_focus.get(row)?;
                 let label = editing.folder_labels.get(row)?.clone();
+                let has_folder = !clone.folder.as_os_str().is_empty();
+                let is_folder_wrong = editing.has_clone_problem(row, ClonePart::Folder);
+                let folder_color = if is_folder_wrong {
+                    colors.danger
+                } else if has_folder {
+                    colors.text
+                } else {
+                    colors.muted_text
+                };
                 Some(
                     div()
+                        .px_3()
+                        .py_2p5()
                         .flex()
                         .flex_col()
-                        .gap_1()
+                        .gap_1p5()
+                        .when(row > 0, |line| {
+                            line.border_t_1().border_color(colors.subtle_border)
+                        })
                         .child(
                             div()
                                 .flex()
                                 .items_center()
-                                .gap_2()
-                                .child(div().w(px(220.)).flex_none().child(self.text_box(
-                                    SharedString::from(format!("clone-repo-{row}")),
-                                    focus,
-                                    &clone.repo,
-                                    cx,
-                                    move |editing, text| {
-                                        editing.settings.set_clone_repo(row, text);
-                                    },
-                                )))
+                                .gap_3()
+                                .child(
+                                    self.text_box(
+                                        SharedString::from(format!("clone-repo-{row}")),
+                                        focus,
+                                        &clone.repo,
+                                        editing.has_clone_problem(row, ClonePart::Repo),
+                                        cx,
+                                        move |editing, text| {
+                                            editing.settings.set_clone_repo(row, text);
+                                        },
+                                    )
+                                    .w(px(210.))
+                                    .flex_none(),
+                                )
+                                .child(sized_icon(Icon::ArrowRight, colors.muted_text, px(14.)))
                                 .child(
                                     div()
                                         .flex_1()
                                         .min_w_0()
-                                        .truncate()
-                                        .text_sm()
-                                        .text_color(colors.muted_text)
-                                        .child(label),
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(sized_icon(Icon::FolderOpen, folder_color, px(14.)))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .text_ellipsis_middle()
+                                                .text_xs()
+                                                .when(has_folder, |path| {
+                                                    path.font_family(CODE_FONT)
+                                                })
+                                                .text_color(folder_color)
+                                                .child(label),
+                                        ),
                                 )
                                 .child(
-                                    button(
+                                    icon_button(
                                         colors,
                                         SharedString::from(format!("clone-folder-{row}")),
                                         ButtonKind::Secondary,
                                         ButtonSize::Regular,
+                                        Icon::FolderOpen,
+                                        "Choose folder",
                                     )
-                                    .child("Choose folder...")
                                     .on_click(cx.listener(
                                         move |this, _, _, cx| {
                                             this.pick_clone_folder(row, cx);
@@ -973,13 +1175,14 @@ impl SettingsPanel {
                                     )),
                                 )
                                 .child(
-                                    button(
+                                    icon_button(
                                         colors,
                                         SharedString::from(format!("clone-remove-{row}")),
-                                        ButtonKind::Ghost,
+                                        ButtonKind::Danger,
                                         ButtonSize::Regular,
+                                        Icon::Trash,
+                                        "Remove clone",
                                     )
-                                    .child("Remove")
                                     .on_click(cx.listener(
                                         move |this, _, _, cx| {
                                             this.edit(cx, |editing| {
@@ -992,63 +1195,419 @@ impl SettingsPanel {
                         .child(Self::problem_lines(editing, Slot::Clone(row), colors)),
                 )
             });
-        div().flex().flex_col().gap_3().children(rows).child(
-            div().flex().child(
-                button(
-                    colors,
-                    "clone-add",
-                    ButtonKind::Secondary,
-                    ButtonSize::Regular,
-                )
-                .child("Add clone")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.edit(cx, |editing| {
-                        editing.settings.add_clone();
-                    });
-                })),
-            ),
-        )
-    }
-
-    fn discard_question(colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         div()
-            .flex_none()
-            .px_6()
-            .py_3()
             .flex()
-            .items_center()
+            .flex_col()
             .gap_3()
-            .bg(colors.warning_background)
-            .border_b_1()
-            .border_color(colors.subtle_border)
-            .text_sm()
-            .text_color(colors.warning)
             .child(
                 div()
-                    .flex_1()
-                    .child("Close Settings and lose your changes?"),
+                    .flex()
+                    .flex_col()
+                    .rounded(px(CONTROL_RADIUS))
+                    .border_1()
+                    .border_color(colors.subtle_border)
+                    .bg(colors.background)
+                    .children(rows),
             )
             .child(
-                button(
-                    colors,
-                    "settings-keep-editing",
-                    ButtonKind::Secondary,
-                    ButtonSize::Regular,
-                )
-                .child("Keep editing")
-                .on_click(cx.listener(|this, _, _, cx| this.keep_editing(cx))),
+                div()
+                    .flex()
+                    .child(add_clone(ButtonKind::Ghost, ButtonSize::Small)),
             )
-            .child(
-                button(
-                    colors,
-                    "settings-discard",
-                    ButtonKind::Primary,
-                    ButtonSize::Regular,
-                )
-                .child("Discard changes")
-                .on_click(cx.listener(|this, _, window, cx| this.discard(window, cx))),
-            )
+            .into_any_element()
     }
+
+    /// Pinned under the form, so Save is always in reach: what state the edits are in on the left,
+    /// the ways out on the right. While the discard question is up, it takes the bar.
+    fn action_bar(
+        &self,
+        editing: &Editing,
+        colors: &Colors,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let content = if editing.is_confirming_discard {
+            slide_in(
+                bar_row()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_color(colors.text)
+                            .child(sized_icon(Icon::CircleAlert, colors.warning, px(16.)))
+                            .child("Close Settings and lose your changes?"),
+                    )
+                    .child(
+                        button(
+                            colors,
+                            "settings-keep-editing",
+                            ButtonKind::Secondary,
+                            ButtonSize::Regular,
+                        )
+                        .child("Keep editing")
+                        .on_click(cx.listener(|this, _, _, cx| this.keep_editing(cx))),
+                    )
+                    .child(
+                        icon_label_button(
+                            colors,
+                            "settings-discard",
+                            ButtonKind::Danger,
+                            ButtonSize::Large,
+                            Icon::Trash,
+                            "Discard changes",
+                        )
+                        .bg(colors.danger_background)
+                        .border_color(colors.danger_border)
+                        .on_click(cx.listener(|this, _, window, cx| this.discard(window, cx))),
+                    ),
+                "settings-bar-question",
+                STATE,
+                Edge::Bottom,
+                BOX_RISE,
+            )
+            .into_any_element()
+        } else {
+            let state = if let Some(note) = editing.note.clone() {
+                Some(
+                    bar_state(colors, colors.danger)
+                        .child(note)
+                        .into_any_element(),
+                )
+            } else if !editing.problems.is_empty() {
+                let count = editing.problems.len();
+                Some(
+                    bar_state(colors, colors.danger)
+                        .child(if count == 1 {
+                            "1 setting to fix before saving".to_owned()
+                        } else {
+                            format!("{count} settings to fix before saving")
+                        })
+                        .into_any_element(),
+                )
+            } else if editing.settings.has_unsaved_changes() {
+                Some(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_color(colors.text)
+                        .child(div().size(px(8.)).rounded_full().bg(colors.accent))
+                        .child("Unsaved changes")
+                        .into_any_element(),
+                )
+            } else {
+                None
+            };
+            bar_row()
+                .child(div().flex_1().min_w_0().children(state))
+                .child(
+                    button(
+                        colors,
+                        "settings-close",
+                        ButtonKind::Ghost,
+                        ButtonSize::Regular,
+                    )
+                    .child("Close")
+                    .on_click(cx.listener(|this, _, window, cx| this.request_close(window, cx))),
+                )
+                .child(
+                    icon_label_button(
+                        colors,
+                        "settings-save",
+                        ButtonKind::Primary,
+                        ButtonSize::Large,
+                        Icon::Save,
+                        "Save",
+                    )
+                    .min_w(px(112.))
+                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                )
+                .into_any_element()
+        };
+        div()
+            .flex_none()
+            .flex()
+            .justify_center()
+            .px_8()
+            .bg(colors.overlay)
+            .border_t_1()
+            .border_color(colors.border)
+            .shadow(colors.bar_shadow())
+            .child(content)
+    }
+
+    /// A made-up config being edited, for the pictures: a custom IDE, another model and effort,
+    /// two clones, one of them wrong, and nothing saved yet.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_sample_edits(&mut self, cx: &mut Context<Self>) {
+        const TEMPLATE: &str = "code --goto {path}:{line}";
+        self.edit(cx, |editing| {
+            editing.ide.is_open = true;
+            TEMPLATE.clone_into(&mut editing.ide.text);
+            editing
+                .settings
+                .set_ide(&IdeChoice::Custom(IdeTemplate::new(TEMPLATE.to_owned())));
+            editing.settings.set_ask_model(&AskModelChoice::Sonnet);
+            editing.settings.set_ask_effort(&AskEffortChoice::High);
+            for (repo, folder) in [
+                ("acme/widgets", "~/code/widgets"),
+                ("acme/billing-service", "~/code/archive/billing-service"),
+            ] {
+                let row = editing.settings.add_clone();
+                editing.settings.set_clone_repo(row, repo.to_owned());
+                editing
+                    .settings
+                    .set_clone_folder(row, PathBuf::from(folder));
+            }
+        });
+        if let Some(editing) = self.editing_mut()
+            && let Some(clone) = editing.settings.clones().get(1).cloned()
+        {
+            editing.problems = vec![ShownProblem::of(&SettingProblem::Clone {
+                row: 1,
+                clone,
+                problem: CloneRowProblem::FolderGone,
+            })];
+        }
+        cx.notify();
+    }
+
+    /// Scrolls the form to its last section, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn scroll_to_end(&self) {
+        self.scroll.scroll_to_item(SECTION_COUNT);
+    }
+}
+
+/// The form's header and its four sections, which the scroll counts as items.
+#[cfg(feature = "snapshots")]
+const SECTION_COUNT: usize = 4;
+
+/// The Settings column: as wide as the window allows, up to `COLUMN_WIDTH`, centred.
+fn column(content: impl IntoElement) -> gpui::Div {
+    div()
+        .w_full()
+        .px_8()
+        .flex()
+        .justify_center()
+        .child(div().w_full().max_w(px(COLUMN_WIDTH)).child(content))
+}
+
+fn bar_row() -> gpui::Div {
+    div()
+        .w_full()
+        .max_w(px(COLUMN_WIDTH))
+        .py_3()
+        .flex()
+        .items_center()
+        .gap_3()
+}
+
+fn bar_state(colors: &Colors, tone: gpui::Rgba) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .truncate()
+        .text_color(tone)
+        .child(sized_icon(Icon::CircleAlert, colors.danger, px(16.)))
+}
+
+/// An inner part of a section opening (a custom box, the skill picker) rises into place.
+fn rising(content: impl IntoElement + Styled + 'static, id: &'static str) -> impl IntoElement {
+    slide_in(content, id, STATE, Edge::Bottom, BOX_RISE)
+}
+
+/// A section's mark: its icon on a soft iris-to-azure tile.
+fn icon_tile(colors: &Colors, icon: Icon) -> impl IntoElement {
+    div()
+        .flex_none()
+        .size(px(36.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(CONTROL_RADIUS))
+        .border_1()
+        .border_color(colors.current_border)
+        .bg(colors.icon_tile.diagonal())
+        .child(sized_icon(icon, colors.accent, px(18.)))
+}
+
+/// A setting's name with a note under it on the left, its control on the right; on a narrow
+/// window the control goes under.
+fn setting_row(name: &'static str, note: gpui::Div, control: impl IntoElement) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .justify_between()
+        .gap_x_6()
+        .gap_y_3()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().font_weight(FontWeight::MEDIUM).child(name))
+                .child(note),
+        )
+        .child(control)
+}
+
+/// A file a setting points at: its icon and path, then what the caller adds (a status, an action).
+fn file_row(colors: &Colors, path: SharedString, is_invalid: bool) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .pl_3()
+        .pr_1p5()
+        .py_1p5()
+        .rounded(px(CONTROL_RADIUS))
+        .border_1()
+        .border_color(if is_invalid {
+            colors.danger
+        } else {
+            colors.subtle_border
+        })
+        .bg(colors.background)
+        .child(sized_icon(Icon::FileText, colors.muted_text, px(16.)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis_middle()
+                .font_family(CODE_FONT)
+                .text_xs()
+                .child(path),
+        )
+}
+
+/// A quiet line that says what a choice does.
+fn note_row(colors: &Colors, icon: Icon) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .py_2()
+        .rounded(px(CONTROL_RADIUS))
+        .bg(colors.inset)
+        .text_sm()
+        .text_color(colors.muted_text)
+        .child(sized_icon(icon, colors.muted_text, px(14.)))
+}
+
+/// What an IDE tile shows above its name: a neutral monogram, or a drawn icon.
+#[derive(Debug, Clone, Copy)]
+enum Glyph {
+    Monogram(&'static str),
+    Icon(Icon),
+}
+
+fn ide_tile(
+    colors: &Colors,
+    id: &'static str,
+    name: &'static str,
+    glyph: Glyph,
+    is_on: bool,
+) -> gpui::Stateful<gpui::Div> {
+    let ink = if is_on { colors.accent } else { colors.text };
+    let mark = div()
+        .size(px(30.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(INNER_RADIUS))
+        .border_1()
+        .text_xs()
+        .font_weight(FontWeight::BOLD)
+        .text_color(ink)
+        .map(|mark| {
+            if is_on {
+                mark.bg(colors.icon_tile.diagonal())
+                    .border_color(colors.current_border)
+            } else {
+                mark.bg(colors.inset).border_color(colors.subtle_border)
+            }
+        })
+        .child(match glyph {
+            Glyph::Monogram(letters) => letters.into_any_element(),
+            Glyph::Icon(icon) => sized_icon(icon, ink, px(16.)).into_any_element(),
+        });
+    div()
+        .id(id)
+        .relative()
+        .flex_1()
+        .min_w(px(120.))
+        .flex()
+        .flex_col()
+        .gap_2p5()
+        .p_3()
+        .rounded(px(CONTROL_RADIUS))
+        .border_1()
+        .cursor_pointer()
+        .map(|tile| {
+            if is_on {
+                tile.bg(colors.current).border_color(colors.accent_border)
+            } else {
+                tile.bg(colors.raised_fill())
+                    .border_color(colors.border)
+                    .shadow(colors.control_shadow())
+                    .hover(|tile| tile.border_color(colors.accent_border))
+                    .active(|tile| tile.bg(colors.pressed).shadow_none())
+            }
+        })
+        .child(mark)
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(ink)
+                .child(name),
+        )
+        .child(pop_when_shown(
+            sized_icon(Icon::CircleCheck, colors.accent, px(16.))
+                .absolute()
+                .top(px(10.))
+                .right(px(10.)),
+            "tile-check",
+            is_on,
+        ))
+}
+
+/// How much thinking an effort asks for, from 1 (low) to 5 (max); 0 for an effort Claude does not know.
+fn effort_level(effort: &AskEffortChoice) -> usize {
+    AskEffortChoice::PICKABLE
+        .iter()
+        .position(|pickable| pickable == effort)
+        .map_or(0, |index| index + 1)
+}
+
+/// Five bars rising from low to max, filled up to the chosen effort.
+fn effort_meter(colors: &Colors, level: usize) -> impl IntoElement {
+    const HEIGHTS: [f32; 5] = [4., 6., 8., 10., 12.];
+    div()
+        .flex()
+        .items_end()
+        .gap(px(2.))
+        .h(px(12.))
+        .children(HEIGHTS.into_iter().enumerate().map(move |(index, height)| {
+            div()
+                .w(px(3.))
+                .h(px(height))
+                .rounded(px(1.))
+                .bg(if index < level {
+                    colors.accent
+                } else {
+                    colors.border
+                })
+        }))
 }
 
 impl Render for SettingsPanel {
@@ -1067,120 +1626,187 @@ impl Render for SettingsPanel {
         let Some(loaded) = &self.loaded else {
             return div().into_any_element();
         };
-        let header = TitleBarArea::new("settings-title-bar", colors.background).child(
-            div()
-                .pl(px(self.placement.title_indent()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(colors.muted_text)
-                .child("Settings"),
-        );
-        let body = match loaded {
-            Loaded::Failed(reason) => div()
-                .p_6()
-                .text_color(colors.danger)
-                .child(reason.clone())
-                .into_any_element(),
+        let close = icon_button(
+            &colors,
+            "settings-close-sheet",
+            ButtonKind::Ghost,
+            ButtonSize::Regular,
+            Icon::Close,
+            "Close Settings",
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.request_close(window, cx)));
+        let header = div()
+            .flex_none()
+            .w_full()
+            .pt_5()
+            .pb_4()
+            .border_b_1()
+            .border_color(colors.subtle_border)
+            .child(column(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_2xl()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Settings"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(colors.muted_text)
+                                    .child("How tours are summarised, where code opens, how Ask thinks and where your clones live."),
+                            ),
+                    )
+                    .child(close),
+            ));
+        let (body, bar) = match loaded {
+            Loaded::Failed(reason) => (
+                div()
+                    .flex_1()
+                    .pt_6()
+                    .child(column(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_color(colors.danger)
+                            .child(sized_icon(Icon::CircleAlert, colors.danger, px(16.)))
+                            .child(reason.clone()),
+                    ))
+                    .into_any_element(),
+                None,
+            ),
             Loaded::Ready(editing) => {
                 let summary = self.summary_instructions(editing, &colors, cx);
                 let ide = self.ide(editing, &colors, cx);
                 let ask = self.ask(editing, &colors, cx);
                 let clones = self.clones(editing, &colors, cx);
-                div()
-                    .id("settings-form")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(FORM_WIDTH))
-                            .px_6()
-                            .py_6()
-                            .flex()
-                            .flex_col()
-                            .gap_5()
-                            .child(Self::section(
-                                &colors,
-                                "Summary instructions",
-                                "How the tour writer writes the reviewer summary at the start of a tour.",
-                                summary,
-                            ))
-                            .child(Self::section(
-                                &colors,
-                                "Open code in",
-                                "The editor a code link opens. With none, code opens on GitHub.",
-                                ide,
-                            ))
-                            .child(Self::section(
-                                &colors,
-                                "Ask",
-                                "The model and effort Ask uses.",
-                                ask,
-                            ))
-                            .child(Self::section(
-                                &colors,
-                                "Clones",
-                                "Where each repo is cloned on this machine.",
-                                clones,
-                            ))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        button(
-                                            &colors,
-                                            "settings-save",
-                                            ButtonKind::Primary,
-                                            ButtonSize::Regular,
-                                        )
-                                        .child("Save")
-                                        .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
-                                    )
-                                    .children(editing.note.clone().map(|note| {
-                                        div().text_sm().text_color(colors.danger).child(note)
-                                    })),
-                            ),
-                    )
-                    .into_any_element()
+                (
+                    div()
+                        .id("settings-form")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .flex()
+                        .flex_col()
+                        .gap_5()
+                        .pt_6()
+                        .pb_10()
+                        .child(Self::section(
+                            &colors,
+                            Icon::FileText,
+                            "Summary instructions",
+                            "How the tour writer writes the reviewer summary at the start of a tour.",
+                            summary,
+                        ))
+                        .child(Self::section(
+                            &colors,
+                            Icon::Code,
+                            "Open code in",
+                            "The editor a code link opens. With none, code opens on GitHub.",
+                            ide,
+                        ))
+                        .child(Self::section(
+                            &colors,
+                            Icon::Sparkles,
+                            "Ask",
+                            "The model and effort Ask uses.",
+                            ask,
+                        ))
+                        .child(Self::section(
+                            &colors,
+                            Icon::FolderGit,
+                            "Clones",
+                            "Where each repo is cloned on this machine.",
+                            clones,
+                        ))
+                        .into_any_element(),
+                    Some(self.action_bar(editing, &colors, cx)),
+                )
             }
         };
-        let is_confirming =
-            matches!(loaded, Loaded::Ready(editing) if editing.is_confirming_discard);
-        div()
+        let notice = self.notice.clone().map(|notice| {
+            dropping_in(
+                notice_band(&colors, Tone::Danger).py_3().child(notice),
+                "settings-notice-band",
+            )
+        });
+        let panel = div()
             .id("settings-panel")
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key_down))
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .right_0()
-            .left(px(self.placement.left()))
             .flex()
             .flex_col()
-            .bg(colors.background)
-            .occlude()
             .font_family(TEXT_FONT)
             .text_sm()
-            .text_color(colors.text)
-            .child(header)
-            .children(self.notice.clone().map(|notice| {
-                div()
-                    .flex_none()
-                    .px_6()
-                    .py_3()
-                    .bg(colors.warning_background)
-                    .border_b_1()
-                    .border_color(colors.subtle_border)
-                    .text_color(colors.danger)
-                    .child(notice)
-            }))
-            .when(is_confirming, |panel| {
-                panel.child(Self::discard_question(&colors, cx))
-            })
-            .child(body)
-            .into_any_element()
+            .text_color(colors.text);
+        match self.placement {
+            Placement::WholeWindow => fade_in(
+                panel
+                    .absolute()
+                    .inset_0()
+                    .bg(colors.background)
+                    .occlude()
+                    .child(TitleBarArea::new("settings-title-bar", colors.background))
+                    .child(header)
+                    .children(notice)
+                    .child(body)
+                    .children(bar),
+                "settings-panel-fade",
+                OVERLAY,
+            )
+            .into_any_element(),
+            Placement::SheetOverReview => div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .occlude()
+                .child(fade_in(
+                    div()
+                        .id("settings-scrim")
+                        .absolute()
+                        .inset_0()
+                        .bg(colors.scrim)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.request_close(window, cx)),
+                        ),
+                    "settings-scrim-fade",
+                    STATE,
+                ))
+                .child(rise_in(
+                    panel
+                        .relative()
+                        .w_full()
+                        .max_w(px(SHEET_WIDTH))
+                        .h(relative(0.9))
+                        .mx_8()
+                        .overflow_hidden()
+                        .bg(colors.overlay)
+                        .border_1()
+                        .border_color(colors.border)
+                        .rounded(px(CARD_RADIUS))
+                        .shadow(colors.overlay_shadow())
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(header)
+                        .children(notice)
+                        .child(body)
+                        .children(bar),
+                    "settings-sheet-rise",
+                ))
+                .into_any_element(),
+        }
     }
 }

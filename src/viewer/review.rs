@@ -22,6 +22,7 @@ use super::comments::{
     QueuedComment, SendMode,
 };
 use super::diagram_notes::{DiagramNotes, DiagramToNotes, DiagramToNotesOutcome, NotesButton};
+use super::diff_display::HiddenLines;
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
@@ -35,7 +36,7 @@ use super::hand_offs::{
 };
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
-use super::jump::{self, JumpTarget};
+use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::ports::{AgentLaunch, GitHubError};
 use super::problems::{Problem, Read};
@@ -74,12 +75,77 @@ pub struct SidebarEntry<'a> {
     pub thread_count: usize,
     /// Shown greyed: every piece of the step is gone since the last version.
     pub is_gone: bool,
+    /// The step carries a check hint.
+    pub has_check: bool,
+    pub is_skim: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadProgress {
     pub read: usize,
     pub total: usize,
+}
+
+impl ReadProgress {
+    /// How much of the tour is read, from 0 to 1: the length of the trail.
+    pub fn share(self) -> f32 {
+        if self.total == 0 {
+            return 0.;
+        }
+        self.read.min(self.total) as f32 / self.total as f32
+    }
+
+    /// Every step read; a tour without steps has nothing to complete.
+    pub fn is_complete(self) -> bool {
+        self.total > 0 && self.read >= self.total
+    }
+}
+
+/// A step the reader has not read yet, named for a button that leads there.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnreadStep {
+    pub id: StepId,
+    /// Its title is markdown.
+    pub title: String,
+}
+
+/// What the summary leads the reader to: the start of the tour, the first step not read yet, or
+/// once every step is read, finishing the review.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TourLead {
+    /// A tour with no steps leads nowhere.
+    Nowhere,
+    Start(UnreadStep),
+    Continue(UnreadStep),
+    Finish {
+        steps: usize,
+        /// The PR takes a review from the viewer; an own PR with nothing to send does not.
+        can_finish: bool,
+    },
+}
+
+/// One top-level step of the tour as the summary lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteStop {
+    pub id: StepId,
+    /// Markdown.
+    pub title: String,
+    /// Markdown.
+    pub why: String,
+    /// How many steps sit under it.
+    pub details: usize,
+    pub is_read: bool,
+    pub has_check: bool,
+}
+
+/// What the summary counts about the PR, all of it known without GitHub but the threads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SummaryStats {
+    pub steps: usize,
+    pub files: usize,
+    pub added_lines: usize,
+    pub removed_lines: usize,
+    pub open_threads: usize,
 }
 
 /// Where the open screen sits in the reading order.
@@ -301,6 +367,17 @@ impl Review {
 
     pub fn show_more_context(&mut self, more: &MoreContext) {
         self.display_options.show_more_context(more);
+    }
+
+    /// Every line of the gap, from the side it can be shown from; a gap that does not say how many
+    /// lines it hides shows the usual few more.
+    pub fn show_hidden_lines(&mut self, gap: &HiddenLines) {
+        let either_side = gap.after_above.as_ref().or(gap.before_below.as_ref());
+        match (either_side, gap.count) {
+            (Some(more), Some(count)) => self.display_options.show_lines(more, count),
+            (Some(more), None) => self.display_options.show_more_context(more),
+            (None, _) => {}
+        }
     }
 
     pub fn ignores_whitespace(&self) -> bool {
@@ -699,6 +776,8 @@ impl Review {
                     is_ticked: review.is_ticked(&id),
                     thread_count: review.threads.in_step(&id).len(),
                     is_gone: review.is_gone(step),
+                    has_check: step.check.is_some(),
+                    is_skim: step.skim,
                     id,
                     title: &step.title,
                     depth,
@@ -746,6 +825,17 @@ impl Review {
 
     fn display<'a>(&'a self, links: &'a CodeLinks<'a>) -> DiffDisplay<'a> {
         self.display_options.display(links)
+    }
+
+    /// Where a screen sits in the reading order, without building the order; the safety net is last.
+    pub fn reading_position(&self, screen: &Screen) -> Option<usize> {
+        match screen {
+            Screen::SafetyNet => Some(self.steps_in_reading_order.len()),
+            Screen::Summary | Screen::Step(_) => self
+                .steps_in_reading_order
+                .iter()
+                .position(|shown| shown == screen),
+        }
     }
 
     fn reading_order(&self) -> Vec<Screen> {
@@ -1285,6 +1375,56 @@ impl Review {
         )
     }
 
+    /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
+    pub fn palette(&self, query: &str) -> Vec<PaletteGroup> {
+        jump::palette(self.jump_targets(""), &self.palette_actions(), query)
+    }
+
+    /// What the palette can do on the open screen.
+    pub fn palette_actions(&self) -> Vec<PaletteAction> {
+        let step = match &self.screen {
+            Screen::Step(id) => Some(id),
+            Screen::Summary | Screen::SafetyNet => None,
+        };
+        let tick = step.map(|id| {
+            if self.is_ticked(id) {
+                PaletteAction::MarkStepUnread
+            } else {
+                PaletteAction::MarkStepRead
+            }
+        });
+        let wrap = if self.wraps_lines() {
+            PaletteAction::StopWrappingLines
+        } else {
+            PaletteAction::WrapLines
+        };
+        let whitespace = if self.ignores_whitespace() {
+            PaletteAction::ShowWhitespace
+        } else {
+            PaletteAction::HideWhitespace
+        };
+        let next_unread = self
+            .first_unread_step()
+            .map(|_| PaletteAction::NextUnreadStep);
+        let ask = step.map(|_| PaletteAction::AskAboutStep);
+        let finish = self
+            .can_finish_review()
+            .then_some(PaletteAction::FinishReview);
+        next_unread
+            .into_iter()
+            .chain(tick)
+            .chain(ask)
+            .chain([wrap, whitespace])
+            .chain(finish)
+            .chain([
+                PaletteAction::OpenOnGitHub,
+                PaletteAction::SwitchPr,
+                PaletteAction::Settings,
+                PaletteAction::Shortcuts,
+            ])
+            .collect()
+    }
+
     /// A folded step opens for the session so the file or symbol the reviewer asked for is on screen.
     pub fn jump_to(&mut self, target: &JumpTarget) {
         self.go_to_screen(target.screen.clone());
@@ -1317,6 +1457,94 @@ impl Review {
     /// False on the summary, the first screen.
     pub fn go_back(&mut self) -> bool {
         self.step_by(-1)
+    }
+
+    /// The first step after the open screen that is not read yet, starting over from the top.
+    /// False when every step is read.
+    pub fn go_to_next_unread(&mut self) -> bool {
+        let reading_order = self.reading_order();
+        let here = reading_order
+            .iter()
+            .position(|screen| screen == &self.screen)
+            .unwrap_or(0);
+        let after = reading_order.iter().skip(here + 1);
+        let next = after
+            .chain(reading_order.iter().take(here + 1))
+            .find(|screen| matches!(screen, Screen::Step(id) if !self.is_ticked(id)))
+            .cloned();
+        match next {
+            Some(screen) if screen != self.screen => {
+                self.screen = screen;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn tour_lead(&self) -> TourLead {
+        let progress = self.progress();
+        if progress.total == 0 {
+            return TourLead::Nowhere;
+        }
+        if progress.is_complete() {
+            return TourLead::Finish {
+                steps: progress.total,
+                can_finish: self.can_finish_review(),
+            };
+        }
+        match self.first_unread_step() {
+            Some(first) if progress.read == 0 => TourLead::Start(first),
+            Some(next) => TourLead::Continue(next),
+            None => TourLead::Nowhere,
+        }
+    }
+
+    pub fn route(&self) -> Vec<RouteStop> {
+        fn count(steps: &[Step]) -> usize {
+            steps.iter().map(|step| 1 + count(&step.children)).sum()
+        }
+        self.tour
+            .steps
+            .iter()
+            .map(|step| RouteStop {
+                id: step.id.clone(),
+                title: step.title.clone(),
+                why: step.why.clone(),
+                details: count(&step.children),
+                is_read: self.is_ticked(&step.id),
+                has_check: step.check.is_some(),
+            })
+            .collect()
+    }
+
+    pub fn summary_stats(&self) -> SummaryStats {
+        SummaryStats {
+            steps: self.progress().total,
+            files: self.files.len(),
+            added_lines: self.files.iter().map(|file| file.added).sum(),
+            removed_lines: self.files.iter().map(|file| file.removed).sum(),
+            open_threads: self
+                .pulled_threads
+                .iter()
+                .filter(|thread| !thread.is_resolved)
+                .count(),
+        }
+    }
+
+    /// The first step in reading order that is not read yet.
+    pub fn first_unread_step(&self) -> Option<UnreadStep> {
+        self.steps_in_reading_order.iter().find_map(|screen| {
+            let Screen::Step(id) = screen else {
+                return None;
+            };
+            (!self.is_ticked(id)).then(|| UnreadStep {
+                id: id.clone(),
+                title: self
+                    .step(id)
+                    .map(|step| step.title.clone())
+                    .unwrap_or_default(),
+            })
+        })
     }
 
     pub fn is_ticked(&self, id: &StepId) -> bool {

@@ -5,36 +5,55 @@ use gpui::{
 };
 
 use crate::pieces::PieceId;
-use crate::viewer::{JumpPlace, JumpTarget};
+use crate::viewer::{
+    JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
+};
 
 use super::diff_view::PieceLabel;
+use super::icon::{Icon, sized_icon};
+use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
 use super::markdown_view::InlineMarkdown;
-use super::palette::{Colors, TEXT_FONT};
+use super::motion::rise_in;
+use super::overlay::{modal_layer, overlay_panel, picker_footer, picker_row};
+use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
-const VISIBLE_ROWS: usize = 12;
+/// Rows of the list on show at once, headings included.
+const VISIBLE_ROWS: usize = 13;
 
 pub enum JumpEvent {
     /// The list must be asked again for this text.
     QueryChanged(String),
     Picked(JumpTarget),
+    Act(PaletteAction),
 }
 
-/// The cmd+k overlay: a query box over the places the reviewer can jump to.
-/// It knows nothing of the review; its owner answers `QueryChanged` with new targets.
+/// The cmd+k overlay: a query box over the places the reviewer can jump to and the actions the app
+/// can take, under their headings. It knows nothing of the review; its owner answers `QueryChanged`
+/// with new groups.
 pub struct JumpPalette {
     is_open: bool,
     query: String,
-    targets: Vec<ShownTarget>,
+    rows: Vec<ShownRow>,
+    /// Of the entries, headings not counted.
+    entry_count: usize,
     selected: usize,
     focus: FocusHandle,
     owner_focus: FocusHandle,
 }
 
-/// A target with the text its row shows, cut when the list changes rather than every frame.
-struct ShownTarget {
-    target: JumpTarget,
+/// A row of the list with the text it shows, cut when the list changes rather than every frame.
+enum ShownRow {
+    Heading(PaletteGroupKind),
+    Entry {
+        index: usize,
+        entry: Box<ShownEntry>,
+    },
+}
+
+struct ShownEntry {
+    entry: PaletteEntry,
     label: ShownLabel,
     detail: Option<SharedString>,
 }
@@ -42,23 +61,55 @@ struct ShownTarget {
 enum ShownLabel {
     Step(SharedString),
     Piece(PieceLabel),
+    Action(&'static str),
 }
 
-impl ShownTarget {
-    fn of(target: JumpTarget) -> Self {
-        let label = match &target.place {
-            JumpPlace::StepTop => ShownLabel::Step(target.label().into_owned().into()),
-            JumpPlace::File(path) => {
-                ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(path.clone())))
-            }
-            JumpPlace::Piece(id) => ShownLabel::Piece(PieceLabel::of(id)),
+impl ShownEntry {
+    fn of(entry: PaletteEntry) -> Self {
+        let (label, detail) = match &entry {
+            PaletteEntry::Place(target) => (
+                match &target.place {
+                    JumpPlace::StepTop => ShownLabel::Step(target.label().into_owned().into()),
+                    JumpPlace::File(path) => {
+                        ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(path.clone())))
+                    }
+                    JumpPlace::Piece(id) => ShownLabel::Piece(PieceLabel::of(id)),
+                },
+                target.detail().map(|detail| detail.to_owned().into()),
+            ),
+            PaletteEntry::Action(action) => (ShownLabel::Action(action.label()), None),
         };
-        let detail = target.detail().map(|detail| detail.to_owned().into());
         Self {
-            target,
+            entry,
             label,
             detail,
         }
+    }
+
+    fn icon(&self) -> Icon {
+        match &self.entry {
+            PaletteEntry::Place(target) => match target.place {
+                JumpPlace::StepTop => Icon::Milestone,
+                JumpPlace::File(_) => Icon::FileText,
+                JumpPlace::Piece(_) => Icon::Braces,
+            },
+            PaletteEntry::Action(action) => action_icon(*action),
+        }
+    }
+}
+
+fn action_icon(action: PaletteAction) -> Icon {
+    match action {
+        PaletteAction::NextUnreadStep => Icon::CircleDot,
+        PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => Icon::Check,
+        PaletteAction::WrapLines | PaletteAction::StopWrappingLines => Icon::WrapText,
+        PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => Icon::Space,
+        PaletteAction::AskAboutStep => Icon::Sparkles,
+        PaletteAction::FinishReview => Icon::ListChecks,
+        PaletteAction::OpenOnGitHub => Icon::ExternalLink,
+        PaletteAction::SwitchPr => Icon::PullRequest,
+        PaletteAction::Settings => Icon::Settings,
+        PaletteAction::Shortcuts => Icon::Keyboard,
     }
 }
 
@@ -71,7 +122,8 @@ impl JumpPalette {
         Self {
             is_open: false,
             query: String::new(),
-            targets: Vec::new(),
+            rows: Vec::new(),
+            entry_count: 0,
             selected: 0,
             focus: cx.focus_handle(),
             owner_focus,
@@ -82,12 +134,19 @@ impl JumpPalette {
         self.is_open
     }
 
-    pub fn open(&mut self, targets: Vec<JumpTarget>, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open(&mut self, groups: Vec<PaletteGroup>, window: &mut Window, cx: &mut Context<Self>) {
         self.is_open = true;
         self.query.clear();
-        self.set_targets(targets);
+        self.set_groups(groups);
         window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    /// The palette as it is after typing `query`, for a picture.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_query(&mut self, query: &str, groups: Vec<PaletteGroup>) {
+        query.clone_into(&mut self.query);
+        self.set_groups(groups);
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -96,26 +155,44 @@ impl JumpPalette {
         cx.notify();
     }
 
-    pub fn set_targets(&mut self, targets: Vec<JumpTarget>) {
-        self.targets = targets.into_iter().map(ShownTarget::of).collect();
+    pub fn set_groups(&mut self, groups: Vec<PaletteGroup>) {
+        self.rows.clear();
+        let mut index = 0;
+        for group in groups {
+            self.rows.push(ShownRow::Heading(group.group));
+            for entry in group.entries {
+                self.rows.push(ShownRow::Entry {
+                    index,
+                    entry: Box::new(ShownEntry::of(entry)),
+                });
+                index += 1;
+            }
+        }
+        self.entry_count = index;
         self.selected = 0;
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(target) = self
-            .targets
-            .get(self.selected)
-            .map(|shown| shown.target.clone())
-        {
-            self.close(window, cx);
-            cx.emit(JumpEvent::Picked(target));
-        }
+        let picked = self.rows.iter().find_map(|row| match row {
+            ShownRow::Entry { index, entry } if *index == self.selected => {
+                Some(entry.entry.clone())
+            }
+            _ => None,
+        });
+        let Some(picked) = picked else {
+            return;
+        };
+        self.close(window, cx);
+        cx.emit(match picked {
+            PaletteEntry::Place(target) => JumpEvent::Picked(target),
+            PaletteEntry::Action(action) => JumpEvent::Act(action),
+        });
     }
 
     /// Up and down pick a target; the query box takes every other key.
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
-            "down" => self.selected = (self.selected + 1).min(self.targets.len().saturating_sub(1)),
+            "down" => self.selected = (self.selected + 1).min(self.entry_count.saturating_sub(1)),
             "up" => self.selected = self.selected.saturating_sub(1),
             _ => return,
         }
@@ -136,14 +213,9 @@ impl JumpPalette {
             .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
-    fn row(&self, index: usize, shown: &ShownTarget, cx: &mut Context<Self>) -> impl IntoElement {
+    fn row(&self, index: usize, shown: &ShownEntry, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let is_selected = index == self.selected;
-        let kind = match &shown.target.place {
-            JumpPlace::StepTop => "Step",
-            JumpPlace::File(_) => "File",
-            JumpPlace::Piece(_) => "Symbol",
-        };
         let label = match &shown.label {
             ShownLabel::Step(title) => div()
                 .min_w_0()
@@ -151,6 +223,7 @@ impl JumpPalette {
                 .child(InlineMarkdown::new(format!("jump-label-{index}"), title))
                 .into_any_element(),
             ShownLabel::Piece(label) => piece_label(&colors, label.clone()).into_any_element(),
+            ShownLabel::Action(name) => div().min_w_0().truncate().child(*name).into_any_element(),
         };
         let detail = shown.detail.as_ref().map(|detail| {
             div()
@@ -162,43 +235,46 @@ impl JumpPalette {
                 .text_color(colors.muted_text)
                 .child(InlineMarkdown::new(format!("jump-detail-{index}"), detail))
         });
-        div()
-            .id(SharedString::from(format!("jump-{index}")))
-            .mx_2()
-            .px_2()
-            .h(px(32.))
-            .flex()
-            .items_center()
-            .gap_3()
-            .rounded_md()
-            .overflow_hidden()
-            .cursor_pointer()
-            .map(|row| {
-                if is_selected {
-                    row.bg(colors.current)
-                } else {
-                    row.hover(|row| row.bg(colors.hover))
-                }
-            })
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.selected = index;
-                this.pick(window, cx);
-            }))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(52.))
-                    .text_xs()
-                    .text_color(if is_selected {
-                        colors.accent
-                    } else {
-                        colors.muted_text
-                    })
-                    .child(kind),
-            )
-            .child(div().flex_1().min_w_0().overflow_hidden().child(label))
-            .children(detail)
+        let keys = match &shown.entry {
+            PaletteEntry::Action(action) => action
+                .command()
+                .map(|command| chord_caps(&colors, command.first_chord(), CapGround::Page)),
+            PaletteEntry::Place(_) => None,
+        };
+        picker_row(
+            &colors,
+            SharedString::from(format!("jump-{index}")),
+            is_selected,
+        )
+        .h(px(32.))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.selected = index;
+            this.pick(window, cx);
+        }))
+        .child(sized_icon(
+            shown.icon(),
+            if is_selected {
+                colors.accent
+            } else {
+                colors.muted_text
+            },
+            px(14.),
+        ))
+        .child(div().flex_1().min_w_0().overflow_hidden().child(label))
+        .children(detail)
+        .children(keys)
     }
+}
+
+fn heading_row(colors: &Colors, group: PaletteGroupKind) -> impl IntoElement {
+    div()
+        .px_4()
+        .pt_2()
+        .pb_1()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(colors.muted_text)
+        .child(group.title())
 }
 
 /// A file or symbol target as `folder/` dim, then the file name, then the symbol, so the end of a
@@ -251,31 +327,29 @@ impl Render for JumpPalette {
         if !self.is_open {
             return div().into_any_element();
         }
-        let first_shown = self.selected.saturating_sub(VISIBLE_ROWS - 1);
-        let rows: Vec<_> = self
-            .targets
+        let selected_row = self
+            .rows
             .iter()
-            .enumerate()
+            .position(|row| matches!(row, ShownRow::Entry { index, .. } if *index == self.selected))
+            .unwrap_or(0);
+        let first_shown = selected_row.saturating_sub(VISIBLE_ROWS - 1);
+        let rows: Vec<_> = self
+            .rows
+            .iter()
             .skip(first_shown)
             .take(VISIBLE_ROWS)
-            .map(|(index, target)| self.row(index, target, cx).into_any_element())
+            .map(|row| match row {
+                ShownRow::Heading(group) => heading_row(&colors, *group).into_any_element(),
+                ShownRow::Entry { index, entry } => self.row(*index, entry, cx).into_any_element(),
+            })
             .collect();
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .flex()
-            .items_start()
-            .justify_center()
-            .bg(gpui::rgba(0x00000066))
-            .occlude()
+        modal_layer(&colors, "jump-palette-scrim")
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),
             )
-            .child(
-                div()
+            .child(rise_in(
+                overlay_panel(&colors)
                     .id("jump-palette")
                     .key_context(Self::KEY_CONTEXT)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -283,53 +357,46 @@ impl Render for JumpPalette {
                     .mt(px(80.))
                     .w(px(720.))
                     .h_auto()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .bg(colors.background)
-                    .border_1()
-                    .border_color(colors.border)
-                    .rounded_lg()
-                    .shadow_lg()
-                    .font_family(TEXT_FONT)
-                    .text_sm()
-                    .text_color(colors.text)
                     .child(
                         div()
                             .px_4()
                             .py_3()
+                            .flex()
+                            .items_center()
+                            .gap_3()
                             .text_base()
                             .border_b_1()
-                            .border_color(colors.border)
-                            .child(self.query_box(cx)),
+                            .border_color(colors.subtle_border)
+                            .child(sized_icon(Icon::Search, colors.muted_text, px(16.)))
+                            .child(div().flex_1().min_w_0().child(self.query_box(cx))),
                     )
                     .child(div().py_2().flex().flex_col().children(rows).when(
-                        self.targets.is_empty(),
+                        self.entry_count == 0,
                         |list| {
                             list.child(
                                 div().px_4().py_3().text_color(colors.muted_text).child(
-                                    "Nothing matches. Try part of a file, symbol or step name.",
+                                    "Nothing matches. Try part of a file, symbol or step name, or > for actions.",
                                 ),
                             )
                         },
                     ))
                     .child(
-                        div()
-                            .px_4()
-                            .py_2()
-                            .flex()
-                            .gap_4()
-                            .border_t_1()
-                            .border_color(colors.subtle_border)
-                            .bg(colors.surface)
-                            .rounded_b_md()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child("↑ ↓  move")
-                            .child("↵  open")
-                            .child("esc  close"),
+                        picker_footer(&colors)
+                            .child(key_hint(
+                                &colors,
+                                &[
+                                    KeyLabel::Icon(Icon::ArrowUp),
+                                    KeyLabel::Icon(Icon::ArrowDown),
+                                ],
+                                "move",
+                            ))
+                            .child(key_hint(&colors, &[KeyLabel::Icon(Icon::Enter)], "open"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("esc")], "close"))
+                            .child(div().flex_1())
+                            .child(key_hint(&colors, &[KeyLabel::Text(">")], "actions only")),
                     ),
-            )
+                "jump-palette-rise",
+            ))
             .into_any_element()
     }
 }

@@ -4,8 +4,10 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use super::button::{ButtonKind, ButtonSize, button};
-use super::palette::{CODE_FONT, Colors, TEXT_FONT};
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
+use super::icon::Icon;
+use super::motion::{OVERLAY, busy_dot, busy_sweep, fade_in};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, TEXT_FONT};
 use super::title_bar::TITLE_BAR_HEIGHT;
 use crate::app::tour_writer;
 use crate::pull_request::PullRequestUrl;
@@ -84,37 +86,51 @@ impl Render for LoadingScreen {
             .gap_2()
             .when(shown.failure.is_some(), |actions| {
                 actions.child(
-                    button(
+                    icon_label_button(
                         &colors,
                         "loading-try-again",
                         ButtonKind::Primary,
                         ButtonSize::Regular,
+                        Icon::Refresh,
+                        "Try again",
                     )
-                    .child("Try again")
                     .on_click(move |_, _, cx| tour_writer::try_again(retry_pr.clone(), cx)),
                 )
             })
             .child(
-                button(
+                icon_label_button(
                     &colors,
                     "loading-show-agent",
                     ButtonKind::Secondary,
                     ButtonSize::Regular,
+                    Icon::Terminal,
+                    "Show agent",
                 )
-                .child("Show agent")
                 .on_click(move |_, _, cx| tour_writer::show_agent(show_pr.clone(), cx)),
             )
             .children(shown.back_to.clone().map(|back_to| {
-                button(
+                icon_label_button(
                     &colors,
                     "loading-back",
                     ButtonKind::Ghost,
                     ButtonSize::Regular,
+                    Icon::ArrowLeft,
+                    back_to,
                 )
-                .child(back_to)
                 .on_click(|_, _, cx| tour_writer::stop_waiting(cx))
             }));
-        div()
+        let is_busy = shown.failure.is_none();
+        let status = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_sm()
+            .text_color(colors.muted_text)
+            .when(is_busy, |status| {
+                status.child(busy_dot(&colors, "loading-dot"))
+            })
+            .child(shown.status.clone());
+        let screen = div()
             .absolute()
             .top(px(TITLE_BAR_HEIGHT))
             .left_0()
@@ -135,18 +151,18 @@ impl Render for LoadingScreen {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(shown.title.clone()),
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(colors.muted_text)
-                    .child(shown.status.clone()),
-            )
+            .child(status)
+            .child(div().w(px(320.)).when(is_busy, |track| {
+                track.child(busy_sweep(&colors, "loading-sweep"))
+            }))
             .children(shown.failure.clone().map(|failure| {
                 div()
                     .w(px(860.))
                     .px_4()
                     .py_2()
-                    .rounded_md()
+                    .rounded(px(CARD_RADIUS))
+                    .border_1()
+                    .border_color(colors.warning_border)
                     .text_sm()
                     .bg(colors.warning_background)
                     .text_color(colors.warning)
@@ -159,10 +175,11 @@ impl Render for LoadingScreen {
                     .h(px(360.))
                     .overflow_y_scroll()
                     .p_3()
-                    .rounded_md()
+                    .rounded(px(CARD_RADIUS))
                     .border_1()
-                    .border_color(colors.border)
+                    .border_color(colors.subtle_border)
                     .bg(colors.surface)
+                    .shadow(colors.card_shadow())
                     .font_family(CODE_FONT)
                     .text_xs()
                     .text_color(colors.muted_text)
@@ -173,7 +190,7 @@ impl Render for LoadingScreen {
                             .map(|line| div().whitespace_nowrap().child(line.clone())),
                     ),
             )
-            .child(actions)
-            .into_any_element()
+            .child(actions);
+        fade_in(screen, "loading-screen", OVERLAY).into_any_element()
     }
 }

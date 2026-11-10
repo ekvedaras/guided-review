@@ -5,8 +5,10 @@ use gpui::{
 
 use crate::viewer::RefreshBrief;
 
-use super::button::{ButtonKind, ButtonSize, button};
-use super::palette::Colors;
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
+use super::chip::{dropping_in, notice_band};
+use super::icon::Icon;
+use super::palette::{Colors, Tone};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshProgress {
@@ -61,14 +63,15 @@ impl RenderOnce for RefreshBanner {
             RefreshProgress::Idle | RefreshProgress::Running => "Refresh",
         };
         let button = (self.progress != RefreshProgress::Running).then(|| {
-            button(
+            icon_label_button(
                 &colors,
                 "refresh-tour",
-                ButtonKind::Primary,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
+                Icon::Refresh,
+                button_label,
             )
             .on_click(self.on_refresh)
-            .child(button_label)
         });
         let redo_hint = self.brief.redo_hint().map(|hint| {
             div().child(SharedString::from(format!(
@@ -80,16 +83,11 @@ impl RenderOnce for RefreshBanner {
                 .text_color(colors.danger)
                 .child("The last refresh did not go through, the sidebar says why.")
         });
-        div()
-            .px_6()
+        let band = notice_band(&colors, Tone::Warning)
             .py_2()
-            .flex()
             .flex_col()
+            .items_start()
             .gap_1()
-            .bg(colors.warning_background)
-            .border_b_1()
-            .border_color(colors.border)
-            .text_sm()
             .child(
                 div()
                     .flex()
@@ -99,7 +97,8 @@ impl RenderOnce for RefreshBanner {
                     .children(button),
             )
             .children(redo_hint)
-            .children(failed)
+            .children(failed);
+        dropping_in(band, "refresh-banner")
     }
 }
 
