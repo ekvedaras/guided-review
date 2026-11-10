@@ -273,6 +273,22 @@ impl Settings {
         self.default_file().is_file()
     }
 
+    /// Makes an empty default file when there is none, and returns its path to open.
+    pub fn create_default_file(&self) -> anyhow::Result<PathBuf> {
+        let file = self.default_file();
+        let folder = file
+            .parent()
+            .with_context(|| format!("{} has no folder", file.display()))?;
+        std::fs::create_dir_all(folder)
+            .with_context(|| format!("could not create {}", folder.display()))?;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&file)
+            .with_context(|| format!("could not create {}", file.display()))?;
+        Ok(file)
+    }
+
     pub fn clones(&self) -> &[CloneRow] {
         &self.edited.clones
     }

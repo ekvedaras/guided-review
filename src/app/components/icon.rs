@@ -6,6 +6,7 @@ pub enum Icon {
     Search,
     ExternalLink,
     PullRequest,
+    Settings,
 }
 
 impl Icon {
@@ -14,6 +15,7 @@ impl Icon {
             Self::Search => "icons/search.svg",
             Self::ExternalLink => "icons/external-link.svg",
             Self::PullRequest => "icons/git-pull-request.svg",
+            Self::Settings => "icons/settings.svg",
         }
     }
 }

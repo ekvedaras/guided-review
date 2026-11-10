@@ -646,3 +646,18 @@ fn a_blank_custom_ide_template_is_refused_with_a_message_and_nothing_is_written(
         "ide = \"zed://file{path}:{line}\"\n"
     );
 }
+
+#[test]
+fn creating_the_default_file_makes_an_empty_one_and_keeps_one_that_is_there() {
+    let (home, settings) = loaded_from("");
+    let file = home.path().join(".guided-review/summary.md");
+    assert!(!settings.default_file_exists());
+
+    assert_eq!(settings.create_default_file().unwrap(), file);
+    assert!(settings.default_file_exists());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+
+    std::fs::write(&file, "Warm me up").unwrap();
+    settings.create_default_file().unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Warm me up");
+}

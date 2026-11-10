@@ -17,6 +17,7 @@ impl AssetSource for Assets {
             "icons/git-pull-request.svg" => {
                 include_bytes!("../../assets/icons/git-pull-request.svg")
             }
+            "icons/settings.svg" => include_bytes!("../../assets/icons/settings.svg"),
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(bytes)))

@@ -46,9 +46,11 @@ use components::comment_composer::CommentComposer;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
 use components::pr_switcher::{PrSwitcherView, PrSwitching};
+use components::settings_panel::SettingsPanel;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleWrapLines,
+    Collaborators, CopySelection, GoBack, GoForward, OneStepLayout, ToggleJump, ToggleSettings,
+    ToggleWrapLines,
 };
 use review_session::TourWork;
 
@@ -354,11 +356,12 @@ fn switch_window(
 
 fn bind_keys(cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
+        SettingsPanel::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
@@ -370,6 +373,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("k", GoBack, Some(&typing_is_not_navigation)),
         KeyBinding::new("w", ToggleWrapLines, Some(&typing_is_not_navigation)),
         KeyBinding::new("cmd-k", ToggleJump, Some(OneStepLayout::KEY_CONTEXT)),
+        KeyBinding::new("cmd-,", ToggleSettings, Some(OneStepLayout::KEY_CONTEXT)),
         KeyBinding::new("cmd-c", CopySelection, Some(&typing_is_not_navigation)),
     ]);
 }

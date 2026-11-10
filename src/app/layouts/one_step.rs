@@ -44,6 +44,7 @@ use crate::app::components::palette::{Colors, TEXT_FONT};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::settings_panel::{SettingsEvent, SettingsPanel};
 use crate::app::components::sidebar_row::{RowMark, count_badge, sidebar_row};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
@@ -76,7 +77,8 @@ actions!(
         GoBack,
         ToggleJump,
         CopySelection,
-        ToggleWrapLines
+        ToggleWrapLines,
+        ToggleSettings
     ]
 );
 
@@ -119,6 +121,7 @@ pub struct OneStepLayout {
     snapshots: Option<crate::app::snapshots::Snapshots>,
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
+    settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
@@ -178,6 +181,16 @@ impl OneStepLayout {
         let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
         cx.observe(&switching.active, |_, _, cx| cx.notify())
             .detach();
+        let home = switching.home.clone();
+        let settings = cx.new(|cx| SettingsPanel::new(home, focus.clone(), cx));
+        cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, SettingsEvent::Saved, window, cx| {
+                this.settings_saved(window, cx);
+            },
+        )
+        .detach();
         let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
         cx.subscribe(&jump, |this, palette, event: &JumpEvent, cx| match event {
             JumpEvent::QueryChanged(query) => {
@@ -257,6 +270,7 @@ impl OneStepLayout {
             snapshots: crate::app::snapshots::Snapshots::from_env(),
             jump,
             pr_switcher,
+            settings,
             loading,
             ide,
             _session_subscriptions: session_subscriptions,
@@ -745,6 +759,24 @@ impl OneStepLayout {
         });
     }
 
+    fn toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.update(cx, |settings, cx| {
+            if settings.is_open() {
+                settings.request_close(window, cx);
+            } else {
+                settings.open(window, cx);
+            }
+        });
+    }
+
+    /// The one place that reacts to Save having written `config.toml`. The settings the open PR was built
+    /// with are now out of date; for now the panel closes, and the reopen of the PR (see
+    /// `ReopenAfterSave` and `ActivePr::reopen`) is started from here.
+    fn settings_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings
+            .update(cx, |settings, cx| settings.close(window, cx));
+    }
+
     fn toggle_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pr_switcher.update(cx, |switcher, cx| {
             if switcher.is_open() {
@@ -1009,6 +1041,34 @@ impl OneStepLayout {
                     .children(safety_net_row),
             )
             .child(key_hints(&colors))
+            .child(self.settings_row(&colors, cx))
+    }
+
+    /// The gear at the bottom of the sidebar, beside the key that does the same.
+    fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex_none()
+            .px_4()
+            .py_2()
+            .flex()
+            .items_center()
+            .border_t_1()
+            .border_color(colors.subtle_border)
+            .child(
+                button(
+                    colors,
+                    "sidebar-settings",
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                )
+                .child(icon(Icon::Settings, colors.muted_text))
+                .child("Settings")
+                .child(div().pl_1().text_color(colors.muted_text).child("⌘,"))
+                .tooltip(tooltip(|_| "Settings".into()))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_settings(&ToggleSettings, window, cx);
+                })),
+            )
     }
 
     /// The PR this review is of, and the window-wide actions.
@@ -1777,6 +1837,7 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::toggle_wrap_lines))
             .on_action(cx.listener(Self::toggle_jump))
+            .on_action(cx.listener(Self::toggle_settings))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
@@ -1836,6 +1897,7 @@ impl Render for OneStepLayout {
             .when(self.ask.read(cx).is_open(), |row| {
                 row.child(self.ask.clone())
             })
+            .child(self.settings.clone())
             .child(self.loading.clone())
             .children(switching_veil)
             .child(self.jump.clone())
