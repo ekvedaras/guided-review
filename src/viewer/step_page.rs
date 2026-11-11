@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,9 @@ pub struct DiffLine {
     /// Opened through the `CodeOpener`.
     pub code_link: CodeLink,
     pub view: RowView,
+    /// Byte ranges of the words that changed, on a removed or added line that has a partner on the
+    /// other side; empty when the whole line changed.
+    pub changed: Vec<Range<usize>>,
 }
 
 impl DiffLine {

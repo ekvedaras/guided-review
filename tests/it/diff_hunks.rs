@@ -456,3 +456,61 @@ fn showing_every_hidden_line_of_a_gap_joins_the_changes_around_it() {
     assert_eq!(hunks.len(), 1);
     assert!(rows(&hunks).contains(&"~ 45|45 line 45".to_owned()));
 }
+
+/// The words each changed row marks, as text: `-` rows for the base side, `+` rows for head.
+fn marked_words(review: &Review) -> Vec<String> {
+    shown_hunks(review)
+        .iter()
+        .flat_map(|hunk| &hunk.rows)
+        .filter(|row| !matches!(row.kind, LineKind::Context { .. }))
+        .map(|row| {
+            let sign = if row.kind == LineKind::Removed {
+                '-'
+            } else {
+                '+'
+            };
+            let words: Vec<&str> = row
+                .changed
+                .iter()
+                .filter_map(|range| row.text.get(range.clone()))
+                .collect();
+            format!("{sign} {}", words.join(" | "))
+        })
+        .collect()
+}
+
+fn one_line_changing(base: &str, head: &str) -> Review {
+    Pull::changing(
+        "notes.txt",
+        &format!("top\n{base}\nend\n"),
+        &format!("top\n{head}\nend\n"),
+    )
+    .open_step(json!([{"file": "notes.txt"}]))
+}
+
+#[test]
+fn a_changed_line_marks_the_words_that_changed_on_both_sides() {
+    let review = one_line_changing("the cart holds three items", "the cart holds four items");
+
+    assert_eq!(marked_words(&review), ["- three", "+ four"]);
+}
+
+#[test]
+fn words_taken_out_of_a_line_are_marked_as_one_run_on_the_removed_side() {
+    let review = one_line_changing(
+        "one of its order items, as a product return's extra, or as a pool line's remainder",
+        "one of its order items, or as a pool line's remainder",
+    );
+
+    assert_eq!(
+        marked_words(&review),
+        ["- as a product return's extra,", "+ "]
+    );
+}
+
+#[test]
+fn a_line_written_anew_marks_no_words_as_it_is_all_changed() {
+    let review = one_line_changing("alpha beta gamma", "one two three four");
+
+    assert_eq!(marked_words(&review), ["- ", "+ "]);
+}

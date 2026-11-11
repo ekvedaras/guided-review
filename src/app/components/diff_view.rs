@@ -78,6 +78,8 @@ pub struct DiffRowLine {
     code: SharedString,
     /// Cut to char boundaries already; coloured when drawn, so a theme switch needs no rebuild.
     highlights: Vec<(Range<usize>, Capture)>,
+    /// The words that changed, cut to char boundaries already.
+    changed_words: Vec<Range<usize>>,
     code_link: CodeLink,
     /// Rows outside GitHub's hunks show no button. Rows of the change since the read show one, to say why they take no comment.
     offers_comment_button: bool,
@@ -109,8 +111,17 @@ impl DiffRowLine {
                 line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
             })
             .collect();
+        let changed_words = line
+            .changed
+            .iter()
+            .filter(|range| {
+                line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
+            })
+            .cloned()
+            .collect();
         Self {
             offers_comment_button: line.offers_comment_button(),
+            changed_words,
             wraps,
             gutter: format!("{base_number:>5} {head_number:>5} {sign} ").into(),
             code: line.text.into(),
@@ -196,6 +207,27 @@ impl RenderOnce for DiffRow {
                 (range.clone(), style)
             })
             .collect();
+        let word_background = match line.kind {
+            LineKind::Removed => Some(colors.removed_word),
+            LineKind::Added => Some(colors.added_word),
+            LineKind::Context { .. } => None,
+        };
+        let highlights = match word_background {
+            // Plain text in a changed word: syntax colours do not all read on its stronger ground.
+            Some(background) => {
+                let word = HighlightStyle {
+                    color: Some(colors.text.into()),
+                    background_color: Some(background.into()),
+                    ..Default::default()
+                };
+                line.changed_words
+                    .iter()
+                    .fold(highlights, |highlights, range| {
+                        laid_over(&highlights, range.clone(), word)
+                    })
+            }
+            None => highlights,
+        };
         let selected = self
             .code_selection
             .as_ref()
@@ -340,6 +372,15 @@ fn with_selection(
         background_color: Some(background.into()),
         ..Default::default()
     };
+    laid_over(highlights, selected, selection_style)
+}
+
+/// Lays `style` over the styles in `range`; the styles must stay sorted and apart.
+fn laid_over(
+    highlights: &[(Range<usize>, HighlightStyle)],
+    selected: Range<usize>,
+    selection_style: HighlightStyle,
+) -> Vec<(Range<usize>, HighlightStyle)> {
     let mut cut: Vec<usize> = vec![selected.start, selected.end];
     for (range, _) in highlights {
         cut.push(range.start);

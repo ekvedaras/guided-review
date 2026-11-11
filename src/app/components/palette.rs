@@ -264,6 +264,9 @@ pub struct Colors {
     pub added_line: Rgba,
     pub removed_gutter: Rgba,
     pub added_gutter: Rgba,
+    /// Behind the words that changed inside a removed or added line, which are drawn in `text`.
+    pub removed_word: Rgba,
+    pub added_word: Rgba,
     /// Links, marks, the focus ring and lines in the accent colour.
     pub accent: Rgba,
     /// The fill of a primary button, top to bottom; `accent` reads too light under white text in the dark.
@@ -381,6 +384,8 @@ impl Colors {
             added_line: rgb(0xe4f8e9),
             removed_gutter: rgb(0xffd2cd),
             added_gutter: rgb(0xc8f0d2),
+            removed_word: rgb(0xffc4bd),
+            added_word: rgb(0xb4ebc2),
             accent: rgb(iris::S700),
             accent_fill: Gradient::of(iris::S600, iris::S700),
             accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),
@@ -450,6 +455,8 @@ impl Colors {
             added_line: rgb(0x13291c),
             removed_gutter: rgb(0x4c1f22),
             added_gutter: rgb(0x1a4129),
+            removed_word: rgb(0x5c2328),
+            added_word: rgb(0x1f4c30),
             accent: rgb(iris::S400),
             accent_fill: Gradient::of(iris::S600, iris::S700),
             accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),

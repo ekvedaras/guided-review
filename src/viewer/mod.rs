@@ -48,6 +48,7 @@ mod tour_agent;
 mod tour_writing;
 mod typing_save;
 mod viewed_sync;
+mod word_diff;
 
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
 pub use agent_event::AgentEvent;
