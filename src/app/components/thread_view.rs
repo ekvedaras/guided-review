@@ -885,7 +885,12 @@ impl RenderOnce for ThreadElement {
                             .on_lines(Arc::clone(&self.view.commented_lines))
                             .into_any_element(),
                         };
-                        div().flex().flex_col().gap_1().child(header).child(content)
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(header)
+                            .child(div().pl_4().child(content))
                     }),
             )
         });
