@@ -245,9 +245,18 @@ pub(super) fn views(
                 .collect(),
             hand_off_line: hand_offs.line_for(&thread.id),
             failed_hand_off: hand_offs.failed_in(&thread.id),
-            thread: thread.clone(),
+            thread: without_working_on_it(thread, hand_offs),
         })
         .collect()
+}
+
+/// The line under the thread already says the agent is working on it, so its reply saying so is left out.
+fn without_working_on_it(thread: &ReviewThread, hand_offs: &HandOffs) -> ReviewThread {
+    let mut shown = thread.clone();
+    if let Some(reply) = hand_offs.working_on_it_in(&thread.id) {
+        shown.comments.retain(|comment| &comment.id != reply);
+    }
+    shown
 }
 
 fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[Arc<str>]> {
