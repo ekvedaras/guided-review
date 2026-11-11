@@ -3,7 +3,7 @@ use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
     Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, list, px,
+    Window, actions, div, list, px, relative,
 };
 
 use std::collections::HashMap;
@@ -1424,7 +1424,10 @@ impl OneStepLayout {
                     .child(InlineMarkdown::new("title-bar-title", &title)),
             )
             .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
-        let progress = self.session.read(cx).sidebar().progress;
+        let page_share = scrolled_share(
+            -self.screen_list.scroll_px_offset_for_scrollbar().y,
+            self.screen_list.max_offset_for_scrollbar().y,
+        );
         TitleBarArea::new("title-bar", colors.background)
             .edge(TitleBarEdge::Open)
             .child(
@@ -1441,7 +1444,7 @@ impl OneStepLayout {
                     .child(jump)
                     .child(github),
             )
-            .child(trail_hairline(&colors, progress))
+            .child(page_hairline(&colors, page_share))
     }
 
     /// Once the step's heading has scrolled away, a slim bar under the title bar keeps where the
@@ -2748,7 +2751,8 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
 }
 
 /// The title bar's lower edge is the trail: filled left to right as far as the tour is read.
-fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
+/// How far down the screen the reader is; the steps read are the sidebar's meter.
+fn page_hairline(colors: &Colors, share: f32) -> impl IntoElement {
     div()
         .absolute()
         .left_0()
@@ -2756,13 +2760,7 @@ fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
         .bottom_0()
         .h(px(2.))
         .bg(colors.subtle_border)
-        .child(glide_to_share(
-            div()
-                .h_full()
-                .bg(colors.trail_fill(TrailStage::of(progress))),
-            "trail-hairline-fill",
-            progress.share(),
-        ))
+        .child(div().h_full().w(relative(share)).bg(colors.accent))
 }
 
 impl Focusable for OneStepLayout {
@@ -2964,5 +2962,30 @@ impl CodeScrollX {
         }
         let offset = self.by_path.entry(path.clone()).or_insert(Pixels::ZERO);
         *offset = (*offset + delta).clamp(Pixels::ZERO, max);
+    }
+}
+
+/// How far down its page the reader is, 0 at the top and 1 at the end; a page that fits is read whole.
+fn scrolled_share(scrolled: Pixels, scrollable: Pixels) -> f32 {
+    if scrollable <= Pixels::ZERO {
+        return 1.;
+    }
+    (scrolled / scrollable).clamp(0., 1.)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_page_line_follows_the_scroll_from_top_to_end() {
+        assert_eq!(scrolled_share(px(0.), px(400.)), 0.);
+        assert_eq!(scrolled_share(px(100.), px(400.)), 0.25);
+        assert_eq!(scrolled_share(px(400.), px(400.)), 1.);
+    }
+
+    #[test]
+    fn a_page_that_fits_the_window_is_seen_whole() {
+        assert_eq!(scrolled_share(px(0.), px(0.)), 1.);
     }
 }
