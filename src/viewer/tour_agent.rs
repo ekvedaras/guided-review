@@ -195,7 +195,7 @@ impl fmt::Display for TourAgentState {
             ),
             Self::None => write!(formatter, "Tour agent: none"),
             Self::Agent { terminal, status } => {
-                write!(formatter, "Tour agent {terminal}: {status}")
+                write!(formatter, "Tour agent `{terminal}`: {status}")
             }
         }
     }

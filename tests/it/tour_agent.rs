@@ -245,15 +245,15 @@ fn show_agent_with_no_agent_says_so() {
 fn the_sidebar_line_names_the_agent_and_its_status() {
     assert_eq!(
         on("t2", AgentStatus::Idle).to_string(),
-        "Tour agent t2: idle"
+        "Tour agent `t2`: idle"
     );
     assert_eq!(
         on("t2", AgentStatus::Working).to_string(),
-        "Tour agent t2: working"
+        "Tour agent `t2`: working"
     );
     assert_eq!(
         on("t2", AgentStatus::WaitingForYou).to_string(),
-        "Tour agent t2: waiting for you"
+        "Tour agent `t2`: waiting for you"
     );
     assert_eq!(TourAgentState::None.to_string(), "Tour agent: none");
     assert!(

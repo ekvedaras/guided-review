@@ -1167,11 +1167,19 @@ impl OneStepLayout {
             .gap_1()
             .child(
                 div()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(agent.line.clone()),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                    )
+                    .children(show),
             )
-            .children(show)
             .children(
                 agent
                     .show_failed

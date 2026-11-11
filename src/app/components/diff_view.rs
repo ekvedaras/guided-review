@@ -464,15 +464,33 @@ pub struct PieceLabel {
     pub symbol: Option<SharedString>,
     /// The last part of the symbol: `total` of `Order::total`.
     pub symbol_name: Option<SharedString>,
+    /// A part the tour numbers (`hunk-1`) where the file has no symbol to name it by; the number
+    /// means nothing to the reader, so it is not shown.
+    pub is_part: bool,
 }
 
 impl PieceLabel {
+    /// What a marker inside a box of several pieces names: the symbol, the file for a whole-file
+    /// piece, and nothing for a numbered part, which the gap above it already sets apart.
+    pub fn shown_name(&self) -> Option<SharedString> {
+        self.symbol
+            .clone()
+            .or_else(|| (!self.is_part).then(|| self.file_name.clone()))
+    }
+
     pub fn of(id: &PieceId) -> Self {
         Self {
             folder: SharedString::from(id.folder().to_owned()),
             file_name: SharedString::from(id.file_name().to_owned()),
-            symbol: id.symbol_path().map(|symbol| symbol.to_owned().into()),
-            symbol_name: id.symbol_name().map(|name| name.to_owned().into()),
+            symbol: id
+                .symbol_path()
+                .filter(|_| !id.is_hunk())
+                .map(|symbol| symbol.to_owned().into()),
+            symbol_name: id
+                .symbol_name()
+                .filter(|_| !id.is_hunk())
+                .map(|name| name.to_owned().into()),
+            is_part: id.is_hunk(),
         }
     }
 }
@@ -613,7 +631,7 @@ impl PieceMarker {
 impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let name = self.piece.symbol.unwrap_or(self.piece.file_name);
+        let name = self.piece.shown_name();
         box_row(&colors, self.edges)
             .group("piece-marker")
             .h(px(24.))
@@ -632,7 +650,7 @@ impl RenderOnce for PieceMarker {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(name),
+                    .children(name),
             )
             .children(
                 self.repin_label
@@ -784,4 +802,33 @@ pub fn hunk_gap(
         })
         .child(div().pl_1().child(label));
     box_row(colors, edges).child(band)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn label(id: &str) -> PieceLabel {
+        PieceLabel::of(&id.parse().unwrap())
+    }
+
+    #[test]
+    fn a_part_the_tour_numbers_as_a_hunk_shows_no_name_of_its_own() {
+        let part = label("GLOSSARY.md#hunk-1");
+
+        assert_eq!(part.symbol, None);
+        assert_eq!(part.shown_name(), None);
+    }
+
+    #[test]
+    fn a_symbol_shows_its_name_and_a_whole_file_its_file_name() {
+        assert_eq!(
+            label("app/Order.php#Order::total").shown_name().as_deref(),
+            Some("Order::total")
+        );
+        assert_eq!(
+            label("app/Order.php").shown_name().as_deref(),
+            Some("Order.php")
+        );
+    }
 }
