@@ -687,3 +687,21 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
     assert_eq!(reopened.comment_drafts(), []);
     assert_eq!(reopened.queued_comments()[0].draft.body, "later");
 }
+
+#[test]
+fn leaving_a_comment_box_drops_it_when_nothing_was_written_and_keeps_it_when_something_was() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let empty = comment_on(&mut review, "line ten");
+    typed(&mut review, &empty, "  \n ");
+
+    review.leave_draft(&empty).unwrap();
+
+    assert_eq!(review.comment_drafts(), []);
+    let written = comment_on(&mut review, "line ten");
+    typed(&mut review, &written, "why ten?");
+
+    review.leave_draft(&written).unwrap();
+
+    assert_eq!(review.comment_drafts().len(), 1);
+}

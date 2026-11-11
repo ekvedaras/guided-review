@@ -38,6 +38,7 @@ use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
+use super::outdated_lines::FollowedLines;
 use super::ports::{AgentLaunch, GitHubError};
 use super::problems::{Problem, Read};
 use super::refresh::RefreshBrief;
@@ -196,6 +197,7 @@ pub struct Review {
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
+    followed_lines: BTreeMap<ThreadId, FollowedLines>,
     threads: ThreadPlacement,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
@@ -281,6 +283,7 @@ impl Review {
             steps_in_reading_order,
             has_uncovered_changes,
             pulled_threads: Vec::new(),
+            followed_lines: BTreeMap::new(),
             threads: ThreadPlacement::default(),
             thread_fold_flipped: BTreeSet::new(),
             screen: Screen::Summary,
@@ -866,6 +869,12 @@ impl Review {
         self.place_threads();
     }
 
+    /// Outdated threads hang under the lines they were followed to; the others stay after the code.
+    pub fn set_followed_lines(&mut self, followed: BTreeMap<ThreadId, FollowedLines>) {
+        self.followed_lines = followed;
+        self.place_threads();
+    }
+
     /// The threads shown stay as they were, named as possibly old until a read goes through.
     pub fn threads_not_read(&mut self, error: &GitHubError) {
         self.threads_not_read = Some(format!("{error:#}"));
@@ -881,7 +890,13 @@ impl Review {
             ignores_whitespace: false,
             links: &links,
         };
-        self.threads = ThreadPlacement::of(&self.tour, &self.files, &self.pulled_threads, &display);
+        self.threads = ThreadPlacement::of(
+            &self.tour,
+            &self.files,
+            &self.pulled_threads,
+            &self.followed_lines,
+            &display,
+        );
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
@@ -1206,6 +1221,18 @@ impl Review {
     pub fn edit_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
         self.state.write_draft(place, body);
         self.save_viewer_sections()
+    }
+
+    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
+    pub fn leave_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
+        let is_blank = self
+            .comment_drafts()
+            .iter()
+            .any(|draft| &draft.place == place && draft.body.trim().is_empty());
+        if is_blank {
+            self.discard_draft(place)?;
+        }
+        Ok(())
     }
 
     pub fn discard_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {

@@ -1311,6 +1311,7 @@ mod tests {
             reply_draft: None,
             edit_drafts: std::collections::BTreeMap::new(),
             hand_off_line: None,
+            followed: None,
             failed_hand_off: None,
         }
     }

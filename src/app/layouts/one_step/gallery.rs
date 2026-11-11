@@ -152,6 +152,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         )]
     };
     let view = ThreadView {
+        followed: None,
         thread: ReviewThread {
             id: ThreadId::new(if is_open { "t1" } else { "t2" }),
             is_resolved: is_open,

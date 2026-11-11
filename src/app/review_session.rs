@@ -25,6 +25,7 @@ use crate::viewer::{
     LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
     SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, ToastTone,
     TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    follow_outdated,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -312,8 +313,15 @@ impl ReviewSession {
     }
 
     pub fn stop_composing(&mut self, cx: &mut Context<Self>) {
-        self.composing = None;
-        cx.notify();
+        // A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
+        self.change_session(cx, |session| {
+            let left = session.composing.take();
+            match left {
+                Some(place) => session.review.leave_draft(&place),
+                None => Ok(()),
+            }
+        })
+        .ok();
     }
 
     pub fn type_in_comment(&mut self, place: &CommentPlace, text: &str, cx: &mut Context<Self>) {
@@ -956,13 +964,23 @@ impl ReviewSession {
         ));
     }
 
+    /// Outdated threads are followed to their lines in the same trip, so they never jump once shown.
     fn pull_threads(&mut self, cx: &mut Context<Self>) {
         let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
+        let (source, head) = (Arc::clone(&self.source), self.review.head().clone());
         self.threads_pull = Some(self.run_off_thread(
             cx,
-            move || github.review_threads(&pr),
+            move || {
+                github.review_threads(&pr).map(|threads| {
+                    let followed = follow_outdated(&threads, source.as_ref(), &head);
+                    (threads, followed)
+                })
+            },
             |this, threads, cx| match threads {
-                Ok(threads) => this.change(cx, |review| review.set_threads(&threads)),
+                Ok((threads, followed)) => this.change(cx, |review| {
+                    review.set_threads(&threads);
+                    review.set_followed_lines(followed);
+                }),
                 Err(error) => this.change(cx, |review| review.threads_not_read(&error)),
             },
         ));
