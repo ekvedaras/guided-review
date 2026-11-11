@@ -3,34 +3,36 @@
 Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub PR: a summary, then steps from the main flow down to the details, each with the diff pieces and diagrams it talks about. The app shows the tour next to the diff and lets you comment on it.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/guided-review-intro-dark.gif">
-  <img alt="A guided review of sharkdp/fd#2185: summary, a step with a diagram and diff, an inline thread, the next step" src="docs/assets/guided-review-intro.gif">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/guided-review-intro-dark.webp">
+  <img alt="A short film of a guided review: the summary with the PR description, a step with its diagram and diff, changed words marked in a line, a comment box in the diff, the jump palette, the finished review" src="docs/assets/guided-review-intro.webp">
 </picture>
+
+Watch it as a video: [light](https://github.com/user-attachments/assets/93b19ae6-9cda-481f-b273-1924d7c8d903) or [dark](https://github.com/user-attachments/assets/e28b647b-a7ab-49d2-a547-456a9a84ab54).
 
 ## Tour
 
-The tour of [sharkdp/fd#2185](https://github.com/sharkdp/fd/pull/2185), a merged public PR.
+The tour of [ekvedaras/guided-review#12](https://github.com/ekvedaras/guided-review/pull/12), the PR that added the Settings page.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-summary-dark.png">
-  <img alt="The tour summary next to the list of steps" src="docs/assets/tour-summary.png">
+  <img alt="The tour summary with the PR description beside it and the list of steps on the left" src="docs/assets/tour-summary.png">
 </picture>
 
-The summary and the PR description, with the steps listed on the left.
+The summary and the PR description beside it. The sidebar lists the steps and how far you have read.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-diagram-dark.png">
   <img alt="A step with a diagram and the diff it explains" src="docs/assets/tour-step-diagram.png">
 </picture>
 
-A step: what to check, a diagram, then the diff pieces it talks about.
+A step: what to check, a diagram, then the diff pieces it talks about. Changed words are marked inside rewritten lines.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-thread-dark.png">
-  <img alt="A review thread inside the diff" src="docs/assets/tour-step-thread.png">
+  <img alt="A comment box inside the diff" src="docs/assets/tour-step-thread.png">
 </picture>
 
-GitHub review threads sit inline in the diff, where you can reply and resolve.
+Comments and GitHub review threads sit inline in the diff, in a box that splits it. Add a comment to your review, send it now, or hand it to the tour's agent.
 
 ## Requirements
 
@@ -118,7 +120,9 @@ The skill writes the tour with the `guided-review` CLI and opens it. To open an 
 guided-review open <pr-url>
 ```
 
-Tours and app state live under `~/.guided-review/`. `guided-review --help` lists the other commands (`outline`, `show`, `check`, `repin`, `refresh`, `eval`).
+In the app, `N` (and Next) goes on to the next unread step, `M` marks a step read, `⌘K` jumps to a step, file or action (Settings, Finish review, Restart app here, which `guided-review restart` also does), `?` lists every shortcut and `⌘W` closes the window and quits the app. With summary instructions set in Settings, the tour can also carry a reviewer summary; pictures it shows sit in the tour's own folder.
+
+Tours and app state live under `~/.guided-review/`. `guided-review --help` lists the other commands (`outline`, `show`, `check`, `repin`, `refresh`, `settings`, `restart`, `eval`).
 
 ## How it works
 
