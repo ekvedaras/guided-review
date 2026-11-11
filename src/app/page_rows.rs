@@ -255,7 +255,10 @@ pub enum PageRow {
     },
     /// The ask button under the last of the lines that have Asks.
     AskMarker(Rc<AskAt>),
-    PieceEnd,
+    /// `after_line`: the box's last line drew the bottom edge.
+    PieceEnd {
+        after_line: bool,
+    },
     ScreenFooter(Rc<ScreenFooter>),
 }
 
@@ -338,6 +341,7 @@ impl PageRow {
                 line.location.line.hash(&mut hasher);
                 matches!(line.kind, LineKind::Context { .. }).hash(&mut hasher);
                 line.wraps.hash(&mut hasher);
+                line.closes_piece.hash(&mut hasher);
             }
             Self::Thread {
                 view,
@@ -386,7 +390,7 @@ impl PageRow {
             | Self::RouteHeading
             | Self::NoChangeSinceRead
             | Self::OnlyWhitespace
-            | Self::PieceEnd => {}
+            | Self::PieceEnd { .. } => {}
         }
         RowKey(hasher.finish())
     }
@@ -1133,7 +1137,7 @@ impl RowsBuilder<'_> {
                 gap,
             ))));
         }
-        self.rows.push(PageRow::PieceEnd);
+        self.end_piece();
     }
 
     /// A folded box keeps its header and the labels of its pieces, so the step still says what it covers.
@@ -1173,7 +1177,19 @@ impl RowsBuilder<'_> {
                     .push(PageRow::PieceMarker(Rc::new(heading(piece))));
             }
         }
-        self.rows.push(PageRow::PieceEnd);
+        self.end_piece();
+    }
+
+    fn end_piece(&mut self) {
+        let last_line = match self.rows.last_mut() {
+            Some(PageRow::Line(line)) => Rc::get_mut(line),
+            _ => None,
+        };
+        let after_line = last_line.is_some();
+        if let Some(line) = last_line {
+            line.closes_piece = true;
+        }
+        self.rows.push(PageRow::PieceEnd { after_line });
     }
 
     fn hang(&mut self, here: Vec<UnderLine>) {

@@ -83,6 +83,8 @@ pub struct DiffRowLine {
     offers_comment_button: bool,
     /// A long line wraps onto more rows instead of being cut at the box's edge.
     pub wraps: bool,
+    /// The last row of its box: it draws the box's bottom edge, so its colour runs into the corners.
+    pub closes_piece: bool,
 }
 
 impl DiffRowLine {
@@ -118,6 +120,7 @@ impl DiffRowLine {
             code_link: line.code_link,
             location: line.location,
             kind: line.kind,
+            closes_piece: false,
         }
     }
 }
@@ -253,6 +256,9 @@ impl RenderOnce for DiffRow {
             }))
             .on_click(move |_, _, cx| open_code(&link, cx))
             .whitespace_nowrap()
+            .when(line.closes_piece, |gutter| {
+                gutter.rounded_bl(px(CARD_RADIUS))
+            })
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self
@@ -305,7 +311,14 @@ impl RenderOnce for DiffRow {
             LineKind::Added => row.bg(colors.added_line),
             LineKind::Context { .. } => row,
         };
-        row.child(gutter).child(comment_button).child(code)
+        row.when(line.closes_piece, |row| {
+            row.border_b_1()
+                .rounded_b(px(CARD_RADIUS))
+                .shadow(colors.card_shadow())
+        })
+        .child(gutter)
+        .child(comment_button)
+        .child(code)
     }
 }
 
@@ -538,16 +551,23 @@ impl RenderOnce for PieceMarker {
 }
 
 /// The bottom edge of a piece box, and the space before the next one.
-pub fn piece_end(colors: &Colors) -> impl IntoElement {
-    div().pb_4().child(
-        div()
-            .h_1p5()
-            .border_x_1()
-            .border_b_1()
-            .rounded_b(px(CARD_RADIUS))
-            .border_color(colors.subtle_border)
-            .shadow(colors.card_shadow()),
-    )
+/// After a box whose last line drew its bottom edge, only the space under the box is left to draw.
+pub fn piece_end(colors: &Colors, after_line: bool) -> gpui::AnyElement {
+    if after_line {
+        return div().pb_4().into_any_element();
+    }
+    div()
+        .pb_4()
+        .child(
+            div()
+                .h_1p5()
+                .border_x_1()
+                .border_b_1()
+                .rounded_b(px(CARD_RADIUS))
+                .border_color(colors.subtle_border)
+                .shadow(colors.card_shadow()),
+        )
+        .into_any_element()
 }
 
 pub fn no_change_since_read_row(colors: &Colors) -> impl IntoElement {

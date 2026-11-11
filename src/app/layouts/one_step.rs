@@ -1767,7 +1767,7 @@ impl OneStepLayout {
                 .py_1()
                 .child(self.ask_at(&ask, ButtonKind::Ghost, cx))
                 .into_any_element(),
-            PageRow::PieceEnd => piece_end(&colors).into_any_element(),
+            PageRow::PieceEnd { after_line } => piece_end(&colors, after_line),
         }
     }
 
