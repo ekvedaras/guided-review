@@ -2204,16 +2204,10 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             Command::PreviousScreen,
         ))
     });
-    let (up_next_label, next_label) = match &footer.lead {
-        Some(TourLead::Continue(next)) => ("Where you left off:", Some(next.title.clone())),
-        _ => (
-            "Up next:",
-            footer.next.as_ref().map(|next| match next {
-                NextScreen::Step { title } => title.clone(),
-                NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
-            }),
-        ),
-    };
+    let next_label = footer.next.as_ref().map(|next| match next {
+        NextScreen::Step { title } => title.clone(),
+        NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
+    });
     if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {
         return div()
             .pt_8()
@@ -2225,17 +2219,17 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .child(finish_card(
                 *steps,
                 *can_finish,
-                ReviewAgain::from(footer.is_summary),
+                ReviewAgain::NotOffered,
                 "footer",
                 cx,
             ))
             .into_any_element();
     }
-    let action = match (&footer.ticks, footer.next.is_some(), footer.is_summary) {
-        (Some(_), true, false) => Some(("Mark as read and go on", Onward::Goes)),
-        (Some(_), false, false) => Some(("Mark as read", Onward::Stays)),
-        (None, true, false) => Some(("Next", Onward::Goes)),
-        (_, _, true) | (None, false, _) => None,
+    let action = match (&footer.ticks, footer.next.is_some()) {
+        (Some(_), true) => Some(("Mark as read and go on", Onward::Goes)),
+        (Some(_), false) => Some(("Mark as read", Onward::Stays)),
+        (None, true) => Some(("Next", Onward::Goes)),
+        (None, false) => None,
     };
     let lead = footer
         .lead
@@ -2273,7 +2267,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .flex_col()
             .gap_0p5()
             .child(
-                note_label(up_next_label)
+                note_label("Up next:")
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(colors.muted_text),
             )
@@ -2479,16 +2473,6 @@ fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl Into
 enum ReviewAgain {
     Offered,
     NotOffered,
-}
-
-impl From<bool> for ReviewAgain {
-    fn from(is_offered: bool) -> Self {
-        if is_offered {
-            Self::Offered
-        } else {
-            Self::NotOffered
-        }
-    }
 }
 
 /// The way into the tour: its start, or the first step not read yet. Finishing has its own card.

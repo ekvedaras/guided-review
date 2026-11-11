@@ -92,8 +92,7 @@ pub struct ScreenFooter {
     pub ticks: Option<StepId>,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
-    pub is_summary: bool,
-    /// On the summary, and on the last screen once every step is read: where the tour leads.
+    /// On the last screen once every step is read: the end of the tour.
     pub lead: Option<TourLead>,
 }
 
@@ -718,7 +717,6 @@ impl PageRows {
                         ticks: None,
                         has_previous: footer.has_previous,
                         next: footer.next.clone(),
-                        is_summary: footer.is_summary,
                         lead: Some(TourLead::Finish {
                             steps,
                             can_finish: true,
@@ -832,23 +830,17 @@ fn summary_rows(review: &Review, page: &mut Vec<PageRow>) {
         ignores_whitespace: None,
         wraps_lines: None,
     })));
-    page.push(screen_footer(review, None));
 }
 
 fn screen_footer(review: &Review, ticks: Option<StepId>) -> PageRow {
     let place = review.reading_place();
-    let is_summary = review.screen() == &Screen::Summary;
     let lead = review.tour_lead();
-    let leads_on = match &lead {
-        TourLead::Finish { .. } => is_summary || (place.next.is_none() && ticks.is_none()),
-        TourLead::Start(_) | TourLead::Continue(_) => is_summary,
-        TourLead::Nowhere => false,
-    };
+    let leads_on =
+        matches!(lead, TourLead::Finish { .. }) && place.next.is_none() && ticks.is_none();
     PageRow::ScreenFooter(Rc::new(ScreenFooter {
         ticks,
         has_previous: place.has_previous,
         next: place.next,
-        is_summary,
         lead: leads_on.then_some(lead),
     }))
 }
