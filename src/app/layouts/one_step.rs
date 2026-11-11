@@ -31,9 +31,9 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture, OnScrollX,
-    PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
-    only_whitespace_row, piece_end, piece_row,
+    CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
+    OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap,
+    no_change_since_read_row, only_whitespace_row, piece_end, piece_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -108,7 +108,7 @@ actions!(
     ]
 );
 
-type OnCodeSpot = Rc<dyn Fn(RowGesture, CodeSpot, &mut Window, &mut App)>;
+type OnCodeSpot = Rc<dyn Fn(CodeGesture, CodeSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
@@ -146,7 +146,6 @@ pub struct OneStepLayout {
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
     /// The rows of the last drag, to ask the AI about.
-    lines_to_ask: Option<Place>,
     frame_stats: FrameStatsHook,
     #[cfg(feature = "snapshots")]
     _snapshots: Option<gpui::Task<()>>,
@@ -298,7 +297,7 @@ impl OneStepLayout {
         let on_code_gesture: OnCodeSpot = Rc::new(move |gesture, at, window, cx| {
             layout_handle
                 .update(cx, |this, cx| {
-                    if gesture == RowGesture::Press {
+                    if gesture != CodeGesture::Over {
                         window.focus(&this.focus, cx);
                     }
                     this.on_code_gesture(gesture, at, cx);
@@ -331,7 +330,6 @@ impl OneStepLayout {
             code_selection: None,
             on_code_gesture,
             selection_notice: None,
-            lines_to_ask: None,
             frame_stats,
             #[cfg(feature = "snapshots")]
             _snapshots: scenes::start(window, cx),
@@ -474,7 +472,6 @@ impl OneStepLayout {
     fn on_row_gesture(&mut self, gesture: RowGesture, at: &LineLocation, cx: &mut Context<Self>) {
         if gesture == RowGesture::Press {
             self.selection_notice = None;
-            self.lines_to_ask = None;
         }
         self.session.update(cx, |session, cx| match gesture {
             RowGesture::Press => session.select_from(at.clone(), cx),
@@ -482,13 +479,21 @@ impl OneStepLayout {
         });
     }
 
-    fn on_code_gesture(&mut self, gesture: RowGesture, at: CodeSpot, cx: &mut Context<Self>) {
+    fn on_code_gesture(&mut self, gesture: CodeGesture, at: CodeSpot, cx: &mut Context<Self>) {
         match gesture {
-            RowGesture::Press => {
+            CodeGesture::Press => {
                 let screen = self.session.read(cx).review().screen().clone();
                 self.code_selection = Some(CodeSelection::start(screen, at));
             }
-            RowGesture::Over => match &mut self.code_selection {
+            CodeGesture::PressTwice => {
+                let session = self.session.read(cx);
+                let screen = session.review().screen().clone();
+                self.code_selection = match session.rows().row(at.row) {
+                    Some(PageRow::Line(line)) => CodeSelection::word(screen, at, line.code()),
+                    _ => None,
+                };
+            }
+            CodeGesture::Over => match &mut self.code_selection {
                 Some(selection) if selection.is_dragging() => selection.drag_to(at),
                 _ => return,
             },
@@ -537,19 +542,15 @@ impl OneStepLayout {
             if !review.is_selecting() {
                 return None;
             }
-            let lines_to_ask = review
-                .selected_lines()
-                .map(|selected| review.place_of_lines(&selected));
             let finished = session.change(cx, Review::finish_selection);
             if let Ok(Some(place)) = &finished {
                 session.compose(place.clone(), cx);
             }
-            Some((lines_to_ask, finished))
+            Some(finished)
         });
-        let Some((lines_to_ask, finished)) = ended else {
+        let Some(finished) = ended else {
             return;
         };
-        self.lines_to_ask = lines_to_ask;
         match finished {
             Ok(Some(_)) => window.focus(&self.composer_focus, cx),
             Ok(None) => {}
@@ -652,6 +653,7 @@ impl OneStepLayout {
             ask_agent: session.agent_link_is_on(),
         };
         let problem = session.comment_problem(place);
+        let ask_place = review.ask_place_of(place);
         let on_type = {
             let (layout, place) = (cx.entity(), place.clone());
             Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
@@ -708,14 +710,28 @@ impl OneStepLayout {
                 window.focus(&this.focus, cx);
             }),
         };
-        Some(CommentComposer::new(
-            draft,
-            self.composer_focus.clone(),
-            state,
-            capabilities,
-            problem,
-            actions,
-        ))
+        let ask = ask_place.map(|ask_place| {
+            let label = ask_place.lines_label().unwrap_or_default();
+            self.ask_button(
+                format!("ask-{}", place.describe()),
+                ask_place,
+                label,
+                ButtonKind::Ghost,
+                cx,
+            )
+            .into_any_element()
+        });
+        Some(
+            CommentComposer::new(
+                draft,
+                self.composer_focus.clone(),
+                state,
+                capabilities,
+                problem,
+                actions,
+            )
+            .with_ask(ask),
+        )
     }
 
     fn on_thread_action(&self) -> OnThreadAction {
@@ -2085,7 +2101,6 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         .on_click(cx.listener(|this, _, _, cx| {
             this.change_review(cx, Review::go_back);
         }))
-        .child(icon(Icon::ArrowLeft, colors.muted_text))
         .child("Previous")
         .child(button_keys(
             &colors,
@@ -2786,22 +2801,6 @@ impl Render for OneStepLayout {
                             cx.listener(|this, _, _, cx| {
                                 this.session.update(cx, ReviewSession::repin);
                             }),
-                        )
-                    }))
-                    .children(self.lines_to_ask.clone().map(|place| {
-                        let label = place.lines_label().unwrap_or_default();
-                        dropping_in(
-                            notice_band(&colors, Tone::Neutral)
-                                .py_1()
-                                .child(self.ask_button(
-                                    "ask-selected-lines".into(),
-                                    place,
-                                    label,
-                                    ButtonKind::Tinted,
-                                    cx,
-                                ))
-                                .child("about the selected lines"),
-                            "ask-selected-lines-band",
                         )
                     }))
                     .children(self.reopen_after_save.waiting_line().map(|line| {

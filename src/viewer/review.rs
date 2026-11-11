@@ -689,6 +689,19 @@ impl Review {
     }
 
     /// The place an Ask about selected rows is about: the rows and the pieces holding them.
+    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
+    /// file, or lines not on this screen.
+    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
+        let CommentPlace::Lines { start, end } = comment else {
+            return None;
+        };
+        let lines = self.screen_lines();
+        let first = lines.iter().position(|line| &line.location == start)?;
+        let last = lines.iter().position(|line| &line.location == end)?;
+        let selected = SelectedLines::new(lines.get(first..=last)?.to_vec())?;
+        Some(self.place_of_lines(&selected))
+    }
+
     pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
         let (step, pieces) = match &self.screen {
             Screen::Step(id) => (

@@ -270,7 +270,6 @@ impl OneStepLayout {
                         session.discard_comment(place, cx);
                     }
                 });
-                self.lines_to_ask = None;
                 window.focus(&self.focus, cx);
             }
             Scene::AskPanel => self.ask.update(cx, |panel, cx| panel.close(window, cx)),

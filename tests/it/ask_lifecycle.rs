@@ -516,3 +516,24 @@ fn the_pool_counts_the_turns_answering_now() {
     pool.ended(ask(2));
     assert_eq!(pool.answering(), 0);
 }
+
+#[test]
+fn a_comment_box_on_lines_asks_about_the_same_place_as_the_drag_that_opened_it() {
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    review.go_to(&StepId::from("total"));
+    let (from, to) = (row(&review, "return 1;"), row(&review, "return 2;"));
+    review.begin_selection(from);
+    review.extend_selection(to);
+    let dragged = review.place_of_lines(&review.selected_lines().unwrap());
+
+    let comment_place = review.finish_selection().unwrap().unwrap();
+
+    assert_eq!(review.ask_place_of(&comment_place), Some(dragged));
+    review.go_to_summary();
+    assert_eq!(
+        review.ask_place_of(&comment_place),
+        None,
+        "the lines are not on this screen"
+    );
+}

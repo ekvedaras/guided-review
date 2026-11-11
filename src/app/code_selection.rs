@@ -31,6 +31,37 @@ impl CodeSelection {
         }
     }
 
+    /// The word around `at` in `code`, the row's code, as a double click picks it in an IDE: letters,
+    /// digits and `_`. `None` off a word.
+    pub fn word(screen: Screen, at: CodeSpot, code: &str) -> Option<Self> {
+        let is_word = |c: char| c.is_alphanumeric() || c == '_';
+        let byte = code.floor_char_boundary(at.byte);
+        let (before, after) = code.split_at(byte);
+        if !after.starts_with(is_word) {
+            return None;
+        }
+        let start = before
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !is_word(c))
+            .map_or(0, |(at, c)| at + c.len_utf8());
+        let end = after
+            .find(|c: char| !is_word(c))
+            .map_or(code.len(), |end| byte + end);
+        Some(Self {
+            screen,
+            anchor: CodeSpot {
+                row: at.row,
+                byte: start,
+            },
+            head: CodeSpot {
+                row: at.row,
+                byte: end,
+            },
+            is_dragging: false,
+        })
+    }
+
     pub fn drag_to(&mut self, at: CodeSpot) {
         if self.is_dragging {
             self.head = at;
@@ -133,6 +164,35 @@ mod tests {
         let mut selection = CodeSelection::start(Screen::Summary, spot(3, 2));
 
         assert!(!selection.end_drag());
+    }
+
+    #[test]
+    fn a_double_click_selects_the_name_under_it_and_nothing_off_a_name() {
+        let code = "    $order->placeWith(lines: $ąžuolas_2);";
+        let word_at = |byte| {
+            CodeSelection::word(Screen::Summary, spot(4, byte), code)
+                .map(|selection| selection.text(|_| Some(code)))
+        };
+
+        assert_eq!(word_at(14).as_deref(), Some("placeWith"));
+        assert_eq!(
+            word_at(12).as_deref(),
+            Some("placeWith"),
+            "the name's first letter"
+        );
+        assert_eq!(
+            word_at(31).as_deref(),
+            Some("ąžuolas_2"),
+            "a name with letters past ASCII"
+        );
+        assert_eq!(word_at(0), None, "indentation");
+        assert_eq!(word_at(11), None, "an arrow");
+        assert!(
+            !CodeSelection::word(Screen::Summary, spot(4, 14), code)
+                .unwrap()
+                .is_dragging(),
+            "the mouse let go must not drop it"
+        );
     }
 
     #[test]

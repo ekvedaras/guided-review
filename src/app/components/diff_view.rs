@@ -37,6 +37,17 @@ pub enum RowGesture {
     Over,
 }
 
+/// What the mouse does on a row's code text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeGesture {
+    /// Down once: a text selection starts here.
+    Press,
+    /// Down twice in a row: the word here is selected.
+    PressTwice,
+    /// A move with the button held carries the selection on.
+    Over,
+}
+
 /// A sideways scroll on a row: how far the row's file box should move its code, in pixels.
 pub type OnScrollX = Rc<dyn Fn(Pixels, &mut Window, &mut App)>;
 
@@ -46,7 +57,7 @@ pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut A
 
 /// The mouse on a row's code text: down starts a text selection there, a move with the button held
 /// carries it on. Spots are byte offsets in the row's code.
-pub type OnCodeGesture = Rc<dyn Fn(RowGesture, usize, &mut Window, &mut App)>;
+pub type OnCodeGesture = Rc<dyn Fn(CodeGesture, usize, &mut Window, &mut App)>;
 
 /// How a row takes part in the text selection: what of it is selected, and where its mouse goes.
 pub struct CodeSelectionHooks {
@@ -200,12 +211,16 @@ impl RenderOnce for DiffRow {
                 code.cursor_text()
                     .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                         let byte = byte_at(&press_layout, event.position);
-                        on_press(RowGesture::Press, byte, window, cx);
+                        let gesture = match event.click_count {
+                            2 => CodeGesture::PressTwice,
+                            _ => CodeGesture::Press,
+                        };
+                        on_press(gesture, byte, window, cx);
                     })
                     .on_mouse_move(move |event, window, cx| {
                         if event.pressed_button == Some(MouseButton::Left) {
                             let byte = byte_at(&move_layout, event.position);
-                            on_move(RowGesture::Over, byte, window, cx);
+                            on_move(CodeGesture::Over, byte, window, cx);
                         }
                     })
             }

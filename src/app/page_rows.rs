@@ -518,6 +518,7 @@ impl PageRows {
             .unwrap_or_default()
     }
 
+    #[cfg(feature = "snapshots")]
     pub fn description_fold_keys(&self) -> Vec<String> {
         self.description()
             .map(|(_, description)| description.fold_keys(DESCRIPTION_KEY))

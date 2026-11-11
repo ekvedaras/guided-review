@@ -123,6 +123,7 @@ impl PreparedMarkdown {
         self.markdown.diagrams()
     }
 
+    #[cfg(feature = "snapshots")]
     /// The keys `MarkdownView` gives its top-level `<details>` folds when drawn under `key`.
     pub fn fold_keys(&self, key: &str) -> Vec<String> {
         self.blocks

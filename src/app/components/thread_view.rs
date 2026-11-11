@@ -407,7 +407,6 @@ impl ThreadElement {
             .flex_wrap()
             .items_center()
             .gap_0p5()
-            .ml(px(-4.))
             .children(counted)
             .child(div().relative().child(add).children(picker))
             .into_any_element()
@@ -819,7 +818,14 @@ impl RenderOnce for ThreadElement {
                                     let handle = edit_focus.read(cx).clone();
                                     window.focus(&handle, cx);
                                 })
-                            }));
+                            }))
+                            .child(Self::reactions(
+                                &colors,
+                                comment,
+                                &ui,
+                                &reaction_on_action,
+                                cx,
+                            ));
                         let content = match being_edited {
                             Some(text) => {
                                 let edit_focus = window
@@ -850,19 +856,7 @@ impl RenderOnce for ThreadElement {
                             .on_lines(Arc::clone(&self.view.commented_lines))
                             .into_any_element(),
                         };
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(header)
-                            .child(content)
-                            .child(Self::reactions(
-                                &colors,
-                                comment,
-                                &ui,
-                                &reaction_on_action,
-                                cx,
-                            ))
+                        div().flex().flex_col().gap_1().child(header).child(content)
                     }),
             )
         });
