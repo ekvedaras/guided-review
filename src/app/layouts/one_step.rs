@@ -1665,9 +1665,6 @@ impl OneStepLayout {
                     &summary_bullet,
                 )))
                 .into_any_element(),
-            PageRow::ReviewerSummary(summary) => {
-                self.reviewer_summary(&summary, cx).into_any_element()
-            }
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepIntro(intro) => self.step_intro(&intro, index, cx).into_any_element(),
             PageRow::RepinNotes {
@@ -1818,8 +1815,8 @@ impl OneStepLayout {
         }
     }
 
-    /// The summary keeps its reading width; the description sits beside it where the window has room,
-    /// else under it.
+    /// The summary keeps its reading width; the reviewer summary and the description sit beside it where
+    /// the window has room, else under it.
     fn summary_columns(
         &mut self,
         columns: &SummaryColumns,
@@ -1841,19 +1838,25 @@ impl OneStepLayout {
                 )
             })
             .collect();
+        let reviewer_summary = columns
+            .reviewer_summary
+            .as_ref()
+            .map(|summary| self.reviewer_summary(summary, cx));
         let description = columns.description.clone().map(|description| {
+            self.markdown_card(
+                "PR DESCRIPTION",
+                MarkdownView::new(DESCRIPTION_KEY, description)
+                    .with_diagrams(self.description_diagrams.clone()),
+                cx,
+            )
+        });
+        let beside = (reviewer_summary.is_some() || description.is_some()).then(|| {
             div()
                 .flex_1()
                 .min_w(DESCRIPTION_MIN_WIDTH)
                 .max_w(READING_WIDTH)
-                .child(
-                    self.markdown_card(
-                        "PR DESCRIPTION",
-                        MarkdownView::new(DESCRIPTION_KEY, description)
-                            .with_diagrams(self.description_diagrams.clone()),
-                        cx,
-                    ),
-                )
+                .children(reviewer_summary)
+                .children(description)
         });
         div()
             .flex()
@@ -1869,7 +1872,7 @@ impl OneStepLayout {
                     .flex_col()
                     .children(summary),
             )
-            .children(description)
+            .children(beside)
             .into_any_element()
     }
 

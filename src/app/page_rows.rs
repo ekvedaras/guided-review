@@ -234,6 +234,8 @@ impl HunkGapRow {
 
 pub struct SummaryColumns {
     pub summary: Vec<PageRow>,
+    /// Above the description, in its column.
+    pub reviewer_summary: Option<Rc<ReviewerSummaryRow>>,
     pub description: Option<Rc<PreparedMarkdown>>,
 }
 
@@ -246,7 +248,6 @@ pub enum PageRow {
     RouteHeading,
     RouteStop(Rc<RouteStopRow>),
     TourLead(Rc<TourLead>),
-    ReviewerSummary(Rc<ReviewerSummaryRow>),
     /// The summary's rows down to the reviewer summary, with the PR description as a column of its own,
     /// so a wide window puts the description beside them.
     SummaryColumns(Rc<SummaryColumns>),
@@ -313,14 +314,14 @@ impl PageRow {
                 heading.title.hash(&mut hasher);
                 heading.number.hash(&mut hasher);
             }
-            Self::ReviewerSummary(summary) => {
-                summary.markdown.hash(&mut hasher);
-                summary.notes_button.hash(&mut hasher);
-                summary.picture_buttons.hash(&mut hasher);
-            }
             Self::SummaryColumns(columns) => {
                 for row in &columns.summary {
                     row.key().0.hash(&mut hasher);
+                }
+                if let Some(summary) = &columns.reviewer_summary {
+                    summary.markdown.hash(&mut hasher);
+                    summary.notes_button.hash(&mut hasher);
+                    summary.picture_buttons.hash(&mut hasher);
                 }
                 columns.description.hash(&mut hasher);
             }
@@ -839,13 +840,11 @@ fn summary_rows(review: &Review, page: &mut Vec<PageRow>) {
     if lead != TourLead::Nowhere {
         rows.push(PageRow::TourLead(Rc::new(lead)));
     }
-    rows.extend(
-        review.reviewer_summary().map(|summary| {
-            PageRow::ReviewerSummary(Rc::new(ReviewerSummaryRow::of(review, summary)))
-        }),
-    );
     page.push(PageRow::SummaryColumns(Rc::new(SummaryColumns {
         summary: rows,
+        reviewer_summary: review
+            .reviewer_summary()
+            .map(|summary| Rc::new(ReviewerSummaryRow::of(review, summary))),
         description: review
             .pr_description()
             .map(|description| Rc::new(PreparedMarkdown::of(description))),
