@@ -1494,6 +1494,29 @@ impl Review {
         self.step_by(1)
     }
 
+    /// The Next button: on to the next screen that is not a step already read, which the sidebar
+    /// still reaches. False when there is none.
+    pub fn go_on(&mut self) -> bool {
+        match self.onward_screen() {
+            Some(screen) => {
+                self.screen = screen;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn onward_screen(&self) -> Option<Screen> {
+        let reading_order = self.reading_order();
+        let here = reading_order
+            .iter()
+            .position(|screen| screen == &self.screen)?;
+        reading_order
+            .into_iter()
+            .skip(here + 1)
+            .find(|screen| !matches!(screen, Screen::Step(id) if self.is_ticked(id)))
+    }
+
     /// False on the summary, the first screen.
     pub fn go_back(&mut self) -> bool {
         self.step_by(-1)
@@ -1808,15 +1831,13 @@ impl Review {
             .iter()
             .position(|screen| screen == &self.screen);
         let is_step = |screen: &&Screen| matches!(screen, Screen::Step(_));
-        let next = position
-            .and_then(|position| reading_order.get(position + 1))
-            .and_then(|screen| match screen {
-                Screen::Step(id) => Some(NextScreen::Step {
-                    title: self.step(id)?.title.clone(),
-                }),
-                Screen::SafetyNet => Some(NextScreen::SafetyNet),
-                Screen::Summary => None,
-            });
+        let next = self.onward_screen().and_then(|screen| match &screen {
+            Screen::Step(id) => Some(NextScreen::Step {
+                title: self.step(id)?.title.clone(),
+            }),
+            Screen::SafetyNet => Some(NextScreen::SafetyNet),
+            Screen::Summary => None,
+        });
         ReadingPlace {
             step_number: match (&self.screen, position) {
                 (Screen::Step(_), Some(position)) => Some(

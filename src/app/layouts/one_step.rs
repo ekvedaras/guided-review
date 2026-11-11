@@ -1011,8 +1011,8 @@ impl OneStepLayout {
         use_code_opener(opener, cx);
     }
 
-    /// Like the footer's button, the arrow key ticks the step it leaves, but only once the reader
-    /// has seen the step's end, so skipping ahead does not count as reading.
+    /// Like the footer's button, the key ticks the step it leaves, but only once the reader has
+    /// seen the step's end, so skipping ahead does not count as reading; both pass steps already read.
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
         if self.is_reopening(cx) {
             return;
@@ -1025,7 +1025,7 @@ impl OneStepLayout {
         {
             self.toggle_tick(&id, cx);
         }
-        self.change_review(cx, Review::go_forward);
+        self.change_review(cx, Review::go_on);
     }
 
     fn scroll_code_sideways(
@@ -2253,7 +2253,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             if let Some(id) = &ticks {
                 this.toggle_tick(id, cx);
             }
-            this.change_review(cx, Review::go_forward);
+            this.change_review(cx, Review::go_on);
         }))
         .child(label)
         .child(button_keys(
