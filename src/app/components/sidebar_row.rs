@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, div, px,
+    SharedString, Stateful, StatefulInteractiveElement, Styled, div, phi, px,
 };
 
 use super::chip::chip;
@@ -12,8 +12,9 @@ use super::tooltip::tooltip;
 
 const FLAT_INDENT: f32 = 8.;
 const INDENT_PER_DEPTH: f32 = 16.;
-/// One line of `text_sm`, so a mark sits on the first line of a label that wraps.
-const LINE_HEIGHT: f32 = 20.;
+/// A row's line height, set on the row itself, so the marks, chips and badges beside a label centre
+/// on its first line even when it wraps.
+const LINE_HEIGHT: f32 = 22.;
 const MARK_SIZE: f32 = 14.;
 
 /// What the reader has done with the screen a row opens.
@@ -38,6 +39,7 @@ pub fn sidebar_row(
     div()
         .id(id)
         .relative()
+        .line_height(px(LINE_HEIGHT))
         .mx_2()
         .pl(indent(depth))
         .pr_2()
@@ -195,6 +197,7 @@ pub fn count_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
                     .border_1()
                     .border_color(colors.subtle_border)
                     .text_xs()
+                    .line_height(phi())
                     .text_color(colors.muted_text)
                     .child(count.to_string()),
             )
