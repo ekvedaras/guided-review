@@ -1647,7 +1647,8 @@ impl OneStepLayout {
                     heading.label.clone(),
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
-                );
+                )
+                .closing_its_box(heading.closes_piece);
                 match heading.fold.clone() {
                     Some(fold) => header
                         .with_fold_toggle(
@@ -1767,7 +1768,7 @@ impl OneStepLayout {
                 .py_1()
                 .child(self.ask_at(&ask, ButtonKind::Ghost, cx))
                 .into_any_element(),
-            PageRow::PieceEnd { after_line } => piece_end(&colors, after_line),
+            PageRow::PieceEnd { edge_drawn } => piece_end(&colors, edge_drawn),
         }
     }
 

@@ -423,6 +423,7 @@ pub struct PieceHeader {
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
     fold_toggle: Option<Stateful<Div>>,
+    closes_box: bool,
 }
 
 impl PieceHeader {
@@ -436,7 +437,14 @@ impl PieceHeader {
             repin_label,
             buttons,
             fold_toggle: None,
+            closes_box: false,
         }
+    }
+
+    /// Nothing follows it in its box: it rounds the box's bottom corners too.
+    pub fn closing_its_box(mut self, closes_box: bool) -> Self {
+        self.closes_box = closes_box;
+        self
     }
 
     /// A chevron before the name that opens or folds the box.
@@ -463,6 +471,11 @@ impl RenderOnce for PieceHeader {
             .bg(colors.header_band())
             .border_1()
             .rounded_t(px(CARD_RADIUS))
+            .when(self.closes_box, |header| {
+                header
+                    .rounded_b(px(CARD_RADIUS))
+                    .shadow(colors.card_shadow())
+            })
             .border_color(colors.subtle_border)
             .text_sm()
             .children(self.fold_toggle)
@@ -571,8 +584,8 @@ impl RenderOnce for PieceMarker {
 
 /// The bottom edge of a piece box, and the space before the next one.
 /// After a box whose last line drew its bottom edge, only the space under the box is left to draw.
-pub fn piece_end(colors: &Colors, after_line: bool) -> gpui::AnyElement {
-    if after_line {
+pub fn piece_end(colors: &Colors, edge_drawn: bool) -> gpui::AnyElement {
+    if edge_drawn {
         return div().pb_4().into_any_element();
     }
     div()

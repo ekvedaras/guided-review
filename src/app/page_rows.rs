@@ -150,6 +150,8 @@ pub struct PieceHeading {
     /// "changed" or "new" after a re-pin.
     pub repin_label: Option<&'static str>,
     pub code_link: Option<CodeLink>,
+    /// Nothing follows it in its box, as in a folded box: it draws the box's bottom edge.
+    pub closes_piece: bool,
 }
 
 pub struct BinaryFileRow {
@@ -255,9 +257,9 @@ pub enum PageRow {
     },
     /// The ask button under the last of the lines that have Asks.
     AskMarker(Rc<AskAt>),
-    /// `after_line`: the box's last line drew the bottom edge.
+    /// `edge_drawn`: the box's last row, a line or a lone header, drew the bottom edge.
     PieceEnd {
-        after_line: bool,
+        edge_drawn: bool,
     },
     ScreenFooter(Rc<ScreenFooter>),
 }
@@ -322,6 +324,7 @@ impl PageRow {
                 heading.fold.hash(&mut hasher);
                 heading.piece.hash(&mut hasher);
                 heading.repin_label.hash(&mut hasher);
+                heading.closes_piece.hash(&mut hasher);
             }
             Self::BinaryFile(binary) => {
                 binary.piece.hash(&mut hasher);
@@ -1049,6 +1052,7 @@ impl RowsBuilder<'_> {
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
+            closes_piece: false,
         };
         let has_no_change_since_read = |piece: &PieceDiff| {
             shown == DiffShown::ChangeSinceRead
@@ -1092,6 +1096,7 @@ impl RowsBuilder<'_> {
                 ask: None,
                 repin_label: None,
                 code_link: block.lines().next().map(|line| line.code_link.clone()),
+                closes_piece: false,
             })));
             for piece in block.without_rows() {
                 self.rows
@@ -1159,6 +1164,7 @@ impl RowsBuilder<'_> {
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
+            closes_piece: false,
         };
         if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
@@ -1175,6 +1181,7 @@ impl RowsBuilder<'_> {
                 ask: None,
                 repin_label: None,
                 code_link: block.lines().next().map(|line| line.code_link.clone()),
+                closes_piece: false,
             })));
             for piece in block.pieces_in_order() {
                 self.rows
@@ -1185,15 +1192,15 @@ impl RowsBuilder<'_> {
     }
 
     fn end_piece(&mut self) {
-        let last_line = match self.rows.last_mut() {
-            Some(PageRow::Line(line)) => Rc::get_mut(line),
+        let edge_drawn = match self.rows.last_mut() {
+            Some(PageRow::Line(line)) => Rc::get_mut(line).map(|line| line.closes_piece = true),
+            Some(PageRow::PieceHeader(heading)) => {
+                Rc::get_mut(heading).map(|heading| heading.closes_piece = true)
+            }
             _ => None,
-        };
-        let after_line = last_line.is_some();
-        if let Some(line) = last_line {
-            line.closes_piece = true;
         }
-        self.rows.push(PageRow::PieceEnd { after_line });
+        .is_some();
+        self.rows.push(PageRow::PieceEnd { edge_drawn });
     }
 
     /// The line above ends its colour in rounded corners, and so does the next line start, if it comes
