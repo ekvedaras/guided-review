@@ -2,47 +2,7 @@
 
 Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub PR: a summary, then steps from the main flow down to the details, each with the diff pieces and diagrams it talks about. The app shows the tour next to the diff and lets you comment on it.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/guided-review-intro-dark.gif">
-  <img alt="A guided review of sharkdp/fd#2185: summary, a step with a diagram and diff, an inline thread, the next step" src="docs/assets/guided-review-intro.gif">
-</picture>
-
-## Tour
-
-The tour of [sharkdp/fd#2185](https://github.com/sharkdp/fd/pull/2185), a merged public PR.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-summary-dark.png">
-  <img alt="The tour summary next to the list of steps" src="docs/assets/tour-summary.png">
-</picture>
-
-The summary and the PR description, with the steps listed on the left.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-diagram-dark.png">
-  <img alt="A step with a diagram and the diff it explains" src="docs/assets/tour-step-diagram.png">
-</picture>
-
-A step: what to check, a diagram, then the diff pieces it talks about.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-thread-dark.png">
-  <img alt="A review thread inside the diff" src="docs/assets/tour-step-thread.png">
-</picture>
-
-GitHub review threads sit inline in the diff, where you can reply and resolve.
-
-## Requirements
-
-- macOS (the only platform tested; CI runs on macOS).
-- A Rust toolchain, stable (edition 2024), only to build from source.
-- [`gh`](https://cli.github.com), logged in. The app reads the token from `gh auth token`.
-- [Claude Code](https://claude.com/claude-code) (`claude`), which writes the tours.
-- [herdr](https://herdr.dev) (`hc` and `herdr-app`), only for the agent features: the PR switcher starting a tour writer, comments reaching the tour's agent, Refresh. Without herdr the app turns those features off and says why; opening and reading an existing tour does not need it.
-
-## Install
-
-### Let your agent do it
+## Install with your agent
 
 Paste this into Claude Code (or any coding agent with a shell):
 
@@ -58,6 +18,47 @@ Install guided-review (https://github.com/ekvedaras/guided-review) for me from i
 ```
 
 To update later, paste the same prompt again: each version unpacks into its own folder and the links move to the newest.
+
+Other ways to install, and what it needs: [Requirements](#requirements) and [Install](#install).
+
+## Tour
+
+The tour of [ekvedaras/guided-review#12](https://github.com/ekvedaras/guided-review/pull/12), the PR that added the Settings page.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-summary-dark.png">
+  <img alt="The tour summary with the PR description beside it and the list of steps on the left" src="docs/assets/tour-summary.png">
+</picture>
+
+The summary and the PR description beside it. The sidebar lists the steps and how far you have read.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-diagram-dark.png">
+  <img alt="A step with a diagram and the diff it explains" src="docs/assets/tour-step-diagram.png">
+</picture>
+
+A step: what to check, a diagram, then the diff pieces it talks about. Changed words are marked inside rewritten lines.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tour-step-thread-dark.png">
+  <img alt="A comment box inside the diff" src="docs/assets/tour-step-thread.png">
+</picture>
+
+Comments and GitHub review threads sit inline in the diff, in a box that splits it. Add a comment to your review, send it now, or hand it to the tour's agent.
+
+## Video
+
+https://github.com/user-attachments/assets/eca2f93c-4b15-4f71-8c8b-e71c33fa7c4c
+
+## Requirements
+
+- macOS (the only platform tested; CI runs on macOS).
+- A Rust toolchain, stable (edition 2024), only to build from source.
+- [`gh`](https://cli.github.com), logged in. The app reads the token from `gh auth token`.
+- [Claude Code](https://claude.com/claude-code) (`claude`), which writes the tours.
+- [herdr](https://herdr.dev) (`hc` and `herdr-app`), only for the agent features: the PR switcher starting a tour writer, comments reaching the tour's agent, Refresh. Without herdr the app turns those features off and says why; opening and reading an existing tour does not need it.
+
+## Install
 
 ### Prebuilt (no Rust needed)
 
@@ -118,7 +119,9 @@ The skill writes the tour with the `guided-review` CLI and opens it. To open an 
 guided-review open <pr-url>
 ```
 
-Tours and app state live under `~/.guided-review/`. `guided-review --help` lists the other commands (`outline`, `show`, `check`, `repin`, `refresh`, `eval`).
+In the app, `→` or `J` (the Next button) goes on to the next step not read yet, `N` jumps to the next unread step from anywhere, `M` marks a step read, `⌘K` jumps to a step, file or action (Settings, Finish review, Restart app here, which `guided-review restart` also does), `?` lists every shortcut and `⌘W` closes the window and quits the app. With summary instructions set in Settings, the tour can also carry a reviewer summary; pictures it shows sit in the tour's own folder.
+
+Tours and app state live under `~/.guided-review/`. `guided-review --help` lists the other commands (`outline`, `show`, `check`, `repin`, `refresh`, `settings`, `restart`, `eval`).
 
 ## How it works
 
