@@ -342,6 +342,8 @@ impl PageRow {
                 matches!(line.kind, LineKind::Context { .. }).hash(&mut hasher);
                 line.wraps.hash(&mut hasher);
                 line.closes_piece.hash(&mut hasher);
+                line.rounded_top.hash(&mut hasher);
+                line.rounded_bottom.hash(&mut hasher);
             }
             Self::Thread {
                 view,
@@ -473,6 +475,7 @@ impl PageRows {
         let mut builder = RowsBuilder {
             rows: Vec::new(),
             under_lines: UnderLines::default(),
+            hung_until: None,
             facts,
             review,
         };
@@ -891,6 +894,8 @@ struct RowsBuilder<'a> {
     review: &'a Review,
     /// Taken out as their row is placed; what no row takes is dropped.
     under_lines: UnderLines,
+    /// Where the rows that hang under the last line ended, so a line right after them knows.
+    hung_until: Option<usize>,
 }
 
 impl RowsBuilder<'_> {
@@ -1124,10 +1129,9 @@ impl RowsBuilder<'_> {
                     self.rows.push(PageRow::PieceMarker(Rc::new(marker)));
                 }
                 let here = self.under_lines.take_at(&line.location);
-                self.rows.push(PageRow::Line(Rc::new(DiffRowLine::of(
-                    line.clone(),
-                    review.wraps_lines(),
-                ))));
+                let mut row = DiffRowLine::of(line.clone(), review.wraps_lines());
+                row.rounded_top = self.hung_until == Some(self.rows.len());
+                self.rows.push(PageRow::Line(Rc::new(row)));
                 self.hang(here);
             }
         }
@@ -1192,10 +1196,21 @@ impl RowsBuilder<'_> {
         self.rows.push(PageRow::PieceEnd { after_line });
     }
 
+    /// The line above ends its colour in rounded corners, and so does the next line start, if it comes
+    /// right after.
     fn hang(&mut self, here: Vec<UnderLine>) {
+        if here.is_empty() {
+            return;
+        }
+        if let Some(PageRow::Line(line)) = self.rows.last_mut()
+            && let Some(line) = Rc::get_mut(line)
+        {
+            line.rounded_bottom = true;
+        }
         let (review, facts) = (self.review, self.facts);
         self.rows
             .extend(here.into_iter().map(|item| item.into_row(review, facts)));
+        self.hung_until = Some(self.rows.len());
     }
 }
 

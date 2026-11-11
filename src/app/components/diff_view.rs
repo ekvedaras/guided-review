@@ -18,7 +18,7 @@ use crate::viewer::{
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
-use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, INNER_RADIUS, Tone};
 
 /// What a gap row asks for: a few more lines from one side, or every hidden line.
 pub enum GapAsk<'a> {
@@ -85,6 +85,10 @@ pub struct DiffRowLine {
     pub wraps: bool,
     /// The last row of its box: it draws the box's bottom edge, so its colour runs into the corners.
     pub closes_piece: bool,
+    /// Something hangs under it, like a thread: its colour ends in rounded corners there.
+    pub rounded_bottom: bool,
+    /// It comes right after something that hangs under the line above.
+    pub rounded_top: bool,
 }
 
 impl DiffRowLine {
@@ -121,6 +125,8 @@ impl DiffRowLine {
             location: line.location,
             kind: line.kind,
             closes_piece: false,
+            rounded_bottom: false,
+            rounded_top: false,
         }
     }
 }
@@ -236,6 +242,12 @@ impl RenderOnce for DiffRow {
             LineKind::Added => colors.added_gutter,
             LineKind::Context { .. } => colors.background,
         };
+        // At the box's end the colour fills the box's corner inside its 1 px edge.
+        let bottom_radius = if line.closes_piece {
+            Some(px(CARD_RADIUS - 1.))
+        } else {
+            line.rounded_bottom.then_some(px(INNER_RADIUS))
+        };
         let gutter = div()
             .id(SharedString::from(format!(
                 "gutter-{}-{:?}-{}",
@@ -256,9 +268,10 @@ impl RenderOnce for DiffRow {
             }))
             .on_click(move |_, _, cx| open_code(&link, cx))
             .whitespace_nowrap()
-            .when(line.closes_piece, |gutter| {
-                gutter.rounded_bl(px(CARD_RADIUS))
+            .when(line.rounded_top, |gutter| {
+                gutter.rounded_tl(px(INNER_RADIUS))
             })
+            .when_some(bottom_radius, Styled::rounded_bl)
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self
@@ -305,20 +318,26 @@ impl RenderOnce for DiffRow {
                     on_gesture(RowGesture::Over, &location, window, cx);
                 })
             });
-        let row = match line.kind {
-            _ if self.is_selected => row.bg(colors.current),
-            LineKind::Removed => row.bg(colors.removed_line),
-            LineKind::Added => row.bg(colors.added_line),
-            LineKind::Context { .. } => row,
+        // The colour is a layer inside the box's edges, so it can round off where a thread breaks the
+        // code while the box's sides run straight past.
+        let fill = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .when(line.rounded_top, |fill| fill.rounded_t(px(INNER_RADIUS)))
+            .when_some(bottom_radius, Styled::rounded_b);
+        let fill = match line.kind {
+            _ if self.is_selected => fill.bg(colors.current),
+            LineKind::Removed => fill.bg(colors.removed_line),
+            LineKind::Added => fill.bg(colors.added_line),
+            LineKind::Context { .. } => fill,
         };
         row.when(line.closes_piece, |row| {
             row.border_b_1()
                 .rounded_b(px(CARD_RADIUS))
                 .shadow(colors.card_shadow())
         })
-        .child(gutter)
-        .child(comment_button)
-        .child(code)
+        .child(fill.child(gutter).child(comment_button).child(code))
     }
 }
 

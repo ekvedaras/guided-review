@@ -110,6 +110,7 @@ async fn shoot(
             break;
         }
     }
+    camera.wait_for_loading(cx).await?;
     layout.update(cx, OneStepLayout::go_to_first_open_code)?;
     for scene in Scene::ALL {
         layout.update_in(cx, |layout, window, cx| layout.stage(scene, window, cx))?;
