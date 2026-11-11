@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{
@@ -6,6 +7,71 @@ use pulldown_cmark::{
 
 use super::highlight::{Span, highlight_snippet};
 use crate::image_facts;
+
+const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH.union(Options::ENABLE_TASKLISTS);
+
+/// A file of the tour's `folder` that `url` names by a plain relative path.
+fn file_in(folder: &Path, url: &str) -> Option<PathBuf> {
+    let is_plain = !url.is_empty()
+        && !url.contains("://")
+        && !url.starts_with(['/', '#'])
+        && !url.split('/').any(|part| part == "..");
+    let file = folder.join(url);
+    (is_plain && file.is_file()).then_some(file)
+}
+
+/// A picture or link of a markdown text that names a file of the tour's folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LocalFile {
+    /// Where the whole `![…](…)` or `[…](…)` stands in the text.
+    pub range: Range<usize>,
+    pub path: PathBuf,
+    /// The markdown between the brackets: a picture's alt text, a link's text.
+    pub text: String,
+    pub is_picture: bool,
+}
+
+/// The pictures and links of `source` that name files of `folder`, in reading order.
+pub(super) fn local_files(source: &str, folder: &Path) -> Vec<LocalFile> {
+    let mut found = Vec::new();
+    let mut open: Option<(LocalFile, Option<Range<usize>>)> = None;
+    let mut depth = 0_usize;
+    for (event, range) in Parser::new_ext(source, OPTIONS).into_offset_iter() {
+        match (&event, open.as_mut()) {
+            (Event::Start(Tag::Image { .. } | Tag::Link { .. }), Some(_)) => depth += 1,
+            (Event::Start(Tag::Image { dest_url, .. } | Tag::Link { dest_url, .. }), None) => {
+                open = file_in(folder, dest_url).map(|path| {
+                    let is_picture = matches!(event, Event::Start(Tag::Image { .. }));
+                    let file = LocalFile {
+                        range: range.clone(),
+                        path,
+                        text: String::new(),
+                        is_picture,
+                    };
+                    (file, None)
+                });
+            }
+            (Event::End(TagEnd::Image | TagEnd::Link), Some(_)) if depth > 0 => depth -= 1,
+            (Event::End(TagEnd::Image | TagEnd::Link), Some(_)) => {
+                if let Some((mut file, inner)) = open.take() {
+                    inner
+                        .and_then(|inner| source.get(inner))
+                        .unwrap_or_default()
+                        .clone_into(&mut file.text);
+                    found.push(file);
+                }
+            }
+            (_, Some((_, inner))) => {
+                *inner = Some(match inner.take() {
+                    Some(inner) => inner.start..range.end,
+                    None => range,
+                });
+            }
+            (_, None) => {}
+        }
+    }
+    found
+}
 
 /// The part of GitHub-flavoured markdown that review comments use, as a tree the views can draw.
 /// Everything else (tables, raw HTML other than `<details>`, `<img>`, `<br>`, `<a>`) shows as plain text.
@@ -71,12 +137,11 @@ impl Markdown {
     }
 
     fn parse_in(source: &str, files: Option<&Path>) -> Self {
-        let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
         let mut builder = Builder {
             files: files.map(Path::to_path_buf),
             ..Builder::default()
         };
-        for event in TextMergeStream::new(Parser::new_ext(source, options)) {
+        for event in TextMergeStream::new(Parser::new_ext(source, OPTIONS)) {
             builder.event(event);
         }
         builder.finish()
@@ -89,6 +154,15 @@ impl Markdown {
             block.collect_diagrams(&mut diagrams);
         }
         diagrams
+    }
+
+    /// The pictures from the tour's folder, in reading order, with their alt text.
+    pub fn pictures(&self) -> Vec<(&Path, &str)> {
+        let mut pictures = Vec::new();
+        for block in &self.blocks {
+            block.collect_pictures(&mut pictures);
+        }
+        pictures
     }
 
     /// For text shown under a title of its own: its headings rank one level lower.
@@ -126,6 +200,20 @@ impl Block {
             Self::List { items, .. } => items.iter().for_each(|item| collect(item)),
             Self::Quote(blocks) | Self::Details { body: blocks, .. } => collect(blocks),
             block => diagrams.extend(block.diagram()),
+        }
+    }
+
+    fn collect_pictures<'a>(&'a self, pictures: &mut Vec<(&'a Path, &'a str)>) {
+        let mut collect = |blocks: &'a [Self]| {
+            for block in blocks {
+                block.collect_pictures(pictures);
+            }
+        };
+        match self {
+            Self::List { items, .. } => items.iter().for_each(|item| collect(item)),
+            Self::Quote(blocks) | Self::Details { body: blocks, .. } => collect(blocks),
+            Self::Picture { path, alt, .. } => pictures.push((path, alt)),
+            _ => {}
         }
     }
 
@@ -592,15 +680,8 @@ impl Builder {
         });
     }
 
-    /// A file of the tour's folder that `url` names by a plain relative path.
     fn file_named(&self, url: &str) -> Option<PathBuf> {
-        let folder = self.files.as_ref()?;
-        let is_plain = !url.is_empty()
-            && !url.contains("://")
-            && !url.starts_with(['/', '#'])
-            && !url.split('/').any(|part| part == "..");
-        let file = folder.join(url);
-        (is_plain && file.is_file()).then_some(file)
+        file_in(self.files.as_ref()?, url)
     }
 
     fn picture(path: PathBuf, alt: &str) -> Result<Block, PathBuf> {

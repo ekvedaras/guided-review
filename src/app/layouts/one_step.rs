@@ -1,9 +1,9 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
-    Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, list, px,
+    AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
+    Focusable, FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
+    ParentElement, Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
+    Subscription, Window, actions, div, list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -43,7 +43,7 @@ use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
-    InlineMarkdown, MarkdownView, bullet, parsed_markdown,
+    InlineMarkdown, MarkdownView, UnderPicture, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
     BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
@@ -72,7 +72,7 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
-    AskAt, DESCRIPTION_KEY, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows,
+    AskAt, DESCRIPTION_KEY, PageRow, ReviewerSummaryRow, RouteStopRow, ScreenFooter, SelectedRows,
     StepHeading, StepIntro, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
@@ -84,9 +84,9 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
-    LineLocation, NextScreen, NotesButton, PaletteAction, Place, QueuedComment, ReadProgress,
-    Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review, Screen, ScreenTravel, SendMode,
-    StepId, ThreadId, ThreadView, ToastTone, TourLead, Travel,
+    LineLocation, NextScreen, NoteSubject, NotesButton, PaletteAction, Place, QueuedComment,
+    ReadProgress, Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review, Screen, ScreenTravel,
+    SendMode, StepId, ThreadId, ThreadView, ToastTone, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1665,13 +1665,9 @@ impl OneStepLayout {
                     &summary_bullet,
                 )))
                 .into_any_element(),
-            PageRow::ReviewerSummary(summary) => self
-                .markdown_card(
-                    "REVIEWER SUMMARY",
-                    MarkdownView::new("reviewer-summary", summary),
-                    cx,
-                )
-                .into_any_element(),
+            PageRow::ReviewerSummary(summary) => {
+                self.reviewer_summary(&summary, cx).into_any_element()
+            }
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepIntro(intro) => self.step_intro(&intro, index, cx).into_any_element(),
             PageRow::RepinNotes {
@@ -1877,12 +1873,42 @@ impl OneStepLayout {
             .into_any_element()
     }
 
+    fn reviewer_summary(&self, summary: &ReviewerSummaryRow, cx: &mut Context<Self>) -> Div {
+        let colors = Colors::active(cx);
+        let (session, buttons) = (self.session.clone(), Rc::clone(&summary.picture_buttons));
+        let under_picture: UnderPicture = Rc::new(move |path, cx| {
+            let state = buttons.get(path)?;
+            Some(
+                notes_button(
+                    &Colors::active(cx),
+                    SharedString::from(format!("picture-to-notes-{}", path.display())),
+                    state,
+                    NotesLabels::PICTURE,
+                    session.clone(),
+                    NoteSubject::SummaryPicture(path.to_owned()),
+                )
+                .into_any_element(),
+            )
+        });
+        let markdown = MarkdownView::new("reviewer-summary", Rc::clone(&summary.markdown))
+            .under_each_picture(under_picture);
+        self.markdown_card("REVIEWER SUMMARY", markdown, cx)
+            .child(notes_button(
+                &colors,
+                "summary-to-notes",
+                &summary.notes_button,
+                NotesLabels::SUMMARY,
+                self.session.clone(),
+                NoteSubject::ReviewerSummary,
+            ))
+    }
+
     fn markdown_card(
         &self,
         label: &'static str,
         markdown: MarkdownView,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> Div {
         let colors = Colors::active(cx);
         div()
             .pt_6()
@@ -1988,7 +2014,14 @@ impl OneStepLayout {
                 .flex_col()
                 .gap_2()
                 .child(DiagramView::new(self.diagrams.clone()))
-                .child(self.notes_button(diagram, cx))
+                .child(notes_button(
+                    &Colors::active(cx),
+                    "diagram-to-notes",
+                    &diagram.notes_button,
+                    NotesLabels::DIAGRAM,
+                    self.session.clone(),
+                    NoteSubject::StepDiagram(diagram.step.clone()),
+                ))
         });
         div()
             .pb_4()
@@ -1999,57 +2032,6 @@ impl OneStepLayout {
             .gap_y_4()
             .child(text)
             .children(diagram)
-    }
-
-    fn notes_button(&self, diagram: &DiagramRow, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = Colors::active(cx);
-        let small = |kind, icon| {
-            button(&colors, "diagram-to-notes", kind, ButtonSize::Small).child(button_icon(
-                &colors,
-                kind,
-                ButtonSize::Small,
-                icon,
-            ))
-        };
-        let session = self.session.clone();
-        let step = diagram.step.clone();
-        let add = small(ButtonKind::Ghost, Icon::FilePlus)
-            .tooltip(tooltip(|_| {
-                "Put this diagram under Notes in the PR description".into()
-            }))
-            .on_click(move |_, _, cx| {
-                session.update(cx, |session, cx| session.add_diagram_to_notes(&step, cx));
-            })
-            .child("Add to PR notes");
-        let (shown, failure) = match &diagram.notes_button {
-            NotesButton::Add => (add, None),
-            NotesButton::Adding => (
-                small(ButtonKind::Ghost, Icon::FilePlus).child("Adding to PR notes…"),
-                None,
-            ),
-            NotesButton::InNotes => (
-                small(ButtonKind::Done, Icon::Check).child("In PR notes"),
-                None,
-            ),
-            NotesButton::Failed(reason) => (
-                add,
-                Some(
-                    div()
-                        .flex()
-                        .gap_1()
-                        .child("Could not add it:")
-                        .child(SharedString::from(Arc::clone(reason))),
-                ),
-            ),
-        };
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_xs()
-            .text_color(colors.muted_text)
-            .child(shown)
-            .children(failure)
     }
 
     fn ask_at(&self, ask: &AskAt, kind: ButtonKind, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -2679,7 +2661,7 @@ enum Onward {
 
 fn tool_button(
     colors: &Colors,
-    id: impl Into<gpui::ElementId>,
+    id: impl Into<ElementId>,
     icon: Icon,
     label: &'static str,
 ) -> Stateful<Div> {
@@ -3032,4 +3014,88 @@ mod tests {
     fn a_page_that_fits_the_window_is_seen_whole() {
         assert_eq!(scrolled_share(px(0.), px(0.)), 1.);
     }
+}
+
+/// The words of a button that puts something under Notes in the PR description.
+#[derive(Clone, Copy)]
+struct NotesLabels {
+    add: &'static str,
+    adding: &'static str,
+    done: &'static str,
+    tooltip: &'static str,
+}
+
+impl NotesLabels {
+    const DIAGRAM: Self = Self {
+        add: "Add to PR notes",
+        adding: "Adding to PR notes…",
+        done: "In PR notes",
+        tooltip: "Put this diagram under Notes in the PR description, folded",
+    };
+    const PICTURE: Self = Self {
+        add: "Add to PR notes",
+        adding: "Uploading to PR notes…",
+        done: "In PR notes",
+        tooltip: "Upload this picture to GitHub and put it under Notes in the PR description, folded",
+    };
+    const SUMMARY: Self = Self {
+        add: "Add summary to PR notes",
+        adding: "Adding summary to PR notes…",
+        done: "Summary in PR notes",
+        tooltip: "Put this summary under Notes in the PR description, folded, its pictures uploaded to GitHub",
+    };
+}
+
+fn notes_button(
+    colors: &Colors,
+    id: impl Into<ElementId>,
+    state: &NotesButton,
+    labels: NotesLabels,
+    session: Entity<ReviewSession>,
+    subject: NoteSubject,
+) -> Div {
+    let id = id.into();
+    let small = |kind, icon| {
+        button(colors, id.clone(), kind, ButtonSize::Small).child(button_icon(
+            colors,
+            kind,
+            ButtonSize::Small,
+            icon,
+        ))
+    };
+    let add = small(ButtonKind::Ghost, Icon::FilePlus)
+        .tooltip(tooltip(move |_| labels.tooltip.into()))
+        .on_click(move |_, _, cx| {
+            session.update(cx, |session, cx| session.add_to_notes(&subject, cx));
+        })
+        .child(labels.add);
+    let (shown, failure) = match state {
+        NotesButton::Add => (add, None),
+        NotesButton::Adding => (
+            small(ButtonKind::Ghost, Icon::FilePlus).child(labels.adding),
+            None,
+        ),
+        NotesButton::InNotes => (
+            small(ButtonKind::Done, Icon::Check).child(labels.done),
+            None,
+        ),
+        NotesButton::Failed(reason) => (
+            add,
+            Some(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child("Could not add it:")
+                    .child(SharedString::from(Arc::clone(reason))),
+            ),
+        ),
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_xs()
+        .text_color(colors.muted_text)
+        .child(shown)
+        .children(failure)
 }

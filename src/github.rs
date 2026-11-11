@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -7,11 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::file_path::FilePath;
+use crate::image_facts;
 use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::viewer::{
-    CommentId, CommentPlace, GitHubError, NoAccess, PullRequestDescriptionPort,
+    CommentId, CommentPlace, GitHubError, NoAccess, PictureUploadPort, PullRequestDescriptionPort,
     PullRequestTipsPort, Reaction, ReactionChange, ReactionCount, Resolution, ReviewOutcome,
     ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
     SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
@@ -21,6 +23,8 @@ use crate::viewer::{
 #[derive(Clone)]
 pub struct GitHub {
     api: String,
+    /// Where pictures go up, a server of its own on github.com.
+    uploads: String,
     token: Option<String>,
     /// GraphQL mutations address a PR by node id, so it is looked up once per PR.
     pull_request_ids: Arc<Mutex<HashMap<String, String>>>,
@@ -83,12 +87,19 @@ fn capitalized(word: &str) -> String {
 
 impl GitHub {
     pub fn from_env() -> Self {
-        Self {
-            api: std::env::var("GUIDED_REVIEW_GITHUB_API")
-                .unwrap_or_else(|_| "https://api.github.com".to_owned()),
-            token: token_from_gh_cli().or_else(|| std::env::var("GITHUB_TOKEN").ok()),
-            pull_request_ids: Arc::default(),
-            viewer_teams: Arc::default(),
+        let token = token_from_gh_cli().or_else(|| std::env::var("GITHUB_TOKEN").ok());
+        match std::env::var("GUIDED_REVIEW_GITHUB_API") {
+            Ok(api) => Self {
+                token,
+                ..Self::without_token_at(&api)
+            },
+            Err(_) => Self {
+                api: "https://api.github.com".to_owned(),
+                uploads: "https://uploads.github.com".to_owned(),
+                token,
+                pull_request_ids: Arc::default(),
+                viewer_teams: Arc::default(),
+            },
         }
     }
 
@@ -103,6 +114,7 @@ impl GitHub {
     pub fn without_token_at(api: &str) -> Self {
         Self {
             api: api.to_owned(),
+            uploads: api.to_owned(),
             token: None,
             pull_request_ids: Arc::default(),
             viewer_teams: Arc::default(),
@@ -352,6 +364,59 @@ impl PullRequestDescriptionPort for GitHub {
         )
         .with_context(|| format!("could not change the description of {pr} on GitHub"))?;
         Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct RepositoryJson {
+    id: u64,
+}
+
+#[derive(Deserialize)]
+struct UploadedJson {
+    url: String,
+}
+
+/// GitHub's own drag-and-drop store, so the picture is seen only by those who can see the repository.
+/// It is not in GitHub's documented API, but it takes the token `gh` holds.
+impl PictureUploadPort for GitHub {
+    fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String> {
+        let name = picture
+            .file_name()
+            .context("a picture needs a file name")?
+            .to_string_lossy()
+            .into_owned();
+        let media_type = image_facts::media_type(&name)
+            .with_context(|| format!("{name} is no picture GitHub takes"))?;
+        let bytes = std::fs::read(picture).with_context(|| format!("could not read {name}"))?;
+        let token = self
+            .token
+            .as_ref()
+            .context("no GitHub token: run `gh auth login` or set GITHUB_TOKEN")?;
+        let repository: RepositoryJson = self
+            .get(&format!("repos/{}", pr.repo), "application/vnd.github+json")?
+            .body_mut()
+            .read_json()?;
+        let uploaded: UploadedJson =
+            ureq::post(format!("{}/user-attachments/assets", self.uploads))
+                .query("name", &name)
+                .query("content_type", media_type)
+                .query("repository_id", repository.id.to_string())
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/json")
+                .header("Content-Type", media_type)
+                .header("User-Agent", "guided-review")
+                .send(bytes.as_slice())
+                .map_err(|error| match error {
+                    ureq::Error::StatusCode(404) => anyhow::anyhow!(
+                        "GitHub refused the upload of {name}: the token needs push access to {}",
+                        pr.repo
+                    ),
+                    error => anyhow::Error::from(error).context(format!("could not upload {name}")),
+                })?
+                .body_mut()
+                .read_json()?;
+        Ok(uploaded.url)
     }
 }
 

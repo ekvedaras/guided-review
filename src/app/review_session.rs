@@ -25,9 +25,9 @@ use crate::code_source::CodeSource;
 use crate::viewer::{
     AgentReplied, AgentStatus, Ask, Audience, CommentId, CommentOutcome, CommentPlace,
     CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache,
-    LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
-    SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, ToastTone,
-    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    LineLocation, NoteSubject, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
+    ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
+    ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
     follow_outdated,
 };
 
@@ -942,8 +942,8 @@ impl ReviewSession {
         ));
     }
 
-    pub fn add_diagram_to_notes(&mut self, step: &StepId, cx: &mut Context<Self>) {
-        let Some(request) = self.change(cx, |review| review.diagram_to_notes(step)) else {
+    pub fn add_to_notes(&mut self, subject: &NoteSubject, cx: &mut Context<Self>) {
+        let Some(request) = self.change(cx, |review| review.start_adding_to_notes(subject)) else {
             return;
         };
         let github = Arc::clone(&self.github);
@@ -951,8 +951,7 @@ impl ReviewSession {
             cx,
             move || request.run(github.as_ref()),
             |this, outcome, cx| {
-                if let Err(error) = this.change(cx, |review| review.apply_diagram_to_notes(outcome))
-                {
+                if let Err(error) = this.change(cx, |review| review.apply_to_notes(outcome)) {
                     eprintln!("warning: could not keep the PR's description: {error:#}");
                 }
             },

@@ -64,7 +64,7 @@
 
 **Seen mark**: The 👀 the viewer puts on the reviewer's comment on GitHub when its hand-off is delivered to the tour agent. The agent's first reply takes it off; so does the viewer when the agent ends without answering. When GitHub refuses either, the line under the thread says so.
 
-**PR notes**: The `Notes` section of the PR description. A step's diagram can be added to it, collapsed under the step's title, from the button under the diagram; a description with no such section gets one at its end.
+**PR notes**: The `Notes` section of the PR description. A step's diagram, a picture of the reviewer summary, or the whole reviewer summary can be added to it, each folded in a `<details>`, from the button under it; a description with no such section gets one at its end. Pictures are uploaded to GitHub first, where only those who can see the repository can open them; the summary's links to other files of the tour's folder become plain text. A hidden comment in the fold tells the app a picture or summary is there already.
 
 **Shortcuts sheet**: The overlay that lists every key the app answers, by heading (Navigate, Read, Comment, View, App), opened with `?`. It reads the same table the keys are bound from. Avoid: cheat sheet, help.
 

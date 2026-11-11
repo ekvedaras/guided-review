@@ -12,7 +12,6 @@ mod ask_target;
 mod code_link;
 mod comment_desk;
 mod comments;
-mod diagram_notes;
 mod diff_display;
 mod diff_fence;
 mod display_options;
@@ -26,6 +25,7 @@ mod markdown;
 mod new_commits;
 mod outdated_lines;
 mod ports;
+mod pr_notes;
 mod pr_switcher;
 mod problems;
 mod reactions;
@@ -64,9 +64,6 @@ pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
     CommentResult, QueuedComment, SendMode,
 };
-pub use diagram_notes::{
-    DiagramToNotes, DiagramToNotesOutcome, NotesButton, with_diagram_in_notes,
-};
 pub use diff_display::{
     DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext, hidden_lines_after,
     hidden_lines_before,
@@ -93,10 +90,11 @@ pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess,
+    AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
     PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
     ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
+pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
 pub use problems::{Problem, Read};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};

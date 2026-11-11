@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -7,10 +8,10 @@ use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentId, CommentPlace, GitHubError,
-    NoAccess, PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange,
-    ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome,
-    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview,
-    ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    NoAccess, PictureUploadPort, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
+    ReactionChange, ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -71,6 +72,10 @@ pub enum GitHubCall {
     SetDescription {
         pr: PullRequestUrl,
         body: String,
+    },
+    UploadPicture {
+        pr: PullRequestUrl,
+        name: String,
     },
 }
 
@@ -274,6 +279,19 @@ impl PullRequestDescriptionPort for FakeGitHub {
         self.fail_if_connection_lost()?;
         body.clone_into(&mut self.description.lock().unwrap());
         Ok(())
+    }
+}
+
+impl PictureUploadPort for FakeGitHub {
+    /// The address is the file's name under GitHub's attachments, so a test can tell pictures apart.
+    fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String> {
+        let name = picture.file_name().unwrap().to_string_lossy().into_owned();
+        self.sent.record(GitHubCall::UploadPicture {
+            pr: pr.clone(),
+            name: name.clone(),
+        });
+        self.fail_if_connection_lost()?;
+        Ok(format!("https://github.com/user-attachments/assets/{name}"))
     }
 }
 

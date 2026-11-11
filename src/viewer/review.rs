@@ -21,7 +21,6 @@ use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
 };
-use super::diagram_notes::{DiagramNotes, DiagramToNotes, DiagramToNotesOutcome, NotesButton};
 use super::diff_display::HiddenLines;
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
 use super::display_options::DisplayOptions;
@@ -40,6 +39,7 @@ use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
 use super::ports::{AgentLaunch, GitHubError};
+use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::problems::{Problem, Read};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
@@ -239,7 +239,7 @@ pub struct Review {
     working_copy: WorkingCopy,
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
-    diagram_notes: DiagramNotes,
+    pr_notes: PrNotes,
     saves: Arc<Saves>,
 }
 
@@ -310,7 +310,7 @@ impl Review {
             working_copy: WorkingCopy::Elsewhere,
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
-            diagram_notes: DiagramNotes::default(),
+            pr_notes: PrNotes::default(),
             saves: Arc::default(),
         })
     }
@@ -466,30 +466,52 @@ impl Review {
         (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
     }
 
-    /// `None` when the step shows no diagram.
-    pub fn diagram_notes_button(&self, step: &StepId) -> Option<NotesButton> {
-        let diagram = self.step(step)?.diagram.as_deref()?;
+    /// `None` when the tour has no such diagram, picture or summary.
+    pub fn notes_button(&self, subject: &NoteSubject) -> Option<NotesButton> {
+        let note = self.note(subject)?;
         Some(
-            self.diagram_notes
-                .button(step, self.state.pr_description(), diagram),
+            self.pr_notes
+                .button(subject, self.state.pr_description(), &note),
         )
     }
 
-    /// `None` while the step's diagram is being added, or when the description holds it.
-    pub fn diagram_to_notes(&mut self, step: &StepId) -> Option<DiagramToNotes> {
-        if self.diagram_notes_button(step)? == NotesButton::InNotes {
+    /// `None` while the subject is being added, or when the description holds it.
+    pub fn start_adding_to_notes(&mut self, subject: &NoteSubject) -> Option<ToNotes> {
+        let note = self.note(subject)?;
+        if note.is_in(self.state.pr_description()) {
             return None;
         }
-        let found = self.tour.find_step(step)?;
-        let diagram = found.diagram.as_deref()?;
-        self.diagram_notes
-            .start(&self.pr, step, &found.title, diagram)
+        self.pr_notes.start(&self.pr, subject, note)
     }
 
-    pub fn apply_diagram_to_notes(&mut self, outcome: DiagramToNotesOutcome) -> anyhow::Result<()> {
-        match self.diagram_notes.finish(outcome) {
+    pub fn apply_to_notes(&mut self, outcome: ToNotesOutcome) -> anyhow::Result<()> {
+        match self.pr_notes.finish(outcome) {
             Some(description) => self.set_pr_description(&description),
             None => Ok(()),
+        }
+    }
+
+    fn note(&self, subject: &NoteSubject) -> Option<Note> {
+        match subject {
+            NoteSubject::StepDiagram(step) => {
+                let found = self.step(step)?;
+                Some(Note::diagram(&found.title, found.diagram.as_deref()?))
+            }
+            NoteSubject::SummaryPicture(path) => {
+                let summary = self.reviewer_summary()?;
+                let (_, alt) = summary
+                    .pictures()
+                    .into_iter()
+                    .find(|(picture, _)| picture == path)?;
+                Note::picture(path, alt)
+            }
+            NoteSubject::ReviewerSummary => {
+                let summary = &self.tour.reviewer_summary;
+                if summary.trim().is_empty() {
+                    return None;
+                }
+                Note::reviewer_summary(summary, self.tour_files.as_deref())
+            }
         }
     }
 

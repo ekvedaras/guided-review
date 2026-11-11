@@ -8,9 +8,10 @@
 //! Rows on screen are measured on every frame anyway, so the key matters for the rows off screen.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::SharedString;
@@ -26,9 +27,9 @@ use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
     CodeLink, CommentPlace, CommentProblem, FileBlock, HiddenLines, JumpPlace, JumpTarget,
-    LineKind, LineLocation, NextScreen, NotesButton, PieceDiff, Place, QueuedComment, Review,
-    RowSelection, SafetyNetPage, Screen, StepId, StepPage, SummaryStats, ThreadView, TourLead,
-    hidden_lines_after, hidden_lines_before,
+    LineKind, LineLocation, Markdown, NextScreen, NoteSubject, NotesButton, PieceDiff, Place,
+    QueuedComment, Review, RowSelection, SafetyNetPage, Screen, StepId, StepPage, SummaryStats,
+    ThreadView, TourLead, hidden_lines_after, hidden_lines_before,
 };
 
 /// An ask button and what it asks about.
@@ -167,6 +168,32 @@ pub struct BinaryFileRow {
     pub link: CodeLink,
 }
 
+pub struct ReviewerSummaryRow {
+    pub markdown: Rc<PreparedMarkdown>,
+    pub notes_button: NotesButton,
+    pub picture_buttons: Rc<BTreeMap<PathBuf, NotesButton>>,
+}
+
+impl ReviewerSummaryRow {
+    fn of(review: &Review, summary: Markdown) -> Self {
+        let picture_buttons = summary
+            .pictures()
+            .into_iter()
+            .filter_map(|(path, _)| {
+                let button = review.notes_button(&NoteSubject::SummaryPicture(path.to_owned()))?;
+                Some((path.to_owned(), button))
+            })
+            .collect();
+        Self {
+            notes_button: review
+                .notes_button(&NoteSubject::ReviewerSummary)
+                .unwrap_or(NotesButton::Add),
+            picture_buttons: Rc::new(picture_buttons),
+            markdown: Rc::new(PreparedMarkdown::of(summary)),
+        }
+    }
+}
+
 pub struct DiagramRow {
     pub step: StepId,
     pub notes_button: NotesButton,
@@ -219,7 +246,7 @@ pub enum PageRow {
     RouteHeading,
     RouteStop(Rc<RouteStopRow>),
     TourLead(Rc<TourLead>),
-    ReviewerSummary(Rc<PreparedMarkdown>),
+    ReviewerSummary(Rc<ReviewerSummaryRow>),
     /// The summary's rows down to the reviewer summary, with the PR description as a column of its own,
     /// so a wide window puts the description beside them.
     SummaryColumns(Rc<SummaryColumns>),
@@ -286,7 +313,11 @@ impl PageRow {
                 heading.title.hash(&mut hasher);
                 heading.number.hash(&mut hasher);
             }
-            Self::ReviewerSummary(summary) => summary.hash(&mut hasher),
+            Self::ReviewerSummary(summary) => {
+                summary.markdown.hash(&mut hasher);
+                summary.notes_button.hash(&mut hasher);
+                summary.picture_buttons.hash(&mut hasher);
+            }
             Self::SummaryColumns(columns) => {
                 for row in &columns.summary {
                     row.key().0.hash(&mut hasher);
@@ -809,9 +840,9 @@ fn summary_rows(review: &Review, page: &mut Vec<PageRow>) {
         rows.push(PageRow::TourLead(Rc::new(lead)));
     }
     rows.extend(
-        review
-            .reviewer_summary()
-            .map(|summary| PageRow::ReviewerSummary(Rc::new(PreparedMarkdown::of(summary)))),
+        review.reviewer_summary().map(|summary| {
+            PageRow::ReviewerSummary(Rc::new(ReviewerSummaryRow::of(review, summary)))
+        }),
     );
     page.push(PageRow::SummaryColumns(Rc::new(SummaryColumns {
         summary: rows,
@@ -994,7 +1025,7 @@ impl RowsBuilder<'_> {
         let notes = Some(StepNotes::of(step)).filter(|notes| !notes.is_empty());
         let diagram_row = diagram
             .as_ref()
-            .and_then(|_| review.diagram_notes_button(&id))
+            .and_then(|_| review.notes_button(&NoteSubject::StepDiagram(id.clone())))
             .map(|notes_button| DiagramRow {
                 step: id.clone(),
                 notes_button,
@@ -1425,7 +1456,7 @@ mod tests {
             anchor: None,
             commented_lines: Arc::new([]),
             reply_draft: None,
-            edit_drafts: std::collections::BTreeMap::new(),
+            edit_drafts: BTreeMap::new(),
             hand_off_line: None,
             followed: None,
             failed_hand_off: None,
