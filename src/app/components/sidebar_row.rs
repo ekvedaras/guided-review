@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    Stateful, StatefulInteractiveElement, Styled, div, px,
+    SharedString, Stateful, StatefulInteractiveElement, Styled, div, px,
 };
 
 use super::chip::chip;
@@ -90,6 +90,18 @@ pub fn check_flag(colors: &Colors) -> impl IntoElement {
         .items_center()
         .tooltip(tooltip(|_| "Has something to check".into()))
         .child(sized_icon(Icon::Flag, colors.warning, px(12.)))
+}
+
+/// Small text after a row's label, centred on the label's first line like the badges.
+pub fn row_note(colors: &Colors, note: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .flex_none()
+        .h(px(LINE_HEIGHT))
+        .flex()
+        .items_center()
+        .text_xs()
+        .text_color(colors.muted_text)
+        .child(note.into())
 }
 
 /// A step the reviewer only needs to glance at.

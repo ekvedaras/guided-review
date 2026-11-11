@@ -58,7 +58,7 @@ use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
-    RowMark, check_flag, count_badge, sidebar_row, skim_chip,
+    RowMark, check_flag, count_badge, row_note, sidebar_row, skim_chip,
 };
 use crate::app::components::step_notes::note_label;
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -1237,16 +1237,13 @@ impl OneStepLayout {
                 this.change_review(cx, Review::go_to_safety_net);
             }))
             .child(div().flex_1().child(SafetyNetIntro::TITLE))
-            .child(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(match safety_net.pieces {
-                        1 => "1 piece".to_owned(),
-                        pieces => format!("{pieces} pieces"),
-                    }),
-            )
+            .child(row_note(
+                &colors,
+                match safety_net.pieces {
+                    1 => "1 piece".to_owned(),
+                    pieces => format!("{pieces} pieces"),
+                },
+            ))
             .children(count_badge(&colors, safety_net.thread_count))
         });
         let header = div()
