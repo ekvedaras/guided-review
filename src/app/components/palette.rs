@@ -624,6 +624,11 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(-6.), self.shadow.opacity(0.5).into()).blur_radius(px(20.))]
     }
 
+    /// The page lies on top of the sidebar and casts leftwards over it.
+    pub fn page_shadow(&self) -> Vec<BoxShadow> {
+        vec![BoxShadow::new(px(-2.), px(0.), self.shadow.opacity(0.6).into()).blur_radius(px(14.))]
+    }
+
     /// A bar pinned to the top of the page casts downwards over what scrolls under it.
     pub fn sticky_shadow(&self) -> Vec<BoxShadow> {
         vec![BoxShadow::new(px(0.), px(4.), self.shadow.opacity(0.35).into()).blur_radius(px(12.))]

@@ -52,7 +52,7 @@ use crate::app::components::motion::{
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
-    CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
+    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
 };
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
@@ -1318,9 +1318,6 @@ impl OneStepLayout {
             .h_full()
             .flex()
             .flex_col()
-            .bg(colors.sidebar_ground())
-            .border_r_1()
-            .border_color(colors.subtle_border)
             .text_sm()
             .child(
                 TitleBarArea::new("sidebar-title-bar", gpui::transparent_black())
@@ -1478,7 +1475,7 @@ impl OneStepLayout {
             -self.screen_list.scroll_px_offset_for_scrollbar().y,
             self.screen_list.max_offset_for_scrollbar().y,
         );
-        TitleBarArea::new("title-bar", colors.background)
+        TitleBarArea::new("title-bar", gpui::transparent_black())
             .edge(TitleBarEdge::Open)
             .child(
                 div()
@@ -2945,7 +2942,7 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
-            .bg(colors.background)
+            .bg(colors.sidebar_ground())
             .font_family(TEXT_FONT)
             .text_color(colors.text)
             .child(self.sidebar(cx))
@@ -2956,6 +2953,11 @@ impl Render for OneStepLayout {
                     .h_full()
                     .flex()
                     .flex_col()
+                    .bg(colors.background)
+                    .rounded_l(px(CARD_RADIUS))
+                    .border_l_1()
+                    .border_color(colors.subtle_border)
+                    .shadow(colors.page_shadow())
                     .child(self.title_bar(cx))
                     .children(old_head.clone().map(|old_head| {
                         NewCommitsBanner::new(
