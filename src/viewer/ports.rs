@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -32,6 +32,11 @@ pub trait PullRequestDescriptionPort: Send + Sync {
     fn pull_request_description(&self, pr: &PullRequestUrl) -> anyhow::Result<String>;
 
     fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
+}
+
+pub trait PictureUploadPort: Send + Sync {
+    /// The address GitHub keeps the picture at, open only to those who can see the PR's repository.
+    fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String>;
 }
 
 /// Reading review threads and acting on them: replies, resolving, reactions.
@@ -111,6 +116,7 @@ pub trait ReviewWritesPort: Send + Sync {
 pub trait GitHubPort:
     PullRequestTipsPort
     + PullRequestDescriptionPort
+    + PictureUploadPort
     + ViewedFilesPort
     + ReviewThreadsPort
     + ReviewWritesPort
@@ -120,6 +126,7 @@ pub trait GitHubPort:
 impl<T> GitHubPort for T where
     T: PullRequestTipsPort
         + PullRequestDescriptionPort
+        + PictureUploadPort
         + ViewedFilesPort
         + ReviewThreadsPort
         + ReviewWritesPort

@@ -26,6 +26,19 @@ pub fn is_image_path(path: &str) -> bool {
         })
 }
 
+/// The media type of a picture by its extension; `None` for a file that is no picture.
+pub fn media_type(path: &str) -> Option<&'static str> {
+    let extension = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    }
+}
+
 pub fn is_svg_path(path: &str) -> bool {
     Path::new(path)
         .extension()

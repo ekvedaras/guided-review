@@ -311,8 +311,18 @@ pub struct MarkdownView {
     markdown: Rc<PreparedMarkdown>,
     /// The lines the comment is on, so a suggestion block shows as a diff against them.
     commented_lines: Arc<[Arc<str>]>,
-    diagrams: DiagramSet,
+    embeds: Embeds,
 }
+
+/// What a body shows in place of its own text: drawn diagrams, and something under each picture.
+#[derive(Default)]
+struct Embeds {
+    diagrams: DiagramSet,
+    under_picture: Option<UnderPicture>,
+}
+
+/// Drawn under a picture of the tour's folder, by its path; `None` draws nothing.
+pub type UnderPicture = Rc<dyn Fn(&Path, &mut App) -> Option<AnyElement>>;
 
 impl MarkdownView {
     pub fn new(key: impl Into<SharedString>, markdown: Rc<PreparedMarkdown>) -> Self {
@@ -320,13 +330,18 @@ impl MarkdownView {
             key: key.into(),
             markdown,
             commented_lines: Arc::new([]),
-            diagrams: DiagramSet::default(),
+            embeds: Embeds::default(),
         }
     }
 
     /// Mermaid fences show as these diagrams; a fence with none in the set shows as code.
     pub fn with_diagrams(mut self, diagrams: DiagramSet) -> Self {
-        self.diagrams = diagrams;
+        self.embeds.diagrams = diagrams;
+        self
+    }
+
+    pub fn under_each_picture(mut self, under_picture: UnderPicture) -> Self {
+        self.embeds.under_picture = Some(under_picture);
         self
     }
 
@@ -342,7 +357,7 @@ impl RenderOnce for MarkdownView {
             &self.markdown.blocks,
             &self.key,
             &self.commented_lines,
-            &self.diagrams,
+            &self.embeds,
             window,
             cx,
         )
@@ -400,7 +415,7 @@ fn blocks(
     items: &[PreparedBlock],
     key: &str,
     commented_lines: &[Arc<str>],
-    diagrams: &DiagramSet,
+    embeds: &Embeds,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -413,7 +428,7 @@ fn blocks(
                 block,
                 &format!("{key}-{index}"),
                 commented_lines,
-                diagrams,
+                embeds,
                 window,
                 cx,
             )
@@ -428,7 +443,7 @@ fn block_element(
     block: &PreparedBlock,
     key: &str,
     commented_lines: &[Arc<str>],
-    diagrams: &DiagramSet,
+    embeds: &Embeds,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -460,14 +475,14 @@ fn block_element(
                         item,
                         &format!("{key}-{index}"),
                         &[],
-                        diagrams,
+                        embeds,
                         window,
                         cx,
                     )))
             }))
             .into_any_element(),
         PreparedBlock::Code { lines } => code_block(&colors, key, lines),
-        PreparedBlock::Diagram { source, lines } => match diagrams.get(source) {
+        PreparedBlock::Diagram { source, lines } => match embeds.diagrams.get(source) {
             Some(diagram) => DiagramView::new(diagram.clone()).into_any_element(),
             None => code_block(&colors, key, lines),
         },
@@ -483,11 +498,9 @@ fn block_element(
             .border_l_1()
             .border_color(colors.border)
             .text_color(colors.muted_text)
-            .child(blocks(inner, key, &[], diagrams, window, cx))
+            .child(blocks(inner, key, &[], embeds, window, cx))
             .into_any_element(),
-        PreparedBlock::Details { summary, body } => {
-            details(summary, body, key, diagrams, window, cx)
-        }
+        PreparedBlock::Details { summary, body } => details(summary, body, key, embeds, window, cx),
         PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
         PreparedBlock::Picture {
             path,
@@ -497,11 +510,22 @@ fn block_element(
             // A size of its own: one taken from the box's width is measured before that width is
             // known, and the room kept is then that of the widest picture.
             let width = widest.min(PICTURE_ROOM);
-            img(Arc::clone(path))
+            let picture = img(Arc::clone(path))
                 .w(px(width))
                 .h(px(width / ratio))
                 .max_w_full()
-                .rounded(px(INNER_RADIUS))
+                .rounded(px(INNER_RADIUS));
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(picture)
+                .children(
+                    embeds
+                        .under_picture
+                        .as_ref()
+                        .and_then(|under| under(path, cx)),
+                )
                 .into_any_element()
         }
     }
@@ -511,7 +535,7 @@ fn details(
     summary: &Rc<InlineText>,
     body: &[PreparedBlock],
     key: &str,
-    diagrams: &DiagramSet,
+    embeds: &Embeds,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -550,7 +574,7 @@ fn details(
         .flex_col()
         .gap_2()
         .child(header)
-        .when_open(open, blocks(body, key, &[], diagrams, window, cx))
+        .when_open(open, blocks(body, key, &[], embeds, window, cx))
         .into_any_element()
 }
 

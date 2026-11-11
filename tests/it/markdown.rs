@@ -318,8 +318,44 @@ fn tour_files() -> tempfile::TempDir {
     image::RgbaImage::new(40, 20)
         .save(folder.path().join("deadline.png"))
         .unwrap();
+    std::fs::write(
+        folder.path().join("flow.svg"),
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30"><rect width="60" height="30"/></svg>"#,
+    )
+    .unwrap();
+    std::fs::write(folder.path().join("broken.png"), "not a picture").unwrap();
     std::fs::write(folder.path().join("explainer.html"), "<html></html>").unwrap();
     folder
+}
+
+#[test]
+fn an_svg_saved_in_the_tours_folder_shows_as_a_picture_of_its_size() {
+    let files = tour_files();
+
+    let markdown = Markdown::parse_with_files("![flow](flow.svg)", files.path());
+
+    assert_eq!(
+        markdown.blocks[0],
+        Block::Picture {
+            path: files.path().join("flow.svg"),
+            alt: "flow".into(),
+            width: 60,
+            height: 30,
+        }
+    );
+}
+
+#[test]
+fn a_file_in_the_tours_folder_that_is_no_picture_is_a_link_that_opens_it() {
+    let files = tour_files();
+
+    let markdown = Markdown::parse_with_files("![broken](broken.png)", files.path());
+
+    let expected = format!("file://{}", files.path().join("broken.png").display());
+    assert_eq!(
+        paragraph_runs(&markdown.blocks[0])[0].link.as_deref(),
+        Some(expected.as_str())
+    );
 }
 
 #[test]
