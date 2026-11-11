@@ -8,7 +8,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{App, Context, EventEmitter, ListAlignment, ListState, Subscription, Task, Window, px};
+use gpui::{
+    App, Context, EventEmitter, ListAlignment, ListOffset, ListState, Subscription, Task, Window,
+    px,
+};
 
 use crate::app::components::image_row::ImagePictures;
 use crate::app::components::markdown_view::OpenDetails;
@@ -585,6 +588,19 @@ impl ReviewSession {
         })
     }
 
+    /// GPUI's splice moves the view to the top of a replaced row; a reply box opening on a long thread
+    /// would throw the reader to the thread's start. The view stays where it was in that row instead.
+    fn splice_keeping_place(&self, old: std::ops::Range<usize>, new_count: usize) {
+        let top = self.screen_list.logical_scroll_top();
+        self.screen_list.splice(old.clone(), new_count);
+        if old.contains(&top.item_ix) && new_count > 0 {
+            self.screen_list.scroll_to(ListOffset {
+                item_ix: top.item_ix.min(old.start + new_count - 1),
+                offset_in_item: top.offset_in_item,
+            });
+        }
+    }
+
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
         let started = Instant::now();
         let rows = PageRows::of(
@@ -598,7 +614,7 @@ impl ReviewSession {
         );
         match rows.change_from(&self.rows) {
             RowsChange::OtherScreen => self.screen_list.reset(rows.len()),
-            RowsChange::Spliced { old, new_count } => self.screen_list.splice(old, new_count),
+            RowsChange::Spliced { old, new_count } => self.splice_keeping_place(old, new_count),
             RowsChange::Unchanged => {}
         }
         self.rows = rows;
