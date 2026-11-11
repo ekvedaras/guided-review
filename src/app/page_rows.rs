@@ -68,6 +68,17 @@ pub struct FoldControl {
     pub piece_count: usize,
 }
 
+impl FoldControl {
+    /// On a step that folds and has pieces to open or fold.
+    fn of_step(step: StepId, folds: bool, is_folded: bool, piece_count: usize) -> Option<Self> {
+        (folds && piece_count > 0).then_some(Self {
+            step,
+            is_folded,
+            piece_count,
+        })
+    }
+}
+
 #[derive(Hash)]
 pub struct FullDiffControl {
     pub step: StepId,
@@ -1013,11 +1024,12 @@ impl RowsBuilder<'_> {
                 place: Place::Step { step: id.clone() },
                 label: step.title.clone(),
             }),
-            fold: (page.is_folded || step.skim || page.is_ticked).then(|| FoldControl {
-                step: id.clone(),
-                is_folded: page.is_folded,
-                piece_count: page.pieces.len(),
-            }),
+            fold: FoldControl::of_step(
+                id.clone(),
+                page.is_folded || step.skim || page.is_ticked,
+                page.is_folded,
+                page.pieces.len(),
+            ),
             full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
                 step: id.clone(),
                 is_showing_full_diff: since.showing_full_diff,
@@ -1563,6 +1575,15 @@ mod tests {
             box_edges(&[Boxed, Hung, End]),
             [edges(false, true), edges(false, false), edges(false, false)]
         );
+    }
+
+    #[test]
+    fn a_step_without_pieces_has_nothing_to_open_or_fold() {
+        let step = StepId::from("notes");
+
+        assert!(FoldControl::of_step(step.clone(), true, true, 0).is_none());
+        assert!(FoldControl::of_step(step.clone(), true, true, 2).is_some());
+        assert!(FoldControl::of_step(step, false, false, 2).is_none());
     }
 
     fn keys(ids: &[u64]) -> Vec<RowKey> {
