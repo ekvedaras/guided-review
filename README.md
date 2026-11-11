@@ -46,10 +46,6 @@ A step: what to check, a diagram, then the diff pieces it talks about. Changed w
 
 Comments and GitHub review threads sit inline in the diff, in a box that splits it. Add a comment to your review, send it now, or hand it to the tour's agent.
 
-## Video
-
-https://github.com/user-attachments/assets/eca2f93c-4b15-4f71-8c8b-e71c33fa7c4c
-
 ## Requirements
 
 - macOS (the only platform tested; CI runs on macOS).
