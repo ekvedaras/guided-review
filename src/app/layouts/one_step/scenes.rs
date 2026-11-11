@@ -15,6 +15,8 @@ use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::page_rows::PageRow;
 use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
+use crate::app::updater::Updates;
+use crate::update::{ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId};
 
 const MAX_SCREENS: usize = 16;
@@ -40,10 +42,11 @@ enum Scene {
     Toasts,
     AllRead,
     DescriptionFolds,
+    UpdateOffered,
 }
 
 impl Scene {
-    const ALL: [Self; 17] = [
+    const ALL: [Self; 18] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -61,6 +64,7 @@ impl Scene {
         Self::Toasts,
         Self::AllRead,
         Self::DescriptionFolds,
+        Self::UpdateOffered,
     ];
 
     fn file_name(self) -> &'static str {
@@ -82,6 +86,7 @@ impl Scene {
             Self::Toasts => "34-toasts",
             Self::AllRead => "35-all-read",
             Self::DescriptionFolds => "36-description-folds",
+            Self::UpdateOffered => "39-update-offered",
         }
     }
 }
@@ -295,6 +300,12 @@ impl OneStepLayout {
                     self.scroll_to_row(row);
                 }
             }
+            Scene::UpdateOffered => {
+                let home = cx.global::<PrSwitching>().home.clone();
+                if let Some(update) = sample_update() {
+                    Updates::stage(&home, UpdateOffer::Available(update), cx);
+                }
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -364,6 +375,11 @@ impl OneStepLayout {
                 self.toggle_description_folds(cx);
                 self.go_to_first_open_code(cx);
             }
+            Scene::UpdateOffered => {
+                if cx.has_global::<Updates>() {
+                    cx.remove_global::<Updates>();
+                }
+            }
         }
         cx.notify();
     }
@@ -399,6 +415,24 @@ impl OneStepLayout {
             }
         });
     }
+}
+
+fn sample_update() -> Option<Update> {
+    let version = Version::from_tag("v0.5.0")?;
+    let target = Target::running();
+    let archive = format!("guided-review-{version}-{}.tar.gz", target.triple());
+    Some(Update {
+        version,
+        target,
+        checksum: ReleaseAsset {
+            name: format!("{archive}.sha256"),
+            url: String::new(),
+        },
+        archive: ReleaseAsset {
+            name: archive,
+            url: String::new(),
+        },
+    })
 }
 
 fn sample_agent_screen() -> Vec<String> {

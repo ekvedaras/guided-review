@@ -34,4 +34,5 @@ pub mod test_pairing;
 pub mod timestamp;
 pub mod tour;
 pub mod tour_check;
+pub mod update;
 pub mod viewer;

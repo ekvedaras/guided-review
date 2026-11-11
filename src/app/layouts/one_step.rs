@@ -8,6 +8,7 @@ use gpui::{
 use std::os::unix::process::CommandExt;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -79,6 +80,7 @@ use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
 };
 use crate::app::sidebar_rows::SidebarTourAgent;
+use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
@@ -265,6 +267,13 @@ impl OneStepLayout {
             },
         )
         .detach();
+        if let Some(Updates(updater)) = cx.try_global::<Updates>().cloned() {
+            cx.observe(&updater, |_, _, cx| cx.notify()).detach();
+            cx.subscribe(&updater, |this, _, installed: &UpdateInstalled, cx| {
+                this.restart_app_with(installed.program.clone(), cx);
+            })
+            .detach();
+        }
         let use_as_comment_subscription =
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
                 this.use_as_comment(ask, window, cx);
@@ -886,26 +895,25 @@ impl OneStepLayout {
             PaletteAction::SwitchPr => self.toggle_pr_switcher(window, cx),
             PaletteAction::Settings => self.toggle_settings(&ToggleSettings, window, cx),
             PaletteAction::Shortcuts => self.toggle_shortcuts(&ToggleShortcuts, window, cx),
-            PaletteAction::RestartApp => self.restart_app(cx),
+            PaletteAction::RestartApp => match std::env::current_exe() {
+                Ok(exe) => self.restart_app_with(exe, cx),
+                Err(error) => {
+                    post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
+                }
+            },
         }
     }
 
-    /// The installed binary, which may be newer than this app, quits this one and opens the PR on this
-    /// screen; it runs on its own so it outlives the app it quits.
-    fn restart_app(&mut self, cx: &mut Context<Self>) {
+    /// `program`, which may be newer than this app, quits this one and opens the PR on this screen; it
+    /// runs on its own so it outlives the app it quits.
+    fn restart_app_with(&mut self, program: PathBuf, cx: &mut Context<Self>) {
         let in_flight = self.in_flight(cx);
         if let RestartStep::Warn(warning) = self.restart_guard.ask(in_flight, Instant::now()) {
             post_toast(cx, ToastTone::Danger, warning);
             return;
         }
         let review = self.session.read(cx).review();
-        let mut command = match std::env::current_exe() {
-            Ok(exe) => std::process::Command::new(exe),
-            Err(error) => {
-                post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
-                return;
-            }
-        };
+        let mut command = std::process::Command::new(program);
         command.arg("restart").arg(review.pr().to_string());
         if let Screen::Step(id) = review.screen() {
             command.arg("--at").arg(id.to_string());
@@ -1344,6 +1352,7 @@ impl OneStepLayout {
                     .children(step_rows)
                     .children(safety_net_row),
             )
+            .children(update_button(&colors, cx))
             .child(self.settings_row(&colors, cx))
     }
 
@@ -2212,6 +2221,37 @@ fn repin_notes(colors: &Colors, gone_pieces: usize, text_may_be_old: bool) -> im
         .when(text_may_be_old, |row| {
             row.child(note("The text may describe an older version".to_owned()))
         })
+}
+
+/// Above Settings, only while a newer release is offered, installing, or installed and waiting for a
+/// restart.
+fn update_button(colors: &Colors, cx: &App) -> Option<impl IntoElement + use<>> {
+    let Updates(updater) = cx.try_global::<Updates>()?.clone();
+    let (action, is_installing) = {
+        let read = updater.read(cx);
+        (read.action()?.clone(), read.is_installing())
+    };
+    let kind = if is_installing {
+        ButtonKind::Secondary
+    } else {
+        ButtonKind::Tinted
+    };
+    Some(
+        div().flex_none().px_4().pt_2().child(
+            icon_label_button(
+                colors,
+                "update-app",
+                kind,
+                ButtonSize::Regular,
+                Icon::ArrowUp,
+                action,
+            )
+            .w_full()
+            .when(!is_installing, |button| {
+                button.on_click(move |_, _, cx| updater.update(cx, Updater::act))
+            }),
+        ),
+    )
 }
 
 fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyElement {

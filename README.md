@@ -17,7 +17,7 @@ Install guided-review (https://github.com/ekvedaras/guided-review) for me from i
 7. Run `guided-review --version` and tell me the installed version.
 ```
 
-To update later, paste the same prompt again: each version unpacks into its own folder and the links move to the newest.
+After that, the app updates itself: when a newer release is out, an Update button shows in the sidebar, above Settings. One click downloads it, checks it, moves the links to it and restarts the app. Each version keeps its own folder, so the old one is still there.
 
 Other ways to install, and what it needs: [Requirements](#requirements) and [Install](#install).
 
@@ -58,14 +58,16 @@ Comments and GitHub review threads sit inline in the diff, in a box that splits 
 
 ### Prebuilt (no Rust needed)
 
-Download the archive for your Mac from the [latest release](https://github.com/ekvedaras/guided-review/releases/latest): `aarch64-apple-darwin` for Apple Silicon, `x86_64-apple-darwin` for Intel. Then:
+Download the archive for your Mac from the [latest release](https://github.com/ekvedaras/guided-review/releases/latest): `aarch64-apple-darwin` for Apple Silicon, `x86_64-apple-darwin` for Intel. Unpack it into its own version folder and link the binary and the tour skill into it. The app updates itself only when it is installed this way:
 
 ```sh
-VERSION=0.1.0 TARGET=aarch64-apple-darwin   # the release you downloaded
+VERSION=0.4.0 TARGET=aarch64-apple-darwin   # the release you downloaded
 shasum -a 256 -c guided-review-$VERSION-$TARGET.tar.gz.sha256   # optional
-tar xzf guided-review-$VERSION-$TARGET.tar.gz
-mkdir -p ~/.local/bin
-mv guided-review-$VERSION-$TARGET/guided-review ~/.local/bin/
+mkdir -p ~/.local/share/guided-review/$VERSION ~/.local/bin ~/.claude/skills
+tar xzf guided-review-$VERSION-$TARGET.tar.gz -C ~/.local/share/guided-review/$VERSION
+RELEASE=~/.local/share/guided-review/$VERSION/guided-review-$VERSION-$TARGET
+ln -sf "$RELEASE/guided-review" ~/.local/bin/guided-review
+ln -sfn "$RELEASE/skills/tour" ~/.claude/skills/tour
 ```
 
 `~/.local/bin` must be on `PATH`, also for agents the app starts.
@@ -73,17 +75,10 @@ mv guided-review-$VERSION-$TARGET/guided-review ~/.local/bin/
 The binary is not signed or notarized, so macOS Gatekeeper blocks a downloaded copy. Remove the quarantine flag once:
 
 ```sh
-xattr -d com.apple.quarantine ~/.local/bin/guided-review
+xattr -d com.apple.quarantine "$RELEASE/guided-review"
 ```
 
-Link the tour skill from the unpacked folder so Claude Code finds `/tour`. Keep that folder, the link points into it:
-
-```sh
-mkdir -p ~/.claude/skills
-ln -s "$PWD/guided-review-$VERSION-$TARGET/skills/tour" ~/.claude/skills/tour
-```
-
-The CLI embeds the skill, so keep both from the same release.
+The CLI embeds the skill, so keep both from the same release. An update the app installs needs no quarantine step: macOS puts the flag only on files that browsers and similar apps download.
 
 ### From source
 

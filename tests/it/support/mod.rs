@@ -240,6 +240,41 @@ impl FakeGitHub {
     }
 }
 
+/// Answers each GET for one of `files`' paths with its bytes, and anything else with 404. Returns the
+/// server's address.
+pub fn serve_files(files: Vec<(&'static str, Vec<u8>)>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut request_line = String::new();
+            let mut reader = BufReader::new(&stream);
+            reader.read_line(&mut request_line).unwrap();
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                if header.trim().is_empty() {
+                    break;
+                }
+            }
+            let requested_path = request_line.split_whitespace().nth(1).unwrap_or_default();
+            let (status, body) = files
+                .iter()
+                .find(|(path, _)| *path == requested_path)
+                .map_or(("404 Not Found", &b"{}"[..]), |(_, body)| ("200 OK", body));
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+    url
+}
+
 /// A real PNG of one flat colour, so the code under test can read its size.
 pub fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
     let mut bytes = std::io::Cursor::new(Vec::new());
