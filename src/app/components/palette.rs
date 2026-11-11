@@ -458,9 +458,9 @@ impl Colors {
             removed_word: rgb(0x5c2328),
             added_word: rgb(0x1f4c30),
             accent: rgb(iris::S400),
-            accent_fill: Gradient::of(iris::S600, iris::S700),
-            accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),
-            accent_fill_pressed: rgb(iris::S700),
+            accent_fill: Gradient::of(0x5652d8, 0x4640a8),
+            accent_fill_hover: Gradient::of(iris::S600, iris::S700),
+            accent_fill_pressed: rgb(0x403a9c),
             on_accent_fill: rgb(WHITE),
             warning: rgb(amber::S400),
             warning_background: rgb(amber::S950),
@@ -606,12 +606,11 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(1.), self.card_shadow.into()).blur_radius(px(2.))]
     }
 
-    /// A primary button sits above the page and casts its own colour.
+    /// A primary button sits a little above the page, with a short drop and no glow of its colour.
     pub fn primary_shadow(&self) -> Vec<BoxShadow> {
         vec![
             BoxShadow::new(px(0.), px(1.), translucent(iris::S900, 0.4).into()).blur_radius(px(2.)),
-            BoxShadow::new(px(0.), px(4.), translucent(iris::S600, 0.28).into())
-                .blur_radius(px(10.)),
+            BoxShadow::new(px(0.), px(2.), self.shadow.opacity(0.3).into()).blur_radius(px(4.)),
         ]
     }
 
