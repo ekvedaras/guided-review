@@ -441,7 +441,13 @@ impl AskPanel {
                         &colors,
                         SharedString::from(format!("ask-activity-{}", id_label(id))),
                     ))
-                    .child(format!("{activity}...")),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(format!("{activity}...")),
+                    ),
             );
         }
         if let Some(failure) = &ask.failure {

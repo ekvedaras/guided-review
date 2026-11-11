@@ -69,6 +69,10 @@ pub enum HandOffState {
 }
 
 impl HandOffState {
+    pub fn is_working(&self) -> bool {
+        matches!(self, Self::Working | Self::WorkingOnIt { .. })
+    }
+
     /// What the reviewer reads under the comment.
     pub fn line(&self) -> String {
         match self {
@@ -450,6 +454,13 @@ impl HandOffs {
             .iter()
             .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
             .map(|hand_off| hand_off.line().into())
+    }
+
+    pub(super) fn is_working_on(&self, thread: &ThreadId) -> bool {
+        self.0
+            .iter()
+            .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
+            .is_some_and(|hand_off| hand_off.state.is_working())
     }
 
     /// Hand-offs the agent ended without answering whose comment still shows the seen mark.

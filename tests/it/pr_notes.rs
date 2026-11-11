@@ -46,17 +46,19 @@ impl Shop {
         self.open_with_summary("")
     }
 
+    fn tour_files(&self) -> std::path::PathBuf {
+        Tour::files_for(self.repo.home(), &PR.parse().unwrap())
+    }
+
     /// The tour's folder holds `before.png` and `explainer.html`.
     fn open_with_summary(&self, reviewer_summary: &str) -> Review {
-        let files = self.repo.home().join("tour-files");
+        let files = self.tour_files();
         std::fs::create_dir_all(&files).unwrap();
         image::RgbaImage::new(40, 20)
             .save(files.join("before.png"))
             .unwrap();
         std::fs::write(files.join("explainer.html"), "<html></html>").unwrap();
-        let mut review = self.open_tour(reviewer_summary);
-        review.set_tour_files(files);
-        review
+        self.open_tour(reviewer_summary)
     }
 
     fn open_tour(&self, reviewer_summary: &str) -> Review {
@@ -225,7 +227,7 @@ fn a_failed_add_says_why_and_can_be_tried_again() {
 const UPLOADED: &str = "https://github.com/user-attachments/assets/before.png";
 
 fn before_png(shop: &Shop) -> NoteSubject {
-    NoteSubject::SummaryPicture(shop.repo.home().join("tour-files/before.png"))
+    NoteSubject::SummaryPicture(shop.tour_files().join("before.png"))
 }
 
 fn uploads(shop: &Shop) -> Vec<String> {
@@ -362,5 +364,18 @@ fn a_note_added_after_a_folded_summary_goes_after_its_fold_not_into_its_headings
         format!(
             "## Notes\n\n<details>\n<summary>Reviewer summary</summary>\n\n## Like I'm 5\n\nA cart.\n\n</details>\n\n{IN_NOTES}\n\n## Merge Danger\n\nNone."
         )
+    );
+}
+
+#[test]
+fn every_opening_of_a_review_shows_the_pictures_of_the_tours_folder() {
+    let shop = Shop::new();
+
+    let review = shop.open_with_summary("![before](before.png)");
+
+    let summary = review.reviewer_summary().unwrap();
+    assert_eq!(
+        summary.pictures(),
+        [(shop.tour_files().join("before.png").as_path(), "before")]
     );
 }

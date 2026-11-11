@@ -606,6 +606,32 @@ fn a_thread_sent_with_ask_agent_shows_each_hand_off_state_as_a_line_under_it() {
     );
 }
 
+fn first_thread_shows_agent_working(review: &Review) -> bool {
+    review
+        .current_step()
+        .unwrap()
+        .threads
+        .first()
+        .unwrap()
+        .agent_is_working
+}
+
+#[test]
+fn a_threads_line_shows_the_agent_at_work_only_while_it_works() {
+    let pull = Pull::new();
+    let mut github = pull.github();
+    let mut review = asked_twice(&pull, &mut github);
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
+    assert!(!first_thread_shows_agent_working(&review), "waiting");
+
+    deliver(&mut review, &agents_of(&fake));
+    assert!(!first_thread_shows_agent_working(&review), "delivered");
+    review.agent_status_is(AgentStatus::Working).unwrap();
+    assert!(first_thread_shows_agent_working(&review), "working");
+    review.agent_status_is(AgentStatus::Idle).unwrap();
+    assert!(!first_thread_shows_agent_working(&review), "ended");
+}
+
 #[test]
 fn a_hand_off_that_failed_in_its_thread_can_be_tried_again_and_then_goes_to_the_agent() {
     let pull = Pull::new();

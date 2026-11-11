@@ -10,6 +10,7 @@ use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
 use crate::timestamp::UtcTimestamp;
+use crate::tour::Tour;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
@@ -459,6 +460,7 @@ pub struct TypedText {
 #[derive(Clone)]
 pub struct ReviewStateFile {
     path: PathBuf,
+    tour_files: PathBuf,
 }
 
 impl ReviewStateFile {
@@ -468,7 +470,14 @@ impl ReviewStateFile {
                 .join(".guided-review/state")
                 .join(pr.repo.to_string())
                 .join(format!("{}.json", pr.number)),
+            tour_files: Tour::files_for(home, pr),
         }
+    }
+
+    /// The folder of the PR's tour, whose pictures its summary shows. Named here, beside the state, so
+    /// every way of opening a review finds it.
+    pub fn tour_files(&self) -> &Path {
+        &self.tour_files
     }
 
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
@@ -479,11 +488,19 @@ impl ReviewStateFile {
         else {
             return Vec::new();
         };
-        let mut paths: Vec<PathBuf> = files.filter_map(|file| Some(file.ok()?.path())).collect();
-        paths.sort();
-        paths
+        let mut numbers: Vec<u64> = files
+            .filter_map(|file| file.ok()?.path().file_stem()?.to_str()?.parse().ok())
+            .collect();
+        numbers.sort_unstable();
+        numbers
             .into_iter()
-            .filter_map(|path| Self { path }.opened_from().ok().flatten())
+            .filter_map(|number| {
+                let other = PullRequestUrl {
+                    repo: pr.repo.clone(),
+                    number,
+                };
+                Self::for_pr(home, &other).opened_from().ok().flatten()
+            })
             .collect()
     }
 

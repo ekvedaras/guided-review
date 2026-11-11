@@ -157,6 +157,8 @@ pub struct ThreadView {
     pub edit_drafts: BTreeMap<CommentId, String>,
     /// Where the comment sent with Ask agent is, when this thread has one.
     pub hand_off_line: Option<Arc<str>>,
+    /// The agent is at work on the thread's latest hand-off, so its line shows it busy.
+    pub agent_is_working: bool,
     /// The thread's latest hand-off failed and can be tried again.
     pub failed_hand_off: Option<HandOffId>,
     /// An outdated thread's lines, followed to the head, and what they were.
@@ -281,6 +283,7 @@ pub(super) fn views(
                 })
                 .collect(),
             hand_off_line: hand_offs.line_for(&thread.id),
+            agent_is_working: hand_offs.is_working_on(&thread.id),
             failed_hand_off: hand_offs.failed_in(&thread.id),
             thread: without_working_on_it(thread, hand_offs),
         })
