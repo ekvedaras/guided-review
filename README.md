@@ -2,12 +2,24 @@
 
 Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub PR: a summary, then steps from the main flow down to the details, each with the diff pieces and diagrams it talks about. The app shows the tour next to the diff and lets you comment on it.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/guided-review-intro-dark.webp">
-  <img alt="A short film of a guided review: the summary with the PR description, a step with its diagram and diff, changed words marked in a line, a comment box in the diff, the jump palette, the finished review" src="docs/assets/guided-review-intro.webp">
-</picture>
+## Install with your agent
 
-Watch it as a video: [light](https://github.com/user-attachments/assets/93b19ae6-9cda-481f-b273-1924d7c8d903) or [dark](https://github.com/user-attachments/assets/e28b647b-a7ab-49d2-a547-456a9a84ab54).
+Paste this into Claude Code (or any coding agent with a shell):
+
+```text
+Install guided-review (https://github.com/ekvedaras/guided-review) for me from its latest GitHub release. Do it yourself, one step at a time, and stop and tell me if any step fails:
+1. Find my Mac's architecture with `uname -m`: arm64 means target aarch64-apple-darwin, x86_64 means x86_64-apple-darwin. Stop if this is not macOS.
+2. Find the latest release and its assets: `gh release view --repo ekvedaras/guided-review --json tagName,assets` (or, without gh, https://api.github.com/repos/ekvedaras/guided-review/releases/latest). Pick guided-review-<version>-<target>.tar.gz and its .sha256.
+3. Download both into a new empty folder ~/.local/share/guided-review/<version>/, check the archive with `shasum -a 256 -c <archive>.sha256`, and unpack it there with `tar xzf`.
+4. Link the binary: `mkdir -p ~/.local/bin` and `ln -sf` the unpacked guided-review binary to ~/.local/bin/guided-review. Remove the macOS quarantine flag from the unpacked binary with `xattr -d com.apple.quarantine <path>` (ignore "No such xattr").
+5. Link the tour skill: point ~/.claude/skills/tour at the unpacked skills/tour folder with `ln -sfn`. If ~/.claude/skills/tour exists and is a real folder rather than a link, ask me before replacing it.
+6. If ~/.local/bin is not on my PATH, tell me which line to add to my shell profile; do not edit it yourself.
+7. Run `guided-review --version` and tell me the installed version.
+```
+
+To update later, paste the same prompt again: each version unpacks into its own folder and the links move to the newest.
+
+Other ways to install, and what it needs: [Requirements](#requirements) and [Install](#install).
 
 ## Tour
 
@@ -34,6 +46,10 @@ A step: what to check, a diagram, then the diff pieces it talks about. Changed w
 
 Comments and GitHub review threads sit inline in the diff, in a box that splits it. Add a comment to your review, send it now, or hand it to the tour's agent.
 
+## Video
+
+https://github.com/user-attachments/assets/eca2f93c-4b15-4f71-8c8b-e71c33fa7c4c
+
 ## Requirements
 
 - macOS (the only platform tested; CI runs on macOS).
@@ -43,23 +59,6 @@ Comments and GitHub review threads sit inline in the diff, in a box that splits 
 - [herdr](https://herdr.dev) (`hc` and `herdr-app`), only for the agent features: the PR switcher starting a tour writer, comments reaching the tour's agent, Refresh. Without herdr the app turns those features off and says why; opening and reading an existing tour does not need it.
 
 ## Install
-
-### Let your agent do it
-
-Paste this into Claude Code (or any coding agent with a shell):
-
-```text
-Install guided-review (https://github.com/ekvedaras/guided-review) for me from its latest GitHub release. Do it yourself, one step at a time, and stop and tell me if any step fails:
-1. Find my Mac's architecture with `uname -m`: arm64 means target aarch64-apple-darwin, x86_64 means x86_64-apple-darwin. Stop if this is not macOS.
-2. Find the latest release and its assets: `gh release view --repo ekvedaras/guided-review --json tagName,assets` (or, without gh, https://api.github.com/repos/ekvedaras/guided-review/releases/latest). Pick guided-review-<version>-<target>.tar.gz and its .sha256.
-3. Download both into a new empty folder ~/.local/share/guided-review/<version>/, check the archive with `shasum -a 256 -c <archive>.sha256`, and unpack it there with `tar xzf`.
-4. Link the binary: `mkdir -p ~/.local/bin` and `ln -sf` the unpacked guided-review binary to ~/.local/bin/guided-review. Remove the macOS quarantine flag from the unpacked binary with `xattr -d com.apple.quarantine <path>` (ignore "No such xattr").
-5. Link the tour skill: point ~/.claude/skills/tour at the unpacked skills/tour folder with `ln -sfn`. If ~/.claude/skills/tour exists and is a real folder rather than a link, ask me before replacing it.
-6. If ~/.local/bin is not on my PATH, tell me which line to add to my shell profile; do not edit it yourself.
-7. Run `guided-review --version` and tell me the installed version.
-```
-
-To update later, paste the same prompt again: each version unpacks into its own folder and the links move to the newest.
 
 ### Prebuilt (no Rust needed)
 
