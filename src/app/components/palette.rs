@@ -280,8 +280,8 @@ pub struct Colors {
     pub danger: Rgba,
     pub danger_background: Rgba,
     pub danger_border: Rgba,
-    /// Progress along the tour, and only that: the meter, the current step's dot and
-    /// the busy sweep.
+    /// Progress, and only that: the tour's meter, the current step's dot, the busy sweep and the
+    /// line under the title bar that follows the scroll down a screen.
     pub trail: Gradient,
     /// The trail once every step is read.
     pub trail_done: Gradient,

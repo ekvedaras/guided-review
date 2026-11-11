@@ -3,7 +3,7 @@ use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
     Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, list, px, relative,
+    Window, actions, div, list, px,
 };
 
 use std::collections::HashMap;
@@ -2748,7 +2748,8 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
 }
 
 /// The title bar's lower edge is the trail: filled left to right as far as the tour is read.
-/// How far down the screen the reader is; the steps read are the sidebar's meter.
+/// How far down the screen the reader is, gliding after the scroll and green at the end; the steps
+/// read are the sidebar's meter.
 fn page_hairline(colors: &Colors, share: f32) -> impl IntoElement {
     div()
         .absolute()
@@ -2757,7 +2758,15 @@ fn page_hairline(colors: &Colors, share: f32) -> impl IntoElement {
         .bottom_0()
         .h(px(2.))
         .bg(colors.subtle_border)
-        .child(div().h_full().w(relative(share)).bg(colors.accent))
+        .child(glide_to_share(
+            div().h_full().bg(colors.trail_fill(if share >= 1. {
+                TrailStage::Complete
+            } else {
+                TrailStage::UnderWay
+            })),
+            "page-hairline-fill",
+            share,
+        ))
 }
 
 impl Focusable for OneStepLayout {
