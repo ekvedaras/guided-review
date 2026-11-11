@@ -10,8 +10,12 @@ const FLOWCHART: &str = "flowchart TD\n  A[Open the tour] --> B{Has diagram?}\n 
     clippy::cast_sign_loss,
     reason = "a colour channel is 0.0..=1.0, so the byte is 0..=255"
 )]
+fn channels(color: gpui::Rgba) -> [u8; 3] {
+    [color.r, color.g, color.b].map(|channel| (channel * 255.0).round() as u8)
+}
+
 fn hex(color: gpui::Rgba) -> String {
-    let [r, g, b] = [color.r, color.g, color.b].map(|channel| (channel * 255.0).round() as u8);
+    let [r, g, b] = channels(color);
     format!("#{r:02x}{g:02x}{b:02x}")
 }
 
@@ -22,14 +26,15 @@ fn svg(appearance: Appearance, source: &str) -> Svg {
 }
 
 #[test]
-fn a_diagram_is_drawn_on_the_app_background_in_the_app_font() {
+fn a_diagram_has_no_ground_of_its_own_so_the_page_shows_through_and_is_in_the_app_font() {
     for appearance in [Appearance::Light, Appearance::Dark] {
-        let colors = Colors::of(appearance);
         let svg = svg(appearance, FLOWCHART);
+        let bitmap = rasterize(&svg, 1.0, &Strip::cut(svg.height(), 1.0)[0]).unwrap();
 
-        assert!(
-            svg.text().contains(&hex(colors.background)),
-            "{appearance:?} diagram is not on the app background"
+        assert_eq!(
+            bitmap.as_bytes(0).unwrap()[..4],
+            [0, 0, 0, 0],
+            "{appearance:?} diagram covers the page at its corner"
         );
         assert!(
             svg.text().contains(TEXT_FONT),
@@ -110,11 +115,11 @@ fn a_strip_is_drawn_at_screen_scale_with_blue_and_red_swapped_for_gpui() {
     let size = bitmap.size(0);
     assert_eq!(size.width.0 as f32, (svg.width() * 2.0).ceil());
     assert_eq!(size.height.0, i32::try_from(last.rows().len()).unwrap());
-    let corner = &bitmap.as_bytes(0).unwrap()[..4];
-    let dark_background_as_bgra = [0x22, 0x16, 0x14, 0xff];
-    assert_eq!(
-        corner, dark_background_as_bgra,
-        "the dark background #141622"
+    let [r, g, b] = channels(Colors::of(Appearance::Dark).text);
+    let drawn = bitmap.as_bytes(0).unwrap();
+    assert!(
+        drawn.as_chunks::<4>().0.contains(&[b, g, r, 0xff]),
+        "no solid pixel in the text colour, in blue-green-red order"
     );
 }
 

@@ -93,7 +93,7 @@ impl Setup {
         let output = SvgOutputPolicy {
             preset: SvgPipelinePreset::ResvgSafe,
             css_override_policy: CssOverridePolicy::StripExistingImportant,
-            root_background_color: Some(hex(colors.background)),
+            root_background_color: None,
             ..SvgOutputPolicy::default()
         };
         let presentation = Presentation::new()

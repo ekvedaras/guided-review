@@ -176,8 +176,7 @@ impl RenderOnce for DiagramView {
         let frame = div()
             .id(("diagram", self.diagrams.entity_id()))
             .overflow_x_scroll()
-            .rounded(px(CARD_RADIUS))
-            .bg(colors.background);
+            .rounded(px(CARD_RADIUS));
         if let Some(svg) = memory.svg() {
             let width = svg.width();
             let strips = memory.strips().into_iter().map(|strip| {
