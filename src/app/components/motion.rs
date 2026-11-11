@@ -9,7 +9,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationElement, AnimationExt, ElementId, HighlightStyle, IntoElement,
+    Animation, AnimationElement, AnimationExt, Bounds, ElementId, HighlightStyle, IntoElement,
     ParentElement, Pixels, Rgba, SharedString, SpringAnimation, SpringAnimationElement,
     SpringConfig, Styled, StyledText, Svg, Transformation, div, percentage, px, relative, size,
 };
@@ -99,6 +99,25 @@ pub fn slide_in<E: IntoElement + Styled + 'static>(
             Edge::Top => element.top(-away),
             Edge::Bottom => element.top(away),
         }
+    })
+}
+
+/// Grows from `from` to `to`, both in window coordinates, over `OVERLAY`: a picture leaving its
+/// place on the page for its larger view.
+pub fn grow_from<E: IntoElement + Styled + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    from: Bounds<Pixels>,
+    to: Bounds<Pixels>,
+) -> AnimationElement<E> {
+    element.with_animation(id, one_shot(OVERLAY), move |element, delta| {
+        let between = |start: Pixels, end: Pixels| start + (end - start) * delta;
+        element
+            .absolute()
+            .left(between(from.origin.x, to.origin.x))
+            .top(between(from.origin.y, to.origin.y))
+            .w(between(from.size.width, to.size.width))
+            .h(between(from.size.height, to.size.height))
     })
 }
 

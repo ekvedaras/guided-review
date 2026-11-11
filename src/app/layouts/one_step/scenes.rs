@@ -42,11 +42,12 @@ enum Scene {
     Toasts,
     AllRead,
     DescriptionFolds,
+    PictureZoom,
     UpdateOffered,
 }
 
 impl Scene {
-    const ALL: [Self; 18] = [
+    const ALL: [Self; 19] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -64,6 +65,7 @@ impl Scene {
         Self::Toasts,
         Self::AllRead,
         Self::DescriptionFolds,
+        Self::PictureZoom,
         Self::UpdateOffered,
     ];
 
@@ -86,6 +88,7 @@ impl Scene {
             Self::Toasts => "34-toasts",
             Self::AllRead => "35-all-read",
             Self::DescriptionFolds => "36-description-folds",
+            Self::PictureZoom => "40-picture-zoom",
             Self::UpdateOffered => "39-update-offered",
         }
     }
@@ -300,6 +303,13 @@ impl OneStepLayout {
                     self.scroll_to_row(row);
                 }
             }
+            Scene::PictureZoom => {
+                self.change_review(cx, Review::go_to_summary);
+                if let Some(picture) = self.session.read(cx).rows().first_summary_picture() {
+                    self.picture_zoom
+                        .update(cx, |zoom, cx| zoom.open(picture, None, window, cx));
+                }
+            }
             Scene::UpdateOffered => {
                 let home = cx.global::<PrSwitching>().home.clone();
                 if let Some(update) = sample_update() {
@@ -373,6 +383,11 @@ impl OneStepLayout {
             }
             Scene::DescriptionFolds => {
                 self.toggle_description_folds(cx);
+                self.go_to_first_open_code(cx);
+            }
+            Scene::PictureZoom => {
+                self.picture_zoom
+                    .update(cx, |zoom, cx| zoom.close(window, cx));
                 self.go_to_first_open_code(cx);
             }
             Scene::UpdateOffered => {

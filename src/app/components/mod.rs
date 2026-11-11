@@ -17,6 +17,7 @@ pub mod motion;
 pub mod new_commits_banner;
 pub mod overlay;
 pub mod palette;
+pub mod picture_zoom;
 pub mod pr_switcher;
 pub mod refresh_banner;
 pub mod safety_net_view;

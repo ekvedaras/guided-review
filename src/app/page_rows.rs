@@ -668,6 +668,18 @@ impl PageRows {
             .unwrap_or_default()
     }
 
+    #[cfg(feature = "snapshots")]
+    pub fn first_summary_picture(
+        &self,
+    ) -> Option<crate::app::components::picture_zoom::ZoomedPicture> {
+        self.rows.iter().find_map(|row| match row {
+            PageRow::SummaryColumns(columns) => {
+                columns.reviewer_summary.as_ref()?.markdown.first_picture()
+            }
+            _ => None,
+        })
+    }
+
     pub fn description_row(&self) -> Option<usize> {
         self.description().map(|(row, _)| row)
     }

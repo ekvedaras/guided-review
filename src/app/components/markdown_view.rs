@@ -6,7 +6,7 @@ use gpui::{
 };
 use std::path::Path;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
@@ -14,12 +14,14 @@ use std::sync::Arc;
 
 use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
+use crate::image_facts::is_svg_path;
 use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines};
 
 use super::diagram::{DiagramSet, DiagramView};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
 use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS};
+use super::picture_zoom::{ZoomedPicture, zoom_picture};
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
 pub fn bullet(colors: &Colors, line_height: gpui::Pixels) -> Div {
@@ -134,6 +136,12 @@ impl PreparedMarkdown {
             .map(|(index, _)| format!("{key}-{index}"))
             .collect()
     }
+
+    #[cfg(feature = "snapshots")]
+    /// Its first picture outside any list, quote or fold.
+    pub fn first_picture(&self) -> Option<ZoomedPicture> {
+        self.blocks.iter().find_map(PreparedBlock::zoomed)
+    }
 }
 
 impl std::hash::Hash for PreparedMarkdown {
@@ -178,6 +186,27 @@ enum PreparedBlock {
         /// Its width at the screen's two pixels to a point, the widest it is drawn.
         widest: f32,
     },
+}
+
+impl PreparedBlock {
+    fn zoomed(&self) -> Option<ZoomedPicture> {
+        match self {
+            Self::Picture {
+                path,
+                ratio,
+                widest,
+            } => Some(ZoomedPicture {
+                path: Arc::clone(path),
+                ratio: *ratio,
+                pixel_width: if is_svg_path(&path.to_string_lossy()) {
+                    f32::INFINITY
+                } else {
+                    widest * 2.
+                },
+            }),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -510,11 +539,35 @@ fn block_element(
             // A size of its own: one taken from the box's width is measured before that width is
             // known, and the room kept is then that of the widest picture.
             let width = widest.min(PICTURE_ROOM);
-            let picture = img(Arc::clone(path))
-                .w(px(width))
-                .h(px(width / ratio))
+            let zoomed = block.zoomed();
+            let on_page = Rc::new(Cell::new(None));
+            let measured = Rc::clone(&on_page);
+            let picture = div()
+                .id(SharedString::from(format!("picture-{key}")))
+                .relative()
+                .self_start()
                 .max_w_full()
-                .rounded(px(INNER_RADIUS));
+                .cursor_pointer()
+                .on_click(move |_, window, cx| {
+                    if let Some(zoomed) = &zoomed {
+                        zoom_picture(zoomed.clone(), on_page.get(), window, cx);
+                    }
+                })
+                .child(
+                    canvas(
+                        move |bounds, _, _| measured.set(Some(bounds)),
+                        |_, (), _, _| {},
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+                .child(
+                    img(Arc::clone(path))
+                        .w(px(width))
+                        .h(px(width / ratio))
+                        .max_w_full()
+                        .rounded(px(INNER_RADIUS)),
+                );
             div()
                 .flex()
                 .flex_col()
