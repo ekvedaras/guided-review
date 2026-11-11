@@ -1,4 +1,4 @@
-use gpui::{AnimationElement, Div, ElementId, Styled, div, px};
+use gpui::{AnimationElement, Div, ElementId, ParentElement, Styled, div, px};
 
 use super::motion::{BANNER_DROP, Edge, STATE, slide_in};
 use super::palette::{CARD_RADIUS, Colors, INNER_RADIUS, Tone};
@@ -18,6 +18,15 @@ pub fn chip(colors: &Colors, tone: Tone) -> Div {
         .bg(tone.background)
         .text_color(tone.text)
         .text_xs()
+}
+
+/// Marks a debug build's window, so a `cargo run` or snapshot window is not taken for the installed app.
+pub fn dev_build_chip(colors: &Colors) -> Option<Div> {
+    cfg!(debug_assertions).then(|| {
+        chip(colors, Tone::Warning)
+            .font_weight(gpui::FontWeight::BOLD)
+            .child("DEV")
+    })
 }
 
 /// A note across the page column under the title bar, in its state's ground with an edge below.

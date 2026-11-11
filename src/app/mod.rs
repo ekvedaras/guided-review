@@ -596,7 +596,7 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
-            title: Some(title.into()),
+            title: Some(marked_if_dev(title).into()),
             appears_transparent: true,
             traffic_light_position: Some(point(px(14.), px(14.))),
         }),
@@ -608,6 +608,15 @@ fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
     format!("{pr}: {}", opened.review.title())
 }
 
+/// A debug build names itself in its title, which the Window menu and Mission Control show.
+fn marked_if_dev(title: String) -> String {
+    if cfg!(debug_assertions) {
+        format!("{title} (dev)")
+    } else {
+        title
+    }
+}
+
 fn new_layout(
     opened: OpenedReview,
     pr: &PullRequestUrl,
@@ -615,7 +624,7 @@ fn new_layout(
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,
 ) -> OneStepLayout {
-    window.set_window_title(&window_title(&opened, pr));
+    window.set_window_title(&marked_if_dev(window_title(&opened, pr)));
     let collaborators = Collaborators {
         github: opened.github,
         ide: opened.ide,

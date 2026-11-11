@@ -24,7 +24,7 @@ use crate::app::components::button::{
     toggle_button,
 };
 use crate::app::components::card::card;
-use crate::app::components::chip::{callout, chip, dropping_in, notice_band};
+use crate::app::components::chip::{callout, chip, dev_build_chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
     QueuedCommentNote,
@@ -1279,9 +1279,13 @@ impl OneStepLayout {
                     .child(
                         div()
                             .pl(px(TRAFFIC_LIGHTS_WIDTH))
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(colors.muted_text)
-                            .child("Guided review"),
+                            .child("Guided review")
+                            .children(dev_build_chip(&colors)),
                     ),
             )
             .child(header)

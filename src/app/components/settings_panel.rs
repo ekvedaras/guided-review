@@ -16,7 +16,7 @@ use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
 };
 use super::card::card;
-use super::chip::{chip, dropping_in, notice_band};
+use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
 use super::palette::{
@@ -25,7 +25,7 @@ use super::palette::{
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::title_bar::TitleBarArea;
+use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 
 /// The widest a sheet over a review grows on a wide window.
 const SHEET_WIDTH: f32 = 860.;
@@ -1758,7 +1758,12 @@ impl Render for SettingsPanel {
                     .inset_0()
                     .bg(colors.background)
                     .occlude()
-                    .child(TitleBarArea::new("settings-title-bar", colors.background))
+                    .child(
+                        TitleBarArea::new("settings-title-bar", colors.background).children(
+                            dev_build_chip(&colors)
+                                .map(|chip| div().pl(px(TRAFFIC_LIGHTS_WIDTH)).child(chip)),
+                        ),
+                    )
                     .child(header)
                     .children(notice)
                     .child(body)
