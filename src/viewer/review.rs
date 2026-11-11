@@ -209,7 +209,8 @@ pub struct Review {
     fold_flipped: BTreeSet<StepId>,
     /// File boxes of a step opened or folded against the step's fold, by step and path.
     box_fold_flipped: BTreeSet<(StepId, FilePath)>,
-    tour_files: Option<PathBuf>,
+    /// The tour's own folder, whose pictures its summary shows and whose files its links open.
+    tour_files: PathBuf,
     viewed_sync: ViewedSync,
     repin_running: bool,
     refused_while_repinning: bool,
@@ -251,6 +252,7 @@ impl Review {
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
         let (state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let tour_files = state_file.tour_files().to_owned();
         let pr: PullRequestUrl = tour.pr.parse()?;
         let (base, head) = (tour.base.clone(), tour.head.clone());
         let files = pieces::cut(source, &base, &head)?;
@@ -292,7 +294,6 @@ impl Review {
             state_file,
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
-            tour_files: None,
             viewed_sync: ViewedSync::default(),
             repin_running: false,
             refused_while_repinning: false,
@@ -311,6 +312,7 @@ impl Review {
             comment_desk: CommentDesk::default(),
             display_options: DisplayOptions::default(),
             pr_notes: PrNotes::default(),
+            tour_files,
             saves: Arc::default(),
         })
     }
@@ -447,16 +449,8 @@ impl Review {
     /// Under the summary's bullets and above the PR description. `None` when the tour has none.
     pub fn reviewer_summary(&self) -> Option<Markdown> {
         let body = &self.tour.reviewer_summary;
-        let markdown = match &self.tour_files {
-            Some(folder) => Markdown::parse_with_files(body, folder),
-            None => Markdown::parse(body),
-        };
+        let markdown = Markdown::parse_with_files(body, &self.tour_files);
         (!body.trim().is_empty()).then(|| markdown.nested_one_level())
-    }
-
-    /// The tour's own folder, whose pictures its summary shows and whose files its links open.
-    pub fn set_tour_files(&mut self, folder: PathBuf) {
-        self.tour_files = Some(folder);
     }
 
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
@@ -510,7 +504,7 @@ impl Review {
                 if summary.trim().is_empty() {
                     return None;
                 }
-                Note::reviewer_summary(summary, self.tour_files.as_deref())
+                Note::reviewer_summary(summary, &self.tour_files)
             }
         }
     }

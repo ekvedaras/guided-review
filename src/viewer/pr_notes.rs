@@ -144,10 +144,8 @@ impl Note {
 
     /// The summary as written, its pictures uploaded and its links to other files of the tour's
     /// `folder` left as their text, since GitHub cannot open those.
-    pub(super) fn reviewer_summary(summary: &str, folder: Option<&Path>) -> Option<Self> {
-        let files = folder
-            .map(|folder| local_files(summary, folder))
-            .unwrap_or_default();
+    pub(super) fn reviewer_summary(summary: &str, folder: &Path) -> Option<Self> {
+        let files = local_files(summary, folder);
         let mut contents = vec![summary.as_bytes().to_vec()];
         let mut body = Vec::new();
         let mut written = 0;
