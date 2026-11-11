@@ -45,8 +45,8 @@ use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
-    BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to_share, grow_when_shown, pop_in,
-    slide_in, turn_to,
+    BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
+    pop_in, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
@@ -2747,10 +2747,19 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
         )
 }
 
-/// The title bar's lower edge is the trail: filled left to right as far as the tour is read.
-/// How far down the screen the reader is, gliding after the scroll and green at the end; the steps
-/// read are the sidebar's meter.
+/// How far down the screen the reader is, gliding after the scroll; at the end the green fades in
+/// over the trail. The steps read are the sidebar's meter.
 fn page_hairline(colors: &Colors, share: f32) -> impl IntoElement {
+    let is_at_end = share >= 1.;
+    let green = glide_to(
+        div()
+            .absolute()
+            .inset_0()
+            .bg(colors.trail_fill(TrailStage::Complete)),
+        "page-hairline-green",
+        if is_at_end { 1. } else { 0. },
+        |green, shown| green.opacity(shown.clamp(0., 1.)),
+    );
     div()
         .absolute()
         .left_0()
@@ -2759,11 +2768,11 @@ fn page_hairline(colors: &Colors, share: f32) -> impl IntoElement {
         .h(px(2.))
         .bg(colors.subtle_border)
         .child(glide_to_share(
-            div().h_full().bg(colors.trail_fill(if share >= 1. {
-                TrailStage::Complete
-            } else {
-                TrailStage::UnderWay
-            })),
+            div()
+                .relative()
+                .h_full()
+                .bg(colors.trail_fill(TrailStage::UnderWay))
+                .child(green),
             "page-hairline-fill",
             share,
         ))
