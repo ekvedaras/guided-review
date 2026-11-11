@@ -18,7 +18,7 @@ use crate::viewer::{
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
-use super::palette::{CARD_RADIUS, CODE_FONT, Colors, INNER_RADIUS, Tone};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
 
 /// What a gap row asks for: a few more lines from one side, or every hidden line.
 pub enum GapAsk<'a> {
@@ -83,12 +83,6 @@ pub struct DiffRowLine {
     offers_comment_button: bool,
     /// A long line wraps onto more rows instead of being cut at the box's edge.
     pub wraps: bool,
-    /// The last row of its box: it draws the box's bottom edge, so its colour runs into the corners.
-    pub closes_piece: bool,
-    /// Something hangs under it, like a thread: its colour ends in rounded corners there.
-    pub rounded_bottom: bool,
-    /// It comes right after something that hangs under the line above.
-    pub rounded_top: bool,
 }
 
 impl DiffRowLine {
@@ -124,9 +118,6 @@ impl DiffRowLine {
             code_link: line.code_link,
             location: line.location,
             kind: line.kind,
-            closes_piece: false,
-            rounded_bottom: false,
-            rounded_top: false,
         }
     }
 }
@@ -143,6 +134,7 @@ pub struct DiffRow {
     /// How far the code is moved left; all rows of a file box share it, so they scroll together.
     scroll_x: Pixels,
     on_scroll_x: Option<OnScrollX>,
+    edges: BoxEdges,
 }
 
 impl DiffRow {
@@ -154,7 +146,13 @@ impl DiffRow {
             code_selection: None,
             scroll_x: Pixels::ZERO,
             on_scroll_x: None,
+            edges: BoxEdges::default(),
         }
+    }
+
+    pub fn with_edges(mut self, edges: BoxEdges) -> Self {
+        self.edges = edges;
+        self
     }
 
     /// Only for a row that does not wrap: a wrapped row has nothing hidden to the side.
@@ -242,12 +240,7 @@ impl RenderOnce for DiffRow {
             LineKind::Added => colors.added_gutter,
             LineKind::Context { .. } => colors.background,
         };
-        // At the box's end the colour fills the box's corner inside its 1 px edge.
-        let bottom_radius = if line.closes_piece {
-            Some(px(CARD_RADIUS - 1.))
-        } else {
-            line.rounded_bottom.then_some(px(INNER_RADIUS))
-        };
+        let edges = self.edges;
         let gutter = div()
             .id(SharedString::from(format!(
                 "gutter-{}-{:?}-{}",
@@ -268,10 +261,12 @@ impl RenderOnce for DiffRow {
             }))
             .on_click(move |_, _, cx| open_code(&link, cx))
             .whitespace_nowrap()
-            .when(line.rounded_top, |gutter| {
-                gutter.rounded_tl(px(INNER_RADIUS))
+            .when(edges.opens, |gutter| {
+                gutter.rounded_tl(px(INSIDE_EDGE_RADIUS))
             })
-            .when_some(bottom_radius, Styled::rounded_bl)
+            .when(edges.closes, |gutter| {
+                gutter.rounded_bl(px(INSIDE_EDGE_RADIUS))
+            })
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self
@@ -297,7 +292,7 @@ impl RenderOnce for DiffRow {
             }
             None => comment_button.into_any_element(),
         };
-        let row = piece_row(&colors)
+        let row = box_row(&colors, edges)
             .group("diff-row")
             .flex()
             .overflow_hidden()
@@ -318,26 +313,14 @@ impl RenderOnce for DiffRow {
                     on_gesture(RowGesture::Over, &location, window, cx);
                 })
             });
-        // The colour is a layer inside the box's edges, so it can round off where a thread breaks the
-        // code while the box's sides run straight past.
-        let fill = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .when(line.rounded_top, |fill| fill.rounded_t(px(INNER_RADIUS)))
-            .when_some(bottom_radius, Styled::rounded_b);
+        let fill = edges.round_inside(div().flex_1().min_w_0().flex());
         let fill = match line.kind {
             _ if self.is_selected => fill.bg(colors.current),
             LineKind::Removed => fill.bg(colors.removed_line),
             LineKind::Added => fill.bg(colors.added_line),
             LineKind::Context { .. } => fill,
         };
-        row.when(line.closes_piece, |row| {
-            row.border_b_1()
-                .rounded_b(px(CARD_RADIUS))
-                .shadow(colors.card_shadow())
-        })
-        .child(fill.child(gutter).child(comment_button).child(code))
+        row.child(fill.child(gutter).child(comment_button).child(code))
     }
 }
 
@@ -384,6 +367,43 @@ fn with_selection(
             Some((piece, style))
         })
         .collect()
+}
+
+/// Where a row of a piece box meets the box's rounded edge: the box closes at its end and above what
+/// hangs under a line, like a thread, and opens again below it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct BoxEdges {
+    pub opens: bool,
+    pub closes: bool,
+}
+
+/// A row's own colour sits inside the box's 1 px edge, so its corners are that much tighter.
+const INSIDE_EDGE_RADIUS: f32 = CARD_RADIUS - 1.;
+
+impl BoxEdges {
+    pub fn round_inside(self, layer: Div) -> Div {
+        layer
+            .when(self.opens, |layer| layer.rounded_t(px(INSIDE_EDGE_RADIUS)))
+            .when(self.closes, |layer| layer.rounded_b(px(INSIDE_EDGE_RADIUS)))
+    }
+}
+
+/// A row of a piece box, drawing the box's top or bottom edge where it opens or closes there.
+pub fn box_row(colors: &Colors, edges: BoxEdges) -> Div {
+    piece_row(colors)
+        .when(edges.opens, |row| {
+            row.border_t_1().rounded_t(px(CARD_RADIUS))
+        })
+        .when(edges.closes, |row| {
+            row.border_b_1()
+                .rounded_b(px(CARD_RADIUS))
+                .shadow(colors.card_shadow())
+        })
+}
+
+/// What hangs under a line, like a thread, sits between the box's two parts, as wide as the box.
+pub fn hung_row() -> Div {
+    div().w_full().px(px(1.))
 }
 
 /// Every row of a piece sits between the box's side borders.
@@ -526,6 +546,7 @@ pub struct PieceMarker {
     piece: PieceLabel,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
+    edges: BoxEdges,
 }
 
 impl PieceMarker {
@@ -538,7 +559,13 @@ impl PieceMarker {
             piece,
             repin_label,
             buttons,
+            edges: BoxEdges::default(),
         }
+    }
+
+    pub fn with_edges(mut self, edges: BoxEdges) -> Self {
+        self.edges = edges;
+        self
     }
 }
 
@@ -546,7 +573,7 @@ impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let name = self.piece.symbol.unwrap_or(self.piece.file_name);
-        piece_row(&colors)
+        box_row(&colors, self.edges)
             .group("piece-marker")
             .h(px(24.))
             .flex()
@@ -582,28 +609,13 @@ impl RenderOnce for PieceMarker {
     }
 }
 
-/// The bottom edge of a piece box, and the space before the next one.
-/// After a box whose last line drew its bottom edge, only the space under the box is left to draw.
-pub fn piece_end(colors: &Colors, edge_drawn: bool) -> gpui::AnyElement {
-    if edge_drawn {
-        return div().pb_4().into_any_element();
-    }
-    div()
-        .pb_4()
-        .child(
-            div()
-                .h_1p5()
-                .border_x_1()
-                .border_b_1()
-                .rounded_b(px(CARD_RADIUS))
-                .border_color(colors.subtle_border)
-                .shadow(colors.card_shadow()),
-        )
-        .into_any_element()
+/// The space under a piece box, before the next one.
+pub fn piece_end() -> gpui::AnyElement {
+    div().pb_4().into_any_element()
 }
 
-pub fn no_change_since_read_row(colors: &Colors) -> impl IntoElement {
-    piece_row(colors)
+pub fn no_change_since_read_row(colors: &Colors, edges: BoxEdges) -> impl IntoElement {
+    box_row(colors, edges)
         .px_2()
         .py_1()
         .text_sm()
@@ -611,8 +623,8 @@ pub fn no_change_since_read_row(colors: &Colors) -> impl IntoElement {
         .child("No change since you read it")
 }
 
-pub fn only_whitespace_row(colors: &Colors) -> impl IntoElement {
-    piece_row(colors)
+pub fn only_whitespace_row(colors: &Colors, edges: BoxEdges) -> impl IntoElement {
+    box_row(colors, edges)
         .px_2()
         .py_1()
         .text_sm()
@@ -623,12 +635,13 @@ pub fn only_whitespace_row(colors: &Colors) -> impl IntoElement {
 /// A binary file has no lines to show, so it gets one row that opens the file.
 pub fn binary_file_row(
     colors: &Colors,
+    edges: BoxEdges,
     id: SharedString,
     link: CodeLink,
     cx: &App,
 ) -> impl IntoElement {
     let label = format!("Binary file. {}", open_code_label(&link, cx));
-    piece_row(colors).child(
+    box_row(colors, edges).child(
         div()
             .id(id)
             .px_2()
@@ -650,6 +663,7 @@ pub fn binary_file_row(
 /// many, and small arrows that bring more in from each side, or all of them at once.
 pub fn hunk_gap(
     colors: &Colors,
+    edges: BoxEdges,
     id: SharedString,
     gap: &HiddenLines,
     label: SharedString,
@@ -710,7 +724,8 @@ pub fn hunk_gap(
         })
     });
     let has_asks = down.is_some() || up.is_some();
-    let band = div()
+    let band = edges
+        .round_inside(div())
         .id(id)
         .h(px(28.))
         .px_2()
@@ -727,5 +742,5 @@ pub fn hunk_gap(
             band.child(sized_icon(Icon::Ellipsis, colors.muted_text, px(12.)))
         })
         .child(div().pl_1().child(label));
-    piece_row(colors).child(band)
+    box_row(colors, edges).child(band)
 }

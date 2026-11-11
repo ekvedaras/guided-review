@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use gpui::SharedString;
 
-use crate::app::components::diff_view::{DiffRowLine, PieceLabel};
+use crate::app::components::diff_view::{BoxEdges, DiffRowLine, PieceLabel};
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 
 /// What the PR description's `MarkdownView` is keyed by, so its folds can be told apart.
@@ -150,8 +150,6 @@ pub struct PieceHeading {
     /// "changed" or "new" after a re-pin.
     pub repin_label: Option<&'static str>,
     pub code_link: Option<CodeLink>,
-    /// Nothing follows it in its box, as in a folded box: it draws the box's bottom edge.
-    pub closes_piece: bool,
 }
 
 pub struct BinaryFileRow {
@@ -257,10 +255,8 @@ pub enum PageRow {
     },
     /// The ask button under the last of the lines that have Asks.
     AskMarker(Rc<AskAt>),
-    /// `edge_drawn`: the box's last row, a line or a lone header, drew the bottom edge.
-    PieceEnd {
-        edge_drawn: bool,
-    },
+    /// The space under a piece box; the box's last row draws its bottom edge.
+    PieceEnd,
     ScreenFooter(Rc<ScreenFooter>),
 }
 
@@ -324,7 +320,6 @@ impl PageRow {
                 heading.fold.hash(&mut hasher);
                 heading.piece.hash(&mut hasher);
                 heading.repin_label.hash(&mut hasher);
-                heading.closes_piece.hash(&mut hasher);
             }
             Self::BinaryFile(binary) => {
                 binary.piece.hash(&mut hasher);
@@ -344,9 +339,6 @@ impl PageRow {
                 line.location.line.hash(&mut hasher);
                 matches!(line.kind, LineKind::Context { .. }).hash(&mut hasher);
                 line.wraps.hash(&mut hasher);
-                line.closes_piece.hash(&mut hasher);
-                line.rounded_top.hash(&mut hasher);
-                line.rounded_bottom.hash(&mut hasher);
             }
             Self::Thread {
                 view,
@@ -395,10 +387,76 @@ impl PageRow {
             | Self::RouteHeading
             | Self::NoChangeSinceRead
             | Self::OnlyWhitespace
-            | Self::PieceEnd { .. } => {}
+            | Self::PieceEnd => {}
         }
         RowKey(hasher.finish())
     }
+}
+
+/// What a row is to the piece box around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoxPart {
+    Outside,
+    /// Between the box's sides.
+    Boxed,
+    /// Under a line but outside the box, like a thread: the box closes above it and opens again below.
+    Hung,
+    End,
+}
+
+fn box_edges(parts: &[BoxPart]) -> Vec<BoxEdges> {
+    let mut before = None;
+    let mut edges = Vec::with_capacity(parts.len());
+    for (index, &part) in parts.iter().enumerate() {
+        let after = parts.get(index + 1).copied();
+        edges.push(if part == BoxPart::Boxed {
+            BoxEdges {
+                opens: before == Some(BoxPart::Hung),
+                closes: matches!(after, Some(BoxPart::Hung | BoxPart::End) | None),
+            }
+        } else {
+            BoxEdges::default()
+        });
+        before = Some(part);
+    }
+    edges
+}
+
+impl PageRow {
+    fn box_part(&self) -> BoxPart {
+        match self {
+            Self::PieceHeader(_)
+            | Self::PieceMarker(_)
+            | Self::NoChangeSinceRead
+            | Self::BinaryFile(_)
+            | Self::Image { .. }
+            | Self::OnlyWhitespace
+            | Self::HunkGap(_)
+            | Self::Line(_) => BoxPart::Boxed,
+            Self::Thread {
+                place: ThreadRowPlace::UnderLine,
+                ..
+            }
+            | Self::QueuedComment(_)
+            | Self::Composer { .. }
+            | Self::AskMarker(_) => BoxPart::Hung,
+            Self::PieceEnd => BoxPart::End,
+            _ => BoxPart::Outside,
+        }
+    }
+}
+
+/// A row's edges are a part of its key: a row that comes to close its box is drawn and measured anew.
+fn keys_of(rows: &[PageRow], edges: &[BoxEdges]) -> Vec<RowKey> {
+    rows.iter()
+        .zip(edges)
+        .map(|(row, edges)| {
+            let mut hasher = DefaultHasher::new();
+            row.key().0.hash(&mut hasher);
+            edges.hash(&mut hasher);
+            RowKey(hasher.finish())
+        })
+        .collect()
 }
 
 /// Where a thread's row sits on the page.
@@ -439,6 +497,7 @@ pub struct PageRows {
     screen: Option<Screen>,
     rows: Vec<PageRow>,
     keys: Vec<RowKey>,
+    edges: Vec<BoxEdges>,
     diagram: Option<SharedString>,
     asked_lines: Vec<Place>,
     line_rows: HashMap<LineLocation, usize>,
@@ -465,6 +524,7 @@ impl PageRows {
             screen: None,
             rows: Vec::new(),
             keys: Vec::new(),
+            edges: Vec::new(),
             diagram: None,
             asked_lines: Vec::new(),
             line_rows: HashMap::new(),
@@ -478,7 +538,6 @@ impl PageRows {
         let mut builder = RowsBuilder {
             rows: Vec::new(),
             under_lines: UnderLines::default(),
-            hung_until: None,
             facts,
             review,
         };
@@ -499,7 +558,8 @@ impl PageRows {
             }
         }
         let rows = builder.rows;
-        let keys = rows.iter().map(PageRow::key).collect();
+        let edges = box_edges(&rows.iter().map(PageRow::box_part).collect::<Vec<_>>());
+        let keys = keys_of(&rows, &edges);
         let mut line_rows = HashMap::new();
         let mut pieces = Vec::new();
         for (index, row) in rows.iter().enumerate() {
@@ -521,6 +581,7 @@ impl PageRows {
             screen: Some(screen),
             rows,
             keys,
+            edges,
             diagram,
             asked_lines,
             line_rows,
@@ -534,6 +595,10 @@ impl PageRows {
 
     pub fn row(&self, index: usize) -> Option<&PageRow> {
         self.rows.get(index)
+    }
+
+    pub fn edges(&self, index: usize) -> BoxEdges {
+        self.edges.get(index).copied().unwrap_or_default()
     }
 
     /// The mermaid source of the diagram this screen shows, if it shows one.
@@ -662,7 +727,7 @@ impl PageRows {
                 _ => {}
             }
         }
-        self.keys = self.rows.iter().map(PageRow::key).collect();
+        self.keys = keys_of(&self.rows, &self.edges);
     }
 
     pub fn change_from(&self, old: &Self) -> RowsChange {
@@ -897,8 +962,6 @@ struct RowsBuilder<'a> {
     review: &'a Review,
     /// Taken out as their row is placed; what no row takes is dropped.
     under_lines: UnderLines,
-    /// Where the rows that hang under the last line ended, so a line right after them knows.
-    hung_until: Option<usize>,
 }
 
 impl RowsBuilder<'_> {
@@ -1052,7 +1115,6 @@ impl RowsBuilder<'_> {
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
-            closes_piece: false,
         };
         let has_no_change_since_read = |piece: &PieceDiff| {
             shown == DiffShown::ChangeSinceRead
@@ -1096,7 +1158,6 @@ impl RowsBuilder<'_> {
                 ask: None,
                 repin_label: None,
                 code_link: block.lines().next().map(|line| line.code_link.clone()),
-                closes_piece: false,
             })));
             for piece in block.without_rows() {
                 self.rows
@@ -1134,8 +1195,7 @@ impl RowsBuilder<'_> {
                     self.rows.push(PageRow::PieceMarker(Rc::new(marker)));
                 }
                 let here = self.under_lines.take_at(&line.location);
-                let mut row = DiffRowLine::of(line.clone(), review.wraps_lines());
-                row.rounded_top = self.hung_until == Some(self.rows.len());
+                let row = DiffRowLine::of(line.clone(), review.wraps_lines());
                 self.rows.push(PageRow::Line(Rc::new(row)));
                 self.hang(here);
             }
@@ -1164,7 +1224,6 @@ impl RowsBuilder<'_> {
             ask: ask_of.map(|ask_of| ask_of(piece)),
             repin_label: piece.repin_status.and_then(repin_label),
             code_link: piece.code_link().cloned(),
-            closes_piece: false,
         };
         if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Rc::new(PieceHeading {
@@ -1181,7 +1240,6 @@ impl RowsBuilder<'_> {
                 ask: None,
                 repin_label: None,
                 code_link: block.lines().next().map(|line| line.code_link.clone()),
-                closes_piece: false,
             })));
             for piece in block.pieces_in_order() {
                 self.rows
@@ -1192,32 +1250,17 @@ impl RowsBuilder<'_> {
     }
 
     fn end_piece(&mut self) {
-        let edge_drawn = match self.rows.last_mut() {
-            Some(PageRow::Line(line)) => Rc::get_mut(line).map(|line| line.closes_piece = true),
-            Some(PageRow::PieceHeader(heading)) => {
-                Rc::get_mut(heading).map(|heading| heading.closes_piece = true)
-            }
-            _ => None,
-        }
-        .is_some();
-        self.rows.push(PageRow::PieceEnd { edge_drawn });
+        self.rows.push(PageRow::PieceEnd);
     }
 
-    /// The line above ends its colour in rounded corners, and so does the next line start, if it comes
-    /// right after.
+    /// Hangs `here` under the row above.
     fn hang(&mut self, here: Vec<UnderLine>) {
         if here.is_empty() {
             return;
         }
-        if let Some(PageRow::Line(line)) = self.rows.last_mut()
-            && let Some(line) = Rc::get_mut(line)
-        {
-            line.rounded_bottom = true;
-        }
         let (review, facts) = (self.review, self.facts);
         self.rows
             .extend(here.into_iter().map(|item| item.into_row(review, facts)));
-        self.hung_until = Some(self.rows.len());
     }
 }
 
@@ -1472,6 +1515,53 @@ mod tests {
         assert_ne!(
             composer_key("a", None),
             composer_key("a", Some(CommentProblem::Rejected("rejected".into())))
+        );
+    }
+
+    fn edges(opens: bool, closes: bool) -> BoxEdges {
+        BoxEdges { opens, closes }
+    }
+
+    #[test]
+    fn a_box_closes_on_its_last_row_whatever_it_is() {
+        use BoxPart::{Boxed, End, Outside};
+
+        assert_eq!(
+            box_edges(&[Outside, Boxed, Boxed, End, Outside]),
+            [
+                edges(false, false),
+                edges(false, false),
+                edges(false, true),
+                edges(false, false),
+                edges(false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_hangs_under_a_line_splits_the_box_around_it() {
+        use BoxPart::{Boxed, End, Hung};
+
+        assert_eq!(
+            box_edges(&[Boxed, Boxed, Hung, Hung, Boxed, End]),
+            [
+                edges(false, false),
+                edges(false, true),
+                edges(false, false),
+                edges(false, false),
+                edges(true, true),
+                edges(false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_hangs_under_the_last_line_leaves_the_box_closed_above_it() {
+        use BoxPart::{Boxed, End, Hung};
+
+        assert_eq!(
+            box_edges(&[Boxed, Hung, End]),
+            [edges(false, true), edges(false, false), edges(false, false)]
         );
     }
 

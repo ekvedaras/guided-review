@@ -31,9 +31,9 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
-    OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap,
-    no_change_since_read_row, only_whitespace_row, piece_end, piece_row,
+    BoxEdges, CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment,
+    OnRowGesture, OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row,
+    hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -1551,7 +1551,8 @@ impl OneStepLayout {
         let Some(row) = self.session.read(cx).rows().row(index).cloned() else {
             return div().into_any_element();
         };
-        self.render_page_row(row, index, selected, cx)
+        let edges = self.session.read(cx).rows().edges(index);
+        self.render_page_row(row, index, edges, selected, cx)
     }
 
     /// `index` tells the row's elements apart from other rows'; a row inside another uses a made-up one.
@@ -1559,6 +1560,7 @@ impl OneStepLayout {
         &mut self,
         row: PageRow,
         index: usize,
+        edges: BoxEdges,
         selected: Option<&SelectedRows>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1648,7 +1650,7 @@ impl OneStepLayout {
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
                 )
-                .closing_its_box(heading.closes_piece);
+                .closing_its_box(edges.closes);
                 match heading.fold.clone() {
                     Some(fold) => header
                         .with_fold_toggle(
@@ -1693,22 +1695,27 @@ impl OneStepLayout {
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
                 )
+                .with_edges(edges)
                 .into_any_element()
             }
-            PageRow::NoChangeSinceRead => no_change_since_read_row(&colors).into_any_element(),
+            PageRow::NoChangeSinceRead => {
+                no_change_since_read_row(&colors, edges).into_any_element()
+            }
             PageRow::BinaryFile(binary) => binary_file_row(
                 &colors,
+                edges,
                 format!("binary-{}", binary.piece).into(),
                 binary.link.clone(),
                 cx,
             )
             .into_any_element(),
-            PageRow::Image { path, .. } => piece_row(&colors)
+            PageRow::Image { path, .. } => box_row(&colors, edges)
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
-            PageRow::OnlyWhitespace => only_whitespace_row(&colors).into_any_element(),
+            PageRow::OnlyWhitespace => only_whitespace_row(&colors, edges).into_any_element(),
             PageRow::HunkGap(gap) => hunk_gap(
                 &colors,
+                edges,
                 gap.id.clone(),
                 &gap.gap,
                 gap.label.clone(),
@@ -1736,6 +1743,7 @@ impl OneStepLayout {
                         .ok();
                 });
                 DiffRow::new(line)
+                    .with_edges(edges)
                     .scrolled_sideways(scroll_x, on_scroll_x)
                     .selected(is_selected)
                     .with_code_selection(CodeSelectionHooks {
@@ -1750,25 +1758,23 @@ impl OneStepLayout {
             PageRow::Thread { view, place, .. } => {
                 let thread = self.thread_element(&view, cx);
                 match place {
-                    ThreadRowPlace::UnderLine => {
-                        piece_row(&colors).child(thread).into_any_element()
-                    }
+                    ThreadRowPlace::UnderLine => hung_row().child(thread).into_any_element(),
                     ThreadRowPlace::AfterCode => div().pb_3().child(thread).into_any_element(),
                 }
             }
-            PageRow::QueuedComment(queued) => piece_row(&colors)
+            PageRow::QueuedComment(queued) => hung_row()
                 .child(self.queued_comment(&queued, cx))
                 .into_any_element(),
-            PageRow::Composer { place, .. } => piece_row(&colors)
+            PageRow::Composer { place, .. } => hung_row()
                 .children(self.composer(&place, cx))
                 .into_any_element(),
-            PageRow::AskMarker(ask) => piece_row(&colors)
+            PageRow::AskMarker(ask) => hung_row()
                 .flex()
                 .px_2()
                 .py_1()
                 .child(self.ask_at(&ask, ButtonKind::Ghost, cx))
                 .into_any_element(),
-            PageRow::PieceEnd { edge_drawn } => piece_end(&colors, edge_drawn),
+            PageRow::PieceEnd => piece_end(),
         }
     }
 
@@ -1786,7 +1792,13 @@ impl OneStepLayout {
             .iter()
             .enumerate()
             .map(|(inner, row)| {
-                self.render_page_row(row.clone(), INNER_ROWS * (index + 1) + inner, None, cx)
+                self.render_page_row(
+                    row.clone(),
+                    INNER_ROWS * (index + 1) + inner,
+                    BoxEdges::default(),
+                    None,
+                    cx,
+                )
             })
             .collect();
         let description = columns.description.clone().map(|description| {
