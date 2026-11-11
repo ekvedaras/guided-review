@@ -55,9 +55,9 @@ pub struct Toolbar {
     pub ask: Option<AskAt>,
     pub fold: Option<FoldControl>,
     pub full_diff: Option<FullDiffControl>,
-    /// `None` while the pieces are folded away, as whitespace changes nothing then.
+    /// `None` where no code is shown.
     pub ignores_whitespace: Option<bool>,
-    /// `None` while the pieces are folded away.
+    /// `None` where no code is shown.
     pub wraps_lines: Option<bool>,
 }
 
@@ -1018,6 +1018,7 @@ impl RowsBuilder<'_> {
                 text_may_be_old: page.text_may_be_old,
             });
         }
+        let has_code = !page.pieces.is_empty();
         self.rows.push(PageRow::Toolbar(Rc::new(Toolbar {
             ask: Some(AskAt {
                 id: format!("ask-step-{id}").into(),
@@ -1034,8 +1035,8 @@ impl RowsBuilder<'_> {
                 step: id.clone(),
                 is_showing_full_diff: since.showing_full_diff,
             }),
-            ignores_whitespace: Some(review.ignores_whitespace()),
-            wraps_lines: Some(review.wraps_lines()),
+            ignores_whitespace: has_code.then(|| review.ignores_whitespace()),
+            wraps_lines: has_code.then(|| review.wraps_lines()),
         })));
         let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
         let shown = if page
