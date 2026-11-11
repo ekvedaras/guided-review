@@ -64,7 +64,7 @@
 
 **Seen mark**: The 👀 the viewer puts on the reviewer's comment on GitHub when its hand-off is delivered to the tour agent. The agent's first reply takes it off; so does the viewer when the agent ends without answering. When GitHub refuses either, the line under the thread says so.
 
-**PR notes**: The `Notes` section of the PR description. A step's diagram can be added to it from the button under the diagram; a description with no such section gets one at its end.
+**PR notes**: The `Notes` section of the PR description. A step's diagram can be added to it, collapsed under the step's title, from the button under the diagram; a description with no such section gets one at its end.
 
 **Shortcuts sheet**: The overlay that lists every key the app answers, by heading (Navigate, Read, Comment, View, App), opened with `?`. It reads the same table the keys are bound from. Avoid: cheat sheet, help.
 

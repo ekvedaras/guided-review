@@ -105,7 +105,7 @@ impl DiagramToNotes {
     }
 }
 
-/// The description with the diagram, under its title, at the end of its `Notes` section; a description with
+/// The description with the diagram, collapsed under its title, at the end of its `Notes` section; a description with
 /// no such section gets one at its end. `None` when the description holds the diagram already.
 pub fn with_diagram_in_notes(description: &str, title: &str, diagram: &str) -> Option<String> {
     if holds(description, diagram) {
@@ -117,7 +117,7 @@ pub fn with_diagram_in_notes(description: &str, title: &str, diagram: &str) -> O
         "\n"
     };
     let lines: Vec<&str> = description.lines().collect();
-    let block = format!("**{title}**\n\n```mermaid\n{}\n```", diagram.trim());
+    let block = collapsed(title, diagram);
     let mut out: Vec<&str> = Vec::with_capacity(lines.len() + 8);
     let ends_with_line_end = match notes_section(&lines) {
         Some(section) if section.end < lines.len() => {
@@ -150,6 +150,18 @@ pub fn with_diagram_in_notes(description: &str, title: &str, diagram: &str) -> O
         changed.push_str(line_end);
     }
     Some(changed)
+}
+
+/// GitHub renders Markdown inside `<details>` only after a blank line.
+fn collapsed(title: &str, diagram: &str) -> String {
+    let summary = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(
+        "<details>\n<summary>{summary}</summary>\n\n```mermaid\n{}\n```\n\n</details>",
+        diagram.trim()
+    )
 }
 
 fn holds(description: &str, diagram: &str) -> bool {

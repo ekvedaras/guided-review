@@ -8,8 +8,7 @@ use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 const DIAGRAM: &str = "flowchart TD\n  A[Cart] --> B[Checkout]";
-const IN_NOTES: &str =
-    "**Checkout flow**\n\n```mermaid\nflowchart TD\n  A[Cart] --> B[Checkout]\n```";
+const IN_NOTES: &str = "<details>\n<summary>Checkout flow</summary>\n\n```mermaid\nflowchart TD\n  A[Cart] --> B[Checkout]\n```\n\n</details>";
 
 fn step() -> StepId {
     StepId::from("checkout")
@@ -76,6 +75,16 @@ fn the_diagram_goes_at_the_end_of_the_notes_section() {
         format!(
             "## Why\n\nBecause.\n\n## Notes\n\nKeep the old cart.\n\n{IN_NOTES}\n\n## Merge Danger\n\nNone."
         )
+    );
+}
+
+#[test]
+fn a_title_with_html_in_it_shows_as_text_in_the_summary() {
+    let changed = with_diagram_in_notes("", "Cart <A> & B", DIAGRAM).unwrap();
+
+    assert!(
+        changed.contains("<summary>Cart &lt;A&gt; &amp; B</summary>"),
+        "{changed}"
     );
 }
 
