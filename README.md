@@ -120,7 +120,7 @@ The skill writes the tour with the `guided-review` CLI and opens it. To open an 
 guided-review open <pr-url>
 ```
 
-In the app, `N` (and Next) goes on to the next unread step, `M` marks a step read, `⌘K` jumps to a step, file or action (Settings, Finish review, Restart app here, which `guided-review restart` also does), `?` lists every shortcut and `⌘W` closes the window and quits the app. With summary instructions set in Settings, the tour can also carry a reviewer summary; pictures it shows sit in the tour's own folder.
+In the app, `→` or `J` (the Next button) goes on to the next step not read yet, `N` jumps to the next unread step from anywhere, `M` marks a step read, `⌘K` jumps to a step, file or action (Settings, Finish review, Restart app here, which `guided-review restart` also does), `?` lists every shortcut and `⌘W` closes the window and quits the app. With summary instructions set in Settings, the tour can also carry a reviewer summary; pictures it shows sit in the tour's own folder.
 
 Tours and app state live under `~/.guided-review/`. `guided-review --help` lists the other commands (`outline`, `show`, `check`, `repin`, `refresh`, `settings`, `restart`, `eval`).
 
