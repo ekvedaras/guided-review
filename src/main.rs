@@ -64,6 +64,7 @@ enum Command {
         pr: PullRequestUrl,
         /// The hand-off id from the message, like `h0`
         hand_off: HandOffId,
+        /// The answer in GitHub markdown; `-` reads it from stdin, which keeps its line breaks
         #[arg(long, required_unless_present = "working", conflicts_with = "working")]
         body: Option<String>,
         /// Post "Working on it…" now; the answer with --body replaces it
@@ -109,8 +110,12 @@ fn main() -> anyhow::Result<()> {
             body,
             working: _,
         } => {
+            let body = match body.as_deref() {
+                Some("-") => Some(std::io::read_to_string(std::io::stdin())?),
+                _ => body,
+            };
             let reply = match &body {
-                Some(body) => AgentReply::Answer(body),
+                Some(body) => AgentReply::Answer(body.trim_end()),
                 None => AgentReply::WorkingOnIt,
             };
             let said = agent_reply(&GitHub::from_env(), &home_folder()?, &pr, hand_off, &reply)?;

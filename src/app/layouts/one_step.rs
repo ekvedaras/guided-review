@@ -72,7 +72,7 @@ use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
     AskAt, DESCRIPTION_KEY, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows,
-    StepHeading, StepIntro, SummaryStatsRow, ThreadRowPlace, Toolbar,
+    StepHeading, StepIntro, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
@@ -1548,11 +1548,23 @@ impl OneStepLayout {
         selected: Option<&SelectedRows>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let colors = Colors::active(cx);
         let Some(row) = self.session.read(cx).rows().row(index).cloned() else {
             return div().into_any_element();
         };
+        self.render_page_row(row, index, selected, cx)
+    }
+
+    /// `index` tells the row's elements apart from other rows'; a row inside another uses a made-up one.
+    fn render_page_row(
+        &mut self,
+        row: PageRow,
+        index: usize,
+        selected: Option<&SelectedRows>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = Colors::active(cx);
         match row {
+            PageRow::SummaryColumns(columns) => self.summary_columns(&columns, index, cx),
             PageRow::SummaryTitle(title) => div()
                 .pb_5()
                 .flex()
@@ -1611,14 +1623,6 @@ impl OneStepLayout {
                 .markdown_card(
                     "REVIEWER SUMMARY",
                     MarkdownView::new("reviewer-summary", summary),
-                    cx,
-                )
-                .into_any_element(),
-            PageRow::PrDescription(description) => self
-                .markdown_card(
-                    "PR DESCRIPTION",
-                    MarkdownView::new(DESCRIPTION_KEY, description)
-                        .with_diagrams(self.description_diagrams.clone()),
                     cx,
                 )
                 .into_any_element(),
@@ -1765,6 +1769,55 @@ impl OneStepLayout {
                 .into_any_element(),
             PageRow::PieceEnd => piece_end(&colors).into_any_element(),
         }
+    }
+
+    /// The summary keeps its reading width; the description sits beside it where the window has room,
+    /// else under it.
+    fn summary_columns(
+        &mut self,
+        columns: &SummaryColumns,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        const INNER_ROWS: usize = 1_000_000;
+        let summary: Vec<AnyElement> = columns
+            .summary
+            .iter()
+            .enumerate()
+            .map(|(inner, row)| {
+                self.render_page_row(row.clone(), INNER_ROWS * (index + 1) + inner, None, cx)
+            })
+            .collect();
+        let description = columns.description.clone().map(|description| {
+            div()
+                .flex_1()
+                .min_w(DESCRIPTION_MIN_WIDTH)
+                .max_w(READING_WIDTH)
+                .child(
+                    self.markdown_card(
+                        "PR DESCRIPTION",
+                        MarkdownView::new(DESCRIPTION_KEY, description)
+                            .with_diagrams(self.description_diagrams.clone()),
+                        cx,
+                    ),
+                )
+        });
+        div()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap_x_10()
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .max_w(READING_WIDTH)
+                    .flex()
+                    .flex_col()
+                    .children(summary),
+            )
+            .children(description)
+            .into_any_element()
     }
 
     fn markdown_card(
@@ -1974,6 +2027,8 @@ impl OneStepLayout {
 
 /// Keeps prose at a readable line length on a wide window; code still takes the full width.
 const READING_WIDTH: Pixels = px(760.);
+/// Narrower than this beside the summary, the description goes under it instead.
+const DESCRIPTION_MIN_WIDTH: Pixels = px(420.);
 
 /// The line height of the summary's bullets, which their dots centre on.
 const SUMMARY_LINE: Pixels = px(26.);

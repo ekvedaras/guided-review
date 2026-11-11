@@ -111,6 +111,7 @@ pub struct GuidedReview<'a> {
     github: &'a FakeGitHub,
     current_dir: PathBuf,
     env: Vec<(String, PathBuf)>,
+    stdin: Option<String>,
 }
 
 impl<'a> GuidedReview<'a> {
@@ -120,7 +121,13 @@ impl<'a> GuidedReview<'a> {
             github,
             current_dir: repo.path().to_path_buf(),
             env: Vec::new(),
+            stdin: None,
         }
+    }
+
+    pub fn with_stdin(mut self, text: &str) -> Self {
+        self.stdin = Some(text.to_owned());
+        self
     }
 
     pub fn with_env(mut self, name: &str, value: &Path) -> Self {
@@ -138,6 +145,9 @@ impl<'a> GuidedReview<'a> {
         std::fs::create_dir_all(&empty_gh_config).unwrap();
         let mut command = cargo_bin_cmd!("guided-review");
         command.envs(self.env.iter().map(|(name, value)| (name, value)));
+        if let Some(stdin) = &self.stdin {
+            command.write_stdin(stdin.clone());
+        }
         let output = command
             .args(args)
             .current_dir(&self.current_dir)

@@ -55,6 +55,8 @@ pub fn appearance() -> Option<Appearance> {
 
 pub struct Camera {
     folder: PathBuf,
+    /// Name starts of the pictures to take; empty takes them all.
+    only: Vec<String>,
 }
 
 impl Camera {
@@ -64,12 +66,30 @@ impl Camera {
             eprintln!("could not make {}: {error}", folder.display());
             return None;
         }
-        Some(Self { folder })
+        let only = std::env::var("GUIDED_REVIEW_SNAPSHOT_ONLY")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|start| !start.is_empty())
+            .map(str::to_owned)
+            .collect();
+        Some(Self { folder, only })
+    }
+
+    fn wants(&self, name: &str) -> bool {
+        self.only.is_empty()
+            || self
+                .only
+                .iter()
+                .any(|start| name.starts_with(start.as_str()))
     }
 
     /// Draws the window until its picture settles, then saves it as `<name>.png`. Fails once the
     /// window is gone.
     pub async fn take(&self, name: &str, cx: &mut AsyncWindowContext) -> anyhow::Result<()> {
+        if !self.wants(name) {
+            return Ok(());
+        }
         let started = Instant::now();
         let mut last = None;
         let mut unchanged_since = started;

@@ -424,6 +424,8 @@ fn an_idle_agent_gets_the_oldest_hand_off_as_a_self_contained_message() {
         "notes.txt",
         "guided-review agent-reply",
         "--working",
+        "--body -",
+        "blank line",
     ] {
         assert!(text.contains(part), "{part} missing from {text}");
     }

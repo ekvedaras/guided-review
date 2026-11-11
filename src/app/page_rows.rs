@@ -195,6 +195,11 @@ impl HunkGapRow {
     }
 }
 
+pub struct SummaryColumns {
+    pub summary: Vec<PageRow>,
+    pub description: Option<Rc<PreparedMarkdown>>,
+}
+
 /// Rows are stored per line of a page, so a payload much bigger than a pointer goes behind an `Rc`.
 #[derive(Clone)]
 pub enum PageRow {
@@ -205,7 +210,9 @@ pub enum PageRow {
     RouteStop(Rc<RouteStopRow>),
     TourLead(Rc<TourLead>),
     ReviewerSummary(Rc<PreparedMarkdown>),
-    PrDescription(Rc<PreparedMarkdown>),
+    /// The summary's rows down to the reviewer summary, with the PR description as a column of its own,
+    /// so a wide window puts the description beside them.
+    SummaryColumns(Rc<SummaryColumns>),
     StepHeading(Rc<StepHeading>),
     StepIntro(Rc<StepIntro>),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
@@ -268,8 +275,12 @@ impl PageRow {
                 heading.title.hash(&mut hasher);
                 heading.number.hash(&mut hasher);
             }
-            Self::ReviewerSummary(summary) | Self::PrDescription(summary) => {
-                summary.hash(&mut hasher);
+            Self::ReviewerSummary(summary) => summary.hash(&mut hasher),
+            Self::SummaryColumns(columns) => {
+                for row in &columns.summary {
+                    row.key().0.hash(&mut hasher);
+                }
+                columns.description.hash(&mut hasher);
             }
             Self::AskMarker(ask) => ask.id.hash(&mut hasher),
             Self::Toolbar(toolbar) => {
@@ -549,7 +560,10 @@ impl PageRows {
             .iter()
             .enumerate()
             .find_map(|(index, row)| match row {
-                PageRow::PrDescription(description) => Some((index, description.as_ref())),
+                PageRow::SummaryColumns(columns) => columns
+                    .description
+                    .as_ref()
+                    .map(|description| (index, description.as_ref())),
                 _ => None,
             })
     }
@@ -672,7 +686,8 @@ fn changed_span(old: &[RowKey], new: &[RowKey]) -> RowsChange {
 
 /// The summary is the tour's start page: what the PR is, how big, what it does, the route of the
 /// tour and the way in, then the reviewer summary and the PR's own description.
-fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
+fn summary_rows(review: &Review, page: &mut Vec<PageRow>) {
+    let mut rows = Vec::new();
     rows.push(PageRow::SummaryTitle(review.title().to_owned().into()));
     rows.push(PageRow::SummaryStats(Rc::new(SummaryStatsRow::of(
         review.summary_stats(),
@@ -714,12 +729,13 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
             .reviewer_summary()
             .map(|summary| PageRow::ReviewerSummary(Rc::new(PreparedMarkdown::of(summary)))),
     );
-    rows.extend(
-        review
+    page.push(PageRow::SummaryColumns(Rc::new(SummaryColumns {
+        summary: rows,
+        description: review
             .pr_description()
-            .map(|description| PageRow::PrDescription(Rc::new(PreparedMarkdown::of(description)))),
-    );
-    rows.push(PageRow::Toolbar(Rc::new(Toolbar {
+            .map(|description| Rc::new(PreparedMarkdown::of(description))),
+    })));
+    page.push(PageRow::Toolbar(Rc::new(Toolbar {
         ask: Some(AskAt {
             id: "ask-tour".into(),
             place: Place::Tour,
@@ -730,7 +746,7 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
         ignores_whitespace: None,
         wraps_lines: None,
     })));
-    rows.push(screen_footer(review, None));
+    page.push(screen_footer(review, None));
 }
 
 fn screen_footer(review: &Review, ticks: Option<StepId>) -> PageRow {
