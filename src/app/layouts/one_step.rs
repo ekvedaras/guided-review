@@ -54,6 +54,7 @@ use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
 };
+use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
@@ -156,6 +157,7 @@ pub struct OneStepLayout {
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
     shortcuts: Entity<ShortcutsSheet>,
+    picture_zoom: Entity<PictureZoom>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
     /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
@@ -245,6 +247,7 @@ impl OneStepLayout {
         .detach();
         let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
         let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
+        let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
         cx.subscribe_in(
             &jump,
             window,
@@ -323,6 +326,7 @@ impl OneStepLayout {
         .detach();
         let opener = session.read(cx).review().code_opener(ide.clone());
         use_active_session(&session, cx);
+        use_picture_zoom(&picture_zoom, cx);
         use_code_opener(opener, cx);
         let mut screen_travel = ScreenTravel::default();
         screen_travel.arrive(session.read(cx).review());
@@ -348,6 +352,7 @@ impl OneStepLayout {
             jump,
             pr_switcher,
             shortcuts,
+            picture_zoom,
             settings,
             loading,
             reopen_after_save: ReopenAfterSave::default(),
@@ -3004,6 +3009,7 @@ impl Render for OneStepLayout {
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
             .child(self.shortcuts.clone())
+            .child(self.picture_zoom.clone())
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)
     }

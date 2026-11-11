@@ -48,6 +48,7 @@ pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
+use components::picture_zoom::PictureZoom;
 use components::pr_switcher::{PrSwitcherView, PrSwitching};
 use components::settings_panel::SettingsPanel;
 use components::shortcuts_sheet::ShortcutsSheet;
@@ -541,13 +542,14 @@ fn turn_into_review(
 /// Every shortcut comes from the one table the shortcuts sheet lists (`viewer::Command`).
 fn bind_keys(cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
         SettingsPanel::KEY_CONTEXT,
         ShortcutsSheet::KEY_CONTEXT,
+        PictureZoom::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
