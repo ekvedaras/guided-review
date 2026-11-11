@@ -421,6 +421,9 @@ fn blocks(
         .into_any_element()
 }
 
+/// The width of a reviewer summary's text, the widest a picture in it is drawn.
+const PICTURE_ROOM: f32 = 700.;
+
 fn block_element(
     block: &PreparedBlock,
     key: &str,
@@ -490,12 +493,17 @@ fn block_element(
             path,
             ratio,
             widest,
-        } => img(Arc::clone(path))
-            .w_full()
-            .max_w(px(*widest))
-            .aspect_ratio(*ratio)
-            .rounded(px(INNER_RADIUS))
-            .into_any_element(),
+        } => {
+            // A size of its own: one taken from the box's width is measured before that width is
+            // known, and the room kept is then that of the widest picture.
+            let width = widest.min(PICTURE_ROOM);
+            img(Arc::clone(path))
+                .w(px(width))
+                .h(px(width / ratio))
+                .max_w_full()
+                .rounded(px(INNER_RADIUS))
+                .into_any_element()
+        }
     }
 }
 
