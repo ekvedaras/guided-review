@@ -12,6 +12,7 @@ use crate::image_facts;
 use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
     CommentId, CommentPlace, GitHubError, NoAccess, PictureUploadPort, PullRequestDescriptionPort,
     PullRequestTipsPort, Reaction, ReactionChange, ReactionCount, Resolution, ReviewOutcome,
@@ -323,6 +324,59 @@ impl GitHub {
             repo: repo.clone(),
             fallback_reason: None,
         }
+    }
+}
+
+/// A release archive is about 15 MB; the cap only stops a runaway download.
+const RELEASE_FILE_LIMIT: u64 = 500 * 1024 * 1024;
+
+#[derive(Deserialize)]
+struct ReleaseJson {
+    tag_name: String,
+    assets: Vec<ReleaseAssetJson>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseAssetJson {
+    name: String,
+    browser_download_url: String,
+}
+
+impl ReleasesPort for GitHub {
+    fn latest_release(&self) -> anyhow::Result<PublishedRelease> {
+        let repository = env!("CARGO_PKG_REPOSITORY").trim_start_matches("https://github.com/");
+        let release: ReleaseJson = self
+            .get(
+                &format!("repos/{repository}/releases/latest"),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not read the latest release of {repository}"))?;
+        Ok(PublishedRelease {
+            tag: release.tag_name,
+            assets: release
+                .assets
+                .into_iter()
+                .map(|asset| ReleaseAsset {
+                    name: asset.name,
+                    url: asset.browser_download_url,
+                })
+                .collect(),
+        })
+    }
+
+    /// Release files are public and GitHub sends them from another host, so no token goes along.
+    fn download(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        let mut response = ureq::get(url)
+            .header("User-Agent", "guided-review")
+            .call()
+            .with_context(|| format!("could not download {url}"))?;
+        response
+            .body_mut()
+            .with_config()
+            .limit(RELEASE_FILE_LIMIT)
+            .read_to_vec()
+            .with_context(|| format!("could not download {url}"))
     }
 }
 

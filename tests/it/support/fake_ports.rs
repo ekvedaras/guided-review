@@ -645,3 +645,27 @@ impl AskStore for FakeAskStore {
         Ok(())
     }
 }
+
+/// Stands in for GitHub's releases: the latest one, and the files it serves by address.
+#[derive(Default)]
+pub struct FakeReleases {
+    pub latest: Option<guided_review::update::PublishedRelease>,
+    pub files: BTreeMap<String, Vec<u8>>,
+    pub downloaded: Mutex<Vec<String>>,
+}
+
+impl guided_review::update::ReleasesPort for FakeReleases {
+    fn latest_release(&self) -> anyhow::Result<guided_review::update::PublishedRelease> {
+        self.latest
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("GitHub is down"))
+    }
+
+    fn download(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        self.downloaded.lock().unwrap().push(url.to_owned());
+        self.files
+            .get(url)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("404 for {url}"))
+    }
+}

@@ -16,6 +16,7 @@ mod sidebar_rows;
 #[cfg(feature = "snapshots")]
 mod snapshots;
 mod tour_writer;
+mod updater;
 mod word_keys;
 
 use std::cell::RefCell;
@@ -100,6 +101,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             dock_icon::show();
             bind_keys(cx);
             components::toast_stack::Toaster::install(cx);
+            updater::Updates::install(&home, cx);
             word_keys::take_before_macos(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
