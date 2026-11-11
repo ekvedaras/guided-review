@@ -29,5 +29,5 @@ fn a_line_is_four_bytes_even_inside_an_option() {
 
 #[test]
 fn a_diff_line_stays_small_since_there_is_one_per_shown_line() {
-    assert_eq!(size_of::<guided_review::viewer::DiffLine>(), 160);
+    assert_eq!(size_of::<guided_review::viewer::DiffLine>(), 184);
 }

@@ -37,6 +37,17 @@ pub enum RowGesture {
     Over,
 }
 
+/// What the mouse does on a row's code text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeGesture {
+    /// Down once: a text selection starts here.
+    Press,
+    /// Down twice in a row: the word here is selected.
+    PressTwice,
+    /// A move with the button held carries the selection on.
+    Over,
+}
+
 /// A sideways scroll on a row: how far the row's file box should move its code, in pixels.
 pub type OnScrollX = Rc<dyn Fn(Pixels, &mut Window, &mut App)>;
 
@@ -46,7 +57,7 @@ pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut A
 
 /// The mouse on a row's code text: down starts a text selection there, a move with the button held
 /// carries it on. Spots are byte offsets in the row's code.
-pub type OnCodeGesture = Rc<dyn Fn(RowGesture, usize, &mut Window, &mut App)>;
+pub type OnCodeGesture = Rc<dyn Fn(CodeGesture, usize, &mut Window, &mut App)>;
 
 /// How a row takes part in the text selection: what of it is selected, and where its mouse goes.
 pub struct CodeSelectionHooks {
@@ -67,6 +78,8 @@ pub struct DiffRowLine {
     code: SharedString,
     /// Cut to char boundaries already; coloured when drawn, so a theme switch needs no rebuild.
     highlights: Vec<(Range<usize>, Capture)>,
+    /// The words that changed, cut to char boundaries already.
+    changed_words: Vec<Range<usize>>,
     code_link: CodeLink,
     /// Rows outside GitHub's hunks show no button. Rows of the change since the read show one, to say why they take no comment.
     offers_comment_button: bool,
@@ -98,8 +111,17 @@ impl DiffRowLine {
                 line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
             })
             .collect();
+        let changed_words = line
+            .changed
+            .iter()
+            .filter(|range| {
+                line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
+            })
+            .cloned()
+            .collect();
         Self {
             offers_comment_button: line.offers_comment_button(),
+            changed_words,
             wraps,
             gutter: format!("{base_number:>5} {head_number:>5} {sign} ").into(),
             code: line.text.into(),
@@ -123,6 +145,7 @@ pub struct DiffRow {
     /// How far the code is moved left; all rows of a file box share it, so they scroll together.
     scroll_x: Pixels,
     on_scroll_x: Option<OnScrollX>,
+    edges: BoxEdges,
 }
 
 impl DiffRow {
@@ -134,7 +157,13 @@ impl DiffRow {
             code_selection: None,
             scroll_x: Pixels::ZERO,
             on_scroll_x: None,
+            edges: BoxEdges::default(),
         }
+    }
+
+    pub fn with_edges(mut self, edges: BoxEdges) -> Self {
+        self.edges = edges;
+        self
     }
 
     /// Only for a row that does not wrap: a wrapped row has nothing hidden to the side.
@@ -178,6 +207,27 @@ impl RenderOnce for DiffRow {
                 (range.clone(), style)
             })
             .collect();
+        let word_background = match line.kind {
+            LineKind::Removed => Some(colors.removed_word),
+            LineKind::Added => Some(colors.added_word),
+            LineKind::Context { .. } => None,
+        };
+        let highlights = match word_background {
+            // Plain text in a changed word: syntax colours do not all read on its stronger ground.
+            Some(background) => {
+                let word = HighlightStyle {
+                    color: Some(colors.text.into()),
+                    background_color: Some(background.into()),
+                    ..Default::default()
+                };
+                line.changed_words
+                    .iter()
+                    .fold(highlights, |highlights, range| {
+                        laid_over(&highlights, range.clone(), word)
+                    })
+            }
+            None => highlights,
+        };
         let selected = self
             .code_selection
             .as_ref()
@@ -200,12 +250,16 @@ impl RenderOnce for DiffRow {
                 code.cursor_text()
                     .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                         let byte = byte_at(&press_layout, event.position);
-                        on_press(RowGesture::Press, byte, window, cx);
+                        let gesture = match event.click_count {
+                            2 => CodeGesture::PressTwice,
+                            _ => CodeGesture::Press,
+                        };
+                        on_press(gesture, byte, window, cx);
                     })
                     .on_mouse_move(move |event, window, cx| {
                         if event.pressed_button == Some(MouseButton::Left) {
                             let byte = byte_at(&move_layout, event.position);
-                            on_move(RowGesture::Over, byte, window, cx);
+                            on_move(CodeGesture::Over, byte, window, cx);
                         }
                     })
             }
@@ -218,6 +272,7 @@ impl RenderOnce for DiffRow {
             LineKind::Added => colors.added_gutter,
             LineKind::Context { .. } => colors.background,
         };
+        let edges = self.edges;
         let gutter = div()
             .id(SharedString::from(format!(
                 "gutter-{}-{:?}-{}",
@@ -238,6 +293,12 @@ impl RenderOnce for DiffRow {
             }))
             .on_click(move |_, _, cx| open_code(&link, cx))
             .whitespace_nowrap()
+            .when(edges.opens, |gutter| {
+                gutter.rounded_tl(px(INSIDE_EDGE_RADIUS))
+            })
+            .when(edges.closes, |gutter| {
+                gutter.rounded_bl(px(INSIDE_EDGE_RADIUS))
+            })
             .child(line.gutter.clone());
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self
@@ -263,7 +324,7 @@ impl RenderOnce for DiffRow {
             }
             None => comment_button.into_any_element(),
         };
-        let row = piece_row(&colors)
+        let row = box_row(&colors, edges)
             .group("diff-row")
             .flex()
             .overflow_hidden()
@@ -284,13 +345,14 @@ impl RenderOnce for DiffRow {
                     on_gesture(RowGesture::Over, &location, window, cx);
                 })
             });
-        let row = match line.kind {
-            _ if self.is_selected => row.bg(colors.current),
-            LineKind::Removed => row.bg(colors.removed_line),
-            LineKind::Added => row.bg(colors.added_line),
-            LineKind::Context { .. } => row,
+        let fill = edges.round_inside(div().flex_1().min_w_0().flex());
+        let fill = match line.kind {
+            _ if self.is_selected => fill.bg(colors.current),
+            LineKind::Removed => fill.bg(colors.removed_line),
+            LineKind::Added => fill.bg(colors.added_line),
+            LineKind::Context { .. } => fill,
         };
-        row.child(gutter).child(comment_button).child(code)
+        row.child(fill.child(gutter).child(comment_button).child(code))
     }
 }
 
@@ -310,6 +372,15 @@ fn with_selection(
         background_color: Some(background.into()),
         ..Default::default()
     };
+    laid_over(highlights, selected, selection_style)
+}
+
+/// Lays `style` over the styles in `range`; the styles must stay sorted and apart.
+fn laid_over(
+    highlights: &[(Range<usize>, HighlightStyle)],
+    selected: Range<usize>,
+    selection_style: HighlightStyle,
+) -> Vec<(Range<usize>, HighlightStyle)> {
     let mut cut: Vec<usize> = vec![selected.start, selected.end];
     for (range, _) in highlights {
         cut.push(range.start);
@@ -339,6 +410,43 @@ fn with_selection(
         .collect()
 }
 
+/// Where a row of a piece box meets the box's rounded edge: the box closes at its end and above what
+/// hangs under a line, like a thread, and opens again below it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct BoxEdges {
+    pub opens: bool,
+    pub closes: bool,
+}
+
+/// A row's own colour sits inside the box's 1 px edge, so its corners are that much tighter.
+const INSIDE_EDGE_RADIUS: f32 = CARD_RADIUS - 1.;
+
+impl BoxEdges {
+    pub fn round_inside(self, layer: Div) -> Div {
+        layer
+            .when(self.opens, |layer| layer.rounded_t(px(INSIDE_EDGE_RADIUS)))
+            .when(self.closes, |layer| layer.rounded_b(px(INSIDE_EDGE_RADIUS)))
+    }
+}
+
+/// A row of a piece box, drawing the box's top or bottom edge where it opens or closes there.
+pub fn box_row(colors: &Colors, edges: BoxEdges) -> Div {
+    piece_row(colors)
+        .when(edges.opens, |row| {
+            row.border_t_1().rounded_t(px(CARD_RADIUS))
+        })
+        .when(edges.closes, |row| {
+            row.border_b_1()
+                .rounded_b(px(CARD_RADIUS))
+                .shadow(colors.card_shadow())
+        })
+}
+
+/// What hangs under a line, like a thread, sits between the box's two parts, as wide as the box.
+pub fn hung_row() -> Div {
+    div().w_full().px(px(1.))
+}
+
 /// Every row of a piece sits between the box's side borders.
 pub fn piece_row(colors: &Colors) -> Div {
     div()
@@ -356,15 +464,33 @@ pub struct PieceLabel {
     pub symbol: Option<SharedString>,
     /// The last part of the symbol: `total` of `Order::total`.
     pub symbol_name: Option<SharedString>,
+    /// A part the tour numbers (`hunk-1`) where the file has no symbol to name it by; the number
+    /// means nothing to the reader, so it is not shown.
+    pub is_part: bool,
 }
 
 impl PieceLabel {
+    /// What a marker inside a box of several pieces names: the symbol, the file for a whole-file
+    /// piece, and nothing for a numbered part, which the gap above it already sets apart.
+    pub fn shown_name(&self) -> Option<SharedString> {
+        self.symbol
+            .clone()
+            .or_else(|| (!self.is_part).then(|| self.file_name.clone()))
+    }
+
     pub fn of(id: &PieceId) -> Self {
         Self {
             folder: SharedString::from(id.folder().to_owned()),
             file_name: SharedString::from(id.file_name().to_owned()),
-            symbol: id.symbol_path().map(|symbol| symbol.to_owned().into()),
-            symbol_name: id.symbol_name().map(|name| name.to_owned().into()),
+            symbol: id
+                .symbol_path()
+                .filter(|_| !id.is_hunk())
+                .map(|symbol| symbol.to_owned().into()),
+            symbol_name: id
+                .symbol_name()
+                .filter(|_| !id.is_hunk())
+                .map(|name| name.to_owned().into()),
+            is_part: id.is_hunk(),
         }
     }
 }
@@ -376,6 +502,7 @@ pub struct PieceHeader {
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
     fold_toggle: Option<Stateful<Div>>,
+    closes_box: bool,
 }
 
 impl PieceHeader {
@@ -389,7 +516,14 @@ impl PieceHeader {
             repin_label,
             buttons,
             fold_toggle: None,
+            closes_box: false,
         }
+    }
+
+    /// Nothing follows it in its box: it rounds the box's bottom corners too.
+    pub fn closing_its_box(mut self, closes_box: bool) -> Self {
+        self.closes_box = closes_box;
+        self
     }
 
     /// A chevron before the name that opens or folds the box.
@@ -416,6 +550,11 @@ impl RenderOnce for PieceHeader {
             .bg(colors.header_band())
             .border_1()
             .rounded_t(px(CARD_RADIUS))
+            .when(self.closes_box, |header| {
+                header
+                    .rounded_b(px(CARD_RADIUS))
+                    .shadow(colors.card_shadow())
+            })
             .border_color(colors.subtle_border)
             .text_sm()
             .children(self.fold_toggle)
@@ -466,6 +605,7 @@ pub struct PieceMarker {
     piece: PieceLabel,
     repin_label: Option<&'static str>,
     buttons: Vec<Stateful<Div>>,
+    edges: BoxEdges,
 }
 
 impl PieceMarker {
@@ -478,15 +618,21 @@ impl PieceMarker {
             piece,
             repin_label,
             buttons,
+            edges: BoxEdges::default(),
         }
+    }
+
+    pub fn with_edges(mut self, edges: BoxEdges) -> Self {
+        self.edges = edges;
+        self
     }
 }
 
 impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let name = self.piece.symbol.unwrap_or(self.piece.file_name);
-        piece_row(&colors)
+        let name = self.piece.shown_name();
+        box_row(&colors, self.edges)
             .group("piece-marker")
             .h(px(24.))
             .flex()
@@ -504,7 +650,7 @@ impl RenderOnce for PieceMarker {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(name),
+                    .children(name),
             )
             .children(
                 self.repin_label
@@ -522,21 +668,13 @@ impl RenderOnce for PieceMarker {
     }
 }
 
-/// The bottom edge of a piece box, and the space before the next one.
-pub fn piece_end(colors: &Colors) -> impl IntoElement {
-    div().pb_4().child(
-        div()
-            .h_1p5()
-            .border_x_1()
-            .border_b_1()
-            .rounded_b(px(CARD_RADIUS))
-            .border_color(colors.subtle_border)
-            .shadow(colors.card_shadow()),
-    )
+/// The space under a piece box, before the next one.
+pub fn piece_end() -> gpui::AnyElement {
+    div().pb_4().into_any_element()
 }
 
-pub fn no_change_since_read_row(colors: &Colors) -> impl IntoElement {
-    piece_row(colors)
+pub fn no_change_since_read_row(colors: &Colors, edges: BoxEdges) -> impl IntoElement {
+    box_row(colors, edges)
         .px_2()
         .py_1()
         .text_sm()
@@ -544,8 +682,8 @@ pub fn no_change_since_read_row(colors: &Colors) -> impl IntoElement {
         .child("No change since you read it")
 }
 
-pub fn only_whitespace_row(colors: &Colors) -> impl IntoElement {
-    piece_row(colors)
+pub fn only_whitespace_row(colors: &Colors, edges: BoxEdges) -> impl IntoElement {
+    box_row(colors, edges)
         .px_2()
         .py_1()
         .text_sm()
@@ -556,12 +694,13 @@ pub fn only_whitespace_row(colors: &Colors) -> impl IntoElement {
 /// A binary file has no lines to show, so it gets one row that opens the file.
 pub fn binary_file_row(
     colors: &Colors,
+    edges: BoxEdges,
     id: SharedString,
     link: CodeLink,
     cx: &App,
 ) -> impl IntoElement {
     let label = format!("Binary file. {}", open_code_label(&link, cx));
-    piece_row(colors).child(
+    box_row(colors, edges).child(
         div()
             .id(id)
             .px_2()
@@ -583,6 +722,7 @@ pub fn binary_file_row(
 /// many, and small arrows that bring more in from each side, or all of them at once.
 pub fn hunk_gap(
     colors: &Colors,
+    edges: BoxEdges,
     id: SharedString,
     gap: &HiddenLines,
     label: SharedString,
@@ -643,7 +783,8 @@ pub fn hunk_gap(
         })
     });
     let has_asks = down.is_some() || up.is_some();
-    let band = div()
+    let band = edges
+        .round_inside(div())
         .id(id)
         .h(px(28.))
         .px_2()
@@ -660,5 +801,34 @@ pub fn hunk_gap(
             band.child(sized_icon(Icon::Ellipsis, colors.muted_text, px(12.)))
         })
         .child(div().pl_1().child(label));
-    piece_row(colors).child(band)
+    box_row(colors, edges).child(band)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn label(id: &str) -> PieceLabel {
+        PieceLabel::of(&id.parse().unwrap())
+    }
+
+    #[test]
+    fn a_part_the_tour_numbers_as_a_hunk_shows_no_name_of_its_own() {
+        let part = label("GLOSSARY.md#hunk-1");
+
+        assert_eq!(part.symbol, None);
+        assert_eq!(part.shown_name(), None);
+    }
+
+    #[test]
+    fn a_symbol_shows_its_name_and_a_whole_file_its_file_name() {
+        assert_eq!(
+            label("app/Order.php#Order::total").shown_name().as_deref(),
+            Some("Order::total")
+        );
+        assert_eq!(
+            label("app/Order.php").shown_name().as_deref(),
+            Some("Order.php")
+        );
+    }
 }

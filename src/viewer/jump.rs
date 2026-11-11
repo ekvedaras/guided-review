@@ -174,6 +174,8 @@ pub enum PaletteAction {
     SwitchPr,
     Settings,
     Shortcuts,
+    /// Quits and opens this PR on this screen in a new app, as after an install.
+    RestartApp,
 }
 
 impl PaletteAction {
@@ -192,6 +194,7 @@ impl PaletteAction {
             Self::SwitchPr => "Switch pull request",
             Self::Settings => "Settings",
             Self::Shortcuts => "Keyboard shortcuts",
+            Self::RestartApp => "Restart app here",
         }
     }
 
@@ -208,7 +211,8 @@ impl PaletteAction {
             | Self::AskAboutStep
             | Self::FinishReview
             | Self::OpenOnGitHub
-            | Self::SwitchPr => None,
+            | Self::SwitchPr
+            | Self::RestartApp => None,
         }
     }
 }

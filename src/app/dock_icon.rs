@@ -34,7 +34,13 @@ pub fn show() {
 pub fn show() {}
 
 fn picture() -> Option<Vec<u8>> {
-    let tree = usvg::Tree::from_str(Assets::APP_ICON, &usvg::Options::default()).ok()?;
+    let tree = if cfg!(debug_assertions) {
+        let mut options = usvg::Options::default();
+        options.fontdb_mut().load_system_fonts();
+        usvg::Tree::from_str(Assets::DEV_APP_ICON, &options).ok()?
+    } else {
+        usvg::Tree::from_str(Assets::APP_ICON, &usvg::Options::default()).ok()?
+    };
     let mut pixmap = resvg::tiny_skia::Pixmap::new(SIZE, SIZE)?;
     let scale = SIZE as f32 / tree.size().width();
     resvg::render(

@@ -361,3 +361,10 @@ fn the_sidebar_flags_steps_with_something_to_check_and_marks_skim_steps() {
     assert!(!entries[1].has_check);
     assert!(entries[1].is_skim);
 }
+
+#[test]
+fn the_palette_offers_a_restart_that_comes_back_to_this_screen() {
+    let review = open(shop_tour());
+
+    assert_eq!(palette(&review, ">restart"), ["Actions: Restart app here"]);
+}

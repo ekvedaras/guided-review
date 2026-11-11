@@ -7,6 +7,8 @@ pub struct Assets;
 
 impl Assets {
     pub const APP_ICON: &str = include_str!("../../assets/app-icon.svg");
+    /// A debug build's icon carries a badge, so it is not taken for the installed app in the Dock.
+    pub const DEV_APP_ICON: &str = include_str!("../../assets/app-icon-dev.svg");
 }
 
 impl AssetSource for Assets {

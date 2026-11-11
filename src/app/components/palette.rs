@@ -264,6 +264,9 @@ pub struct Colors {
     pub added_line: Rgba,
     pub removed_gutter: Rgba,
     pub added_gutter: Rgba,
+    /// Behind the words that changed inside a removed or added line, which are drawn in `text`.
+    pub removed_word: Rgba,
+    pub added_word: Rgba,
     /// Links, marks, the focus ring and lines in the accent colour.
     pub accent: Rgba,
     /// The fill of a primary button, top to bottom; `accent` reads too light under white text in the dark.
@@ -280,8 +283,8 @@ pub struct Colors {
     pub danger: Rgba,
     pub danger_background: Rgba,
     pub danger_border: Rgba,
-    /// Progress along the tour, and only that: the meter, the current step's dot, the title-bar
-    /// hairline and the busy sweep.
+    /// Progress, and only that: the tour's meter, the current step's dot, the busy sweep and the
+    /// line under the title bar that follows the scroll down a screen.
     pub trail: Gradient,
     /// The trail once every step is read.
     pub trail_done: Gradient,
@@ -381,6 +384,8 @@ impl Colors {
             added_line: rgb(0xe4f8e9),
             removed_gutter: rgb(0xffd2cd),
             added_gutter: rgb(0xc8f0d2),
+            removed_word: rgb(0xffc4bd),
+            added_word: rgb(0xb4ebc2),
             accent: rgb(iris::S700),
             accent_fill: Gradient::of(iris::S600, iris::S700),
             accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),
@@ -450,10 +455,12 @@ impl Colors {
             added_line: rgb(0x13291c),
             removed_gutter: rgb(0x4c1f22),
             added_gutter: rgb(0x1a4129),
+            removed_word: rgb(0x5c2328),
+            added_word: rgb(0x1f4c30),
             accent: rgb(iris::S400),
-            accent_fill: Gradient::of(iris::S600, iris::S700),
-            accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),
-            accent_fill_pressed: rgb(iris::S700),
+            accent_fill: Gradient::of(0x5652d8, 0x4640a8),
+            accent_fill_hover: Gradient::of(iris::S600, iris::S700),
+            accent_fill_pressed: rgb(0x403a9c),
             on_accent_fill: rgb(WHITE),
             warning: rgb(amber::S400),
             warning_background: rgb(amber::S950),
@@ -599,12 +606,11 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(1.), self.card_shadow.into()).blur_radius(px(2.))]
     }
 
-    /// A primary button sits above the page and casts its own colour.
+    /// A primary button sits a little above the page, with a short drop and no glow of its colour.
     pub fn primary_shadow(&self) -> Vec<BoxShadow> {
         vec![
             BoxShadow::new(px(0.), px(1.), translucent(iris::S900, 0.4).into()).blur_radius(px(2.)),
-            BoxShadow::new(px(0.), px(4.), translucent(iris::S600, 0.28).into())
-                .blur_radius(px(10.)),
+            BoxShadow::new(px(0.), px(2.), self.shadow.opacity(0.3).into()).blur_radius(px(4.)),
         ]
     }
 

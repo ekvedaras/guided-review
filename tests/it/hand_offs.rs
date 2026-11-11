@@ -424,6 +424,8 @@ fn an_idle_agent_gets_the_oldest_hand_off_as_a_self_contained_message() {
         "notes.txt",
         "guided-review agent-reply",
         "--working",
+        "--body -",
+        "blank line",
     ] {
         assert!(text.contains(part), "{part} missing from {text}");
     }
@@ -1109,4 +1111,40 @@ fn a_hand_off_the_agent_ends_without_answering_has_its_eyes_taken_off() {
     );
     assert_eq!(seen_marks(&review), [SeenMark::Off]);
     assert_eq!(review.seen_marks_to_take_off().len(), 0);
+}
+
+#[test]
+fn the_agents_working_on_it_reply_is_left_out_of_the_thread_while_the_line_under_it_says_so() {
+    let pull = Pull::new();
+    let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
+    let (mut review, id) = delivered_one(&pull, &github);
+    let working = working_on_it_request(&pull, id).run(&github).unwrap();
+    review.hand_off_replied(id, working.replied()).unwrap();
+    let thread_with = |reply: &str| {
+        thread_on_line_ten(
+            "T1",
+            vec![comment("C1", "me", "why ten?"), comment("R1", "me", reply)],
+        )
+    };
+    let shown_comments = |review: &Review| -> Vec<String> {
+        review.current_step().unwrap().threads[0]
+            .thread
+            .comments
+            .iter()
+            .map(|comment| comment.body.clone())
+            .collect()
+    };
+
+    review.set_threads(&[thread_with("🤖 Working on it…")]);
+
+    assert_eq!(shown_comments(&review), ["why ten?"]);
+
+    let answered = reply_request(&pull, id, "Done in abc123.")
+        .unwrap()
+        .run(&github)
+        .unwrap();
+    review.hand_off_replied(id, answered.replied()).unwrap();
+    review.set_threads(&[thread_with("🤖 Done in abc123.")]);
+
+    assert_eq!(shown_comments(&review), ["why ten?", "🤖 Done in abc123."]);
 }

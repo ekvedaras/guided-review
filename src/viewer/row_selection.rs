@@ -63,7 +63,7 @@ pub struct SelectedLines {
 
 impl SelectedLines {
     /// `None` for no rows, so a selection always has a first and a last.
-    fn new(lines: Vec<DiffLine>) -> Option<Self> {
+    pub(super) fn new(lines: Vec<DiffLine>) -> Option<Self> {
         let first = lines.first()?.location.clone();
         let last = lines.last()?.location.clone();
         Some(Self { lines, first, last })

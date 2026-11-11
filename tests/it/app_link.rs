@@ -12,6 +12,7 @@ fn open_request() -> OpenRequest {
         pr: "https://github.com/acme/shop/pull/7".to_owned(),
         folder: "/work/shop".into(),
         terminal: Some("t1b".to_owned()),
+        at_step: None,
     }
 }
 

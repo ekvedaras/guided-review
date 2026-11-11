@@ -62,8 +62,9 @@ pub fn rasterize(svg: &Svg, scale: f32, strip: &Strip) -> Result<Arc<RenderImage
         Transform::from_scale(scale, scale).post_translate(0.0, -(strip.rows.start as f32));
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     let mut pixels = pixmap.take();
+    // resvg's pixels are premultiplied; a GPUI image is not, so see-through edges would come out dark.
     for pixel in pixels.as_chunks_mut::<4>().0 {
-        pixel.swap(0, 2);
+        gpui::swap_rgba_pa_to_bgra(pixel);
     }
     let bgra = image::RgbaImage::from_raw(width_px, height_px, pixels)
         .ok_or("the strip buffer has the wrong size")?;

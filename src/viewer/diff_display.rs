@@ -10,6 +10,7 @@ use crate::pull_request::Sha;
 use super::code_link::CodeLinks;
 use super::highlight::Highlights;
 use super::step_page::{DiffLine, LineKind, LineLocation, RowView, Side};
+use super::word_diff::changed_words;
 
 /// GitHub's diff shows this many unchanged lines around a change; only those take comments.
 const GITHUB_CONTEXT_LINES: usize = 3;
@@ -391,7 +392,21 @@ impl DiffDisplay<'_> {
             };
             file_lines.changed_row(Side::Head, kind, line)
         });
-        removed_rows.chain(added_rows).collect()
+        let mut removed_rows: Vec<DiffLine> = removed_rows.collect();
+        let mut added_rows: Vec<DiffLine> = added_rows.collect();
+        mark_changed_words(&mut removed_rows, &mut added_rows);
+        removed_rows.into_iter().chain(added_rows).collect()
+    }
+}
+
+/// The n-th removed line pairs with the n-th added one, as both stand for the same line rewritten.
+fn mark_changed_words(removed: &mut [DiffLine], added: &mut [DiffLine]) {
+    let added = added.iter_mut().filter(|line| line.kind == LineKind::Added);
+    for (old, new) in removed.iter_mut().zip(added) {
+        if let Some(changed) = changed_words(&old.text, &new.text) {
+            old.changed = changed.old;
+            new.changed = changed.new;
+        }
     }
 }
 
@@ -500,6 +515,7 @@ impl FileLines<'_> {
                 .spans(side, self.file.path.as_str(), line.number.into())
                 .to_vec(),
             view: RowView::PrDiff,
+            changed: Vec::new(),
         }
     }
 }

@@ -11,6 +11,7 @@ use crate::tour::Tour;
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
 use super::hand_offs::{HandOffId, HandOffs};
+use super::outdated_lines::FollowedLines;
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
@@ -113,10 +114,17 @@ impl ThreadComment {
 }
 
 impl ReviewThread {
-    /// Where the thread hangs, for a thread that still points at a line.
-    pub fn anchor(&self) -> Option<LineLocation> {
-        if self.is_outdated || self.is_file_comment {
+    /// Where the thread hangs: its line, or for an outdated thread where its lines were followed to.
+    pub fn anchor(&self, followed: Option<&FollowedLines>) -> Option<LineLocation> {
+        if self.is_file_comment {
             return None;
+        }
+        if self.is_outdated {
+            return followed.map(|followed| LineLocation {
+                path: self.path.clone(),
+                side: Side::Head,
+                line: followed.end,
+            });
         }
         Some(LineLocation {
             path: self.path.clone(),
@@ -151,6 +159,8 @@ pub struct ThreadView {
     pub hand_off_line: Option<Arc<str>>,
     /// The thread's latest hand-off failed and can be tried again.
     pub failed_hand_off: Option<HandOffId>,
+    /// An outdated thread's lines, followed to the head, and what they were.
+    pub followed: Option<FollowedLines>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -163,6 +173,24 @@ enum Home {
 #[derive(Debug, Default)]
 pub(super) struct ThreadPlacement {
     homes: BTreeMap<Home, Vec<ReviewThread>>,
+    followed: BTreeMap<ThreadId, FollowedLines>,
+}
+
+/// The threads of one screen, with where their outdated lines went.
+#[derive(Clone, Copy)]
+pub(super) struct Placed<'a> {
+    threads: &'a [ReviewThread],
+    followed: &'a BTreeMap<ThreadId, FollowedLines>,
+}
+
+impl Placed<'_> {
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
 }
 
 impl ThreadPlacement {
@@ -170,6 +198,7 @@ impl ThreadPlacement {
         tour: &Tour,
         files: &[ChangedFile],
         threads: &[ReviewThread],
+        followed: &BTreeMap<ThreadId, FollowedLines>,
         display: &DiffDisplay,
     ) -> Self {
         let steps: Vec<(StepId, Vec<PieceDiff>)> = tour
@@ -189,26 +218,32 @@ impl ThreadPlacement {
         for thread in threads {
             let home = steps
                 .iter()
-                .find(|(_, parts)| match thread.anchor() {
+                .find(|(_, parts)| match thread.anchor(followed.get(&thread.id)) {
                     Some(anchor) => parts.iter().any(|piece| hangs_under_a_row(piece, &anchor)),
                     None => parts.iter().any(|piece| thread.path == *piece.id.path()),
                 })
                 .map_or(Home::SafetyNet, |(id, _)| Home::Step(id.clone()));
             homes.entry(home).or_default().push(thread.clone());
         }
-        Self { homes }
+        Self {
+            homes,
+            followed: followed.clone(),
+        }
     }
 
-    pub fn in_step(&self, id: &StepId) -> &[ReviewThread] {
+    pub fn in_step(&self, id: &StepId) -> Placed<'_> {
         self.of_home(&Home::Step(id.clone()))
     }
 
-    pub fn in_safety_net(&self) -> &[ReviewThread] {
+    pub fn in_safety_net(&self) -> Placed<'_> {
         self.of_home(&Home::SafetyNet)
     }
 
-    fn of_home(&self, home: &Home) -> &[ReviewThread] {
-        self.homes.get(home).map_or(&[], Vec::as_slice)
+    fn of_home(&self, home: &Home) -> Placed<'_> {
+        Placed {
+            threads: self.homes.get(home).map_or(&[], Vec::as_slice),
+            followed: &self.followed,
+        }
     }
 }
 
@@ -218,7 +253,7 @@ fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
 
 /// Turns placed threads into what a screen shows. `shown` is the code the screen has.
 pub(super) fn views(
-    threads: &[ReviewThread],
+    placed: Placed<'_>,
     shown: &[PieceDiff],
     flipped: &BTreeSet<ThreadId>,
     files_at_head: &FilesAtHead,
@@ -226,13 +261,15 @@ pub(super) fn views(
     comment_edits: &BTreeMap<CommentId, String>,
     hand_offs: &HandOffs,
 ) -> Vec<ThreadView> {
-    threads
+    placed
+        .threads
         .iter()
         .map(|thread| ThreadView {
             is_folded: thread.is_folded_by_default() != flipped.contains(&thread.id),
             anchor: thread
-                .anchor()
+                .anchor(placed.followed.get(&thread.id))
                 .filter(|anchor| shown.iter().any(|piece| hangs_under_a_row(piece, anchor))),
+            followed: placed.followed.get(&thread.id).cloned(),
             commented_lines: commented_lines(thread, files_at_head),
             reply_draft: reply_drafts.get(&thread.id).cloned(),
             edit_drafts: thread
@@ -245,9 +282,18 @@ pub(super) fn views(
                 .collect(),
             hand_off_line: hand_offs.line_for(&thread.id),
             failed_hand_off: hand_offs.failed_in(&thread.id),
-            thread: thread.clone(),
+            thread: without_working_on_it(thread, hand_offs),
         })
         .collect()
+}
+
+/// The line under the thread already says the agent is working on it, so its reply saying so is left out.
+fn without_working_on_it(thread: &ReviewThread, hand_offs: &HandOffs) -> ReviewThread {
+    let mut shown = thread.clone();
+    if let Some(reply) = hand_offs.working_on_it_in(&thread.id) {
+        shown.comments.retain(|comment| &comment.id != reply);
+    }
+    shown
 }
 
 fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[Arc<str>]> {

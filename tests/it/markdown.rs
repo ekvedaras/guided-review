@@ -226,7 +226,7 @@ fn all_text(blocks: &[Block]) -> String {
                 text += &all_text(body);
             }
             Block::Code { text: code, .. } => text += code,
-            Block::Rule => {}
+            Block::Rule | Block::Picture { .. } => {}
         }
     }
     text
@@ -289,4 +289,82 @@ fn other_fences_have_only_plain_lines() {
 
     assert_eq!(fence_lines(Some("php"), "-1\n+2"), [FenceLine::Plain; 2]);
     assert_eq!(fence_lines(None, "-1"), [FenceLine::Plain]);
+}
+
+#[test]
+fn mermaid_fences_are_the_diagrams_of_the_text_in_reading_order_even_inside_folds_and_lists() {
+    let markdown = Markdown::parse(
+        "```mermaid\nflowchart TD\n  A --> B\n```\n\n\
+         ```php\n$a = 1;\n```\n\n\
+         <details><summary>Before / after</summary>\n\n\
+         ```Mermaid\nflowchart LR\n  X --> Y\n```\n\n\
+         </details>\n\n\
+         - item\n\n  ```mermaid\n  sequenceDiagram\n    A->>B: hi\n  ```\n",
+    );
+
+    assert_eq!(
+        markdown.diagrams(),
+        [
+            "flowchart TD\n  A --> B\n",
+            "flowchart LR\n  X --> Y\n",
+            "sequenceDiagram\n  A->>B: hi\n",
+        ]
+    );
+}
+
+/// A tour's folder holding a 40×20 picture and an explainer page.
+fn tour_files() -> tempfile::TempDir {
+    let folder = tempfile::tempdir().unwrap();
+    image::RgbaImage::new(40, 20)
+        .save(folder.path().join("deadline.png"))
+        .unwrap();
+    std::fs::write(folder.path().join("explainer.html"), "<html></html>").unwrap();
+    folder
+}
+
+#[test]
+fn a_picture_saved_in_the_tours_folder_shows_as_a_picture_of_its_size() {
+    let files = tour_files();
+
+    let markdown = Markdown::parse_with_files("Before\n\n![deadline](deadline.png)", files.path());
+
+    assert_eq!(
+        markdown.blocks[1],
+        Block::Picture {
+            path: files.path().join("deadline.png"),
+            alt: "deadline".into(),
+            width: 40,
+            height: 20,
+        }
+    );
+}
+
+#[test]
+fn a_picture_on_the_web_or_missing_stays_a_link() {
+    let files = tour_files();
+
+    let markdown = Markdown::parse_with_files(
+        "![a](https://example.com/a.png) ![b](gone.png)",
+        files.path(),
+    );
+
+    let links: Vec<Option<&str>> = paragraph_runs(&markdown.blocks[0])
+        .iter()
+        .filter(|run| run.link.is_some())
+        .map(|run| run.link.as_deref())
+        .collect();
+    assert_eq!(links, [Some("https://example.com/a.png"), Some("gone.png")]);
+}
+
+#[test]
+fn a_link_to_a_file_in_the_tours_folder_opens_that_file() {
+    let files = tour_files();
+
+    let markdown = Markdown::parse_with_files("[Open the explainer](explainer.html)", files.path());
+
+    let expected = format!("file://{}", files.path().join("explainer.html").display());
+    assert_eq!(
+        paragraph_runs(&markdown.blocks[0])[0].link.as_deref(),
+        Some(expected.as_str())
+    );
 }

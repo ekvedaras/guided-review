@@ -5,7 +5,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Problem, ReadProgress, Review, ReviewState, ReviewStateFile, SummaryStats, TourLead,
+    NextScreen, Problem, ReadProgress, Review, ReviewState, ReviewStateFile, Screen, SummaryStats,
+    TourLead,
 };
 use serde_json::{Value, json};
 
@@ -382,15 +383,9 @@ fn next_unread_goes_to_the_first_unread_step_after_the_open_screen() {
     review.tick(&"greeting".into()).unwrap();
 
     assert!(review.go_to_next_unread());
-    assert_eq!(
-        review.screen(),
-        &guided_review::viewer::Screen::Step("readme".into())
-    );
+    assert_eq!(review.screen(), &Screen::Step("readme".into()));
     assert!(review.go_to_next_unread());
-    assert_eq!(
-        review.screen(),
-        &guided_review::viewer::Screen::Step("emails".into())
-    );
+    assert_eq!(review.screen(), &Screen::Step("emails".into()));
 }
 
 #[test]
@@ -401,10 +396,7 @@ fn next_unread_starts_over_from_the_top_once_past_the_last_unread_step() {
     review.go_to(&"emails".into());
 
     assert!(review.go_to_next_unread());
-    assert_eq!(
-        review.screen(),
-        &guided_review::viewer::Screen::Step("readme".into())
-    );
+    assert_eq!(review.screen(), &Screen::Step("readme".into()));
 }
 
 #[test]
@@ -417,10 +409,7 @@ fn next_unread_stays_put_when_every_step_is_read() {
     review.go_to(&"greeting".into());
 
     assert!(!review.go_to_next_unread());
-    assert_eq!(
-        review.screen(),
-        &guided_review::viewer::Screen::Step("greeting".into())
-    );
+    assert_eq!(review.screen(), &Screen::Step("greeting".into()));
     assert_eq!(review.first_unread_step(), None);
 }
 
@@ -496,4 +485,47 @@ fn the_summary_counts_what_the_pr_changes() {
             open_threads: 0,
         }
     );
+}
+
+#[test]
+fn going_on_skips_the_steps_already_read_and_up_next_names_where_it_lands() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"greeting".into()).unwrap();
+    review.go_to(&"readme".into());
+
+    assert_eq!(
+        review.reading_place().next,
+        Some(NextScreen::Step {
+            title: "Emails".into()
+        })
+    );
+    assert!(review.go_on());
+    assert_eq!(review.screen(), &Screen::Step("emails".into()));
+}
+
+#[test]
+fn going_on_passes_the_read_steps_left_to_the_changes_in_no_step() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"greeting".into()).unwrap();
+    review.tick(&"emails".into()).unwrap();
+    review.go_to(&"readme".into());
+
+    assert_eq!(review.reading_place().next, Some(NextScreen::SafetyNet));
+    assert!(review.go_on());
+    assert_eq!(review.screen(), &Screen::SafetyNet);
+    assert_eq!(review.reading_place().next, None);
+    assert!(!review.go_on());
+}
+
+#[test]
+fn going_forward_still_walks_every_screen_in_order() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"greeting".into()).unwrap();
+    review.go_to(&"readme".into());
+
+    assert!(review.go_forward());
+    assert_eq!(review.screen(), &Screen::Step("greeting".into()));
 }

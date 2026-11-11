@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use guided_review::agent_reply::{AgentReply, agent_reply};
 use guided_review::app_link::{
     Answer, AppFolder, AppListener, BindError, OpenRequest, Request, hand_over,
+    restart as restart_app,
 };
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
@@ -18,7 +19,7 @@ use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
-use guided_review::tour::Tour;
+use guided_review::tour::{StepId, Tour};
 use guided_review::tour_check;
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
 
@@ -57,6 +58,13 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
+    /// Quit the running app and open a PR in a new one, as after an install
+    Restart {
+        pr: PullRequestUrl,
+        /// The id of the step to show, else the summary
+        #[arg(long)]
+        at: Option<StepId>,
+    },
     /// Show the app's Settings, also with no PR open
     Settings,
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
@@ -64,6 +72,7 @@ enum Command {
         pr: PullRequestUrl,
         /// The hand-off id from the message, like `h0`
         hand_off: HandOffId,
+        /// The answer in GitHub markdown; `-` reads it from stdin, which keeps its line breaks
         #[arg(long, required_unless_present = "working", conflicts_with = "working")]
         body: Option<String>,
         /// Post "Working on it…" now; the answer with --body replaces it
@@ -101,7 +110,8 @@ fn main() -> anyhow::Result<()> {
         Command::Check { pr } => check(&pr),
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
-        Command::Open { pr } => open(&pr),
+        Command::Open { pr } => open(&pr, &Launch::Open),
+        Command::Restart { pr, at } => open(&pr, &Launch::Restart { at }),
         Command::Settings => settings(),
         Command::AgentReply {
             pr,
@@ -109,8 +119,12 @@ fn main() -> anyhow::Result<()> {
             body,
             working: _,
         } => {
+            let body = match body.as_deref() {
+                Some("-") => Some(std::io::read_to_string(std::io::stdin())?),
+                _ => body,
+            };
             let reply = match &body {
-                Some(body) => AgentReply::Answer(body),
+                Some(body) => AgentReply::Answer(body.trim_end()),
                 None => AgentReply::WorkingOnIt,
             };
             let said = agent_reply(&GitHub::from_env(), &home_folder()?, &pr, hand_off, &reply)?;
@@ -277,17 +291,32 @@ fn eval(existing_tours: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn open(pr: &PullRequestUrl) -> anyhow::Result<()> {
+/// How `open` reaches the app: through the one running, or by quitting it first.
+enum Launch {
+    Open,
+    /// Shows the step `at`, else the summary.
+    Restart {
+        at: Option<StepId>,
+    },
+}
+
+fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
     let home = home_folder()?;
     require_tour(pr, &home)?;
-    let answer = hand_over(
-        &AppFolder::in_home(&home),
-        &Request::Open(OpenRequest {
-            pr: pr.to_string(),
-            folder: std::env::current_dir().context("could not read the current folder")?,
-            terminal: std::env::var("HC_TERMINAL_ID").ok(),
-        }),
-    )?;
+    let folder = AppFolder::in_home(&home);
+    let request = Request::Open(OpenRequest {
+        pr: pr.to_string(),
+        folder: std::env::current_dir().context("could not read the current folder")?,
+        terminal: std::env::var("HC_TERMINAL_ID").ok(),
+        at_step: match launch {
+            Launch::Open => None,
+            Launch::Restart { at } => at.clone(),
+        },
+    });
+    let answer = match launch {
+        Launch::Restart { .. } => restart_app(&folder, &request)?,
+        Launch::Open => hand_over(&folder, &request)?,
+    };
     match answer {
         Answer::Opening { .. } | Answer::Reloaded { .. } | Answer::KeptInBackground { .. } => {
             println!("{answer}");

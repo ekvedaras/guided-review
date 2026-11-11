@@ -8,7 +8,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{App, Context, EventEmitter, ListAlignment, ListState, Subscription, Task, Window, px};
+use gpui::{
+    App, Context, EventEmitter, ListAlignment, ListOffset, ListState, Subscription, Task, Window,
+    px,
+};
 
 use crate::app::components::image_row::ImagePictures;
 use crate::app::components::markdown_view::OpenDetails;
@@ -25,6 +28,7 @@ use crate::viewer::{
     LineLocation, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
     SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId, ToastTone,
     TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    follow_outdated,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -312,8 +316,15 @@ impl ReviewSession {
     }
 
     pub fn stop_composing(&mut self, cx: &mut Context<Self>) {
-        self.composing = None;
-        cx.notify();
+        // A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
+        self.change_session(cx, |session| {
+            let left = session.composing.take();
+            match left {
+                Some(place) => session.review.leave_draft(&place),
+                None => Ok(()),
+            }
+        })
+        .ok();
     }
 
     pub fn type_in_comment(&mut self, place: &CommentPlace, text: &str, cx: &mut Context<Self>) {
@@ -577,6 +588,19 @@ impl ReviewSession {
         })
     }
 
+    /// GPUI's splice moves the view to the top of a replaced row; a reply box opening on a long thread
+    /// would throw the reader to the thread's start. The view stays where it was in that row instead.
+    fn splice_keeping_place(&self, old: std::ops::Range<usize>, new_count: usize) {
+        let top = self.screen_list.logical_scroll_top();
+        self.screen_list.splice(old.clone(), new_count);
+        if old.contains(&top.item_ix) && new_count > 0 {
+            self.screen_list.scroll_to(ListOffset {
+                item_ix: top.item_ix.min(old.start + new_count - 1),
+                offset_in_item: top.offset_in_item,
+            });
+        }
+    }
+
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
         let started = Instant::now();
         let rows = PageRows::of(
@@ -590,7 +614,7 @@ impl ReviewSession {
         );
         match rows.change_from(&self.rows) {
             RowsChange::OtherScreen => self.screen_list.reset(rows.len()),
-            RowsChange::Spliced { old, new_count } => self.screen_list.splice(old, new_count),
+            RowsChange::Spliced { old, new_count } => self.splice_keeping_place(old, new_count),
             RowsChange::Unchanged => {}
         }
         self.rows = rows;
@@ -956,13 +980,23 @@ impl ReviewSession {
         ));
     }
 
+    /// Outdated threads are followed to their lines in the same trip, so they never jump once shown.
     fn pull_threads(&mut self, cx: &mut Context<Self>) {
         let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
+        let (source, head) = (Arc::clone(&self.source), self.review.head().clone());
         self.threads_pull = Some(self.run_off_thread(
             cx,
-            move || github.review_threads(&pr),
+            move || {
+                github.review_threads(&pr).map(|threads| {
+                    let followed = follow_outdated(&threads, source.as_ref(), &head);
+                    (threads, followed)
+                })
+            },
             |this, threads, cx| match threads {
-                Ok(threads) => this.change(cx, |review| review.set_threads(&threads)),
+                Ok((threads, followed)) => this.change(cx, |review| {
+                    review.set_threads(&threads);
+                    review.set_followed_lines(followed);
+                }),
                 Err(error) => this.change(cx, |review| review.threads_not_read(&error)),
             },
         ));

@@ -151,6 +151,12 @@ impl TextDraft {
             .unwrap_or_else(|| self.selection());
         let range = self.range_in_text(&range);
         self.replace(range.clone(), text);
+        // A comment box wants the backtick for code far more than for an accent, and while text is
+        // marked macOS hands cmd+v to the input method, which swallows the paste.
+        if text == "`" {
+            self.marked = None;
+            return;
+        }
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
         if let Some(selected) = selected {
             let selected = selected.start.min(selected.end)..selected.start.max(selected.end);
@@ -374,6 +380,20 @@ mod tests {
         draft.insert("ą");
         assert_eq!(draft.text(), "aą");
         assert_eq!(draft.marked(), None);
+    }
+
+    #[test]
+    fn a_backtick_a_dead_key_layout_marks_is_written_at_once_so_cmd_v_still_pastes() {
+        let mut draft = TextDraft::with_text("I'd like ");
+        draft.replace_and_mark(None, "`", None);
+
+        assert_eq!(draft.text(), "I'd like `");
+        assert_eq!(
+            draft.marked(),
+            None,
+            "macOS gives cmd+v to the input method while text is marked"
+        );
+        assert_eq!(draft.selection(), 10..10);
     }
 
     #[test]

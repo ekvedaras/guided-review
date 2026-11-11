@@ -222,3 +222,23 @@ fn working_on_it_from_the_cli_posts_the_progress_reply_and_the_state_file_keeps_
         }
     );
 }
+
+#[test]
+fn a_body_of_a_dash_is_read_from_stdin_so_the_reply_keeps_its_paragraphs() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    with_one_hand_off(repo.home());
+    let (url, asked) = serve_graphql(vec![PENDING.into(), PENDING.into(), REPLIED.into()]);
+
+    let run = GuidedReview::new(&repo, &FakeGitHub { url })
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .with_stdin("Two jobs:\n\n- price the lines\n- record the discount\n")
+        .run(&["agent-reply", PR, "h0", "--body", "-"]);
+
+    assert!(run.success, "stderr: {}", run.stderr);
+    let asked = asked.lock().unwrap();
+    let reply: serde_json::Value = serde_json::from_str(asked.last().unwrap()).unwrap();
+    assert_eq!(
+        reply["variables"]["input"]["body"],
+        "🤖 Two jobs:\n\n- price the lines\n- record the discount"
+    );
+}

@@ -52,8 +52,8 @@ use components::settings_panel::SettingsPanel;
 use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout, ToggleJump,
-    ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
+    CloseWindow, Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout,
+    ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -161,6 +161,7 @@ fn open_request_of(home: &Path, pr: &PullRequestUrl) -> OpenRequest {
         pr: pr.to_string(),
         folder,
         terminal: None,
+        at_step: None,
     }
 }
 
@@ -419,10 +420,17 @@ async fn build_and_show(
     home: PathBuf,
     cx: &mut AsyncApp,
 ) {
-    let (build_pr, folder) = (pr.clone(), open.folder.clone());
+    let (build_pr, folder, at_step) = (pr.clone(), open.folder.clone(), open.at_step.clone());
     let built = cx
         .background_executor()
-        .spawn(async move { open_review(&build_pr, &folder, &home) })
+        .spawn(async move {
+            open_review(&build_pr, &folder, &home).map(|mut opened| {
+                if let Some(step) = &at_step {
+                    opened.review.go_to(step);
+                }
+                opened
+            })
+        })
         .await;
     let active = screen.borrow().active.clone();
     let finished = active.update(cx, |active, cx| {
@@ -547,6 +555,11 @@ fn bind_keys(cx: &mut App) {
             KeyScope::Page => typing_is_not_navigation.clone(),
             KeyScope::Window => OneStepLayout::KEY_CONTEXT.to_owned(),
             KeyScope::TextBox => text_box::TYPING_CONTEXT.to_owned(),
+            KeyScope::NotTyping => format!(
+                "{} && !{}",
+                OneStepLayout::KEY_CONTEXT,
+                text_box::TYPING_CONTEXT
+            ),
         };
         command.chords().iter().map(move |chord| {
             let keys = keystroke(chord);
@@ -564,6 +577,7 @@ fn bind_keys(cx: &mut App) {
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
+                Command::CloseWindow => KeyBinding::new(&keys, CloseWindow, context),
             }
         })
     });
@@ -596,7 +610,7 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
-            title: Some(title.into()),
+            title: Some(marked_if_dev(title).into()),
             appears_transparent: true,
             traffic_light_position: Some(point(px(14.), px(14.))),
         }),
@@ -608,6 +622,15 @@ fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
     format!("{pr}: {}", opened.review.title())
 }
 
+/// A debug build names itself in its title, which the Window menu and Mission Control show.
+fn marked_if_dev(title: String) -> String {
+    if cfg!(debug_assertions) {
+        format!("{title} (dev)")
+    } else {
+        title
+    }
+}
+
 fn new_layout(
     opened: OpenedReview,
     pr: &PullRequestUrl,
@@ -615,7 +638,7 @@ fn new_layout(
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,
 ) -> OneStepLayout {
-    window.set_window_title(&window_title(&opened, pr));
+    window.set_window_title(&marked_if_dev(window_title(&opened, pr)));
     let collaborators = Collaborators {
         github: opened.github,
         ide: opened.ide,

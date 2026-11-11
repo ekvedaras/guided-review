@@ -299,6 +299,8 @@ struct EditState {
     is_dragging: bool,
     /// Up and down keep to this x, so going through a short line does not lose the column.
     goal_x: Option<Pixels>,
+    /// How far a single line is moved left so the caret stays in view; it never wraps.
+    scroll_x: Pixels,
     on_edit: Option<OnText>,
     on_submit: Option<OnKey>,
     on_submit_to_agent: Option<OnKey>,
@@ -358,6 +360,7 @@ impl EditState {
             layout: None,
             is_dragging: false,
             goal_x: None,
+            scroll_x: Pixels::ZERO,
             on_edit: None,
             on_submit: None,
             on_submit_to_agent: None,
@@ -816,6 +819,9 @@ struct TextBoxElement {
     state: Entity<EditState>,
 }
 
+/// Room kept right of the caret when a single line moves to show it.
+const CARET_ROOM: Pixels = px(2.);
+
 impl IntoElement for TextBoxElement {
     type Element = Self;
 
@@ -825,6 +831,7 @@ impl IntoElement for TextBoxElement {
 }
 
 struct Painted {
+    origin: Point<Pixels>,
     lines: Vec<(usize, WrappedLine)>,
     selection: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
@@ -857,6 +864,7 @@ impl Element for TextBoxElement {
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let line_height = window.line_height();
         let runs = [text_style.to_run(text.len())];
+        let wraps = self.state.read(cx).lines == Lines::Multi;
         let layout = window.request_measured_layout(style, move |known, available, window, _| {
             let wrap_width = known.width.or(match available.width {
                 gpui::AvailableSpace::Definite(width) => Some(width),
@@ -864,7 +872,13 @@ impl Element for TextBoxElement {
             });
             let height = window
                 .text_system()
-                .shape_text(text.clone(), font_size, &runs, wrap_width, None)
+                .shape_text(
+                    text.clone(),
+                    font_size,
+                    &runs,
+                    wrap_width.filter(|_| wraps),
+                    None,
+                )
                 .map_or(line_height, |lines| {
                     lines
                         .iter()
@@ -914,9 +928,16 @@ impl Element for TextBoxElement {
             ],
             None => vec![run],
         };
+        let wraps = state.lines == Lines::Multi;
         let shaped = window
             .text_system()
-            .shape_text(text.into(), font_size, &runs, Some(bounds.size.width), None)
+            .shape_text(
+                text.into(),
+                font_size,
+                &runs,
+                wraps.then_some(bounds.size.width),
+                None,
+            )
             .unwrap_or_default();
         let mut start = 0;
         let lines: Vec<(usize, WrappedLine)> = shaped
@@ -927,11 +948,19 @@ impl Element for TextBoxElement {
                 (line_start, line)
             })
             .collect();
-        let layout = Layout {
+        let mut layout = Layout {
             lines,
             origin: bounds.origin,
             line_height,
         };
+        let scroll_x = if wraps {
+            Pixels::ZERO
+        } else {
+            let caret_x = layout.position_of(draft.caret()).x;
+            let room = (bounds.size.width - CARET_ROOM).max(Pixels::ZERO);
+            state.scroll_x.min(caret_x).max(caret_x - room)
+        };
+        layout.origin.x -= scroll_x;
         let selection = draft.selection();
         let selection_bounds = if selection.is_empty() {
             Vec::new()
@@ -940,9 +969,11 @@ impl Element for TextBoxElement {
         };
         let caret = (state.focus.is_focused(window) && draft.selection().is_empty()).then(|| {
             let at = layout.position_of(draft.caret());
-            Bounds::new(bounds.origin + at, size(px(1.5), line_height))
+            Bounds::new(layout.origin + at, size(px(1.5), line_height))
         });
+        self.state.update(cx, |state, _| state.scroll_x = scroll_x);
         Painted {
+            origin: layout.origin,
             lines: layout.lines,
             selection: selection_bounds,
             caret,
@@ -967,31 +998,33 @@ impl Element for TextBoxElement {
             ElementInputHandler::new(bounds, self.state.clone()),
             cx,
         );
-        for row in &painted.selection {
-            window.paint_quad(fill(*row, colors.text_selection));
-        }
-        let mut top = bounds.top();
-        for (_, line) in &painted.lines {
-            line.paint(
-                point(bounds.left(), top),
-                painted.line_height,
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            )
-            .ok();
-            top += line.size(painted.line_height).height;
-        }
-        if let Some(caret) = painted.caret {
-            window.paint_quad(fill(caret, colors.accent));
-        }
+        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+            for row in &painted.selection {
+                window.paint_quad(fill(*row, colors.text_selection));
+            }
+            let mut top = painted.origin.y;
+            for (_, line) in &painted.lines {
+                line.paint(
+                    point(painted.origin.x, top),
+                    painted.line_height,
+                    TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                )
+                .ok();
+                top += line.size(painted.line_height).height;
+            }
+            if let Some(caret) = painted.caret {
+                window.paint_quad(fill(caret, colors.accent));
+            }
+        });
         let lines = std::mem::take(&mut painted.lines);
         let line_height = painted.line_height;
         self.state.update(cx, |state, _| {
             state.layout = Some(Layout {
                 lines,
-                origin: bounds.origin,
+                origin: painted.origin,
                 line_height,
             });
         });

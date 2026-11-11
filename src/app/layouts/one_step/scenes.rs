@@ -2,7 +2,11 @@
 //! panels over the first step. Each scene is staged through the layout's own methods and undone after
 //! its picture, so the next one starts from the plain screen.
 
-use gpui::{App, AsyncWindowContext, Context, ListOffset, Task, WeakEntity, Window, px};
+use gpui::{
+    App, AsyncWindowContext, Context, Keystroke, ListOffset, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, Task, WeakEntity, Window, point,
+    px,
+};
 
 use super::OneStepLayout;
 use crate::app::components::diff_view::RowGesture;
@@ -35,10 +39,11 @@ enum Scene {
     StickyStepBar,
     Toasts,
     AllRead,
+    DescriptionFolds,
 }
 
 impl Scene {
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -55,6 +60,7 @@ impl Scene {
         Self::StickyStepBar,
         Self::Toasts,
         Self::AllRead,
+        Self::DescriptionFolds,
     ];
 
     fn file_name(self) -> &'static str {
@@ -75,6 +81,7 @@ impl Scene {
             Self::StickyStepBar => "33-sticky-step-bar",
             Self::Toasts => "34-toasts",
             Self::AllRead => "35-all-read",
+            Self::DescriptionFolds => "36-description-folds",
         }
     }
 }
@@ -84,6 +91,7 @@ pub(super) fn start(window: &Window, cx: &mut Context<OneStepLayout>) -> Option<
     Some(cx.spawn_in(window, async move |layout, cx| {
         if let Err(error) = shoot(&camera, &layout, cx).await {
             eprintln!("snapshots stopped: {error:#}");
+            camera.note_stop(&error);
         }
         cx.update(|_, cx| cx.quit()).ok();
     }))
@@ -107,13 +115,73 @@ async fn shoot(
             break;
         }
     }
+    camera.wait_for_loading(cx).await?;
     layout.update(cx, OneStepLayout::go_to_first_open_code)?;
     for scene in Scene::ALL {
         layout.update_in(cx, |layout, window, cx| layout.stage(scene, window, cx))?;
         camera.take(scene.file_name(), cx).await?;
         layout.update_in(cx, |layout, window, cx| layout.unstage(scene, window, cx))?;
     }
-    Ok(())
+    pick_a_word_and_copy(camera, layout, cx).await
+}
+
+/// With a comment box open on the page, a double click on the first added line's code on screen, as the
+/// mouse gives it, then cmd-c: the word is selected, and the copy says so.
+async fn pick_a_word_and_copy(
+    camera: &Camera,
+    layout: &WeakEntity<OneStepLayout>,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    layout.update(cx, OneStepLayout::go_to_first_open_code)?;
+    layout.update_in(cx, OneStepLayout::compose_on_first_added_lines)?;
+    camera.take("37-before-word", cx).await?;
+    let spot = layout.update(cx, |layout, cx| {
+        let bounds = layout
+            .added_lines(usize::MAX, cx)
+            .into_iter()
+            .find_map(|(row, _)| layout.screen_list.bounds_for_item(row))?;
+        Some(point(bounds.left() + px(205.), bounds.center().y))
+    })?;
+    let spot = spot.ok_or_else(|| anyhow::anyhow!("no added line on screen to double click"))?;
+    // Through the window, not the layout: the layout handles these events and must not be held.
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: spot,
+                pressed_button: None,
+                modifiers: Modifiers::default(),
+            }),
+            cx,
+        );
+        for click_count in [1, 2] {
+            window.dispatch_event(
+                PlatformInput::MouseDown(MouseDownEvent {
+                    button: MouseButton::Left,
+                    position: spot,
+                    modifiers: Modifiers::default(),
+                    click_count,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                PlatformInput::MouseUp(MouseUpEvent {
+                    button: MouseButton::Left,
+                    position: spot,
+                    modifiers: Modifiers::default(),
+                    click_count,
+                }),
+                cx,
+            );
+        }
+    })?;
+    camera.take("37-word", cx).await?;
+    cx.update(|window, cx| {
+        if let Ok(keys) = Keystroke::parse("cmd-c") {
+            window.dispatch_keystroke(keys, cx);
+        }
+    })?;
+    camera.take("38-copied", cx).await
 }
 
 impl OneStepLayout {
@@ -220,6 +288,13 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::stage_all_read);
                 self.scroll_to_row(self.screen_list.item_count());
             }
+            Scene::DescriptionFolds => {
+                self.change_review(cx, Review::go_to_summary);
+                self.toggle_description_folds(cx);
+                if let Some(row) = self.session.read(cx).rows().description_row() {
+                    self.scroll_to_row(row);
+                }
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -260,7 +335,6 @@ impl OneStepLayout {
                         session.discard_comment(place, cx);
                     }
                 });
-                self.lines_to_ask = None;
                 window.focus(&self.focus, cx);
             }
             Scene::AskPanel => self.ask.update(cx, |panel, cx| panel.close(window, cx)),
@@ -286,8 +360,20 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::unstage);
                 self.go_to_first_open_code(cx);
             }
+            Scene::DescriptionFolds => {
+                self.toggle_description_folds(cx);
+                self.go_to_first_open_code(cx);
+            }
         }
         cx.notify();
+    }
+
+    fn toggle_description_folds(&mut self, cx: &mut Context<Self>) {
+        self.session.update(cx, |session, cx| {
+            for key in session.rows().description_fold_keys() {
+                session.toggle_details(&key, cx);
+            }
+        });
     }
 
     /// Drags over three added lines in a row, as the reviewer would, and types a comment.

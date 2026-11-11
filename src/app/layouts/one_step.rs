@@ -5,6 +5,7 @@ use gpui::{
     Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
     Window, actions, div, list, px,
 };
+use std::os::unix::process::CommandExt;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -24,16 +25,16 @@ use crate::app::components::button::{
     toggle_button,
 };
 use crate::app::components::card::card;
-use crate::app::components::chip::{callout, chip, dropping_in, notice_band};
+use crate::app::components::chip::{callout, chip, dev_build_chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
     QueuedCommentNote,
 };
-use crate::app::components::diagram::{DiagramView, Diagrams};
+use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture, OnScrollX,
-    PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
-    only_whitespace_row, piece_end, piece_row,
+    BoxEdges, CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment,
+    OnRowGesture, OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row,
+    hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -42,11 +43,11 @@ use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
-    InlineMarkdown, MarkdownView, PreparedMarkdown, bullet, parsed_markdown,
+    InlineMarkdown, MarkdownView, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
-    BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to_share, grow_when_shown, pop_in,
-    slide_in, turn_to,
+    BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
+    pop_in, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
@@ -58,7 +59,7 @@ use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
-    RowMark, check_flag, count_badge, sidebar_row, skim_chip,
+    RowMark, check_flag, count_badge, row_note, sidebar_row, skim_chip,
 };
 use crate::app::components::step_notes::note_label;
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -71,8 +72,8 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
-    AskAt, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows, StepHeading,
-    SummaryStatsRow, ThreadRowPlace, Toolbar,
+    AskAt, DESCRIPTION_KEY, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows,
+    StepHeading, StepIntro, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
@@ -84,8 +85,8 @@ use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
     LineLocation, NextScreen, NotesButton, PaletteAction, Place, QueuedComment, ReadProgress,
-    Reopen, ReopenAfterSave, Review, Screen, ScreenTravel, SendMode, StepId, ThreadId, ThreadView,
-    ToastTone, TourLead, Travel,
+    Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review, Screen, ScreenTravel, SendMode,
+    StepId, ThreadId, ThreadView, ToastTone, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -104,11 +105,12 @@ actions!(
         ToggleSettings,
         GoToNextUnread,
         ToggleRead,
-        ToggleShortcuts
+        ToggleShortcuts,
+        CloseWindow
     ]
 );
 
-type OnCodeSpot = Rc<dyn Fn(RowGesture, CodeSpot, &mut Window, &mut App)>;
+type OnCodeSpot = Rc<dyn Fn(CodeGesture, CodeSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
@@ -128,6 +130,7 @@ pub struct OneStepLayout {
     screen_list: ListState,
     on_row_gesture: OnRowGesture,
     diagrams: Entity<Diagrams>,
+    description_diagrams: DiagramSet,
     focus: FocusHandle,
     /// The comment being written takes keys with this one.
     composer_focus: FocusHandle,
@@ -145,7 +148,6 @@ pub struct OneStepLayout {
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
     /// The rows of the last drag, to ask the AI about.
-    lines_to_ask: Option<Place>,
     frame_stats: FrameStatsHook,
     #[cfg(feature = "snapshots")]
     _snapshots: Option<gpui::Task<()>>,
@@ -157,6 +159,7 @@ pub struct OneStepLayout {
     /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
     /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
     reopen_after_save: ReopenAfterSave,
+    restart_guard: RestartGuard,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -297,7 +300,7 @@ impl OneStepLayout {
         let on_code_gesture: OnCodeSpot = Rc::new(move |gesture, at, window, cx| {
             layout_handle
                 .update(cx, |this, cx| {
-                    if gesture == RowGesture::Press {
+                    if gesture != CodeGesture::Over {
                         window.focus(&this.focus, cx);
                     }
                     this.on_code_gesture(gesture, at, cx);
@@ -323,13 +326,13 @@ impl OneStepLayout {
             session,
             on_row_gesture,
             diagrams,
+            description_diagrams: DiagramSet::default(),
             focus,
             composer_focus: cx.focus_handle(),
             ask,
             code_selection: None,
             on_code_gesture,
             selection_notice: None,
-            lines_to_ask: None,
             frame_stats,
             #[cfg(feature = "snapshots")]
             _snapshots: scenes::start(window, cx),
@@ -339,6 +342,7 @@ impl OneStepLayout {
             settings,
             loading,
             reopen_after_save: ReopenAfterSave::default(),
+            restart_guard: RestartGuard::default(),
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -356,6 +360,20 @@ impl OneStepLayout {
         })
         .detach();
         diagrams
+    }
+
+    fn new_description_diagrams(sources: &[&str], cx: &mut Context<Self>) -> DiagramSet {
+        let set = DiagramSet::new(sources, cx);
+        for (_, diagrams) in set.iter() {
+            cx.observe(diagrams, |this, _, cx| {
+                if let Some(row) = this.session.read(cx).rows().description_row() {
+                    this.screen_list.remeasure_items(row..row + 1);
+                }
+                cx.notify();
+            })
+            .detach();
+        }
+        set
     }
 
     fn change_review<T>(&self, cx: &mut App, change: impl FnOnce(&mut Review) -> T) -> T {
@@ -458,7 +476,6 @@ impl OneStepLayout {
     fn on_row_gesture(&mut self, gesture: RowGesture, at: &LineLocation, cx: &mut Context<Self>) {
         if gesture == RowGesture::Press {
             self.selection_notice = None;
-            self.lines_to_ask = None;
         }
         self.session.update(cx, |session, cx| match gesture {
             RowGesture::Press => session.select_from(at.clone(), cx),
@@ -466,13 +483,21 @@ impl OneStepLayout {
         });
     }
 
-    fn on_code_gesture(&mut self, gesture: RowGesture, at: CodeSpot, cx: &mut Context<Self>) {
+    fn on_code_gesture(&mut self, gesture: CodeGesture, at: CodeSpot, cx: &mut Context<Self>) {
         match gesture {
-            RowGesture::Press => {
+            CodeGesture::Press => {
                 let screen = self.session.read(cx).review().screen().clone();
                 self.code_selection = Some(CodeSelection::start(screen, at));
             }
-            RowGesture::Over => match &mut self.code_selection {
+            CodeGesture::PressTwice => {
+                let session = self.session.read(cx);
+                let screen = session.review().screen().clone();
+                self.code_selection = match session.rows().row(at.row) {
+                    Some(PageRow::Line(line)) => CodeSelection::word(screen, at, line.code()),
+                    _ => None,
+                };
+            }
+            CodeGesture::Over => match &mut self.code_selection {
                 Some(selection) if selection.is_dragging() => selection.drag_to(at),
                 _ => return,
             },
@@ -521,19 +546,15 @@ impl OneStepLayout {
             if !review.is_selecting() {
                 return None;
             }
-            let lines_to_ask = review
-                .selected_lines()
-                .map(|selected| review.place_of_lines(&selected));
             let finished = session.change(cx, Review::finish_selection);
             if let Ok(Some(place)) = &finished {
                 session.compose(place.clone(), cx);
             }
-            Some((lines_to_ask, finished))
+            Some(finished)
         });
-        let Some((lines_to_ask, finished)) = ended else {
+        let Some(finished) = ended else {
             return;
         };
-        self.lines_to_ask = lines_to_ask;
         match finished {
             Ok(Some(_)) => window.focus(&self.composer_focus, cx),
             Ok(None) => {}
@@ -636,6 +657,7 @@ impl OneStepLayout {
             ask_agent: session.agent_link_is_on(),
         };
         let problem = session.comment_problem(place);
+        let ask_place = review.ask_place_of(place);
         let on_type = {
             let (layout, place) = (cx.entity(), place.clone());
             Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
@@ -692,14 +714,28 @@ impl OneStepLayout {
                 window.focus(&this.focus, cx);
             }),
         };
-        Some(CommentComposer::new(
-            draft,
-            self.composer_focus.clone(),
-            state,
-            capabilities,
-            problem,
-            actions,
-        ))
+        let ask = ask_place.map(|ask_place| {
+            let label = ask_place.lines_label().unwrap_or_default();
+            self.ask_button(
+                format!("ask-{}", place.describe()),
+                ask_place,
+                label,
+                ButtonKind::Ghost,
+                cx,
+            )
+            .into_any_element()
+        });
+        Some(
+            CommentComposer::new(
+                draft,
+                self.composer_focus.clone(),
+                state,
+                capabilities,
+                problem,
+                actions,
+            )
+            .with_ask(ask),
+        )
     }
 
     fn on_thread_action(&self) -> OnThreadAction {
@@ -850,6 +886,38 @@ impl OneStepLayout {
             PaletteAction::SwitchPr => self.toggle_pr_switcher(window, cx),
             PaletteAction::Settings => self.toggle_settings(&ToggleSettings, window, cx),
             PaletteAction::Shortcuts => self.toggle_shortcuts(&ToggleShortcuts, window, cx),
+            PaletteAction::RestartApp => self.restart_app(cx),
+        }
+    }
+
+    /// The installed binary, which may be newer than this app, quits this one and opens the PR on this
+    /// screen; it runs on its own so it outlives the app it quits.
+    fn restart_app(&mut self, cx: &mut Context<Self>) {
+        let in_flight = self.in_flight(cx);
+        if let RestartStep::Warn(warning) = self.restart_guard.ask(in_flight, Instant::now()) {
+            post_toast(cx, ToastTone::Danger, warning);
+            return;
+        }
+        let review = self.session.read(cx).review();
+        let mut command = match std::env::current_exe() {
+            Ok(exe) => std::process::Command::new(exe),
+            Err(error) => {
+                post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
+                return;
+            }
+        };
+        command.arg("restart").arg(review.pr().to_string());
+        if let Screen::Step(id) = review.screen() {
+            command.arg("--at").arg(id.to_string());
+        }
+        let started = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0)
+            .spawn();
+        if let Err(error) = started {
+            post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
         }
     }
 
@@ -979,8 +1047,8 @@ impl OneStepLayout {
         use_code_opener(opener, cx);
     }
 
-    /// Like the footer's button, the arrow key ticks the step it leaves, but only once the reader
-    /// has seen the step's end, so skipping ahead does not count as reading.
+    /// Like the footer's button, the key ticks the step it leaves, but only once the reader has
+    /// seen the step's end, so skipping ahead does not count as reading; both pass steps already read.
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
         if self.is_reopening(cx) {
             return;
@@ -993,7 +1061,7 @@ impl OneStepLayout {
         {
             self.toggle_tick(&id, cx);
         }
-        self.change_review(cx, Review::go_forward);
+        self.change_review(cx, Review::go_on);
     }
 
     fn scroll_code_sideways(
@@ -1100,11 +1168,19 @@ impl OneStepLayout {
             .gap_1()
             .child(
                 div()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(agent.line.clone()),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                    )
+                    .children(show),
             )
-            .children(show)
             .children(
                 agent
                     .show_failed
@@ -1205,16 +1281,13 @@ impl OneStepLayout {
                 this.change_review(cx, Review::go_to_safety_net);
             }))
             .child(div().flex_1().child(SafetyNetIntro::TITLE))
-            .child(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(match safety_net.pieces {
-                        1 => "1 piece".to_owned(),
-                        pieces => format!("{pieces} pieces"),
-                    }),
-            )
+            .child(row_note(
+                &colors,
+                match safety_net.pieces {
+                    1 => "1 piece".to_owned(),
+                    pieces => format!("{pieces} pieces"),
+                },
+            ))
             .children(count_badge(&colors, safety_net.thread_count))
         });
         let header = div()
@@ -1247,9 +1320,13 @@ impl OneStepLayout {
                     .child(
                         div()
                             .pl(px(TRAFFIC_LIGHTS_WIDTH))
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(colors.muted_text)
-                            .child("Guided review"),
+                            .child("Guided review")
+                            .children(dev_build_chip(&colors)),
                     ),
             )
             .child(header)
@@ -1388,7 +1465,10 @@ impl OneStepLayout {
                     .child(InlineMarkdown::new("title-bar-title", &title)),
             )
             .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
-        let progress = self.session.read(cx).sidebar().progress;
+        let page_share = scrolled_share(
+            -self.screen_list.scroll_px_offset_for_scrollbar().y,
+            self.screen_list.max_offset_for_scrollbar().y,
+        );
         TitleBarArea::new("title-bar", colors.background)
             .edge(TitleBarEdge::Open)
             .child(
@@ -1405,7 +1485,7 @@ impl OneStepLayout {
                     .child(jump)
                     .child(github),
             )
-            .child(trail_hairline(&colors, progress))
+            .child(page_hairline(&colors, page_share))
     }
 
     /// Once the step's heading has scrolled away, a slim bar under the title bar keeps where the
@@ -1456,21 +1536,53 @@ impl OneStepLayout {
     }
 
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
-    fn show_diagram(&self, window: &mut Window, cx: &mut Context<Self>) {
+    fn show_diagram(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let screen_list = &self.screen_list;
-        let diagrams = &self.diagrams;
-        self.session.update(cx, |session, cx| {
-            let rows = session.rows();
-            let is_off_view = rows.diagram_row().is_some_and(|row| {
+        let is_off_view = |row: Option<usize>| {
+            row.is_some_and(|row| {
                 screen_list.item_is_above_viewport(row) == Some(true)
                     || screen_list.item_is_below_viewport(row) == Some(true)
-            });
-            diagrams.update(cx, |diagrams, cx| {
-                diagrams.show(rows.diagram(), window, cx);
-                if is_off_view {
-                    diagrams.leave_screen(window);
-                }
-            });
+            })
+        };
+        let session = self.session.read(cx);
+        let rows = session.rows();
+        let step_diagram = rows.diagram().map(str::to_owned);
+        let step_diagram_is_off_view = is_off_view(rows.diagram_row());
+        let description_diagrams: Vec<String> = rows
+            .description_diagrams()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let description_is_off_view = is_off_view(rows.description_row());
+
+        Self::show_one(
+            &self.diagrams,
+            step_diagram.as_deref(),
+            step_diagram_is_off_view,
+            window,
+            cx,
+        );
+        let sources: Vec<&str> = description_diagrams.iter().map(String::as_str).collect();
+        if !self.description_diagrams.is_of(&sources) {
+            self.description_diagrams = Self::new_description_diagrams(&sources, cx);
+        }
+        for (source, diagrams) in self.description_diagrams.clone().iter() {
+            Self::show_one(diagrams, Some(source), description_is_off_view, window, cx);
+        }
+    }
+
+    fn show_one(
+        diagrams: &Entity<Diagrams>,
+        source: Option<&str>,
+        is_off_view: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        diagrams.update(cx, |diagrams, cx| {
+            diagrams.show(source, window, cx);
+            if is_off_view {
+                diagrams.leave_screen(window);
+            }
         });
     }
 
@@ -1480,11 +1592,25 @@ impl OneStepLayout {
         selected: Option<&SelectedRows>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let colors = Colors::active(cx);
         let Some(row) = self.session.read(cx).rows().row(index).cloned() else {
             return div().into_any_element();
         };
+        let edges = self.session.read(cx).rows().edges(index);
+        self.render_page_row(row, index, edges, selected, cx)
+    }
+
+    /// `index` tells the row's elements apart from other rows'; a row inside another uses a made-up one.
+    fn render_page_row(
+        &mut self,
+        row: PageRow,
+        index: usize,
+        edges: BoxEdges,
+        selected: Option<&SelectedRows>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = Colors::active(cx);
         match row {
+            PageRow::SummaryColumns(columns) => self.summary_columns(&columns, index, cx),
             PageRow::SummaryTitle(title) => div()
                 .pb_5()
                 .flex()
@@ -1540,30 +1666,14 @@ impl OneStepLayout {
                 )))
                 .into_any_element(),
             PageRow::ReviewerSummary(summary) => self
-                .markdown_card("REVIEWER SUMMARY", "reviewer-summary", summary, cx)
-                .into_any_element(),
-            PageRow::PrDescription(description) => self
-                .markdown_card("PR DESCRIPTION", "pr-description", description, cx)
+                .markdown_card(
+                    "REVIEWER SUMMARY",
+                    MarkdownView::new("reviewer-summary", summary),
+                    cx,
+                )
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
-            PageRow::StepWhy(why) => div()
-                .pb_4()
-                .max_w(READING_WIDTH)
-                .text_color(colors.muted_text)
-                .child(MarkdownView::new(
-                    format!("step-why-{index}"),
-                    parsed_markdown(&why),
-                ))
-                .into_any_element(),
-            PageRow::Diagram(diagram) => div()
-                .pb_4()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(DiagramView::new(self.diagrams.clone()))
-                .child(self.notes_button(&diagram, cx))
-                .into_any_element(),
-            PageRow::StepNotes(notes) => div().pb_4().child(notes).into_any_element(),
+            PageRow::StepIntro(intro) => self.step_intro(&intro, index, cx).into_any_element(),
             PageRow::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
@@ -1583,7 +1693,8 @@ impl OneStepLayout {
                     heading.label.clone(),
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
-                );
+                )
+                .closing_its_box(edges.closes);
                 match heading.fold.clone() {
                     Some(fold) => header
                         .with_fold_toggle(
@@ -1628,22 +1739,27 @@ impl OneStepLayout {
                     heading.repin_label,
                     open_code.into_iter().chain(ask).collect(),
                 )
+                .with_edges(edges)
                 .into_any_element()
             }
-            PageRow::NoChangeSinceRead => no_change_since_read_row(&colors).into_any_element(),
+            PageRow::NoChangeSinceRead => {
+                no_change_since_read_row(&colors, edges).into_any_element()
+            }
             PageRow::BinaryFile(binary) => binary_file_row(
                 &colors,
+                edges,
                 format!("binary-{}", binary.piece).into(),
                 binary.link.clone(),
                 cx,
             )
             .into_any_element(),
-            PageRow::Image { path, .. } => piece_row(&colors)
+            PageRow::Image { path, .. } => box_row(&colors, edges)
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
-            PageRow::OnlyWhitespace => only_whitespace_row(&colors).into_any_element(),
+            PageRow::OnlyWhitespace => only_whitespace_row(&colors, edges).into_any_element(),
             PageRow::HunkGap(gap) => hunk_gap(
                 &colors,
+                edges,
                 gap.id.clone(),
                 &gap.gap,
                 gap.label.clone(),
@@ -1671,6 +1787,7 @@ impl OneStepLayout {
                         .ok();
                 });
                 DiffRow::new(line)
+                    .with_edges(edges)
                     .scrolled_sideways(scroll_x, on_scroll_x)
                     .selected(is_selected)
                     .with_code_selection(CodeSelectionHooks {
@@ -1685,33 +1802,85 @@ impl OneStepLayout {
             PageRow::Thread { view, place, .. } => {
                 let thread = self.thread_element(&view, cx);
                 match place {
-                    ThreadRowPlace::UnderLine => {
-                        piece_row(&colors).child(thread).into_any_element()
-                    }
+                    ThreadRowPlace::UnderLine => hung_row().child(thread).into_any_element(),
                     ThreadRowPlace::AfterCode => div().pb_3().child(thread).into_any_element(),
                 }
             }
-            PageRow::QueuedComment(queued) => piece_row(&colors)
+            PageRow::QueuedComment(queued) => hung_row()
                 .child(self.queued_comment(&queued, cx))
                 .into_any_element(),
-            PageRow::Composer { place, .. } => piece_row(&colors)
+            PageRow::Composer { place, .. } => hung_row()
                 .children(self.composer(&place, cx))
                 .into_any_element(),
-            PageRow::AskMarker(ask) => piece_row(&colors)
+            PageRow::AskMarker(ask) => hung_row()
                 .flex()
                 .px_2()
                 .py_1()
                 .child(self.ask_at(&ask, ButtonKind::Ghost, cx))
                 .into_any_element(),
-            PageRow::PieceEnd => piece_end(&colors).into_any_element(),
+            PageRow::PieceEnd => piece_end(),
         }
+    }
+
+    /// The summary keeps its reading width; the description sits beside it where the window has room,
+    /// else under it.
+    fn summary_columns(
+        &mut self,
+        columns: &SummaryColumns,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        const INNER_ROWS: usize = 1_000_000;
+        let summary: Vec<AnyElement> = columns
+            .summary
+            .iter()
+            .enumerate()
+            .map(|(inner, row)| {
+                self.render_page_row(
+                    row.clone(),
+                    INNER_ROWS * (index + 1) + inner,
+                    BoxEdges::default(),
+                    None,
+                    cx,
+                )
+            })
+            .collect();
+        let description = columns.description.clone().map(|description| {
+            div()
+                .flex_1()
+                .min_w(DESCRIPTION_MIN_WIDTH)
+                .max_w(READING_WIDTH)
+                .child(
+                    self.markdown_card(
+                        "PR DESCRIPTION",
+                        MarkdownView::new(DESCRIPTION_KEY, description)
+                            .with_diagrams(self.description_diagrams.clone()),
+                        cx,
+                    ),
+                )
+        });
+        div()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap_x_10()
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .max_w(READING_WIDTH)
+                    .flex()
+                    .flex_col()
+                    .children(summary),
+            )
+            .children(description)
+            .into_any_element()
     }
 
     fn markdown_card(
         &self,
         label: &'static str,
-        id: &'static str,
-        markdown: Rc<PreparedMarkdown>,
+        markdown: MarkdownView,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = Colors::active(cx);
@@ -1724,13 +1893,7 @@ impl OneStepLayout {
             .flex_col()
             .gap_2()
             .child(note_label(label).text_color(colors.muted_text))
-            .child(
-                card(&colors)
-                    .px_5()
-                    .py_4()
-                    .text_sm()
-                    .child(MarkdownView::new(id, markdown)),
-            )
+            .child(card(&colors).px_5().py_4().text_sm().child(markdown))
     }
 
     fn toolbar(&self, toolbar: &Toolbar, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1795,6 +1958,47 @@ impl OneStepLayout {
             .child(div().flex_1())
             .children(toggles)
             .children(ask.map(|ask| div().pl_1().child(ask)))
+    }
+
+    /// The text keeps its reading width; the diagram sits beside it where the window has room, else under it.
+    fn step_intro(
+        &self,
+        intro: &StepIntro,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let text = div()
+            .flex_none()
+            .w_full()
+            .max_w(READING_WIDTH)
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(div().text_color(colors.muted_text).child(MarkdownView::new(
+                format!("step-why-{index}"),
+                parsed_markdown(&intro.why),
+            )))
+            .children(intro.notes.clone());
+        let diagram = intro.diagram.as_ref().map(|diagram| {
+            div()
+                .min_w_0()
+                .max_w_full()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(DiagramView::new(self.diagrams.clone()))
+                .child(self.notes_button(diagram, cx))
+        });
+        div()
+            .pb_4()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap_x_8()
+            .gap_y_4()
+            .child(text)
+            .children(diagram)
     }
 
     fn notes_button(&self, diagram: &DiagramRow, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1880,6 +2084,8 @@ impl OneStepLayout {
 
 /// Keeps prose at a readable line length on a wide window; code still takes the full width.
 const READING_WIDTH: Pixels = px(760.);
+/// Narrower than this beside the summary, the description goes under it instead.
+const DESCRIPTION_MIN_WIDTH: Pixels = px(420.);
 
 /// The line height of the summary's bullets, which their dots centre on.
 const SUMMARY_LINE: Pixels = px(26.);
@@ -2035,7 +2241,6 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         .on_click(cx.listener(|this, _, _, cx| {
             this.change_review(cx, Review::go_back);
         }))
-        .child(icon(Icon::ArrowLeft, colors.muted_text))
         .child("Previous")
         .child(button_keys(
             &colors,
@@ -2043,16 +2248,10 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             Command::PreviousScreen,
         ))
     });
-    let (up_next_label, next_label) = match &footer.lead {
-        Some(TourLead::Continue(next)) => ("Where you left off:", Some(next.title.clone())),
-        _ => (
-            "Up next:",
-            footer.next.as_ref().map(|next| match next {
-                NextScreen::Step { title } => title.clone(),
-                NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
-            }),
-        ),
-    };
+    let next_label = footer.next.as_ref().map(|next| match next {
+        NextScreen::Step { title } => title.clone(),
+        NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
+    });
     if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {
         return div()
             .pt_8()
@@ -2064,17 +2263,17 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .child(finish_card(
                 *steps,
                 *can_finish,
-                ReviewAgain::from(footer.is_summary),
+                ReviewAgain::NotOffered,
                 "footer",
                 cx,
             ))
             .into_any_element();
     }
-    let action = match (&footer.ticks, footer.next.is_some(), footer.is_summary) {
-        (Some(_), true, false) => Some(("Mark as read and go on", Onward::Goes)),
-        (Some(_), false, false) => Some(("Mark as read", Onward::Stays)),
-        (None, true, false) => Some(("Next", Onward::Goes)),
-        (_, _, true) | (None, false, _) => None,
+    let action = match (&footer.ticks, footer.next.is_some()) {
+        (Some(_), true) => Some(("Mark as read and go on", Onward::Goes)),
+        (Some(_), false) => Some(("Mark as read", Onward::Stays)),
+        (None, true) => Some(("Next", Onward::Goes)),
+        (None, false) => None,
     };
     let lead = footer
         .lead
@@ -2092,7 +2291,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             if let Some(id) = &ticks {
                 this.toggle_tick(id, cx);
             }
-            this.change_review(cx, Review::go_forward);
+            this.change_review(cx, Review::go_on);
         }))
         .child(label)
         .child(button_keys(
@@ -2112,7 +2311,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .flex_col()
             .gap_0p5()
             .child(
-                note_label(up_next_label)
+                note_label("Up next:")
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(colors.muted_text),
             )
@@ -2318,16 +2517,6 @@ fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl Into
 enum ReviewAgain {
     Offered,
     NotOffered,
-}
-
-impl From<bool> for ReviewAgain {
-    fn from(is_offered: bool) -> Self {
-        if is_offered {
-            Self::Offered
-        } else {
-            Self::NotOffered
-        }
-    }
 }
 
 /// The way into the tour: its start, or the first step not read yet. Finishing has its own card.
@@ -2586,8 +2775,19 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
         )
 }
 
-/// The title bar's lower edge is the trail: filled left to right as far as the tour is read.
-fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
+/// How far down the screen the reader is, gliding after the scroll; at the end the green fades in
+/// over the trail. The steps read are the sidebar's meter.
+fn page_hairline(colors: &Colors, share: f32) -> impl IntoElement {
+    let is_at_end = share >= 1.;
+    let green = glide_to(
+        div()
+            .absolute()
+            .inset_0()
+            .bg(colors.trail_fill(TrailStage::Complete)),
+        "page-hairline-green",
+        if is_at_end { 1. } else { 0. },
+        |green, shown| green.opacity(shown.clamp(0., 1.)),
+    );
     div()
         .absolute()
         .left_0()
@@ -2597,10 +2797,12 @@ fn trail_hairline(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
         .bg(colors.subtle_border)
         .child(glide_to_share(
             div()
+                .relative()
                 .h_full()
-                .bg(colors.trail_fill(TrailStage::of(progress))),
-            "trail-hairline-fill",
-            progress.share(),
+                .bg(colors.trail_fill(TrailStage::UnderWay))
+                .child(green),
+            "page-hairline-fill",
+            share,
         ))
 }
 
@@ -2685,19 +2887,19 @@ impl Render for OneStepLayout {
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    if this
+            // Before the press reaches what is under the pointer, so a double click's word, chosen
+            // there, is not the selection cleared here.
+            .capture_any_mouse_down(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                if event.button == MouseButton::Left
+                    && this
                         .code_selection
                         .as_ref()
                         .is_some_and(|selection| !selection.is_dragging())
-                    {
-                        this.code_selection = None;
-                        cx.notify();
-                    }
-                }),
-            )
+                {
+                    this.code_selection = None;
+                    cx.notify();
+                }
+            }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),
@@ -2714,6 +2916,7 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::go_to_next_unread))
             .on_action(cx.listener(Self::toggle_read))
             .on_action(cx.listener(Self::toggle_shortcuts))
+            .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
@@ -2736,22 +2939,6 @@ impl Render for OneStepLayout {
                             cx.listener(|this, _, _, cx| {
                                 this.session.update(cx, ReviewSession::repin);
                             }),
-                        )
-                    }))
-                    .children(self.lines_to_ask.clone().map(|place| {
-                        let label = place.lines_label().unwrap_or_default();
-                        dropping_in(
-                            notice_band(&colors, Tone::Neutral)
-                                .py_1()
-                                .child(self.ask_button(
-                                    "ask-selected-lines".into(),
-                                    place,
-                                    label,
-                                    ButtonKind::Tinted,
-                                    cx,
-                                ))
-                                .child("about the selected lines"),
-                            "ask-selected-lines-band",
                         )
                     }))
                     .children(self.reopen_after_save.waiting_line().map(|line| {
@@ -2819,5 +3006,30 @@ impl CodeScrollX {
         }
         let offset = self.by_path.entry(path.clone()).or_insert(Pixels::ZERO);
         *offset = (*offset + delta).clamp(Pixels::ZERO, max);
+    }
+}
+
+/// How far down its page the reader is, 0 at the top and 1 at the end; a page that fits is read whole.
+fn scrolled_share(scrolled: Pixels, scrollable: Pixels) -> f32 {
+    if scrollable <= Pixels::ZERO {
+        return 1.;
+    }
+    (scrolled / scrollable).clamp(0., 1.)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_page_line_follows_the_scroll_from_top_to_end() {
+        assert_eq!(scrolled_share(px(0.), px(400.)), 0.);
+        assert_eq!(scrolled_share(px(100.), px(400.)), 0.25);
+        assert_eq!(scrolled_share(px(400.), px(400.)), 1.);
+    }
+
+    #[test]
+    fn a_page_that_fits_the_window_is_seen_whole() {
+        assert_eq!(scrolled_share(px(0.), px(0.)), 1.);
     }
 }

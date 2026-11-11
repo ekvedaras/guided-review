@@ -2,8 +2,9 @@ use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
     InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
-    Window, canvas, div, fill, point, px,
+    Window, canvas, div, fill, img, point, px,
 };
+use std::path::Path;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -15,9 +16,10 @@ use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines};
 
+use super::diagram::{DiagramSet, DiagramView};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS};
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
 pub fn bullet(colors: &Colors, line_height: gpui::Pixels) -> Div {
@@ -117,6 +119,21 @@ impl PreparedMarkdown {
         let blocks = prepare(&markdown.blocks);
         Self { markdown, blocks }
     }
+
+    pub fn diagrams(&self) -> Vec<&str> {
+        self.markdown.diagrams()
+    }
+
+    #[cfg(feature = "snapshots")]
+    /// The keys `MarkdownView` gives its top-level `<details>` folds when drawn under `key`.
+    pub fn fold_keys(&self, key: &str) -> Vec<String> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| matches!(block, PreparedBlock::Details { .. }))
+            .map(|(index, _)| format!("{key}-{index}"))
+            .collect()
+    }
 }
 
 impl std::hash::Hash for PreparedMarkdown {
@@ -138,6 +155,11 @@ enum PreparedBlock {
     Code {
         lines: Vec<CodeLine>,
     },
+    /// Drawn as code where the view has no diagram for it.
+    Diagram {
+        source: Arc<str>,
+        lines: Vec<CodeLine>,
+    },
     /// Drawn as a diff against the commented lines when there are some, as plain code when not.
     Suggestion {
         added: Vec<SharedString>,
@@ -149,6 +171,13 @@ enum PreparedBlock {
         body: Vec<Self>,
     },
     Rule,
+    Picture {
+        path: Arc<Path>,
+        /// Width over height, so the picture's room is kept before it loads.
+        ratio: f32,
+        /// Its width at the screen's two pixels to a point, the widest it is drawn.
+        widest: f32,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -164,6 +193,12 @@ fn prepare(blocks: &[Block]) -> Vec<PreparedBlock> {
 }
 
 fn prepare_block(block: &Block) -> PreparedBlock {
+    if let (Some(source), Block::Code { text, spans, .. }) = (block.diagram(), block) {
+        return PreparedBlock::Diagram {
+            source: source.into(),
+            lines: code_lines(None, text, spans),
+        };
+    }
     match block {
         Block::Paragraph(runs) => PreparedBlock::Text {
             text: Rc::new(InlineText::of(runs)),
@@ -217,6 +252,16 @@ fn prepare_block(block: &Block) -> PreparedBlock {
             body: prepare(body),
         },
         Block::Rule => PreparedBlock::Rule,
+        Block::Picture {
+            path,
+            width,
+            height,
+            ..
+        } => PreparedBlock::Picture {
+            path: Arc::from(path.as_path()),
+            ratio: *width as f32 / (*height).max(1) as f32,
+            widest: *width as f32 / 2.,
+        },
     }
 }
 
@@ -266,6 +311,7 @@ pub struct MarkdownView {
     markdown: Rc<PreparedMarkdown>,
     /// The lines the comment is on, so a suggestion block shows as a diff against them.
     commented_lines: Arc<[Arc<str>]>,
+    diagrams: DiagramSet,
 }
 
 impl MarkdownView {
@@ -274,7 +320,14 @@ impl MarkdownView {
             key: key.into(),
             markdown,
             commented_lines: Arc::new([]),
+            diagrams: DiagramSet::default(),
         }
+    }
+
+    /// Mermaid fences show as these diagrams; a fence with none in the set shows as code.
+    pub fn with_diagrams(mut self, diagrams: DiagramSet) -> Self {
+        self.diagrams = diagrams;
+        self
     }
 
     pub fn on_lines(mut self, commented_lines: Arc<[Arc<str>]>) -> Self {
@@ -289,6 +342,7 @@ impl RenderOnce for MarkdownView {
             &self.markdown.blocks,
             &self.key,
             &self.commented_lines,
+            &self.diagrams,
             window,
             cx,
         )
@@ -346,6 +400,7 @@ fn blocks(
     items: &[PreparedBlock],
     key: &str,
     commented_lines: &[Arc<str>],
+    diagrams: &DiagramSet,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -358,6 +413,7 @@ fn blocks(
                 block,
                 &format!("{key}-{index}"),
                 commented_lines,
+                diagrams,
                 window,
                 cx,
             )
@@ -365,10 +421,14 @@ fn blocks(
         .into_any_element()
 }
 
+/// The width of a reviewer summary's text, the widest a picture in it is drawn.
+const PICTURE_ROOM: f32 = 700.;
+
 fn block_element(
     block: &PreparedBlock,
     key: &str,
     commented_lines: &[Arc<str>],
+    diagrams: &DiagramSet,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -400,12 +460,17 @@ fn block_element(
                         item,
                         &format!("{key}-{index}"),
                         &[],
+                        diagrams,
                         window,
                         cx,
                     )))
             }))
             .into_any_element(),
         PreparedBlock::Code { lines } => code_block(&colors, key, lines),
+        PreparedBlock::Diagram { source, lines } => match diagrams.get(source) {
+            Some(diagram) => DiagramView::new(diagram.clone()).into_any_element(),
+            None => code_block(&colors, key, lines),
+        },
         PreparedBlock::Suggestion { added, lines } => {
             if commented_lines.is_empty() {
                 code_block(&colors, key, lines)
@@ -418,10 +483,27 @@ fn block_element(
             .border_l_1()
             .border_color(colors.border)
             .text_color(colors.muted_text)
-            .child(blocks(inner, key, &[], window, cx))
+            .child(blocks(inner, key, &[], diagrams, window, cx))
             .into_any_element(),
-        PreparedBlock::Details { summary, body } => details(summary, body, key, window, cx),
+        PreparedBlock::Details { summary, body } => {
+            details(summary, body, key, diagrams, window, cx)
+        }
         PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
+        PreparedBlock::Picture {
+            path,
+            ratio,
+            widest,
+        } => {
+            // A size of its own: one taken from the box's width is measured before that width is
+            // known, and the room kept is then that of the widest picture.
+            let width = widest.min(PICTURE_ROOM);
+            img(Arc::clone(path))
+                .w(px(width))
+                .h(px(width / ratio))
+                .max_w_full()
+                .rounded(px(INNER_RADIUS))
+                .into_any_element()
+        }
     }
 }
 
@@ -429,6 +511,7 @@ fn details(
     summary: &Rc<InlineText>,
     body: &[PreparedBlock],
     key: &str,
+    diagrams: &DiagramSet,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -467,7 +550,7 @@ fn details(
         .flex_col()
         .gap_2()
         .child(header)
-        .when_open(open, blocks(body, key, &[], window, cx))
+        .when_open(open, blocks(body, key, &[], diagrams, window, cx))
         .into_any_element()
 }
 
@@ -570,6 +653,10 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
                 ..Run::default()
             }],
             Block::Rule => Vec::new(),
+            Block::Picture { alt, .. } => vec![Run {
+                text: alt.clone(),
+                ..Run::default()
+            }],
         };
         if !runs.is_empty() && !block_runs.is_empty() {
             runs.push(Run {

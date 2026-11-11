@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
@@ -15,6 +15,19 @@ impl IdeTemplate {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// A file of the reviewer's own, like the summary instructions, opened at its top.
+    pub fn launch_file(&self, path: &Path) -> IdeLaunch {
+        self.launch(&path.to_string_lossy(), LineNumber::FIRST)
+    }
+
+    fn launch(&self, absolute: &str, line: LineNumber) -> IdeLaunch {
+        if self.is_url() {
+            IdeLaunch::Url(self.fill(&percent_encode_path(absolute), line))
+        } else {
+            IdeLaunch::Shell(self.fill(&shell_quote(absolute), line))
+        }
     }
 
     fn fill(&self, path: &str, line: LineNumber) -> String {
@@ -141,11 +154,7 @@ impl Ide {
     /// `path` is relative to the clone root.
     pub fn launch(&self, path: &FilePath, line: LineNumber) -> IdeLaunch {
         let absolute = path.under(&self.clone_root).to_string_lossy().into_owned();
-        if self.template.is_url() {
-            IdeLaunch::Url(self.template.fill(&percent_encode_path(&absolute), line))
-        } else {
-            IdeLaunch::Shell(self.template.fill(&shell_quote(&absolute), line))
-        }
+        self.template.launch(&absolute, line)
     }
 }
 

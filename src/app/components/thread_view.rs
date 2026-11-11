@@ -23,7 +23,7 @@ use super::chip::chip;
 use super::icon::{Icon, sized_icon};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
-use super::palette::{CARD_RADIUS, Colors, Tone};
+use super::palette::{CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, Tone};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::tooltip::tooltip;
@@ -117,6 +117,35 @@ pub struct ThreadChanges {
     pub on_toggle: OnToggle,
     pub on_action: OnThreadAction,
     pub on_try_hand_off_again: OnTryHandOffAgain,
+}
+
+/// What an outdated thread's lines were when it was written, since the code under it shows what they are now.
+fn before_block(colors: &Colors, before: &[String]) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child("When commented, the lines were:"),
+        )
+        .child(
+            div()
+                .py_1()
+                .px_2()
+                .rounded(px(CONTROL_RADIUS))
+                .bg(colors.removed_line)
+                .font_family(CODE_FONT)
+                .text_sm()
+                .overflow_hidden()
+                .children(before.iter().map(|line| {
+                    div()
+                        .whitespace_nowrap()
+                        .child(SharedString::from(line.clone()))
+                })),
+        )
 }
 
 impl ThreadElement {
@@ -407,7 +436,6 @@ impl ThreadElement {
             .flex_wrap()
             .items_center()
             .gap_0p5()
-            .ml(px(-4.))
             .children(counted)
             .child(div().relative().child(add).children(picker))
             .into_any_element()
@@ -819,7 +847,14 @@ impl RenderOnce for ThreadElement {
                                     let handle = edit_focus.read(cx).clone();
                                     window.focus(&handle, cx);
                                 })
-                            }));
+                            }))
+                            .child(Self::reactions(
+                                &colors,
+                                comment,
+                                &ui,
+                                &reaction_on_action,
+                                cx,
+                            ));
                         let content = match being_edited {
                             Some(text) => {
                                 let edit_focus = window
@@ -855,14 +890,7 @@ impl RenderOnce for ThreadElement {
                             .flex_col()
                             .gap_1()
                             .child(header)
-                            .child(content)
-                            .child(Self::reactions(
-                                &colors,
-                                comment,
-                                &ui,
-                                &reaction_on_action,
-                                cx,
-                            ))
+                            .child(div().pl_4().child(content))
                     }),
             )
         });
@@ -962,6 +990,13 @@ impl RenderOnce for ThreadElement {
                     .child(toggle)
                     .children(resolve)
                     .children(conversation_link),
+            )
+            .children(
+                (!self.view.is_folded)
+                    .then(|| self.view.followed.as_ref())
+                    .flatten()
+                    .filter(|followed| followed.were_changed)
+                    .map(|followed| before_block(&colors, &followed.before)),
             )
             .children(comments)
             .children(self.view.hand_off_line.as_ref().map(|line| {

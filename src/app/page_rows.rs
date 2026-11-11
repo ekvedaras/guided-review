@@ -15,8 +15,11 @@ use std::rc::Rc;
 
 use gpui::SharedString;
 
-use crate::app::components::diff_view::{DiffRowLine, PieceLabel};
+use crate::app::components::diff_view::{BoxEdges, DiffRowLine, PieceLabel};
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
+
+/// What the PR description's `MarkdownView` is keyed by, so its folds can be told apart.
+pub const DESCRIPTION_KEY: &str = "pr-description";
 use crate::app::components::step_notes::StepNotes;
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
@@ -52,9 +55,9 @@ pub struct Toolbar {
     pub ask: Option<AskAt>,
     pub fold: Option<FoldControl>,
     pub full_diff: Option<FullDiffControl>,
-    /// `None` while the pieces are folded away, as whitespace changes nothing then.
+    /// `None` where no code is shown.
     pub ignores_whitespace: Option<bool>,
-    /// `None` while the pieces are folded away.
+    /// `None` where no code is shown.
     pub wraps_lines: Option<bool>,
 }
 
@@ -63,6 +66,17 @@ pub struct FoldControl {
     pub step: StepId,
     pub is_folded: bool,
     pub piece_count: usize,
+}
+
+impl FoldControl {
+    /// On a step that folds and has pieces to open or fold.
+    fn of_step(step: StepId, folds: bool, is_folded: bool, piece_count: usize) -> Option<Self> {
+        (folds && piece_count > 0).then_some(Self {
+            step,
+            is_folded,
+            piece_count,
+        })
+    }
 }
 
 #[derive(Hash)]
@@ -78,8 +92,7 @@ pub struct ScreenFooter {
     pub ticks: Option<StepId>,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
-    pub is_summary: bool,
-    /// On the summary, and on the last screen once every step is read: where the tour leads.
+    /// On the last screen once every step is read: the end of the tour.
     pub lead: Option<TourLead>,
 }
 
@@ -159,6 +172,14 @@ pub struct DiagramRow {
     pub notes_button: NotesButton,
 }
 
+/// What a step says before its code: its why, what to check, and its diagram. One row, so a wide
+/// window can put the diagram beside the text.
+pub struct StepIntro {
+    pub why: SharedString,
+    pub notes: Option<StepNotes>,
+    pub diagram: Option<DiagramRow>,
+}
+
 pub struct HunkGapRow {
     pub id: SharedString,
     pub gap: HiddenLines,
@@ -184,6 +205,11 @@ impl HunkGapRow {
     }
 }
 
+pub struct SummaryColumns {
+    pub summary: Vec<PageRow>,
+    pub description: Option<Rc<PreparedMarkdown>>,
+}
+
 /// Rows are stored per line of a page, so a payload much bigger than a pointer goes behind an `Rc`.
 #[derive(Clone)]
 pub enum PageRow {
@@ -194,12 +220,12 @@ pub enum PageRow {
     RouteStop(Rc<RouteStopRow>),
     TourLead(Rc<TourLead>),
     ReviewerSummary(Rc<PreparedMarkdown>),
-    PrDescription(Rc<PreparedMarkdown>),
+    /// The summary's rows down to the reviewer summary, with the PR description as a column of its own,
+    /// so a wide window puts the description beside them.
+    SummaryColumns(Rc<SummaryColumns>),
     StepHeading(Rc<StepHeading>),
-    StepWhy(SharedString),
+    StepIntro(Rc<StepIntro>),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
-    Diagram(Rc<DiagramRow>),
-    StepNotes(StepNotes),
     RepinNotes {
         gone_pieces: usize,
         text_may_be_old: bool,
@@ -239,6 +265,7 @@ pub enum PageRow {
     },
     /// The ask button under the last of the lines that have Asks.
     AskMarker(Rc<AskAt>),
+    /// The space under a piece box; the box's last row draws its bottom edge.
     PieceEnd,
     ScreenFooter(Rc<ScreenFooter>),
 }
@@ -251,7 +278,7 @@ impl PageRow {
         let mut hasher = DefaultHasher::new();
         std::mem::discriminant(self).hash(&mut hasher);
         match self {
-            Self::SummaryTitle(text) | Self::SummaryBullet(text) | Self::StepWhy(text) => {
+            Self::SummaryTitle(text) | Self::SummaryBullet(text) => {
                 text.hash(&mut hasher);
             }
             Self::StepHeading(heading) => {
@@ -259,8 +286,12 @@ impl PageRow {
                 heading.title.hash(&mut hasher);
                 heading.number.hash(&mut hasher);
             }
-            Self::ReviewerSummary(summary) | Self::PrDescription(summary) => {
-                summary.hash(&mut hasher);
+            Self::ReviewerSummary(summary) => summary.hash(&mut hasher),
+            Self::SummaryColumns(columns) => {
+                for row in &columns.summary {
+                    row.key().0.hash(&mut hasher);
+                }
+                columns.description.hash(&mut hasher);
             }
             Self::AskMarker(ask) => ask.id.hash(&mut hasher),
             Self::Toolbar(toolbar) => {
@@ -274,7 +305,20 @@ impl PageRow {
             Self::SummaryStats(stats) => stats.hash(&mut hasher),
             Self::RouteStop(stop) => stop.hash(&mut hasher),
             Self::TourLead(lead) => lead.hash(&mut hasher),
-            Self::StepNotes(notes) => notes.hash(&mut hasher),
+            Self::StepIntro(intro) => {
+                intro.why.hash(&mut hasher);
+                intro.notes.hash(&mut hasher);
+                intro
+                    .diagram
+                    .as_ref()
+                    .map(|diagram| &diagram.step)
+                    .hash(&mut hasher);
+                intro
+                    .diagram
+                    .as_ref()
+                    .map(|diagram| &diagram.notes_button)
+                    .hash(&mut hasher);
+            }
             Self::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
@@ -349,10 +393,6 @@ impl PageRow {
                 problem.hash(&mut hasher);
                 is_sending.hash(&mut hasher);
             }
-            Self::Diagram(diagram) => {
-                diagram.step.hash(&mut hasher);
-                diagram.notes_button.hash(&mut hasher);
-            }
             Self::SafetyNetIntro
             | Self::RouteHeading
             | Self::NoChangeSinceRead
@@ -361,6 +401,72 @@ impl PageRow {
         }
         RowKey(hasher.finish())
     }
+}
+
+/// What a row is to the piece box around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoxPart {
+    Outside,
+    /// Between the box's sides.
+    Boxed,
+    /// Under a line but outside the box, like a thread: the box closes above it and opens again below.
+    Hung,
+    End,
+}
+
+fn box_edges(parts: &[BoxPart]) -> Vec<BoxEdges> {
+    let mut before = None;
+    let mut edges = Vec::with_capacity(parts.len());
+    for (index, &part) in parts.iter().enumerate() {
+        let after = parts.get(index + 1).copied();
+        edges.push(if part == BoxPart::Boxed {
+            BoxEdges {
+                opens: before == Some(BoxPart::Hung),
+                closes: matches!(after, Some(BoxPart::Hung | BoxPart::End) | None),
+            }
+        } else {
+            BoxEdges::default()
+        });
+        before = Some(part);
+    }
+    edges
+}
+
+impl PageRow {
+    fn box_part(&self) -> BoxPart {
+        match self {
+            Self::PieceHeader(_)
+            | Self::PieceMarker(_)
+            | Self::NoChangeSinceRead
+            | Self::BinaryFile(_)
+            | Self::Image { .. }
+            | Self::OnlyWhitespace
+            | Self::HunkGap(_)
+            | Self::Line(_) => BoxPart::Boxed,
+            Self::Thread {
+                place: ThreadRowPlace::UnderLine,
+                ..
+            }
+            | Self::QueuedComment(_)
+            | Self::Composer { .. }
+            | Self::AskMarker(_) => BoxPart::Hung,
+            Self::PieceEnd => BoxPart::End,
+            _ => BoxPart::Outside,
+        }
+    }
+}
+
+/// A row's edges are a part of its key: a row that comes to close its box is drawn and measured anew.
+fn keys_of(rows: &[PageRow], edges: &[BoxEdges]) -> Vec<RowKey> {
+    rows.iter()
+        .zip(edges)
+        .map(|(row, edges)| {
+            let mut hasher = DefaultHasher::new();
+            row.key().0.hash(&mut hasher);
+            edges.hash(&mut hasher);
+            RowKey(hasher.finish())
+        })
+        .collect()
 }
 
 /// Where a thread's row sits on the page.
@@ -401,6 +507,7 @@ pub struct PageRows {
     screen: Option<Screen>,
     rows: Vec<PageRow>,
     keys: Vec<RowKey>,
+    edges: Vec<BoxEdges>,
     diagram: Option<SharedString>,
     asked_lines: Vec<Place>,
     line_rows: HashMap<LineLocation, usize>,
@@ -427,6 +534,7 @@ impl PageRows {
             screen: None,
             rows: Vec::new(),
             keys: Vec::new(),
+            edges: Vec::new(),
             diagram: None,
             asked_lines: Vec::new(),
             line_rows: HashMap::new(),
@@ -460,7 +568,8 @@ impl PageRows {
             }
         }
         let rows = builder.rows;
-        let keys = rows.iter().map(PageRow::key).collect();
+        let edges = box_edges(&rows.iter().map(PageRow::box_part).collect::<Vec<_>>());
+        let keys = keys_of(&rows, &edges);
         let mut line_rows = HashMap::new();
         let mut pieces = Vec::new();
         for (index, row) in rows.iter().enumerate() {
@@ -482,6 +591,7 @@ impl PageRows {
             screen: Some(screen),
             rows,
             keys,
+            edges,
             diagram,
             asked_lines,
             line_rows,
@@ -497,6 +607,10 @@ impl PageRows {
         self.rows.get(index)
     }
 
+    pub fn edges(&self, index: usize) -> BoxEdges {
+        self.edges.get(index).copied().unwrap_or_default()
+    }
+
     /// The mermaid source of the diagram this screen shows, if it shows one.
     pub fn diagram(&self) -> Option<&str> {
         self.diagram.as_deref()
@@ -505,7 +619,38 @@ impl PageRows {
     pub fn diagram_row(&self) -> Option<usize> {
         self.rows
             .iter()
-            .position(|row| matches!(row, PageRow::Diagram(_)))
+            .position(|row| matches!(row, PageRow::StepIntro(intro) if intro.diagram.is_some()))
+    }
+
+    /// The Mermaid text in the PR description card, in reading order.
+    pub fn description_diagrams(&self) -> Vec<&str> {
+        self.description()
+            .map(|(_, description)| description.diagrams())
+            .unwrap_or_default()
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn description_fold_keys(&self) -> Vec<String> {
+        self.description()
+            .map(|(_, description)| description.fold_keys(DESCRIPTION_KEY))
+            .unwrap_or_default()
+    }
+
+    pub fn description_row(&self) -> Option<usize> {
+        self.description().map(|(row, _)| row)
+    }
+
+    fn description(&self) -> Option<(usize, &PreparedMarkdown)> {
+        self.rows
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| match row {
+                PageRow::SummaryColumns(columns) => columns
+                    .description
+                    .as_ref()
+                    .map(|description| (index, description.as_ref())),
+                _ => None,
+            })
     }
 
     pub fn asked_lines(&self) -> &[Place] {
@@ -572,7 +717,6 @@ impl PageRows {
                         ticks: None,
                         has_previous: footer.has_previous,
                         next: footer.next.clone(),
-                        is_summary: footer.is_summary,
                         lead: Some(TourLead::Finish {
                             steps,
                             can_finish: true,
@@ -592,7 +736,7 @@ impl PageRows {
                 _ => {}
             }
         }
-        self.keys = self.rows.iter().map(PageRow::key).collect();
+        self.keys = keys_of(&self.rows, &self.edges);
     }
 
     pub fn change_from(&self, old: &Self) -> RowsChange {
@@ -626,7 +770,8 @@ fn changed_span(old: &[RowKey], new: &[RowKey]) -> RowsChange {
 
 /// The summary is the tour's start page: what the PR is, how big, what it does, the route of the
 /// tour and the way in, then the reviewer summary and the PR's own description.
-fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
+fn summary_rows(review: &Review, page: &mut Vec<PageRow>) {
+    let mut rows = Vec::new();
     rows.push(PageRow::SummaryTitle(review.title().to_owned().into()));
     rows.push(PageRow::SummaryStats(Rc::new(SummaryStatsRow::of(
         review.summary_stats(),
@@ -668,12 +813,13 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
             .reviewer_summary()
             .map(|summary| PageRow::ReviewerSummary(Rc::new(PreparedMarkdown::of(summary)))),
     );
-    rows.extend(
-        review
+    page.push(PageRow::SummaryColumns(Rc::new(SummaryColumns {
+        summary: rows,
+        description: review
             .pr_description()
-            .map(|description| PageRow::PrDescription(Rc::new(PreparedMarkdown::of(description)))),
-    );
-    rows.push(PageRow::Toolbar(Rc::new(Toolbar {
+            .map(|description| Rc::new(PreparedMarkdown::of(description))),
+    })));
+    page.push(PageRow::Toolbar(Rc::new(Toolbar {
         ask: Some(AskAt {
             id: "ask-tour".into(),
             place: Place::Tour,
@@ -684,23 +830,17 @@ fn summary_rows(review: &Review, rows: &mut Vec<PageRow>) {
         ignores_whitespace: None,
         wraps_lines: None,
     })));
-    rows.push(screen_footer(review, None));
 }
 
 fn screen_footer(review: &Review, ticks: Option<StepId>) -> PageRow {
     let place = review.reading_place();
-    let is_summary = review.screen() == &Screen::Summary;
     let lead = review.tour_lead();
-    let leads_on = match &lead {
-        TourLead::Finish { .. } => is_summary || (place.next.is_none() && ticks.is_none()),
-        TourLead::Start(_) | TourLead::Continue(_) => is_summary,
-        TourLead::Nowhere => false,
-    };
+    let leads_on =
+        matches!(lead, TourLead::Finish { .. }) && place.next.is_none() && ticks.is_none();
     PageRow::ScreenFooter(Rc::new(ScreenFooter {
         ticks,
         has_previous: place.has_previous,
         next: place.next,
-        is_summary,
         lead: leads_on.then_some(lead),
     }))
 }
@@ -846,48 +986,49 @@ impl RowsBuilder<'_> {
             is_gone: page.is_gone,
             folds_on_title_click: page.is_ticked || step.skim,
         })));
-        self.rows.push(PageRow::StepWhy(step.why.clone().into()));
         let diagram = step
             .diagram
             .as_ref()
             .filter(|_| !page.is_folded)
             .map(|source| SharedString::from(source.clone()));
-        let notes = StepNotes::of(step);
-        if !notes.is_empty() {
-            self.rows.push(PageRow::StepNotes(notes));
-        }
-        if let Some(notes_button) = diagram
+        let notes = Some(StepNotes::of(step)).filter(|notes| !notes.is_empty());
+        let diagram_row = diagram
             .as_ref()
             .and_then(|_| review.diagram_notes_button(&id))
-        {
-            self.rows.push(PageRow::Diagram(Rc::new(DiagramRow {
+            .map(|notes_button| DiagramRow {
                 step: id.clone(),
                 notes_button,
-            })));
-        }
+            });
+        self.rows.push(PageRow::StepIntro(Rc::new(StepIntro {
+            why: step.why.clone().into(),
+            notes,
+            diagram: diagram_row,
+        })));
         if page.gone_pieces > 0 || page.text_may_be_old {
             self.rows.push(PageRow::RepinNotes {
                 gone_pieces: page.gone_pieces,
                 text_may_be_old: page.text_may_be_old,
             });
         }
+        let has_code = !page.pieces.is_empty();
         self.rows.push(PageRow::Toolbar(Rc::new(Toolbar {
             ask: Some(AskAt {
                 id: format!("ask-step-{id}").into(),
                 place: Place::Step { step: id.clone() },
                 label: step.title.clone(),
             }),
-            fold: (page.is_folded || step.skim || page.is_ticked).then(|| FoldControl {
-                step: id.clone(),
-                is_folded: page.is_folded,
-                piece_count: page.pieces.len(),
-            }),
+            fold: FoldControl::of_step(
+                id.clone(),
+                page.is_folded || step.skim || page.is_ticked,
+                page.is_folded,
+                page.pieces.len(),
+            ),
             full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
                 step: id.clone(),
                 is_showing_full_diff: since.showing_full_diff,
             }),
-            ignores_whitespace: Some(review.ignores_whitespace()),
-            wraps_lines: Some(review.wraps_lines()),
+            ignores_whitespace: has_code.then(|| review.ignores_whitespace()),
+            wraps_lines: has_code.then(|| review.wraps_lines()),
         })));
         let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
         let shown = if page
@@ -1059,10 +1200,8 @@ impl RowsBuilder<'_> {
                     self.rows.push(PageRow::PieceMarker(Rc::new(marker)));
                 }
                 let here = self.under_lines.take_at(&line.location);
-                self.rows.push(PageRow::Line(Rc::new(DiffRowLine::of(
-                    line.clone(),
-                    review.wraps_lines(),
-                ))));
+                let row = DiffRowLine::of(line.clone(), review.wraps_lines());
+                self.rows.push(PageRow::Line(Rc::new(row)));
                 self.hang(here);
             }
         }
@@ -1072,7 +1211,7 @@ impl RowsBuilder<'_> {
                 gap,
             ))));
         }
-        self.rows.push(PageRow::PieceEnd);
+        self.end_piece();
     }
 
     /// A folded box keeps its header and the labels of its pieces, so the step still says what it covers.
@@ -1112,10 +1251,18 @@ impl RowsBuilder<'_> {
                     .push(PageRow::PieceMarker(Rc::new(heading(piece))));
             }
         }
+        self.end_piece();
+    }
+
+    fn end_piece(&mut self) {
         self.rows.push(PageRow::PieceEnd);
     }
 
+    /// Hangs `here` under the row above.
     fn hang(&mut self, here: Vec<UnderLine>) {
+        if here.is_empty() {
+            return;
+        }
         let (review, facts) = (self.review, self.facts);
         self.rows
             .extend(here.into_iter().map(|item| item.into_row(review, facts)));
@@ -1172,7 +1319,7 @@ mod tests {
 
     #[test]
     fn a_page_row_stays_small_since_there_is_one_per_line() {
-        assert_eq!(size_of::<PageRow>(), 56);
+        assert_eq!(size_of::<PageRow>(), 48);
     }
 
     fn line(number: usize) -> LineNumber {
@@ -1280,6 +1427,7 @@ mod tests {
             reply_draft: None,
             edit_drafts: std::collections::BTreeMap::new(),
             hand_off_line: None,
+            followed: None,
             failed_hand_off: None,
         }
     }
@@ -1373,6 +1521,62 @@ mod tests {
             composer_key("a", None),
             composer_key("a", Some(CommentProblem::Rejected("rejected".into())))
         );
+    }
+
+    fn edges(opens: bool, closes: bool) -> BoxEdges {
+        BoxEdges { opens, closes }
+    }
+
+    #[test]
+    fn a_box_closes_on_its_last_row_whatever_it_is() {
+        use BoxPart::{Boxed, End, Outside};
+
+        assert_eq!(
+            box_edges(&[Outside, Boxed, Boxed, End, Outside]),
+            [
+                edges(false, false),
+                edges(false, false),
+                edges(false, true),
+                edges(false, false),
+                edges(false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_hangs_under_a_line_splits_the_box_around_it() {
+        use BoxPart::{Boxed, End, Hung};
+
+        assert_eq!(
+            box_edges(&[Boxed, Boxed, Hung, Hung, Boxed, End]),
+            [
+                edges(false, false),
+                edges(false, true),
+                edges(false, false),
+                edges(false, false),
+                edges(true, true),
+                edges(false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_hangs_under_the_last_line_leaves_the_box_closed_above_it() {
+        use BoxPart::{Boxed, End, Hung};
+
+        assert_eq!(
+            box_edges(&[Boxed, Hung, End]),
+            [edges(false, true), edges(false, false), edges(false, false)]
+        );
+    }
+
+    #[test]
+    fn a_step_without_pieces_has_nothing_to_open_or_fold() {
+        let step = StepId::from("notes");
+
+        assert!(FoldControl::of_step(step.clone(), true, true, 0).is_none());
+        assert!(FoldControl::of_step(step.clone(), true, true, 2).is_some());
+        assert!(FoldControl::of_step(step, false, false, 2).is_none());
     }
 
     fn keys(ids: &[u64]) -> Vec<RowKey> {

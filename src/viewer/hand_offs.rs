@@ -209,7 +209,9 @@ impl HandOff {
         }
         lines.push(format!("Comment: {}", self.comment));
         lines.push(format!(
-            "Answer with `guided-review agent-reply {pr} {id} --body <text>`. If the comment asks for a change to the \
+            "Answer with `guided-review agent-reply {pr} {id} --body -` and the answer on stdin, in a quoted heredoc \
+             (`<<'EOF'`). Write it in GitHub markdown the reviewer can scan: short paragraphs with a blank line between \
+             them, a list for steps or several points, code names in backticks. If the comment asks for a change to the \
              PR's code, first run `guided-review agent-reply {pr} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
              the PR's branch with none of the reviewer's own changes in it; else in a new git worktree, or a shallow \
@@ -474,6 +476,17 @@ impl HandOffs {
     }
 
     /// The thread's latest hand-off, when it failed and so can be tried again.
+    /// The agent's "Working on it…" reply, while the line under the thread says so.
+    pub(super) fn working_on_it_in(&self, thread: &ThreadId) -> Option<&CommentId> {
+        self.0
+            .iter()
+            .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
+            .and_then(|hand_off| match &hand_off.state {
+                HandOffState::WorkingOnIt { reply } => Some(reply),
+                _ => None,
+            })
+    }
+
     pub(super) fn failed_in(&self, thread: &ThreadId) -> Option<HandOffId> {
         self.0
             .iter()

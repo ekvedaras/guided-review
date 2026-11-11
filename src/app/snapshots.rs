@@ -55,6 +55,8 @@ pub fn appearance() -> Option<Appearance> {
 
 pub struct Camera {
     folder: PathBuf,
+    /// Name starts of the pictures to take; empty takes them all.
+    only: Vec<String>,
 }
 
 impl Camera {
@@ -64,12 +66,51 @@ impl Camera {
             eprintln!("could not make {}: {error}", folder.display());
             return None;
         }
-        Some(Self { folder })
+        let only = std::env::var("GUIDED_REVIEW_SNAPSHOT_ONLY")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|start| !start.is_empty())
+            .map(str::to_owned)
+            .collect();
+        Some(Self { folder, only })
+    }
+
+    fn wants(&self, name: &str) -> bool {
+        self.only.is_empty()
+            || self
+                .only
+                .iter()
+                .any(|start| name.starts_with(start.as_str()))
     }
 
     /// Draws the window until its picture settles, then saves it as `<name>.png`. Fails once the
     /// window is gone.
     pub async fn take(&self, name: &str, cx: &mut AsyncWindowContext) -> anyhow::Result<()> {
+        if !self.wants(name) {
+            return Ok(());
+        }
+        let image = Self::settle(name, cx).await?;
+        let path = self.folder.join(format!("{name}.png"));
+        image
+            .save(&path)
+            .with_context(|| format!("could not save {}", path.display()))
+    }
+
+    /// Why the run stopped early, beside its pictures: the app's own log goes with its throwaway home.
+    pub fn note_stop(&self, error: &anyhow::Error) {
+        std::fs::write(self.folder.join("stopped.txt"), format!("{error:#}\n")).ok();
+    }
+
+    /// When pictures are skipped nothing waits for the code to load, and the scenes need it loaded.
+    pub async fn wait_for_loading(&self, cx: &mut AsyncWindowContext) -> anyhow::Result<()> {
+        if !self.only.is_empty() {
+            Self::settle("loading", cx).await?;
+        }
+        Ok(())
+    }
+
+    async fn settle(name: &str, cx: &mut AsyncWindowContext) -> anyhow::Result<image::RgbaImage> {
         let started = Instant::now();
         let mut last = None;
         let mut unchanged_since = started;
@@ -101,10 +142,7 @@ impl Camera {
                 if !is_settled {
                     eprintln!("{name} kept changing; taken after {MAX_SETTLE:?}");
                 }
-                let path = self.folder.join(format!("{name}.png"));
-                return image
-                    .save(&path)
-                    .with_context(|| format!("could not save {}", path.display()));
+                return Ok(image);
             }
             last = Some(image);
         }

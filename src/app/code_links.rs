@@ -5,6 +5,7 @@ use gpui::{App, Global, SharedString};
 
 use crate::app::active_session::session_of;
 use crate::app::components::icon::Icon;
+use crate::ide::IdeLaunch;
 use crate::viewer::{CodeLink, CodeOpener, Destination, Opened, Review};
 
 struct ActiveCodeOpener(CodeOpener);
@@ -46,6 +47,12 @@ pub fn open_code_hint(link: &CodeLink, cx: &App) -> SharedString {
         .destination(link)
         .explanation()
         .into()
+}
+
+/// A file of the reviewer's own, outside any clone, in the IDE they set.
+#[allow(clippy::disallowed_methods, reason = "opens a URL, beside `open`")]
+pub fn open_file_in_ide(launch: &IdeLaunch, cx: &mut App) -> std::io::Result<()> {
+    launch.run(|url| cx.open_url(url))
 }
 
 #[allow(clippy::disallowed_methods, reason = "the one place that opens a URL")]

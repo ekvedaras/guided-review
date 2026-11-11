@@ -115,3 +115,15 @@ fn a_symbol_or_whole_file_pointer_names_its_piece_and_the_other_kinds_name_none(
         None
     );
 }
+
+#[test]
+fn a_tours_own_files_sit_in_a_folder_beside_it_named_by_the_pr_number() {
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let home = std::path::Path::new("/home/me");
+
+    assert_eq!(
+        Tour::files_for(home, &pr),
+        Tour::path_for(home, &pr).with_extension("")
+    );
+    assert!(Tour::files_for(home, &pr).ends_with("acme/shop/7"));
+}

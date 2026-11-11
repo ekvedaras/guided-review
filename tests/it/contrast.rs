@@ -111,6 +111,14 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
         &[
             ("text_selection", colors.text_selection),
             (
+                "added_word, a changed word in plain text",
+                colors.added_word,
+            ),
+            (
+                "removed_word, a changed word in plain text",
+                colors.removed_word,
+            ),
+            (
                 "current_border, the gutter of selected lines",
                 colors.current_border,
             ),

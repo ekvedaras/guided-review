@@ -1,7 +1,8 @@
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Bounds, Context, Corners, Entity, InteractiveElement, IntoElement,
+    AnyElement, App, AppContext, Bounds, Context, Corners, Entity, InteractiveElement, IntoElement,
     ParentElement, Pixels, RenderImage, RenderOnce, SharedString, StatefulInteractiveElement,
     Styled, Window, canvas, div, px,
 };
@@ -112,6 +113,49 @@ impl Diagrams {
     }
 }
 
+/// The diagrams of text that holds several, like a PR description: one `Diagrams` per Mermaid text.
+/// Text that repeats a diagram shares one.
+#[derive(Clone, Default)]
+pub struct DiagramSet {
+    diagrams: Rc<[(Arc<str>, Entity<Diagrams>)]>,
+}
+
+impl DiagramSet {
+    pub fn new(sources: &[&str], cx: &mut App) -> Self {
+        let mut diagrams: Vec<(Arc<str>, Entity<Diagrams>)> = Vec::new();
+        for source in sources {
+            if diagrams.iter().all(|(known, _)| known.as_ref() != *source) {
+                diagrams.push(((*source).into(), cx.new(|_| Diagrams::default())));
+            }
+        }
+        Self {
+            diagrams: diagrams.into(),
+        }
+    }
+
+    /// True when it holds these diagrams, so the set need not be made again.
+    pub fn is_of(&self, sources: &[&str]) -> bool {
+        sources.iter().all(|source| self.get(source).is_some())
+            && self
+                .diagrams
+                .iter()
+                .all(|(known, _)| sources.contains(&known.as_ref()))
+    }
+
+    pub fn get(&self, source: &str) -> Option<&Entity<Diagrams>> {
+        self.diagrams
+            .iter()
+            .find(|(known, _)| known.as_ref() == source)
+            .map(|(_, diagrams)| diagrams)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Entity<Diagrams>)> {
+        self.diagrams
+            .iter()
+            .map(|(source, diagrams)| (source.as_ref(), diagrams))
+    }
+}
+
 /// The shown step's diagram: one block per strip, sized from the SVG before any bitmap exists,
 /// so the page does not jump when bitmaps arrive or leave.
 #[derive(IntoElement)]
@@ -130,13 +174,9 @@ impl RenderOnce for DiagramView {
         let colors = Colors::active(cx);
         let memory = &self.diagrams.read(cx).memory;
         let frame = div()
-            .id("diagram")
+            .id(("diagram", self.diagrams.entity_id()))
             .overflow_x_scroll()
-            .rounded(px(CARD_RADIUS))
-            .border_1()
-            .border_color(colors.subtle_border)
-            .bg(colors.background)
-            .shadow(colors.card_shadow());
+            .rounded(px(CARD_RADIUS));
         if let Some(svg) = memory.svg() {
             let width = svg.width();
             let strips = memory.strips().into_iter().map(|strip| {

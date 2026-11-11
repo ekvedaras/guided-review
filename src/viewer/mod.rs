@@ -24,6 +24,7 @@ mod image_preview;
 mod jump;
 mod markdown;
 mod new_commits;
+mod outdated_lines;
 mod ports;
 mod pr_switcher;
 mod problems;
@@ -47,6 +48,7 @@ mod tour_agent;
 mod tour_writing;
 mod typing_save;
 mod viewed_sync;
+mod word_diff;
 
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
 pub use agent_event::AgentEvent;
@@ -89,6 +91,7 @@ pub use jump::{
 };
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
+pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess,
     PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
@@ -101,7 +104,7 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
-pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave};
+pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, RouteStop,
     SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadStep,

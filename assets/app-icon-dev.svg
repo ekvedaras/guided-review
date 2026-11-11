@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f2937"/>
+      <stop offset="1" stop-color="#0b1120"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#58a6ff"/>
+      <stop offset="1" stop-color="#3fb950"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="185" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+  <path d="M300 330 C 520 330, 520 512, 512 512 S 500 694, 724 694" fill="none" stroke="url(#trail)" stroke-width="44" stroke-linecap="round" stroke-dasharray="1 88"/>
+  <circle cx="300" cy="330" r="62" fill="#58a6ff"/>
+  <circle cx="512" cy="512" r="62" fill="#4aa8c9"/>
+  <circle cx="724" cy="694" r="76" fill="#3fb950"/>
+  <path d="M690 694 l24 24 l46 -50" fill="none" stroke="#0b1120" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="560" y="800" width="400" height="180" rx="44" fill="#f59e0b" stroke="#0b1120" stroke-width="16"/>
+  <text x="760" y="928" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="bold" font-size="128" fill="#0b1120">DEV</text>
+</svg>

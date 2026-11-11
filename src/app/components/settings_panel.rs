@@ -7,6 +7,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, px, relative,
 };
 
+use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
@@ -16,7 +17,7 @@ use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
 };
 use super::card::card;
-use super::chip::{chip, dropping_in, notice_band};
+use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
 use super::palette::{
@@ -25,7 +26,7 @@ use super::palette::{
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::title_bar::TitleBarArea;
+use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 
 /// The widest a sheet over a review grows on a wide window.
 const SHEET_WIDTH: f32 = 860.;
@@ -338,12 +339,16 @@ impl SettingsPanel {
         }
     }
 
-    fn save(&mut self, cx: &mut Context<Self>) {
+    /// Whoever placed the panel closes it once saved; with nothing to save it closes here.
+    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editing) = self.editing_mut() else {
             return;
         };
         match editing.settings.save() {
-            Ok(SaveOutcome::NothingChanged) => {}
+            Ok(SaveOutcome::NothingChanged) => {
+                self.close(window, cx);
+                return;
+            }
             Ok(SaveOutcome::Written) => {
                 editing.problems.clear();
                 editing.note = None;
@@ -365,7 +370,15 @@ impl SettingsPanel {
         match editing.settings.create_default_file() {
             Ok(file) => {
                 editing.default_file_exists = true;
-                cx.open_with_system(&file);
+                // In the reviewer's IDE when one is set: the system's app for `.md` may be any.
+                match editing.settings.ide().template() {
+                    Some(template) => {
+                        if let Err(error) = open_file_in_ide(&template.launch_file(&file), cx) {
+                            editing.note = Some(format!("the IDE did not start: {error}").into());
+                        }
+                    }
+                    None => cx.open_with_system(&file),
+                }
             }
             Err(error) => editing.note = Some(format!("{error:#}").into()),
         }
@@ -1322,7 +1335,7 @@ impl SettingsPanel {
                         "Save",
                     )
                     .min_w(px(112.))
-                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                 )
                 .into_any_element()
         };
@@ -1758,7 +1771,12 @@ impl Render for SettingsPanel {
                     .inset_0()
                     .bg(colors.background)
                     .occlude()
-                    .child(TitleBarArea::new("settings-title-bar", colors.background))
+                    .child(
+                        TitleBarArea::new("settings-title-bar", colors.background).children(
+                            dev_build_chip(&colors)
+                                .map(|chip| div().pl(px(TRAFFIC_LIGHTS_WIDTH)).child(chip)),
+                        ),
+                    )
                     .child(header)
                     .children(notice)
                     .child(body)

@@ -38,6 +38,7 @@ use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
+use super::outdated_lines::FollowedLines;
 use super::ports::{AgentLaunch, GitHubError};
 use super::problems::{Problem, Read};
 use super::refresh::RefreshBrief;
@@ -196,6 +197,7 @@ pub struct Review {
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
+    followed_lines: BTreeMap<ThreadId, FollowedLines>,
     threads: ThreadPlacement,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
@@ -207,6 +209,7 @@ pub struct Review {
     fold_flipped: BTreeSet<StepId>,
     /// File boxes of a step opened or folded against the step's fold, by step and path.
     box_fold_flipped: BTreeSet<(StepId, FilePath)>,
+    tour_files: Option<PathBuf>,
     viewed_sync: ViewedSync,
     repin_running: bool,
     refused_while_repinning: bool,
@@ -281,6 +284,7 @@ impl Review {
             steps_in_reading_order,
             has_uncovered_changes,
             pulled_threads: Vec::new(),
+            followed_lines: BTreeMap::new(),
             threads: ThreadPlacement::default(),
             thread_fold_flipped: BTreeSet::new(),
             screen: Screen::Summary,
@@ -288,6 +292,7 @@ impl Review {
             state_file,
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
+            tour_files: None,
             viewed_sync: ViewedSync::default(),
             repin_running: false,
             refused_while_repinning: false,
@@ -442,7 +447,16 @@ impl Review {
     /// Under the summary's bullets and above the PR description. `None` when the tour has none.
     pub fn reviewer_summary(&self) -> Option<Markdown> {
         let body = &self.tour.reviewer_summary;
-        (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
+        let markdown = match &self.tour_files {
+            Some(folder) => Markdown::parse_with_files(body, folder),
+            None => Markdown::parse(body),
+        };
+        (!body.trim().is_empty()).then(|| markdown.nested_one_level())
+    }
+
+    /// The tour's own folder, whose pictures its summary shows and whose files its links open.
+    pub fn set_tour_files(&mut self, folder: PathBuf) {
+        self.tour_files = Some(folder);
     }
 
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
@@ -689,6 +703,19 @@ impl Review {
     }
 
     /// The place an Ask about selected rows is about: the rows and the pieces holding them.
+    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
+    /// file, or lines not on this screen.
+    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
+        let CommentPlace::Lines { start, end } = comment else {
+            return None;
+        };
+        let lines = self.screen_lines();
+        let first = lines.iter().position(|line| &line.location == start)?;
+        let last = lines.iter().position(|line| &line.location == end)?;
+        let selected = SelectedLines::new(lines.get(first..=last)?.to_vec())?;
+        Some(self.place_of_lines(&selected))
+    }
+
     pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
         let (step, pieces) = match &self.screen {
             Screen::Step(id) => (
@@ -853,6 +880,12 @@ impl Review {
         self.place_threads();
     }
 
+    /// Outdated threads hang under the lines they were followed to; the others stay after the code.
+    pub fn set_followed_lines(&mut self, followed: BTreeMap<ThreadId, FollowedLines>) {
+        self.followed_lines = followed;
+        self.place_threads();
+    }
+
     /// The threads shown stay as they were, named as possibly old until a read goes through.
     pub fn threads_not_read(&mut self, error: &GitHubError) {
         self.threads_not_read = Some(format!("{error:#}"));
@@ -868,7 +901,13 @@ impl Review {
             ignores_whitespace: false,
             links: &links,
         };
-        self.threads = ThreadPlacement::of(&self.tour, &self.files, &self.pulled_threads, &display);
+        self.threads = ThreadPlacement::of(
+            &self.tour,
+            &self.files,
+            &self.pulled_threads,
+            &self.followed_lines,
+            &display,
+        );
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
@@ -1195,6 +1234,18 @@ impl Review {
         self.save_viewer_sections()
     }
 
+    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
+    pub fn leave_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
+        let is_blank = self
+            .comment_drafts()
+            .iter()
+            .any(|draft| &draft.place == place && draft.body.trim().is_empty());
+        if is_blank {
+            self.discard_draft(place)?;
+        }
+        Ok(())
+    }
+
     pub fn discard_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
         self.state.drop_draft(place);
         self.state.drop_queued(place);
@@ -1421,6 +1472,7 @@ impl Review {
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,
                 PaletteAction::Shortcuts,
+                PaletteAction::RestartApp,
             ])
             .collect()
     }
@@ -1452,6 +1504,29 @@ impl Review {
     /// False when there is no screen after this one.
     pub fn go_forward(&mut self) -> bool {
         self.step_by(1)
+    }
+
+    /// The Next button: on to the next screen that is not a step already read, which the sidebar
+    /// still reaches. False when there is none.
+    pub fn go_on(&mut self) -> bool {
+        match self.onward_screen() {
+            Some(screen) => {
+                self.screen = screen;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn onward_screen(&self) -> Option<Screen> {
+        let reading_order = self.reading_order();
+        let here = reading_order
+            .iter()
+            .position(|screen| screen == &self.screen)?;
+        reading_order
+            .into_iter()
+            .skip(here + 1)
+            .find(|screen| !matches!(screen, Screen::Step(id) if self.is_ticked(id)))
     }
 
     /// False on the summary, the first screen.
@@ -1768,15 +1843,13 @@ impl Review {
             .iter()
             .position(|screen| screen == &self.screen);
         let is_step = |screen: &&Screen| matches!(screen, Screen::Step(_));
-        let next = position
-            .and_then(|position| reading_order.get(position + 1))
-            .and_then(|screen| match screen {
-                Screen::Step(id) => Some(NextScreen::Step {
-                    title: self.step(id)?.title.clone(),
-                }),
-                Screen::SafetyNet => Some(NextScreen::SafetyNet),
-                Screen::Summary => None,
-            });
+        let next = self.onward_screen().and_then(|screen| match &screen {
+            Screen::Step(id) => Some(NextScreen::Step {
+                title: self.step(id)?.title.clone(),
+            }),
+            Screen::SafetyNet => Some(NextScreen::SafetyNet),
+            Screen::Summary => None,
+        });
         ReadingPlace {
             step_number: match (&self.screen, position) {
                 (Screen::Step(_), Some(position)) => Some(
