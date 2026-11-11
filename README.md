@@ -2,6 +2,9 @@
 
 Turn a PR diff into a top-down guided review. An agent writes a tour of a GitHub PR: a summary, then steps from the main flow down to the details, each with the diff pieces and diagrams it talks about. The app shows the tour next to the diff and lets you comment on it.
 
+> [!NOTE]
+> Mandatory `vibe` alert! I do not have the capacity to review all of this code. The irony here is not lost on me 🙃 I do care, PRs and issues are welcome!
+
 ## Install with your agent
 
 Paste this into Claude Code (or any coding agent with a shell):
