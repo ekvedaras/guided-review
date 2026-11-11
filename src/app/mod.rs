@@ -161,6 +161,7 @@ fn open_request_of(home: &Path, pr: &PullRequestUrl) -> OpenRequest {
         pr: pr.to_string(),
         folder,
         terminal: None,
+        at_step: None,
     }
 }
 
@@ -419,10 +420,17 @@ async fn build_and_show(
     home: PathBuf,
     cx: &mut AsyncApp,
 ) {
-    let (build_pr, folder) = (pr.clone(), open.folder.clone());
+    let (build_pr, folder, at_step) = (pr.clone(), open.folder.clone(), open.at_step.clone());
     let built = cx
         .background_executor()
-        .spawn(async move { open_review(&build_pr, &folder, &home) })
+        .spawn(async move {
+            open_review(&build_pr, &folder, &home).map(|mut opened| {
+                if let Some(step) = &at_step {
+                    opened.review.go_to(step);
+                }
+                opened
+            })
+        })
         .await;
     let active = screen.borrow().active.clone();
     let finished = active.update(cx, |active, cx| {

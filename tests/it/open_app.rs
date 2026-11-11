@@ -270,3 +270,50 @@ fn settings_asks_the_running_app_to_show_settings_and_says_so() {
     let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
     assert_eq!(request["request"], "show_settings");
 }
+
+#[test]
+fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_in_a_new_one() {
+    let (repo, github) = shop_with_a_tour_file();
+    let script = start_script(repo.home());
+    let seen = Seen::default();
+    let old_app = fake_app(
+        repo.home(),
+        None,
+        vec![answer_line(BUILD, r#""quitting""#)],
+        Arc::clone(&seen),
+    );
+    let new_app = {
+        let home = repo.home().to_path_buf();
+        let seen = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            old_app.join().unwrap();
+            std::fs::remove_file(AppFolder::in_home(&home).socket()).unwrap();
+            fake_app(
+                &home,
+                Some(home.join("started")),
+                vec![opening_line()],
+                seen,
+            )
+            .join()
+            .unwrap();
+        })
+    };
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["restart", PR, "--at", "readme"]);
+
+    new_app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    let requests: Vec<serde_json::Value> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["request"], "quit");
+    assert_eq!(requests[1]["request"]["open"]["pr"], PR);
+    assert_eq!(requests[1]["request"]["open"]["at_step"], "readme");
+}

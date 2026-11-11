@@ -5,6 +5,7 @@ use gpui::{
     Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
     Window, actions, div, list, px,
 };
+use std::os::unix::process::CommandExt;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -84,8 +85,8 @@ use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
     LineLocation, NextScreen, NotesButton, PaletteAction, Place, QueuedComment, ReadProgress,
-    Reopen, ReopenAfterSave, Review, Screen, ScreenTravel, SendMode, StepId, ThreadId, ThreadView,
-    ToastTone, TourLead, Travel,
+    Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review, Screen, ScreenTravel, SendMode,
+    StepId, ThreadId, ThreadView, ToastTone, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -157,6 +158,7 @@ pub struct OneStepLayout {
     /// Lives and dies with this window's session: whatever ends the session (the reopen itself, or a
     /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
     reopen_after_save: ReopenAfterSave,
+    restart_guard: RestartGuard,
     /// `None` opens all code on GitHub.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
@@ -339,6 +341,7 @@ impl OneStepLayout {
             settings,
             loading,
             reopen_after_save: ReopenAfterSave::default(),
+            restart_guard: RestartGuard::default(),
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
@@ -882,6 +885,38 @@ impl OneStepLayout {
             PaletteAction::SwitchPr => self.toggle_pr_switcher(window, cx),
             PaletteAction::Settings => self.toggle_settings(&ToggleSettings, window, cx),
             PaletteAction::Shortcuts => self.toggle_shortcuts(&ToggleShortcuts, window, cx),
+            PaletteAction::RestartApp => self.restart_app(cx),
+        }
+    }
+
+    /// The installed binary, which may be newer than this app, quits this one and opens the PR on this
+    /// screen; it runs on its own so it outlives the app it quits.
+    fn restart_app(&mut self, cx: &mut Context<Self>) {
+        let in_flight = self.in_flight(cx);
+        if let RestartStep::Warn(warning) = self.restart_guard.ask(in_flight, Instant::now()) {
+            post_toast(cx, ToastTone::Danger, warning);
+            return;
+        }
+        let review = self.session.read(cx).review();
+        let mut command = match std::env::current_exe() {
+            Ok(exe) => std::process::Command::new(exe),
+            Err(error) => {
+                post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
+                return;
+            }
+        };
+        command.arg("restart").arg(review.pr().to_string());
+        if let Screen::Step(id) = review.screen() {
+            command.arg("--at").arg(id.to_string());
+        }
+        let started = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0)
+            .spawn();
+        if let Err(error) = started {
+            post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
         }
     }
 

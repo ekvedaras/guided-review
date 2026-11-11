@@ -61,6 +61,7 @@ mod refresh;
 mod relevant_prs;
 mod reopen_after_save;
 mod repin;
+mod restart_guard;
 mod review_threads;
 mod screen_travel;
 mod settings;

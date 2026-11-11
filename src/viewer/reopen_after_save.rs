@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 /// The work running now that a reopen would kill, as the window counts it: Ask turns answer in threads
 /// the Ask panel owns, and hand-offs and Asks handed to the agent are typed in by tasks of the session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -18,6 +20,11 @@ impl Pending {
     }
 
     fn waiting_line(self) -> String {
+        format!("Saved. The PR opens again once {}.", self.waits())
+    }
+
+    /// What has to end first, as one clause: "the Ask finishes answering and …".
+    fn waits(self) -> String {
         let mut waits = Vec::new();
         match self.in_flight.asks_answering {
             0 => {}
@@ -32,12 +39,11 @@ impl Pending {
         if self.in_flight.delivering_hand_offs {
             waits.push("the hand-offs are delivered to the tour agent".to_owned());
         }
-        let waits = match waits.split_last() {
+        match waits.split_last() {
             Some((last, [])) => last.clone(),
             Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
             None => String::new(),
-        };
-        format!("Saved. The PR opens again once {waits}.")
+        }
     }
 }
 
@@ -96,5 +102,43 @@ impl ReopenAfterSave {
 
     pub fn waiting_line(&self) -> Option<&str> {
         self.waiting.as_deref()
+    }
+}
+
+/// How soon a second restart must follow the warning to count as a yes.
+const CONFIRM_WITHIN: Duration = Duration::from_secs(10);
+
+/// A restart quits the app at once, so with work running it first warns, and only a second ask soon
+/// after restarts.
+#[derive(Debug, Default)]
+pub struct RestartGuard {
+    warned_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestartStep {
+    Restart,
+    /// What would be lost, and that asking again restarts anyway.
+    Warn(String),
+}
+
+impl RestartGuard {
+    pub fn ask(&mut self, in_flight: InFlight, now: Instant) -> RestartStep {
+        let was_warned = self
+            .warned_at
+            .is_some_and(|warned| now.saturating_duration_since(warned) <= CONFIRM_WITHIN);
+        if in_flight == InFlight::default() || was_warned {
+            self.warned_at = None;
+            return RestartStep::Restart;
+        }
+        self.warned_at = Some(now);
+        let running = Pending {
+            in_flight,
+            asks_handed_to_agent: 0,
+        };
+        RestartStep::Warn(format!(
+            "A restart now does not wait until {}. Pick Restart again to restart anyway.",
+            running.waits()
+        ))
     }
 }

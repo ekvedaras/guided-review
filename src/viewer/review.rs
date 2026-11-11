@@ -1461,6 +1461,7 @@ impl Review {
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,
                 PaletteAction::Shortcuts,
+                PaletteAction::RestartApp,
             ])
             .collect()
     }

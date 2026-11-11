@@ -110,6 +110,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::SwitchPr => Icon::PullRequest,
         PaletteAction::Settings => Icon::Settings,
         PaletteAction::Shortcuts => Icon::Keyboard,
+        PaletteAction::RestartApp => Icon::RotateCcw,
     }
 }
 

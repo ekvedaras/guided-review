@@ -104,7 +104,7 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
-pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave};
+pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, RepinRunning, Review, RouteStop,
     SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadStep,

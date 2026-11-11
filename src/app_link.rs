@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::tour::StepId;
 use crate::viewer::{AgentReplied, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
@@ -41,6 +42,9 @@ pub struct OpenRequest {
     pub folder: PathBuf,
     /// The caller's herdr terminal, when it runs in one.
     pub terminal: Option<String>,
+    /// The step to show once open, as a restart brings back the screen it left; else the summary.
+    #[serde(default)]
+    pub at_step: Option<StepId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,6 +288,11 @@ pub fn hand_over(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer
         }
         None => {}
     }
+    start_and_hand(folder, request)
+}
+
+fn start_and_hand(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
+    let socket = folder.socket();
     start_app(folder)?;
     let mut answer = None;
     wait_until(START_WAIT, || {
@@ -294,6 +303,16 @@ pub fn hand_over(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer
     answer
         .map(|line| line.answer)
         .context("the app did not answer")
+}
+
+/// Asks the running app to quit, whatever its build, then starts one and hands it the request: the way
+/// to pick up a reinstalled binary without quitting by hand.
+pub fn restart(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
+    let socket = folder.socket();
+    if exchange(&socket, &Request::Quit)?.is_some() {
+        wait_until(QUIT_WAIT, || !is_answering(&socket)).context("the app did not quit")?;
+    }
+    start_and_hand(folder, request)
 }
 
 fn is_answering(socket: &Path) -> bool {
