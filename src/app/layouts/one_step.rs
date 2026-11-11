@@ -2886,19 +2886,19 @@ impl Render for OneStepLayout {
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    if this
+            // Before the press reaches what is under the pointer, so a double click's word, chosen
+            // there, is not the selection cleared here.
+            .capture_any_mouse_down(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                if event.button == MouseButton::Left
+                    && this
                         .code_selection
                         .as_ref()
                         .is_some_and(|selection| !selection.is_dragging())
-                    {
-                        this.code_selection = None;
-                        cx.notify();
-                    }
-                }),
-            )
+                {
+                    this.code_selection = None;
+                    cx.notify();
+                }
+            }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),

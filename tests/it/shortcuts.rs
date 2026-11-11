@@ -46,6 +46,7 @@ fn no_two_commands_of_one_scope_share_a_key() {
                 KeyScope::Page => "page",
                 KeyScope::Window => "window",
                 KeyScope::TextBox => "text box",
+                KeyScope::NotTyping => "outside text boxes",
             };
             assert!(
                 taken.insert((scope, keystroke(chord))),
@@ -85,4 +86,9 @@ fn the_keys_the_app_had_before_the_sheet_still_work() {
     assert_eq!(keys(Command::CopyCode), ["cmd-c"]);
     assert_eq!(keys(Command::AddToReview), ["cmd-enter"]);
     assert_eq!(keys(Command::CloseBox), ["escape"]);
+}
+
+#[test]
+fn copying_code_works_with_a_comment_box_open_but_not_while_typing_in_it() {
+    assert_eq!(Command::CopyCode.scope(), KeyScope::NotTyping);
 }

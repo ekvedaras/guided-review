@@ -97,6 +97,11 @@ impl Camera {
             .with_context(|| format!("could not save {}", path.display()))
     }
 
+    /// Why the run stopped early, beside its pictures: the app's own log goes with its throwaway home.
+    pub fn note_stop(&self, error: &anyhow::Error) {
+        std::fs::write(self.folder.join("stopped.txt"), format!("{error:#}\n")).ok();
+    }
+
     /// When pictures are skipped nothing waits for the code to load, and the scenes need it loaded.
     pub async fn wait_for_loading(&self, cx: &mut AsyncWindowContext) -> anyhow::Result<()> {
         if !self.only.is_empty() {

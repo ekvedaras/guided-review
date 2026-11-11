@@ -45,6 +45,9 @@ pub enum KeyScope {
     Window,
     /// In a comment, reply or edit box.
     TextBox,
+    /// Anywhere in the review's window but a box that takes typing, which has its own: a comment
+    /// box left open elsewhere on the page does not stop it.
+    NotTyping,
 }
 
 /// The sheet's headings, in the order it shows them.
@@ -135,11 +138,11 @@ impl Command {
             | Self::PreviousScreen
             | Self::NextUnreadStep
             | Self::ToggleRead
-            | Self::CopyCode
             | Self::WrapLines
             | Self::Shortcuts => KeyScope::Page,
             Self::Jump | Self::Settings => KeyScope::Window,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
+            Self::CopyCode => KeyScope::NotTyping,
         }
     }
 

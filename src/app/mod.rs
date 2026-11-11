@@ -555,6 +555,11 @@ fn bind_keys(cx: &mut App) {
             KeyScope::Page => typing_is_not_navigation.clone(),
             KeyScope::Window => OneStepLayout::KEY_CONTEXT.to_owned(),
             KeyScope::TextBox => text_box::TYPING_CONTEXT.to_owned(),
+            KeyScope::NotTyping => format!(
+                "{} && !{}",
+                OneStepLayout::KEY_CONTEXT,
+                text_box::TYPING_CONTEXT
+            ),
         };
         command.chords().iter().map(move |chord| {
             let keys = keystroke(chord);
