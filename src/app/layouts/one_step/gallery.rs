@@ -172,7 +172,8 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         commented_lines: Arc::from(Vec::new()),
         reply_draft: None,
         edit_drafts: BTreeMap::new(),
-        hand_off_line: is_open.then(|| Arc::from("Sent to your agent; it answers in this thread.")),
+        hand_off_line: is_open.then(|| Arc::from("The agent is working on it")),
+        agent_is_working: is_open,
         failed_hand_off: None,
     };
     ThreadElement::new(

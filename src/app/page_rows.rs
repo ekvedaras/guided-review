@@ -1457,6 +1457,7 @@ mod tests {
             reply_draft: None,
             edit_drafts: BTreeMap::new(),
             hand_off_line: None,
+            agent_is_working: false,
             followed: None,
             failed_hand_off: None,
         }

@@ -22,7 +22,7 @@ use super::card::card;
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
 use super::markdown_view::{MarkdownView, parsed_markdown};
-use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
+use super::motion::{BOX_RISE, Edge, STATE, busy_dot, shimmer_text, slide_in, turn_to};
 use super::palette::{CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, Tone};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
@@ -1021,7 +1021,17 @@ impl RenderOnce for ThreadElement {
                     } else {
                         colors.muted_text
                     })
-                    .child(SharedString::from(Arc::clone(line)))
+                    .child(if self.view.agent_is_working {
+                        shimmer_text(
+                            SharedString::from(Arc::clone(line)),
+                            colors.muted_text,
+                            colors.text,
+                            SharedString::from(format!("hand-off-working-{id}")),
+                        )
+                        .into_any_element()
+                    } else {
+                        SharedString::from(Arc::clone(line)).into_any_element()
+                    })
                     .children(try_again)
             }))
             .children(actions)

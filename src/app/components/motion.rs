@@ -5,12 +5,13 @@
 //! moves then draw their end state and repeating ones their start state. An animation plays once per
 //! element id, so a move that must replay on a state change takes an id that changes with that state.
 
+use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationElement, AnimationExt, ElementId, IntoElement, ParentElement, Pixels,
-    SpringAnimation, SpringAnimationElement, SpringConfig, Styled, Svg, Transformation, div,
-    percentage, px, relative, size,
+    Animation, AnimationElement, AnimationExt, ElementId, HighlightStyle, IntoElement,
+    ParentElement, Pixels, Rgba, SharedString, SpringAnimation, SpringAnimationElement,
+    SpringConfig, Styled, StyledText, Svg, Transformation, div, percentage, px, relative, size,
 };
 
 use super::palette::Colors;
@@ -262,4 +263,62 @@ pub fn busy_dot(colors: &Colors, id: impl Into<ElementId>) -> impl IntoElement {
             .bg(colors.trail.left_right()),
         id,
     )
+}
+
+/// One pass of the shine over a busy line.
+const SHIMMER: Duration = Duration::from_millis(1800);
+/// How far the shine reaches either side of its centre, as a share of the line.
+const SHINE_REACH: f32 = 0.18;
+
+/// A line that a lighter shine runs over again and again while busy. Reduce motion holds the shine
+/// before the line's start, so the line stands still in its own colour.
+pub fn shimmer_text(
+    text: SharedString,
+    color: Rgba,
+    shine: Rgba,
+    id: impl Into<ElementId>,
+) -> impl IntoElement {
+    div().text_color(color).with_animation(
+        id,
+        Animation::new(SHIMMER).repeat().with_max_fps(BUSY_FPS),
+        move |line, phase| {
+            let highlights = shine_over(&text, phase, color, shine);
+            line.child(StyledText::new(text.clone()).with_highlights(highlights))
+        },
+    )
+}
+
+/// Each character's colour at `phase`: `shine` at the centre of the shine, fading to `color` at its reach.
+fn shine_over(
+    text: &str,
+    phase: f32,
+    color: Rgba,
+    shine: Rgba,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let count = text.chars().count().max(1) as f32;
+    let centre = phase * (1. + 2. * SHINE_REACH) - SHINE_REACH;
+    text.char_indices()
+        .enumerate()
+        .filter_map(|(index, (start, character))| {
+            let place = (index as f32 + 0.5) / count;
+            let strength = 1. - (place - centre).abs() / SHINE_REACH;
+            (strength > 0.).then(|| {
+                let style = HighlightStyle {
+                    color: Some(mixed(color, shine, strength).into()),
+                    ..HighlightStyle::default()
+                };
+                (start..start + character.len_utf8(), style)
+            })
+        })
+        .collect()
+}
+
+fn mixed(from: Rgba, to: Rgba, share: f32) -> Rgba {
+    let at = |a: f32, b: f32| a + (b - a) * share;
+    Rgba {
+        r: at(from.r, to.r),
+        g: at(from.g, to.g),
+        b: at(from.b, to.b),
+        a: at(from.a, to.a),
+    }
 }
