@@ -15,6 +15,7 @@ use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines};
 
+use super::diagram::{DiagramSet, DiagramView};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
 use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors};
@@ -117,6 +118,20 @@ impl PreparedMarkdown {
         let blocks = prepare(&markdown.blocks);
         Self { markdown, blocks }
     }
+
+    pub fn diagrams(&self) -> Vec<&str> {
+        self.markdown.diagrams()
+    }
+
+    /// The keys `MarkdownView` gives its top-level `<details>` folds when drawn under `key`.
+    pub fn fold_keys(&self, key: &str) -> Vec<String> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| matches!(block, PreparedBlock::Details { .. }))
+            .map(|(index, _)| format!("{key}-{index}"))
+            .collect()
+    }
 }
 
 impl std::hash::Hash for PreparedMarkdown {
@@ -136,6 +151,11 @@ enum PreparedBlock {
         items: Vec<Vec<Self>>,
     },
     Code {
+        lines: Vec<CodeLine>,
+    },
+    /// Drawn as code where the view has no diagram for it.
+    Diagram {
+        source: Arc<str>,
         lines: Vec<CodeLine>,
     },
     /// Drawn as a diff against the commented lines when there are some, as plain code when not.
@@ -164,6 +184,12 @@ fn prepare(blocks: &[Block]) -> Vec<PreparedBlock> {
 }
 
 fn prepare_block(block: &Block) -> PreparedBlock {
+    if let (Some(source), Block::Code { text, spans, .. }) = (block.diagram(), block) {
+        return PreparedBlock::Diagram {
+            source: source.into(),
+            lines: code_lines(None, text, spans),
+        };
+    }
     match block {
         Block::Paragraph(runs) => PreparedBlock::Text {
             text: Rc::new(InlineText::of(runs)),
@@ -266,6 +292,7 @@ pub struct MarkdownView {
     markdown: Rc<PreparedMarkdown>,
     /// The lines the comment is on, so a suggestion block shows as a diff against them.
     commented_lines: Arc<[Arc<str>]>,
+    diagrams: DiagramSet,
 }
 
 impl MarkdownView {
@@ -274,7 +301,14 @@ impl MarkdownView {
             key: key.into(),
             markdown,
             commented_lines: Arc::new([]),
+            diagrams: DiagramSet::default(),
         }
+    }
+
+    /// Mermaid fences show as these diagrams; a fence with none in the set shows as code.
+    pub fn with_diagrams(mut self, diagrams: DiagramSet) -> Self {
+        self.diagrams = diagrams;
+        self
     }
 
     pub fn on_lines(mut self, commented_lines: Arc<[Arc<str>]>) -> Self {
@@ -289,6 +323,7 @@ impl RenderOnce for MarkdownView {
             &self.markdown.blocks,
             &self.key,
             &self.commented_lines,
+            &self.diagrams,
             window,
             cx,
         )
@@ -346,6 +381,7 @@ fn blocks(
     items: &[PreparedBlock],
     key: &str,
     commented_lines: &[Arc<str>],
+    diagrams: &DiagramSet,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -358,6 +394,7 @@ fn blocks(
                 block,
                 &format!("{key}-{index}"),
                 commented_lines,
+                diagrams,
                 window,
                 cx,
             )
@@ -369,6 +406,7 @@ fn block_element(
     block: &PreparedBlock,
     key: &str,
     commented_lines: &[Arc<str>],
+    diagrams: &DiagramSet,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -400,12 +438,17 @@ fn block_element(
                         item,
                         &format!("{key}-{index}"),
                         &[],
+                        diagrams,
                         window,
                         cx,
                     )))
             }))
             .into_any_element(),
         PreparedBlock::Code { lines } => code_block(&colors, key, lines),
+        PreparedBlock::Diagram { source, lines } => match diagrams.get(source) {
+            Some(diagram) => DiagramView::new(diagram.clone()).into_any_element(),
+            None => code_block(&colors, key, lines),
+        },
         PreparedBlock::Suggestion { added, lines } => {
             if commented_lines.is_empty() {
                 code_block(&colors, key, lines)
@@ -418,9 +461,11 @@ fn block_element(
             .border_l_1()
             .border_color(colors.border)
             .text_color(colors.muted_text)
-            .child(blocks(inner, key, &[], window, cx))
+            .child(blocks(inner, key, &[], diagrams, window, cx))
             .into_any_element(),
-        PreparedBlock::Details { summary, body } => details(summary, body, key, window, cx),
+        PreparedBlock::Details { summary, body } => {
+            details(summary, body, key, diagrams, window, cx)
+        }
         PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
     }
 }
@@ -429,6 +474,7 @@ fn details(
     summary: &Rc<InlineText>,
     body: &[PreparedBlock],
     key: &str,
+    diagrams: &DiagramSet,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -467,7 +513,7 @@ fn details(
         .flex_col()
         .gap_2()
         .child(header)
-        .when_open(open, blocks(body, key, &[], window, cx))
+        .when_open(open, blocks(body, key, &[], diagrams, window, cx))
         .into_any_element()
 }
 

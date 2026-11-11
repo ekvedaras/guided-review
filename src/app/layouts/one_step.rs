@@ -29,7 +29,7 @@ use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
     QueuedCommentNote,
 };
-use crate::app::components::diagram::{DiagramView, Diagrams};
+use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture, OnScrollX,
     PieceHeader, PieceMarker, RowGesture, binary_file_row, hunk_gap, no_change_since_read_row,
@@ -42,7 +42,7 @@ use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
-    InlineMarkdown, MarkdownView, PreparedMarkdown, bullet, parsed_markdown,
+    InlineMarkdown, MarkdownView, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
     BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to_share, grow_when_shown, pop_in,
@@ -71,8 +71,8 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
-    AskAt, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows, StepHeading,
-    SummaryStatsRow, ThreadRowPlace, Toolbar,
+    AskAt, DESCRIPTION_KEY, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows,
+    StepHeading, SummaryStatsRow, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
@@ -128,6 +128,7 @@ pub struct OneStepLayout {
     screen_list: ListState,
     on_row_gesture: OnRowGesture,
     diagrams: Entity<Diagrams>,
+    description_diagrams: DiagramSet,
     focus: FocusHandle,
     /// The comment being written takes keys with this one.
     composer_focus: FocusHandle,
@@ -323,6 +324,7 @@ impl OneStepLayout {
             session,
             on_row_gesture,
             diagrams,
+            description_diagrams: DiagramSet::default(),
             focus,
             composer_focus: cx.focus_handle(),
             ask,
@@ -356,6 +358,20 @@ impl OneStepLayout {
         })
         .detach();
         diagrams
+    }
+
+    fn new_description_diagrams(sources: &[&str], cx: &mut Context<Self>) -> DiagramSet {
+        let set = DiagramSet::new(sources, cx);
+        for (_, diagrams) in set.iter() {
+            cx.observe(diagrams, |this, _, cx| {
+                if let Some(row) = this.session.read(cx).rows().description_row() {
+                    this.screen_list.remeasure_items(row..row + 1);
+                }
+                cx.notify();
+            })
+            .detach();
+        }
+        set
     }
 
     fn change_review<T>(&self, cx: &mut App, change: impl FnOnce(&mut Review) -> T) -> T {
@@ -1456,21 +1472,53 @@ impl OneStepLayout {
     }
 
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
-    fn show_diagram(&self, window: &mut Window, cx: &mut Context<Self>) {
+    fn show_diagram(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let screen_list = &self.screen_list;
-        let diagrams = &self.diagrams;
-        self.session.update(cx, |session, cx| {
-            let rows = session.rows();
-            let is_off_view = rows.diagram_row().is_some_and(|row| {
+        let is_off_view = |row: Option<usize>| {
+            row.is_some_and(|row| {
                 screen_list.item_is_above_viewport(row) == Some(true)
                     || screen_list.item_is_below_viewport(row) == Some(true)
-            });
-            diagrams.update(cx, |diagrams, cx| {
-                diagrams.show(rows.diagram(), window, cx);
-                if is_off_view {
-                    diagrams.leave_screen(window);
-                }
-            });
+            })
+        };
+        let session = self.session.read(cx);
+        let rows = session.rows();
+        let step_diagram = rows.diagram().map(str::to_owned);
+        let step_diagram_is_off_view = is_off_view(rows.diagram_row());
+        let description_diagrams: Vec<String> = rows
+            .description_diagrams()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let description_is_off_view = is_off_view(rows.description_row());
+
+        Self::show_one(
+            &self.diagrams,
+            step_diagram.as_deref(),
+            step_diagram_is_off_view,
+            window,
+            cx,
+        );
+        let sources: Vec<&str> = description_diagrams.iter().map(String::as_str).collect();
+        if !self.description_diagrams.is_of(&sources) {
+            self.description_diagrams = Self::new_description_diagrams(&sources, cx);
+        }
+        for (source, diagrams) in self.description_diagrams.clone().iter() {
+            Self::show_one(diagrams, Some(source), description_is_off_view, window, cx);
+        }
+    }
+
+    fn show_one(
+        diagrams: &Entity<Diagrams>,
+        source: Option<&str>,
+        is_off_view: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        diagrams.update(cx, |diagrams, cx| {
+            diagrams.show(source, window, cx);
+            if is_off_view {
+                diagrams.leave_screen(window);
+            }
         });
     }
 
@@ -1540,10 +1588,19 @@ impl OneStepLayout {
                 )))
                 .into_any_element(),
             PageRow::ReviewerSummary(summary) => self
-                .markdown_card("REVIEWER SUMMARY", "reviewer-summary", summary, cx)
+                .markdown_card(
+                    "REVIEWER SUMMARY",
+                    MarkdownView::new("reviewer-summary", summary),
+                    cx,
+                )
                 .into_any_element(),
             PageRow::PrDescription(description) => self
-                .markdown_card("PR DESCRIPTION", "pr-description", description, cx)
+                .markdown_card(
+                    "PR DESCRIPTION",
+                    MarkdownView::new(DESCRIPTION_KEY, description)
+                        .with_diagrams(self.description_diagrams.clone()),
+                    cx,
+                )
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepWhy(why) => div()
@@ -1710,8 +1767,7 @@ impl OneStepLayout {
     fn markdown_card(
         &self,
         label: &'static str,
-        id: &'static str,
-        markdown: Rc<PreparedMarkdown>,
+        markdown: MarkdownView,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = Colors::active(cx);
@@ -1724,13 +1780,7 @@ impl OneStepLayout {
             .flex_col()
             .gap_2()
             .child(note_label(label).text_color(colors.muted_text))
-            .child(
-                card(&colors)
-                    .px_5()
-                    .py_4()
-                    .text_sm()
-                    .child(MarkdownView::new(id, markdown)),
-            )
+            .child(card(&colors).px_5().py_4().text_sm().child(markdown))
     }
 
     fn toolbar(&self, toolbar: &Toolbar, cx: &mut Context<Self>) -> impl IntoElement {

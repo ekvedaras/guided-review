@@ -35,10 +35,11 @@ enum Scene {
     StickyStepBar,
     Toasts,
     AllRead,
+    DescriptionFolds,
 }
 
 impl Scene {
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -55,6 +56,7 @@ impl Scene {
         Self::StickyStepBar,
         Self::Toasts,
         Self::AllRead,
+        Self::DescriptionFolds,
     ];
 
     fn file_name(self) -> &'static str {
@@ -75,6 +77,7 @@ impl Scene {
             Self::StickyStepBar => "33-sticky-step-bar",
             Self::Toasts => "34-toasts",
             Self::AllRead => "35-all-read",
+            Self::DescriptionFolds => "36-description-folds",
         }
     }
 }
@@ -220,6 +223,13 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::stage_all_read);
                 self.scroll_to_row(self.screen_list.item_count());
             }
+            Scene::DescriptionFolds => {
+                self.change_review(cx, Review::go_to_summary);
+                self.toggle_description_folds(cx);
+                if let Some(row) = self.session.read(cx).rows().description_row() {
+                    self.scroll_to_row(row);
+                }
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -286,8 +296,20 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::unstage);
                 self.go_to_first_open_code(cx);
             }
+            Scene::DescriptionFolds => {
+                self.toggle_description_folds(cx);
+                self.go_to_first_open_code(cx);
+            }
         }
         cx.notify();
+    }
+
+    fn toggle_description_folds(&mut self, cx: &mut Context<Self>) {
+        self.session.update(cx, |session, cx| {
+            for key in session.rows().description_fold_keys() {
+                session.toggle_details(&key, cx);
+            }
+        });
     }
 
     /// Drags over three added lines in a row, as the reviewer would, and types a comment.

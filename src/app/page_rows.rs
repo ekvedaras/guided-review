@@ -17,6 +17,9 @@ use gpui::SharedString;
 
 use crate::app::components::diff_view::{DiffRowLine, PieceLabel};
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
+
+/// What the PR description's `MarkdownView` is keyed by, so its folds can be told apart.
+pub const DESCRIPTION_KEY: &str = "pr-description";
 use crate::app::components::step_notes::StepNotes;
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
@@ -506,6 +509,33 @@ impl PageRows {
         self.rows
             .iter()
             .position(|row| matches!(row, PageRow::Diagram(_)))
+    }
+
+    /// The Mermaid text in the PR description card, in reading order.
+    pub fn description_diagrams(&self) -> Vec<&str> {
+        self.description()
+            .map(|(_, description)| description.diagrams())
+            .unwrap_or_default()
+    }
+
+    pub fn description_fold_keys(&self) -> Vec<String> {
+        self.description()
+            .map(|(_, description)| description.fold_keys(DESCRIPTION_KEY))
+            .unwrap_or_default()
+    }
+
+    pub fn description_row(&self) -> Option<usize> {
+        self.description().map(|(row, _)| row)
+    }
+
+    fn description(&self) -> Option<(usize, &PreparedMarkdown)> {
+        self.rows
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| match row {
+                PageRow::PrDescription(description) => Some((index, description.as_ref())),
+                _ => None,
+            })
     }
 
     pub fn asked_lines(&self) -> &[Place] {

@@ -290,3 +290,24 @@ fn other_fences_have_only_plain_lines() {
     assert_eq!(fence_lines(Some("php"), "-1\n+2"), [FenceLine::Plain; 2]);
     assert_eq!(fence_lines(None, "-1"), [FenceLine::Plain]);
 }
+
+#[test]
+fn mermaid_fences_are_the_diagrams_of_the_text_in_reading_order_even_inside_folds_and_lists() {
+    let markdown = Markdown::parse(
+        "```mermaid\nflowchart TD\n  A --> B\n```\n\n\
+         ```php\n$a = 1;\n```\n\n\
+         <details><summary>Before / after</summary>\n\n\
+         ```Mermaid\nflowchart LR\n  X --> Y\n```\n\n\
+         </details>\n\n\
+         - item\n\n  ```mermaid\n  sequenceDiagram\n    A->>B: hi\n  ```\n",
+    );
+
+    assert_eq!(
+        markdown.diagrams(),
+        [
+            "flowchart TD\n  A --> B\n",
+            "flowchart LR\n  X --> Y\n",
+            "sequenceDiagram\n  A->>B: hi\n",
+        ]
+    );
+}

@@ -59,6 +59,15 @@ impl Markdown {
         builder.finish()
     }
 
+    /// The Mermaid text of every `mermaid` fence, in reading order, folds and lists included.
+    pub fn diagrams(&self) -> Vec<&str> {
+        let mut diagrams = Vec::new();
+        for block in &self.blocks {
+            block.collect_diagrams(&mut diagrams);
+        }
+        diagrams
+    }
+
     /// For text shown under a title of its own: its headings rank one level lower.
     pub fn nested_one_level(self) -> Self {
         Self {
@@ -72,6 +81,31 @@ impl Markdown {
 }
 
 impl Block {
+    /// The Mermaid text, when this is a `mermaid` fence.
+    pub fn diagram(&self) -> Option<&str> {
+        match self {
+            Self::Code {
+                language: Some(language),
+                text,
+                ..
+            } if language.eq_ignore_ascii_case("mermaid") => Some(text),
+            _ => None,
+        }
+    }
+
+    fn collect_diagrams<'a>(&'a self, diagrams: &mut Vec<&'a str>) {
+        let mut collect = |blocks: &'a [Self]| {
+            for block in blocks {
+                block.collect_diagrams(diagrams);
+            }
+        };
+        match self {
+            Self::List { items, .. } => items.iter().for_each(|item| collect(item)),
+            Self::Quote(blocks) | Self::Details { body: blocks, .. } => collect(blocks),
+            block => diagrams.extend(block.diagram()),
+        }
+    }
+
     fn nested_one_level(self) -> Self {
         let nested = |blocks: Vec<Self>| blocks.into_iter().map(Self::nested_one_level).collect();
         match self {
