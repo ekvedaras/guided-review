@@ -5,6 +5,7 @@ use pulldown_cmark::{
 };
 
 use super::highlight::{Span, highlight_snippet};
+use crate::image_facts;
 
 /// The part of GitHub-flavoured markdown that review comments use, as a tree the views can draw.
 /// Everything else (tables, raw HTML other than `<details>`, `<img>`, `<br>`, `<a>`) shows as plain text.
@@ -409,11 +410,15 @@ impl Builder {
             }
             TagEnd::Image => {
                 if let Some((url, alt)) = self.image.take() {
-                    if let Some(picture) = self.picture(&url, &alt) {
-                        self.flush_runs();
-                        self.push_block(picture);
-                        return;
-                    }
+                    let link = match self.file_named(&url).map(|file| Self::picture(file, &alt)) {
+                        Some(Ok(picture)) => {
+                            self.flush_runs();
+                            self.push_block(picture);
+                            return;
+                        }
+                        Some(Err(unreadable)) => format!("file://{}", unreadable.display()),
+                        None => url,
+                    };
                     let text = if alt.is_empty() {
                         "image".to_owned()
                     } else {
@@ -421,7 +426,7 @@ impl Builder {
                     };
                     self.runs.push(Run {
                         text,
-                        link: Some(url),
+                        link: Some(link),
                         ..self.style_run()
                     });
                 }
@@ -598,14 +603,18 @@ impl Builder {
         (is_plain && file.is_file()).then_some(file)
     }
 
-    fn picture(&self, url: &str, alt: &str) -> Option<Block> {
-        let path = self.file_named(url)?;
-        let (width, height) = image::image_dimensions(&path).ok()?;
-        Some(Block::Picture {
+    fn picture(path: PathBuf, alt: &str) -> Result<Block, PathBuf> {
+        let Some(size) = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| image_facts::measure(&path.to_string_lossy(), &bytes))
+        else {
+            return Err(path);
+        };
+        Ok(Block::Picture {
             path,
             alt: alt.to_owned(),
-            width,
-            height,
+            width: size.width,
+            height: size.height,
         })
     }
 
