@@ -7,6 +7,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, px, relative,
 };
 
+use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
@@ -338,12 +339,16 @@ impl SettingsPanel {
         }
     }
 
-    fn save(&mut self, cx: &mut Context<Self>) {
+    /// Whoever placed the panel closes it once saved; with nothing to save it closes here.
+    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editing) = self.editing_mut() else {
             return;
         };
         match editing.settings.save() {
-            Ok(SaveOutcome::NothingChanged) => {}
+            Ok(SaveOutcome::NothingChanged) => {
+                self.close(window, cx);
+                return;
+            }
             Ok(SaveOutcome::Written) => {
                 editing.problems.clear();
                 editing.note = None;
@@ -365,7 +370,15 @@ impl SettingsPanel {
         match editing.settings.create_default_file() {
             Ok(file) => {
                 editing.default_file_exists = true;
-                cx.open_with_system(&file);
+                // In the reviewer's IDE when one is set: the system's app for `.md` may be any.
+                match editing.settings.ide().template() {
+                    Some(template) => {
+                        if let Err(error) = open_file_in_ide(&template.launch_file(&file), cx) {
+                            editing.note = Some(format!("the IDE did not start: {error}").into());
+                        }
+                    }
+                    None => cx.open_with_system(&file),
+                }
             }
             Err(error) => editing.note = Some(format!("{error:#}").into()),
         }
@@ -1322,7 +1335,7 @@ impl SettingsPanel {
                         "Save",
                     )
                     .min_w(px(112.))
-                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                 )
                 .into_any_element()
         };

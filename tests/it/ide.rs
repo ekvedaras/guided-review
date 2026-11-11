@@ -118,3 +118,13 @@ fn running_a_shell_launch_does_not_use_the_url_opener() {
         .run(|_| panic!("a shell command is not a URL"))
         .unwrap();
 }
+
+#[test]
+fn a_file_outside_any_clone_opens_in_the_ide_at_its_first_line() {
+    let template = IdeChoice::JetBrains.template().unwrap();
+
+    assert_eq!(
+        template.launch_file(std::path::Path::new("/Users/me/.guided-review/summary.md")),
+        IdeLaunch::Url("idea://open?file=/Users/me/.guided-review/summary.md&line=1".into())
+    );
+}
