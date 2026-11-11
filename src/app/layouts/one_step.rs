@@ -105,7 +105,8 @@ actions!(
         ToggleSettings,
         GoToNextUnread,
         ToggleRead,
-        ToggleShortcuts
+        ToggleShortcuts,
+        CloseWindow
     ]
 );
 
@@ -2915,6 +2916,7 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::go_to_next_unread))
             .on_action(cx.listener(Self::toggle_read))
             .on_action(cx.listener(Self::toggle_shortcuts))
+            .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()

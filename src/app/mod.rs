@@ -52,8 +52,8 @@ use components::settings_panel::SettingsPanel;
 use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout, ToggleJump,
-    ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
+    CloseWindow, Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout,
+    ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -577,6 +577,7 @@ fn bind_keys(cx: &mut App) {
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
+                Command::CloseWindow => KeyBinding::new(&keys, CloseWindow, context),
             }
         })
     });

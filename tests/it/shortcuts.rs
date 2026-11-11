@@ -92,3 +92,9 @@ fn the_keys_the_app_had_before_the_sheet_still_work() {
 fn copying_code_works_with_a_comment_box_open_but_not_while_typing_in_it() {
     assert_eq!(Command::CopyCode.scope(), KeyScope::NotTyping);
 }
+
+#[test]
+fn cmd_w_closes_the_window_from_anywhere_in_it() {
+    assert_eq!(keystroke(Command::CloseWindow.first_chord()), "cmd-w");
+    assert_eq!(Command::CloseWindow.scope(), KeyScope::Window);
+}

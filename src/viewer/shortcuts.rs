@@ -95,10 +95,11 @@ pub enum Command {
     WrapLines,
     Settings,
     Shortcuts,
+    CloseWindow,
 }
 
 impl Command {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -111,6 +112,7 @@ impl Command {
         Self::WrapLines,
         Self::Settings,
         Self::Shortcuts,
+        Self::CloseWindow,
     ];
 
     /// Every way to press it; the first is the one a button shows.
@@ -129,6 +131,7 @@ impl Command {
             Self::WrapLines => &[&[W]],
             Self::Settings => &[&[Cmd, COMMA]],
             Self::Shortcuts => &[&[QUESTION]],
+            Self::CloseWindow => &[&[Cmd, W]],
         }
     }
 
@@ -140,7 +143,7 @@ impl Command {
             | Self::ToggleRead
             | Self::WrapLines
             | Self::Shortcuts => KeyScope::Page,
-            Self::Jump | Self::Settings => KeyScope::Window,
+            Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
         }
@@ -154,7 +157,7 @@ impl Command {
             Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines => ShortcutGroup::View,
-            Self::Settings | Self::Shortcuts => ShortcutGroup::App,
+            Self::Settings | Self::Shortcuts | Self::CloseWindow => ShortcutGroup::App,
         }
     }
 
@@ -173,6 +176,7 @@ impl Command {
             Self::WrapLines => "Wrap long lines",
             Self::Settings => "Settings",
             Self::Shortcuts => "This list of shortcuts",
+            Self::CloseWindow => "Close the window and quit",
         }
     }
 
