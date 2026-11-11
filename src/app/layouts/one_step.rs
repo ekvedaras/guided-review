@@ -72,7 +72,7 @@ use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::{
     AskAt, DESCRIPTION_KEY, DiagramRow, PageRow, RouteStopRow, ScreenFooter, SelectedRows,
-    StepHeading, SummaryStatsRow, ThreadRowPlace, Toolbar,
+    StepHeading, StepIntro, SummaryStatsRow, ThreadRowPlace, Toolbar,
 };
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
@@ -1619,24 +1619,7 @@ impl OneStepLayout {
                 )
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
-            PageRow::StepWhy(why) => div()
-                .pb_4()
-                .max_w(READING_WIDTH)
-                .text_color(colors.muted_text)
-                .child(MarkdownView::new(
-                    format!("step-why-{index}"),
-                    parsed_markdown(&why),
-                ))
-                .into_any_element(),
-            PageRow::Diagram(diagram) => div()
-                .pb_4()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(DiagramView::new(self.diagrams.clone()))
-                .child(self.notes_button(&diagram, cx))
-                .into_any_element(),
-            PageRow::StepNotes(notes) => div().pb_4().child(notes).into_any_element(),
+            PageRow::StepIntro(intro) => self.step_intro(&intro, index, cx).into_any_element(),
             PageRow::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
@@ -1861,6 +1844,47 @@ impl OneStepLayout {
             .child(div().flex_1())
             .children(toggles)
             .children(ask.map(|ask| div().pl_1().child(ask)))
+    }
+
+    /// The text keeps its reading width; the diagram sits beside it where the window has room, else under it.
+    fn step_intro(
+        &self,
+        intro: &StepIntro,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let text = div()
+            .flex_none()
+            .w_full()
+            .max_w(READING_WIDTH)
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(div().text_color(colors.muted_text).child(MarkdownView::new(
+                format!("step-why-{index}"),
+                parsed_markdown(&intro.why),
+            )))
+            .children(intro.notes.clone());
+        let diagram = intro.diagram.as_ref().map(|diagram| {
+            div()
+                .min_w_0()
+                .max_w_full()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(DiagramView::new(self.diagrams.clone()))
+                .child(self.notes_button(diagram, cx))
+        });
+        div()
+            .pb_4()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap_x_8()
+            .gap_y_4()
+            .child(text)
+            .children(diagram)
     }
 
     fn notes_button(&self, diagram: &DiagramRow, cx: &mut Context<Self>) -> impl IntoElement {

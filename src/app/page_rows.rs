@@ -162,6 +162,14 @@ pub struct DiagramRow {
     pub notes_button: NotesButton,
 }
 
+/// What a step says before its code: its why, what to check, and its diagram. One row, so a wide
+/// window can put the diagram beside the text.
+pub struct StepIntro {
+    pub why: SharedString,
+    pub notes: Option<StepNotes>,
+    pub diagram: Option<DiagramRow>,
+}
+
 pub struct HunkGapRow {
     pub id: SharedString,
     pub gap: HiddenLines,
@@ -199,10 +207,8 @@ pub enum PageRow {
     ReviewerSummary(Rc<PreparedMarkdown>),
     PrDescription(Rc<PreparedMarkdown>),
     StepHeading(Rc<StepHeading>),
-    StepWhy(SharedString),
+    StepIntro(Rc<StepIntro>),
     /// Its height follows the drawing; the layout re-measures it when the drawing changes.
-    Diagram(Rc<DiagramRow>),
-    StepNotes(StepNotes),
     RepinNotes {
         gone_pieces: usize,
         text_may_be_old: bool,
@@ -254,7 +260,7 @@ impl PageRow {
         let mut hasher = DefaultHasher::new();
         std::mem::discriminant(self).hash(&mut hasher);
         match self {
-            Self::SummaryTitle(text) | Self::SummaryBullet(text) | Self::StepWhy(text) => {
+            Self::SummaryTitle(text) | Self::SummaryBullet(text) => {
                 text.hash(&mut hasher);
             }
             Self::StepHeading(heading) => {
@@ -277,7 +283,20 @@ impl PageRow {
             Self::SummaryStats(stats) => stats.hash(&mut hasher),
             Self::RouteStop(stop) => stop.hash(&mut hasher),
             Self::TourLead(lead) => lead.hash(&mut hasher),
-            Self::StepNotes(notes) => notes.hash(&mut hasher),
+            Self::StepIntro(intro) => {
+                intro.why.hash(&mut hasher);
+                intro.notes.hash(&mut hasher);
+                intro
+                    .diagram
+                    .as_ref()
+                    .map(|diagram| &diagram.step)
+                    .hash(&mut hasher);
+                intro
+                    .diagram
+                    .as_ref()
+                    .map(|diagram| &diagram.notes_button)
+                    .hash(&mut hasher);
+            }
             Self::RepinNotes {
                 gone_pieces,
                 text_may_be_old,
@@ -351,10 +370,6 @@ impl PageRow {
                 text_lines.hash(&mut hasher);
                 problem.hash(&mut hasher);
                 is_sending.hash(&mut hasher);
-            }
-            Self::Diagram(diagram) => {
-                diagram.step.hash(&mut hasher);
-                diagram.notes_button.hash(&mut hasher);
             }
             Self::SafetyNetIntro
             | Self::RouteHeading
@@ -508,7 +523,7 @@ impl PageRows {
     pub fn diagram_row(&self) -> Option<usize> {
         self.rows
             .iter()
-            .position(|row| matches!(row, PageRow::Diagram(_)))
+            .position(|row| matches!(row, PageRow::StepIntro(intro) if intro.diagram.is_some()))
     }
 
     /// The Mermaid text in the PR description card, in reading order.
@@ -877,25 +892,24 @@ impl RowsBuilder<'_> {
             is_gone: page.is_gone,
             folds_on_title_click: page.is_ticked || step.skim,
         })));
-        self.rows.push(PageRow::StepWhy(step.why.clone().into()));
         let diagram = step
             .diagram
             .as_ref()
             .filter(|_| !page.is_folded)
             .map(|source| SharedString::from(source.clone()));
-        let notes = StepNotes::of(step);
-        if !notes.is_empty() {
-            self.rows.push(PageRow::StepNotes(notes));
-        }
-        if let Some(notes_button) = diagram
+        let notes = Some(StepNotes::of(step)).filter(|notes| !notes.is_empty());
+        let diagram_row = diagram
             .as_ref()
             .and_then(|_| review.diagram_notes_button(&id))
-        {
-            self.rows.push(PageRow::Diagram(Rc::new(DiagramRow {
+            .map(|notes_button| DiagramRow {
                 step: id.clone(),
                 notes_button,
-            })));
-        }
+            });
+        self.rows.push(PageRow::StepIntro(Rc::new(StepIntro {
+            why: step.why.clone().into(),
+            notes,
+            diagram: diagram_row,
+        })));
         if page.gone_pieces > 0 || page.text_may_be_old {
             self.rows.push(PageRow::RepinNotes {
                 gone_pieces: page.gone_pieces,
@@ -1203,7 +1217,7 @@ mod tests {
 
     #[test]
     fn a_page_row_stays_small_since_there_is_one_per_line() {
-        assert_eq!(size_of::<PageRow>(), 56);
+        assert_eq!(size_of::<PageRow>(), 48);
     }
 
     fn line(number: usize) -> LineNumber {
