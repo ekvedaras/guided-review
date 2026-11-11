@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeStream,
 };
@@ -35,6 +37,13 @@ pub enum Block {
         body: Vec<Self>,
     },
     Rule,
+    /// A picture from the tour's own folder, of its size in pixels, so its room is known before it loads.
+    Picture {
+        path: PathBuf,
+        alt: String,
+        width: u32,
+        height: u32,
+    },
 }
 
 /// A stretch of text with one style.
@@ -51,8 +60,21 @@ pub struct Run {
 
 impl Markdown {
     pub fn parse(source: &str) -> Self {
+        Self::parse_in(source, None)
+    }
+
+    /// Like `parse`, where pictures and links may name files of the tour's own `folder`: such a
+    /// picture shows, and such a link opens the file. Anything else is left as `parse` leaves it.
+    pub fn parse_with_files(source: &str, folder: &Path) -> Self {
+        Self::parse_in(source, Some(folder))
+    }
+
+    fn parse_in(source: &str, files: Option<&Path>) -> Self {
         let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
-        let mut builder = Builder::default();
+        let mut builder = Builder {
+            files: files.map(Path::to_path_buf),
+            ..Builder::default()
+        };
         for event in TextMergeStream::new(Parser::new_ext(source, options)) {
             builder.event(event);
         }
@@ -225,6 +247,8 @@ struct Builder {
     code: Option<(Option<String>, String)>,
     heading: Option<u8>,
     image: Option<(String, String)>,
+    /// The tour's own folder, whose files pictures and links may name.
+    files: Option<PathBuf>,
     /// `</details>` seen inside a list item or quote: the fold closes once those close.
     details_to_close: usize,
 }
@@ -241,6 +265,7 @@ impl Default for Builder {
             code: None,
             heading: None,
             image: None,
+            files: None,
             details_to_close: 0,
         }
     }
@@ -302,7 +327,13 @@ impl Builder {
             Tag::Emphasis => self.style.italic += 1,
             Tag::Strong => self.style.bold += 1,
             Tag::Strikethrough => self.style.strikethrough += 1,
-            Tag::Link { dest_url, .. } => self.style.links.push(dest_url.to_string()),
+            Tag::Link { dest_url, .. } => {
+                let link = match self.file_named(&dest_url) {
+                    Some(file) => format!("file://{}", file.display()),
+                    None => dest_url.to_string(),
+                };
+                self.style.links.push(link);
+            }
             Tag::Image { dest_url, .. } => self.image = Some((dest_url.to_string(), String::new())),
             _ => {}
         }
@@ -378,6 +409,11 @@ impl Builder {
             }
             TagEnd::Image => {
                 if let Some((url, alt)) = self.image.take() {
+                    if let Some(picture) = self.picture(&url, &alt) {
+                        self.flush_runs();
+                        self.push_block(picture);
+                        return;
+                    }
                     let text = if alt.is_empty() {
                         "image".to_owned()
                     } else {
@@ -549,6 +585,28 @@ impl Builder {
             frame,
             blocks: Vec::new(),
         });
+    }
+
+    /// A file of the tour's folder that `url` names by a plain relative path.
+    fn file_named(&self, url: &str) -> Option<PathBuf> {
+        let folder = self.files.as_ref()?;
+        let is_plain = !url.is_empty()
+            && !url.contains("://")
+            && !url.starts_with(['/', '#'])
+            && !url.split('/').any(|part| part == "..");
+        let file = folder.join(url);
+        (is_plain && file.is_file()).then_some(file)
+    }
+
+    fn picture(&self, url: &str, alt: &str) -> Option<Block> {
+        let path = self.file_named(url)?;
+        let (width, height) = image::image_dimensions(&path).ok()?;
+        Some(Block::Picture {
+            path,
+            alt: alt.to_owned(),
+            width,
+            height,
+        })
     }
 
     fn push_block(&mut self, block: Block) {

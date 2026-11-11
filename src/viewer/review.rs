@@ -209,6 +209,7 @@ pub struct Review {
     fold_flipped: BTreeSet<StepId>,
     /// File boxes of a step opened or folded against the step's fold, by step and path.
     box_fold_flipped: BTreeSet<(StepId, FilePath)>,
+    tour_files: Option<PathBuf>,
     viewed_sync: ViewedSync,
     repin_running: bool,
     refused_while_repinning: bool,
@@ -291,6 +292,7 @@ impl Review {
             state_file,
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
+            tour_files: None,
             viewed_sync: ViewedSync::default(),
             repin_running: false,
             refused_while_repinning: false,
@@ -445,7 +447,16 @@ impl Review {
     /// Under the summary's bullets and above the PR description. `None` when the tour has none.
     pub fn reviewer_summary(&self) -> Option<Markdown> {
         let body = &self.tour.reviewer_summary;
-        (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
+        let markdown = match &self.tour_files {
+            Some(folder) => Markdown::parse_with_files(body, folder),
+            None => Markdown::parse(body),
+        };
+        (!body.trim().is_empty()).then(|| markdown.nested_one_level())
+    }
+
+    /// The tour's own folder, whose pictures its summary shows and whose files its links open.
+    pub fn set_tour_files(&mut self, folder: PathBuf) {
+        self.tour_files = Some(folder);
     }
 
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.

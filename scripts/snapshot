@@ -47,6 +47,10 @@ rm -rf "$work"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/tours/$(dirname "$tour_in_root")"
 cp "$tour" "$work/tours/$tour_in_root"
+# The tour's own files, like its summary's pictures, sit in a folder beside it.
+if [ -d "${tour%.json}" ]; then
+    cp -R "${tour%.json}" "$work/tours/${tour_in_root%.json}"
+fi
 
 rm -rf "$out"
 

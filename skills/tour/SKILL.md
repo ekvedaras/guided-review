@@ -42,7 +42,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
 A reviewer skims: short lines, visuals over prose. Text fields are small Markdown (inline code, bold).
 
 - `summary`: at most 3 bullets, about 12 words each.
-- `reviewer_summary`: only with summary instructions. Markdown, as long as they ask for.
+- `reviewer_summary`: only with summary instructions. Markdown, as long as they ask for. Pictures and pages it shows go in the tour's own folder: the tour file's path without `.json` (`guided-review tour-path <pr>` prints it). Name them by a relative path: `![deadline](deadline.png)` shows the picture in the app, and `[Open the explainer](explainer.html)` opens the page in the browser. An image on GitHub is shown only as a link.
 - `why`: one or two lines. What this is and why it comes here.
 - `check`: risky steps only. One line saying what to verify.
 - `tldr`: only when a step has several separate points.

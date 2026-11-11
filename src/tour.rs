@@ -124,6 +124,13 @@ impl Tour {
         Self::path_in(&Self::tours_dir(home), pr)
     }
 
+    /// Where the tour writer keeps files the tour shows, like the pictures of its summary.
+    pub fn files_for(home: &Path, pr: &PullRequestUrl) -> PathBuf {
+        Self::tours_dir(home)
+            .join(pr.repo.to_string())
+            .join(pr.number.to_string())
+    }
+
     pub fn path_in(tours_dir: &Path, pr: &PullRequestUrl) -> PathBuf {
         tours_dir
             .join(pr.repo.to_string())

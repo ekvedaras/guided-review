@@ -2,8 +2,9 @@ use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
     InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
-    Window, canvas, div, fill, point, px,
+    Window, canvas, div, fill, img, point, px,
 };
+use std::path::Path;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -18,7 +19,7 @@ use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines}
 use super::diagram::{DiagramSet, DiagramView};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS};
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
 pub fn bullet(colors: &Colors, line_height: gpui::Pixels) -> Div {
@@ -170,6 +171,13 @@ enum PreparedBlock {
         body: Vec<Self>,
     },
     Rule,
+    Picture {
+        path: Arc<Path>,
+        /// Width over height, so the picture's room is kept before it loads.
+        ratio: f32,
+        /// Its width at the screen's two pixels to a point, the widest it is drawn.
+        widest: f32,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -244,6 +252,16 @@ fn prepare_block(block: &Block) -> PreparedBlock {
             body: prepare(body),
         },
         Block::Rule => PreparedBlock::Rule,
+        Block::Picture {
+            path,
+            width,
+            height,
+            ..
+        } => PreparedBlock::Picture {
+            path: Arc::from(path.as_path()),
+            ratio: *width as f32 / (*height).max(1) as f32,
+            widest: *width as f32 / 2.,
+        },
     }
 }
 
@@ -468,6 +486,16 @@ fn block_element(
             details(summary, body, key, diagrams, window, cx)
         }
         PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
+        PreparedBlock::Picture {
+            path,
+            ratio,
+            widest,
+        } => img(Arc::clone(path))
+            .w_full()
+            .max_w(px(*widest))
+            .aspect_ratio(*ratio)
+            .rounded(px(INNER_RADIUS))
+            .into_any_element(),
     }
 }
 
@@ -617,6 +645,10 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
                 ..Run::default()
             }],
             Block::Rule => Vec::new(),
+            Block::Picture { alt, .. } => vec![Run {
+                text: alt.clone(),
+                ..Run::default()
+            }],
         };
         if !runs.is_empty() && !block_runs.is_empty() {
             runs.push(Run {
