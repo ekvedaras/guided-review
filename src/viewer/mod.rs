@@ -18,6 +18,7 @@ mod diff_fence;
 mod display_options;
 mod file_block;
 mod finish_review;
+mod github_outage;
 mod hand_offs;
 mod highlight;
 mod image_preview;
@@ -87,6 +88,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
+pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
     HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, SeenMark, ThreadMessage,
@@ -118,7 +120,7 @@ pub use ports::{
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
-pub use problems::{Problem, ProblemKind, Problems, Read};
+pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{

@@ -50,10 +50,11 @@ enum Scene {
     ReleaseInstallInTheWay,
     RenderedMarkdown,
     AgentLinkOff,
+    GitHubOutage,
 }
 
 impl Scene {
-    const ALL: [Self; 22] = [
+    const ALL: [Self; 23] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -76,6 +77,7 @@ impl Scene {
         Self::ReleaseInstallInTheWay,
         Self::RenderedMarkdown,
         Self::AgentLinkOff,
+        Self::GitHubOutage,
     ];
 
     fn file_name(self) -> &'static str {
@@ -102,6 +104,7 @@ impl Scene {
             Self::ReleaseInstallInTheWay => "43-release-install-in-the-way",
             Self::RenderedMarkdown => "41-rendered-markdown",
             Self::AgentLinkOff => "42-agent-link-off",
+            Self::GitHubOutage => "44-github-outage",
         }
     }
 }
@@ -399,6 +402,7 @@ impl OneStepLayout {
                 }
             }
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
+            Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -456,6 +460,12 @@ impl OneStepLayout {
                 .update(cx, |sheet, cx| sheet.close(window, cx)),
             Scene::StickyStepBar => self.scroll_to_row(0),
             Scene::Toasts => {
+                if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
+                    toaster.0.update(cx, ToastShelf::clear);
+                }
+            }
+            Scene::GitHubOutage => {
+                self.session.update(cx, ReviewSession::unstage_outage);
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);
                 }

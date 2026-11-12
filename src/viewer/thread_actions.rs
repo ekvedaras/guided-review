@@ -159,7 +159,7 @@ fn classify(error: &GitHubError) -> ThreadActionResult {
         GitHubError::NoAccess(no_access) => {
             ThreadActionResult::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
-        GitHubError::ThreadNotCreated(_) | GitHubError::Other(_) => {
+        GitHubError::ThreadNotCreated(_) | GitHubError::NotAnswering(_) | GitHubError::Other(_) => {
             ThreadActionResult::Failed(format!("{error:#}"))
         }
     }

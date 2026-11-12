@@ -25,10 +25,11 @@ use crate::app::updater::release_install_in_the_way;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
-    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Problem,
-    RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen, SendMode, TextBox,
-    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, WorkPorts, line_count,
+    FinishResult, GitHubError, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
+    OldHead, OutageCause, Problem, ProblemKind, Read, RefreshBrief, RepinnedTour, Review,
+    ReviewChange, ReviewVerdict, Screen, SendMode, TextBox, ThreadAction, ThreadActionResult,
+    ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkPorts,
+    announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -590,6 +591,22 @@ impl ReviewSession {
         cx.notify();
     }
 
+    /// Three reads that fail the way a GitHub outage fails them, through the review's own path.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
+        let outage = GitHubError::NotAnswering(OutageCause::ServerError(503));
+        self.review.could_not_read(Read::PrHead, &outage);
+        self.review.could_not_read(Read::PrDescription, &outage);
+        self.review.threads_not_read(&outage);
+        self.show_problems(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_outage(&mut self, cx: &mut Context<Self>) {
+        self.review.clear_problem(ProblemKind::GitHubNotAnswering);
+        self.show_problems(cx);
+    }
+
     #[cfg(feature = "snapshots")]
     pub fn unstage(&mut self, cx: &mut Context<Self>) {
         self.screen_list.reset(0);
@@ -630,10 +647,19 @@ impl ReviewSession {
     /// problem that was not there before is also a toast that stays until dismissed.
     fn show_sidebar(&mut self, cx: &mut Context<Self>) {
         let sidebar = self.sidebar_rows();
-        for problem in &sidebar.problems {
-            if !self.sidebar.problems.contains(problem) {
-                post_toast(cx, ToastTone::Danger, problem.to_string());
-            }
+        let before: Vec<Problem> = self
+            .sidebar
+            .problems
+            .iter()
+            .map(|shown| shown.problem.clone())
+            .collect();
+        let after: Vec<Problem> = sidebar
+            .problems
+            .iter()
+            .map(|shown| shown.problem.clone())
+            .collect();
+        for announcement in announcements(&before, &after) {
+            post_toast(cx, announcement.tone, announcement.text);
         }
         self.sidebar = sidebar;
     }

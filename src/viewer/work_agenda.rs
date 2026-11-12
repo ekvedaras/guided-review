@@ -283,9 +283,9 @@ pub struct WorkOutcome {
 }
 
 pub(super) enum Done {
-    PrHead(anyhow::Result<PullRequestTips>),
+    PrHead(Result<PullRequestTips, GitHubError>),
     WorkingCopy(bool),
-    PrDescription(anyhow::Result<String>),
+    PrDescription(Result<String, GitHubError>),
     SyncViewed(SyncOutcome),
     Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), GitHubError>),
     PendingReview {

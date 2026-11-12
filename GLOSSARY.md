@@ -85,3 +85,5 @@
 **Update**: A published release newer than the running app, built for this Mac, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
 
 **Toast**: A short note at the bottom right of the window about an outcome that is otherwise easy to miss. It leaves by itself unless it tells of a failure. Avoid: notification, snackbar.
+
+**GitHub outage**: GitHub not answering reads that are fine: a server error (5xx), a timeout or no connection. A refused token or a missing page (4xx) is not one, as the reviewer can put those right and trying again changes nothing. While it lasts the sidebar holds one problem for all the reads it keeps from going through, with what may be old under it, and the reads are tried again by themselves, 30 s, 1 min, 2 min, up to every 5 min, besides when the window comes to the front. It ends when each of those reads goes through. Avoid: network error, downtime.

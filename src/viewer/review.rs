@@ -33,6 +33,7 @@ use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
+use super::github_outage::{Affected, OutageCause};
 use super::hand_offs::{Audience, HandOffState, HandOffs};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
@@ -492,8 +493,26 @@ impl ReviewCore {
             .any(|problem| problem.kind() == ProblemKind::ShowAgentFailed)
     }
 
-    pub fn could_not_read(&mut self, read: Read, error: &impl fmt::Display) {
-        self.raise_problem(Problem::NotRead(read, format!("{error:#}")));
+    pub fn could_not_read(&mut self, read: Read, error: &GitHubError) {
+        let affected = Affected::from(read);
+        if let GitHubError::NotAnswering(cause) = error {
+            self.clear_problem(ProblemKind::NotRead(read));
+            self.github_not_answering(*cause, affected);
+        } else {
+            self.github_answered(affected);
+            self.raise_problem(Problem::NotRead(read, error.short_reason()));
+        }
+    }
+
+    /// GitHub does not answer: one problem for all the reads that fail, and the read is tried
+    /// again by itself, further off each time it fails.
+    fn github_not_answering(&mut self, cause: OutageCause, affected: Affected) {
+        let retry_in = self.problems.github_not_answering(cause, affected);
+        self.work.want_in(affected.retried_by(), retry_in);
+    }
+
+    fn github_answered(&mut self, affected: Affected) {
+        self.problems.github_answered(affected);
     }
 
     pub fn ide_not_started(&mut self, error: &impl fmt::Display) {
@@ -506,6 +525,7 @@ impl ReviewCore {
 
     pub fn pr_head_is(&mut self, head: Sha) {
         self.clear_problem(ProblemKind::NotRead(Read::PrHead));
+        self.github_answered(Affected::NewCommits);
         self.pr_head = Some(head);
     }
 
@@ -593,6 +613,7 @@ impl ReviewCore {
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
+        self.github_answered(Affected::Description);
         if self.state.pr_description() != body {
             self.state.record(|state| state.saw_pr_description(body))?;
         }
@@ -938,6 +959,7 @@ impl ReviewCore {
 
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
         self.clear_problem(ProblemKind::ThreadsNotRead);
+        self.github_answered(Affected::Comments);
         self.pulled_threads = threads.to_vec();
         self.place_threads();
     }
@@ -950,7 +972,13 @@ impl ReviewCore {
 
     /// The threads shown stay as they were, named as possibly old until a read goes through.
     pub fn threads_not_read(&mut self, error: &GitHubError) {
-        self.raise_problem(Problem::ThreadsNotRead(format!("{error:#}")));
+        if let GitHubError::NotAnswering(cause) = error {
+            self.clear_problem(ProblemKind::ThreadsNotRead);
+            self.github_not_answering(*cause, Affected::Comments);
+        } else {
+            self.github_answered(Affected::Comments);
+            self.raise_problem(Problem::ThreadsNotRead(error.short_reason()));
+        }
     }
 
     /// Placed by the rows a step shows, which depend on the files read at head, so again when those arrive.
@@ -980,11 +1008,13 @@ impl ReviewCore {
 
     pub fn pending_review_is(&mut self, exists: bool) {
         self.clear_problem(ProblemKind::NotRead(Read::PendingReview));
+        self.github_answered(Affected::PendingReview);
         self.comment_desk.pending_review_is(exists);
     }
 
     pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
         self.clear_problem(ProblemKind::NotRead(Read::LastReview));
+        self.github_answered(Affected::LastReview);
         self.last_review = last;
     }
 
@@ -1112,6 +1142,7 @@ impl ReviewCore {
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
         self.clear_problem(ProblemKind::NotRead(Read::Authorship));
+        self.github_answered(Affected::Authorship);
         self.comment_desk.viewer_authorship_is(authored);
     }
 
@@ -1680,14 +1711,22 @@ impl ReviewCore {
         });
         self.clear_problem(ProblemKind::ViewedNotSynced);
         match error {
+            Some(GitHubError::NotAnswering(cause)) => {
+                self.github_not_answering(cause, Affected::ViewedMarks);
+                Err(GitHubError::NotAnswering(cause).into())
+            }
             Some(error) => {
+                self.github_answered(Affected::ViewedMarks);
                 let settled = self.viewed_sync.settle(error);
                 if let Err(error) = &settled {
-                    self.raise_problem(Problem::ViewedNotSynced(format!("{error:#}")));
+                    self.raise_problem(Problem::ViewedNotSynced(error.root_cause().to_string()));
                 }
                 settled
             }
-            None => saved,
+            None => {
+                self.github_answered(Affected::ViewedMarks);
+                saved
+            }
         }
     }
 

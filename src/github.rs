@@ -14,11 +14,11 @@ use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    CommentId, CommentPlace, GitHubError, NoAccess, PictureUploadPort, PullRequestDescriptionPort,
-    PullRequestTipsPort, Reaction, ReactionChange, ReactionCount, Resolution, ReviewOutcome,
-    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
-    SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
-    percent_encode_path,
+    CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
+    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
+    Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
+    SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -34,6 +34,31 @@ pub struct GitHub {
 }
 
 mod relevant_prs;
+
+impl From<anyhow::Error> for GitHubError {
+    /// Every failure of a call to GitHub passes through here, so an outage is told from the rest
+    /// in one place, by what the HTTP client reported and not by its text.
+    fn from(error: anyhow::Error) -> Self {
+        match error.downcast_ref::<ureq::Error>().and_then(outage_cause) {
+            Some(cause) => Self::NotAnswering(cause),
+            None => Self::Other(error),
+        }
+    }
+}
+
+fn outage_cause(error: &ureq::Error) -> Option<OutageCause> {
+    match error {
+        ureq::Error::StatusCode(status @ 500..=599) => Some(OutageCause::ServerError(*status)),
+        ureq::Error::Timeout(_) => Some(OutageCause::TimedOut),
+        ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => {
+            Some(OutageCause::TimedOut)
+        }
+        ureq::Error::Io(_) | ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => {
+            Some(OutageCause::NoConnection)
+        }
+        _ => None,
+    }
+}
 
 #[derive(Deserialize)]
 struct PullJson {
@@ -381,7 +406,7 @@ impl ReleasesPort for GitHub {
 }
 
 impl PullRequestTipsPort for GitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError> {
         let pull: PullJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -397,7 +422,7 @@ impl PullRequestTipsPort for GitHub {
 }
 
 impl PullRequestDescriptionPort for GitHub {
-    fn pull_request_description(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+    fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, GitHubError> {
         let pull: PullBodyJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
