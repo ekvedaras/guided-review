@@ -63,6 +63,7 @@ mod release_install;
 mod relevant_prs;
 mod reopen_after_save;
 mod repin;
+mod repin_guard;
 mod restart_guard;
 mod review_threads;
 mod screen_travel;

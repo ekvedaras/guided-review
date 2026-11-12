@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
-use std::sync::Arc;
 
 use crate::code_source::CodeSource;
 use crate::coverage;
@@ -29,10 +28,7 @@ use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
-use super::hand_offs::{
-    AgentReplied, Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState,
-    SeenMarkOff, SeenMarkOffOutcome,
-};
+use super::hand_offs::{Audience, HandOffState, HandOffs};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::{ImagePreview, ImagePreviewRequest};
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
@@ -44,13 +40,13 @@ use super::problems::{Problem, Read};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
+use super::saved_state::SavedState;
 use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
 use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement};
-use super::tour_agent::AgentStatus;
-use super::typing_save::{Saves, TypingSave};
+use super::typing_save::TypingSave;
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
@@ -202,8 +198,7 @@ pub struct Review {
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
-    state: ReviewState,
-    state_file: ReviewStateFile,
+    state: SavedState,
     /// Skim and ticked steps start folded; these are the steps whose fold the reviewer flipped.
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
@@ -212,8 +207,6 @@ pub struct Review {
     /// The tour's own folder, whose pictures its summary shows and whose files its links open.
     tour_files: PathBuf,
     viewed_sync: ViewedSync,
-    repin_running: bool,
-    refused_while_repinning: bool,
     /// Why the last read of the threads failed, until one goes through.
     threads_not_read: Option<String>,
     /// Why the last read of each of these failed, until one goes through.
@@ -241,7 +234,6 @@ pub struct Review {
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     pr_notes: PrNotes,
-    saves: Arc<Saves>,
 }
 
 impl Review {
@@ -290,13 +282,10 @@ impl Review {
             threads: ThreadPlacement::default(),
             thread_fold_flipped: BTreeSet::new(),
             screen: Screen::Summary,
-            state,
-            state_file,
+            state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
             viewed_sync: ViewedSync::default(),
-            repin_running: false,
-            refused_while_repinning: false,
             threads_not_read: None,
             not_read: BTreeMap::new(),
             ide_not_started: None,
@@ -313,7 +302,6 @@ impl Review {
             display_options: DisplayOptions::default(),
             pr_notes: PrNotes::default(),
             tour_files,
-            saves: Arc::default(),
         })
     }
 
@@ -512,8 +500,8 @@ impl Review {
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
         self.not_read.remove(&Read::PrDescription);
-        if self.state.saw_pr_description(body) {
-            self.save_viewer_sections()?;
+        if self.state.pr_description() != body {
+            self.state.record(|state| state.saw_pr_description(body))?;
         }
         Ok(())
     }
@@ -677,10 +665,7 @@ impl Review {
             return Err(CommentRefusal::NotInsideHunk);
         }
         let answer = ask.latest_answer().ok_or(CommentRefusal::NoAnswerYet)?;
-        let place = CommentDesk::add_to_draft(&mut self.state, &selected, &self.head, answer);
-        self.save_viewer_sections()
-            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        Ok(place)
+        CommentDesk::add_to_draft(&mut self.state, &selected, &self.head, answer)
     }
 
     /// The rows an Ask about lines or a piece is on, in its step at the tour head.
@@ -993,7 +978,7 @@ impl Review {
     }
 
     pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
+        self.state.refuse_while_repinning()?;
         self.comment_desk.type_in_edit(comment_id, text);
         Ok(())
     }
@@ -1008,18 +993,16 @@ impl Review {
 
     /// Opens the reply box; the text typed in it is saved by `edit_reply`.
     pub fn open_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
-        self.state.open_reply(thread_id);
-        self.save_viewer_sections()
+        self.state.record(|state| state.open_reply(thread_id))
     }
 
     pub fn edit_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
-        self.state.write_reply(thread_id, text);
-        self.save_viewer_sections()
+        self.state
+            .record(|state| state.write_reply(thread_id, text))
     }
 
     pub fn discard_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
-        self.state.drop_reply(thread_id);
-        self.save_viewer_sections()
+        self.state.record(|state| state.drop_reply(thread_id))
     }
 
     pub fn finish_body(&self) -> &str {
@@ -1027,8 +1010,7 @@ impl Review {
     }
 
     pub fn edit_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
-        self.state.write_finish_body(text);
-        self.save_viewer_sections()
+        self.state.record(|state| state.write_finish_body(text))
     }
 
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
@@ -1036,15 +1018,8 @@ impl Review {
             Screen::Step(id) => Some(id.clone()),
             _ => None,
         };
-        if self
-            .comment_desk
-            .apply_thread_action(&mut self.state, &outcome, step)
-        {
-            // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
-            if self.save_viewer_sections().is_err() {
-                self.saves.typed();
-            }
-        }
+        self.comment_desk
+            .apply_thread_action(&mut self.state, &outcome, step);
         self.show_pulled_threads(outcome.threads.as_ref());
         if outcome.result == ThreadActionResult::Done {
             match &outcome.action {
@@ -1119,14 +1094,7 @@ impl Review {
     }
 
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
-        let result = self.comment_desk.apply_finish(&mut self.state, outcome);
-        if result == FinishResult::Sent {
-            // The review is on GitHub; a body that fails to clear is saved again with the next typing.
-            if self.save_viewer_sections().is_err() {
-                self.saves.typed();
-            }
-        }
-        result
+        self.comment_desk.apply_finish(&mut self.state, outcome)
     }
 
     pub fn begin_selection(&mut self, row: LineLocation) {
@@ -1161,26 +1129,14 @@ impl Review {
     pub fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
         let screen_lines = self.screen_lines();
         let freshness = self.tour_freshness();
-        let place = self.comment_desk.finish_selection(
-            &mut self.state,
-            &screen_lines,
-            freshness,
-            &self.head,
-        )?;
-        if place.is_some() {
-            self.save_viewer_sections()
-                .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        }
-        Ok(place)
+        self.comment_desk
+            .finish_selection(&mut self.state, &screen_lines, freshness, &self.head)
     }
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
     pub fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
         let freshness = self.tour_freshness();
-        let place = CommentDesk::begin_file_comment(&mut self.state, path, freshness, &self.head)?;
-        self.save_viewer_sections()
-            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        Ok(place)
+        CommentDesk::begin_file_comment(&mut self.state, path, freshness, &self.head)
     }
 
     /// Every row the current screen shows, top to bottom.
@@ -1212,42 +1168,26 @@ impl Review {
 
     /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
     pub fn type_in_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.write_draft(place, body);
-        self.saves.typed();
-        Ok(())
+        self.state.type_in(|state| state.write_draft(place, body))
     }
 
     pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.write_reply(thread_id, text);
-        self.saves.typed();
-        Ok(())
+        self.state
+            .type_in(|state| state.write_reply(thread_id, text))
     }
 
     pub fn type_in_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.write_finish_body(text);
-        self.saves.typed();
-        Ok(())
+        self.state.type_in(|state| state.write_finish_body(text))
     }
 
     /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
     pub fn typing_save(&mut self) -> Option<TypingSave> {
-        if !self.saves.take_typing_unsaved() {
-            return None;
-        }
-        Some(TypingSave::new(
-            self.state_file.clone(),
-            Arc::clone(&self.saves),
-            self.state.typed_text(),
-        ))
+        self.state.typing_save()
     }
 
     /// Saved at once, so a crash loses nothing.
     pub fn edit_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
-        self.state.write_draft(place, body);
-        self.save_viewer_sections()
+        self.state.record(|state| state.write_draft(place, body))
     }
 
     /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
@@ -1263,9 +1203,10 @@ impl Review {
     }
 
     pub fn discard_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
-        self.state.drop_draft(place);
-        self.state.drop_queued(place);
-        self.save_viewer_sections()
+        self.state.record(|state| {
+            state.drop_draft(place);
+            state.drop_queued(place);
+        })
     }
 
     /// "Suggest change" shows only when the range starts and ends on lines of the head.
@@ -1279,11 +1220,7 @@ impl Review {
         let Some(rows) = self.rows_of(place) else {
             return Ok(None);
         };
-        let body = CommentDesk::suggest_change(&mut self.state, place, &rows);
-        if body.is_some() {
-            self.save_viewer_sections()?;
-        }
-        Ok(body)
+        CommentDesk::suggest_change(&mut self.state, place, &rows)
     }
 
     fn rows_of(&self, place: &CommentPlace) -> Option<Vec<DiffLine>> {
@@ -1311,47 +1248,17 @@ impl Review {
         CommentDesk::comment_request(&self.state, place, mode, audience, &self.head, &self.pr)
     }
 
-    pub fn hand_offs(&self) -> &[HandOff] {
-        self.state.hand_offs().all()
+    pub fn hand_offs(&self) -> &HandOffs {
+        self.state.hand_offs()
     }
 
-    /// The oldest queued hand-off to send to the tour agent, when it is time to try.
-    pub fn delivery_request(&self) -> Option<DeliveryRequest> {
-        self.state.hand_offs().delivery_request(&self.pr)
-    }
-
-    pub fn apply_delivery(&mut self, outcome: DeliveryOutcome) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().apply_delivery(outcome);
-        self.save_viewer_sections()
-    }
-
-    pub fn hand_off_replied(
+    /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
+    /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
+    pub fn record_hand_offs<T>(
         &mut self,
-        id: HandOffId,
-        replied: &AgentReplied,
-    ) -> anyhow::Result<()> {
-        self.state.hand_off_replied(id, replied)?;
-        self.save_viewer_sections()
-    }
-
-    pub fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
-        self.state.hand_offs().seen_marks_to_take_off()
-    }
-
-    pub fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().apply_seen_mark_off(outcome);
-        self.save_viewer_sections()
-    }
-
-    /// Queues a failed hand-off again; it goes to the tour agent like a new one.
-    pub fn try_hand_off_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().try_again(id)?;
-        self.save_viewer_sections()
-    }
-
-    pub fn agent_status_is(&mut self, status: AgentStatus) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().agent_status_is(status);
-        self.save_viewer_sections()
+        change: impl FnOnce(&mut HandOffs) -> T,
+    ) -> anyhow::Result<T> {
+        self.state.record(|state| change(state.hand_offs_mut()))
     }
 
     /// The oldest comment in the queue, to send again.
@@ -1365,7 +1272,7 @@ impl Review {
     }
 
     pub fn state_file(&self) -> ReviewStateFile {
-        self.state_file.clone()
+        self.state.file().clone()
     }
 
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
@@ -1375,13 +1282,13 @@ impl Review {
             _ => None,
         };
         let hand_offs_before = self.state.hand_offs().all().len();
+        let comment_desk = &mut self.comment_desk;
         let result = self
-            .comment_desk
-            .apply_comment(&mut self.state, outcome, step);
+            .state
+            .record(|state| comment_desk.apply_comment(state, outcome, step));
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
-        self.save_viewer_sections()?;
-        Ok(result)
+        result
     }
 
     fn note_new_hand_off(&mut self, hand_offs_before: usize) {
@@ -1642,11 +1549,10 @@ impl Review {
         self.state.read_tick(id).is_some()
     }
 
-    /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
     /// The re-pin writes the state file from another thread and this review is replaced when it
     /// is done, so from now on nothing it holds may be saved over the re-pin's record.
     pub fn start_repin(&mut self) {
-        self.repin_running = true;
+        self.state.start_repin();
     }
 
     pub fn refresh_failed(&mut self, error: &anyhow::Error) {
@@ -1654,31 +1560,29 @@ impl Review {
     }
 
     pub fn repin_failed(&mut self) {
-        self.repin_running = false;
-        self.refused_while_repinning = false;
+        self.state.repin_failed();
     }
 
+    /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
-        self.state.tick(id, &self.head);
-        self.fold_flipped.remove(id);
         let coverage = self.coverage();
-        self.viewed_sync
-            .wish_after_tick(&mut self.state, &coverage, id);
-        self.save_viewer_sections()
+        self.state.change(|state| {
+            state.tick(id, &self.head);
+            self.fold_flipped.remove(id);
+            self.viewed_sync.wish_after_tick(state, &coverage, id);
+        })
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.untick(id);
-        self.fold_flipped.remove(id);
         let coverage = self.coverage();
-        self.viewed_sync
-            .wish_after_untick(&mut self.state, &coverage, id);
-        self.save_viewer_sections()
+        self.state.change(|state| {
+            state.untick(id);
+            self.fold_flipped.remove(id);
+            self.viewed_sync.wish_after_untick(state, &coverage, id);
+        })
     }
 
     /// Skim, ticked and gone steps fold; the reviewer can flip that for the session without losing the tick.
@@ -1748,13 +1652,16 @@ impl Review {
             return Ok(());
         }
         let coverage = self.coverage();
-        let (unticked, error) =
-            self.viewed_sync
-                .take_in(&mut self.state, &coverage, &self.head, outcome);
-        for step in &unticked {
-            self.fold_flipped.remove(step);
-        }
-        let saved = self.save_viewer_sections();
+        let mut error = None;
+        let saved = self.state.record(|state| {
+            let (unticked, sync_error) = self
+                .viewed_sync
+                .take_in(state, &coverage, &self.head, outcome);
+            for step in &unticked {
+                self.fold_flipped.remove(step);
+            }
+            error = sync_error;
+        });
         self.viewed_not_synced = None;
         match error {
             Some(error) => {
@@ -1794,9 +1701,10 @@ impl Review {
 
     /// What went wrong that the reviewer must know about, until it is put right.
     pub fn problems(&self) -> Vec<Problem> {
-        let not_saved = self.saves.problem().map(Problem::NotSaved);
+        let not_saved = self.state.not_saved().map(Problem::NotSaved);
         let not_kept = self
-            .refused_while_repinning
+            .state
+            .refused_while_repinning()
             .then_some(Problem::ChangeNotKeptWhileRepinning);
         let threads_not_read = self.threads_not_read.clone().map(Problem::ThreadsNotRead);
         not_saved
@@ -1828,29 +1736,6 @@ impl Review {
             )
             .chain(self.switch_failed.clone().map(Problem::SwitchFailed))
             .collect()
-    }
-
-    /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
-    /// these are written into a freshly loaded file.
-    fn save_viewer_sections(&mut self) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        let turn = self.saves.next_turn();
-        self.saves.write(turn, || {
-            self.state_file
-                .update(|saved| saved.take_viewer_sections(&self.state))
-        })?;
-        self.saves.typing_saved();
-        Ok(())
-    }
-
-    /// A refused change is named to the reviewer until the re-pin ends.
-    fn refuse_changes_while_repinning(&mut self) -> anyhow::Result<()> {
-        if self.repin_running {
-            self.refused_while_repinning = true;
-            Err(RepinRunning.into())
-        } else {
-            Ok(())
-        }
     }
 
     pub fn reading_place(&self) -> ReadingPlace {
@@ -1899,18 +1784,6 @@ impl Review {
         }
     }
 }
-
-#[derive(Debug)]
-pub struct RepinRunning;
-
-impl fmt::Display for RepinRunning {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter
-            .write_str("the tour is being updated to the new commits; try again when it is done")
-    }
-}
-
-impl std::error::Error for RepinRunning {}
 
 /// The head a step was last read at: its tick, or the tick a re-pin took away.
 fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a Sha> {

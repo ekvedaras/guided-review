@@ -317,13 +317,8 @@ impl ReviewState {
         &self.viewer.pr_description
     }
 
-    /// Whether it differs from the one kept.
-    pub(super) fn saw_pr_description(&mut self, body: &str) -> bool {
-        let is_new = self.viewer.pr_description != body;
-        if is_new {
-            body.clone_into(&mut self.viewer.pr_description);
-        }
-        is_new
+    pub(super) fn saw_pr_description(&mut self, body: &str) {
+        body.clone_into(&mut self.viewer.pr_description);
     }
 
     pub(super) fn take_viewer_sections(&mut self, from: &Self) {

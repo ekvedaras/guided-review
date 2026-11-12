@@ -779,7 +779,10 @@ impl ReviewSession {
     }
 
     fn agent_status_is(&mut self, status: AgentStatus) {
-        if let Err(error) = self.review.agent_status_is(status) {
+        let recorded = self
+            .review
+            .record_hand_offs(|hand_offs| hand_offs.agent_status_is(status));
+        if let Err(error) = recorded {
             eprintln!("could not save where a hand-off is: {error:#}");
         }
     }
@@ -789,7 +792,7 @@ impl ReviewSession {
         if self.taking_seen_marks_off.is_some() {
             return;
         }
-        let requests = self.review.seen_marks_to_take_off();
+        let requests = self.review.hand_offs().seen_marks_to_take_off();
         if requests.is_empty() {
             return;
         }
@@ -805,9 +808,9 @@ impl ReviewSession {
             |this, outcomes, cx| {
                 this.taking_seen_marks_off = None;
                 for outcome in outcomes {
-                    if let Err(error) =
-                        this.change(cx, |review| review.apply_seen_mark_off(outcome))
-                    {
+                    if let Err(error) = this.change(cx, |review| {
+                        review.record_hand_offs(|hand_offs| hand_offs.apply_seen_mark_off(outcome))
+                    }) {
                         eprintln!("could not save where a hand-off is: {error:#}");
                     }
                 }
@@ -821,7 +824,7 @@ impl ReviewSession {
         if self.delivering.is_some() {
             return;
         }
-        let Some(request) = self.review.delivery_request() else {
+        let Some(request) = self.review.hand_offs().delivery_request(self.review.pr()) else {
             return;
         };
         let agents = self.tour_work.tour_agents.clone();
@@ -834,7 +837,9 @@ impl ReviewSession {
                 cx.notify();
                 let started_an_agent = outcome.started_an_agent();
                 let try_again_soon = outcome.wants_another_try_soon();
-                if let Err(error) = this.change(cx, |review| review.apply_delivery(outcome)) {
+                if let Err(error) = this.change(cx, |review| {
+                    review.record_hand_offs(|hand_offs| hand_offs.apply_delivery(outcome))
+                }) {
                     eprintln!("could not save where a hand-off is: {error:#}");
                 }
                 if started_an_agent {
@@ -851,7 +856,10 @@ impl ReviewSession {
     }
 
     pub fn try_hand_off_again(&mut self, hand_off: HandOffId, cx: &mut Context<Self>) {
-        if let Err(error) = self.change(cx, |review| review.try_hand_off_again(hand_off)) {
+        let queued = self.change(cx, |review| {
+            review.record_hand_offs(|hand_offs| hand_offs.try_again(hand_off))
+        });
+        if let Err(error) = queued.and_then(|tried| tried) {
             eprintln!("could not queue hand-off {hand_off} again: {error:#}");
         }
         self.deliver_hand_offs(cx);
@@ -1024,7 +1032,9 @@ impl ReviewSession {
         replied: &AgentReplied,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        self.change(cx, |review| review.hand_off_replied(id, replied))?;
+        self.change(cx, |review| {
+            review.record_hand_offs(|hand_offs| hand_offs.replied(id, replied))
+        })??;
         self.pull_threads(cx);
         self.pull_pending_review(cx);
         Ok(())

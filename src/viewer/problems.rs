@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::review::RepinRunning;
+use super::saved_state::RepinRunning;
 
 /// Something that went wrong which the reviewer must know about, shown until it is put right.
 #[derive(Debug, Clone, PartialEq, Eq)]

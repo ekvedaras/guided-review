@@ -11,6 +11,7 @@ use super::hand_offs::{Audience, SentComment};
 use super::review::StepId;
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
+use super::saved_state::SavedState;
 use super::step_page::{DiffLine, LineLocation, Side};
 use super::suggestion::suggestion_block;
 use super::thread_actions::{
@@ -22,7 +23,7 @@ use std::collections::BTreeMap;
 
 /// Everything the reviewer writes to GitHub: the drag that opens a comment box, the comments,
 /// replies and finished review, and what GitHub said about the pending review and the PR's author.
-/// The texts themselves live in the review state; saving it is the review's job.
+/// The texts themselves live in the review state and change only through its gate, `SavedState`.
 #[derive(Default)]
 pub(super) struct CommentDesk {
     selection: Option<RowSelection>,
@@ -110,7 +111,7 @@ impl CommentDesk {
     /// The drag ends: when the rows can take a comment, a draft opens on them.
     pub(super) fn finish_selection(
         &mut self,
-        state: &mut ReviewState,
+        state: &mut SavedState,
         screen_lines: &[DiffLine],
         freshness: TourFreshness,
         head: &Sha,
@@ -128,12 +129,12 @@ impl CommentDesk {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::of(&selected);
-        state.open_draft(place.clone(), Some(head));
+        open_draft(state, &place, head)?;
         Ok(Some(place))
     }
 
     pub(super) fn begin_file_comment(
-        state: &mut ReviewState,
+        state: &mut SavedState,
         path: &FilePath,
         freshness: TourFreshness,
         head: &Sha,
@@ -142,21 +143,25 @@ impl CommentDesk {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::on_file(path);
-        state.open_draft(place.clone(), Some(head));
+        open_draft(state, &place, head)?;
         Ok(place)
     }
 
     /// Opens a draft on the lines when there is none and puts `text` after what is typed already.
     pub(super) fn add_to_draft(
-        state: &mut ReviewState,
+        state: &mut SavedState,
         selected: &SelectedLines,
         head: &Sha,
         text: &str,
-    ) -> CommentPlace {
+    ) -> Result<CommentPlace, CommentRefusal> {
         let place = CommentPlace::of(selected);
-        state.open_draft(place.clone(), Some(head));
-        append_to_draft(state, &place, text);
-        place
+        state
+            .record(|state| {
+                state.open_draft(place.clone(), Some(head));
+                append_to_draft(state, &place, text);
+            })
+            .map_err(|error| not_kept(&error))?;
+        Ok(place)
     }
 
     /// "Suggest change" shows only when the range starts and ends on lines of the head:
@@ -169,12 +174,12 @@ impl CommentDesk {
     /// suggested on or there is no draft. No rows means no block: on GitHub an empty suggestion
     /// would replace the lines with nothing.
     pub(super) fn suggest_change(
-        state: &mut ReviewState,
+        state: &mut SavedState,
         place: &CommentPlace,
         rows: &[DiffLine],
-    ) -> Option<String> {
+    ) -> anyhow::Result<Option<String>> {
         if state.draft_at(place).is_none() || !Self::can_suggest_change(place) {
-            return None;
+            return Ok(None);
         }
         let kept_lines: Vec<&str> = rows
             .iter()
@@ -182,9 +187,9 @@ impl CommentDesk {
             .map(|row| row.text.as_str())
             .collect();
         if kept_lines.is_empty() {
-            return None;
+            return Ok(None);
         }
-        append_to_draft(state, place, &suggestion_block(&kept_lines))
+        state.record(|state| append_to_draft(state, place, &suggestion_block(&kept_lines)))
     }
 
     /// `None` when there is no such draft.
@@ -322,13 +327,12 @@ impl CommentDesk {
         self.comment_edits.remove(comment_id);
     }
 
-    /// Says whether a reply went out, so its draft was dropped.
     pub(super) fn apply_thread_action(
         &mut self,
-        state: &mut ReviewState,
+        state: &mut SavedState,
         outcome: &ThreadActionOutcome,
         step: Option<StepId>,
-    ) -> bool {
+    ) {
         match (&outcome.result, &outcome.action) {
             (
                 ThreadActionResult::Done,
@@ -339,24 +343,27 @@ impl CommentDesk {
                 },
             ) => {
                 self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
-                if *audience == Audience::Agent {
-                    hand_off_reply(state, thread_id, *mode, step, outcome);
+                let sent = state.record(|state| {
+                    if *audience == Audience::Agent {
+                        hand_off_reply(state, thread_id, *mode, step, outcome);
+                    }
+                    state.drop_reply(thread_id);
+                });
+                // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
+                if sent.is_err() {
+                    state.save_with_next_typing();
                 }
-                state.drop_reply(thread_id);
-                true
             }
             (ThreadActionResult::Done, ThreadAction::EditComment { comment_id }) => {
                 self.comment_edits.remove(comment_id);
-                false
             }
             (
                 ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),
                 ThreadAction::Reply { .. },
             ) => {
                 self.pending_review = PendingReview::Exists;
-                false
             }
-            _ => false,
+            _ => {}
         }
     }
 
@@ -388,15 +395,33 @@ impl CommentDesk {
 
     pub(super) fn apply_finish(
         &mut self,
-        state: &mut ReviewState,
+        state: &mut SavedState,
         outcome: FinishOutcome,
     ) -> FinishResult {
         if outcome.result == FinishResult::Sent {
             self.pending_review = PendingReview::Absent;
-            state.write_finish_body("");
+            // The review is on GitHub; a body that fails to clear is saved again with the next typing.
+            if state.record(|state| state.write_finish_body("")).is_err() {
+                state.save_with_next_typing();
+            }
         }
         outcome.result
     }
+}
+
+fn open_draft(
+    state: &mut SavedState,
+    place: &CommentPlace,
+    head: &Sha,
+) -> Result<(), CommentRefusal> {
+    state
+        .record(|state| state.open_draft(place.clone(), Some(head)))
+        .map_err(|error| not_kept(&error))
+}
+
+/// The box is open in memory all the same; the reviewer learns its text is not kept.
+fn not_kept(error: &anyhow::Error) -> CommentRefusal {
+    CommentRefusal::NoAccess(format!("{error:#}"))
 }
 
 /// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.

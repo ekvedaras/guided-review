@@ -409,7 +409,7 @@ impl HandOffs {
 
     /// The oldest queued hand-off, unless one was delivered and its agent has not started on it:
     /// they go one at a time, in the order they were sent.
-    pub(super) fn delivery_request(&self, pr: &PullRequestUrl) -> Option<DeliveryRequest> {
+    pub fn delivery_request(&self, pr: &PullRequestUrl) -> Option<DeliveryRequest> {
         if self.0.iter().any(|h| h.state == HandOffState::Delivered) {
             return None;
         }
@@ -422,7 +422,7 @@ impl HandOffs {
         })
     }
 
-    pub(super) fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
+    pub fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
         let state = match outcome.how {
             Delivery::Delivered => HandOffState::Delivered,
             Delivery::Waiting | Delivery::AgentStarting | Delivery::AgentStarted => return,
@@ -436,7 +436,7 @@ impl HandOffs {
 
     /// A delivered hand-off is working once the agent is seen working; when it then goes idle with no
     /// answer, it ended without one.
-    pub(super) fn agent_status_is(&mut self, status: AgentStatus) {
+    pub fn agent_status_is(&mut self, status: AgentStatus) {
         for hand_off in &mut self.0 {
             hand_off.state = match (&hand_off.state, status) {
                 (HandOffState::Delivered, AgentStatus::Working) => HandOffState::Working,
@@ -464,7 +464,7 @@ impl HandOffs {
     }
 
     /// Hand-offs the agent ended without answering whose comment still shows the seen mark.
-    pub(super) fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
+    pub fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
         self.0
             .iter()
             .filter(|hand_off| {
@@ -480,7 +480,7 @@ impl HandOffs {
             .collect()
     }
 
-    pub(super) fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) {
+    pub fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) {
         if let Some(hand_off) = self.0.iter_mut().find(|h| h.id == outcome.id) {
             hand_off.seen_mark = outcome.seen_mark;
         }
@@ -507,7 +507,7 @@ impl HandOffs {
     }
 
     /// Queues a failed hand-off again. One with no thread cannot go: the agent would have nowhere to answer.
-    pub(super) fn try_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
+    pub fn try_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
         let hand_off = self
             .0
             .iter_mut()

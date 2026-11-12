@@ -148,7 +148,7 @@ fn a_comment_sent_with_ask_agent_is_handed_off_whichever_way_it_is_posted() {
         let result = send(&mut review, &place, mode, Audience::Agent, &github);
 
         assert_eq!(result, CommentResult::Sent);
-        let [hand_off] = review.hand_offs() else {
+        let [hand_off] = review.hand_offs().all() else {
             panic!("one hand-off expected for {mode:?}");
         };
         assert_eq!(hand_off.comment(), "why ten?");
@@ -180,7 +180,7 @@ fn a_comment_sent_with_the_plain_action_is_never_handed_off() {
     );
 
     assert_eq!(result, CommentResult::Sent);
-    assert_eq!(review.hand_offs(), []);
+    assert_eq!(review.hand_offs().all(), []);
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn a_comment_github_refused_is_not_handed_off() {
     );
 
     assert!(matches!(result, CommentResult::Refused(_)));
-    assert_eq!(review.hand_offs(), []);
+    assert_eq!(review.hand_offs().all(), []);
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn an_asked_comment_waiting_in_the_queue_is_handed_off_once_the_queue_gets_it_to
     );
     assert!(matches!(result, CommentResult::Queued(_)));
     assert_eq!(
-        review.hand_offs(),
+        review.hand_offs().all(),
         [],
         "GitHub does not have the comment yet"
     );
@@ -228,7 +228,7 @@ fn an_asked_comment_waiting_in_the_queue_is_handed_off_once_the_queue_gets_it_to
         .send_queued_comments(&github_with_the_comment_as_a_thread(&pull, "why ten?"))
         .unwrap();
 
-    let [hand_off] = review.hand_offs() else {
+    let [hand_off] = review.hand_offs().all() else {
         panic!("the queue sent the comment, so it is handed off");
     };
     assert_eq!(hand_off.thread(), Some(&ThreadId::new("T1")));
@@ -250,7 +250,7 @@ fn a_hand_off_whose_thread_cannot_be_read_fails_and_says_why() {
         &github,
     );
 
-    let [hand_off] = review.hand_offs() else {
+    let [hand_off] = review.hand_offs().all() else {
         panic!("the comment is on GitHub, so it is handed off");
     };
     let HandOffState::Failed(reason) = hand_off.state() else {
@@ -276,7 +276,7 @@ fn hand_offs_survive_a_restart() {
     let reopened = pull.open();
 
     assert_eq!(reopened.hand_offs(), review.hand_offs());
-    assert_eq!(reopened.hand_offs().len(), 1);
+    assert_eq!(reopened.hand_offs().all().len(), 1);
 }
 
 fn reply(
@@ -316,7 +316,7 @@ fn a_reply_sent_with_ask_agent_is_handed_off_with_the_thread_so_far() {
     let result = reply(&mut review, "and why not nine?", Audience::Agent, &github);
 
     assert_eq!(result, ThreadActionResult::Done);
-    let [hand_off] = review.hand_offs() else {
+    let [hand_off] = review.hand_offs().all() else {
         panic!("an asked reply is handed off");
     };
     assert_eq!(hand_off.comment(), "and why not nine?");
@@ -353,12 +353,16 @@ fn a_plain_reply_is_not_handed_off_even_in_a_thread_that_started_with_ask_agent(
         Audience::Agent,
         &github,
     );
-    assert_eq!(review.hand_offs().len(), 1);
+    assert_eq!(review.hand_offs().all().len(), 1);
     github.threads = vec![thread_on_line_ten("T1", conversation("thanks"))];
 
     reply(&mut review, "thanks", Audience::Author, &github);
 
-    assert_eq!(review.hand_offs().len(), 1, "only the first comment asked");
+    assert_eq!(
+        review.hand_offs().all().len(),
+        1,
+        "only the first comment asked"
+    );
 }
 
 fn asked_twice(pull: &Pull, github: &mut FakeGitHub) -> Review {
@@ -390,14 +394,31 @@ fn deliver(review: &mut Review, agents: &TourAgents) {
 }
 
 fn deliver_with(review: &mut Review, agents: &TourAgents, github: &FakeGitHub) {
-    if let Some(request) = review.delivery_request() {
-        review.apply_delivery(request.run(agents, github)).unwrap();
+    if let Some(request) = review.hand_offs().delivery_request(review.pr()) {
+        let outcome = request.run(agents, github);
+        review
+            .record_hand_offs(|hand_offs| hand_offs.apply_delivery(outcome))
+            .unwrap();
     }
+}
+
+fn agent_is(review: &mut Review, status: AgentStatus) {
+    review
+        .record_hand_offs(|hand_offs| hand_offs.agent_status_is(status))
+        .unwrap();
+}
+
+fn replied(review: &mut Review, id: HandOffId, replied: &AgentReplied) {
+    review
+        .record_hand_offs(|hand_offs| hand_offs.replied(id, replied))
+        .unwrap()
+        .unwrap();
 }
 
 fn states(review: &Review) -> Vec<HandOffState> {
     review
         .hand_offs()
+        .all()
         .iter()
         .map(|hand_off| hand_off.state().clone())
         .collect()
@@ -530,15 +551,21 @@ fn an_agent_still_starting_keeps_the_hand_off_queued_and_asks_to_try_again_soon(
     fake.still_starting("t1");
     let agents = agents_of(&fake);
 
-    let outcome = review.delivery_request().unwrap().run(&agents, &github);
+    let request = review.hand_offs().delivery_request(review.pr());
+    let outcome = request.unwrap().run(&agents, &github);
     assert!(outcome.wants_another_try_soon());
-    review.apply_delivery(outcome).unwrap();
+    review
+        .record_hand_offs(|hand_offs| hand_offs.apply_delivery(outcome))
+        .unwrap();
 
     assert_eq!(states(&review)[0], HandOffState::Queued);
     fake.settled("t1");
-    let outcome = review.delivery_request().unwrap().run(&agents, &github);
+    let request = review.hand_offs().delivery_request(review.pr());
+    let outcome = request.unwrap().run(&agents, &github);
     assert!(!outcome.wants_another_try_soon());
-    review.apply_delivery(outcome).unwrap();
+    review
+        .record_hand_offs(|hand_offs| hand_offs.apply_delivery(outcome))
+        .unwrap();
     assert_eq!(states(&review)[0], HandOffState::Delivered);
 }
 
@@ -550,15 +577,15 @@ fn a_delivered_hand_off_is_working_while_the_agent_works_and_ends_unanswered_whe
     let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
     deliver(&mut review, &agents_of(&fake));
 
-    review.agent_status_is(AgentStatus::Idle).unwrap();
+    agent_is(&mut review, AgentStatus::Idle);
     assert_eq!(
         states(&review)[0],
         HandOffState::Delivered,
         "not seen working yet"
     );
-    review.agent_status_is(AgentStatus::Working).unwrap();
+    agent_is(&mut review, AgentStatus::Working);
     assert_eq!(states(&review)[0], HandOffState::Working);
-    review.agent_status_is(AgentStatus::Idle).unwrap();
+    agent_is(&mut review, AgentStatus::Idle);
 
     assert_eq!(states(&review)[0], HandOffState::EndedWithoutAnswer);
     assert_eq!(states(&review)[1], HandOffState::Queued);
@@ -591,12 +618,12 @@ fn a_thread_sent_with_ask_agent_shows_each_hand_off_state_as_a_line_under_it() {
         lines_under_the_threads(&review)[0].as_deref(),
         Some("Delivered to the agent")
     );
-    review.agent_status_is(AgentStatus::Working).unwrap();
+    agent_is(&mut review, AgentStatus::Working);
     assert_eq!(
         lines_under_the_threads(&review)[0].as_deref(),
         Some("The agent is working on it")
     );
-    review.agent_status_is(AgentStatus::Idle).unwrap();
+    agent_is(&mut review, AgentStatus::Idle);
     assert_eq!(
         lines_under_the_threads(&review),
         [
@@ -626,9 +653,9 @@ fn a_threads_line_shows_the_agent_at_work_only_while_it_works() {
 
     deliver(&mut review, &agents_of(&fake));
     assert!(!first_thread_shows_agent_working(&review), "delivered");
-    review.agent_status_is(AgentStatus::Working).unwrap();
+    agent_is(&mut review, AgentStatus::Working);
     assert!(first_thread_shows_agent_working(&review), "working");
-    review.agent_status_is(AgentStatus::Idle).unwrap();
+    agent_is(&mut review, AgentStatus::Idle);
     assert!(!first_thread_shows_agent_working(&review), "ended");
 }
 
@@ -647,17 +674,20 @@ fn a_hand_off_that_failed_in_its_thread_can_be_tried_again_and_then_goes_to_the_
         .iter()
         .map(|view| view.failed_hand_off)
         .collect();
-    let first = review.hand_offs()[0].id();
+    let first = review.hand_offs().all()[0].id();
     assert_eq!(offered, [Some(first), None]);
 
-    review.try_hand_off_again(first).unwrap();
+    review
+        .record_hand_offs(|hand_offs| hand_offs.try_again(first))
+        .unwrap()
+        .unwrap();
 
     assert_eq!(states(&review)[0], HandOffState::Queued);
     let idle = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
     deliver(&mut review, &agents_of(&idle));
     assert_eq!(states(&review)[0], HandOffState::Delivered);
     assert_eq!(
-        pull.open().hand_offs()[0].state(),
+        pull.open().hand_offs().all()[0].state(),
         &HandOffState::Delivered,
         "kept in the state file"
     );
@@ -762,7 +792,7 @@ fn asked_one(pull: &Pull, github: &FakeGitHub, mode: SendMode) -> HandOffId {
     let mut review = pull.open();
     let place = comment_on_line_ten(&mut review, "why ten?");
     send(&mut review, &place, mode, Audience::Agent, github);
-    review.hand_offs().first().unwrap().id()
+    review.hand_offs().all().first().unwrap().id()
 }
 
 fn reply_request(
@@ -895,11 +925,9 @@ fn an_answered_hand_off_is_answered_in_the_review_and_in_the_state_file() {
     let pull = Pull::new();
     let mut github = pull.github();
     let mut review = asked_twice(&pull, &mut github);
-    let first = review.hand_offs().first().unwrap().id();
+    let first = review.hand_offs().all().first().unwrap().id();
 
-    review
-        .hand_off_replied(first, &AgentReplied::default())
-        .unwrap();
+    replied(&mut review, first, &AgentReplied::default());
 
     assert_eq!(
         states(&review),
@@ -963,6 +991,7 @@ fn reactions(sent: &SentLog) -> Vec<(CommentId, ReactionChange)> {
 fn seen_marks(review: &Review) -> Vec<SeenMark> {
     review
         .hand_offs()
+        .all()
         .iter()
         .map(|hand_off| hand_off.seen_mark().clone())
         .collect()
@@ -981,7 +1010,7 @@ fn delivered_one(pull: &Pull, github: &FakeGitHub) -> (Review, HandOffId) {
     );
     let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
     deliver_with(&mut review, &agents_of(&fake), github);
-    let id = review.hand_offs().first().unwrap().id();
+    let id = review.hand_offs().all().first().unwrap().id();
     (review, id)
 }
 
@@ -1047,7 +1076,7 @@ fn the_agents_answer_takes_the_eyes_off() {
         .unwrap()
         .run(&github)
         .unwrap();
-    review.hand_off_replied(id, done.replied()).unwrap();
+    replied(&mut review, id, done.replied());
 
     assert_eq!(
         reactions(&pull.sent),
@@ -1067,7 +1096,7 @@ fn working_on_it_is_posted_at_once_and_the_answer_replaces_it() {
     let (mut review, id) = delivered_one(&pull, &github);
 
     let working = working_on_it_request(&pull, id).run(&github).unwrap();
-    review.hand_off_replied(id, working.replied()).unwrap();
+    replied(&mut review, id, working.replied());
 
     assert_eq!(
         replies(&pull.sent),
@@ -1090,7 +1119,7 @@ fn working_on_it_is_posted_at_once_and_the_answer_replaces_it() {
         .unwrap()
         .run(&github)
         .unwrap();
-    review.hand_off_replied(id, answered.replied()).unwrap();
+    replied(&mut review, id, answered.replied());
 
     assert_eq!(answered.placement(), ReplyPlacement::ReplacedWorkingOnIt);
     assert_eq!(replies(&pull.sent).len(), 1, "no second reply");
@@ -1107,10 +1136,10 @@ fn an_agent_that_stops_after_working_on_it_ended_without_an_answer() {
     let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
     let (mut review, id) = delivered_one(&pull, &github);
     let working = working_on_it_request(&pull, id).run(&github).unwrap();
-    review.hand_off_replied(id, working.replied()).unwrap();
+    replied(&mut review, id, working.replied());
 
-    review.agent_status_is(AgentStatus::Working).unwrap();
-    review.agent_status_is(AgentStatus::Idle).unwrap();
+    agent_is(&mut review, AgentStatus::Working);
+    agent_is(&mut review, AgentStatus::Idle);
 
     assert_eq!(states(&review), [HandOffState::EndedWithoutAnswer]);
 }
@@ -1120,12 +1149,19 @@ fn a_hand_off_the_agent_ends_without_answering_has_its_eyes_taken_off() {
     let pull = Pull::new();
     let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
     let (mut review, _) = delivered_one(&pull, &github);
-    assert_eq!(review.seen_marks_to_take_off().len(), 0, "still delivered");
+    assert_eq!(
+        review.hand_offs().seen_marks_to_take_off().len(),
+        0,
+        "still delivered"
+    );
 
-    review.agent_status_is(AgentStatus::Working).unwrap();
-    review.agent_status_is(AgentStatus::Idle).unwrap();
-    for request in review.seen_marks_to_take_off() {
-        review.apply_seen_mark_off(request.run(&github)).unwrap();
+    agent_is(&mut review, AgentStatus::Working);
+    agent_is(&mut review, AgentStatus::Idle);
+    for request in review.hand_offs().seen_marks_to_take_off() {
+        let outcome = request.run(&github);
+        review
+            .record_hand_offs(|hand_offs| hand_offs.apply_seen_mark_off(outcome))
+            .unwrap();
     }
 
     assert_eq!(
@@ -1136,7 +1172,7 @@ fn a_hand_off_the_agent_ends_without_answering_has_its_eyes_taken_off() {
         ]
     );
     assert_eq!(seen_marks(&review), [SeenMark::Off]);
-    assert_eq!(review.seen_marks_to_take_off().len(), 0);
+    assert_eq!(review.hand_offs().seen_marks_to_take_off().len(), 0);
 }
 
 #[test]
@@ -1145,7 +1181,7 @@ fn the_agents_working_on_it_reply_is_left_out_of_the_thread_while_the_line_under
     let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
     let (mut review, id) = delivered_one(&pull, &github);
     let working = working_on_it_request(&pull, id).run(&github).unwrap();
-    review.hand_off_replied(id, working.replied()).unwrap();
+    replied(&mut review, id, working.replied());
     let thread_with = |reply: &str| {
         thread_on_line_ten(
             "T1",
@@ -1169,7 +1205,7 @@ fn the_agents_working_on_it_reply_is_left_out_of_the_thread_while_the_line_under
         .unwrap()
         .run(&github)
         .unwrap();
-    review.hand_off_replied(id, answered.replied()).unwrap();
+    replied(&mut review, id, answered.replied());
     review.set_threads(&[thread_with("🤖 Done in abc123.")]);
 
     assert_eq!(shown_comments(&review), ["why ten?", "🤖 Done in abc123."]);
