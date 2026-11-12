@@ -2945,7 +2945,7 @@ impl Render for OneStepLayout {
                     )
                     .child(screen),
             )
-            .when(self.ask.read(cx).is_open(cx), |row| {
+            .when(self.ask.read(cx).is_shown(cx), |row| {
                 row.child(self.ask.clone())
             })
             .child(self.settings.clone())

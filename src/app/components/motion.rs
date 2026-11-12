@@ -102,6 +102,26 @@ pub fn slide_in<E: IntoElement + Styled + 'static>(
     })
 }
 
+/// The reverse of `slide_in`: fades out while moving `distance` towards `edge`.
+pub fn slide_out<E: IntoElement + Styled + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    duration: Duration,
+    edge: Edge,
+    distance: Pixels,
+) -> AnimationElement<E> {
+    element.with_animation(id, one_shot(duration), move |element, delta| {
+        let away = distance * delta;
+        let element = element.relative().opacity(1. - delta);
+        match edge {
+            Edge::Left => element.left(-away),
+            Edge::Right => element.left(away),
+            Edge::Top => element.top(-away),
+            Edge::Bottom => element.top(away),
+        }
+    })
+}
+
 /// Fades out over `duration`.
 pub fn fade_out<E: IntoElement + Styled + 'static>(
     element: E,
@@ -138,6 +158,14 @@ pub fn rise_in<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
 ) -> AnimationElement<E> {
     slide_in(element, id, OVERLAY, Edge::Bottom, OVERLAY_RISE)
+}
+
+/// An overlay's exit, the reverse of `rise_in`: fades out and sinks `OVERLAY_RISE` over `OVERLAY`.
+pub fn sink_out<E: IntoElement + Styled + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+) -> AnimationElement<E> {
+    slide_out(element, id, OVERLAY, Edge::Bottom, OVERLAY_RISE)
 }
 
 /// A bar whose width follows a share from 0 to 1. A new share glides from the length on show; the

@@ -16,7 +16,7 @@ use crate::app::review_session::ReviewSession;
 use crate::config::AskSettings;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, Ask, AskDesk, AskId, AskProcessEvent, AskProcesses, AskTarget,
-    Author, NotDelivered, Place, Question, Review, TurnStopper,
+    Author, NotDelivered, Place, Presence, Question, Review, Shown, TurnStopper,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_button, icon_label_button};
@@ -24,7 +24,8 @@ use super::card::card;
 use super::icon::{Icon, icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::{MarkdownView, parsed_markdown};
-use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in};
+use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in, slide_out};
+use super::overlay::{close_presence, input_blocker};
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
@@ -145,6 +146,10 @@ pub struct AskPanel {
     focus: FocusHandle,
     question_focus: FocusHandle,
     layout_focus: FocusHandle,
+    /// Whether the panel is leaving; the desk knows whether it is open.
+    presence: Presence,
+    /// What the desk was open on as the panel began to leave, drawn until it is gone.
+    leaving_target: Option<AskTarget>,
 }
 
 impl AskPanel {
@@ -191,11 +196,18 @@ impl AskPanel {
             focus: cx.focus_handle(),
             question_focus: cx.focus_handle(),
             layout_focus,
+            presence: Presence::default(),
+            leaving_target: None,
         }
     }
 
     pub fn is_open(&self, cx: &App) -> bool {
         self.desk(cx).is_open()
+    }
+
+    /// Drawn: open, or on its way out.
+    pub fn is_shown(&self, cx: &App) -> bool {
+        self.is_open(cx) || self.presence.shown().is_some()
     }
 
     fn desk<'a>(&self, cx: &'a App) -> &'a AskDesk {
@@ -225,6 +237,8 @@ impl AskPanel {
         self.change(cx, |review, processes| {
             review.open_ask(place, label, &settings, Instant::now(), processes);
         });
+        self.presence.open();
+        self.leaving_target = None;
         match self.desk(cx).target() {
             Some(AskTarget::Ready { .. }) => {
                 self.question.clear();
@@ -236,6 +250,11 @@ impl AskPanel {
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_open(cx) {
+            return;
+        }
+        self.leaving_target = self.desk(cx).target().cloned();
+        close_presence(self, cx, |this| &mut this.presence);
         self.change(cx, |review, _| review.change_asks(AskDesk::close));
         window.focus(&self.layout_focus, cx);
         cx.notify();
@@ -455,7 +474,7 @@ impl Render for AskPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let desk = self.desk(cx);
-        let Some(target) = desk.target() else {
+        let Some(target) = desk.target().or(self.leaving_target.as_ref()) else {
             return div().into_any_element();
         };
         let place = target.label().to_owned();
@@ -623,13 +642,22 @@ impl Render for AskPanel {
             .flex_none()
             .h_full()
             .bg(colors.background)
-            .child(slide_in(
-                panel,
-                "ask-panel-slide",
-                OVERLAY,
-                Edge::Right,
-                PANEL_SLIDE,
-            ))
+            .child(match self.presence.shown() {
+                Some(Shown::Leaving) => slide_out(
+                    panel.child(input_blocker()),
+                    ("ask-panel-slide", self.presence.turn()),
+                    OVERLAY,
+                    Edge::Right,
+                    PANEL_SLIDE,
+                ),
+                Some(Shown::Entering) | None => slide_in(
+                    panel,
+                    ("ask-panel-slide", self.presence.turn()),
+                    OVERLAY,
+                    Edge::Right,
+                    PANEL_SLIDE,
+                ),
+            })
             .into_any_element()
     }
 }

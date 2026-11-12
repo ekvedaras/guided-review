@@ -8,24 +8,17 @@ use gpui::{
 };
 
 use super::motion::{OVERLAY, fade_in, fade_out, move_between};
-use super::overlay::{leaving_modal_layer, modal_layer};
+use super::overlay::{close_presence, leaving_modal_layer, modal_layer};
 use super::palette::{CARD_RADIUS, Colors};
+use crate::viewer::{Presence, Shown};
 
 /// A picture of a markdown body drawn as large as the window allows, over everything else.
 pub struct PictureZoom {
-    stage: Stage,
-    /// Counts the openings, so each one plays its moves again and a late close of an earlier one
-    /// cannot end the next.
-    openings: usize,
+    presence: Presence,
+    /// What is zoomed; kept while the picture leaves, so it is drawn until it is gone.
+    zoom: Option<Zoom>,
     focus: FocusHandle,
     owner_focus: FocusHandle,
-}
-
-enum Stage {
-    Closed,
-    Open(Zoom),
-    /// On its way back to its place on the page; closed once the move has played.
-    Leaving(Zoom),
 }
 
 struct Zoom {
@@ -51,8 +44,8 @@ impl PictureZoom {
 
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
-            stage: Stage::Closed,
-            openings: 0,
+            presence: Presence::default(),
+            zoom: None,
             focus: cx.focus_handle(),
             owner_focus,
         }
@@ -65,36 +58,22 @@ impl PictureZoom {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.stage = Stage::Open(Zoom {
+        self.zoom = Some(Zoom {
             picture,
             page_place,
         });
-        self.openings += 1;
+        self.presence.open();
         window.focus(&self.focus, cx);
         cx.notify();
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Stage::Open(zoom) = std::mem::replace(&mut self.stage, Stage::Closed) else {
-            return;
-        };
-        window.focus(&self.owner_focus, cx);
-        cx.notify();
-        if cx.reduce_motion() {
+        if !self.presence.is_open() {
             return;
         }
-        self.stage = Stage::Leaving(zoom);
-        let opening = self.openings;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(OVERLAY).await;
-            this.update(cx, |this, cx| {
-                if this.openings == opening && matches!(this.stage, Stage::Leaving(_)) {
-                    this.stage = Stage::Closed;
-                    cx.notify();
-                }
-            })
-        })
-        .detach();
+        close_presence(self, cx, |this| &mut this.presence);
+        window.focus(&self.owner_focus, cx);
+        cx.notify();
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -134,43 +113,33 @@ fn in_place(shown: gpui::Img, place: Bounds<Pixels>) -> gpui::Img {
 impl Render for PictureZoom {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let (zoom, is_leaving) = match &self.stage {
-            Stage::Closed => return div().into_any_element(),
-            Stage::Open(zoom) => (zoom, false),
-            Stage::Leaving(zoom) => (zoom, true),
+        let (Some(zoom), Some(shown)) = (&self.zoom, self.presence.shown()) else {
+            return div().into_any_element();
         };
+        let is_leaving = shown == Shown::Leaving;
+        let turn = self.presence.turn();
         let large = large_place(&zoom.picture, window);
         let shown = img(Arc::clone(&zoom.picture.path))
             .rounded(px(CARD_RADIUS))
             .shadow(colors.overlay_shadow());
         let shown = match (zoom.page_place, is_leaving) {
             (Some(page), false) => {
-                move_between(shown, ("picture-zoom-grow", self.openings), page, large)
-                    .into_any_element()
+                move_between(shown, ("picture-zoom-grow", turn), page, large).into_any_element()
             }
             (Some(page), true) => {
-                move_between(shown, ("picture-zoom-shrink", self.openings), large, page)
-                    .into_any_element()
+                move_between(shown, ("picture-zoom-shrink", turn), large, page).into_any_element()
             }
-            (None, false) => fade_in(
-                in_place(shown, large),
-                ("picture-zoom-rise", self.openings),
-                OVERLAY,
-            )
-            .into_any_element(),
-            (None, true) => fade_out(
-                in_place(shown, large),
-                ("picture-zoom-fade", self.openings),
-                OVERLAY,
-            )
-            .into_any_element(),
+            (None, false) => fade_in(in_place(shown, large), ("picture-zoom-rise", turn), OVERLAY)
+                .into_any_element(),
+            (None, true) => fade_out(in_place(shown, large), ("picture-zoom-fade", turn), OVERLAY)
+                .into_any_element(),
         };
         if is_leaving {
-            return leaving_modal_layer(&colors, ("picture-zoom-scrim-out", self.openings))
+            return leaving_modal_layer(&colors, ("picture-zoom-scrim-out", turn), OVERLAY)
                 .child(shown)
                 .into_any_element();
         }
-        modal_layer(&colors, ("picture-zoom-scrim", self.openings))
+        modal_layer(&colors, ("picture-zoom-scrim", turn))
             .id("picture-zoom")
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)

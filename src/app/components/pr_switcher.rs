@@ -11,15 +11,16 @@ use gpui::{
 use crate::app::tour_writer;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    ActivePr, Pick, PrSwitcher, RelevantPullRequestsPort, SwitcherRow, TourAgentPort, TourFact,
-    WhyListed,
+    ActivePr, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, SwitcherRow, TourAgentPort,
+    TourFact, WhyListed,
 };
 
 use super::chip::{chip, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
-use super::motion::rise_in;
-use super::overlay::{modal_layer, overlay_panel, picker_footer, picker_row};
+use super::overlay::{
+    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
+};
 use super::palette::{Colors, Tone};
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -71,7 +72,7 @@ impl PrSwitching {
 
 /// The overlay behind the PR title: the reviewer's relevant PRs under a query box.
 pub struct PrSwitcherView {
-    is_open: bool,
+    presence: Presence,
     query: String,
     shown: Vec<ShownRow>,
     /// Wheel movement not yet enough for a whole row.
@@ -124,13 +125,13 @@ impl PrSwitcherView {
 
     pub fn new(switching: PrSwitching, owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         let list_changes = cx.observe(&switching.list, |this, _, cx| {
-            if this.is_open {
+            if this.presence.is_open() {
                 this.refresh_shown(cx);
                 cx.notify();
             }
         });
         let mut view = Self {
-            is_open: false,
+            presence: Presence::default(),
             query: String::new(),
             shown: Vec::new(),
             scrolled: px(0.),
@@ -146,11 +147,11 @@ impl PrSwitcherView {
     }
 
     pub fn is_open(&self) -> bool {
-        self.is_open
+        self.presence.is_open()
     }
 
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_open = true;
+        self.presence.open();
         self.query.clear();
         self.refusal = None;
         let (home, active) = (self.switching.home.clone(), self.switching.active.clone());
@@ -166,7 +167,10 @@ impl PrSwitcherView {
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_open = false;
+        if !self.presence.is_open() {
+            return;
+        }
+        close_presence(self, cx, |this| &mut this.presence);
         window.focus(&self.owner_focus, cx);
         cx.notify();
     }
@@ -327,7 +331,7 @@ impl PrSwitcherView {
 impl Render for PrSwitcherView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        if !self.is_open {
+        if self.presence.shown().is_none() {
             return div().into_any_element();
         }
         let list = self.switching.list.read(cx);
@@ -348,12 +352,12 @@ impl Render for PrSwitcherView {
             "No pull request matches."
         };
         let message = self.refusal.clone().or_else(|| self.notice.clone());
-        modal_layer(&colors, "pr-switcher-scrim")
+        modal_layer_for(&colors, "pr-switcher-scrim", &self.presence)
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),
             )
-            .child(rise_in(
+            .child(rise_for(
                 overlay_panel(&colors)
                     .id("pr-switcher")
                     .key_context(Self::KEY_CONTEXT)
@@ -420,6 +424,7 @@ impl Render for PrSwitcherView {
                             }),
                     ),
                 "pr-switcher-rise",
+                &self.presence,
             ))
             .into_any_element()
     }

@@ -1,10 +1,14 @@
+use std::time::Duration;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Div, ElementId, InteractiveElement, ParentElement, Stateful, StatefulInteractiveElement,
-    Styled, div, px,
+    AnimationElement, Context, Div, ElementId, InteractiveElement, IntoElement, ParentElement,
+    Stateful, StatefulInteractiveElement, Styled, div, px,
 };
 
-use super::motion::{OVERLAY, STATE, fade_in, fade_out};
+use crate::viewer::{Closing, Motion, Presence, Shown};
+
+use super::motion::{OVERLAY, STATE, fade_in, fade_out, rise_in, sink_out};
 use super::palette::{CARD_RADIUS, CONTROL_RADIUS, Colors, TEXT_FONT, inside_edge};
 
 /// The layer a modal overlay sits in: it covers the window, takes every click, and fades its
@@ -33,7 +37,11 @@ pub fn modal_layer(colors: &Colors, scrim_id: impl Into<ElementId>) -> Div {
 
 /// A modal layer on its way out: its scrim fades away and the layer still takes every click, so
 /// nothing under it reacts until it is gone.
-pub fn leaving_modal_layer(colors: &Colors, scrim_id: impl Into<ElementId>) -> Div {
+pub fn leaving_modal_layer(
+    colors: &Colors,
+    scrim_id: impl Into<ElementId>,
+    duration: Duration,
+) -> Div {
     div()
         .absolute()
         .top_0()
@@ -48,8 +56,63 @@ pub fn leaving_modal_layer(colors: &Colors, scrim_id: impl Into<ElementId>) -> D
                 .size_full()
                 .bg(colors.scrim),
             scrim_id,
-            OVERLAY,
+            duration,
         ))
+}
+
+/// The layer of an overlay in whatever stage its `presence` is in: entering, or leaving with its
+/// scrim fading out. Both stages take every click, so nothing under the overlay reacts until it is
+/// gone. Name each overlay once; the turn of the presence makes the ids of its moves new.
+pub fn modal_layer_for(colors: &Colors, name: &'static str, presence: &Presence) -> Div {
+    let id = (name, presence.turn());
+    match presence.shown() {
+        Some(Shown::Leaving) => leaving_modal_layer(colors, id, STATE),
+        Some(Shown::Entering) | None => modal_layer(colors, id),
+    }
+}
+
+/// An overlay's panel rising in, or sinking out while it leaves. A leaving panel is covered by a
+/// layer that takes the mouse, so a button on it cannot be pressed on its way out.
+pub fn rise_for<E: IntoElement + Styled + ParentElement + 'static>(
+    panel: E,
+    name: &'static str,
+    presence: &Presence,
+) -> AnimationElement<E> {
+    let id = (name, presence.turn());
+    match presence.shown() {
+        Some(Shown::Leaving) => sink_out(panel.child(input_blocker()), id),
+        Some(Shown::Entering) | None => rise_in(panel, id),
+    }
+}
+
+/// Covers what it is a child of and takes every mouse event that would reach it.
+pub fn input_blocker() -> Div {
+    div().absolute().top_0().left_0().size_full().occlude()
+}
+
+/// Closes the overlay whose presence `presence` picks: it leaves for `OVERLAY` with its move played
+/// in reverse, or goes at once under reduced motion. Whoever owns the overlay has its `close`
+/// refuse unless `Presence::is_open`, so a click or key during the leave reaches nothing.
+pub fn close_presence<T: 'static>(
+    this: &mut T,
+    cx: &mut Context<T>,
+    presence: fn(&mut T) -> &mut Presence,
+) {
+    let motion = if cx.reduce_motion() {
+        Motion::Reduced
+    } else {
+        Motion::Full
+    };
+    if let Closing::Leaving(ticket) = presence(this).close(motion) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(OVERLAY).await;
+            this.update(cx, |this, cx| {
+                presence(this).end_leaving(ticket);
+                cx.notify();
+            })
+        })
+        .detach();
+    }
 }
 
 /// What floats over the page: the overlay ground, its edge and its two-layer shadow.
