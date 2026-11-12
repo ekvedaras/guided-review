@@ -8,6 +8,30 @@ use anyhow::Context;
 
 pub use release_install::{Installed, ReleaseInstall, SkillLink};
 
+/// The build of this binary as `--version` prints it and the app shows it: the release version and
+/// the commit it was built from, marked `-dirty` when built with uncommitted changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppVersion(&'static str);
+
+impl AppVersion {
+    pub const RUNNING: Self = Self(concat!(
+        env!("CARGO_PKG_VERSION"),
+        " (",
+        env!("GUIDED_REVIEW_GIT"),
+        ")"
+    ));
+
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl std::fmt::Display for AppVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
     major: u32,

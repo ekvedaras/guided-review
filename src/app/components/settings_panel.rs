@@ -11,6 +11,7 @@ use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
+use crate::update::AppVersion;
 use crate::viewer::{CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 
 use super::button::{
@@ -238,6 +239,8 @@ pub struct SettingsPanel {
     notice: Option<SharedString>,
     clone_focus: Vec<FocusHandle>,
     scroll: ScrollHandle,
+    /// Where this app's binary is, so the reviewer can tell which install runs.
+    running_binary: SharedString,
 }
 
 impl SettingsPanel {
@@ -258,6 +261,8 @@ impl SettingsPanel {
             notice: None,
             clone_focus: Vec::new(),
             scroll: ScrollHandle::new(),
+            running_binary: std::env::current_exe()
+                .map_or_else(|_| "unknown".into(), |exe| exe.display().to_string().into()),
         }
     }
 
@@ -542,6 +547,15 @@ impl SettingsPanel {
                 )
                 .child(body),
         )
+    }
+
+    fn version(&self, colors: &Colors) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(AppVersion::RUNNING.as_str())
+            .child(Self::shown_text(colors, self.running_binary.clone()))
     }
 
     fn section_rule(colors: &Colors) -> impl IntoElement {
@@ -1722,6 +1736,13 @@ impl Render for SettingsPanel {
                             "Clones",
                             "Where each repo is cloned on this machine.",
                             clones,
+                        ))
+                        .child(Self::section_rule(&colors))
+                        .child(Self::section(
+                            &colors,
+                            "Version",
+                            "The build this app runs and where its binary is.",
+                            self.version(&colors),
                         ))
                         .into_any_element(),
                     Some(self.action_bar(editing, &colors, cx)),

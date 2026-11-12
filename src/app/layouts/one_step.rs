@@ -79,6 +79,7 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::update::AppVersion;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
     CommentPlace, Effect, GitHubPort, HandOffId, InFlight, Intent, LineLocation, NextScreen,
@@ -1193,7 +1194,7 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// Settings and the shortcuts sheet, at the foot of the sidebar.
+    /// Settings and the shortcuts sheet at the foot of the sidebar, over the version this app runs.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
         let shortcuts = button(
             colors,
@@ -1214,10 +1215,9 @@ impl OneStepLayout {
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
-        div()
-            .flex_none()
+        let row = div()
             .px_2()
-            .py_2()
+            .pt_2()
             .flex()
             .items_center()
             .gap_1()
@@ -1243,7 +1243,15 @@ impl OneStepLayout {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),
             )
-            .child(shortcuts)
+            .child(shortcuts);
+        div().flex_none().pb_2().child(row).child(
+            div()
+                .px_4()
+                .pt_1()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(AppVersion::RUNNING.as_str()),
+        )
     }
 
     /// The PR this review is of, and the window-wide actions.

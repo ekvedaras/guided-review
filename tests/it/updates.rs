@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use guided_review::update::{
-    Installed, PublishedRelease, ReleaseAsset, SkillLink, Target, Update, UpdateOffer, Version,
-    find_update,
+    AppVersion, Installed, PublishedRelease, ReleaseAsset, SkillLink, Target, Update, UpdateOffer,
+    Version, find_update,
 };
 
 use crate::support::fake_ports::FakeReleases;
@@ -29,6 +30,30 @@ fn published(tag: &str, version: &str) -> PublishedRelease {
             })
             .collect(),
     }
+}
+
+#[test]
+fn the_app_shows_the_version_its_cli_prints() {
+    let printed = cargo_bin_cmd!("guided-review")
+        .arg("--version")
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(printed.stdout).unwrap(),
+        format!("guided-review {}\n", AppVersion::RUNNING)
+    );
+}
+
+#[test]
+fn the_running_version_names_the_release_and_the_commit_it_was_built_from() {
+    let shown = AppVersion::RUNNING.to_string();
+
+    assert!(
+        shown.starts_with(&format!("{} (", Version::running())),
+        "{shown}"
+    );
+    assert!(shown.ends_with(')'), "{shown}");
 }
 
 #[test]
