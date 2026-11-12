@@ -1,8 +1,8 @@
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::comments::{
-    CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult, Origin, Outcome,
-    QueuedComment, SendMode,
+    CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
+    CommentResult, Origin, Outcome, QueuedComment, SendMode,
 };
 use super::finish_review::{
     FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
@@ -19,7 +19,7 @@ use super::thread_actions::{
 };
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Everything the reviewer writes to GitHub: the drag that opens a comment box, the comments,
 /// replies and finished review, and what GitHub said about the pending review and the PR's author.
@@ -34,6 +34,12 @@ pub(super) struct CommentDesk {
     /// The text of each of the viewer's comments being edited. Not saved: an edit not sent is
     /// given up with the app, as the comment on GitHub is still whole.
     comment_edits: BTreeMap<CommentId, String>,
+    /// The comment box that takes the keys.
+    composing: Option<CommentPlace>,
+    /// Comment boxes whose text is on its way to GitHub.
+    sending: HashSet<CommentPlace>,
+    /// Why the last send from a comment box did not go, until it is sent again or given up.
+    send_problems: HashMap<CommentPlace, CommentProblem>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +74,26 @@ pub enum TextBox {
     Edit(CommentId),
     /// The body of the review being finished.
     FinishBody,
+}
+
+/// A comment box as it is drawn: its draft, what it is doing and what stops it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentBox<'a> {
+    pub draft: &'a CommentDraft,
+    pub state: BoxState,
+    /// Why the last send did not go, or else the tour being behind the PR.
+    pub problem: Option<CommentProblem>,
+}
+
+/// What a comment box is doing: only one of these at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BoxState {
+    /// Shown, but keys go elsewhere.
+    Idle,
+    /// Takes the keys.
+    Composing,
+    /// On its way to GitHub.
+    Sending,
 }
 
 /// Whether the tour shows the PR as it is now: a comment on an older tour may land on lines the tour does not show.
@@ -120,7 +146,7 @@ impl CommentDesk {
         self.selection = None;
     }
 
-    /// The drag ends: when the rows can take a comment, a draft opens on them.
+    /// The drag ends: when the rows can take a comment, a draft opens on them and takes the keys.
     pub(super) fn finish_selection(
         &mut self,
         state: &mut SavedState,
@@ -141,11 +167,12 @@ impl CommentDesk {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::of(&selected);
-        open_draft(state, &place, head)?;
+        self.open_draft(state, &place, head, None)?;
         Ok(Some(place))
     }
 
     pub(super) fn begin_file_comment(
+        &mut self,
         state: &mut SavedState,
         path: &FilePath,
         freshness: TourFreshness,
@@ -155,25 +182,42 @@ impl CommentDesk {
             return Err(CommentRefusal::TourIsOld);
         }
         let place = CommentPlace::on_file(path);
-        open_draft(state, &place, head)?;
+        self.open_draft(state, &place, head, None)?;
         Ok(place)
     }
 
     /// Opens a draft on the lines when there is none and puts `text` after what is typed already.
     pub(super) fn add_to_draft(
+        &mut self,
         state: &mut SavedState,
         selected: &SelectedLines,
         head: &Sha,
         text: &str,
     ) -> Result<CommentPlace, CommentRefusal> {
         let place = CommentPlace::of(selected);
+        self.open_draft(state, &place, head, Some(text))?;
+        Ok(place)
+    }
+
+    /// The box is open in memory even when its save fails; the reviewer learns its text is not
+    /// kept, and the box does not take the keys.
+    fn open_draft(
+        &mut self,
+        state: &mut SavedState,
+        place: &CommentPlace,
+        head: &Sha,
+        appended: Option<&str>,
+    ) -> Result<(), CommentRefusal> {
         state
             .record(|state| {
                 state.open_draft(place.clone(), Some(head));
-                append_to_draft(state, &place, text);
+                if let Some(text) = appended {
+                    append_to_draft(state, place, text);
+                }
             })
-            .map_err(|error| not_kept(&error))?;
-        Ok(place)
+            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
+        self.composing = Some(place.clone());
+        Ok(())
     }
 
     /// "Suggest change" shows only when the range starts and ends on lines of the head:
@@ -204,16 +248,49 @@ impl CommentDesk {
         state.record(|state| append_to_draft(state, place, &suggestion_block(&kept_lines)))
     }
 
-    /// `None` when there is no such draft.
-    pub(super) fn comment_request(
+    pub(super) fn composing(&self) -> Option<&CommentPlace> {
+        self.composing.as_ref()
+    }
+
+    pub(super) fn comment_boxes<'a>(
+        &'a self,
+        state: &'a ReviewState,
+        freshness: TourFreshness,
+    ) -> impl Iterator<Item = CommentBox<'a>> {
+        state.comment_drafts().iter().map(move |draft| {
+            let place = &draft.place;
+            let box_state = if self.sending.contains(place) {
+                BoxState::Sending
+            } else if self.composing.as_ref() == Some(place) {
+                BoxState::Composing
+            } else {
+                BoxState::Idle
+            };
+            let problem = self.send_problems.get(place).cloned().or_else(|| {
+                (freshness == TourFreshness::Behind)
+                    .then_some(CommentProblem::Refused(CommentRefusal::TourIsOld))
+            });
+            CommentBox {
+                draft,
+                state: box_state,
+                problem,
+            }
+        })
+    }
+
+    /// The box shows as sending, with no problem, until the outcome is applied. `None` when there
+    /// is no such draft.
+    pub(super) fn start_sending(
+        &mut self,
         state: &ReviewState,
         place: &CommentPlace,
         mode: SendMode,
         audience: Audience,
-        tour_head: &Sha,
-        pr: &PullRequestUrl,
+        (tour_head, pr): (&Sha, &PullRequestUrl),
     ) -> Option<CommentRequest> {
         let draft = state.draft_at(place)?.clone();
+        self.sending.insert(place.clone());
+        self.send_problems.remove(place);
         Some(CommentRequest::new(
             Origin::Draft,
             draft,
@@ -241,7 +318,39 @@ impl CommentDesk {
         ))
     }
 
+    /// An error means the outcome is in the state but its save failed. A comment box shows how
+    /// its send ended; a queued comment has no box.
     pub(super) fn apply_comment(
+        &mut self,
+        state: &mut SavedState,
+        outcome: CommentOutcome,
+        step: Option<StepId>,
+    ) -> anyhow::Result<CommentResult> {
+        let from_box =
+            (outcome.request.origin == Origin::Draft).then(|| outcome.request.draft.place.clone());
+        let result = state.record(|state| self.settle(state, outcome, step));
+        if let Some(place) = from_box {
+            self.show_landing(&place, &result);
+        }
+        result
+    }
+
+    /// A sent or queued comment closes the box; any other keeps it, with why.
+    fn show_landing(&mut self, place: &CommentPlace, result: &anyhow::Result<CommentResult>) {
+        self.sending.remove(place);
+        let problem = match result {
+            Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
+                self.composing = None;
+                return;
+            }
+            Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal.clone()),
+            Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.as_str().into()),
+            Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
+        };
+        self.send_problems.insert(place.clone(), problem);
+    }
+
+    fn settle(
         &mut self,
         state: &mut ReviewState,
         outcome: CommentOutcome,
@@ -338,7 +447,13 @@ impl CommentDesk {
         text_box: &TextBox,
     ) -> anyhow::Result<()> {
         match text_box {
-            TextBox::Draft(_) | TextBox::FinishBody => Ok(()),
+            TextBox::Draft(place) => {
+                if state.draft_at(place).is_some() {
+                    self.composing = Some(place.clone());
+                }
+                Ok(())
+            }
+            TextBox::FinishBody => Ok(()),
             TextBox::Reply(thread_id) => state.record(|state| state.open_reply(thread_id)),
             TextBox::Edit(comment_id) => {
                 self.open_edit(threads, comment_id);
@@ -375,6 +490,9 @@ impl CommentDesk {
         state: &mut SavedState,
         text_box: &TextBox,
     ) -> anyhow::Result<()> {
+        if let TextBox::Draft(place) = text_box {
+            self.stop_composing(place);
+        }
         let is_blank = self
             .text_of(state, text_box)
             .is_some_and(|text| text.trim().is_empty());
@@ -391,16 +509,26 @@ impl CommentDesk {
         text_box: &TextBox,
     ) -> anyhow::Result<()> {
         match text_box {
-            TextBox::Draft(place) => state.record(|state| {
-                state.drop_draft(place);
-                state.drop_queued(place);
-            }),
+            TextBox::Draft(place) => {
+                self.stop_composing(place);
+                self.send_problems.remove(place);
+                state.record(|state| {
+                    state.drop_draft(place);
+                    state.drop_queued(place);
+                })
+            }
             TextBox::Reply(thread_id) => state.record(|state| state.drop_reply(thread_id)),
             TextBox::Edit(comment_id) => {
                 self.comment_edits.remove(comment_id);
                 Ok(())
             }
             TextBox::FinishBody => state.record(|state| state.write_finish_body("")),
+        }
+    }
+
+    fn stop_composing(&mut self, place: &CommentPlace) {
+        if self.composing.as_ref() == Some(place) {
+            self.composing = None;
         }
     }
 
@@ -500,32 +628,17 @@ impl CommentDesk {
     }
 }
 
-fn open_draft(
-    state: &mut SavedState,
-    place: &CommentPlace,
-    head: &Sha,
-) -> Result<(), CommentRefusal> {
-    state
-        .record(|state| state.open_draft(place.clone(), Some(head)))
-        .map_err(|error| not_kept(&error))
-}
-
-/// The box is open in memory all the same; the reviewer learns its text is not kept.
-fn not_kept(error: &anyhow::Error) -> CommentRefusal {
-    CommentRefusal::NoAccess(format!("{error:#}"))
-}
-
-/// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.
 impl CommentOutcome {
     /// For a send that ended after its review was dropped, as when the window switched to another PR:
     /// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
     pub fn land_in(self, file: &ReviewStateFile) -> anyhow::Result<()> {
         file.update(|state| {
-            CommentDesk::default().apply_comment(state, self, None);
+            CommentDesk::default().settle(state, self, None);
         })
     }
 }
 
+/// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.
 fn append_to_draft(state: &mut ReviewState, place: &CommentPlace, text: &str) -> Option<String> {
     let written = state.draft_at(place)?.body.trim_end().to_owned();
     let body = if written.is_empty() {

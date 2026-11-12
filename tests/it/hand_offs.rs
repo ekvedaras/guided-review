@@ -131,7 +131,7 @@ fn send(
     audience: Audience,
     github: &FakeGitHub,
 ) -> CommentResult {
-    let request = review.comment_request_for(place, mode, audience).unwrap();
+    let request = review.start_sending(place, mode, audience).unwrap();
     review.apply_comment(request.run(github)).unwrap()
 }
 

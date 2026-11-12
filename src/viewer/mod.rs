@@ -60,7 +60,7 @@ pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
-pub use comment_desk::{TextBox, TourFreshness};
+pub use comment_desk::{BoxState, CommentBox, TextBox, TourFreshness};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
     CommentResult, QueuedComment, SendMode,

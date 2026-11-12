@@ -1,14 +1,15 @@
 //! The four text boxes the reviewer writes in, through one vocabulary: a draft comment on lines,
 //! a reply to a thread, an edit of one of the reviewer's comments, and the finished review's body.
 
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::app_path::AppPath;
+use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentId, PieceDiff, Review, ReviewStateFile, ReviewThread, Side, TextBox, ThreadComment,
-    ThreadId,
+    Audience, BoxState, CommentId, CommentPlace, CommentProblem, CommentRefusal, PieceDiff, Review,
+    ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -223,4 +224,154 @@ fn leaving_a_box_drops_it_when_nothing_was_written_and_keeps_it_when_something_w
 
         assert_eq!(review.text_of(&written), Some("why ten?"), "{kind:?}");
     }
+}
+
+fn written_comment_box(review: &mut Review) -> CommentPlace {
+    let TextBox::Draft(place) = open_box(review, Kind::Draft) else {
+        panic!("a click opens a comment box");
+    };
+    review
+        .type_in(&TextBox::Draft(place.clone()), "why ten?")
+        .unwrap();
+    place
+}
+
+fn state_of(review: &Review, place: &CommentPlace) -> Option<(BoxState, Option<CommentProblem>)> {
+    review
+        .comment_box(place)
+        .map(|comment_box| (comment_box.state, comment_box.problem))
+}
+
+#[test]
+fn a_comment_box_opened_by_a_click_takes_the_keys_until_it_is_left() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+
+    assert_eq!(review.composing(), Some(&place));
+    assert_eq!(state_of(&review, &place), Some((BoxState::Composing, None)));
+
+    review.leave(&TextBox::Draft(place.clone())).unwrap();
+
+    assert_eq!(review.composing(), None);
+    assert_eq!(state_of(&review, &place), Some((BoxState::Idle, None)));
+
+    review.open_box(&TextBox::Draft(place.clone())).unwrap();
+
+    assert_eq!(review.composing(), Some(&place));
+}
+
+#[test]
+fn a_comment_shows_as_sending_while_it_is_on_its_way_to_github() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+
+    let request = review
+        .start_sending(&place, SendMode::AddToReview, Audience::Author)
+        .unwrap();
+
+    assert_eq!(state_of(&review, &place), Some((BoxState::Sending, None)));
+    review.apply_comment(request.run(&github)).unwrap();
+}
+
+#[test]
+fn a_sent_or_queued_comment_closes_its_box() {
+    for (fault, result) in [
+        (None, "sent"),
+        (Some(GitHubFault::ConnectionLost), "queued"),
+    ] {
+        let pull = Pull::new();
+        let github = pull.github();
+        let mut review = pull.open();
+        let place = written_comment_box(&mut review);
+        if let Some(fault) = fault {
+            github.inject(fault);
+        }
+
+        review
+            .send_comment(&place, SendMode::AddToReview, &github)
+            .unwrap();
+
+        assert_eq!(state_of(&review, &place), None, "{result}");
+        assert_eq!(review.composing(), None, "{result}");
+    }
+}
+
+#[test]
+fn a_comment_github_rejects_keeps_its_box_with_the_reason() {
+    let pull = Pull::new();
+    let github = pull.github();
+    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+
+    review
+        .send_comment(&place, SendMode::AddToReview, &github)
+        .unwrap();
+
+    let Some((BoxState::Composing, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
+    else {
+        panic!("{:?}", state_of(&review, &place));
+    };
+    assert_eq!(review.text_of(&TextBox::Draft(place)), Some("why ten?"));
+}
+
+#[test]
+fn a_refused_comment_keeps_its_box_with_the_refusal_until_it_is_sent_again() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+    let moved_on = FakeGitHub::with_pull("main-tip", "newer-head", &pull.sent);
+
+    review
+        .send_comment(&place, SendMode::AddToReview, &moved_on)
+        .unwrap();
+
+    assert_eq!(
+        state_of(&review, &place),
+        Some((
+            BoxState::Composing,
+            Some(CommentProblem::Refused(CommentRefusal::TourIsOld))
+        ))
+    );
+
+    review
+        .start_sending(&place, SendMode::AddToReview, Audience::Author)
+        .unwrap();
+
+    assert_eq!(state_of(&review, &place), Some((BoxState::Sending, None)));
+}
+
+#[test]
+fn a_comment_box_says_the_tour_is_old_while_the_pr_has_moved_past_it() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+
+    review.pr_head_is(Sha::new("newer-head"));
+
+    assert_eq!(
+        state_of(&review, &place).and_then(|(_, problem)| problem),
+        Some(CommentProblem::Refused(CommentRefusal::TourIsOld))
+    );
+}
+
+#[test]
+fn a_discarded_comment_box_takes_its_problem_with_it() {
+    let pull = Pull::new();
+    let github = pull.github();
+    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+    review
+        .send_comment(&place, SendMode::AddToReview, &github)
+        .unwrap();
+
+    review.discard(&TextBox::Draft(place.clone())).unwrap();
+    let place_again = written_comment_box(&mut review);
+
+    assert_eq!(place_again, place);
+    assert_eq!(state_of(&review, &place), Some((BoxState::Composing, None)));
 }

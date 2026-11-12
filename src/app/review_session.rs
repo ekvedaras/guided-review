@@ -23,12 +23,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    AgentReplied, AgentStatus, Ask, Audience, CommentOutcome, CommentPlace, CommentProblem,
-    CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation,
-    NoteSubject, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
-    SendMode, StepId, SyncState, TextBox, ThreadAction, ThreadActionResult, ToastTone,
-    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
-    follow_outdated,
+    AgentReplied, AgentStatus, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
+    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Place,
+    Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
+    TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, WorkingCopy, follow_outdated,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -79,10 +78,6 @@ pub struct ReviewSession {
     image_cache: ImageCache,
     image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
     loading_images: HashSet<FilePath>,
-    /// The comment box that takes the keys.
-    composing: Option<CommentPlace>,
-    sending_comments: HashSet<CommentPlace>,
-    comment_problems: HashMap<CommentPlace, CommentProblem>,
     is_retrying_comments: bool,
     sync_state: SyncState,
     pr_head_check: Option<Task<()>>,
@@ -158,8 +153,6 @@ impl ReviewSession {
             &review,
             Vec::new(),
             &RowFacts {
-                comment_problems: &HashMap::new(),
-                sending_comments: &HashSet::new(),
                 open_details: &open_details,
             },
         );
@@ -184,9 +177,6 @@ impl ReviewSession {
             image_cache: ImageCache::under(&std::env::home_dir().unwrap_or_default()),
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
-            composing: None,
-            sending_comments: HashSet::new(),
-            comment_problems: HashMap::new(),
             is_retrying_comments: false,
             sync_state: SyncState::default(),
             pr_head_check: None,
@@ -253,23 +243,6 @@ impl ReviewSession {
         self.image_pictures.get(path).cloned()
     }
 
-    pub fn composing(&self) -> Option<&CommentPlace> {
-        self.composing.as_ref()
-    }
-
-    pub fn is_sending(&self, place: &CommentPlace) -> bool {
-        self.sending_comments.contains(place)
-    }
-
-    /// Why the comment cannot go: its last refusal, or else the tour being behind the PR.
-    pub fn comment_problem(&self, place: &CommentPlace) -> Option<CommentProblem> {
-        self.comment_problems.get(place).cloned().or_else(|| {
-            self.old_head
-                .as_ref()
-                .map(|_| CommentProblem::Refused(CommentRefusal::TourIsOld))
-        })
-    }
-
     pub fn change<T>(
         &mut self,
         cx: &mut Context<Self>,
@@ -309,21 +282,21 @@ impl ReviewSession {
         }
     }
 
+    /// Only the keys move; the rows stay as they are.
     pub fn compose(&mut self, place: CommentPlace, cx: &mut Context<Self>) {
-        self.composing = Some(place);
+        // Taking the keys is never refused: it changes nothing that is saved.
+        self.review.open_box(&TextBox::Draft(place)).ok();
         cx.notify();
     }
 
-    pub fn stop_composing(&mut self, cx: &mut Context<Self>) {
-        // A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
-        self.change_session(cx, |session| {
-            let left = session.composing.take();
-            match left {
-                Some(place) => session.review.leave(&TextBox::Draft(place)),
-                None => Ok(()),
-            }
-        })
-        .ok();
+    /// A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
+    pub fn leave(&mut self, text_box: &TextBox, cx: &mut Context<Self>) {
+        self.change(cx, |review| review.leave(text_box)).ok();
+    }
+
+    /// A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
+    pub fn discard(&mut self, text_box: &TextBox, cx: &mut Context<Self>) {
+        self.change(cx, |review| review.discard(text_box)).ok();
     }
 
     pub fn type_in(&mut self, text_box: &TextBox, text: &str, cx: &mut Context<Self>) {
@@ -345,30 +318,16 @@ impl ReviewSession {
         self.sync_after_debounce(cx);
     }
 
-    pub fn discard_comment(&mut self, place: &CommentPlace, cx: &mut Context<Self>) {
-        // A refused or failed save is one of the review's problems, which the rebuilt sidebar shows.
-        self.change_session(cx, |session| {
-            if session.composing.as_ref() == Some(place) {
-                session.composing = None;
-            }
-            session.comment_problems.remove(place);
-            session.review.discard(&TextBox::Draft(place.clone()))
-        })
-        .ok();
-    }
-
     pub fn send_comment(
         &mut self,
-        place: CommentPlace,
+        place: &CommentPlace,
         mode: SendMode,
         audience: Audience,
         cx: &mut Context<Self>,
     ) {
-        let Some(request) = self.review.comment_request_for(&place, mode, audience) else {
+        let Some(request) = self.review.start_sending(place, mode, audience) else {
             return;
         };
-        self.sending_comments.insert(place.clone());
-        self.comment_problems.remove(&place);
         let github = Arc::clone(&self.github);
         let state_file = self.review.state_file();
         cx.spawn(async move |this, cx| {
@@ -379,7 +338,7 @@ impl ReviewSession {
             let mut outcome = Some(outcome);
             let applied = this.update(cx, |this, cx| {
                 if let Some(outcome) = outcome.take() {
-                    this.comment_sent(&place, outcome, (mode, audience), cx);
+                    this.comment_sent(outcome, (mode, audience), cx);
                 }
             });
             // The window switched to another PR while this was in flight; the comment is not lost.
@@ -396,30 +355,12 @@ impl ReviewSession {
     /// shows its own note where the box was.
     fn comment_sent(
         &mut self,
-        place: &CommentPlace,
         outcome: CommentOutcome,
         (mode, audience): (SendMode, Audience),
         cx: &mut Context<Self>,
     ) {
-        let is_sent = self.change_session(cx, |session| {
-            session.sending_comments.remove(place);
-            let problem = match session.review.apply_comment(outcome) {
-                Ok(CommentResult::Sent) => {
-                    session.composing = None;
-                    return true;
-                }
-                Ok(CommentResult::Queued(_)) => {
-                    session.composing = None;
-                    return false;
-                }
-                Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal),
-                Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.into()),
-                Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
-            };
-            session.comment_problems.insert(place.clone(), problem);
-            false
-        });
-        if is_sent {
+        let result = self.change(cx, |review| review.apply_comment(outcome));
+        if matches!(result, Ok(CommentResult::Sent)) {
             post_toast(cx, ToastTone::Success, sent_note("Comment", mode, audience));
         }
         self.deliver_hand_offs(cx);
@@ -584,8 +525,6 @@ impl ReviewSession {
             &self.review,
             (self.asked_lines_of)(self.review.screen(), cx),
             &RowFacts {
-                comment_problems: &self.comment_problems,
-                sending_comments: &self.sending_comments,
                 open_details: &self.open_details,
             },
         );

@@ -93,7 +93,7 @@ impl Pull {
             .type_in(&TextBox::Draft(place.clone()), "why ten?")
             .unwrap();
         let request = review
-            .comment_request_for(&place, SendMode::CommentNow, Audience::Agent)
+            .start_sending(&place, SendMode::CommentNow, Audience::Agent)
             .unwrap();
         review.apply_comment(request.run(&github)).unwrap();
         review.hand_offs().all().first().unwrap().id()

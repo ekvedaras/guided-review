@@ -6,8 +6,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentId, CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation, Problem,
-    Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment, ThreadId,
+    Audience, CommentId, CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation,
+    Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment,
+    ThreadId,
 };
 use serde_json::json;
 
@@ -634,7 +635,7 @@ fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_o
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "on its way");
     let request = review
-        .comment_request(&place, SendMode::AddToReview)
+        .start_sending(&place, SendMode::AddToReview, Audience::Author)
         .unwrap();
     let outcome = request.run(&github);
     drop(review);
@@ -655,7 +656,7 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
     typed(&mut review, &place, "later");
     github.inject(GitHubFault::ConnectionLost);
     let request = review
-        .comment_request(&place, SendMode::AddToReview)
+        .start_sending(&place, SendMode::AddToReview, Audience::Author)
         .unwrap();
     let outcome = request.run(&github);
     drop(review);

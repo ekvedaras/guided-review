@@ -2,8 +2,8 @@
 //! The app runs the middle part on a background thread; tests run it in line.
 
 use guided_review::viewer::{
-    CommentPlace, CommentResult, FinishResult, GitHubPort, Read, Review, ReviewVerdict, SendMode,
-    ThreadAction, ThreadActionResult,
+    Audience, CommentPlace, CommentResult, FinishResult, GitHubPort, Read, Review, ReviewVerdict,
+    SendMode, ThreadAction, ThreadActionResult,
 };
 
 pub trait AppPath {
@@ -95,7 +95,7 @@ impl AppPath for Review {
         mode: SendMode,
         github: &dyn GitHubPort,
     ) -> anyhow::Result<Option<CommentResult>> {
-        let Some(request) = self.comment_request(place, mode) else {
+        let Some(request) = self.start_sending(place, mode, Audience::Author) else {
             return Ok(None);
         };
         self.apply_comment(request.run(github)).map(Some)

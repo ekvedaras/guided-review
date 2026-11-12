@@ -28,8 +28,7 @@ use crate::app::components::button::{
 use crate::app::components::card::card;
 use crate::app::components::chip::{callout, chip, dev_build_chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
-    CommentCapabilities, CommentComposer, ComposerActions, ComposerState, OnCompose,
-    QueuedCommentNote,
+    CommentCapabilities, CommentComposer, ComposerActions, OnCompose, QueuedCommentNote,
 };
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
@@ -86,10 +85,11 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
-    LineLocation, NextScreen, NoteSubject, NotesButton, PaletteAction, Place, QueuedComment,
-    ReadProgress, Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review, Screen, ScreenTravel,
-    SendMode, StepId, TextBox, ThreadId, ThreadView, ToastTone, TourLead, Travel,
+    AgentReplied, Ask, Audience, CodeLink, Command, CommentBox, CommentPlace, GitHubPort,
+    HandOffId, InFlight, LineLocation, NextScreen, NoteSubject, NotesButton, PaletteAction, Place,
+    QueuedComment, ReadProgress, Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review,
+    Screen, ScreenTravel, SendMode, StepId, TextBox, ThreadId, ThreadView, ToastTone, TourLead,
+    Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -647,8 +647,9 @@ impl OneStepLayout {
 
     fn queued_comment(&self, queued: &QueuedComment, cx: &mut Context<Self>) -> QueuedCommentNote {
         let on_discard = self.on_compose(&queued.draft.place, cx, |this, place, _, cx| {
-            this.session
-                .update(cx, |session, cx| session.discard_comment(&place, cx));
+            this.session.update(cx, |session, cx| {
+                session.discard(&TextBox::Draft(place), cx);
+            });
         });
         QueuedCommentNote::new(queued.clone(), on_discard)
     }
@@ -657,24 +658,17 @@ impl OneStepLayout {
     fn composer(&self, place: &CommentPlace, cx: &mut Context<Self>) -> Option<CommentComposer> {
         let session = self.session.read(cx);
         let review = session.review();
-        let draft = review
-            .comment_drafts()
-            .iter()
-            .find(|draft| &draft.place == place)?
-            .clone();
-        let state = if session.is_sending(place) {
-            ComposerState::Sending
-        } else if session.composing() == Some(place) {
-            ComposerState::Composing
-        } else {
-            ComposerState::Idle
-        };
+        let CommentBox {
+            draft,
+            state,
+            problem,
+        } = review.comment_box(place)?;
+        let draft = draft.clone();
         let capabilities = CommentCapabilities {
             comment_now: review.can_comment_now(),
             suggest_change: review.can_suggest_change(place),
             ask_agent: session.agent_link_is_on(),
         };
-        let problem = session.comment_problem(place);
         let ask_place = review.ask_place_of(place);
         let on_type = {
             let (layout, draft) = (cx.entity(), TextBox::Draft(place.clone()));
@@ -692,31 +686,32 @@ impl OneStepLayout {
                 window.focus(&this.composer_focus, cx);
             }),
             on_type,
-            on_stop: self.on_compose(place, cx, |this, _, window, cx| {
-                this.session.update(cx, ReviewSession::stop_composing);
+            on_stop: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session
+                    .update(cx, |session, cx| session.leave(&TextBox::Draft(place), cx));
                 window.focus(&this.focus, cx);
             }),
             on_add_to_review: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::AddToReview, Audience::Author, cx);
+                    session.send_comment(&place, SendMode::AddToReview, Audience::Author, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
             on_comment_now: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::CommentNow, Audience::Author, cx);
+                    session.send_comment(&place, SendMode::CommentNow, Audience::Author, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
             on_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::AddToReview, Audience::Agent, cx);
+                    session.send_comment(&place, SendMode::AddToReview, Audience::Agent, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
             on_ask_agent_now: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
-                    session.send_comment(place, SendMode::CommentNow, Audience::Agent, cx);
+                    session.send_comment(&place, SendMode::CommentNow, Audience::Agent, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
@@ -727,8 +722,9 @@ impl OneStepLayout {
                 window.focus(&this.composer_focus, cx);
             }),
             on_discard: self.on_compose(place, cx, |this, place, window, cx| {
-                this.session
-                    .update(cx, |session, cx| session.discard_comment(&place, cx));
+                this.session.update(cx, |session, cx| {
+                    session.discard(&TextBox::Draft(place), cx);
+                });
                 window.focus(&this.focus, cx);
             }),
         };
@@ -2094,9 +2090,7 @@ fn change_box(
         ReplyDraftChange::Open => {
             session.change(cx, |review| review.open_box(text_box)).ok();
         }
-        ReplyDraftChange::Discard => {
-            session.change(cx, |review| review.discard(text_box)).ok();
-        }
+        ReplyDraftChange::Discard => session.discard(text_box, cx),
     }
 }
 
@@ -2839,7 +2833,7 @@ impl Focusable for OneStepLayout {
 impl Render for OneStepLayout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let is_composing = self.session.read(cx).composing().is_some();
+        let is_composing = self.session.read(cx).review().composing().is_some();
         let key_context = if is_composing {
             format!("{} {}", Self::KEY_CONTEXT, CommentComposer::KEY_CONTEXT)
         } else {

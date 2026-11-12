@@ -8,7 +8,7 @@
 //! Rows on screen are measured on every frame anyway, so the key matters for the rows off screen.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 use std::path::PathBuf;
@@ -26,10 +26,10 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::{
-    CodeLink, CommentPlace, CommentProblem, FileBlock, HiddenLines, JumpPlace, JumpTarget,
-    LineKind, LineLocation, Markdown, NextScreen, NoteSubject, NotesButton, PieceDiff, Place,
-    QueuedComment, Review, RowSelection, SafetyNetPage, Screen, StepId, StepPage, SummaryStats,
-    ThreadView, TourLead, hidden_lines_after, hidden_lines_before,
+    BoxState, CodeLink, CommentPlace, CommentProblem, FileBlock, HiddenLines, JumpPlace,
+    JumpTarget, LineKind, LineLocation, Markdown, NextScreen, NoteSubject, NotesButton, PieceDiff,
+    Place, QueuedComment, Review, RowSelection, SafetyNetPage, Screen, StepId, StepPage,
+    SummaryStats, ThreadView, TourLead, hidden_lines_after, hidden_lines_before,
 };
 
 /// An ask button and what it asks about.
@@ -912,7 +912,7 @@ impl UnderLine {
         match self {
             Self::Thread(view) => thread_row(view, ThreadRowPlace::UnderLine, facts),
             Self::Queued(queued) => PageRow::QueuedComment(Rc::new(queued)),
-            Self::Composer(place) => composer_row(place, review, facts),
+            Self::Composer(place) => composer_row(place, review),
             Self::AskMarker(ask) => PageRow::AskMarker(Rc::new(ask)),
         }
     }
@@ -978,9 +978,8 @@ fn under_lines(review: &Review, asked_lines: &[Place]) -> Vec<UnderLine> {
         .cloned()
         .map(UnderLine::Queued);
     let composers = review
-        .comment_drafts()
-        .iter()
-        .map(|draft| UnderLine::Composer(draft.place.clone()));
+        .comment_boxes()
+        .map(|comment_box| UnderLine::Composer(comment_box.draft.place.clone()));
     let markers = asked_lines.iter().filter_map(|place| {
         let Place::Lines { start, end, .. } = place else {
             return None;
@@ -996,8 +995,6 @@ fn under_lines(review: &Review, asked_lines: &[Place]) -> Vec<UnderLine> {
 
 /// What the layout knows that changes the height of rows and the review does not.
 pub struct RowFacts<'a> {
-    pub comment_problems: &'a HashMap<CommentPlace, CommentProblem>,
-    pub sending_comments: &'a HashSet<CommentPlace>,
     pub open_details: &'a OpenDetails,
 }
 
@@ -1331,16 +1328,12 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace, facts: &RowFacts) -> Page
     }
 }
 
-fn composer_row(place: CommentPlace, review: &Review, facts: &RowFacts) -> PageRow {
-    let text = review
-        .comment_drafts()
-        .iter()
-        .find(|draft| draft.place == place)
-        .map_or("", |draft| draft.body.as_str());
+fn composer_row(place: CommentPlace, review: &Review) -> PageRow {
+    let comment_box = review.comment_box(&place);
     PageRow::Composer {
-        text_lines: line_count(text),
-        problem: facts.comment_problems.get(&place).cloned(),
-        is_sending: facts.sending_comments.contains(&place),
+        text_lines: line_count(comment_box.as_ref().map_or("", |shown| &shown.draft.body)),
+        problem: comment_box.as_ref().and_then(|shown| shown.problem.clone()),
+        is_sending: comment_box.is_some_and(|shown| shown.state == BoxState::Sending),
         place: Rc::new(place),
     }
 }

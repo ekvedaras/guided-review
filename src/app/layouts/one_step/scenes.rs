@@ -348,14 +348,13 @@ impl OneStepLayout {
             }
             Scene::CommentComposer => {
                 self.session.update(cx, |session, cx| {
-                    let places: Vec<_> = session
+                    let drafts: Vec<_> = session
                         .review()
-                        .comment_drafts()
-                        .iter()
-                        .map(|draft| draft.place.clone())
+                        .comment_boxes()
+                        .map(|comment_box| TextBox::Draft(comment_box.draft.place.clone()))
                         .collect();
-                    for place in &places {
-                        session.discard_comment(place, cx);
+                    for draft in &drafts {
+                        session.discard(draft, cx);
                     }
                 });
                 window.focus(&self.focus, cx);
@@ -427,7 +426,7 @@ impl OneStepLayout {
         self.on_row_gesture(RowGesture::Over, last, cx);
         self.end_row_selection(window, cx);
         self.session.update(cx, |session, cx| {
-            if let Some(place) = session.composing().cloned() {
+            if let Some(place) = session.review().composing().cloned() {
                 let draft = TextBox::Draft(place);
                 session.type_in(&draft, "Should a blank value be refused here?", cx);
             }

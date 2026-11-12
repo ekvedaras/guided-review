@@ -15,7 +15,7 @@ use super::ask::{Ask, Place};
 use super::ask_context;
 use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
-use super::comment_desk::{CommentDesk, TextBox, TourFreshness};
+use super::comment_desk::{CommentBox, CommentDesk, TextBox, TourFreshness};
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
@@ -633,7 +633,8 @@ impl Review {
             return Err(CommentRefusal::NotInsideHunk);
         }
         let answer = ask.latest_answer().ok_or(CommentRefusal::NoAnswerYet)?;
-        CommentDesk::add_to_draft(&mut self.state, &selected, &self.head, answer)
+        self.comment_desk
+            .add_to_draft(&mut self.state, &selected, &self.head, answer)
     }
 
     /// The rows an Ask about lines or a piece is on, in its step at the tour head.
@@ -1081,7 +1082,8 @@ impl Review {
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
     pub fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
         let freshness = self.tour_freshness();
-        CommentDesk::begin_file_comment(&mut self.state, path, freshness, &self.head)
+        self.comment_desk
+            .begin_file_comment(&mut self.state, path, freshness, &self.head)
     }
 
     /// Every row the current screen shows, top to bottom.
@@ -1140,19 +1142,32 @@ impl Review {
         Some(rows.lines().to_vec())
     }
 
-    /// `None` when there is no such draft.
-    pub fn comment_request(&self, place: &CommentPlace, mode: SendMode) -> Option<CommentRequest> {
-        self.comment_request_for(place, mode, Audience::Author)
+    /// The comment boxes open on this review, each with what it is doing; each hangs under the
+    /// last line of its place, or under the picture of its file.
+    pub fn comment_boxes(&self) -> impl Iterator<Item = CommentBox<'_>> {
+        self.comment_desk
+            .comment_boxes(&self.state, self.tour_freshness())
     }
 
-    /// `None` when there is no such draft.
-    pub fn comment_request_for(
-        &self,
+    pub fn comment_box(&self, place: &CommentPlace) -> Option<CommentBox<'_>> {
+        self.comment_boxes()
+            .find(|comment_box| &comment_box.draft.place == place)
+    }
+
+    /// The comment box that takes the keys.
+    pub fn composing(&self) -> Option<&CommentPlace> {
+        self.comment_desk.composing()
+    }
+
+    /// The box shows as sending until `apply_comment` takes the outcome. `None` when there is no such draft.
+    pub fn start_sending(
+        &mut self,
         place: &CommentPlace,
         mode: SendMode,
         audience: Audience,
     ) -> Option<CommentRequest> {
-        CommentDesk::comment_request(&self.state, place, mode, audience, &self.head, &self.pr)
+        self.comment_desk
+            .start_sending(&self.state, place, mode, audience, (&self.head, &self.pr))
     }
 
     pub fn hand_offs(&self) -> &HandOffs {
@@ -1189,10 +1204,9 @@ impl Review {
             _ => None,
         };
         let hand_offs_before = self.state.hand_offs().all().len();
-        let comment_desk = &mut self.comment_desk;
         let result = self
-            .state
-            .record(|state| comment_desk.apply_comment(state, outcome, step));
+            .comment_desk
+            .apply_comment(&mut self.state, outcome, step);
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
         result
