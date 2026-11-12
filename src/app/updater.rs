@@ -5,7 +5,8 @@ use gpui::{App, AppContext, Context, Entity, EventEmitter, Global, SharedString,
 
 use crate::github::GitHub;
 use crate::update::{
-    Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version, find_update,
+    InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version,
+    find_update,
 };
 use crate::viewer::ToastTone;
 
@@ -55,6 +56,14 @@ impl Updates {
         });
         cx.set_global(Self(updater));
     }
+}
+
+/// Looked up again for each review opened, so removing the binary named clears it.
+pub fn release_install_in_the_way() -> Option<InTheWay> {
+    let home = std::env::home_dir()?;
+    let exe = std::env::current_exe().ok()?;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    ReleaseInstall::in_home(&home).in_the_way(&exe, &path)
 }
 
 /// An update is installed and the app should restart into it.

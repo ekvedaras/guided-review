@@ -2,6 +2,7 @@ use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
+use guided_review::update::InTheWay;
 use guided_review::viewer::{Problem, ProblemKind, Read, Review, ReviewStateFile};
 use serde_json::json;
 
@@ -107,6 +108,42 @@ fn a_tour_that_could_not_be_read_again_is_a_problem_that_says_the_screen_shows_i
     assert_eq!(
         problem.to_string(),
         "The tour could not be read again, so it shows as it was: no tour file"
+    );
+}
+
+#[test]
+fn a_source_build_running_in_place_of_the_release_install_names_the_binary_to_remove() {
+    let (_repo, mut review) = open_review();
+
+    review.raise_problem(Problem::ReleaseInstallInTheWay(InTheWay::Runs {
+        binary: "/Users/me/.cargo/bin/guided-review".into(),
+        release_install: "/Users/me/.local/bin/guided-review".into(),
+    }));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(
+        problem.to_string(),
+        "Updates do not reach this app: it runs /Users/me/.cargo/bin/guided-review, not the release \
+         install /Users/me/.local/bin/guided-review. Remove /Users/me/.cargo/bin/guided-review and \
+         start guided-review again."
+    );
+}
+
+#[test]
+fn a_guided_review_before_the_release_install_on_path_names_the_binary_to_remove() {
+    let (_repo, mut review) = open_review();
+
+    review.raise_problem(Problem::ReleaseInstallInTheWay(InTheWay::FirstOnPath {
+        binary: "/Users/me/.cargo/bin/guided-review".into(),
+        release_install: "/Users/me/.local/bin/guided-review".into(),
+    }));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(
+        problem.to_string(),
+        "Updates do not reach guided-review in a terminal or the tour skill: \
+         /Users/me/.cargo/bin/guided-review comes before the release install \
+         /Users/me/.local/bin/guided-review on PATH. Remove /Users/me/.cargo/bin/guided-review."
     );
 }
 

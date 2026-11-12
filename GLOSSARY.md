@@ -76,6 +76,8 @@
 
 **Release install**: The app as the README installs a release: each version in its own folder under `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` (and usually `~/.claude/skills/tour`) linked into the newest. Only a release install updates itself. Avoid: managed install.
 
+**In the way**: Of the release install: another `guided-review` that the app runs instead of it, or that comes before its bin link on `PATH`, so updates never reach the reviewer. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary to remove. Avoid: shadowing.
+
 **Update**: A published release newer than the running app, built for this Mac, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
 
 **Toast**: A short note at the bottom right of the window about an outcome that is otherwise easy to miss. It leaves by itself unless it tells of a failure. Avoid: notification, snackbar.

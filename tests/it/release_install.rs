@@ -1,10 +1,13 @@
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use guided_review::update::{ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version};
+use guided_review::update::{
+    InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
+};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
@@ -114,9 +117,7 @@ fn the_binary_the_bin_link_points_into_the_release_folders_at_is_a_release_insta
 #[test]
 fn a_binary_built_from_source_is_not_a_release_install() {
     let home = Home::with_release_installed();
-    let cargo_bin = home.path().join(".cargo/bin/guided-review");
-    fs::create_dir_all(cargo_bin.parent().unwrap()).unwrap();
-    fs::write(&cargo_bin, "binary from source").unwrap();
+    let cargo_bin = home.source_build();
 
     assert!(!home.install().runs(&cargo_bin));
 }
@@ -140,6 +141,87 @@ fn a_bin_link_pointing_outside_the_release_folders_is_not_a_release_install() {
     symlink(&elsewhere, home.bin_link()).unwrap();
 
     assert!(!home.install().runs(&elsewhere));
+}
+
+impl Home {
+    fn source_build(&self) -> PathBuf {
+        let cargo_bin = self.path().join(".cargo/bin/guided-review");
+        fs::create_dir_all(cargo_bin.parent().unwrap()).unwrap();
+        fs::write(&cargo_bin, "binary from source").unwrap();
+        cargo_bin
+    }
+
+    fn bin_folder(&self) -> PathBuf {
+        self.path().join(".local/bin")
+    }
+
+    fn cargo_bin_folder(&self) -> PathBuf {
+        self.path().join(".cargo/bin")
+    }
+}
+
+fn path_of(folders: &[PathBuf]) -> OsString {
+    std::env::join_paths(folders).unwrap()
+}
+
+#[test]
+fn the_release_install_running_and_first_on_path_has_nothing_in_its_way() {
+    let home = Home::with_release_installed();
+    let path = path_of(&[home.path().join("empty"), home.bin_folder()]);
+
+    assert_eq!(home.install().in_the_way(&home.bin_link(), &path), None);
+}
+
+#[test]
+fn a_source_build_running_while_a_release_is_installed_is_in_its_way() {
+    let home = Home::with_release_installed();
+    let cargo_bin = home.source_build();
+    let path = path_of(&[home.cargo_bin_folder(), home.bin_folder()]);
+
+    assert_eq!(
+        home.install().in_the_way(&cargo_bin, &path),
+        Some(InTheWay::Runs {
+            binary: cargo_bin,
+            release_install: home.bin_link(),
+        })
+    );
+}
+
+#[test]
+fn a_guided_review_before_the_bin_link_on_path_is_in_the_way_of_the_running_release_install() {
+    let home = Home::with_release_installed();
+    let cargo_bin = home.source_build();
+    let path = path_of(&[home.cargo_bin_folder(), home.bin_folder()]);
+
+    assert_eq!(
+        home.install().in_the_way(&home.bin_link(), &path),
+        Some(InTheWay::FirstOnPath {
+            binary: cargo_bin,
+            release_install: home.bin_link(),
+        })
+    );
+}
+
+#[test]
+fn another_link_to_the_release_install_first_on_path_is_not_in_its_way() {
+    let home = Home::with_release_installed();
+    let other_link = home.path().join("other/bin/guided-review");
+    fs::create_dir_all(other_link.parent().unwrap()).unwrap();
+    symlink(home.bin_link(), &other_link).unwrap();
+    let path = path_of(&[home.path().join("other/bin"), home.bin_folder()]);
+
+    assert_eq!(home.install().in_the_way(&home.bin_link(), &path), None);
+}
+
+#[test]
+fn a_source_build_with_no_release_installed_has_nothing_to_be_in_the_way_of() {
+    let home = Home {
+        dir: TempDir::new().unwrap(),
+    };
+    let cargo_bin = home.source_build();
+    let path = path_of(&[home.cargo_bin_folder()]);
+
+    assert_eq!(home.install().in_the_way(&cargo_bin, &path), None);
 }
 
 #[test]

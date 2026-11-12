@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use anyhow::Context;
 
-pub use release_install::{Installed, ReleaseInstall, SkillLink};
+pub use release_install::{InTheWay, Installed, ReleaseInstall, SkillLink};
 
 /// The build of this binary as `--version` prints it and the app shows it: the release version and
 /// the commit it was built from, marked `-dirty` when built with uncommitted changes.
