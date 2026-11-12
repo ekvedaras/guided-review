@@ -142,6 +142,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
                 "Refused: Save says why under the setting.\n\n> each problem shown under its setting",
                 Vec::new(),
             ),
+            comment("c4", "you", "Never mind, I see it now.", Vec::new()),
         ]
     } else {
         vec![comment(
@@ -172,6 +173,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         commented_lines: Arc::from(Vec::new()),
         reply_draft: None,
         edit_drafts: BTreeMap::new(),
+        delete_asked: is_open.then(|| CommentId::new("c4")),
         hand_off_line: is_open.then(|| Arc::from("The agent is working on it")),
         agent_is_working: is_open,
         failed_hand_off: None,
@@ -187,6 +189,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         ThreadChanges {
             on_reply_draft: Rc::new(|_, _| {}),
             on_comment_edit: Rc::new(|_, _, _| {}),
+            on_delete_question: Rc::new(|_, _, _| {}),
             on_toggle: Box::new(|_, _, _| {}),
             on_action: Rc::new(|_, _, _| {}),
             on_try_hand_off_again: Rc::new(|_, _| {}),

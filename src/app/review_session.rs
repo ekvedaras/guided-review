@@ -827,12 +827,14 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     }
 }
 
-/// What a toast says once a thread action went through; an edit or a reaction shows in place.
+/// What a toast says once a thread action went through; an edit or a reaction shows in place,
+/// a deleted comment is gone, so a toast says it was.
 fn thread_action_note(action: &ThreadAction) -> Option<String> {
     match action {
         ThreadAction::Reply { mode, audience, .. } => Some(sent_note("Reply", *mode, *audience)),
         ThreadAction::Resolve { .. } => Some("Thread resolved".to_owned()),
         ThreadAction::Unresolve { .. } => Some("Thread unresolved".to_owned()),
+        ThreadAction::DeleteComment { .. } => Some("Comment deleted".to_owned()),
         ThreadAction::EditComment { .. } | ThreadAction::SetReaction { .. } => None,
     }
 }

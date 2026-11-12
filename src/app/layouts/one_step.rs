@@ -65,8 +65,8 @@ use crate::app::components::sidebar_row::{
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
-    OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
-    ThreadChanges, ThreadDrafts, ThreadElement,
+    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnReplyDraft, OnThreadAction,
+    OnTryHandOffAgain, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -724,6 +724,18 @@ impl OneStepLayout {
         })
     }
 
+    fn on_delete_question(&self) -> OnDeleteQuestion {
+        let session = self.session.clone();
+        Rc::new(move |comment_id, question, cx| {
+            session.update(cx, |session, cx| {
+                session.change(cx, |review| match question {
+                    DeleteQuestion::Ask => review.ask_to_delete(comment_id),
+                    DeleteQuestion::Withdraw => review.withdraw_delete(),
+                });
+            });
+        })
+    }
+
     fn on_finish_body_edit(&self) -> OnBodyEdit {
         let session = self.session.clone();
         Rc::new(move |text, cx| {
@@ -770,6 +782,7 @@ impl OneStepLayout {
             ThreadChanges {
                 on_reply_draft: self.on_reply_draft(&view.thread.id),
                 on_comment_edit: self.on_comment_edit(),
+                on_delete_question: self.on_delete_question(),
                 on_toggle: Box::new(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.toggle_thread_fold(&id));
                 })),

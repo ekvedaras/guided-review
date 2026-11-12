@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -65,6 +65,9 @@ pub enum GitHubCall {
     EditComment {
         comment_id: CommentId,
         body: String,
+    },
+    DeleteComment {
+        comment_id: CommentId,
     },
     Submit {
         verdict: ReviewVerdict,
@@ -135,6 +138,7 @@ pub struct FakeGitHub {
     resolved_now: Mutex<BTreeMap<ThreadId, bool>>,
     reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
     edited_now: Mutex<BTreeMap<CommentId, String>>,
+    deleted_now: Mutex<BTreeSet<CommentId>>,
     description: Mutex<String>,
 }
 
@@ -153,6 +157,7 @@ impl FakeGitHub {
             resolved_now: Mutex::default(),
             reacted_now: Mutex::default(),
             edited_now: Mutex::default(),
+            deleted_now: Mutex::default(),
             description: Mutex::default(),
         }
     }
@@ -361,8 +366,12 @@ impl ReviewThreadsPort for FakeGitHub {
         let resolved = self.resolved_now.lock().unwrap();
         let reacted = self.reacted_now.lock().unwrap();
         let edited = self.edited_now.lock().unwrap();
+        let deleted = self.deleted_now.lock().unwrap();
         let mut threads = self.threads.clone();
         for thread in &mut threads {
+            thread
+                .comments
+                .retain(|comment| !deleted.contains(&comment.id));
             if let Some(is_resolved) = resolved.get(&thread.id) {
                 thread.is_resolved = *is_resolved;
             }
@@ -385,6 +394,7 @@ impl ReviewThreadsPort for FakeGitHub {
                 }
             }
         }
+        threads.retain(|thread| !thread.comments.is_empty());
         Ok(threads)
     }
 
@@ -465,6 +475,15 @@ impl ReviewThreadsPort for FakeGitHub {
             .lock()
             .unwrap()
             .insert(comment_id.clone(), body.to_owned());
+        Ok(())
+    }
+
+    fn delete_comment(&self, comment_id: &CommentId) -> Result<(), GitHubError> {
+        self.sent.record(GitHubCall::DeleteComment {
+            comment_id: comment_id.clone(),
+        });
+        self.fail_if_connection_lost()?;
+        self.deleted_now.lock().unwrap().insert(comment_id.clone());
         Ok(())
     }
 }
