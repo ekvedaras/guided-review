@@ -97,6 +97,20 @@ fn problems_are_listed_in_the_order_of_their_kinds_not_of_when_they_were_raised(
 }
 
 #[test]
+fn a_tour_that_could_not_be_read_again_is_a_problem_that_says_the_screen_shows_it_as_it_was() {
+    let (_repo, mut review) = open_review();
+
+    review.reload_failed(&anyhow::anyhow!("no tour file"));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(problem, Problem::TourNotReloaded("no tour file".into()));
+    assert_eq!(
+        problem.to_string(),
+        "The tour could not be read again, so it shows as it was: no tour file"
+    );
+}
+
+#[test]
 fn a_failed_show_agent_is_listed_with_the_text_the_sidebar_always_gave_it() {
     let (_repo, mut review) = open_review();
 

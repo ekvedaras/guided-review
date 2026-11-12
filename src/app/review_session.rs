@@ -453,7 +453,7 @@ impl ReviewSession {
     }
 
     /// Runs when `open` names the PR already shown: the tour file is read again and the screen stays.
-    /// A failed read keeps the review on screen and is printed for the app's log.
+    /// A failed read keeps the review on screen and is one of its problems.
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
         let reloader = Arc::clone(&self.tour_work.reloader);
         self.reload = Some(self.run_off_thread(
@@ -461,7 +461,10 @@ impl ReviewSession {
             move || reloader.run(),
             |this, reloaded, cx| match reloaded {
                 Ok(reloaded) => this.reopen(reloaded, cx),
-                Err(error) => eprintln!("could not reload the tour: {error:#}"),
+                Err(error) => {
+                    this.review.reload_failed(&error);
+                    this.show_problems(cx);
+                }
             },
         ));
     }

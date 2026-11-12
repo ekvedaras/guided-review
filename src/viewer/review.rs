@@ -1491,6 +1491,11 @@ impl ReviewCore {
         self.raise_problem(Problem::TourNotRefreshed(format!("{error:#}")));
     }
 
+    /// `open` named the PR shown and its tour file could not be read again.
+    pub fn reload_failed(&mut self, error: &anyhow::Error) {
+        self.raise_problem(Problem::TourNotReloaded(format!("{error:#}")));
+    }
+
     pub fn repin_failed(&mut self) {
         self.state.repin_failed();
     }
