@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::motion::{OVERLAY, STATE, fade_in, fade_out};
-use super::palette::{CARD_RADIUS, CONTROL_RADIUS, Colors, TEXT_FONT};
+use super::palette::{CARD_RADIUS, CONTROL_RADIUS, Colors, TEXT_FONT, inside_edge};
 
 /// The layer a modal overlay sits in: it covers the window, takes every click, and fades its
 /// scrim in under the panel. The caller adds the close on a click outside and the panel.
@@ -93,9 +93,10 @@ pub fn picker_row(colors: &Colors, id: impl Into<ElementId>, is_selected: bool) 
         .active(|row| row.bg(colors.pressed))
 }
 
-/// The strip under a picker's rows that names its keys.
+/// The strip under a picker's rows that names its keys, at the foot of an `overlay_panel`.
 pub fn picker_footer(colors: &Colors) -> Div {
     div()
+        .rounded_b(px(inside_edge(CARD_RADIUS)))
         .px_4()
         .py_2()
         .flex()

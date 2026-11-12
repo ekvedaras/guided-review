@@ -10,6 +10,8 @@ Components read colour roles from `Colors` and the three radii from `src/app/com
 
 Three, so corners agree: `CARD_RADIUS` 12 for cards, file boxes, callouts and sheets; `CONTROL_RADIUS` 8 for buttons, fields, rows and segmented tracks; `INNER_RADIUS` 6 for what sits inside a control or is too small for 8 (a segment's thumb, a chip, a key cap). `rounded_full` is for dots, discs and meters only, not for labels: a pill around a label is the tell 1775047 removed.
 
+2026-11-12: gpui clips children to a rectangle, never to the parent's rounded corners, even with `overflow_hidden`. So a child that paints its own ground along the edge of a rounded surface (the Settings sheet's action bar, a picker's key footer, a suggested change's head, a diff box's rows) rounds the corners it touches itself, with `inside_edge(radius)` from `palette.rs`: the surface's radius less its 1 px border. Without it the child's ground shows as a square patch past the curve, as the Settings sheet's foot and the pickers' footers did in both appearances.
+
 ## Spacing and edges
 
 The scale is gpui's 4 px steps. What lines up:

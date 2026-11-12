@@ -20,7 +20,7 @@ use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines}
 use super::diagram::{DiagramSet, DiagramView};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, inside_edge};
 use super::picture_zoom::{ZoomedPicture, zoom_picture};
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
@@ -418,6 +418,7 @@ fn suggestion_view(colors: &Colors, removed: &[Arc<str>], added: &[SharedString]
             div()
                 .px_2()
                 .py_1()
+                .rounded_t(px(inside_edge(CONTROL_RADIUS)))
                 .bg(colors.header_band())
                 .border_b_1()
                 .border_color(colors.subtle_border)
