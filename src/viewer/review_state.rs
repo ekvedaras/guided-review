@@ -321,6 +321,11 @@ impl ReviewState {
         body.clone_into(&mut self.viewer.pr_description);
     }
 
+    /// The Ask desk keeps the Asks and saves them itself, so the viewer's copy holds none.
+    pub(super) fn take_asks(&mut self) -> Vec<Ask> {
+        std::mem::take(&mut self.asks)
+    }
+
     pub(super) fn take_viewer_sections(&mut self, from: &Self) {
         self.viewer = from.viewer.clone();
         self.typed = from.typed.clone();

@@ -567,16 +567,18 @@ fn comments_and_asks(review: &ReviewCore) -> Vec<UnderLine> {
     let boxes = review
         .comment_boxes()
         .map(|comment_box| UnderLine::CommentBox(comment_box.draft.place.clone()));
-    let markers = review.asked_lines().iter().filter_map(|place| {
-        let Place::Lines { start, end, .. } = place else {
-            return None;
-        };
-        Some(UnderLine::AskMarker(AskAt {
-            id: format!("ask-lines-{}-{}-{}", end.path, start.line, end.line).into(),
-            place: place.clone(),
-            label: place.lines_label()?,
-        }))
-    });
+    let markers = review
+        .asks()
+        .asked_lines_on(review.screen())
+        .into_iter()
+        .filter_map(|place| {
+            let Place::Lines { start, end, .. } = &place else {
+                return None;
+            };
+            let id = format!("ask-lines-{}-{}-{}", end.path, start.line, end.line).into();
+            let label = place.lines_label()?;
+            Some(UnderLine::AskMarker(AskAt { id, place, label }))
+        });
     queued.chain(boxes).chain(markers).collect()
 }
 

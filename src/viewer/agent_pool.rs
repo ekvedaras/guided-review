@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 use super::ask::AskId;
 
 /// Which Asks have a live AI process. Each process costs memory and plan limits, so only a few
-/// stay live; a stopped Ask comes back with `--resume` on its next question. The shell owns the
-/// processes and the clock and does what the pool decides.
+/// stay live; a stopped Ask comes back with `--resume` on its next question. The Ask desk asks
+/// it and has the shell's processes do what it decides.
 #[derive(Debug)]
 pub struct AgentPool {
     max_live: usize,

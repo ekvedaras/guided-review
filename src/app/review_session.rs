@@ -24,7 +24,7 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
-    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Place,
+    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead,
     RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen, SendMode, TextBox,
     ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
     TourReloader, TourRepinner, WorkPorts, line_count,
@@ -41,9 +41,6 @@ pub struct TourWork {
     pub reloader: Arc<TourReloader>,
     pub tour_agents: TourAgents,
 }
-
-/// The selected lines with Asks on a screen. They live in the Ask panel, and each gets a row marker.
-pub type AskedLinesOf = Box<dyn Fn(&Screen, &App) -> Vec<Place>>;
 
 pub enum SessionEvent {
     /// A re-pin or a Refresh replaced the review: what the layout keeps about the old one is stale.
@@ -64,7 +61,6 @@ pub struct ReviewSession {
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
-    asked_lines_of: AskedLinesOf,
     github: Arc<dyn GitHubPort>,
     source: Arc<dyn CodeSource>,
     tour_work: TourWork,
@@ -103,7 +99,6 @@ pub struct SessionWiring {
     pub source: Arc<dyn CodeSource>,
     pub github: Arc<dyn GitHubPort>,
     pub tour_work: TourWork,
-    pub asked_lines_of: AskedLinesOf,
     pub frame_stats: FrameStatsHook,
 }
 
@@ -120,7 +115,6 @@ impl ReviewSession {
             source,
             github,
             tour_work,
-            asked_lines_of,
             frame_stats,
         } = wiring;
         let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
@@ -147,7 +141,6 @@ impl ReviewSession {
             screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
             rows,
             review,
-            asked_lines_of,
             github,
             source,
             tour_work,
@@ -270,11 +263,20 @@ impl ReviewSession {
         });
     }
 
-    /// For when the Asks changed: their lines get row markers.
-    pub fn asks_changed(&mut self, cx: &mut Context<Self>) {
-        if (self.asked_lines_of)(self.review.screen(), cx) != self.review.asked_lines() {
+    /// For changes of the Asks, which come on every line an answer streams in: the rows are built
+    /// again only when the page changed, that is when the lines with Asks on the screen did.
+    pub fn change_asks<T>(
+        &mut self,
+        cx: &mut Context<Self>,
+        change: impl FnOnce(&mut Review) -> T,
+    ) -> T {
+        let result = change(&mut self.review);
+        if self.rows.shows(self.review.page()) {
+            cx.notify();
+        } else {
             self.rebuild_rows(cx);
         }
+        result
     }
 
     /// The drag selection only changes how rows look, which is read when they are drawn.
@@ -526,10 +528,6 @@ impl ReviewSession {
 
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
         let started = Instant::now();
-        let asked_lines = (self.asked_lines_of)(self.review.screen(), cx);
-        if asked_lines != self.review.asked_lines() {
-            self.review.set_asked_lines(asked_lines);
-        }
         let rows = PageRows::of(&self.review, &self.open_details);
         match rows.change_from(&self.rows) {
             RowsChange::OtherScreen => self.screen_list.reset(rows.len()),

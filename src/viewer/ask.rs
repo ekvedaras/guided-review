@@ -129,10 +129,12 @@ pub struct Asks {
 
 impl Asks {
     pub fn load(store: Arc<dyn AskStore>) -> anyhow::Result<Self> {
-        Ok(Self {
-            asks: store.load()?,
-            store,
-        })
+        Ok(Self::loaded(store.load()?, store))
+    }
+
+    /// Asks the store gave already, as part of the review state it was read with.
+    pub(super) fn loaded(asks: Vec<Ask>, store: Arc<dyn AskStore>) -> Self {
+        Self { asks, store }
     }
 
     /// A new, empty Ask. It is kept only once it holds a question.

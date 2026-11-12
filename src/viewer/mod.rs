@@ -8,6 +8,7 @@ mod app_state;
 mod app_window;
 mod ask;
 mod ask_context;
+mod ask_desk;
 mod ask_target;
 mod code_link;
 mod comment_desk;
@@ -59,6 +60,9 @@ pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
 pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
+pub use ask_desk::{
+    AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
+};
 pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};

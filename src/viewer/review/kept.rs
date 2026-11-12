@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use super::ReviewCore;
+use crate::viewer::ask_desk::AskDesk;
 use crate::viewer::page::Page;
 use crate::viewer::work_agenda::WorkAgenda;
 
@@ -39,6 +40,17 @@ impl Review {
         if !self.review.has_seen_end_of_screen() {
             self.review.seen_end_of = Some(self.review.screen.clone());
         }
+    }
+
+    /// Asks change on every line an answer streams in, and the page shows only which lines have
+    /// Asks, so the page is dropped only when those lines change.
+    pub fn change_asks<T>(&mut self, change: impl FnOnce(&mut AskDesk) -> T) -> T {
+        let before = self.review.ask_desk.asked_lines_on(&self.review.screen);
+        let result = change(&mut self.review.ask_desk);
+        if self.review.ask_desk.asked_lines_on(&self.review.screen) != before {
+            self.page.take();
+        }
+        result
     }
 
     /// The work agenda is no input of the page, so it changes without dropping the page.

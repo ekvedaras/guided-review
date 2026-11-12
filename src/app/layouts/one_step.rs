@@ -73,9 +73,7 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
-use crate::app::review_session::{
-    AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
-};
+use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::SidebarTourAgent;
 use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
@@ -165,7 +163,6 @@ pub struct OneStepLayout {
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
     _use_as_comment_subscription: Subscription,
-    _asked_lines_subscription: Subscription,
 }
 
 impl OneStepLayout {
@@ -188,11 +185,7 @@ impl OneStepLayout {
         let focus = cx.focus_handle();
         #[cfg(feature = "snapshots")]
         let ask = crate::app::snapshots::quiet_ask(ask);
-        let ask = cx.new(|cx| AskPanel::new(ask, focus.clone(), cx));
         let frame_stats = FrameStatsHook::from_env();
-        let asks = ask.clone();
-        let asked_lines_of: AskedLinesOf =
-            Box::new(move |screen, cx| asks.read(cx).asked_lines_on(screen));
         let session = cx.new(|cx| {
             ReviewSession::new(
                 review,
@@ -200,13 +193,13 @@ impl OneStepLayout {
                     source,
                     github,
                     tour_work,
-                    asked_lines_of,
                     frame_stats: frame_stats.clone(),
                 },
                 window,
                 cx,
             )
         });
+        let ask = cx.new(|cx| AskPanel::new(ask, session.clone(), focus.clone(), cx));
         let session_subscriptions = [
             cx.observe(&session, |this, session, cx| {
                 this.screen_travel.arrive(session.read(cx).review());
@@ -279,14 +272,18 @@ impl OneStepLayout {
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
                 this.open_comment_box(CommentGesture::AskAnswer(ask), window, cx);
             });
-        cx.subscribe(&ask, |this, panel, HandToAgent { ask, place }, cx| {
+        cx.subscribe(&ask, |this, _, HandToAgent { ask, place }, cx| {
             let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
             let id = ask.id;
             this.reopen_after_save.ask_handed_to_agent();
             cx.spawn(async move |this, cx| {
                 let line = handing.await;
-                panel.update(cx, |panel, cx| panel.hand_off_ended(id, line, cx));
                 this.update(cx, |this, cx| {
+                    this.session.update(cx, |session, cx| {
+                        session.change_asks(cx, |review| {
+                            review.change_asks(|desk| desk.hand_off_ended(id, &line));
+                        });
+                    });
                     let in_flight = this.in_flight(cx);
                     let reopen = this.reopen_after_save.ask_hand_off_ended(in_flight);
                     this.reopen_if_due(reopen, cx);
@@ -296,10 +293,6 @@ impl OneStepLayout {
             .detach();
         })
         .detach();
-        let asked_lines_subscription = cx.observe(&ask, |this, _, cx| {
-            this.session.update(cx, ReviewSession::asks_changed);
-            this.reopen_if_work_ended(cx);
-        });
         let layout_handle = cx.weak_entity();
         let on_row_gesture: OnRowGesture = Rc::new(move |gesture, at, _window, cx| {
             layout_handle
@@ -357,7 +350,6 @@ impl OneStepLayout {
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
-            _asked_lines_subscription: asked_lines_subscription,
         }
     }
 
@@ -416,14 +408,8 @@ impl OneStepLayout {
         self.session.update(cx, ReviewSession::reload_tour);
     }
 
-    /// The re-pin or Refresh opened a new review: diagrams and notes on old answers follow it.
+    /// The re-pin or Refresh opened a new review: diagrams follow it.
     fn reopened(&mut self, cx: &mut Context<Self>) {
-        let ask = self.ask.clone();
-        self.session.update(cx, |session, cx| {
-            ask.update(cx, |panel, cx| {
-                panel.recheck_code_changes(session.review(), cx);
-            });
-        });
         self.diagrams = Self::new_diagrams(cx);
         cx.notify();
     }
@@ -460,14 +446,11 @@ impl OneStepLayout {
         kind: ButtonKind,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let count = self.ask.read(cx).count_at(&place);
+        let count = self.session.read(cx).review().asks().count_at(&place);
         ask_button(&Colors::active(cx), SharedString::from(key), count, kind).on_click(cx.listener(
             move |this, _, window, cx| {
-                let ask = this.ask.clone();
-                this.session.update(cx, |session, cx| {
-                    ask.update(cx, |panel, cx| {
-                        panel.open(session.review(), place.clone(), label.clone(), window, cx);
-                    });
+                this.ask.update(cx, |panel, cx| {
+                    panel.open(place.clone(), label.clone(), window, cx);
                 });
             },
         ))
@@ -833,12 +816,8 @@ impl OneStepLayout {
         else {
             return;
         };
-        let ask = self.ask.clone();
-        self.session.update(cx, |session, cx| {
-            ask.update(cx, |panel, cx| {
-                panel.open(session.review(), place, label, window, cx);
-            });
-        });
+        self.ask
+            .update(cx, |panel, cx| panel.open(place, label, window, cx));
     }
 
     /// Settings asked for from outside the window, by `guided-review settings`: opens it, never closes it.
@@ -861,7 +840,7 @@ impl OneStepLayout {
 
     fn in_flight(&self, cx: &App) -> InFlight {
         InFlight {
-            asks_answering: self.ask.read(cx).answering(),
+            asks_answering: self.session.read(cx).review().asks().answering(),
             delivering_hand_offs: self.session.read(cx).is_delivering_hand_offs(),
         }
     }
@@ -2895,7 +2874,7 @@ impl Render for OneStepLayout {
                     )
                     .child(screen),
             )
-            .when(self.ask.read(cx).is_open(), |row| {
+            .when(self.ask.read(cx).is_open(cx), |row| {
                 row.child(self.ask.clone())
             })
             .child(self.settings.clone())

@@ -4,6 +4,7 @@ mod work;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage;
@@ -11,12 +12,13 @@ use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::{Step, Tour};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::AskSettings;
 
-use super::ask::{Ask, Place};
+use super::ask::{Ask, Asks, Place};
 use super::ask_context;
+use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
@@ -225,8 +227,7 @@ pub struct ReviewCore {
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     pr_notes: PrNotes,
-    /// The lines of the open screen that have Asks. The Ask panel keeps the Asks and hands these in.
-    asked_lines: Vec<Place>,
+    ask_desk: AskDesk,
     work: WorkAgenda,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
@@ -305,6 +306,35 @@ impl Review {
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
         self.seen_end_of = replaced.seen_end_of;
+        self.ask_desk = replaced.ask_desk;
+        self.check_asks_for_code_changes();
+    }
+
+    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
+    pub fn open_ask(
+        &mut self,
+        place: Place,
+        label: String,
+        settings: &AskSettings,
+        now: Instant,
+        processes: &mut dyn AskProcesses,
+    ) {
+        let clone = self.ask_desk.clone_folder().cloned();
+        let target = self.ask_target(place, label, clone, settings);
+        let head = self.head().clone();
+        self.check_asks_for_code_changes();
+        self.change_asks(|desk| desk.open(target, &head, now, processes));
+    }
+
+    fn check_asks_for_code_changes(&mut self) {
+        let changed = self
+            .ask_desk
+            .all()
+            .iter()
+            .filter(|ask| self.code_changed_since(ask))
+            .map(|ask| ask.id)
+            .collect();
+        self.change_asks(|desk| desk.code_changed_is(changed));
     }
 }
 
@@ -314,7 +344,8 @@ impl ReviewCore {
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
-        let (state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let pr: PullRequestUrl = tour.pr.parse()?;
         let (base, head) = (tour.base.clone(), tour.head.clone());
@@ -374,7 +405,7 @@ impl ReviewCore {
             comment_desk: CommentDesk::default(),
             display_options,
             pr_notes: PrNotes::default(),
-            asked_lines: Vec::new(),
+            ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
             seen_end_of: None,
             tour_files,
@@ -405,13 +436,9 @@ impl ReviewCore {
         Some(ImagePreviewRequest::for_file(file, &self.base, &self.head))
     }
 
-    /// The selected lines with Asks on the open screen; each gets an ask marker under its last line.
-    pub fn asked_lines(&self) -> &[Place] {
-        &self.asked_lines
-    }
-
-    pub fn set_asked_lines(&mut self, asked_lines: Vec<Place>) {
-        self.asked_lines = asked_lines;
+    /// Every Ask of the PR, the place the Ask panel is open on and the processes answering.
+    pub fn asks(&self) -> &AskDesk {
+        &self.ask_desk
     }
 
     pub fn display_options(&self) -> &DisplayOptions {

@@ -7,11 +7,12 @@ use super::file_path;
 use guided_review::file_path::FilePath;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskStore, CommentId, CommentPlace, GitHubError,
-    NoAccess, PictureUploadPort, PullRequestDescriptionPort, PullRequestTipsPort, Reaction,
-    ReactionChange, ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, CommentId,
+    CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
+    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
+    RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId,
+    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -622,6 +623,55 @@ impl AgentLauncher for FakeAgentLauncher {
         ));
         let turns: Vec<&str> = self.turns.iter().map(String::as_str).collect();
         Ok(Box::new(FakeAgent::answering(&turns, &self.sent)))
+    }
+}
+
+/// Stands in for the Asks' process threads: logs what the desk does to them, and lets the next
+/// deliveries fail as if the process had died.
+#[derive(Default)]
+pub struct FakeAskProcesses {
+    pub log: Vec<String>,
+    running: Vec<AskId>,
+    pub deliveries_failing: usize,
+}
+
+impl AskProcesses for FakeAskProcesses {
+    fn start(&mut self, ask: AskId, launch: AgentLaunch) {
+        assert!(launch.cwd.exists(), "an Ask's process starts in the clone");
+        self.log
+            .push(format!("start {}", serde_json::to_string(&ask).unwrap()));
+        self.running.push(ask);
+    }
+
+    fn stop(&mut self, ask: AskId) {
+        self.log
+            .push(format!("stop {}", serde_json::to_string(&ask).unwrap()));
+        self.running.retain(|running| *running != ask);
+    }
+
+    fn is_running(&self, ask: AskId) -> bool {
+        self.running.contains(&ask)
+    }
+
+    fn deliver(&mut self, ask: AskId, message: String) -> Result<(), NotDelivered> {
+        if self.deliveries_failing > 0 {
+            self.deliveries_failing -= 1;
+            self.log.push(format!(
+                "not delivered to {}",
+                serde_json::to_string(&ask).unwrap()
+            ));
+            return Err(NotDelivered);
+        }
+        let question = message.lines().last().unwrap_or_default();
+        self.log.push(format!(
+            "deliver to {}: {question}",
+            serde_json::to_string(&ask).unwrap()
+        ));
+        Ok(())
+    }
+
+    fn turn_stopper(&self, _: AskId) -> Option<Arc<dyn TurnStopper>> {
+        None
     }
 }
 

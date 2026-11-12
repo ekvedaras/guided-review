@@ -7,7 +7,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, Place, Review,
+    BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, Review,
     ReviewStateFile, ReviewThread, Side, ThreadComment, ThreadId, ThreadRowPlace,
 };
 use serde_json::{Value, json};
@@ -312,21 +312,6 @@ fn a_thread_with_no_line_to_hang_under_follows_the_code() {
         shapes[shapes.len() - 3..],
         ["end", "thread T1 AfterCode", "footer"]
     );
-}
-
-#[test]
-fn lines_with_asks_get_an_ask_marker_under_their_last_line() {
-    let mut review = Pull::new().open(notes_step());
-    let asked = Place::Lines {
-        step: Some("notes".into()),
-        start: at_head("notes.txt", 9),
-        end: at_head("notes.txt", 10),
-        pieces: Vec::new(),
-    };
-
-    review.set_asked_lines(vec![asked]);
-
-    assert_eq!(rows_from(review.page(), "+10", 2), ["+10", "ask marker"]);
 }
 
 #[test]

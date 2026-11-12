@@ -96,6 +96,13 @@ impl PageRows {
         }
     }
 
+    /// Whether these rows were laid out from this very page.
+    pub fn shows(&self, page: &Arc<Page>) -> bool {
+        self.page
+            .as_ref()
+            .is_some_and(|shown| Arc::ptr_eq(shown, page))
+    }
+
     pub fn len(&self) -> usize {
         self.page.as_deref().map_or(0, Page::len)
     }
