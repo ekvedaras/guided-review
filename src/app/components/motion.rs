@@ -102,9 +102,20 @@ pub fn slide_in<E: IntoElement + Styled + 'static>(
     })
 }
 
-/// Grows from `from` to `to`, both in window coordinates, over `OVERLAY`: a picture leaving its
-/// place on the page for its larger view.
-pub fn grow_from<E: IntoElement + Styled + 'static>(
+/// Fades out over `duration`.
+pub fn fade_out<E: IntoElement + Styled + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    duration: Duration,
+) -> AnimationElement<E> {
+    element.with_animation(id, one_shot(duration), |element, delta| {
+        element.opacity(1. - delta)
+    })
+}
+
+/// Moves and resizes from `from` to `to`, both in window coordinates, over `OVERLAY`: a picture
+/// growing from its place on the page to its larger view, and back.
+pub fn move_between<E: IntoElement + Styled + 'static>(
     element: E,
     id: impl Into<ElementId>,
     from: Bounds<Pixels>,
