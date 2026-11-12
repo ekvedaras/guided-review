@@ -6,7 +6,8 @@ use guided_review::pull_request::PullRequestUrl;
 use std::path::PathBuf;
 
 use guided_review::viewer::{
-    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
+    TourAgentPort, TourAgentStart,
 };
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
@@ -34,7 +35,9 @@ pub enum TourAgentCall {
 
 /// Herdr with a few terminals: which PR each is the tour agent of, and the status each reports.
 pub struct FakeTourAgent {
-    link: Mutex<Result<(), String>>,
+    link: Mutex<Result<(), AgentLinkOff>>,
+    /// Herdr answers `server status` but refuses to list terminals, with this reason.
+    refusing: Mutex<Option<String>>,
     terminals: Mutex<BTreeMap<TerminalId, (Option<PullRequestUrl>, AgentStatus)>>,
     /// What `follow` reports, in order, before its stream ends.
     coming: Mutex<VecDeque<AgentStatus>>,
@@ -52,6 +55,7 @@ impl FakeTourAgent {
     pub fn new() -> Self {
         Self {
             link: Mutex::new(Ok(())),
+            refusing: Mutex::new(None),
             terminals: Mutex::default(),
             coming: Mutex::default(),
             calls: Mutex::default(),
@@ -62,9 +66,21 @@ impl FakeTourAgent {
         }
     }
 
-    pub fn without_herdr(self, reason: &str) -> Self {
-        *self.link.lock().unwrap() = Err(reason.to_owned());
+    pub fn without_herdr(self, off: AgentLinkOff) -> Self {
+        *self.link.lock().unwrap() = Err(off);
         self
+    }
+
+    /// Herdr is up but fails every command with this reason.
+    pub fn refusing(self, reason: &str) -> Self {
+        *self.refusing.lock().unwrap() = Some(reason.to_owned());
+        self
+    }
+
+    /// Herdr works again, however it failed.
+    pub fn recovers(&self) {
+        *self.link.lock().unwrap() = Ok(());
+        *self.refusing.lock().unwrap() = None;
     }
 
     pub fn with_terminal(self, terminal: &str, pr: Option<&str>, status: AgentStatus) -> Self {
@@ -165,11 +181,18 @@ impl FakeTourAgent {
 }
 
 impl TourAgentPort for FakeTourAgent {
-    fn link(&self) -> Result<(), String> {
+    fn link(&self) -> Result<(), AgentLinkOff> {
         self.link.lock().unwrap().clone()
     }
 
     fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>> {
+        if let Some(reason) = self.refusing.lock().unwrap().clone() {
+            return Err(HerdrRefused {
+                command: "ls --json".to_owned(),
+                reason,
+            }
+            .into());
+        }
         Ok(self
             .terminals
             .lock()

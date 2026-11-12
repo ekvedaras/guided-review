@@ -14,13 +14,15 @@ use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOf
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort};
 use super::threads::{ReviewThread, ThreadId};
-use super::tour_agent::TourAgents;
+use super::tour_agent::{TourAgentState, TourAgents};
 use super::viewed_sync::{SyncOutcome, SyncRequest};
 
 /// A tick's sync waits this long for the next tick, so a burst of ticks is one round trip.
 pub const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 /// How long to wait before handing off again to an agent whose screen had not settled since it started.
 pub const AGENT_START_RETRY: Duration = Duration::from_secs(3);
+/// How long to wait before looking again at a link to herdr that is off.
+pub const AGENT_LINK_RECHECK: Duration = Duration::from_secs(30);
 
 /// The kinds of work, in the order due work of several kinds starts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,6 +37,7 @@ pub enum WorkKind {
     SendQueuedComment,
     TakeSeenMarksOff,
     DeliverHandOff,
+    CheckAgentLink,
 }
 
 /// What happens to work of a kind that falls due while one of its kind runs.
@@ -63,9 +66,10 @@ impl WorkKind {
     fn while_running(self) -> WhileRunning {
         match self {
             Self::SyncViewed => WhileRunning::RunsAgainAfter,
-            Self::SendQueuedComment | Self::TakeSeenMarksOff | Self::DeliverHandOff => {
-                WhileRunning::IsDropped
-            }
+            Self::SendQueuedComment
+            | Self::TakeSeenMarksOff
+            | Self::DeliverHandOff
+            | Self::CheckAgentLink => WhileRunning::IsDropped,
             Self::CheckPrHead
             | Self::CheckWorkingCopy
             | Self::PullPrDescription
@@ -205,6 +209,7 @@ pub(super) enum Job {
     SendQueuedComment(CommentRequest),
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
+    CheckAgentLink(PullRequestUrl),
 }
 
 impl Job {
@@ -220,6 +225,7 @@ impl Job {
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
             Self::DeliverHandOff(_) => WorkKind::DeliverHandOff,
+            Self::CheckAgentLink(_) => WorkKind::CheckAgentLink,
         }
     }
 }
@@ -259,6 +265,7 @@ impl Work {
                     .collect(),
             ),
             Job::DeliverHandOff(request) => Done::Delivery(request.run(ports.agents, github)),
+            Job::CheckAgentLink(pr) => Done::AgentLink(ports.agents.lookup(&pr)),
         };
         WorkOutcome {
             kind,
@@ -289,12 +296,16 @@ pub(super) enum Done {
     QueuedComment(CommentOutcome),
     SeenMarksOff(Vec<SeenMarkOffOutcome>),
     Delivery(DeliveryOutcome),
+    AgentLink(TourAgentState),
 }
 
 /// What the app does once an outcome landed, besides showing the review as it is now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AfterLanding {
     Nothing,
     /// A tour agent was started for a hand-off, so there is a new terminal to follow.
     FollowNewTourAgent,
+    /// A look at herdr after the link was off: what the sidebar says now, and when it is not off
+    /// any more, the tour agent to follow.
+    TourAgentIs(TourAgentState),
 }

@@ -47,6 +47,8 @@ One family for text (`TEXT_FONT`) and one for code (`CODE_FONT`); every text nam
 
 Drawn icons from `Icon`, never emoji. Sizes follow the button size (`ButtonSize::icon_size`: 16, 14, 13); a free-standing icon beside `text_sm` is 14, beside `text_xs` 12 or 13. An icon has a job (what a button does, a state); one that only repeats the title next to it goes (b103e63).
 
+2026-11-12: A Markdown table (`PreparedTable`, drawn by `table_view`) is one bordered box: `subtle_border` hairlines between rows and columns, the header bold on `inset`, cells padded 12 by 4. It wraps inside its cells and never scrolls: a summary's table is prose, and a column scrolled out of sight hides what the reviewer is meant to read (code fences scroll because a line of code cannot be reflowed). Text is not measured, so column widths come from character counts: each column's basis is its longest cell, its floor its longest word, and the whole table is no wider than its cells need on one line. A long unbreakable token in a cell is the one thing that can still overflow.
+
 ## Known open
 
 - The Settings IDE tiles still mark the chosen editor's glyph with the `icon_tile` gradient; it is the gradient's last use.

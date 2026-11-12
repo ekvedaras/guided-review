@@ -130,3 +130,11 @@ Until now `guided-review open` (and `restart`) refused a PR with no tour ("run `
 - `open_review` still refuses a PR with no tour, as a last guard.
 
 Open: not tried on a real window.
+
+## 2026-11-12: a failed agent link is told apart, checked again and can be retried
+
+The sidebar once said "Tour agent is off, it needs herdr (`hc`) and its server running: `hc ls ...` failed: cannot save terminals: registry writer stopped" while herdr was running; only its registry writer had died. The message was wrong for that case, offered no way out, and the app never looked again, so the Tour agent stayed off until the app restarted.
+
+- `AgentLinkOff` names the cases: `hc` missing, server not running (`hc server status` fails), and herdr running but a command failed (`HerdrFailed`, with the reason herdr gave and no command line, plus a hint to `hc server restart`, which may pause running terminals). The hc adapter raises `HerdrRefused` for a failed command so the viewer can take the reason out.
+- While the link is off the work agenda holds `WorkKind::CheckAgentLink`, due `AGENT_LINK_RECHECK` (30 s) after the last news and at once on the sidebar's Retry. It runs `TourAgents::lookup`, not only `link()`, because the incident had `server status` answering and `ls` failing. Still off: checked again. Back: `AfterLanding::TourAgentIs` makes the app follow the tour agent again, which clears the message.
+- Not done: a restart of herdr is never run by the app, it is only suggested.

@@ -45,11 +45,12 @@ enum Scene {
     PictureZoom,
     UpdateOffered,
     RenderedMarkdown,
+    AgentLinkOff,
     GitHubOutage,
 }
 
 impl Scene {
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 22] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -70,6 +71,7 @@ impl Scene {
         Self::PictureZoom,
         Self::UpdateOffered,
         Self::RenderedMarkdown,
+        Self::AgentLinkOff,
         Self::GitHubOutage,
     ];
 
@@ -95,7 +97,8 @@ impl Scene {
             Self::PictureZoom => "40-picture-zoom",
             Self::UpdateOffered => "39-update-offered",
             Self::RenderedMarkdown => "41-rendered-markdown",
-            Self::GitHubOutage => "42-github-outage",
+            Self::AgentLinkOff => "42-agent-link-off",
+            Self::GitHubOutage => "44-github-outage",
         }
     }
 }
@@ -386,6 +389,7 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::JumpActions => {
                 let query = ">";
@@ -472,6 +476,9 @@ impl OneStepLayout {
                     cx.remove_global::<Updates>();
                 }
             }
+            Scene::AgentLinkOff => self
+                .session
+                .update(cx, ReviewSession::unstage_agent_link_off),
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.markdown_box(cx) {
                     self.change_review(cx, |review| {

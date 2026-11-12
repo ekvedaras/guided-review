@@ -230,6 +230,8 @@ pub struct ReviewCore {
     pr_notes: PrNotes,
     ask_desk: AskDesk,
     work: WorkAgenda,
+    /// The last news of the tour agent said tour agents cannot be reached. Not saved.
+    agent_link_is_off: bool,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
     seen_end_of: Option<Screen>,
@@ -409,6 +411,7 @@ impl ReviewCore {
             pr_notes: PrNotes::default(),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
+            agent_link_is_off: false,
             seen_end_of: None,
             tour_files,
         })
