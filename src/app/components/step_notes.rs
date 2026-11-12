@@ -30,12 +30,12 @@ impl StepNotes {
 /// The line height of `text_base`, which the TLDR's bullets centre on.
 const TLDR_LINE: gpui::Pixels = px(26.);
 
-/// A small label over a note, in the weight and case the step chip uses.
-pub fn note_label(text: &'static str) -> gpui::Div {
+/// A small label over a note, a section or a screen's heading: one style for every such label.
+pub fn note_label(text: impl Into<gpui::SharedString>) -> gpui::Div {
     div()
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
-        .child(text)
+        .child(text.into())
 }
 
 impl RenderOnce for StepNotes {
