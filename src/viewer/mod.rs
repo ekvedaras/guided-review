@@ -86,7 +86,10 @@ pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snipp
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
-pub use intent::{Effect, Intent, ReviewChange, WindowMoment};
+pub use intent::{
+    Effect, Intent, Overlay, Refusal, Reopening, RestartArgs, ReviewChange, SettingsSheet,
+    WindowMoment,
+};
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };

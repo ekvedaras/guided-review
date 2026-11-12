@@ -84,11 +84,11 @@ use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
     CommentPlace, Effect, GitHubPort, HandOffId, InFlight, Intent, LineLocation, NextScreen,
-    NoteSubject, NotesButton, PageRow, PaletteAction, Place, QueuedComment, ReadProgress, Reopen,
-    ReopenAfterSave, RestartGuard, RestartStep, Review, ReviewerSummaryRow, RouteStopRow, Screen,
-    ScreenFooter, ScreenTravel, SelectedRows, SendMode, StepHeading, StepId, StepIntro,
-    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
-    Toolbar, TourLead, Travel, WindowMoment,
+    NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment, ReadProgress, Reopen,
+    ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange,
+    ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode,
+    SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox,
+    ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -253,7 +253,7 @@ impl OneStepLayout {
                     let groups = this.session.read(cx).review().palette(query);
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
-                JumpEvent::Act(action) => this.palette_action(*action, window, cx),
+                JumpEvent::Act(action) => this.act((*action).into(), window, cx),
                 JumpEvent::Picked(target) => {
                     let row = this.session.update(cx, |session, cx| {
                         session.change(cx, |review| review.jump_to(target));
@@ -270,7 +270,8 @@ impl OneStepLayout {
         if let Some(Updates(updater)) = cx.try_global::<Updates>().cloned() {
             cx.observe(&updater, |_, _, cx| cx.notify()).detach();
             cx.subscribe(&updater, |this, _, installed: &UpdateInstalled, cx| {
-                this.restart_app_with(installed.program.clone(), cx);
+                let restart = this.session.read(cx).review().restart_args();
+                this.restart_app_with(installed.program.clone(), &restart, cx);
             })
             .detach();
         }
@@ -806,78 +807,21 @@ impl OneStepLayout {
         )
     }
 
-    /// Settings is a modal sheet: while it is open, the other overlays wait.
-    fn is_settings_open(&self, cx: &App) -> bool {
-        self.settings.read(cx).is_open()
-    }
-
-    fn toggle_jump(&mut self, _: &ToggleJump, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) || self.is_settings_open(cx) {
-            return;
-        }
-        let groups = self.session.read(cx).review().palette("");
-        self.jump.update(cx, |palette, cx| {
-            if palette.is_open() {
-                palette.close(window, cx);
-            } else {
-                palette.open(groups, window, cx);
-            }
-        });
-    }
-
-    /// What an action picked in the palette does: the same as its button or key.
-    fn palette_action(
-        &mut self,
-        action: PaletteAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match action {
-            PaletteAction::NextUnreadStep => self.go_to_next_unread(&GoToNextUnread, window, cx),
-            PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => {
-                self.toggle_read(&ToggleRead, window, cx);
-            }
-            PaletteAction::WrapLines | PaletteAction::StopWrappingLines => {
-                self.toggle_wrap_lines(&ToggleWrapLines, window, cx);
-            }
-            PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => {
-                self.change_review(cx, |review| {
-                    review.display_options_mut().toggle_ignore_whitespace();
-                });
-            }
-            PaletteAction::AskAboutStep => self.ask_about_screen(window, cx),
-            PaletteAction::FinishReview => self.open_finish_form(cx),
-            PaletteAction::OpenOnGitHub => {
-                let pr = self.session.read(cx).review().pr().to_string();
-                open_link(&pr, cx);
-            }
-            PaletteAction::SwitchPr => self.toggle_pr_switcher(window, cx),
-            PaletteAction::Settings => self.toggle_settings(&ToggleSettings, window, cx),
-            PaletteAction::Shortcuts => self.toggle_shortcuts(&ToggleShortcuts, window, cx),
-            PaletteAction::RestartApp => match std::env::current_exe() {
-                Ok(exe) => self.restart_app_with(exe, cx),
-                Err(error) => {
-                    post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
-                }
-            },
-        }
-    }
-
     /// `program`, which may be newer than this app, quits this one and opens the PR on this screen; it
     /// runs on its own so it outlives the app it quits.
-    fn restart_app_with(&mut self, program: PathBuf, cx: &mut Context<Self>) {
+    fn restart_app_with(
+        &mut self,
+        program: PathBuf,
+        restart: &RestartArgs,
+        cx: &mut Context<Self>,
+    ) {
         let in_flight = self.in_flight(cx);
         if let RestartStep::Warn(warning) = self.restart_guard.ask(in_flight, Instant::now()) {
             post_toast(cx, ToastTone::Danger, warning);
             return;
         }
-        let review = self.session.read(cx).review();
-        let mut command = std::process::Command::new(program);
-        command.arg("restart").arg(review.pr().to_string());
-        if let Screen::Step(id) = review.screen() {
-            command.arg("--at").arg(id.to_string());
-        }
-        let started = command
+        let started = std::process::Command::new(program)
+            .args(restart.args())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -908,26 +852,9 @@ impl OneStepLayout {
         });
     }
 
-    fn toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
-            return;
-        }
-        self.settings.update(cx, |settings, cx| {
-            if settings.is_open() {
-                settings.request_close(window, cx);
-            } else {
-                settings.open(window, cx);
-            }
-        });
-    }
-
     /// Settings asked for from outside the window, by `guided-review settings`: opens it, never closes it.
     pub fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) || self.settings.read(cx).is_open() {
-            return;
-        }
-        self.settings
-            .update(cx, |settings, cx| settings.open(window, cx));
+        self.act(Intent::ShowSettings, window, cx);
     }
 
     /// The one place that reacts to Save having written `config.toml`. The PR on screen was built with the
@@ -964,28 +891,10 @@ impl OneStepLayout {
     }
 
     /// Typing is saved and focus leaves every box, so nothing the reviewer does reaches the session whose
-    /// state file the reopen's build is reading. The veil keeps the mouse out; `is_reopening` the keys.
+    /// state file the reopen's build is reading. The veil keeps the mouse out; `act` the keys.
     pub fn hold_for_reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_typing(cx);
         window.focus(&self.focus, cx);
-    }
-
-    fn is_reopening(&self, cx: &App) -> bool {
-        cx.global::<PrSwitching>().active.read(cx).switching_to()
-            == Some(self.session.read(cx).review().pr())
-    }
-
-    fn toggle_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_settings_open(cx) {
-            return;
-        }
-        self.pr_switcher.update(cx, |switcher, cx| {
-            if switcher.is_open() {
-                switcher.close(window, cx);
-            } else {
-                switcher.open(window, cx);
-            }
-        });
     }
 
     fn open_code_button(key: String, link: &CodeLink, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -1007,24 +916,80 @@ impl OneStepLayout {
         use_code_opener(opener, cx);
     }
 
-    fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
-            return;
-        }
+    fn go_forward(&mut self, _: &GoForward, window: &mut Window, cx: &mut Context<Self>) {
         self.note_seen_end(cx);
-        self.act(Intent::NextScreen, cx);
+        self.act(Intent::NextScreen, window, cx);
     }
 
-    fn act(&mut self, intent: Intent, cx: &mut Context<Self>) {
+    /// What the window alone knows when the reader asks for something.
+    fn moment(&self, cx: &App) -> WindowMoment {
+        let is_reopening = cx.global::<PrSwitching>().active.read(cx).switching_to()
+            == Some(self.session.read(cx).review().pr());
+        WindowMoment {
+            reopening: if is_reopening {
+                Reopening::Underway
+            } else {
+                Reopening::NotUnderway
+            },
+            settings: if self.settings.read(cx).is_open() {
+                SettingsSheet::Open
+            } else {
+                SettingsSheet::Closed
+            },
+        }
+    }
+
+    /// Carries out what the review decides the reader's intent does.
+    fn act(&mut self, intent: Intent, window: &mut Window, cx: &mut Context<Self>) {
         let effect = self
             .session
             .read(cx)
             .review()
-            .decide(intent, WindowMoment::default());
+            .decide(intent, self.moment(cx));
         match effect {
             Effect::Change(change) => self
                 .session
                 .update(cx, |session, cx| session.apply(change, cx)),
+            Effect::Toggle(Overlay::Jump) => {
+                let groups = self.session.read(cx).review().palette("");
+                self.jump.update(cx, |palette, cx| {
+                    if palette.is_open() {
+                        palette.close(window, cx);
+                    } else {
+                        palette.open(groups, window, cx);
+                    }
+                });
+            }
+            Effect::Toggle(Overlay::PrSwitcher) => self.pr_switcher.update(cx, |switcher, cx| {
+                if switcher.is_open() {
+                    switcher.close(window, cx);
+                } else {
+                    switcher.open(window, cx);
+                }
+            }),
+            Effect::Toggle(Overlay::Settings) => self.settings.update(cx, |settings, cx| {
+                if settings.is_open() {
+                    settings.request_close(window, cx);
+                } else {
+                    settings.open(window, cx);
+                }
+            }),
+            Effect::Toggle(Overlay::Shortcuts) => self
+                .shortcuts
+                .update(cx, |sheet, cx| sheet.toggle(window, cx)),
+            Effect::OpenSettings => self
+                .settings
+                .update(cx, |settings, cx| settings.open(window, cx)),
+            Effect::AskAboutScreen => self.ask_about_screen(window, cx),
+            Effect::OpenFinishForm => self.open_finish_form(cx),
+            Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
+            Effect::Restart(restart) => match std::env::current_exe() {
+                Ok(exe) => self.restart_app_with(exe, &restart, cx),
+                Err(error) => {
+                    post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
+                }
+            },
+            Effect::Nothing | Effect::Refused(_) => {}
         }
     }
 
@@ -1062,52 +1027,6 @@ impl OneStepLayout {
             self.session
                 .update(cx, |session, _| session.saw_end_of_screen());
         }
-    }
-
-    fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
-            return;
-        }
-        self.change_review(cx, |review| review.go_back());
-    }
-
-    fn go_to_next_unread(&mut self, _: &GoToNextUnread, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
-            return;
-        }
-        self.change_review(cx, |review| review.go_to_next_unread());
-    }
-
-    /// Ticks or unticks the step on screen; the summary and the safety net have no tick.
-    fn toggle_read(&mut self, _: &ToggleRead, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
-            return;
-        }
-        if let Screen::Step(id) = self.session.read(cx).review().screen().clone() {
-            self.toggle_tick(&id, cx);
-        }
-    }
-
-    fn toggle_shortcuts(
-        &mut self,
-        _: &ToggleShortcuts,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.is_reopening(cx) {
-            return;
-        }
-        self.shortcuts
-            .update(cx, |sheet, cx| sheet.toggle(window, cx));
-    }
-
-    fn toggle_wrap_lines(&mut self, _: &ToggleWrapLines, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_reopening(cx) {
-            return;
-        }
-        self.change_review(cx, |review| {
-            review.display_options_mut().toggle_wrap_lines();
-        });
     }
 
     /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
@@ -1325,7 +1244,7 @@ impl OneStepLayout {
         ))
         .child(button_keys(colors, ButtonKind::Ghost, Command::Shortcuts))
         .on_click(cx.listener(|this, _, window, cx| {
-            this.toggle_shortcuts(&ToggleShortcuts, window, cx);
+            this.act(Intent::ToggleShortcuts, window, cx);
         }));
         div()
             .flex_none()
@@ -1353,7 +1272,7 @@ impl OneStepLayout {
                 .child(div().flex_1().child("Settings"))
                 .child(button_keys(colors, ButtonKind::Ghost, Command::Settings))
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.toggle_settings(&ToggleSettings, window, cx);
+                    this.act(Intent::ToggleSettings, window, cx);
                 })),
             )
             .child(shortcuts)
@@ -1379,7 +1298,7 @@ impl OneStepLayout {
         ))
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump))
-        .on_click(cx.listener(|this, _, window, cx| this.toggle_jump(&ToggleJump, window, cx)));
+        .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
         let pr_link = pr.to_string();
         let github = button(
             &colors,
@@ -1408,7 +1327,9 @@ impl OneStepLayout {
             .hover(|button| button.bg(colors.hover))
             .active(|button| button.bg(colors.pressed))
             .tooltip(tooltip(|_| "Switch pull request".into()))
-            .on_click(cx.listener(|this, _, window, cx| this.toggle_pr_switcher(window, cx)))
+            .on_click(
+                cx.listener(|this, _, window, cx| this.act(Intent::TogglePrSwitcher, window, cx)),
+            )
             .child(icon(Icon::PullRequest, colors.success))
             .child(
                 div()
@@ -2034,8 +1955,9 @@ impl OneStepLayout {
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
+        let change = ReviewChange::ToggleTick(id.clone());
         self.session
-            .update(cx, |session, cx| session.toggle_tick(id, cx));
+            .update(cx, |session, cx| session.apply(change, cx));
     }
 }
 
@@ -2279,7 +2201,9 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             ButtonKind::Primary,
             ButtonSize::Large,
         )
-        .on_click(cx.listener(|this, _, _, cx| this.act(Intent::MarkReadAndGoOn, cx)))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.act(Intent::MarkReadAndGoOn, window, cx);
+        }))
         .child(label)
         .child(button_keys(
             &colors,
@@ -2904,13 +2828,27 @@ impl Render for OneStepLayout {
                 cx.listener(|this, _, window, cx| this.end_row_selection(window, cx)),
             )
             .on_action(cx.listener(Self::go_forward))
-            .on_action(cx.listener(Self::go_back))
-            .on_action(cx.listener(Self::toggle_wrap_lines))
-            .on_action(cx.listener(Self::toggle_jump))
-            .on_action(cx.listener(Self::toggle_settings))
-            .on_action(cx.listener(Self::go_to_next_unread))
-            .on_action(cx.listener(Self::toggle_read))
-            .on_action(cx.listener(Self::toggle_shortcuts))
+            .on_action(cx.listener(|this, _: &GoBack, window, cx| {
+                this.act(Intent::PreviousScreen, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleWrapLines, window, cx| {
+                this.act(Intent::ToggleWrapLines, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleJump, window, cx| {
+                this.act(Intent::ToggleJump, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSettings, window, cx| {
+                this.act(Intent::ToggleSettings, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GoToNextUnread, window, cx| {
+                this.act(Intent::NextUnreadStep, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleRead, window, cx| {
+                this.act(Intent::ToggleRead, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
+                this.act(Intent::ToggleShortcuts, window, cx);
+            }))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
