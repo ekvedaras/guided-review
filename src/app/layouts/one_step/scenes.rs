@@ -54,7 +54,7 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 22] = [
+    const ALL: [Self; 23] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
