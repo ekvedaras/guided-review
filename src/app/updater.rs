@@ -26,10 +26,16 @@ impl Global for Updates {}
 impl Updates {
     pub fn install(home: &Path, cx: &mut App) {
         let install = ReleaseInstall::in_home(home);
-        let is_release_install = std::env::current_exe().is_ok_and(|exe| install.runs(&exe));
-        if !is_release_install {
+        let Some(exe) = std::env::current_exe().ok().filter(|exe| install.runs(exe)) else {
             return;
-        }
+        };
+        let bundling = install.clone();
+        cx.background_spawn(async move {
+            if let Err(error) = bundling.bring_bundle_up_to_date(&exe) {
+                eprintln!("could not put Guided Review.app in ~/Applications: {error:#}");
+            }
+        })
+        .detach();
         let updater = cx.new(|cx| Updater {
             install,
             offer: UpdateOffer::default(),

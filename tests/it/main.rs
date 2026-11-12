@@ -13,6 +13,7 @@ mod support;
 
 mod active_pr;
 mod agent_reply;
+mod app_bundle;
 mod app_link;
 mod app_state;
 mod app_window;
