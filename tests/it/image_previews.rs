@@ -300,7 +300,9 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
     let github = FakeGitHub::with_pull("main-tip", &pull.head, &sent);
 
     let place = review.begin_file_comment(&file_path("logo.png")).unwrap();
-    review.edit_draft(&place, "is the red intended?").unwrap();
+    review
+        .type_in_draft(&place, "is the red intended?")
+        .unwrap();
     let result = review
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();

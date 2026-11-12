@@ -290,6 +290,15 @@ pub fn svg_of(width: u32, height: u32) -> String {
     )
 }
 
+/// What the app does once typing pauses: the typed text goes to the state file.
+pub fn save_typing(review: &mut Review) {
+    review
+        .typing_save()
+        .expect("something was typed")
+        .run()
+        .unwrap();
+}
+
 /// Where `link` opens on GitHub, for a review with no IDE.
 pub fn on_github(review: &Review, link: &CodeLink) -> String {
     match review.code_opener(Err(NoIde::NoTemplate)).destination(link) {

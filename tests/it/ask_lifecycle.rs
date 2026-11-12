@@ -449,7 +449,7 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
     };
     let (asks, id) = answered(&shop, &review, piece);
     let first = review.use_as_comment(asks.get(id).unwrap()).unwrap();
-    review.edit_draft(&first, "My note").unwrap();
+    review.type_in_draft(&first, "My note").unwrap();
 
     let second = review.use_as_comment(asks.get(id).unwrap()).unwrap();
 

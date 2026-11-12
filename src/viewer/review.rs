@@ -949,14 +949,9 @@ impl Review {
         self.state.reply_draft(thread_id)
     }
 
-    /// Opens the reply box; the text typed in it is saved by `edit_reply`.
+    /// Opens the reply box; the text typed in it is saved by `type_in_reply` and `typing_save`.
     pub fn open_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
         self.state.record(|state| state.open_reply(thread_id))
-    }
-
-    pub fn edit_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
-        self.state
-            .record(|state| state.write_reply(thread_id, text))
     }
 
     pub fn discard_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
@@ -965,10 +960,6 @@ impl Review {
 
     pub fn finish_body(&self) -> &str {
         self.state.finish_body()
-    }
-
-    pub fn edit_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
-        self.state.record(|state| state.write_finish_body(text))
     }
 
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
@@ -1141,11 +1132,6 @@ impl Review {
     /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
     pub fn typing_save(&mut self) -> Option<TypingSave> {
         self.state.typing_save()
-    }
-
-    /// Saved at once, so a crash loses nothing.
-    pub fn edit_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
-        self.state.record(|state| state.write_draft(place, body))
     }
 
     /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.

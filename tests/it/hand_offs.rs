@@ -118,7 +118,7 @@ fn comment_on_line_ten(review: &mut Review, body: &str) -> CommentPlace {
     review.begin_selection(row.clone());
     review.extend_selection(row);
     let place = review.finish_selection().unwrap().unwrap();
-    review.edit_draft(&place, body).unwrap();
+    review.type_in_draft(&place, body).unwrap();
     place
 }
 

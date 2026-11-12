@@ -1,6 +1,6 @@
-use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::{FixtureRepo, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
@@ -255,7 +255,8 @@ fn the_review_body_being_written_is_saved_and_goes_when_the_review_is_sent() {
     let github = pull.github();
     let mut review = pull.open();
     review.pull_viewer_authorship(&github).unwrap();
-    review.edit_finish_body("looks good so far").unwrap();
+    review.type_in_finish_body("looks good so far").unwrap();
+    save_typing(&mut review);
 
     assert_eq!(pull.open().finish_body(), "looks good so far");
 
@@ -271,7 +272,8 @@ fn a_refused_finish_keeps_the_body() {
     let github = pull.github().with_viewer_as_pull_author();
     let mut review = pull.open();
     review.pull_viewer_authorship(&github).unwrap();
-    review.edit_finish_body("not yet").unwrap();
+    review.type_in_finish_body("not yet").unwrap();
+    save_typing(&mut review);
 
     let result = review.finish_review(ReviewVerdict::Approve, "not yet", &github);
 

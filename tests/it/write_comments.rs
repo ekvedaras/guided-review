@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
-use crate::support::{file_path, line};
+use crate::support::{file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
@@ -140,7 +140,8 @@ fn comment_on(review: &mut Review, text: &str) -> CommentPlace {
 }
 
 fn typed(review: &mut Review, place: &CommentPlace, body: &str) {
-    review.edit_draft(place, body).unwrap();
+    review.type_in_draft(place, body).unwrap();
+    save_typing(review);
 }
 
 #[test]
@@ -585,7 +586,10 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
     assert!(drafts[1].written_at.is_some());
     assert!(matches!(drafts[1].place, CommentPlace::Lines { .. }));
 
-    review.edit_draft(&file, "about the file, edited").unwrap();
+    review
+        .type_in_draft(&file, "about the file, edited")
+        .unwrap();
+    save_typing(&mut review);
 
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
-use crate::support::{FixtureRepo, file_path};
+use crate::support::{FixtureRepo, file_path, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
@@ -545,7 +545,7 @@ fn suggest_change_keeps_the_text_already_typed() {
     let pull = Pull::new();
     let mut review = pull.open();
     let place = drag(&mut review, "line ten", "line ten");
-    review.edit_draft(&place, "use a name").unwrap();
+    review.type_in_draft(&place, "use a name").unwrap();
 
     let body = review.suggest_change(&place).unwrap().unwrap();
 
@@ -589,8 +589,9 @@ fn a_reply_being_written_is_saved_and_comes_back_after_reopening() {
 
     review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .edit_reply(&ThreadId::new("T1"), "because it was slow")
+        .type_in_reply(&ThreadId::new("T1"), "because it was slow")
         .unwrap();
+    save_typing(&mut review);
 
     let reopened = pull.open();
     assert_eq!(
@@ -607,7 +608,10 @@ fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
     review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.edit_reply(&ThreadId::new("T1"), "because").unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
+    save_typing(&mut review);
 
     review.act_on_thread(
         ThreadAction::Reply {
@@ -620,7 +624,7 @@ fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
     assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
 
     review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.edit_reply(&ThreadId::new("T1"), "again").unwrap();
+    review.type_in_reply(&ThreadId::new("T1"), "again").unwrap();
     review.discard_reply(&ThreadId::new("T1")).unwrap();
     assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
 }
@@ -631,7 +635,10 @@ fn a_failed_reply_keeps_its_draft() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.edit_reply(&ThreadId::new("T1"), "because").unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
+    save_typing(&mut review);
     github.inject(GitHubFault::ConnectionLost);
 
     review.act_on_thread(
@@ -656,7 +663,10 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     let mut review = pull.open();
     review.pr_head_is(Sha::new("newer-head"));
     review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.edit_reply(&ThreadId::new("T1"), "because").unwrap();
+    review
+        .type_in_reply(&ThreadId::new("T1"), "because")
+        .unwrap();
+    save_typing(&mut review);
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
