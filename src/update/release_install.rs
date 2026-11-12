@@ -22,7 +22,8 @@ pub struct ReleaseInstall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
     pub version: Version,
-    /// The bin link, which now runs the new version.
+    /// The new version's own binary, which the restart runs: never the bin link or a name looked up on
+    /// `PATH`, either of which may lead to another binary by then.
     pub program: PathBuf,
     pub skill: SkillLink,
 }
@@ -84,10 +85,11 @@ impl ReleaseInstall {
             }
             None => SkillLink::NotOurs,
         };
-        relink(&self.bin_link, &release.join("guided-review"))?;
+        let program = release.join("guided-review");
+        relink(&self.bin_link, &program)?;
         Ok(Installed {
             version: update.version,
-            program: self.bin_link.clone(),
+            program,
             skill,
         })
     }

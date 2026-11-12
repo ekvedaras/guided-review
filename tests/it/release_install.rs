@@ -165,7 +165,7 @@ fn installing_unpacks_the_release_beside_the_old_one_and_moves_both_links_to_it(
         home.release_folder("0.5.0").join("skills/tour")
     );
     assert_eq!(installed.version, Version::from_tag("v0.5.0").unwrap());
-    assert_eq!(installed.program, home.bin_link());
+    assert_eq!(installed.program, binary);
     assert_eq!(installed.skill, SkillLink::Moved);
     assert_eq!(
         fs::read_to_string(home.release_folder("0.4.0").join("guided-review")).unwrap(),
@@ -285,8 +285,31 @@ fn an_update_is_downloaded_from_its_release_files_and_installed() {
         .download_and_install(&releases, &update)
         .unwrap();
 
-    assert_eq!(installed.program, home.bin_link());
+    assert_eq!(
+        installed.program,
+        home.release_folder("0.5.0").join("guided-review")
+    );
     assert_eq!(fs::read_to_string(home.bin_link()).unwrap(), "binary 0.5.0");
+}
+
+#[test]
+fn the_app_restarts_into_the_binary_it_installed_whatever_the_bin_link_or_path_say_later() {
+    let home = Home::with_release_installed();
+    let update = update_to("0.5.0");
+    let archive = archive_of("0.5.0", "binary 0.5.0");
+    let installed = home
+        .install()
+        .install(&update, &archive, &checksum_of(&update, &archive))
+        .unwrap();
+
+    fs::remove_file(home.bin_link()).unwrap();
+    fs::write(home.bin_link(), "something else").unwrap();
+
+    assert!(installed.program.is_absolute());
+    assert_eq!(
+        fs::read_to_string(&installed.program).unwrap(),
+        "binary 0.5.0"
+    );
 }
 
 #[test]

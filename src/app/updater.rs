@@ -59,7 +59,7 @@ impl Updates {
 
 /// An update is installed and the app should restart into it.
 pub struct UpdateInstalled {
-    /// The bin link, which now runs the new release.
+    /// The new release's own binary.
     pub program: PathBuf,
 }
 
