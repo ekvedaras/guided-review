@@ -1025,3 +1025,140 @@ fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
     );
     assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("  \n"));
 }
+
+fn delete(id: &str) -> ThreadAction {
+    ThreadAction::DeleteComment {
+        comment_id: CommentId::new(id),
+    }
+}
+
+fn delete_asked_of(review: &Review) -> Option<CommentId> {
+    review
+        .current_step()
+        .unwrap()
+        .threads
+        .first()
+        .and_then(|thread| thread.delete_asked.clone())
+}
+
+fn deleted_calls(pull: &Pull) -> Vec<GitHubCall> {
+    pull.sent
+        .github_calls()
+        .into_iter()
+        .filter(|call| matches!(call, GitHubCall::DeleteComment { .. }))
+        .collect()
+}
+
+#[test]
+fn deleting_my_comment_asks_first_and_then_removes_it_from_the_thread() {
+    let pull = Pull::new();
+    let github = github_with_thread(
+        &pull,
+        thread_on_line_ten(vec![comment("C1", "why?"), mine("C2", "because")]),
+    );
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+
+    review.ask_to_delete(&CommentId::new("C2"));
+    assert_eq!(delete_asked_of(&review), Some(CommentId::new("C2")));
+    let result = review.act_on_thread(delete("C2"), &github);
+
+    assert_eq!(result, ThreadActionResult::Done);
+    assert_eq!(
+        deleted_calls(&pull),
+        vec![GitHubCall::DeleteComment {
+            comment_id: CommentId::new("C2")
+        }]
+    );
+    let bodies: Vec<_> = shown_thread(&review)
+        .comments
+        .iter()
+        .map(|comment| comment.body.clone())
+        .collect();
+    assert_eq!(bodies, ["why?"]);
+    assert_eq!(delete_asked_of(&review), None);
+}
+
+#[test]
+fn a_deletion_that_was_not_asked_about_is_refused_and_nothing_is_sent() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+
+    let result = review.act_on_thread(delete("C1"), &github);
+
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::DeleteNotConfirmed)
+    );
+    assert_eq!(deleted_calls(&pull).len(), 0);
+    assert_eq!(shown_thread(&review).comments.len(), 1);
+}
+
+#[test]
+fn giving_up_the_question_takes_the_deletion_back() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.ask_to_delete(&CommentId::new("C1"));
+
+    review.withdraw_delete();
+
+    assert_eq!(delete_asked_of(&review), None);
+    assert_eq!(
+        review.act_on_thread(delete("C1"), &github),
+        ThreadActionResult::Refused(CommentRefusal::DeleteNotConfirmed)
+    );
+}
+
+#[test]
+fn a_comment_of_someone_else_cannot_be_deleted() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+
+    review.ask_to_delete(&CommentId::new("C1"));
+    let result = review.act_on_thread(delete("C1"), &github);
+
+    assert_eq!(delete_asked_of(&review), None);
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::NotYourComment)
+    );
+    assert_eq!(deleted_calls(&pull).len(), 0);
+}
+
+#[test]
+fn a_deletion_that_fails_keeps_the_comment_and_says_why() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.ask_to_delete(&CommentId::new("C1"));
+    github.inject(GitHubFault::ConnectionLost);
+
+    let result = review.act_on_thread(delete("C1"), &github);
+
+    assert!(
+        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("network is down")),
+        "{result:?}"
+    );
+    assert_eq!(shown_thread(&review).comments.len(), 1);
+    assert_eq!(delete_asked_of(&review), None);
+}
+
+#[test]
+fn a_thread_whose_only_comment_is_deleted_goes_away() {
+    let pull = Pull::new();
+    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let mut review = pull.open();
+    review.pull_threads(&github).unwrap();
+    review.ask_to_delete(&CommentId::new("C1"));
+
+    review.act_on_thread(delete("C1"), &github);
+
+    assert!(review.current_step().unwrap().threads.is_empty());
+}

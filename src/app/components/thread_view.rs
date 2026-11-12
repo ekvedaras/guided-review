@@ -49,6 +49,14 @@ pub type OnTryHandOffAgain = Rc<dyn Fn(HandOffId, &mut App)>;
 /// What happened to the edit of one comment; the core keeps its text, so it survives scrolling away.
 pub type OnCommentEdit = Rc<dyn Fn(&CommentId, ReplyDraftChange, &mut App)>;
 
+/// The question before a comment is deleted; the core keeps it, so the buttons come back as they were.
+pub enum DeleteQuestion {
+    Ask,
+    Withdraw,
+}
+
+pub type OnDeleteQuestion = Rc<dyn Fn(&CommentId, DeleteQuestion, &mut App)>;
+
 /// What the reviewer is doing in one thread: the action under way. The reply text is the core's.
 struct ThreadUi {
     /// The comment whose reaction picker is open.
@@ -96,6 +104,7 @@ pub struct ThreadElement {
     edits: BTreeMap<CommentId, String>,
     on_reply_draft: OnReplyDraft,
     on_comment_edit: OnCommentEdit,
+    on_delete_question: OnDeleteQuestion,
     on_toggle: OnToggle,
     on_action: OnThreadAction,
     on_try_hand_off_again: OnTryHandOffAgain,
@@ -114,6 +123,7 @@ pub struct ThreadDrafts {
 pub struct ThreadChanges {
     pub on_reply_draft: OnReplyDraft,
     pub on_comment_edit: OnCommentEdit,
+    pub on_delete_question: OnDeleteQuestion,
     pub on_toggle: OnToggle,
     pub on_action: OnThreadAction,
     pub on_try_hand_off_again: OnTryHandOffAgain,
@@ -159,6 +169,7 @@ impl ThreadElement {
         let ThreadChanges {
             on_reply_draft,
             on_comment_edit,
+            on_delete_question,
             on_toggle,
             on_action,
             on_try_hand_off_again,
@@ -171,6 +182,7 @@ impl ThreadElement {
             edits,
             on_reply_draft,
             on_comment_edit,
+            on_delete_question,
             on_toggle,
             on_action,
             on_try_hand_off_again,
@@ -612,6 +624,93 @@ impl ThreadElement {
     }
 }
 
+struct DeleteControl<'a> {
+    colors: Colors,
+    comment_id: &'a CommentId,
+    is_asked: bool,
+    on_question: &'a OnDeleteQuestion,
+    on_action: &'a OnThreadAction,
+    ui: &'a Entity<ThreadUi>,
+    is_busy: bool,
+}
+
+impl ThreadElement {
+    /// The trash button, which turns into the question "Delete? Yes No" once clicked. Nothing
+    /// shows while a deletion is on its way.
+    fn delete_control(
+        DeleteControl {
+            colors,
+            comment_id,
+            is_asked,
+            on_question,
+            on_action,
+            ui,
+            is_busy,
+        }: DeleteControl,
+    ) -> Option<gpui::Div> {
+        if is_busy {
+            return None;
+        }
+        let colors = &colors;
+        if !is_asked {
+            let (comment_id, on_question) = (comment_id.clone(), Rc::clone(on_question));
+            return Some(
+                div().child(
+                    icon_button(
+                        colors,
+                        SharedString::from(format!("delete-{comment_id}")),
+                        ButtonKind::Ghost,
+                        ButtonSize::Small,
+                        Icon::Trash,
+                        "Delete your comment",
+                    )
+                    .on_click(move |_, _, cx| {
+                        on_question(&comment_id, DeleteQuestion::Ask, cx);
+                    }),
+                ),
+            );
+        }
+        let (yes_ui, yes_on_action, yes_id) =
+            (ui.clone(), Rc::clone(on_action), comment_id.clone());
+        let (no_id, no_question) = (comment_id.clone(), Rc::clone(on_question));
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(colors.muted_text)
+                        .child("Delete?"),
+                )
+                .child(
+                    plain_button(
+                        colors,
+                        SharedString::from(format!("delete-yes-{comment_id}")),
+                        ButtonKind::Danger,
+                        "Yes",
+                    )
+                    .on_click(move |_, _, cx| {
+                        let action = ThreadAction::DeleteComment {
+                            comment_id: yes_id.clone(),
+                        };
+                        run_action(action, &yes_ui, &yes_on_action, cx);
+                    }),
+                )
+                .child(
+                    plain_button(
+                        colors,
+                        SharedString::from(format!("delete-no-{comment_id}")),
+                        ButtonKind::Ghost,
+                        "No",
+                    )
+                    .on_click(move |_, _, cx| no_question(&no_id, DeleteQuestion::Withdraw, cx)),
+                ),
+        )
+    }
+}
+
 /// Where a comment's new text is written, in place of the comment.
 struct EditBox<'a> {
     colors: Colors,
@@ -848,6 +947,22 @@ impl RenderOnce for ThreadElement {
                                     window.focus(&handle, cx);
                                 })
                             }))
+                            .children(
+                                (comment.by_viewer && being_edited.is_none())
+                                    .then(|| {
+                                        Self::delete_control(DeleteControl {
+                                            colors,
+                                            comment_id: &comment.id,
+                                            is_asked: self.view.delete_asked.as_ref()
+                                                == Some(&comment.id),
+                                            on_question: &self.on_delete_question,
+                                            on_action: &self.on_action,
+                                            ui: &ui,
+                                            is_busy,
+                                        })
+                                    })
+                                    .flatten(),
+                            )
                             .child(Self::reactions(
                                 &colors,
                                 comment,

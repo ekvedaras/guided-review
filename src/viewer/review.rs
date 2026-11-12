@@ -51,7 +51,7 @@ use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRe
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{self, ReviewThread, ThreadId, ThreadPlacement};
+use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork};
 use super::typing_save::TypingSave;
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
@@ -594,6 +594,14 @@ impl ReviewCore {
         Ok(())
     }
 
+    fn thread_work(&self) -> ThreadWork<'_> {
+        ThreadWork {
+            reply_drafts: self.state.reply_drafts(),
+            comment_edits: self.comment_desk.comment_edits(),
+            delete_asked: self.comment_desk.delete_asked(),
+        }
+    }
+
     pub fn current_step(&self) -> Option<StepPage<'_>> {
         let Screen::Step(id) = &self.screen else {
             return None;
@@ -608,8 +616,7 @@ impl ReviewCore {
             &page.pieces,
             &self.thread_fold_flipped,
             self.display_options.files_at_head(),
-            self.state.reply_drafts(),
-            self.comment_desk.comment_edits(),
+            &self.thread_work(),
             self.state.hand_offs(),
         );
         if let Some(record) = self.repin_record() {
@@ -883,8 +890,7 @@ impl ReviewCore {
                 &page.pieces,
                 &self.thread_fold_flipped,
                 self.display_options.files_at_head(),
-                self.state.reply_drafts(),
-                self.comment_desk.comment_edits(),
+                &self.thread_work(),
                 self.state.hand_offs(),
             );
             page
@@ -1010,8 +1016,24 @@ impl ReviewCore {
             }
             _ => None,
         };
+        self.comment_desk.thread_action_request(
+            &self.pr,
+            &self.pulled_threads,
+            action,
+            reply_body,
+            self.tour_freshness(),
+        )
+    }
+
+    /// Asks the reviewer to confirm deleting one of their own comments, which a deletion needs.
+    pub fn ask_to_delete(&mut self, comment_id: &CommentId) {
         self.comment_desk
-            .thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
+            .ask_to_delete(&self.pulled_threads, comment_id);
+    }
+
+    /// The reviewer said no, or looked away.
+    pub fn withdraw_delete(&mut self) {
+        self.comment_desk.withdraw_delete();
     }
 
     /// The text in the box as typed so far; `None` while it is not open.

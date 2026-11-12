@@ -188,6 +188,10 @@ pub enum CommentRefusal {
     EmptyReply,
     /// An edit that left no text would not be a comment any more.
     EmptyComment,
+    /// Only the viewer's own comments can be deleted.
+    NotYourComment,
+    /// A comment is deleted only after the reviewer said yes to the question.
+    DeleteNotConfirmed,
     /// An Ask still waiting for its first answer has nothing to put in a comment.
     NoAnswerYet,
     NoAccess(String),
@@ -210,6 +214,8 @@ impl CommentRefusal {
             Self::PendingReviewExists => "There is a pending review now: add the comment to it",
             Self::EmptyReply => "Write the reply first",
             Self::EmptyComment => "A comment needs text",
+            Self::NotYourComment => "Only your own comments can be deleted",
+            Self::DeleteNotConfirmed => "Confirm the deletion first",
             Self::NoAnswerYet => "This Ask has no answer yet",
             Self::NoAccess(reason) => return Cow::Owned(format!("No access to GitHub: {reason}")),
         })

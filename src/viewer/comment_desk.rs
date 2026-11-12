@@ -35,6 +35,9 @@ pub(super) struct CommentDesk {
     /// The text of each of the viewer's comments being edited. Not saved: an edit not sent is
     /// given up with the app, as the comment on GitHub is still whole.
     comment_edits: BTreeMap<CommentId, String>,
+    /// The comment the reviewer was asked to confirm the deletion of. Not saved: a question
+    /// left open is given up with the app.
+    delete_asked: Option<CommentId>,
     boxes: BoxActivity,
 }
 
@@ -426,6 +429,7 @@ impl CommentDesk {
     pub(super) fn thread_action_request(
         &self,
         pr: &PullRequestUrl,
+        threads: &[ReviewThread],
         action: ThreadAction,
         reply_body: Option<String>,
         freshness: TourFreshness,
@@ -434,12 +438,47 @@ impl CommentDesk {
             ThreadAction::EditComment { comment_id } => self.comment_edits.get(comment_id).cloned(),
             _ => reply_body,
         };
+        let refusal = match &action {
+            ThreadAction::DeleteComment { comment_id } => {
+                self.deletion_refusal(threads, comment_id)
+            }
+            _ => None,
+        };
         ThreadActionRequest {
             pr: pr.clone(),
             action,
             draft_body,
             freshness,
+            refusal,
         }
+    }
+
+    fn deletion_refusal(
+        &self,
+        threads: &[ReviewThread],
+        comment_id: &CommentId,
+    ) -> Option<CommentRefusal> {
+        if !is_own_comment(threads, comment_id) {
+            Some(CommentRefusal::NotYourComment)
+        } else if self.delete_asked.as_ref() != Some(comment_id) {
+            Some(CommentRefusal::DeleteNotConfirmed)
+        } else {
+            None
+        }
+    }
+
+    /// Asks the reviewer to confirm the deletion of one of the viewer's own comments; another
+    /// person's comment is left alone. One question at a time.
+    pub(super) fn ask_to_delete(&mut self, threads: &[ReviewThread], comment_id: &CommentId) {
+        self.delete_asked = is_own_comment(threads, comment_id).then(|| comment_id.clone());
+    }
+
+    pub(super) fn withdraw_delete(&mut self) {
+        self.delete_asked = None;
+    }
+
+    pub(super) fn delete_asked(&self) -> Option<&CommentId> {
+        self.delete_asked.as_ref()
     }
 
     pub(super) fn comment_edits(&self) -> &BTreeMap<CommentId, String> {
@@ -598,6 +637,12 @@ impl CommentDesk {
             (ThreadActionResult::Done, ThreadAction::EditComment { comment_id }) => {
                 self.comment_edits.remove(comment_id);
             }
+            (_, ThreadAction::DeleteComment { comment_id }) => {
+                self.delete_asked = None;
+                if outcome.result == ThreadActionResult::Done {
+                    self.comment_edits.remove(comment_id);
+                }
+            }
             (
                 ThreadActionResult::Refused(CommentRefusal::PendingReviewExists),
                 ThreadAction::Reply { .. },
@@ -661,6 +706,13 @@ impl CommentOutcome {
 }
 
 /// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.
+fn is_own_comment(threads: &[ReviewThread], comment_id: &CommentId) -> bool {
+    threads
+        .iter()
+        .flat_map(|thread| &thread.comments)
+        .any(|comment| comment.id == *comment_id && comment.by_viewer)
+}
+
 fn append_to_draft(state: &mut ReviewState, place: &CommentPlace, text: &str) -> Option<String> {
     let written = state.draft_at(place)?.body.trim_end().to_owned();
     let body = if written.is_empty() {
