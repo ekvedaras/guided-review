@@ -100,7 +100,7 @@ pub use intent::{
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };
-pub use markdown::{Block, Markdown, Run};
+pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use page::{

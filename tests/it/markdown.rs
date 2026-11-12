@@ -1,4 +1,4 @@
-use guided_review::viewer::{Block, Markdown, Run};
+use guided_review::viewer::{Block, ColumnAlignment, Markdown, Run, Table};
 
 fn plain(text: &str) -> Run {
     Run {
@@ -226,7 +226,7 @@ fn all_text(blocks: &[Block]) -> String {
                 text += &all_text(body);
             }
             Block::Code { text: code, .. } => text += code,
-            Block::Rule | Block::Picture { .. } => {}
+            Block::Rule | Block::Picture { .. } | Block::Table(_) => {}
         }
     }
     text
@@ -403,4 +403,93 @@ fn a_link_to_a_file_in_the_tours_folder_opens_that_file() {
         paragraph_runs(&markdown.blocks[0])[0].link.as_deref(),
         Some(expected.as_str())
     );
+}
+
+fn table_of(block: &Block) -> &Table {
+    match block {
+        Block::Table(table) => table,
+        other => panic!("expected a table, got {other:?}"),
+    }
+}
+
+fn cell_text(cell: &[Run]) -> String {
+    cell.iter().map(|run| run.text.as_str()).collect()
+}
+
+#[test]
+fn a_summary_table_is_one_table_with_header_rows_and_inline_style() {
+    let markdown = Markdown::parse(
+        "| | Deal holds all stock |\n|---|---|\n| \u{274c} Before | reminder **sent** |\n| \u{2705} After | reminder **waits** |",
+    );
+
+    let [block] = markdown.blocks.as_slice() else {
+        panic!("one table, got {:?}", markdown.blocks);
+    };
+    let table = table_of(block);
+    assert_eq!(table.alignments.len(), 2);
+    assert_eq!(table.header.len(), 2);
+    assert_eq!(cell_text(&table.header[1]), "Deal holds all stock");
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(cell_text(&table.rows[0][0]), "\u{274c} Before");
+    let sent = &table.rows[0][1];
+    assert_eq!(cell_text(sent), "reminder sent");
+    assert!(sent.iter().any(|run| run.bold && run.text == "sent"));
+    assert_eq!(cell_text(&table.rows[1][1]), "reminder waits");
+}
+
+#[test]
+fn colons_in_the_separator_line_set_the_column_alignments() {
+    let markdown = Markdown::parse("| a | b | c | d |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |");
+
+    assert_eq!(
+        table_of(&markdown.blocks[0]).alignments,
+        [
+            ColumnAlignment::Left,
+            ColumnAlignment::Center,
+            ColumnAlignment::Right,
+            ColumnAlignment::Left,
+        ]
+    );
+}
+
+#[test]
+fn cells_keep_code_and_links() {
+    let markdown = Markdown::parse("| a |\n|---|\n| `x` [d](https://x.test) |");
+
+    let cell = &table_of(&markdown.blocks[0]).rows[0][0];
+    assert!(cell.iter().any(|run| run.code && run.text == "x"));
+    assert!(
+        cell.iter()
+            .any(|run| run.link.as_deref() == Some("https://x.test"))
+    );
+}
+
+#[test]
+fn a_table_after_a_paragraph_is_a_block_of_its_own() {
+    let markdown = Markdown::parse("Before:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter.");
+
+    assert!(matches!(
+        markdown.blocks.as_slice(),
+        [Block::Paragraph(_), Block::Table(_), Block::Paragraph(_)]
+    ));
+}
+
+#[test]
+fn a_table_inside_a_list_item_stays_in_the_item() {
+    let markdown = Markdown::parse("- item\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n");
+
+    let [Block::List { items, .. }] = markdown.blocks.as_slice() else {
+        panic!("one list, got {:?}", markdown.blocks);
+    };
+    assert!(matches!(
+        items[0].as_slice(),
+        [Block::Paragraph(_), Block::Table(_)]
+    ));
+}
+
+#[test]
+fn pipes_without_a_separator_line_stay_a_paragraph() {
+    let markdown = Markdown::parse("| a | b |\n| 1 | 2 |");
+
+    assert!(matches!(markdown.blocks.as_slice(), [Block::Paragraph(_)]));
 }
