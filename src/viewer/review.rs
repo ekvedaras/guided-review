@@ -20,8 +20,7 @@ use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
 };
-use super::diff_display::HiddenLines;
-use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
+use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::finish_review::{
@@ -30,7 +29,7 @@ use super::finish_review::{
 };
 use super::hand_offs::{Audience, HandOffState, HandOffs};
 use super::highlight::{HighlightRequest, Highlights};
-use super::image_preview::{ImagePreview, ImagePreviewRequest};
+use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
@@ -267,6 +266,7 @@ impl Review {
                 Some((read_head.clone(), files))
             })
             .collect();
+        let display_options = DisplayOptions::for_code(base.clone(), head.clone());
         Ok(Self {
             tour,
             pr,
@@ -299,7 +299,7 @@ impl Review {
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
             comment_desk: CommentDesk::default(),
-            display_options: DisplayOptions::default(),
+            display_options,
             pr_notes: PrNotes::default(),
             tour_files,
         })
@@ -310,15 +310,6 @@ impl Review {
         HighlightRequest::for_files(&self.files, &self.tour.base, &self.tour.head)
     }
 
-    /// Colours read for another base or head, e.g. before a re-pin, are dropped. Says whether they were kept.
-    pub fn set_highlights(&mut self, highlights: Highlights) -> bool {
-        if !highlights.is_of(&self.tour.base, &self.tour.head) {
-            return false;
-        }
-        self.display_options.set_highlights(highlights);
-        true
-    }
-
     /// Context lines come from the files at head, read off the main thread like the colours.
     pub fn files_at_head_request(&self) -> FilesAtHeadRequest {
         FilesAtHeadRequest::for_files(&self.files, &self.tour.head)
@@ -326,12 +317,11 @@ impl Review {
 
     /// Files read at another head, e.g. before a re-pin, are dropped. Says whether they were kept.
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) -> bool {
-        if !files_at_head.is_at(&self.tour.head) {
-            return false;
+        let kept = self.display_options.set_files_at_head(files_at_head);
+        if kept {
+            self.place_threads();
         }
-        self.display_options.set_files_at_head(files_at_head);
-        self.place_threads();
-        true
+        kept
     }
 
     /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
@@ -340,7 +330,7 @@ impl Review {
         let mut requests: Vec<ImagePreviewRequest> = Vec::new();
         for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
             let path = piece.id.path();
-            let is_wanted = self.display_options.image_preview(path.as_str()).is_none()
+            let is_wanted = self.display_options.image_preview(path).is_none()
                 && !requests.iter().any(|request| request.path() == path);
             let file = self.files.iter().find(|file| file.path == *path);
             if let (true, Some(file)) = (is_wanted, file) {
@@ -350,45 +340,13 @@ impl Review {
         requests
     }
 
-    /// A preview loaded for another base or head, e.g. before a re-open, is dropped. Says whether it was kept.
-    pub fn set_image_preview(&mut self, preview: ImagePreview) -> bool {
-        self.display_options
-            .set_image_preview(preview, &self.base, &self.head)
+    pub fn display_options(&self) -> &DisplayOptions {
+        &self.display_options
     }
 
-    pub fn image_preview(&self, path: &FilePath) -> Option<&ImagePreview> {
-        self.display_options.image_preview(path.as_str())
-    }
-
-    pub fn show_more_context(&mut self, more: &MoreContext) {
-        self.display_options.show_more_context(more);
-    }
-
-    /// Every line of the gap, from the side it can be shown from; a gap that does not say how many
-    /// lines it hides shows the usual few more.
-    pub fn show_hidden_lines(&mut self, gap: &HiddenLines) {
-        let either_side = gap.after_above.as_ref().or(gap.before_below.as_ref());
-        match (either_side, gap.count) {
-            (Some(more), Some(count)) => self.display_options.show_lines(more, count),
-            (Some(more), None) => self.display_options.show_more_context(more),
-            (None, _) => {}
-        }
-    }
-
-    pub fn ignores_whitespace(&self) -> bool {
-        self.display_options.ignores_whitespace()
-    }
-
-    pub fn toggle_ignore_whitespace(&mut self) {
-        self.display_options.toggle_ignore_whitespace();
-    }
-
-    pub fn wraps_lines(&self) -> bool {
-        self.display_options.wraps_lines()
-    }
-
-    pub fn toggle_wrap_lines(&mut self) {
-        self.display_options.toggle_wrap_lines();
+    /// Nothing of it is saved, so it changes freely, even while a re-pin runs.
+    pub fn display_options_mut(&mut self) -> &mut DisplayOptions {
+        &mut self.display_options
     }
 
     pub fn screen(&self) -> &Screen {
@@ -1367,12 +1325,12 @@ impl Review {
                 PaletteAction::MarkStepRead
             }
         });
-        let wrap = if self.wraps_lines() {
+        let wrap = if self.display_options.wraps_lines() {
             PaletteAction::StopWrappingLines
         } else {
             PaletteAction::WrapLines
         };
-        let whitespace = if self.ignores_whitespace() {
+        let whitespace = if self.display_options.ignores_whitespace() {
             PaletteAction::ShowWhitespace
         } else {
             PaletteAction::HideWhitespace

@@ -720,7 +720,7 @@ impl ReviewSession {
                 this.frame_stats.code_arrived();
                 this.change(cx, |review| {
                     review.set_files_at_head(files_at_head);
-                    review.set_highlights(highlights);
+                    review.display_options_mut().set_highlights(highlights);
                 });
             },
         )
@@ -1106,7 +1106,11 @@ impl ReviewSession {
                 |this, (preview, pictures), cx| {
                     this.change_session(cx, |session| {
                         let path = preview.path.clone();
-                        if session.review.set_image_preview(preview) {
+                        if session
+                            .review
+                            .display_options_mut()
+                            .set_image_preview(preview)
+                        {
                             session.loading_images.remove(&path);
                             session.image_pictures.insert(path, Rc::new(pictures));
                         }

@@ -39,7 +39,7 @@ fn lines(review: &Review) -> Vec<DiffLine> {
 
 fn highlighted(review: &mut Review, source: &LocalGit) {
     let highlights = review.highlight_request().compute(source);
-    review.set_highlights(highlights);
+    review.display_options_mut().set_highlights(highlights);
 }
 
 fn captures_in(line: &DiffLine) -> Vec<(&str, Capture)> {

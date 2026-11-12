@@ -201,7 +201,7 @@ fn a_selection_on_expanded_context_takes_no_comment() {
         .more_above
         .clone()
         .unwrap();
-    review.show_more_context(&more);
+    review.display_options_mut().show_more_context(&more);
 
     let refused = drag(&mut review, "line 5", "line ten");
 

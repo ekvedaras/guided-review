@@ -1069,8 +1069,8 @@ impl RowsBuilder<'_> {
                 step: id.clone(),
                 is_showing_full_diff: since.showing_full_diff,
             }),
-            ignores_whitespace: has_code.then(|| review.ignores_whitespace()),
-            wraps_lines: has_code.then(|| review.wraps_lines()),
+            ignores_whitespace: has_code.then(|| review.display_options().ignores_whitespace()),
+            wraps_lines: has_code.then(|| review.display_options().wraps_lines()),
         })));
         let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
         let shown = if page
@@ -1118,8 +1118,8 @@ impl RowsBuilder<'_> {
             ask: None,
             fold: None,
             full_diff: None,
-            ignores_whitespace: Some(review.ignores_whitespace()),
-            wraps_lines: Some(review.wraps_lines()),
+            ignores_whitespace: Some(review.display_options().ignores_whitespace()),
+            wraps_lines: Some(review.display_options().wraps_lines()),
         })));
         let (under_a_line, after_code): (Vec<_>, Vec<_>) = page
             .threads
@@ -1185,7 +1185,7 @@ impl RowsBuilder<'_> {
             if piece.is_image {
                 let path = piece.id.path().clone();
                 self.rows.push(PageRow::Image {
-                    is_loaded: review.image_preview(&path).is_some(),
+                    is_loaded: review.display_options().image_preview(&path).is_some(),
                     path: path.clone(),
                 });
                 let here = self.under_lines.take_whole_file(&path);
@@ -1242,7 +1242,7 @@ impl RowsBuilder<'_> {
                     self.rows.push(PageRow::PieceMarker(Rc::new(marker)));
                 }
                 let here = self.under_lines.take_at(&line.location);
-                let row = DiffRowLine::of(line.clone(), review.wraps_lines());
+                let row = DiffRowLine::of(line.clone(), review.display_options().wraps_lines());
                 self.rows.push(PageRow::Line(Rc::new(row)));
                 self.hang(here);
             }

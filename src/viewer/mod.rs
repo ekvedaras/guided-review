@@ -70,6 +70,7 @@ pub use diff_display::{
     hidden_lines_before,
 };
 pub use diff_fence::{FenceLine, fence_lines};
+pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,

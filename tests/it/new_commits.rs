@@ -642,7 +642,7 @@ fn colours_and_context_lines_read_before_a_re_pin_do_not_reach_the_re_pinned_rev
     shop.repin_onto(&second_head);
     let mut review = shop.open();
 
-    review.set_highlights(highlights);
+    review.display_options_mut().set_highlights(highlights);
     review.set_files_at_head(files_at_head);
 
     review.go_to(&"keep".into());

@@ -605,7 +605,11 @@ impl OneStepLayout {
         let session = self.session.read(cx);
         ImageRow::new(
             path.clone(),
-            session.review().image_preview(path).cloned(),
+            session
+                .review()
+                .display_options()
+                .image_preview(path)
+                .cloned(),
             session.image_pictures(path),
             on_comment,
         )
@@ -889,7 +893,9 @@ impl OneStepLayout {
                 self.toggle_wrap_lines(&ToggleWrapLines, window, cx);
             }
             PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => {
-                self.change_review(cx, Review::toggle_ignore_whitespace);
+                self.change_review(cx, |review| {
+                    review.display_options_mut().toggle_ignore_whitespace();
+                });
             }
             PaletteAction::AskAboutStep => self.ask_about_screen(window, cx),
             PaletteAction::FinishReview => self.open_finish_form(cx),
@@ -1153,7 +1159,9 @@ impl OneStepLayout {
         if self.is_reopening(cx) {
             return;
         }
-        self.change_review(cx, Review::toggle_wrap_lines);
+        self.change_review(cx, |review| {
+            review.display_options_mut().toggle_wrap_lines();
+        });
     }
 
     /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
@@ -1970,14 +1978,18 @@ impl OneStepLayout {
                 "Hide whitespace",
             )
             .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, Review::toggle_ignore_whitespace);
+                this.change_review(cx, |review| {
+                    review.display_options_mut().toggle_ignore_whitespace();
+                });
             }))
         });
         let wrap = toolbar.wraps_lines.map(|is_on| {
             toolbar_toggle(&colors, "wrap-lines", is_on, Icon::WrapText, "Wrap lines")
                 .tooltip(tooltip(|_| "Wrap long lines (W)".into()))
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.change_review(cx, Review::toggle_wrap_lines);
+                    this.change_review(cx, |review| {
+                        review.display_options_mut().toggle_wrap_lines();
+                    });
                 }))
         });
         let toggles: Vec<Stateful<Div>> = whitespace.into_iter().chain(wrap).collect();
@@ -2064,8 +2076,8 @@ impl OneStepLayout {
             layout
                 .update(cx, |this, cx| {
                     this.change_review(cx, |review| match ask {
-                        GapAsk::More(more) => review.show_more_context(more),
-                        GapAsk::All(gap) => review.show_hidden_lines(gap),
+                        GapAsk::More(more) => review.display_options_mut().show_more_context(more),
+                        GapAsk::All(gap) => review.display_options_mut().show_hidden_lines(gap),
                     });
                 })
                 .ok();
