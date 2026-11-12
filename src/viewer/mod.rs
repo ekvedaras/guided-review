@@ -20,6 +20,7 @@ mod finish_review;
 mod hand_offs;
 mod highlight;
 mod image_preview;
+mod intent;
 mod jump;
 mod markdown;
 mod new_commits;
@@ -85,6 +86,7 @@ pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snipp
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
+pub use intent::{Effect, Intent, ReviewChange, WindowMoment};
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };

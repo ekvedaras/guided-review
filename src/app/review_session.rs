@@ -25,9 +25,9 @@ use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
     FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Place,
-    RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, TextBox,
-    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, WorkPorts, line_count,
+    RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StepId,
+    TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, WorkPorts, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -311,6 +311,16 @@ impl ReviewSession {
         let lines_before = self.review.text_of(text_box).map(line_count);
         let kept = self.review.type_in(text_box, text);
         self.typed(&kept, BoxHeight::of(text_box, lines_before, text), cx);
+    }
+
+    pub fn apply(&mut self, change: ReviewChange, cx: &mut Context<Self>) {
+        // A refused or failed tick is one of the review's problems, which the rebuilt sidebar shows.
+        self.change(cx, |review| review.apply(change)).ok();
+    }
+
+    /// No change of the page, so nothing is drawn again for it.
+    pub fn saw_end_of_screen(&mut self) {
+        self.review.saw_end_of_screen();
     }
 
     pub fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {

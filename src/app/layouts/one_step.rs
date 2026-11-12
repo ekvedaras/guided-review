@@ -83,12 +83,12 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, GitHubPort, HandOffId, InFlight, LineLocation, NextScreen, NoteSubject,
-    NotesButton, PageRow, PaletteAction, Place, QueuedComment, ReadProgress, Reopen,
+    CommentPlace, Effect, GitHubPort, HandOffId, InFlight, Intent, LineLocation, NextScreen,
+    NoteSubject, NotesButton, PageRow, PaletteAction, Place, QueuedComment, ReadProgress, Reopen,
     ReopenAfterSave, RestartGuard, RestartStep, Review, ReviewerSummaryRow, RouteStopRow, Screen,
     ScreenFooter, ScreenTravel, SelectedRows, SendMode, StepHeading, StepId, StepIntro,
     SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
-    Toolbar, TourLead, Travel,
+    Toolbar, TourLead, Travel, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -139,8 +139,6 @@ pub struct OneStepLayout {
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
     on_code_gesture: OnCodeSpot,
-    /// The screen whose end the reader has had on screen; the arrow key ticks a step only then.
-    seen_end_of: Option<Screen>,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
@@ -331,7 +329,6 @@ impl OneStepLayout {
         screen_travel.arrive(session.read(cx).review());
         Self {
             screen_list: session.read(cx).screen_list().clone(),
-            seen_end_of: None,
             finish_form_request: 0,
             screen_travel,
             code_scroll_x: CodeScrollX::default(),
@@ -1010,21 +1007,25 @@ impl OneStepLayout {
         use_code_opener(opener, cx);
     }
 
-    /// Like the footer's button, the key ticks the step it leaves, but only once the reader has
-    /// seen the step's end, so skipping ahead does not count as reading; both pass steps already read.
     fn go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
         if self.is_reopening(cx) {
             return;
         }
         self.note_seen_end(cx);
-        let review = self.session.read(cx).review();
-        if let Screen::Step(id) = review.screen().clone()
-            && !review.is_ticked(&id)
-            && self.seen_end_of.as_ref() == Some(review.screen())
-        {
-            self.toggle_tick(&id, cx);
+        self.act(Intent::NextScreen, cx);
+    }
+
+    fn act(&mut self, intent: Intent, cx: &mut Context<Self>) {
+        let effect = self
+            .session
+            .read(cx)
+            .review()
+            .decide(intent, WindowMoment::default());
+        match effect {
+            Effect::Change(change) => self
+                .session
+                .update(cx, |session, cx| session.apply(change, cx)),
         }
-        self.change_review(cx, |review| review.go_on());
     }
 
     fn scroll_code_sideways(
@@ -1053,12 +1054,13 @@ impl OneStepLayout {
     }
 
     /// The screen's last row is its footer; once it is on screen, or above it, the end was seen.
-    fn note_seen_end(&mut self, cx: &App) {
+    fn note_seen_end(&mut self, cx: &mut App) {
         let Some(last) = self.screen_list.item_count().checked_sub(1) else {
             return;
         };
         if self.screen_list.item_is_below_viewport(last) == Some(false) {
-            self.seen_end_of = Some(self.session.read(cx).review().screen().clone());
+            self.session
+                .update(cx, |session, _| session.saw_end_of_screen());
         }
     }
 
@@ -2271,19 +2273,13 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         .as_ref()
         .and_then(|lead| lead_button(lead, LeadLabel::Short, "footer-lead", cx));
     let primary = action.map(|(label, onward)| {
-        let ticks = footer.ticks.clone();
         button(
             &colors,
             "footer-next",
             ButtonKind::Primary,
             ButtonSize::Large,
         )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            if let Some(id) = &ticks {
-                this.toggle_tick(id, cx);
-            }
-            this.change_review(cx, |review| review.go_on());
-        }))
+        .on_click(cx.listener(|this, _, _, cx| this.act(Intent::MarkReadAndGoOn, cx)))
         .child(label)
         .child(button_keys(
             &colors,

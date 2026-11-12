@@ -33,6 +33,14 @@ impl Review {
         self.review
     }
 
+    /// The window had the end of the screen on show. No input of the page, so the page is kept:
+    /// the window reports this on every frame.
+    pub fn saw_end_of_screen(&mut self) {
+        if !self.review.has_seen_end_of_screen() {
+            self.review.seen_end_of = Some(self.review.screen.clone());
+        }
+    }
+
     /// The work agenda is no input of the page, so it changes without dropping the page.
     pub(super) fn work_mut(&mut self) -> &mut WorkAgenda {
         &mut self.review.work

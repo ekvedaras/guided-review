@@ -228,6 +228,9 @@ pub struct ReviewCore {
     /// The lines of the open screen that have Asks. The Ask panel keeps the Asks and hands these in.
     asked_lines: Vec<Place>,
     work: WorkAgenda,
+    /// The screen whose end the window last had on show; the forward key ticks a step only then.
+    /// Not saved, and no input of the page.
+    seen_end_of: Option<Screen>,
 }
 
 impl Review {
@@ -296,11 +299,12 @@ impl Review {
 
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
-    /// go), and its work, whose outcomes still land here.
+    /// go), its work, whose outcomes still land here, and which screen's end the window saw.
     pub fn carry_on_from(&mut self, replaced: Self) {
         let replaced = replaced.into_core();
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
+        self.seen_end_of = replaced.seen_end_of;
     }
 }
 
@@ -372,6 +376,7 @@ impl ReviewCore {
             pr_notes: PrNotes::default(),
             asked_lines: Vec::new(),
             work: WorkAgenda::default(),
+            seen_end_of: None,
             tour_files,
         })
     }
@@ -424,6 +429,10 @@ impl ReviewCore {
 
     pub fn pr(&self) -> &PullRequestUrl {
         &self.pr
+    }
+
+    pub(super) fn has_seen_end_of_screen(&self) -> bool {
+        self.seen_end_of.as_ref() == Some(&self.screen)
     }
 
     /// For a failure the reviewer must know about; it stays until its kind is cleared.

@@ -40,6 +40,7 @@ mod highlighting;
 mod icons;
 mod ide;
 mod image_previews;
+mod intents;
 mod jump;
 mod line_number;
 mod markdown;
