@@ -1381,7 +1381,7 @@ impl OneStepLayout {
         }));
         div()
             .flex_none()
-            .px_4()
+            .px_2()
             .py_2()
             .flex()
             .items_center()
@@ -1486,7 +1486,7 @@ impl OneStepLayout {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .px_2()
+                    .px_4()
                     .flex()
                     .items_center()
                     .gap_2()
