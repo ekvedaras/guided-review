@@ -16,7 +16,6 @@ use crate::viewer::{CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
 };
-use super::card::card;
 use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
@@ -514,42 +513,39 @@ impl SettingsPanel {
             }))
     }
 
+    /// A group of settings under its title, straight on the sheet's ground: the sheet is the box,
+    /// so a section draws none of its own, and a hairline between sections splits them.
     fn section(
         colors: &Colors,
-        icon: Icon,
         title: &'static str,
         about: &'static str,
         body: impl IntoElement,
     ) -> impl IntoElement {
         column(
-            card(colors)
+            div()
                 .w_full()
-                .p_6()
                 .flex()
                 .flex_col()
-                .gap_5()
+                .gap_4()
                 .child(
                     div()
                         .flex()
-                        .items_center()
-                        .gap_4()
-                        .child(icon_tile(colors, icon))
+                        .flex_col()
+                        .gap_0p5()
                         .child(
                             div()
-                                .flex()
-                                .flex_col()
-                                .gap_0p5()
-                                .child(
-                                    div()
-                                        .text_base()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(title),
-                                )
-                                .child(div().text_sm().text_color(colors.muted_text).child(about)),
-                        ),
+                                .text_base()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(title),
+                        )
+                        .child(div().text_sm().text_color(colors.muted_text).child(about)),
                 )
                 .child(body),
         )
+    }
+
+    fn section_rule(colors: &Colors) -> impl IntoElement {
+        column(div().h(px(1.)).bg(colors.subtle_border))
     }
 
     fn summary_instructions(
@@ -1434,21 +1430,6 @@ fn rising(content: impl IntoElement + Styled + 'static, id: &'static str) -> imp
     slide_in(content, id, STATE, Edge::Bottom, BOX_RISE)
 }
 
-/// A section's mark: its icon on a soft iris-to-azure tile.
-fn icon_tile(colors: &Colors, icon: Icon) -> impl IntoElement {
-    div()
-        .flex_none()
-        .size(px(36.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(CONTROL_RADIUS))
-        .border_1()
-        .border_color(colors.current_border)
-        .bg(colors.icon_tile.diagonal())
-        .child(sized_icon(icon, colors.accent, px(18.)))
-}
-
 /// A setting's name with a note under it on the left, its control on the right; on a narrow
 /// window the control goes under.
 fn setting_row(name: &'static str, note: gpui::Div, control: impl IntoElement) -> impl IntoElement {
@@ -1712,33 +1693,32 @@ impl Render for SettingsPanel {
                         .track_scroll(&self.scroll)
                         .flex()
                         .flex_col()
-                        .gap_5()
+                        .gap_6()
                         .pt_6()
                         .pb_10()
                         .child(Self::section(
                             &colors,
-                            Icon::FileText,
                             "Summary instructions",
                             "How the tour writer writes the reviewer summary at the start of a tour.",
                             summary,
                         ))
+                        .child(Self::section_rule(&colors))
                         .child(Self::section(
                             &colors,
-                            Icon::Code,
                             "Open code in",
                             "The editor a code link opens. With none, code opens on GitHub.",
                             ide,
                         ))
+                        .child(Self::section_rule(&colors))
                         .child(Self::section(
                             &colors,
-                            Icon::Sparkles,
                             "Ask",
                             "The model and effort Ask uses.",
                             ask,
                         ))
+                        .child(Self::section_rule(&colors))
                         .child(Self::section(
                             &colors,
-                            Icon::FolderGit,
                             "Clones",
                             "Where each repo is cloned on this machine.",
                             clones,
