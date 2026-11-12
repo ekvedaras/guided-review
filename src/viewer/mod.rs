@@ -34,6 +34,7 @@ mod problems;
 mod reactions;
 mod refresh;
 mod relevant_prs;
+mod rendered_view;
 mod reopen_after_save;
 mod review;
 mod review_state;
@@ -121,6 +122,7 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
+pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
 pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen,

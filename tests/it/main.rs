@@ -63,6 +63,7 @@ mod read_ticks;
 mod refresh;
 mod release_install;
 mod relevant_prs;
+mod rendered_view;
 mod reopen_after_save;
 mod repin;
 mod repin_guard;

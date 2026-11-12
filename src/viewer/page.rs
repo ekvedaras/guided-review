@@ -36,6 +36,7 @@ pub struct Page {
     line_rows: HashMap<LineLocation, usize>,
     pieces: Vec<PieceAt>,
     images_to_load: Vec<FilePath>,
+    rendered: Vec<FilePath>,
 }
 
 #[derive(Clone)]
@@ -71,10 +72,12 @@ impl Page {
             rows,
             blocks,
             diagram,
+            rendered,
         } = laid.unwrap_or_else(|| build::Laid {
             rows: Vec::new(),
             blocks: Vec::new(),
             diagram: None,
+            rendered: Vec::new(),
         });
         let mut line_rows = HashMap::new();
         let mut pieces = Vec::new();
@@ -115,6 +118,7 @@ impl Page {
             line_rows,
             pieces,
             images_to_load,
+            rendered,
         }
     }
 
@@ -176,9 +180,12 @@ impl Page {
         })
     }
 
-    /// Every line the screen shows, top to bottom.
+    /// Every line the screen shows, top to bottom; a rendered file shows none.
     pub fn lines(&self) -> impl Iterator<Item = &DiffLine> + Clone {
-        self.blocks.iter().flat_map(FileBlock::lines)
+        self.blocks
+            .iter()
+            .filter(|block| !self.rendered.contains(&block.path))
+            .flat_map(FileBlock::lines)
     }
 
     /// The lines a drag selected; `None` when where it started or where it is now is not on this page.

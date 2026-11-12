@@ -369,7 +369,8 @@ impl ReviewCore {
                 Some((read_head.clone(), files))
             })
             .collect();
-        let display_options = DisplayOptions::for_code(base.clone(), head.clone());
+        let mut display_options = DisplayOptions::for_code(base.clone(), head.clone());
+        display_options.cut_markdown(&files);
         Ok(Self {
             tour,
             pr,
@@ -426,6 +427,7 @@ impl ReviewCore {
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) -> bool {
         let kept = self.display_options.set_files_at_head(files_at_head);
         if kept {
+            self.display_options.cut_markdown(&self.files);
             self.place_threads();
         }
         kept

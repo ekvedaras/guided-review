@@ -19,12 +19,15 @@ use crate::viewer::{
     Place, QueuedComment, SafetyNetPage, StepId, StepPage, ThreadView, TourLead,
     hidden_lines_after, hidden_lines_before,
 };
+use crate::viewer::{FileView, Rendering, ViewSwitch};
 
 /// The rows of a screen, the file blocks they show, and the diagram of a step.
 pub(super) struct Laid {
     pub rows: Vec<PageRow>,
     pub blocks: Vec<FileBlock>,
     pub diagram: Option<Arc<str>>,
+    /// The files whose box shows them rendered, so none of their lines is on the page.
+    pub rendered: Vec<FilePath>,
 }
 
 pub(super) fn summary(review: &ReviewCore) -> Laid {
@@ -56,6 +59,7 @@ struct Builder<'a> {
     review: &'a ReviewCore,
     rows: Vec<PageRow>,
     blocks: Vec<FileBlock>,
+    rendered: Vec<FilePath>,
     /// Taken out as their row is placed; what no row takes is dropped.
     under_lines: UnderLines,
 }
@@ -66,6 +70,7 @@ impl<'a> Builder<'a> {
             review,
             rows: Vec::new(),
             blocks: Vec::new(),
+            rendered: Vec::new(),
             under_lines: UnderLines::default(),
         }
     }
@@ -75,6 +80,7 @@ impl<'a> Builder<'a> {
             rows: self.rows,
             blocks: self.blocks,
             diagram,
+            rendered: self.rendered,
         }
     }
 
@@ -276,9 +282,17 @@ impl<'a> Builder<'a> {
         fold: Option<BoxFold>,
         shown: DiffShown,
     ) {
+        let switch = self.view_switch(&block);
         if fold.as_ref().is_some_and(|fold| fold.is_folded) {
-            self.folded_block_rows(&block, ask_of, fold);
+            self.folded_block_rows(&block, ask_of, fold, switch);
             self.blocks.push(block);
+            return;
+        }
+        if let Some(switch) = switch
+            .clone()
+            .filter(|switch| switch.view == FileView::Rendered)
+        {
+            self.rendered_block_rows(block, ask_of, fold, switch);
             return;
         }
         let heading = |piece: &PieceDiff| heading_of(piece, ask_of);
@@ -291,6 +305,7 @@ impl<'a> Builder<'a> {
         let row_id = if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
                 fold,
+                view: switch.clone(),
                 ..heading(piece)
             })));
             if has_no_change_since_read(piece) {
@@ -304,10 +319,12 @@ impl<'a> Builder<'a> {
             }
             if piece.is_image {
                 let path = piece.id.path().clone();
-                self.rows.push(PageRow::Image {
-                    is_loaded: self.review.display_options().image_preview(&path).is_some(),
-                    path: path.clone(),
-                });
+                if switch.is_none() {
+                    self.rows.push(PageRow::Image {
+                        is_loaded: self.review.display_options().image_preview(&path).is_some(),
+                        path: path.clone(),
+                    });
+                }
                 let here = self.under_lines.take_whole_file(&path);
                 self.hang(here);
             }
@@ -316,10 +333,10 @@ impl<'a> Builder<'a> {
             }
             piece.id.to_string()
         } else {
-            self.rows
-                .push(PageRow::PieceHeader(Arc::new(whole_file_heading(
-                    &block, fold,
-                ))));
+            self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
+                view: switch,
+                ..whole_file_heading(&block, fold)
+            })));
             for piece in block.without_rows() {
                 self.rows
                     .push(PageRow::PieceMarker(Arc::new(heading(piece))));
@@ -373,23 +390,84 @@ impl<'a> Builder<'a> {
         self.blocks.push(block);
     }
 
+    /// The Code / Rendered switch of a box whose file can be rendered, set to the view it shows.
+    fn view_switch(&self, block: &FileBlock) -> Option<ViewSwitch> {
+        let is_image = block.pieces.iter().any(|piece| piece.is_image);
+        let rendering = Rendering::of(&block.path, is_image, block.lines().next().is_some())?;
+        Some(ViewSwitch {
+            path: block.path.clone(),
+            view: self
+                .review
+                .display_options()
+                .file_view(&block.path, rendering),
+        })
+    }
+
+    /// A rendered box shows its file instead of its lines, and takes no line comments. What hangs
+    /// under its lines follows the file, so a thread stays readable and answerable in either view.
+    fn rendered_block_rows(
+        &mut self,
+        block: FileBlock,
+        ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
+        fold: Option<BoxFold>,
+        switch: ViewSwitch,
+    ) {
+        let header = match block.pieces.as_slice() {
+            [piece] => PieceHeading {
+                fold,
+                view: Some(switch),
+                ..heading_of(piece, ask_of)
+            },
+            _ => PieceHeading {
+                view: Some(switch),
+                ..whole_file_heading(&block, fold)
+            },
+        };
+        self.rows.push(PageRow::PieceHeader(Arc::new(header)));
+        let path = block.path.clone();
+        let display_options = self.review.display_options();
+        if block.pieces.iter().any(|piece| piece.is_image) {
+            self.rows.push(PageRow::Image {
+                is_loaded: display_options.image_preview(&path).is_some(),
+                path: path.clone(),
+            });
+        } else {
+            match display_options.rendered_markdown(&path) {
+                Some(blocks) => self
+                    .rows
+                    .extend(blocks.iter().cloned().map(PageRow::RenderedBlock)),
+                None => self.rows.push(PageRow::RenderedFileWaiting),
+            }
+        }
+        let mut here = self.under_lines.take_whole_file(&path);
+        for line in block.lines() {
+            here.extend(self.under_lines.take_at(&line.location));
+        }
+        self.hang(here);
+        self.rows.push(PageRow::PieceEnd);
+        self.rendered.push(path);
+        self.blocks.push(block);
+    }
+
     /// A folded box keeps its header and the labels of its pieces, so the step still says what it covers.
     fn folded_block_rows(
         &mut self,
         block: &FileBlock,
         ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
         fold: Option<BoxFold>,
+        switch: Option<ViewSwitch>,
     ) {
         if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
                 fold,
+                view: switch,
                 ..heading_of(piece, ask_of)
             })));
         } else {
-            self.rows
-                .push(PageRow::PieceHeader(Arc::new(whole_file_heading(
-                    block, fold,
-                ))));
+            self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
+                view: switch,
+                ..whole_file_heading(block, fold)
+            })));
             for piece in block.pieces_in_order() {
                 self.rows
                     .push(PageRow::PieceMarker(Arc::new(heading_of(piece, ask_of))));
@@ -415,6 +493,7 @@ fn heading_of(piece: &PieceDiff, ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>) -
         ask: ask_of.map(|ask_of| ask_of(piece)),
         repin_label: piece.repin_status.and_then(repin_label),
         code_link: piece.code_link().cloned(),
+        view: None,
     }
 }
 
@@ -429,6 +508,7 @@ fn whole_file_heading(block: &FileBlock, fold: Option<BoxFold>) -> PieceHeading 
         ask: None,
         repin_label: None,
         code_link: block.lines().next().map(|line| line.code_link.clone()),
+        view: None,
     }
 }
 
