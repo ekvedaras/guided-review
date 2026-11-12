@@ -1,10 +1,13 @@
 use guided_review::viewer::{
     ActivePr, AfterClose, AppWindow, FailedBuild, OpenDecision, OpenOrigin, ShowReview,
-    ShowSettings, ShowWriting,
+    ShowSettings, ShowSwitcher, ShowWriting,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SettingsOnlyWindow;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SwitcherOnlyWindow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReviewWindow;
@@ -12,7 +15,7 @@ struct ReviewWindow;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WritingOnlyWindow;
 
-type Window = AppWindow<SettingsOnlyWindow, WritingOnlyWindow, ReviewWindow>;
+type Window = AppWindow<SettingsOnlyWindow, SwitcherOnlyWindow, WritingOnlyWindow, ReviewWindow>;
 
 #[test]
 fn settings_with_no_window_opens_the_window_holding_only_settings() {
@@ -114,9 +117,81 @@ fn closing_the_review_ends_the_app_even_while_another_pr_builds() {
 }
 
 #[test]
+fn a_launch_with_no_window_opens_the_window_holding_only_the_pr_switcher() {
+    assert_eq!(
+        Window::Closed.show_switcher(),
+        ShowSwitcher::OpenSwitcherOnly
+    );
+}
+
+#[test]
+fn a_launch_while_the_switcher_shows_raises_its_window() {
+    assert_eq!(
+        Window::SwitcherOnly(SwitcherOnlyWindow).show_switcher(),
+        ShowSwitcher::Raise(SwitcherOnlyWindow)
+    );
+}
+
+#[test]
+fn a_launch_with_a_pr_on_screen_opens_the_switcher_over_that_pr() {
+    assert_eq!(
+        Window::Review(ReviewWindow).show_switcher(),
+        ShowSwitcher::OverReview(ReviewWindow)
+    );
+}
+
+#[test]
+fn a_launch_while_only_settings_shows_raises_settings_and_keeps_what_is_typed() {
+    assert_eq!(
+        Window::SettingsOnly(SettingsOnlyWindow).show_switcher(),
+        ShowSwitcher::RaiseSettings(SettingsOnlyWindow)
+    );
+}
+
+#[test]
+fn settings_asked_for_while_only_the_switcher_shows_take_its_window() {
+    assert_eq!(
+        Window::SwitcherOnly(SwitcherOnlyWindow).show_settings(),
+        ShowSettings::ReplaceSwitcher(SwitcherOnlyWindow)
+    );
+}
+
+#[test]
+fn a_review_built_from_the_switcher_alone_turns_its_window_into_the_review() {
+    assert_eq!(
+        Window::SwitcherOnly(SwitcherOnlyWindow).show_review(),
+        ShowReview::TurnSwitcherIntoReview(SwitcherOnlyWindow)
+    );
+}
+
+#[test]
+fn a_failed_build_from_the_switcher_alone_says_why_in_the_switcher() {
+    assert_eq!(
+        Window::SwitcherOnly(SwitcherOnlyWindow).build_failed(),
+        FailedBuild::ShowInSwitcher(SwitcherOnlyWindow)
+    );
+}
+
+#[test]
+fn closing_the_switcher_alone_with_nothing_building_ends_the_app() {
+    let mut window = Window::SwitcherOnly(SwitcherOnlyWindow);
+
+    assert_eq!(window.closed(&ActivePr::default()), AfterClose::EndApp);
+    assert_eq!(window, Window::Closed);
+}
+
+#[test]
+fn closing_the_switcher_alone_while_the_picked_pr_builds_keeps_the_app_for_the_review() {
+    let mut window = Window::SwitcherOnly(SwitcherOnlyWindow);
+
+    assert_eq!(window.closed(&building()), AfterClose::WaitForBuild);
+}
+
+#[test]
 fn only_a_window_holding_a_review_has_a_pr_to_reach() {
     assert_eq!(Window::Closed.review(), None);
     assert_eq!(Window::SettingsOnly(SettingsOnlyWindow).review(), None);
+    assert_eq!(Window::SwitcherOnly(SwitcherOnlyWindow).review(), None);
     assert_eq!(Window::Review(ReviewWindow).review(), Some(ReviewWindow));
 }
 
@@ -184,5 +259,35 @@ fn settings_asked_while_only_the_loading_screen_shows_wait_for_the_review() {
     assert_eq!(
         Window::WritingOnly(WritingOnlyWindow).show_settings(),
         ShowSettings::NotWhileWriting
+    );
+}
+
+#[test]
+fn a_launch_while_a_tour_is_being_written_raises_its_loading_screen() {
+    assert_eq!(
+        Window::WritingOnly(WritingOnlyWindow).show_switcher(),
+        ShowSwitcher::RaiseWriting(WritingOnlyWindow)
+    );
+}
+
+#[test]
+fn a_pr_without_a_tour_picked_in_the_switcher_alone_turns_its_window_into_the_loading_screen() {
+    assert_eq!(
+        Window::SwitcherOnly(SwitcherOnlyWindow).show_writing(),
+        ShowWriting::ReplaceSwitcher(SwitcherOnlyWindow)
+    );
+}
+
+#[test]
+fn the_loading_screen_made_from_the_switcher_alone_gets_the_review_and_the_failure() {
+    let window = Window::WritingOnly(WritingOnlyWindow);
+
+    assert_eq!(
+        window.show_review(),
+        ShowReview::TurnWritingIntoReview(WritingOnlyWindow)
+    );
+    assert_eq!(
+        window.build_failed(),
+        FailedBuild::ShowInWriting(WritingOnlyWindow)
     );
 }

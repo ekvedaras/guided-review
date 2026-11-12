@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use guided_review::update::{
-    InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
+    BundlePlaced, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
+    info_plist,
 };
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -34,11 +35,44 @@ fn update_to(version: &str) -> Update {
 /// A release archive as the release workflow packs it.
 fn archive_of(version: &str, binary: &str) -> Vec<u8> {
     let folder = format!("guided-review-{version}-{}", TARGET.triple());
+    packed(&[
+        (format!("{folder}/guided-review"), binary.to_owned(), 0o755),
+        (
+            format!("{folder}/skills/tour/SKILL.md"),
+            "# tour".to_owned(),
+            0o644,
+        ),
+    ])
+}
+
+/// A release archive from 0.7.0 on, which carries `Guided Review.app` beside the binary.
+fn archive_with_bundle_of(version: &str, binary: &str) -> Vec<u8> {
+    let folder = format!("guided-review-{version}-{}", TARGET.triple());
+    let app = format!("{folder}/Guided Review.app/Contents");
+    packed(&[
+        (format!("{folder}/guided-review"), binary.to_owned(), 0o755),
+        (
+            format!("{folder}/skills/tour/SKILL.md"),
+            "# tour".to_owned(),
+            0o644,
+        ),
+        (
+            format!("{app}/Info.plist"),
+            info_plist(version.parse().unwrap()),
+            0o644,
+        ),
+        (
+            format!("{app}/Resources/AppIcon.icns"),
+            format!("icon {version}"),
+            0o644,
+        ),
+    ])
+}
+
+fn packed(files: &[(String, String, u32)]) -> Vec<u8> {
     let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
-    for (path, content, mode) in [
-        (format!("{folder}/guided-review"), binary, 0o755),
-        (format!("{folder}/skills/tour/SKILL.md"), "# tour", 0o644),
-    ] {
+    for (path, content, mode) in files {
+        let mode = *mode;
         let mut header = tar::Header::new_gnu();
         header.set_size(content.len() as u64);
         header.set_mode(mode);
@@ -96,6 +130,32 @@ impl Home {
 
     fn skill_link(&self) -> PathBuf {
         self.path().join(".claude/skills/tour")
+    }
+
+    fn bundle(&self) -> PathBuf {
+        self.path().join("Applications/Guided Review.app")
+    }
+
+    /// As the 0.6.0 updater leaves a home after updating to `version`: the whole archive unpacked in its
+    /// version folder, the links moved to it, and no bundle in `~/Applications`, which it knew nothing of.
+    fn as_the_0_6_0_updater_leaves_it(version: &str) -> Self {
+        let home = Self::with_release_installed();
+        let update = update_to(version);
+        let archive = archive_with_bundle_of(version, &format!("binary {version}"));
+        let folder = home.path().join(".local/share/guided-review").join(version);
+        fs::create_dir_all(&folder).unwrap();
+        tar::Archive::new(flate2::read::GzDecoder::new(archive.as_slice()))
+            .unpack(&folder)
+            .unwrap();
+        let release = folder.join(update.unpacked_folder());
+        for (link, target) in [
+            (home.bin_link(), release.join("guided-review")),
+            (home.skill_link(), release.join("skills/tour")),
+        ] {
+            fs::remove_file(&link).unwrap();
+            symlink(target, link).unwrap();
+        }
+        home
     }
 
     fn install(&self) -> ReleaseInstall {
@@ -392,6 +452,64 @@ fn the_app_restarts_into_the_binary_it_installed_whatever_the_bin_link_or_path_s
         fs::read_to_string(&installed.program).unwrap(),
         "binary 0.5.0"
     );
+}
+
+#[test]
+fn an_update_puts_the_bundle_of_its_release_in_applications() {
+    let home = Home::with_release_installed();
+    let update = update_to("0.7.0");
+    let archive = archive_with_bundle_of("0.7.0", "binary 0.7.0");
+
+    home.install()
+        .install(&update, &archive, &checksum_of(&update, &archive))
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(home.bundle().join("Contents/Info.plist")).unwrap(),
+        info_plist(Version::from_tag("v0.7.0").unwrap())
+    );
+    assert_eq!(
+        fs::read_to_string(home.bundle().join("Contents/MacOS/guided-review")).unwrap(),
+        "binary 0.7.0"
+    );
+}
+
+#[test]
+fn a_release_install_updated_by_0_6_0_puts_its_own_bundle_in_place_when_it_starts() {
+    let home = Home::as_the_0_6_0_updater_leaves_it("0.7.0");
+    assert!(!home.bundle().exists());
+
+    let placed = home
+        .install()
+        .bring_bundle_up_to_date(&home.bin_link())
+        .unwrap();
+
+    assert_eq!(placed, BundlePlaced::Refreshed);
+    assert_eq!(
+        fs::read_to_string(home.bundle().join("Contents/Info.plist")).unwrap(),
+        info_plist(Version::from_tag("v0.7.0").unwrap())
+    );
+    assert_eq!(
+        fs::read_to_string(home.bundle().join("Contents/MacOS/guided-review")).unwrap(),
+        "binary 0.7.0"
+    );
+    assert_eq!(
+        home.install()
+            .bring_bundle_up_to_date(&home.bin_link())
+            .unwrap(),
+        BundlePlaced::Current
+    );
+}
+
+#[test]
+fn a_source_build_starting_leaves_the_bundle_alone() {
+    let home = Home::as_the_0_6_0_updater_leaves_it("0.7.0");
+    let cargo_bin = home.source_build();
+
+    let placed = home.install().bring_bundle_up_to_date(&cargo_bin).unwrap();
+
+    assert_eq!(placed, BundlePlaced::NotInRelease);
+    assert!(!home.bundle().exists());
 }
 
 #[test]

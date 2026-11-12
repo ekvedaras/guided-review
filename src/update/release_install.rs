@@ -7,6 +7,7 @@ use anyhow::Context;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
+use super::app_bundle::{AppBundle, BUNDLE_FOLDER, BundlePlaced};
 use super::{ReleasesPort, Update, Version};
 
 /// The way the README installs a release: each version unpacked in its own folder under
@@ -18,6 +19,7 @@ pub struct ReleaseInstall {
     versions: PathBuf,
     bin_link: PathBuf,
     skill_link: PathBuf,
+    bundle: AppBundle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +61,7 @@ impl ReleaseInstall {
             versions: home.join(".local/share/guided-review"),
             bin_link: home.join(".local/bin/guided-review"),
             skill_link: home.join(".claude/skills/tour"),
+            bundle: AppBundle::in_home(home),
         }
     }
 
@@ -90,6 +93,19 @@ impl ReleaseInstall {
             binary: first_on_path,
             release_install,
         })
+    }
+
+    /// Puts the bundle of the running release in `~/Applications` when it is missing or another
+    /// version's. An update by 0.6.0, which knew nothing of the bundle, leaves it so.
+    pub fn bring_bundle_up_to_date(&self, exe: &Path) -> anyhow::Result<BundlePlaced> {
+        let release = self
+            .linked_into_versions(&self.bin_link)
+            .filter(|_| self.runs(exe))
+            .and_then(|binary| binary.parent().map(Path::to_path_buf));
+        match release {
+            Some(release) => self.bundle.place_from(&release.join(BUNDLE_FOLDER)),
+            None => Ok(BundlePlaced::NotInRelease),
+        }
     }
 
     /// Checks the archive against its checksum file, unpacks it beside the versions there are, and
@@ -124,6 +140,7 @@ impl ReleaseInstall {
             }
             None => SkillLink::NotOurs,
         };
+        self.bundle.place_from(&release.join(BUNDLE_FOLDER))?;
         let program = release.join("guided-review");
         relink(&self.bin_link, &program)?;
         Ok(Installed {

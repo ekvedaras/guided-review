@@ -61,7 +61,9 @@ pub use active_pr::{
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
-pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowWriting};
+pub use app_window::{
+    AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
+};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,

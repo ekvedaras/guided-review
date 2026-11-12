@@ -15,6 +15,7 @@ mod settings_window;
 mod sidebar_rows;
 #[cfg(feature = "snapshots")]
 mod snapshots;
+mod switcher_window;
 mod tour_writer;
 mod updater;
 mod word_keys;
@@ -42,8 +43,8 @@ use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
-    RelevantPullRequestsPort, ReviewStateFile, ShowReview, ShowSettings, ShowWriting, TourAgents,
-    TourFact, WriteDecision, keystroke,
+    RelevantPullRequestsPort, ReviewStateFile, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
+    TourAgents, TourFact, WriteDecision, keystroke,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -61,6 +62,7 @@ use layouts::one_step::{
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
+use switcher_window::SwitcherWindow;
 use writing_window::WritingWindow;
 
 /// What the app's loop takes in: requests from outside, and the app's own asks of itself.
@@ -179,6 +181,7 @@ fn refused(reason: &str) -> Answer {
 
 type OneWindow = AppWindow<
     WindowHandle<SettingsWindow>,
+    WindowHandle<SwitcherWindow>,
     WindowHandle<WritingWindow>,
     WindowHandle<OneStepLayout>,
 >;
@@ -227,6 +230,10 @@ async fn answer_requests(
             }
             Request::ShowSettings => {
                 let answer = show_settings(&screen, &home, cx);
+                reply.send(answer).ok();
+            }
+            Request::ShowSwitcher => {
+                let answer = show_switcher(&screen, cx);
                 reply.send(answer).ok();
             }
             Request::AgentReplied {
@@ -311,6 +318,15 @@ fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answe
             ShowSettings::OpenSettingsOnly => {
                 open_settings_window(home, cx).map(AppWindow::SettingsOnly)
             }
+            ShowSettings::ReplaceSwitcher(window) => {
+                let home = home.to_path_buf();
+                window
+                    .update(cx, |_, window, cx| {
+                        window.set_window_title(&marked_if_dev("Settings".to_owned()));
+                        window.replace_root(cx, |window, cx| SettingsWindow::new(home, window, cx));
+                    })
+                    .map(|()| AppWindow::SettingsOnly(WindowHandle::new(window.window_id())))
+            }
             ShowSettings::NotWhileWriting => Err(anyhow::anyhow!(
                 "a tour is being written; Settings opens once it is shown"
             )),
@@ -322,6 +338,40 @@ fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answe
             Answer::ShowingSettings
         }
         Err(error) => refused(&format!("could not show Settings: {error:#}")),
+    }
+}
+
+/// The PR switcher over the PR on screen, or with no PR open, in the one window holding only the
+/// switcher. Settings being edited with no PR open come to the front instead, so nothing typed is lost.
+fn show_switcher(screen: &SharedScreen, cx: &mut AsyncApp) -> Answer {
+    let window = screen.borrow().window;
+    let shown = cx.update(|cx| {
+        cx.activate(true);
+        match window.show_switcher() {
+            ShowSwitcher::OverReview(window) => window
+                .update(cx, |layout, window, cx| {
+                    layout.show_pr_switcher(window, cx);
+                    window.activate_window();
+                })
+                .map(|()| AppWindow::Review(window)),
+            ShowSwitcher::Raise(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| AppWindow::SwitcherOnly(window)),
+            ShowSwitcher::RaiseSettings(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| AppWindow::SettingsOnly(window)),
+            ShowSwitcher::RaiseWriting(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| AppWindow::WritingOnly(window)),
+            ShowSwitcher::OpenSwitcherOnly => open_switcher_window(cx).map(AppWindow::SwitcherOnly),
+        }
+    });
+    match shown {
+        Ok(window) => {
+            screen.borrow_mut().window = window;
+            Answer::ShowingSwitcher
+        }
+        Err(error) => refused(&format!("could not show the PR switcher: {error:#}")),
     }
 }
 
@@ -477,6 +527,13 @@ async fn build_and_show(
                         })
                         .ok();
                 }),
+                FailedBuild::ShowInSwitcher(window) => cx.update(|cx| {
+                    window
+                        .update(cx, |switcher_window, _, cx| {
+                            switcher_window.build_failed(reason, cx);
+                        })
+                        .ok();
+                }),
                 // `ActivePr::finished` put the failure on the loading screen, which observes it.
                 FailedBuild::ShowInWriting(_) => {}
                 FailedBuild::ShowInReview(window) => cx.update(|cx| {
@@ -493,6 +550,9 @@ async fn build_and_show(
                         switch_window(window, opened, &pr, cx).map(|()| window)
                     }
                     ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, &pr, cx),
+                    ShowReview::TurnSwitcherIntoReview(window) => {
+                        turn_switcher_into_review(window, opened, &pr, cx)
+                    }
                     ShowReview::TurnWritingIntoReview(window) => {
                         turn_writing_into_review(window, opened, &pr, cx)
                     }
@@ -583,6 +643,10 @@ fn show_writing(screen: &SharedScreen, active: &Entity<ActivePr>, cx: &mut Async
                 .update(cx, |_, window, _| window.activate_window())
                 .map(|()| None),
             ShowWriting::LeaveSettings => Ok(None),
+            ShowWriting::ReplaceSwitcher(window) => {
+                replace_switcher_with_writing(window, active, cx)
+                    .map(|window| Some(AppWindow::WritingOnly(window)))
+            }
         }
     });
     match shown {
@@ -592,9 +656,37 @@ fn show_writing(screen: &SharedScreen, active: &Entity<ActivePr>, cx: &mut Async
     }
 }
 
+/// The PR picked in the switcher has no tour yet: the switcher's window shows the loading screen of the
+/// tour being written.
+fn replace_switcher_with_writing(
+    window: WindowHandle<SwitcherWindow>,
+    active: &Entity<ActivePr>,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<WritingWindow>> {
+    window.update(cx, |_, window, cx| {
+        window.set_window_title(&marked_if_dev("Writing a tour".to_owned()));
+        window.replace_root(cx, |window, cx| WritingWindow::new(active, window, cx));
+        window.activate_window();
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
+}
+
 /// The window that held only the loading screen becomes the review's.
 fn turn_writing_into_review(
     window: WindowHandle<WritingWindow>,
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    window.update(cx, |_, window, cx| {
+        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
+}
+
+/// The window that held only the switcher becomes the picked PR's review.
+fn turn_switcher_into_review(
+    window: WindowHandle<SwitcherWindow>,
     opened: OpenedReview,
     pr: &PullRequestUrl,
     cx: &mut App,
@@ -672,6 +764,15 @@ fn open_settings_window(home: &Path, cx: &mut App) -> anyhow::Result<WindowHandl
     cx.open_window(options, |window, cx| {
         cx.set_global(Appearance::of(window));
         cx.new(|cx| SettingsWindow::new(home, window, cx))
+    })
+}
+
+fn open_switcher_window(cx: &mut App) -> anyhow::Result<WindowHandle<SwitcherWindow>> {
+    let options = window_options("Pick a pull request".to_owned(), cx);
+    let switching = cx.global::<PrSwitching>().clone();
+    cx.open_window(options, |window, cx| {
+        cx.set_global(Appearance::of(window));
+        cx.new(|cx| SwitcherWindow::new(switching, window, cx))
     })
 }
 
