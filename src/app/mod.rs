@@ -477,6 +477,8 @@ async fn build_and_show(
                         })
                         .ok();
                 }),
+                // `ActivePr::finished` put the failure on the loading screen, which observes it.
+                FailedBuild::ShowInWriting(_) => {}
                 FailedBuild::ShowInReview(window) => cx.update(|cx| {
                     window
                         .update(cx, |layout, _, cx| layout.switch_failed(reason, cx))

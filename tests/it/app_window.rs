@@ -158,10 +158,10 @@ fn a_review_built_while_only_the_loading_screen_shows_turns_that_window_into_the
 }
 
 #[test]
-fn a_failed_build_while_only_the_loading_screen_shows_ends_the_app() {
+fn a_failed_build_while_only_the_loading_screen_shows_keeps_that_window_for_the_failure() {
     assert_eq!(
         Window::WritingOnly(WritingOnlyWindow).build_failed(),
-        FailedBuild::EndApp
+        FailedBuild::ShowInWriting(WritingOnlyWindow)
     );
 }
 

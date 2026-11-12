@@ -46,11 +46,13 @@ pub enum ShowReview<SettingsOnly, WritingOnly, Review> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailedBuild<SettingsOnly, Review> {
+pub enum FailedBuild<SettingsOnly, WritingOnly, Review> {
     /// Nothing is on screen to keep.
     EndApp,
     /// Settings stays as it is, with the reason above it.
     ShowInSettings(SettingsOnly),
+    /// The loading screen stays and shows the failure of the written tour, with Try again.
+    ShowInWriting(WritingOnly),
     ShowInReview(Review),
 }
 
@@ -91,9 +93,10 @@ impl<SettingsOnly: Copy, WritingOnly: Copy, Review: Copy>
         }
     }
 
-    pub fn build_failed(&self) -> FailedBuild<SettingsOnly, Review> {
+    pub fn build_failed(&self) -> FailedBuild<SettingsOnly, WritingOnly, Review> {
         match *self {
-            Self::Closed | Self::WritingOnly(_) => FailedBuild::EndApp,
+            Self::Closed => FailedBuild::EndApp,
+            Self::WritingOnly(window) => FailedBuild::ShowInWriting(window),
             Self::SettingsOnly(window) => FailedBuild::ShowInSettings(window),
             Self::Review(window) => FailedBuild::ShowInReview(window),
         }

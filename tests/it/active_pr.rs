@@ -520,3 +520,38 @@ fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_wait
     assert!(matches!(outcome, OpenOutcome::Tour(OpenDecision::Build(_))));
     assert!(active.loading().is_none());
 }
+
+#[test]
+fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to_try_again() {
+    let mut active = ActivePr::default();
+    let pr: PullRequestUrl = A.parse().unwrap();
+    active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+    let OpenOutcome::Tour(OpenDecision::Build(ticket)) =
+        active.open(pr.clone(), OpenOrigin::AppStartedAgent, TourFact::Ready)
+    else {
+        panic!("the writer's open builds the tour");
+    };
+
+    let finished = active.finished::<()>(ticket, Err(anyhow::anyhow!("the tour is broken")));
+
+    assert!(matches!(finished, Finished::Stay { .. }));
+    let (loading, writing) = active.loading().expect("the loading screen stays");
+    assert_eq!(loading, &pr);
+    assert!(writing.has_failed());
+    assert_eq!(active.tour_fact_of(&pr), Some(TourFact::WritingFailed));
+    active.try_again(&pr);
+    assert!(!active.writing_of(&pr).unwrap().has_failed());
+}
+
+#[test]
+fn a_failed_build_of_a_tour_nobody_was_writing_leaves_no_loading_screen() {
+    let mut active = ActivePr::default();
+    let pr: PullRequestUrl = A.parse().unwrap();
+    let OpenDecision::Build(ticket) = active.request(pr, OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+
+    active.finished::<()>(ticket, Err(anyhow::anyhow!("no clone")));
+
+    assert!(active.loading().is_none());
+}

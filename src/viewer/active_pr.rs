@@ -29,6 +29,8 @@ struct Build {
     pr: PullRequestUrl,
     /// Agent replies that came while the PR on screen reopened.
     held_replies: Vec<(HandOffId, AgentReplied)>,
+    /// The build opens a tour the loading screen waited for, so a failure shows there.
+    after_writing: bool,
 }
 
 /// Names one build, so its result can be told from the result of an older one.
@@ -201,7 +203,11 @@ impl ActivePr {
             return OpenDecision::KeepInBackground;
         }
         self.waiting_for = None;
-        OpenDecision::Build(self.build(pr))
+        let ticket = self.build(pr);
+        if let Some(build) = &mut self.building {
+            build.after_writing = is_awaited && was_written;
+        }
+        OpenDecision::Build(ticket)
     }
 
     pub fn finished<Built>(
@@ -218,7 +224,10 @@ impl ActivePr {
         }
         self.switching = None;
         let Build {
-            pr, held_replies, ..
+            pr,
+            held_replies,
+            after_writing,
+            ..
         } = build;
         match built {
             Ok(built) => {
@@ -228,9 +237,18 @@ impl ActivePr {
                 self.replies_for_reopened = held_replies;
                 Finished::Switch(built)
             }
-            Err(error) => Finished::Stay {
-                reason: format!("could not open {pr}: {error:#}"),
-            },
+            Err(error) => {
+                let reason = format!("could not open {pr}: {error:#}");
+                if after_writing {
+                    self.writings.push((
+                        pr.clone(),
+                        TourWriting::failed_to_open(&format!("{error:#}")),
+                    ));
+                    self.waiting_for = Some(pr);
+                    self.remember();
+                }
+                Finished::Stay { reason }
+            }
         }
     }
 
@@ -290,6 +308,7 @@ impl ActivePr {
             ticket,
             pr,
             held_replies,
+            after_writing: false,
         });
         ticket
     }
