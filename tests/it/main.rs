@@ -44,7 +44,6 @@ mod jump;
 mod line_number;
 mod markdown;
 mod new_commits;
-mod open;
 mod open_app;
 mod open_review;
 mod outdated_threads;

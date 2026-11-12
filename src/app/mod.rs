@@ -18,6 +18,7 @@ mod snapshots;
 mod tour_writer;
 mod updater;
 mod word_keys;
+mod writing_window;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -40,8 +41,9 @@ use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
-    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, PrSwitcher, RelevantPullRequestsPort,
-    ReviewStateFile, ShowReview, ShowSettings, TourAgents, keystroke,
+    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
+    RelevantPullRequestsPort, ReviewStateFile, ShowReview, ShowSettings, ShowWriting, TourAgents,
+    TourFact, WriteDecision, keystroke,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -59,6 +61,7 @@ use layouts::one_step::{
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
+use writing_window::WritingWindow;
 
 /// What the app's loop takes in: requests from outside, and the app's own asks of itself.
 enum Asked {
@@ -174,7 +177,11 @@ fn refused(reason: &str) -> Answer {
     }
 }
 
-type OneWindow = AppWindow<WindowHandle<SettingsWindow>, WindowHandle<OneStepLayout>>;
+type OneWindow = AppWindow<
+    WindowHandle<SettingsWindow>,
+    WindowHandle<WritingWindow>,
+    WindowHandle<OneStepLayout>,
+>;
 
 /// What the app shows now. The window is there once the first review is built or Settings is asked for.
 struct Screen {
@@ -240,11 +247,23 @@ async fn answer_requests(
                 claim_terminal(&pr, &open, cx);
                 let origin = origin_of(&open, cx).await;
                 let active = screen.borrow().active.clone();
-                let decision = active.update(cx, |active, cx| {
-                    let decision = active.request(pr.clone(), origin);
+                let tour = TourFact::of(&pr, &home);
+                let outcome = active.update(cx, |active, cx| {
+                    let outcome = active.open(pr.clone(), origin, tour);
                     cx.notify();
-                    decision
+                    outcome
                 });
+                let decision = match outcome {
+                    OpenOutcome::Tour(decision) => decision,
+                    OpenOutcome::Writing(decision) => {
+                        show_writing(&screen, &active, cx);
+                        if decision == WriteDecision::StartWriter {
+                            cx.update(|cx| tour_writer::start_writer(pr, cx));
+                        }
+                        reply.send(Answer::Writing { pr: open.pr }).ok();
+                        continue;
+                    }
+                };
                 match decision {
                     OpenDecision::KeepInBackground => {
                         reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
@@ -292,6 +311,9 @@ fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answe
             ShowSettings::OpenSettingsOnly => {
                 open_settings_window(home, cx).map(AppWindow::SettingsOnly)
             }
+            ShowSettings::NotWhileWriting => Err(anyhow::anyhow!(
+                "a tour is being written; Settings opens once it is shown"
+            )),
         }
     });
     match shown {
@@ -469,6 +491,9 @@ async fn build_and_show(
                         switch_window(window, opened, &pr, cx).map(|()| window)
                     }
                     ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, &pr, cx),
+                    ShowReview::TurnWritingIntoReview(window) => {
+                        turn_writing_into_review(window, opened, &pr, cx)
+                    }
                     ShowReview::OpenWindow => open_window(opened, &pr, cx),
                 };
                 cx.activate(true);
@@ -535,6 +560,45 @@ fn turn_into_review(
         window.replace_root(cx, |window, cx| {
             new_layout(opened, pr, Some(settings), window, cx)
         });
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
+}
+
+/// The window shows the loading screen of the tour being written: the one over the PR on screen, or with
+/// no PR open a window holding only that screen.
+fn show_writing(screen: &SharedScreen, active: &Entity<ActivePr>, cx: &mut AsyncApp) {
+    let window = screen.borrow().window;
+    let shown = cx.update(|cx| {
+        cx.activate(true);
+        match window.show_writing() {
+            ShowWriting::OpenWindow => {
+                open_writing_window(active, cx).map(|window| Some(AppWindow::WritingOnly(window)))
+            }
+            ShowWriting::Raise(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| None),
+            ShowWriting::OverReview(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| None),
+            ShowWriting::LeaveSettings => Ok(None),
+        }
+    });
+    match shown {
+        Ok(Some(window)) => screen.borrow_mut().window = window,
+        Ok(None) => {}
+        Err(error) => eprintln!("could not show the tour being written: {error:#}"),
+    }
+}
+
+/// The window that held only the loading screen becomes the review's.
+fn turn_writing_into_review(
+    window: WindowHandle<WritingWindow>,
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    window.update(cx, |_, window, cx| {
+        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -606,6 +670,18 @@ fn open_settings_window(home: &Path, cx: &mut App) -> anyhow::Result<WindowHandl
     cx.open_window(options, |window, cx| {
         cx.set_global(Appearance::of(window));
         cx.new(|cx| SettingsWindow::new(home, window, cx))
+    })
+}
+
+fn open_writing_window(
+    active: &Entity<ActivePr>,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<WritingWindow>> {
+    let options = window_options("Writing a tour".to_owned(), cx);
+    let active = active.clone();
+    cx.open_window(options, |window, cx| {
+        cx.set_global(Appearance::of(window));
+        cx.new(|cx| WritingWindow::new(&active, window, cx))
     })
 }
 

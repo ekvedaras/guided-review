@@ -5,7 +5,8 @@ use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    ActivePr, AgentReplied, Finished, HandOffId, OpenDecision, OpenOrigin, Problem, ReviewStateFile,
+    ActivePr, AgentReplied, Finished, HandOffId, OpenDecision, OpenOrigin, OpenOutcome, Problem,
+    ReviewStateFile, TourFact, WriteDecision,
 };
 use serde_json::json;
 
@@ -468,4 +469,54 @@ fn a_failed_reopen_keeps_the_pr_on_screen_with_the_reason() {
     assert!(matches!(finished, Finished::Stay { reason } if reason.contains("clone is gone")));
     assert_eq!(active.shown(), Some(&pr(A)));
     assert_eq!(active.switching_to(), None);
+}
+
+#[test]
+fn an_open_of_a_pr_without_a_tour_shows_its_tour_being_written() {
+    let mut active = ActivePr::default();
+    let pr: PullRequestUrl = A.parse().unwrap();
+
+    let outcome = active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+
+    assert!(matches!(
+        outcome,
+        OpenOutcome::Writing(WriteDecision::StartWriter)
+    ));
+    assert_eq!(active.loading().map(|(loading, _)| loading), Some(&pr));
+    assert!(!active.is_building());
+}
+
+#[test]
+fn an_open_of_a_pr_whose_tour_is_being_written_watches_that_writing() {
+    let mut active = ActivePr::default();
+    let pr: PullRequestUrl = A.parse().unwrap();
+    active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+
+    let outcome = active.open(pr, OpenOrigin::Reviewer, TourFact::Writing);
+
+    assert!(matches!(
+        outcome,
+        OpenOutcome::Writing(WriteDecision::Watch)
+    ));
+}
+
+#[test]
+fn an_open_of_a_pr_with_a_tour_builds_it() {
+    let mut active = ActivePr::default();
+
+    let outcome = active.open(A.parse().unwrap(), OpenOrigin::Reviewer, TourFact::Ready);
+
+    assert!(matches!(outcome, OpenOutcome::Tour(OpenDecision::Build(_))));
+}
+
+#[test]
+fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_waiting_on_it() {
+    let mut active = ActivePr::default();
+    let pr: PullRequestUrl = A.parse().unwrap();
+    active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+
+    let outcome = active.open(pr, OpenOrigin::AppStartedAgent, TourFact::Ready);
+
+    assert!(matches!(outcome, OpenOutcome::Tour(OpenDecision::Build(_))));
+    assert!(active.loading().is_none());
 }

@@ -31,6 +31,12 @@ pub fn write(pr: PullRequestUrl, cx: &mut App) {
     }
 }
 
+/// Starts the writer of a PR whose writing `ActivePr` just began.
+pub fn start_writer(pr: PullRequestUrl, cx: &mut App) {
+    let switching = cx.global::<PrSwitching>().clone();
+    start(&switching, pr, cx);
+}
+
 /// After a restart, finds each remembered writing's terminal again and follows it. Asking herdr is
 /// brief and happens once, before the window exists.
 pub fn resume(cx: &mut App) {

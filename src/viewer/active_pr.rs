@@ -45,6 +45,14 @@ pub enum OpenOrigin {
     AppStartedAgent,
 }
 
+/// What an open request of a PR comes to, by whether the PR has a tour.
+pub enum OpenOutcome {
+    Tour(OpenDecision),
+    /// No tour yet: the loading screen shows it being written, as when the reviewer picks the PR with no
+    /// tour in the switcher.
+    Writing(WriteDecision),
+}
+
 pub enum OpenDecision {
     /// The PR is on screen: read its tour again.
     Reload,
@@ -157,6 +165,17 @@ impl ActivePr {
     pub fn picked(&mut self, pr: PullRequestUrl) {
         if self.shown.as_ref() != Some(&pr) {
             self.switching = Some(pr);
+        }
+    }
+
+    /// The one way in for an open request, whoever sent it: a PR with a tour is requested, a PR without
+    /// one gets its tour written.
+    pub fn open(&mut self, pr: PullRequestUrl, origin: OpenOrigin, tour: TourFact) -> OpenOutcome {
+        match tour {
+            TourFact::Ready => OpenOutcome::Tour(self.request(pr, origin)),
+            TourFact::Missing | TourFact::Writing | TourFact::WritingFailed => {
+                OpenOutcome::Writing(self.write(pr))
+            }
         }
     }
 

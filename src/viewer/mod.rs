@@ -50,11 +50,13 @@ mod typing_save;
 mod viewed_sync;
 mod word_diff;
 
-pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
+pub use active_pr::{
+    ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, OpenOutcome, WriteDecision,
+};
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
-pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings};
+pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowWriting};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_target::{AskTarget, Unavailable};
 pub(crate) use code_link::percent_encode_path;

@@ -107,11 +107,13 @@ In Claude Code:
 /tour <pr-url>
 ```
 
-The skill writes the tour with the `guided-review` CLI and opens it. To open an existing tour:
+The skill writes the tour with the `guided-review` CLI and opens it. To open a PR in the app:
 
 ```sh
 guided-review open <pr-url>
 ```
+
+A PR with no tour yet gets one written, as when you pick it in the PR switcher: the app shows the writer's progress and opens the tour when it is ready (needs herdr).
 
 In the app, `→` or `J` (the Next button) goes on to the next step not read yet, `N` jumps to the next unread step from anywhere, `M` marks a step read, `⌘K` jumps to a step, file or action (Settings, Finish review, Restart app here, which `guided-review restart` also does), `?` lists every shortcut and `⌘W` closes the window and quits the app. With summary instructions set in Settings, the tour can also carry a reviewer summary; pictures it shows sit in the tour's own folder.
 
