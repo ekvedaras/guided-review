@@ -7,7 +7,10 @@ use std::str::FromStr;
 
 use anyhow::Context;
 
-pub use app_bundle::{AppBundle, BundlePlaced, info_plist, write_bundle_template};
+pub use app_bundle::{
+    AppBundle, BundlePlaced, IN_LOGIN_SHELL, Relaunch, info_plist, relaunch_in_login_shell,
+    write_bundle_template,
+};
 pub use release_install::{InTheWay, Installed, ReleaseInstall, SkillLink};
 
 /// The build of this binary as `--version` prints it and the app shows it: the release version and

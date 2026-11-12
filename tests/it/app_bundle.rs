@@ -1,7 +1,11 @@
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use guided_review::update::{AppBundle, BundlePlaced, Version, info_plist, write_bundle_template};
+use guided_review::update::{
+    AppBundle, BundlePlaced, Relaunch, Version, info_plist, relaunch_in_login_shell,
+    write_bundle_template,
+};
 use tempfile::TempDir;
 
 fn version(text: &str) -> Version {
@@ -157,4 +161,98 @@ fn a_release_without_a_bundle_places_none() {
 
     assert_eq!(placed, BundlePlaced::NotInRelease);
     assert!(!bundle_in(home.path()).exists());
+}
+
+const BUNDLED: &str = "/Users/you/Applications/Guided Review.app/Contents/MacOS/guided-review";
+
+#[test]
+fn a_launch_of_the_bundle_runs_again_through_the_login_shell_so_gh_claude_and_hc_are_found() {
+    let relaunch =
+        relaunch_in_login_shell(Path::new(BUNDLED), Some(OsStr::new("/bin/bash")), false);
+
+    assert_eq!(
+        relaunch,
+        Some(Relaunch {
+            program: PathBuf::from("/bin/bash"),
+            args: ["-l", "-i", "-c", "exec \"$0\"", BUNDLED]
+                .map(OsString::from)
+                .to_vec(),
+        })
+    );
+}
+
+#[test]
+fn with_no_shell_named_the_launch_runs_through_zsh() {
+    let relaunch = relaunch_in_login_shell(Path::new(BUNDLED), None, false).unwrap();
+
+    assert_eq!(relaunch.program, PathBuf::from("/bin/zsh"));
+}
+
+#[test]
+fn a_launch_already_in_the_login_shell_runs_as_it_is() {
+    assert_eq!(
+        relaunch_in_login_shell(Path::new(BUNDLED), Some(OsStr::new("/bin/zsh")), true),
+        None
+    );
+}
+
+#[test]
+fn a_binary_outside_a_bundle_runs_as_it_is() {
+    assert_eq!(
+        relaunch_in_login_shell(
+            Path::new("/Users/you/.local/bin/guided-review"),
+            Some(OsStr::new("/bin/zsh")),
+            false
+        ),
+        None
+    );
+}
+
+fn with_bin_link_to(home: &Path, binary: &str) -> PathBuf {
+    let release = home.join(".local/share/guided-review/0.7.0/guided-review");
+    fs::create_dir_all(release.parent().unwrap()).unwrap();
+    fs::write(&release, binary).unwrap();
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    std::os::unix::fs::symlink(&release, home.join(".local/bin/guided-review")).unwrap();
+    release
+}
+
+#[test]
+fn the_app_is_started_through_the_bundle_when_the_bundle_runs_the_same_binary() {
+    let home = home();
+    let binary = with_bin_link_to(home.path(), "binary 0.7.0");
+    let release = TempDir::new().unwrap();
+    let bundle = AppBundle::in_home(home.path());
+    bundle
+        .place_from(&template(release.path(), "0.7.0"))
+        .unwrap();
+
+    assert_eq!(bundle.launcher_for(&binary), bundle.executable());
+}
+
+#[test]
+fn another_binary_is_started_as_itself() {
+    let home = home();
+    with_bin_link_to(home.path(), "binary 0.7.0");
+    let release = TempDir::new().unwrap();
+    let bundle = AppBundle::in_home(home.path());
+    bundle
+        .place_from(&template(release.path(), "0.7.0"))
+        .unwrap();
+    let cargo_bin = home.path().join(".cargo/bin/guided-review");
+    fs::create_dir_all(cargo_bin.parent().unwrap()).unwrap();
+    fs::write(&cargo_bin, "binary from source").unwrap();
+
+    assert_eq!(bundle.launcher_for(&cargo_bin), cargo_bin);
+}
+
+#[test]
+fn with_no_bundle_the_binary_is_started_as_itself() {
+    let home = home();
+    let binary = with_bin_link_to(home.path(), "binary 0.7.0");
+
+    assert_eq!(
+        AppBundle::in_home(home.path()).launcher_for(&binary),
+        binary
+    );
 }

@@ -74,6 +74,7 @@ fn the_listener_answers_each_request_line_through_the_handler() {
             Request::Open(open) => Answer::Opening { pr: open.pr },
             Request::AgentReplied { pr, .. } => Answer::HandOffAnswered { pr },
             Request::ShowSettings => Answer::ShowingSettings,
+            Request::ShowSwitcher => Answer::ShowingSwitcher,
             Request::Quit => Answer::Quitting,
         });
 
