@@ -1370,6 +1370,19 @@ impl ReviewCore {
         self.step_by(1)
     }
 
+    /// For the scroll script, which scrolls through every piece, so a folded step is opened.
+    pub fn go_forward_unfolded(&mut self) -> bool {
+        if !self.go_forward() {
+            return false;
+        }
+        if let Screen::Step(id) = self.screen.clone()
+            && self.is_folded(&id)
+        {
+            self.toggle_fold(&id);
+        }
+        true
+    }
+
     /// The Next button: on to the next screen that is not a step already read, which the sidebar
     /// still reaches. False when there is none.
     pub fn go_on(&mut self) -> bool {

@@ -428,7 +428,6 @@ impl OneStepLayout {
         cx.notify();
     }
 
-    /// Folded steps are opened, so the script scrolls through their pieces too.
     fn run_scroll_script(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(next) = self
             .frame_stats
@@ -444,17 +443,7 @@ impl OneStepLayout {
             };
             let screen = self.session.read(cx).review().screen().clone();
             eprintln!("{screen:?} ({active}): {report}");
-            let has_next = self.change_review(cx, |review| {
-                if !review.go_forward() {
-                    return false;
-                }
-                if let Screen::Step(id) = review.screen().clone()
-                    && review.is_folded(&id)
-                {
-                    review.toggle_fold(&id);
-                }
-                true
-            });
+            let has_next = self.change_review(cx, |review| review.go_forward_unfolded());
             if !has_next {
                 cx.quit();
                 return;

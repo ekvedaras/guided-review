@@ -263,3 +263,17 @@ fn restart_on_the_summary_opens_the_pr_where_it_starts() {
         ["restart", "https://github.com/acme/shop/pull/7"]
     );
 }
+
+#[test]
+fn the_scroll_script_goes_forward_with_the_next_step_opened() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = three_step_review(&repo);
+    review.tick(&"two".into()).unwrap();
+    on_step(&mut review, "one");
+    assert!(review.is_folded(&"two".into()), "a read step folds");
+
+    assert!(review.go_forward_unfolded());
+
+    assert_eq!(review.screen(), &Screen::Step("two".into()));
+    assert!(!review.is_folded(&"two".into()));
+}
