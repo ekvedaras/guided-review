@@ -108,37 +108,63 @@ impl ReopenAfterSave {
 /// How soon a second restart must follow the warning to count as a yes.
 const CONFIRM_WITHIN: Duration = Duration::from_secs(10);
 
-/// A restart quits the app at once, so with work running it first warns, and only a second ask soon
-/// after restarts.
+/// A way out of the app that ends what is in flight at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Departure {
+    Restart,
+    Quit,
+    CloseWindow,
+}
+
+/// Leaving the app ends it at once, so with work running the first ask warns, and only the same ask
+/// again soon after goes through. Another way out does not confirm it.
 #[derive(Debug, Default)]
 pub struct RestartGuard {
-    warned_at: Option<Instant>,
+    warned: Option<(Departure, Instant)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestartStep {
+    /// Nothing stops it.
     Restart,
-    /// What would be lost, and that asking again restarts anyway.
+    /// What would be lost, and that asking again goes ahead anyway.
     Warn(String),
 }
 
 impl RestartGuard {
     pub fn ask(&mut self, in_flight: InFlight, now: Instant) -> RestartStep {
-        let was_warned = self
-            .warned_at
-            .is_some_and(|warned| now.saturating_duration_since(warned) <= CONFIRM_WITHIN);
+        self.ask_to(Departure::Restart, in_flight, now)
+    }
+
+    pub fn ask_to(
+        &mut self,
+        departure: Departure,
+        in_flight: InFlight,
+        now: Instant,
+    ) -> RestartStep {
+        let was_warned = self.warned.is_some_and(|(warned_for, at)| {
+            warned_for == departure && now.saturating_duration_since(at) <= CONFIRM_WITHIN
+        });
         if in_flight == InFlight::default() || was_warned {
-            self.warned_at = None;
+            self.warned = None;
             return RestartStep::Restart;
         }
-        self.warned_at = Some(now);
+        self.warned = Some((departure, now));
         let running = Pending {
             in_flight,
             asks_handed_to_agent: 0,
         };
-        RestartStep::Warn(format!(
-            "A restart now does not wait until {}. Pick Restart again to restart anyway.",
-            running.waits()
-        ))
+        let waits = running.waits();
+        RestartStep::Warn(match departure {
+            Departure::Restart => format!(
+                "A restart now does not wait until {waits}. Pick Restart again to restart anyway."
+            ),
+            Departure::Quit => format!(
+                "Quitting now does not wait until {waits}. Press cmd+q again to quit anyway."
+            ),
+            Departure::CloseWindow => format!(
+                "Closing the window quits the app, which does not wait until {waits}. Press cmd+w again to close anyway."
+            ),
+        })
     }
 }

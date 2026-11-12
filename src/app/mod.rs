@@ -30,8 +30,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, TitlebarOptions, Window,
-    WindowBounds, WindowHandle, WindowOptions, point, px, size,
+    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Menu, MenuItem,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, point, px, size,
 };
 use gpui_platform::application;
 
@@ -58,7 +58,7 @@ use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
     CloseWindow, Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout,
-    ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
+    OpenPrOnGitHub, ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -106,6 +106,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             tour_writer::resume(cx);
             dock_icon::show();
             bind_keys(cx);
+            quit_on_cmd_q(cx);
             components::toast_stack::Toaster::install(cx);
             updater::Updates::install(&home, cx);
             word_keys::take_before_macos(cx);
@@ -684,6 +685,19 @@ fn turn_writing_into_review(
     Ok(WindowHandle::new(window.window_id()))
 }
 
+actions!(app, [Quit]);
+
+/// cmd+q ends the app from whichever window has the focus. The review's window answers it first,
+/// warning once while work is in flight; this is for a window with no review. The menu item is what macOS shows the key beside.
+fn quit_on_cmd_q(cx: &mut App) {
+    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.set_menus([Menu {
+        name: "guided-review".into(),
+        items: vec![MenuItem::action("Quit guided-review", Quit)],
+        disabled: false,
+    }]);
+}
+
 /// The window that held only the switcher becomes the picked PR's review.
 fn turn_switcher_into_review(
     window: WindowHandle<SwitcherWindow>,
@@ -714,18 +728,19 @@ fn bind_keys(cx: &mut App) {
     text_box::bind_keys(cx);
     let bindings = Command::ALL.into_iter().flat_map(|command| {
         let context = match command.scope() {
-            KeyScope::Page => typing_is_not_navigation.clone(),
-            KeyScope::Window => OneStepLayout::KEY_CONTEXT.to_owned(),
-            KeyScope::TextBox => text_box::TYPING_CONTEXT.to_owned(),
-            KeyScope::NotTyping => format!(
+            KeyScope::Page => Some(typing_is_not_navigation.clone()),
+            KeyScope::App => None,
+            KeyScope::Window => Some(OneStepLayout::KEY_CONTEXT.to_owned()),
+            KeyScope::TextBox => Some(text_box::TYPING_CONTEXT.to_owned()),
+            KeyScope::NotTyping => Some(format!(
                 "{} && !{}",
                 OneStepLayout::KEY_CONTEXT,
                 text_box::TYPING_CONTEXT
-            ),
+            )),
         };
         command.chords().iter().map(move |chord| {
             let keys = keystroke(chord);
-            let context = Some(context.as_str());
+            let context = context.as_deref();
             match command {
                 Command::NextScreen => KeyBinding::new(&keys, GoForward, context),
                 Command::PreviousScreen => KeyBinding::new(&keys, GoBack, context),
@@ -739,7 +754,9 @@ fn bind_keys(cx: &mut App) {
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
+                Command::OpenOnGitHub => KeyBinding::new(&keys, OpenPrOnGitHub, context),
                 Command::CloseWindow => KeyBinding::new(&keys, CloseWindow, context),
+                Command::Quit => KeyBinding::new(&keys, Quit, context),
             }
         })
     });

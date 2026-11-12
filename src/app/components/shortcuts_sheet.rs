@@ -1,22 +1,24 @@
+use std::time::Instant;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{Command, ShortcutGroup, in_group};
+use crate::viewer::{Command, Presence, ShortcutGroup, in_group};
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
-use super::motion::rise_in;
-use super::overlay::{modal_layer, overlay_panel, picker_footer};
+use super::motion::OVERLAY;
+use super::overlay::{close_presence, modal_layer_for, overlay_panel, picker_footer, rise_for};
 use super::palette::Colors;
 use super::step_notes::note_label;
 
 /// Every shortcut the app has, under its heading, read from the one table the keys are bound from.
 pub struct ShortcutsSheet {
-    is_open: bool,
+    presence: Presence,
     focus: FocusHandle,
     owner_focus: FocusHandle,
 }
@@ -26,28 +28,31 @@ impl ShortcutsSheet {
 
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
-            is_open: false,
+            presence: Presence::lasting(OVERLAY),
             focus: cx.focus_handle(),
             owner_focus,
         }
     }
 
     pub fn is_open(&self) -> bool {
-        self.is_open
+        self.presence.is_open()
     }
 
     pub fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_open {
+        if self.presence.is_open() {
             self.close(window, cx);
         } else {
-            self.is_open = true;
+            self.presence.open(Instant::now());
             window.focus(&self.focus, cx);
             cx.notify();
         }
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_open = false;
+        if !self.presence.is_open() {
+            return;
+        }
+        close_presence(self, cx, |this| &mut this.presence);
         window.focus(&self.owner_focus, cx);
         cx.notify();
     }
@@ -106,7 +111,7 @@ fn group_block(colors: &Colors, group: ShortcutGroup) -> impl IntoElement {
 
 impl Render for ShortcutsSheet {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.is_open {
+        if self.presence.shown().is_none() {
             return div().into_any_element();
         }
         let colors = Colors::active(cx);
@@ -147,12 +152,12 @@ impl Render for ShortcutsSheet {
                 )
                 .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
             );
-        modal_layer(&colors, "shortcuts-scrim")
+        modal_layer_for(&colors, "shortcuts-scrim", &self.presence)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),
             )
-            .child(rise_in(
+            .child(rise_for(
                 overlay_panel(&colors)
                     .id("shortcuts-sheet")
                     .key_context(Self::KEY_CONTEXT)
@@ -184,6 +189,7 @@ impl Render for ShortcutsSheet {
                             )),
                     ),
                 "shortcuts-sheet-rise",
+                &self.presence,
             ))
             .into_any_element()
     }

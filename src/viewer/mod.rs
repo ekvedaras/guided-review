@@ -31,6 +31,7 @@ mod page;
 mod ports;
 mod pr_notes;
 mod pr_switcher;
+mod presence;
 mod problems;
 mod reactions;
 mod refresh;
@@ -120,6 +121,7 @@ pub use ports::{
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
+pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
@@ -127,7 +129,9 @@ pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
 pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
-pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep};
+pub use reopen_after_save::{
+    Departure, InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep,
+};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen,
     SidebarEntry, StepId, SummaryStats, TourLead, UnreadStep,

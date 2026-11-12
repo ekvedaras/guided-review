@@ -16,7 +16,7 @@ use crate::app::review_session::ReviewSession;
 use crate::config::AskSettings;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, Ask, AskDesk, AskId, AskProcessEvent, AskProcesses, AskTarget,
-    Author, NotDelivered, Place, Question, Review, TurnStopper,
+    Author, NotDelivered, Place, Presence, Question, Review, Shown, TurnStopper,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_button, icon_label_button};
@@ -24,7 +24,8 @@ use super::card::card;
 use super::icon::{Icon, icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::{MarkdownView, parsed_markdown};
-use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in};
+use super::motion::{OVERLAY, PANEL_SLIDE, along, busy_dot, panel_level};
+use super::overlay::{close_presence, input_blocker};
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
@@ -145,7 +146,14 @@ pub struct AskPanel {
     focus: FocusHandle,
     question_focus: FocusHandle,
     layout_focus: FocusHandle,
+    /// Whether the panel is leaving; the desk knows whether it is open.
+    presence: Presence,
+    /// What the desk was open on as the panel began to leave, drawn until it is gone.
+    leaving_target: Option<AskTarget>,
 }
+
+/// How wide the panel is once in.
+const PANEL_WIDTH: f32 = 380.;
 
 impl AskPanel {
     pub const KEY_CONTEXT: &str = "AskInput";
@@ -191,11 +199,18 @@ impl AskPanel {
             focus: cx.focus_handle(),
             question_focus: cx.focus_handle(),
             layout_focus,
+            presence: Presence::lasting(OVERLAY),
+            leaving_target: None,
         }
     }
 
     pub fn is_open(&self, cx: &App) -> bool {
         self.desk(cx).is_open()
+    }
+
+    /// Drawn: open, or on its way out.
+    pub fn is_shown(&self, cx: &App) -> bool {
+        self.is_open(cx) || self.presence.shown().is_some()
     }
 
     fn desk<'a>(&self, cx: &'a App) -> &'a AskDesk {
@@ -225,6 +240,8 @@ impl AskPanel {
         self.change(cx, |review, processes| {
             review.open_ask(place, label, &settings, Instant::now(), processes);
         });
+        self.presence.open(Instant::now());
+        self.leaving_target = None;
         match self.desk(cx).target() {
             Some(AskTarget::Ready { .. }) => {
                 self.question.clear();
@@ -236,6 +253,11 @@ impl AskPanel {
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_open(cx) {
+            return;
+        }
+        self.leaving_target = self.desk(cx).target().cloned();
+        close_presence(self, cx, |this| &mut this.presence);
         self.change(cx, |review, _| review.change_asks(AskDesk::close));
         window.focus(&self.layout_focus, cx);
         cx.notify();
@@ -455,7 +477,7 @@ impl Render for AskPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let desk = self.desk(cx);
-        let Some(target) = desk.target() else {
+        let Some(target) = desk.target().or(self.leaving_target.as_ref()) else {
             return div().into_any_element();
         };
         let place = target.label().to_owned();
@@ -549,7 +571,7 @@ impl Render for AskPanel {
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key_down))
-            .w(px(380.))
+            .w(px(PANEL_WIDTH))
             .flex_none()
             .h_full()
             .flex()
@@ -619,18 +641,34 @@ impl Render for AskPanel {
             )
             .children(input.map(|input| div().flex_none().p_3().child(input)));
         // The page runs under the rounded corners, so they cut into the page and not into the sidebar.
-        div()
-            .flex_none()
-            .h_full()
-            .bg(colors.background)
-            .child(slide_in(
-                panel,
-                "ask-panel-slide",
-                OVERLAY,
-                Edge::Right,
-                PANEL_SLIDE,
-            ))
-            .into_any_element()
+        let panel = match self.presence.shown() {
+            Some(Shown::Leaving) => panel.child(input_blocker()),
+            Some(Shown::Entering) | None => panel,
+        };
+        let id = ("ask-panel-slide", self.presence.turn());
+        let travel = self.presence.travel();
+        // The panel's room grows and shrinks with its move, so the page glides wider as it leaves
+        // instead of jumping when it is gone.
+        along(
+            div()
+                .flex_none()
+                .h_full()
+                .flex()
+                .justify_end()
+                .overflow_hidden()
+                .bg(colors.background)
+                .child(along(panel, id, travel, |panel, position| {
+                    let level = panel_level(position);
+                    panel
+                        .relative()
+                        .opacity(level)
+                        .left(PANEL_SLIDE * (1. - level))
+                })),
+            ("ask-panel-room", self.presence.turn()),
+            travel,
+            |room, position| room.w(px(PANEL_WIDTH * panel_level(position))),
+        )
+        .into_any_element()
     }
 }
 

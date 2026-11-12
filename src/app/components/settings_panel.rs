@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -11,14 +12,15 @@ use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
-use crate::viewer::{CloneRowProblem, SaveOutcome, SettingProblem, Settings};
+use crate::viewer::{CloneRowProblem, Motion, Presence, SaveOutcome, SettingProblem, Settings};
 
 use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
 };
 use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
-use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
+use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, slide_in};
+use super::overlay::{close_presence, rise_for, scrim_fade};
 use super::palette::{
     CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, inside_edge,
 };
@@ -231,7 +233,9 @@ enum Loaded {
 /// model and passes clicks on to it; what is allowed, wrong or written is the model's.
 pub struct SettingsPanel {
     home: PathBuf,
+    /// What was loaded stays while the sheet leaves, so it is drawn until it is gone.
     loaded: Option<Loaded>,
+    presence: Presence,
     focus: FocusHandle,
     owner_focus: FocusHandle,
     placement: Placement,
@@ -255,6 +259,7 @@ impl SettingsPanel {
         Self {
             home,
             loaded: None,
+            presence: Presence::lasting(OVERLAY),
             focus: cx.focus_handle(),
             owner_focus,
             placement,
@@ -286,7 +291,7 @@ impl SettingsPanel {
     }
 
     pub fn is_open(&self) -> bool {
-        self.loaded.is_some()
+        self.presence.is_open()
     }
 
     /// Reads the config again, so the panel never shows what an earlier opening left.
@@ -295,6 +300,7 @@ impl SettingsPanel {
             Ok(editing) => Loaded::Ready(Box::new(editing)),
             Err(error) => Loaded::Failed(format!("{error:#}").into()),
         });
+        self.presence.open(Instant::now());
         self.clone_focus.clear();
         window.focus(&self.focus, cx);
         cx.notify();
@@ -302,6 +308,9 @@ impl SettingsPanel {
 
     /// Asks first when there are unsaved changes.
     pub fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.presence.is_open() {
+            return;
+        }
         match self.editing_mut() {
             Some(editing) if editing.settings.has_unsaved_changes() => {
                 editing.is_confirming_discard = true;
@@ -321,13 +330,25 @@ impl SettingsPanel {
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.loaded = None;
+        if !self.presence.is_open() {
+            return;
+        }
+        match self.placement {
+            Placement::SheetOverReview => close_presence(self, cx, |this| &mut this.presence),
+            // The window goes with it, so there is nothing to leave to.
+            Placement::WholeWindow => {
+                self.presence.close(Motion::Reduced, Instant::now());
+            }
+        }
         window.focus(&self.owner_focus, cx);
         cx.emit(SettingsEvent::Closed);
         cx.notify();
     }
 
     fn editing_mut(&mut self) -> Option<&mut Editing> {
+        if !self.presence.is_open() {
+            return None;
+        }
         match self.loaded.as_mut()? {
             Loaded::Ready(editing) => Some(editing),
             Loaded::Failed(_) => None,
@@ -1628,6 +1649,9 @@ fn effort_meter(colors: &Colors, level: usize) -> impl IntoElement {
 
 impl Render for SettingsPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.presence.shown().is_none() {
+            return div().into_any_element();
+        }
         let Some(loaded) = &self.loaded else {
             return div().into_any_element();
         };
@@ -1794,46 +1818,47 @@ impl Render for SettingsPanel {
                 OVERLAY,
             )
             .into_any_element(),
-            Placement::SheetOverReview => div()
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .occlude()
-                .child(fade_in(
-                    div()
-                        .id("settings-scrim")
-                        .absolute()
-                        .inset_0()
-                        .bg(colors.scrim)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.request_close(window, cx)),
-                        ),
-                    "settings-scrim-fade",
-                    STATE,
-                ))
-                .child(rise_in(
-                    panel
-                        .relative()
-                        .w_full()
-                        .max_w(px(SHEET_WIDTH))
-                        .h(relative(0.9))
-                        .mx_8()
-                        .overflow_hidden()
-                        .bg(colors.overlay)
-                        .border_1()
-                        .border_color(colors.border)
-                        .rounded(px(CARD_RADIUS))
-                        .shadow(colors.overlay_shadow())
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(header)
-                        .children(notice)
-                        .child(body)
-                        .children(bar),
-                    "settings-sheet-rise",
-                ))
-                .into_any_element(),
+            Placement::SheetOverReview => {
+                let scrim = div()
+                    .id("settings-scrim")
+                    .absolute()
+                    .inset_0()
+                    .bg(colors.scrim)
+                    .on_click(cx.listener(|this, _, window, cx| this.request_close(window, cx)));
+                let scrim = scrim_fade(scrim, "settings-scrim-fade", &self.presence);
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .occlude()
+                    .child(scrim)
+                    .child(rise_for(
+                        panel
+                            .relative()
+                            .w_full()
+                            .max_w(px(SHEET_WIDTH))
+                            .h(relative(0.9))
+                            .mx_8()
+                            .overflow_hidden()
+                            .bg(colors.overlay)
+                            .border_1()
+                            .border_color(colors.border)
+                            .rounded(px(CARD_RADIUS))
+                            .shadow(colors.overlay_shadow())
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
+                            .child(header)
+                            .children(notice)
+                            .child(body)
+                            .children(bar),
+                        "settings-sheet-rise",
+                        &self.presence,
+                    ))
+                    .into_any_element()
+            }
         }
     }
 }

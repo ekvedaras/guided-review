@@ -47,6 +47,7 @@ fn no_two_commands_of_one_scope_share_a_key() {
                 KeyScope::Window => "window",
                 KeyScope::TextBox => "text box",
                 KeyScope::NotTyping => "outside text boxes",
+                KeyScope::App => "app",
             };
             assert!(
                 taken.insert((scope, keystroke(chord))),
@@ -97,4 +98,51 @@ fn copying_code_works_with_a_comment_box_open_but_not_while_typing_in_it() {
 fn cmd_w_closes_the_window_from_anywhere_in_it() {
     assert_eq!(keystroke(Command::CloseWindow.first_chord()), "cmd-w");
     assert_eq!(Command::CloseWindow.scope(), KeyScope::Window);
+}
+
+#[test]
+fn g_opens_the_pull_request_on_github_wherever_the_page_takes_keys() {
+    assert_eq!(keystroke(Command::OpenOnGitHub.first_chord()), "g");
+    assert_eq!(Command::OpenOnGitHub.scope(), KeyScope::Page);
+    assert_eq!(Command::OpenOnGitHub.group(), ShortcutGroup::App);
+}
+
+#[test]
+fn cmd_q_quits_from_any_window_of_the_app() {
+    assert_eq!(keystroke(Command::Quit.first_chord()), "cmd-q");
+    assert_eq!(Command::Quit.scope(), KeyScope::App);
+    assert_eq!(Command::Quit.group(), ShortcutGroup::App);
+}
+
+#[test]
+fn a_key_of_the_app_scope_is_taken_in_no_other_scope() {
+    let app_keys: Vec<String> = Command::ALL
+        .into_iter()
+        .filter(|command| command.scope() == KeyScope::App)
+        .flat_map(|command| command.chords().iter().map(|chord| keystroke(chord)))
+        .collect();
+
+    for command in Command::ALL {
+        if command.scope() == KeyScope::App {
+            continue;
+        }
+        for chord in command.chords() {
+            assert!(
+                !app_keys.contains(&keystroke(chord)),
+                "{} is also a key of the whole app",
+                keystroke(chord)
+            );
+        }
+    }
+}
+
+#[test]
+fn the_page_keys_are_all_single_keys_or_arrows_so_g_fits_them() {
+    for command in Command::ALL {
+        if command.scope() == KeyScope::Page {
+            for chord in command.chords() {
+                assert_eq!(chord.len(), 1, "{command:?} is a chord on the page");
+            }
+        }
+    }
 }

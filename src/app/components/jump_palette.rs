@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
@@ -7,13 +9,16 @@ use gpui::{
 use crate::pieces::PieceId;
 use crate::viewer::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind, PieceLabel,
+    Presence,
 };
 
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
 use super::markdown_view::InlineMarkdown;
-use super::motion::rise_in;
-use super::overlay::{modal_layer, overlay_panel, picker_footer, picker_row};
+use super::motion::OVERLAY;
+use super::overlay::{
+    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
+};
 use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -32,7 +37,7 @@ pub enum JumpEvent {
 /// can take, under their headings. It knows nothing of the review; its owner answers `QueryChanged`
 /// with new groups.
 pub struct JumpPalette {
-    is_open: bool,
+    presence: Presence,
     query: String,
     rows: Vec<ShownRow>,
     /// Of the entries, headings not counted.
@@ -120,7 +125,7 @@ impl JumpPalette {
 
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
-            is_open: false,
+            presence: Presence::lasting(OVERLAY),
             query: String::new(),
             rows: Vec::new(),
             entry_count: 0,
@@ -131,11 +136,11 @@ impl JumpPalette {
     }
 
     pub fn is_open(&self) -> bool {
-        self.is_open
+        self.presence.is_open()
     }
 
     pub fn open(&mut self, groups: Vec<PaletteGroup>, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_open = true;
+        self.presence.open(Instant::now());
         self.query.clear();
         self.set_groups(groups);
         window.focus(&self.focus, cx);
@@ -150,7 +155,10 @@ impl JumpPalette {
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_open = false;
+        if !self.presence.is_open() {
+            return;
+        }
+        close_presence(self, cx, |this| &mut this.presence);
         window.focus(&self.owner_focus, cx);
         cx.notify();
     }
@@ -325,7 +333,7 @@ fn piece_label(colors: &Colors, label: PieceLabel) -> impl IntoElement {
 impl Render for JumpPalette {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
-        if !self.is_open {
+        if self.presence.shown().is_none() {
             return div().into_any_element();
         }
         let selected_row = self
@@ -344,12 +352,12 @@ impl Render for JumpPalette {
                 ShownRow::Entry { index, entry } => self.row(*index, entry, cx).into_any_element(),
             })
             .collect();
-        modal_layer(&colors, "jump-palette-scrim")
+        modal_layer_for(&colors, "jump-palette-scrim", &self.presence)
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close(window, cx)),
             )
-            .child(rise_in(
+            .child(rise_for(
                 overlay_panel(&colors)
                     .id("jump-palette")
                     .key_context(Self::KEY_CONTEXT)
@@ -397,6 +405,7 @@ impl Render for JumpPalette {
                             .child(key_hint(&colors, &[KeyLabel::Text(">")], "actions only")),
                     ),
                 "jump-palette-rise",
+                &self.presence,
             ))
             .into_any_element()
     }

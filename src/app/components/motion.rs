@@ -14,6 +14,8 @@ use gpui::{
     SpringConfig, Styled, StyledText, Svg, Transformation, div, percentage, px, relative, size,
 };
 
+use crate::viewer::Stretch;
+
 use super::palette::Colors;
 
 /// Press, hover-adjacent swaps, a chevron turning.
@@ -138,6 +140,31 @@ pub fn rise_in<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
 ) -> AnimationElement<E> {
     slide_in(element, id, OVERLAY, Edge::Bottom, OVERLAY_RISE)
+}
+
+/// Plays a stretch of an overlay's timeline (`Presence::travel`): 0 is gone and 1 is fully in, and
+/// `apply` gets the position on it. An entrance and a leave are the same move, travelled in the two
+/// directions, so a switch of direction midway continues where it was.
+pub fn along<E: IntoElement + Styled + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    travel: Stretch,
+    apply: impl Fn(E, f32) -> E + 'static,
+) -> AnimationElement<E> {
+    let animation = Animation::new(travel.lasts.max(Duration::from_millis(1)));
+    element.with_animation(id, animation, move |element, delta| {
+        apply(element, travel.from + (travel.to - travel.from) * delta)
+    })
+}
+
+/// How far in an overlay's panel is at a position on its timeline, on the entrance's easing.
+pub fn panel_level(position: f32) -> f32 {
+    ease_out(position)
+}
+
+/// How far in an overlay's scrim is: it takes `STATE` of the timeline's `OVERLAY`.
+pub fn scrim_level(position: f32) -> f32 {
+    ease_out((position * OVERLAY.as_secs_f32() / STATE.as_secs_f32()).min(1.))
 }
 
 /// A bar whose width follows a share from 0 to 1. A new share glides from the length on show; the
