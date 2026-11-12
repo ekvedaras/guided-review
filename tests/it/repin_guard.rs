@@ -1,5 +1,5 @@
 use crate::support::fake_ports::{FakeGitHub, SentLog};
-use crate::support::{FixtureRepo, file_path, line};
+use crate::support::{FixtureRepo, drafts, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
@@ -186,7 +186,7 @@ fn while_a_re_pin_runs_the_reviewer_s_changes_are_refused_and_nothing_changes() 
 
     assert!(refused.iter().all(Result::is_err));
     assert!(!review.is_ticked(&notes()));
-    assert_eq!(review.comment_drafts().first().unwrap().body, "");
+    assert_eq!(drafts(&review).first().unwrap().body, "");
     assert_eq!(
         review.text_of(&TextBox::Reply(ThreadId::new("T1"))),
         Some("")

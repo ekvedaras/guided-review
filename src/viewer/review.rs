@@ -17,8 +17,8 @@ use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
-    CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
-    QueuedComment, SendMode,
+    CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult, QueuedComment,
+    SendMode,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
 use super::display_options::DisplayOptions;
@@ -1116,10 +1116,6 @@ impl Review {
                 .unwrap_or_default(),
             Screen::Summary => Vec::new(),
         }
-    }
-
-    pub fn comment_drafts(&self) -> &[CommentDraft] {
-        self.state.comment_drafts()
     }
 
     pub fn queued_comments(&self) -> &[QueuedComment] {

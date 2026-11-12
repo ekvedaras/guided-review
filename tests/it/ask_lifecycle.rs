@@ -1,3 +1,4 @@
+use crate::support::drafts;
 use crate::support::line;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -436,10 +437,10 @@ fn use_as_comment_fills_a_comment_box_on_the_asked_lines_with_the_answer() {
     };
     assert_eq!((start.line, end.line), (line(7), line(7)));
     assert!(!comment.is_single_line());
-    let drafts = shop.open().comment_drafts().to_vec();
-    assert_eq!(drafts.len(), 1);
-    assert_eq!(drafts[0].place, comment);
-    assert_eq!(drafts[0].body, "pong");
+    let saved = drafts(&shop.open());
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].place, comment);
+    assert_eq!(saved[0].body, "pong");
 }
 
 #[test]
@@ -465,7 +466,7 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
         .unwrap();
 
     assert_eq!(first, second);
-    assert_eq!(review.comment_drafts()[0].body, "My note\n\npong");
+    assert_eq!(drafts(&review)[0].body, "My note\n\npong");
 }
 
 #[test]
@@ -496,7 +497,7 @@ fn use_as_comment_is_refused_without_lines_on_an_old_tour_and_for_an_ask_on_olde
         )),
         Err(CommentRefusal::AskIsOnOlderCode)
     );
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
 }
 
 #[test]
@@ -510,7 +511,7 @@ fn use_as_comment_is_refused_for_an_ask_with_no_answer_yet() {
     let refused = review.open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()));
 
     assert_eq!(refused, Err(CommentRefusal::NoAnswerYet));
-    assert_eq!(shop.open().comment_drafts().first(), None);
+    assert_eq!(drafts(&shop.open()).first(), None);
 }
 
 #[test]

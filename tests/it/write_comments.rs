@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
-use crate::support::{file_path, line, save_typing};
+use crate::support::{drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
@@ -159,7 +159,7 @@ fn a_click_on_one_row_opens_a_comment_box_on_that_line() {
         panic!("a click is on lines");
     };
     assert_eq!((end.line, place.path().as_str()), (line(10), "notes.txt"));
-    assert_eq!(review.comment_drafts().len(), 1);
+    assert_eq!(drafts(&review).len(), 1);
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn a_selection_on_expanded_context_takes_no_comment() {
     let refused = drag(&mut review, "line 5", "line ten");
 
     assert_eq!(refused, Err(CommentRefusal::NotInsideHunk));
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn a_comment_goes_into_the_pending_review_by_default() {
             body: "why?".into()
         }
     );
-    assert!(review.comment_drafts().is_empty(), "a sent draft is gone");
+    assert!(drafts(&review).is_empty(), "a sent draft is gone");
     assert!(github.has_pending_review_now());
 }
 
@@ -324,7 +324,7 @@ fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_
     let result = review.send_comment(&place, SendMode::AddToReview, &github);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
     let threads = review.current_step().unwrap().threads;
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].thread.comments[0].body, "what I sent");
@@ -342,7 +342,7 @@ fn a_sent_comment_whose_thread_cannot_be_read_back_is_still_sent_and_the_read_is
     let result = review.send_comment(&place, SendMode::AddToReview, &github);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
     assert_eq!(
         review.problems(),
         [Problem::ThreadsNotRead("network is down".into())]
@@ -366,7 +366,7 @@ fn comment_now_is_refused_when_a_pending_review_appeared_meanwhile_and_the_text_
         Some(CommentResult::Refused(CommentRefusal::PendingReviewExists))
     );
     assert!(!review.can_comment_now());
-    assert_eq!(review.comment_drafts()[0].body, "now");
+    assert_eq!(drafts(&review)[0].body, "now");
     assert_eq!(review.queued_comments(), []);
 }
 
@@ -382,7 +382,7 @@ fn thread_null_is_a_failure_that_keeps_the_text_and_is_not_retried() {
     let result = review.send_comment(&place, SendMode::AddToReview, &github);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Rejected(_))));
-    assert_eq!(review.comment_drafts()[0].body, "lost?");
+    assert_eq!(drafts(&review)[0].body, "lost?");
     assert_eq!(review.queued_comments(), []);
     assert!(
         !review.can_comment_now(),
@@ -402,7 +402,7 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
     let result = review.send_comment(&place, SendMode::AddToReview, &github);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
     assert_eq!(review.queued_comments().len(), 1);
     assert_eq!(
         pull.open().queued_comments().len(),
@@ -460,7 +460,7 @@ fn nothing_is_written_while_the_tour_is_behind_the_pr_head() {
         "{:?}",
         pull.sent.github_calls()
     );
-    assert_eq!(review.comment_drafts()[0].body, "stale");
+    assert_eq!(drafts(&review)[0].body, "stale");
 }
 
 #[test]
@@ -483,7 +483,7 @@ fn a_draft_written_before_a_repin_keeps_its_text_but_is_not_sent_to_the_old_line
         CommentRefusal::CodeMoved.to_string(),
         "Code moved, place the comment again"
     );
-    assert_eq!(repinned.comment_drafts()[0].body, "why ten?");
+    assert_eq!(drafts(&repinned)[0].body, "why ten?");
     assert!(
         pull.sent
             .github_calls()
@@ -546,12 +546,12 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
 
     let mut review = pull.open();
     let file = CommentPlace::File(file_path("notes.txt"));
-    let drafts = review.comment_drafts().to_vec();
-    assert_eq!(drafts.len(), 2);
-    assert_eq!(drafts[0].place, file);
-    assert_eq!(drafts[0].written_at, None);
-    assert!(drafts[1].written_at.is_some());
-    assert!(matches!(drafts[1].place, CommentPlace::Lines { .. }));
+    let before = drafts(&review);
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[0].place, file);
+    assert_eq!(before[0].written_at, None);
+    assert!(before[1].written_at.is_some());
+    assert!(matches!(before[1].place, CommentPlace::Lines { .. }));
 
     review
         .type_in(&TextBox::Draft(file.clone()), "about the file, edited")
@@ -565,9 +565,9 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
     assert!(saved_drafts[0].get("written_at").is_none());
     assert!(saved_drafts[1]["place"].get("Lines").is_some());
     let reopened = pull.open();
-    assert_eq!(reopened.comment_drafts()[0].place, file);
-    assert_eq!(reopened.comment_drafts()[0].written_at, None);
-    assert_eq!(reopened.comment_drafts()[1], drafts[1]);
+    assert_eq!(drafts(&reopened)[0].place, file);
+    assert_eq!(drafts(&reopened)[0].written_at, None);
+    assert_eq!(drafts(&reopened)[1], before[1]);
 }
 
 #[test]
@@ -633,7 +633,7 @@ fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_o
         .land_in(&ReviewStateFile::for_pr(pull.repo.home(), &pull.pr()))
         .unwrap();
 
-    assert_eq!(pull.open().comment_drafts(), []);
+    assert_eq!(drafts(&pull.open()), []);
 }
 
 #[test]
@@ -655,6 +655,6 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
         .unwrap();
 
     let reopened = pull.open();
-    assert_eq!(reopened.comment_drafts(), []);
+    assert_eq!(drafts(&reopened), []);
     assert_eq!(reopened.queued_comments()[0].draft.body, "later");
 }

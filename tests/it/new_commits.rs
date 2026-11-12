@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, SentLog};
-use crate::support::{FixtureRepo, on_github};
+use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
@@ -358,7 +358,7 @@ fn since_the_read_a_head_line_takes_a_comment_and_an_older_head_line_says_why_no
         drag_over(&mut review, "return 2;"),
         Err(CommentRefusal::OlderHeadLine)
     );
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
     let place = drag_over(&mut review, "return 3;").unwrap().unwrap();
 
     assert_eq!(
@@ -368,7 +368,7 @@ fn since_the_read_a_head_line_takes_a_comment_and_an_older_head_line_says_why_no
             end: full_diff_line
         }
     );
-    assert_eq!(review.comment_drafts().len(), 1);
+    assert_eq!(drafts(&review).len(), 1);
 }
 
 #[test]

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
-use crate::support::{FixtureRepo, file_path, save_typing};
+use crate::support::{FixtureRepo, drafts, file_path, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
@@ -547,7 +547,7 @@ fn suggest_change_fills_the_box_with_the_selected_lines_in_a_suggestion_block() 
     let body = review.suggest_change(&place).unwrap().unwrap();
 
     assert_eq!(body, "```suggestion\nline 9\nline ten\n```\n");
-    assert_eq!(review.comment_drafts()[0].body, body);
+    assert_eq!(drafts(&review)[0].body, body);
 }
 
 #[test]
@@ -572,7 +572,7 @@ fn suggest_change_is_not_offered_when_removed_lines_are_selected() {
 
     assert!(!review.can_suggest_change(&place));
     assert_eq!(review.suggest_change(&place).unwrap(), None);
-    assert_eq!(review.comment_drafts()[0].body, "");
+    assert_eq!(drafts(&review)[0].body, "");
 }
 
 #[test]
@@ -731,7 +731,7 @@ fn typed_text_reaches_the_file_only_when_its_save_runs_off_the_ui_thread() {
         Some("because")
     );
     assert_eq!(after.text_of(&TextBox::FinishBody), Some("overall fine"));
-    assert_eq!(after.comment_drafts()[0].body, "use a name");
+    assert_eq!(drafts(&after)[0].body, "use a name");
     assert!(review.typing_save().is_none());
 }
 
@@ -907,7 +907,7 @@ fn suggest_change_adds_nothing_when_the_commented_lines_are_not_on_the_screen() 
     review.go_to_summary();
 
     assert_eq!(review.suggest_change(&place).unwrap(), None);
-    assert_eq!(review.comment_drafts()[0].body, "");
+    assert_eq!(drafts(&review)[0].body, "");
 }
 
 fn mine(id: &str, body: &str) -> ThreadComment {
