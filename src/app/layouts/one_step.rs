@@ -109,6 +109,7 @@ actions!(
         GoToNextUnread,
         ToggleRead,
         ToggleShortcuts,
+        OpenPrOnGitHub,
         CloseWindow
     ]
 );
@@ -1320,7 +1321,6 @@ impl OneStepLayout {
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
-        let pr_link = pr.to_string();
         let github = button(
             &colors,
             "title-bar-github",
@@ -1334,7 +1334,12 @@ impl OneStepLayout {
             Icon::ExternalLink,
         ))
         .child("GitHub")
-        .on_click(move |_, _, cx| open_link(&pr_link, cx));
+        .child(button_keys(
+            &colors,
+            ButtonKind::Ghost,
+            Command::OpenOnGitHub,
+        ))
+        .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)));
         let switch_pr = div()
             .id("title-bar-switch-pr")
             .min_w_0()
@@ -2887,6 +2892,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
                 this.act(Intent::ToggleShortcuts, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenPrOnGitHub, window, cx| {
+                this.act(Intent::OpenOnGitHub, window, cx);
             }))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .on_action(cx.listener(Self::copy_selection))

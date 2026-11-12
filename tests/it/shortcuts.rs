@@ -98,3 +98,21 @@ fn cmd_w_closes_the_window_from_anywhere_in_it() {
     assert_eq!(keystroke(Command::CloseWindow.first_chord()), "cmd-w");
     assert_eq!(Command::CloseWindow.scope(), KeyScope::Window);
 }
+
+#[test]
+fn g_opens_the_pull_request_on_github_wherever_the_page_takes_keys() {
+    assert_eq!(keystroke(Command::OpenOnGitHub.first_chord()), "g");
+    assert_eq!(Command::OpenOnGitHub.scope(), KeyScope::Page);
+    assert_eq!(Command::OpenOnGitHub.group(), ShortcutGroup::App);
+}
+
+#[test]
+fn the_page_keys_are_all_single_keys_or_arrows_so_g_fits_them() {
+    for command in Command::ALL {
+        if command.scope() == KeyScope::Page {
+            for chord in command.chords() {
+                assert_eq!(chord.len(), 1, "{command:?} is a chord on the page");
+            }
+        }
+    }
+}

@@ -30,6 +30,7 @@ const N: KeyCap = key("n", "N");
 const M: KeyCap = key("m", "M");
 const C: KeyCap = key("c", "C");
 const W: KeyCap = key("w", "W");
+const G: KeyCap = key("g", "G");
 const COMMA: KeyCap = key(",", ",");
 const QUESTION: KeyCap = key("?", "?");
 
@@ -95,11 +96,12 @@ pub enum Command {
     WrapLines,
     Settings,
     Shortcuts,
+    OpenOnGitHub,
     CloseWindow,
 }
 
 impl Command {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -112,6 +114,7 @@ impl Command {
         Self::WrapLines,
         Self::Settings,
         Self::Shortcuts,
+        Self::OpenOnGitHub,
         Self::CloseWindow,
     ];
 
@@ -131,6 +134,7 @@ impl Command {
             Self::WrapLines => &[&[W]],
             Self::Settings => &[&[Cmd, COMMA]],
             Self::Shortcuts => &[&[QUESTION]],
+            Self::OpenOnGitHub => &[&[G]],
             Self::CloseWindow => &[&[Cmd, W]],
         }
     }
@@ -142,7 +146,8 @@ impl Command {
             | Self::NextUnreadStep
             | Self::ToggleRead
             | Self::WrapLines
-            | Self::Shortcuts => KeyScope::Page,
+            | Self::Shortcuts
+            | Self::OpenOnGitHub => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
@@ -157,7 +162,9 @@ impl Command {
             Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines => ShortcutGroup::View,
-            Self::Settings | Self::Shortcuts | Self::CloseWindow => ShortcutGroup::App,
+            Self::Settings | Self::Shortcuts | Self::OpenOnGitHub | Self::CloseWindow => {
+                ShortcutGroup::App
+            }
         }
     }
 
@@ -176,6 +183,7 @@ impl Command {
             Self::WrapLines => "Wrap long lines",
             Self::Settings => "Settings",
             Self::Shortcuts => "This list of shortcuts",
+            Self::OpenOnGitHub => "Open the pull request on GitHub",
             Self::CloseWindow => "Close the window and quit",
         }
     }
