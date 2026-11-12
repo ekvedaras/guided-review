@@ -2,13 +2,15 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{
-    CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeStream,
+    Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeStream,
 };
 
 use super::highlight::{Span, highlight_snippet};
 use crate::image_facts;
 
-pub(super) const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH.union(Options::ENABLE_TASKLISTS);
+pub(super) const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_TABLES);
 
 /// A file of the tour's `folder` that `url` names by a plain relative path.
 fn file_in(folder: &Path, url: &str) -> Option<PathBuf> {
@@ -74,7 +76,7 @@ pub(super) fn local_files(source: &str, folder: &Path) -> Vec<LocalFile> {
 }
 
 /// The part of GitHub-flavoured markdown that review comments use, as a tree the views can draw.
-/// Everything else (tables, raw HTML other than `<details>`, `<img>`, `<br>`, `<a>`) shows as plain text.
+/// Everything else (raw HTML other than `<details>`, `<img>`, `<br>`, `<a>`) shows as plain text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Markdown {
     pub blocks: Vec<Block>,
@@ -104,6 +106,7 @@ pub enum Block {
         body: Vec<Self>,
     },
     Rule,
+    Table(Table),
     /// A picture from the tour's own folder, of its size in pixels, so its room is known before it loads.
     Picture {
         path: PathBuf,
@@ -111,6 +114,33 @@ pub enum Block {
         width: u32,
         height: u32,
     },
+}
+
+/// A GitHub table: a header row and body rows of cells, each cell inline text.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct Table {
+    /// One per column, from the header's separator line (`:--`, `:-:`, `--:`).
+    pub alignments: Vec<ColumnAlignment>,
+    pub header: Vec<Vec<Run>>,
+    pub rows: Vec<Vec<Vec<Run>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ColumnAlignment {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl From<Alignment> for ColumnAlignment {
+    fn from(alignment: Alignment) -> Self {
+        match alignment {
+            Alignment::None | Alignment::Left => Self::Left,
+            Alignment::Center => Self::Center,
+            Alignment::Right => Self::Right,
+        }
+    }
 }
 
 /// A stretch of text with one style.
@@ -335,6 +365,8 @@ struct Builder {
     style: Style,
     code: Option<(Option<String>, String)>,
     heading: Option<u8>,
+    table: Option<Table>,
+    row: Vec<Vec<Run>>,
     image: Option<(String, String)>,
     /// The tour's own folder, whose files pictures and links may name.
     files: Option<PathBuf>,
@@ -353,6 +385,8 @@ impl Default for Builder {
             style: Style::default(),
             code: None,
             heading: None,
+            table: None,
+            row: Vec::new(),
             image: None,
             files: None,
             details_to_close: 0,
@@ -413,6 +447,14 @@ impl Builder {
                 });
             }
             Tag::Item => self.open(Frame::Item),
+            Tag::Table(alignments) => {
+                self.flush_runs();
+                self.table = Some(Table {
+                    alignments: alignments.into_iter().map(ColumnAlignment::from).collect(),
+                    ..Table::default()
+                });
+            }
+            Tag::TableHead | Tag::TableRow => self.row.clear(),
             Tag::Emphasis => self.style.italic += 1,
             Tag::Strong => self.style.bold += 1,
             Tag::Strikethrough => self.style.strikethrough += 1,
@@ -487,6 +529,27 @@ impl Builder {
                     items.push(open.blocks);
                 }
                 self.close_waiting_details();
+            }
+            TagEnd::TableCell => {
+                let cell = std::mem::take(&mut self.runs);
+                self.row.push(cell);
+            }
+            TagEnd::TableHead => {
+                let header = std::mem::take(&mut self.row);
+                if let Some(table) = &mut self.table {
+                    table.header = header;
+                }
+            }
+            TagEnd::TableRow => {
+                let row = std::mem::take(&mut self.row);
+                if let Some(table) = &mut self.table {
+                    table.rows.push(row);
+                }
+            }
+            TagEnd::Table => {
+                if let Some(table) = self.table.take() {
+                    self.push_block(Block::Table(table));
+                }
             }
             TagEnd::Emphasis => self.style.italic = self.style.italic.saturating_sub(1),
             TagEnd::Strong => self.style.bold = self.style.bold.saturating_sub(1),
