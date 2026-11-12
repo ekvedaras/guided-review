@@ -21,10 +21,11 @@ use crate::viewer::{
 
 use super::button::{ButtonKind, ButtonSize, icon_button, icon_label_button};
 use super::card::card;
-use super::icon::Icon;
+use super::icon::{Icon, icon, sized_icon};
+use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in};
-use super::palette::{Colors, TEXT_FONT};
+use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
@@ -572,35 +573,84 @@ impl Render for AskPanel {
             .collect();
         let is_answering = self.selected.is_some_and(|id| self.pool.is_answering(id));
         let input = match target {
-            AskTarget::Unavailable { why, .. } => {
-                div().text_color(colors.danger).child(why.message())
-            }
-            AskTarget::Ready { .. } => div()
+            AskTarget::Unavailable { .. } => None,
+            AskTarget::Ready { .. } => Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(is_answering.then(|| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_color(colors.muted_text)
+                            .child(busy_dot(&colors, "ask-waiting-dot"))
+                            .child("Waiting for the answer...")
+                    }))
+                    .children(
+                        self.notice
+                            .map(|notice| div().text_color(colors.danger).child(notice.message())),
+                    )
+                    .child(
+                        Field::new(&self.question_focus)
+                            .px_3()
+                            .h(px(36.))
+                            .flex()
+                            .items_center()
+                            .child(self.question_box(cx)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(key_hint(&colors, &[KeyLabel::Icon(Icon::Enter)], "to ask"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("esc")], "to close")),
+                    ),
+            ),
+        };
+        let empty_state = blocks.is_empty().then(|| {
+            let (title, line, tone) = match target {
+                AskTarget::Unavailable { why, .. } => {
+                    ("Ask is not available", why.message(), colors.danger)
+                }
+                AskTarget::Ready { .. } => (
+                    "Ask about this place",
+                    "The AI reads the code and answers here. Follow up on an answer to keep going.",
+                    colors.accent,
+                ),
+            };
+            div()
+                .flex_1()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .children(is_answering.then(|| {
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .px_6()
+                .text_center()
+                .child(
                     div()
+                        .size(px(40.))
                         .flex()
                         .items_center()
-                        .gap_2()
-                        .text_color(colors.muted_text)
-                        .child(busy_dot(&colors, "ask-waiting-dot"))
-                        .child("Waiting for the answer...")
-                }))
-                .children(
-                    self.notice
-                        .map(|notice| div().text_color(colors.danger).child(notice.message())),
+                        .justify_center()
+                        .rounded(px(CARD_RADIUS))
+                        .bg(colors.surface)
+                        .child(sized_icon(Icon::Sparkles, tone, px(18.))),
                 )
                 .child(
-                    Field::new(&self.question_focus)
-                        .px_2()
-                        .h(px(30.))
+                    div()
                         .flex()
-                        .items_center()
-                        .child(self.question_box(cx)),
-                ),
-        };
+                        .flex_col()
+                        .gap_1()
+                        .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(title))
+                        .child(div().text_color(colors.muted_text).child(line)),
+                )
+        });
         let panel = div()
             .id("ask-panel")
             .key_context(Self::KEY_CONTEXT)
@@ -612,8 +662,10 @@ impl Render for AskPanel {
             .flex()
             .flex_col()
             .bg(colors.overlay)
+            .rounded_l(px(CARD_RADIUS))
             .border_l_1()
-            .border_color(colors.border)
+            .border_color(colors.subtle_border)
+            .shadow(colors.page_shadow())
             .font_family(TEXT_FONT)
             .text_sm()
             .text_color(colors.text)
@@ -626,16 +678,27 @@ impl Render for AskPanel {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .bg(colors.header_band())
-                    .border_b_1()
-                    .border_color(colors.subtle_border)
+                    .child(icon(Icon::Sparkles, colors.accent))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(format!("Ask: {place}")),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child("Ask"),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(colors.muted_text)
+                                    .child(place),
+                            ),
                     )
                     .child(
                         icon_button(
@@ -658,17 +721,23 @@ impl Render for AskPanel {
                     .flex_col()
                     .gap_3()
                     .p_3()
-                    .children(blocks),
+                    .children(blocks)
+                    .children(empty_state),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .p_3()
-                    .border_t_1()
-                    .border_color(colors.subtle_border)
-                    .child(input),
-            );
-        slide_in(panel, "ask-panel-slide", OVERLAY, Edge::Right, PANEL_SLIDE).into_any_element()
+            .children(input.map(|input| div().flex_none().p_3().child(input)));
+        // The page runs under the rounded corners, so they cut into the page and not into the sidebar.
+        div()
+            .flex_none()
+            .h_full()
+            .bg(colors.background)
+            .child(slide_in(
+                panel,
+                "ask-panel-slide",
+                OVERLAY,
+                Edge::Right,
+                PANEL_SLIDE,
+            ))
+            .into_any_element()
     }
 }
 
