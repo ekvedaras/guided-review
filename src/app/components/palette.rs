@@ -428,25 +428,25 @@ impl Colors {
     }
 
     fn dark() -> Self {
-        let text = rgb(0xe8eaf4);
-        let muted_text = rgb(ink::S6);
+        let text = rgb(0xeaeaed);
+        let muted_text = rgb(0xa4a4a9);
         Self {
-            background: rgb(0x141622),
-            sidebar: Gradient::of(0x121428, 0x0b0d18),
-            surface: rgb(0x1b1e2b),
-            surface_sheen: rgb(0x181b27),
-            overlay: rgb(ink::S12),
-            raised: Gradient::of(0x2a2d3f, 0x222535),
-            inset: rgb(0x10121c),
+            background: rgb(0x16171a),
+            sidebar: Gradient::of(0x15161c, 0x0d0e11),
+            surface: rgb(0x1e1f23),
+            surface_sheen: rgb(0x1b1c1f),
+            overlay: rgb(0x202125),
+            raised: Gradient::of(0x2d2e33, 0x25262b),
+            inset: rgb(0x121316),
             accent_border: rgb(iris::S600),
             icon_tile: Gradient::of(iris::S900, azure::S900),
             success_fill: Gradient::of(0x163220, green::S950),
-            hover: rgb(0x262939),
-            pressed: rgb(ink::S10),
-            border: rgb(0x383c4f),
-            subtle_border: rgb(0x262a39),
+            hover: rgb(0x292a2f),
+            pressed: rgb(0x38393e),
+            border: rgb(0x3c3d43),
+            subtle_border: rgb(0x292b2f),
             text,
-            sidebar_text: rgb(ink::S4),
+            sidebar_text: rgb(0xdddde0),
             muted_text,
             current: rgb(0x272a55),
             current_border: rgb(iris::S800),
@@ -477,13 +477,13 @@ impl Colors {
             shadow: translucent(BLACK, 0.5),
             card_shadow: translucent(BLACK, 0.),
             control_shadow: translucent(BLACK, 0.45),
-            page_wash: Gradient::of(0x1b1d36, 0x141622),
+            page_wash: Gradient::of(0x1d1e2a, 0x16171a),
             checker_light: rgb(0x2b2b2b),
             checker_dark: rgb(0x3b3b3b),
             code: CodeColors {
                 keyword: rgb(iris::S300),
                 string: rgb(green::S300),
-                comment: rgb(0x8e91a3),
+                comment: rgb(0x919297),
                 function: rgb(azure::S300),
                 type_name: rgb(amber::S300),
                 number: rgb(0xeaa5e0),
@@ -624,7 +624,7 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(-6.), self.shadow.opacity(0.5).into()).blur_radius(px(20.))]
     }
 
-    /// The page lies on top of the sidebar and casts leftwards over it.
+    /// The page lies on top of the sidebar, and the Ask panel on top of the page: each casts leftwards.
     pub fn page_shadow(&self) -> Vec<BoxShadow> {
         vec![BoxShadow::new(px(-2.), px(0.), self.shadow.opacity(0.6).into()).blur_radius(px(14.))]
     }
