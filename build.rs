@@ -8,6 +8,18 @@ fn main() {
     println!("cargo:rerun-if-changed=tests");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rustc-env=GUIDED_REVIEW_GIT={}", git_revision());
+    println!(
+        "cargo:rustc-env=GUIDED_REVIEW_RELEASE_TAG={}",
+        release_tag().unwrap_or_default()
+    );
+}
+
+/// The release this build is: a clean build of the commit its version's tag names.
+fn release_tag() -> Option<String> {
+    let tag = format!("v{}", std::env::var("CARGO_PKG_VERSION").ok()?);
+    let is_clean = git(&["status", "--porcelain"]).is_some_and(|status| status.is_empty());
+    let tags_here = git(&["tag", "--points-at", "HEAD"])?;
+    (is_clean && tags_here.lines().any(|here| here == tag)).then_some(tag)
 }
 
 fn git(args: &[&str]) -> Option<String> {

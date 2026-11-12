@@ -57,6 +57,26 @@ fn the_running_version_names_the_release_and_the_commit_it_was_built_from() {
 }
 
 #[test]
+fn a_release_build_links_to_its_release_page() {
+    let release = AppVersion::new("0.6.0 (f7bb7c4)", Some("v0.6.0"));
+
+    assert_eq!(
+        release.page(),
+        "https://github.com/ekvedaras/guided-review/releases/tag/v0.6.0"
+    );
+}
+
+#[test]
+fn a_source_build_that_is_no_release_links_to_the_list_of_releases() {
+    let source_build = AppVersion::new("0.6.0 (f7bb7c4-dirty)", None);
+
+    assert_eq!(
+        source_build.page(),
+        "https://github.com/ekvedaras/guided-review/releases"
+    );
+}
+
+#[test]
 fn versions_compare_by_number_not_by_text() {
     assert!(version("0.10.0") > version("0.9.3"));
     assert!(version("1.0.0") > version("0.99.99"));

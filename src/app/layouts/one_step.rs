@@ -71,6 +71,7 @@ use crate::app::components::thread_view::{
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
+use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -79,7 +80,6 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
-use crate::update::AppVersion;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
     CommentPlace, Effect, GitHubPort, HandOffId, InFlight, Intent, LineLocation, NextScreen,
@@ -1194,7 +1194,8 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// Settings and the shortcuts sheet at the foot of the sidebar, over the version this app runs.
+    /// Settings and the shortcuts sheet at the foot of the sidebar, under a quiet line with the version
+    /// this app runs, so the Settings row stays at the very bottom.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
         let shortcuts = button(
             colors,
@@ -1217,7 +1218,7 @@ impl OneStepLayout {
         }));
         let row = div()
             .px_2()
-            .pt_2()
+            .pb_2()
             .flex()
             .items_center()
             .gap_1()
@@ -1244,14 +1245,12 @@ impl OneStepLayout {
                 })),
             )
             .child(shortcuts);
-        div().flex_none().pb_2().child(row).child(
-            div()
-                .px_4()
-                .pt_1()
+        let version = div().px_4().pt_2().pb_1().flex().child(
+            version_link(colors, "sidebar-version", colors.faint_text())
                 .text_xs()
-                .text_color(colors.muted_text)
-                .child(AppVersion::RUNNING.as_str()),
-        )
+                .line_height(px(12.)),
+        );
+        div().flex_none().child(version).child(row)
     }
 
     /// The PR this review is of, and the window-wide actions.

@@ -11,7 +11,6 @@ use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
-use crate::update::AppVersion;
 use crate::viewer::{CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 
 use super::button::{
@@ -27,6 +26,7 @@ use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
+use super::version_link::version_link;
 
 /// The widest a sheet over a review grows on a wide window.
 const SHEET_WIDTH: f32 = 860.;
@@ -554,7 +554,11 @@ impl SettingsPanel {
             .flex()
             .flex_col()
             .gap_1()
-            .child(AppVersion::RUNNING.as_str())
+            .child(
+                div()
+                    .flex()
+                    .child(version_link(colors, "settings-version", colors.text)),
+            )
             .child(Self::shown_text(colors, self.running_binary.clone()))
     }
 

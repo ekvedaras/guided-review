@@ -33,3 +33,4 @@ pub mod thread_view;
 pub mod title_bar;
 pub mod toast_stack;
 pub mod tooltip;
+pub mod version_link;
