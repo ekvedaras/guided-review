@@ -4,7 +4,7 @@ use gpui::{
     Styled, div, px,
 };
 
-use super::motion::{STATE, fade_in};
+use super::motion::{OVERLAY, STATE, fade_in, fade_out};
 use super::palette::{CARD_RADIUS, CONTROL_RADIUS, Colors, TEXT_FONT};
 
 /// The layer a modal overlay sits in: it covers the window, takes every click, and fades its
@@ -28,6 +28,27 @@ pub fn modal_layer(colors: &Colors, scrim_id: impl Into<ElementId>) -> Div {
                 .bg(colors.scrim),
             scrim_id,
             STATE,
+        ))
+}
+
+/// A modal layer on its way out: its scrim fades away and the layer still takes every click, so
+/// nothing under it reacts until it is gone.
+pub fn leaving_modal_layer(colors: &Colors, scrim_id: impl Into<ElementId>) -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .occlude()
+        .child(fade_out(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .bg(colors.scrim),
+            scrim_id,
+            OVERLAY,
         ))
 }
 
