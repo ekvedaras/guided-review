@@ -1,5 +1,8 @@
+mod kept;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
+use std::sync::Arc;
 
 use crate::code_source::CodeSource;
 use crate::coverage;
@@ -33,6 +36,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
+use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::problems::{Problem, ProblemKind, Problems, Read};
@@ -52,6 +56,7 @@ use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 
 pub use crate::tour::StepId;
+pub use kept::Review;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
@@ -177,7 +182,8 @@ pub struct OldHead {
     pub pr_head: Sha,
 }
 
-pub struct Review {
+/// What the reviewer reads and does on one PR. Reached through `Review`, which keeps the page built from it.
+pub struct ReviewCore {
     tour: Tour,
     pr: PullRequestUrl,
     base: Sha,
@@ -222,6 +228,77 @@ pub struct Review {
 impl Review {
     /// Code is read at the tour's own base and head, not the PR's current ones.
     pub fn open(
+        tour: Tour,
+        source: &dyn CodeSource,
+        state_file: ReviewStateFile,
+    ) -> anyhow::Result<Self> {
+        ReviewCore::open(tour, source, state_file).map(Self::keeping_page_of)
+    }
+
+    /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
+    /// only while their step is shown.
+    pub fn image_preview_requests(&self) -> Vec<ImagePreviewRequest> {
+        self.page()
+            .images_to_load()
+            .iter()
+            .filter_map(|path| self.image_preview_request(path))
+            .collect()
+    }
+
+    /// Opens the comment box the gesture asks for, which then takes the keys, or says why it
+    /// cannot open. `Ok(None)` when a drag ended on no rows.
+    pub fn open_comment_box(
+        &mut self,
+        gesture: CommentGesture,
+    ) -> Result<Option<CommentPlace>, CommentRefusal> {
+        match gesture {
+            CommentGesture::DragEnded => {
+                let page = Arc::clone(self.page());
+                self.finish_selection(&page)
+            }
+            CommentGesture::OnFile(path) => self.begin_file_comment(path).map(Some),
+            CommentGesture::AskAnswer(ask) => self.use_as_comment(ask).map(Some),
+        }
+    }
+
+    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
+    /// file, or lines not on this screen.
+    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
+        let page = self.page();
+        let selected = page.selected(&RowSelection::of(comment)?)?;
+        Some(page.place_of(&selected))
+    }
+
+    /// The place an Ask about selected rows is about: the rows and the pieces holding them.
+    pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
+        self.page().place_of(selected)
+    }
+
+    /// The rows being dragged over, for drawing them.
+    pub fn selected_lines(&self) -> Option<SelectedLines> {
+        self.page().selected(self.row_selection()?)
+    }
+
+    /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
+    /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
+    pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
+        let Some(rows) = RowSelection::of(place).and_then(|lines| self.page().selected(&lines))
+        else {
+            return Ok(None);
+        };
+        CommentDesk::suggest_change(&mut self.state, place, rows.lines())
+    }
+
+    /// A review reopened after a re-pin goes on showing what the boxes of the one it replaces were
+    /// doing: which takes the keys, which are sending and why a send did not go.
+    pub fn keep_comment_boxes_of(&mut self, replaced: Self) {
+        self.comment_desk
+            .keep_boxes_of(replaced.into_core().comment_desk);
+    }
+}
+
+impl ReviewCore {
+    fn open(
         tour: Tour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
@@ -309,20 +386,9 @@ impl Review {
         kept
     }
 
-    /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
-    /// only while their step is shown.
-    pub fn image_preview_requests(&self) -> Vec<ImagePreviewRequest> {
-        let mut requests: Vec<ImagePreviewRequest> = Vec::new();
-        for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
-            let path = piece.id.path();
-            let is_wanted = self.display_options.image_preview(path).is_none()
-                && !requests.iter().any(|request| request.path() == path);
-            let file = self.files.iter().find(|file| file.path == *path);
-            if let (true, Some(file)) = (is_wanted, file) {
-                requests.push(ImagePreviewRequest::for_file(file, &self.base, &self.head));
-            }
-        }
-        requests
+    fn image_preview_request(&self, path: &FilePath) -> Option<ImagePreviewRequest> {
+        let file = self.files.iter().find(|file| file.path == *path)?;
+        Some(ImagePreviewRequest::for_file(file, &self.base, &self.head))
     }
 
     pub fn display_options(&self) -> &DisplayOptions {
@@ -616,19 +682,6 @@ impl Review {
         }
     }
 
-    /// Opens the comment box the gesture asks for, which then takes the keys, or says why it
-    /// cannot open. `Ok(None)` when a drag ended on no rows.
-    pub fn open_comment_box(
-        &mut self,
-        gesture: CommentGesture,
-    ) -> Result<Option<CommentPlace>, CommentRefusal> {
-        match gesture {
-            CommentGesture::DragEnded => self.finish_selection(),
-            CommentGesture::OnFile(path) => self.begin_file_comment(path).map(Some),
-            CommentGesture::AskAnswer(ask) => self.use_as_comment(ask).map(Some),
-        }
-    }
-
     /// Puts the Ask's latest answer into the comment box on its lines, after any text already
     /// there. The reviewer edits and sends it; nothing goes to GitHub here.
     fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
@@ -665,65 +718,26 @@ impl Review {
             }
             None => self.safety_net()?.pieces,
         };
-        let rows: Vec<DiffLine> = match only_piece {
-            Some(id) => pieces
+        let blocks = FileBlock::group(pieces);
+        let shown: Vec<&DiffLine> = match only_piece {
+            Some(id) => blocks
                 .iter()
+                .flat_map(|block| &block.pieces)
                 .filter(|shown| shown.id == *id)
-                .flat_map(|shown| shown.lines().cloned())
+                .flat_map(PieceDiff::lines)
                 .collect(),
-            None => in_shown_order(pieces),
+            None => blocks.iter().flat_map(FileBlock::lines).collect(),
         };
         let (start, end) = match place {
             Place::Lines { start, end, .. } => (start.clone(), end.clone()),
             _ => (
-                rows.first()?.location.clone(),
-                rows.last()?.location.clone(),
+                shown.first()?.location.clone(),
+                shown.last()?.location.clone(),
             ),
         };
         let mut selection = RowSelection::start_at(start);
         selection.extend_to(end);
-        selection.resolve(&rows)
-    }
-
-    /// The place an Ask about selected rows is about: the rows and the pieces holding them.
-    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
-    /// file, or lines not on this screen.
-    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
-        let CommentPlace::Lines { start, end } = comment else {
-            return None;
-        };
-        let lines = self.screen_lines();
-        let first = lines.iter().position(|line| &line.location == start)?;
-        let last = lines.iter().position(|line| &line.location == end)?;
-        let selected = SelectedLines::new(lines.get(first..=last)?.to_vec())?;
-        Some(self.place_of_lines(&selected))
-    }
-
-    pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
-        let (step, pieces) = match &self.screen {
-            Screen::Step(id) => (
-                Some(id.clone()),
-                self.current_step()
-                    .map(|page| page.pieces)
-                    .unwrap_or_default(),
-            ),
-            _ => (
-                None,
-                self.safety_net()
-                    .map(|page| page.pieces)
-                    .unwrap_or_default(),
-            ),
-        };
-        Place::Lines {
-            step,
-            start: selected.first().clone(),
-            end: selected.last().clone(),
-            pieces: pieces
-                .iter()
-                .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
-                .map(|piece| piece.id.clone())
-                .collect(),
-        }
+        selection.resolve(shown.into_iter())
     }
 
     /// The place the Ask panel opens on, ready only when an AI has code to read and the place is still in the tour.
@@ -776,7 +790,7 @@ impl Review {
             steps: &'a [Step],
             depth: usize,
             current: Option<&StepId>,
-            review: &Review,
+            review: &ReviewCore,
             into: &mut Vec<SidebarEntry<'a>>,
         ) {
             for step in steps {
@@ -1073,23 +1087,15 @@ impl Review {
         self.comment_desk.row_selection()
     }
 
-    /// The rows being dragged over, for drawing them.
-    pub fn selected_lines(&self) -> Option<SelectedLines> {
-        self.comment_desk
-            .row_selection()?
-            .resolve(&self.screen_lines())
-    }
-
     pub fn cancel_selection(&mut self) {
         self.comment_desk.cancel_selection();
     }
 
-    /// The drag ends: when the rows can take a comment, a comment box opens on them.
-    fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
-        let screen_lines = self.screen_lines();
+    /// The drag ends: when the rows of the page can take a comment, a comment box opens on them.
+    fn finish_selection(&mut self, page: &Page) -> Result<Option<CommentPlace>, CommentRefusal> {
         let freshness = self.tour_freshness();
         self.comment_desk
-            .finish_selection(&mut self.state, &screen_lines, freshness, &self.head)
+            .finish_selection(&mut self.state, page.lines(), freshness, &self.head)
     }
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
@@ -1097,25 +1103,6 @@ impl Review {
         let freshness = self.tour_freshness();
         self.comment_desk
             .begin_file_comment(&mut self.state, path, freshness, &self.head)
-    }
-
-    /// Every row the current screen shows, top to bottom.
-    fn screen_lines(&self) -> Vec<DiffLine> {
-        in_shown_order(self.screen_pieces())
-    }
-
-    fn screen_pieces(&self) -> Vec<PieceDiff> {
-        match &self.screen {
-            Screen::Step(_) => self
-                .current_step()
-                .map(|page| page.pieces)
-                .unwrap_or_default(),
-            Screen::SafetyNet => self
-                .safety_net()
-                .map(|page| page.pieces)
-                .unwrap_or_default(),
-            Screen::Summary => Vec::new(),
-        }
     }
 
     pub fn queued_comments(&self) -> &[QueuedComment] {
@@ -1132,25 +1119,6 @@ impl Review {
         CommentDesk::can_suggest_change(place)
     }
 
-    /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
-    /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
-    pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
-        let Some(rows) = self.rows_of(place) else {
-            return Ok(None);
-        };
-        CommentDesk::suggest_change(&mut self.state, place, &rows)
-    }
-
-    fn rows_of(&self, place: &CommentPlace) -> Option<Vec<DiffLine>> {
-        let CommentPlace::Lines { start, end } = place else {
-            return None;
-        };
-        let mut selection = RowSelection::start_at(start.clone());
-        selection.extend_to(end.clone());
-        let rows = selection.resolve(&self.screen_lines())?;
-        Some(rows.lines().to_vec())
-    }
-
     /// The comment boxes open on this review, each with what it is doing; each hangs under the
     /// last line of its place, or under the picture of its file.
     pub fn comment_boxes(&self) -> impl Iterator<Item = CommentBox<'_>> {
@@ -1161,12 +1129,6 @@ impl Review {
     pub fn comment_box(&self, place: &CommentPlace) -> Option<CommentBox<'_>> {
         self.comment_boxes()
             .find(|comment_box| &comment_box.draft.place == place)
-    }
-
-    /// A review reopened after a re-pin goes on showing what the boxes of the one it replaces were
-    /// doing: which takes the keys, which are sending and why a send did not go.
-    pub fn keep_comment_boxes_of(&mut self, replaced: Self) {
-        self.comment_desk.keep_boxes_of(replaced.comment_desk);
     }
 
     /// The comment box that takes the keys.
@@ -1704,12 +1666,4 @@ fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a Sha> {
         .read_tick(step)
         .or_else(|| state.read_before(step))
         .map(|tick| &tick.head)
-}
-
-/// Rows as a screen shows them: the pieces of one file in one block, in line order.
-fn in_shown_order(pieces: Vec<PieceDiff>) -> Vec<DiffLine> {
-    FileBlock::group(pieces)
-        .iter()
-        .flat_map(|block| block.lines().cloned())
-        .collect()
 }

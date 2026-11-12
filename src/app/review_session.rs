@@ -426,7 +426,7 @@ impl ReviewSession {
         }
         self.repin_progress = RepinProgress::Running;
         self.save_typing_now();
-        self.change(cx, Review::start_repin);
+        self.change(cx, |review| review.start_repin());
         let (repinner, github) = (
             Arc::clone(&self.tour_work.repinner),
             Arc::clone(&self.github),
@@ -441,7 +441,7 @@ impl ReviewSession {
                 }
                 Err(error) => {
                     this.repin_progress = RepinProgress::Failed(format!("{error:#}"));
-                    this.change(cx, Review::repin_failed);
+                    this.change(cx, |review| review.repin_failed());
                 }
             },
         )

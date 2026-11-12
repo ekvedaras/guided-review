@@ -1035,7 +1035,7 @@ impl OneStepLayout {
         {
             self.toggle_tick(&id, cx);
         }
-        self.change_review(cx, Review::go_on);
+        self.change_review(cx, |review| review.go_on());
     }
 
     fn scroll_code_sideways(
@@ -1077,14 +1077,14 @@ impl OneStepLayout {
         if self.is_reopening(cx) {
             return;
         }
-        self.change_review(cx, Review::go_back);
+        self.change_review(cx, |review| review.go_back());
     }
 
     fn go_to_next_unread(&mut self, _: &GoToNextUnread, _: &mut Window, cx: &mut Context<Self>) {
         if self.is_reopening(cx) {
             return;
         }
-        self.change_review(cx, Review::go_to_next_unread);
+        self.change_review(cx, |review| review.go_to_next_unread());
     }
 
     /// Ticks or unticks the step on screen; the summary and the safety net have no tick.
@@ -1168,7 +1168,7 @@ impl OneStepLayout {
             RowMark::Page,
         )
         .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, Review::go_to_summary);
+            this.change_review(cx, |review| review.go_to_summary());
         }))
         .child("Summary");
         let sync_notices = sidebar
@@ -1248,7 +1248,7 @@ impl OneStepLayout {
                 RowMark::Page,
             )
             .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, Review::go_to_safety_net);
+                this.change_review(cx, |review| review.go_to_safety_net());
             }))
             .child(div().flex_1().child(SafetyNetIntro::TITLE))
             .child(row_note(
@@ -2232,7 +2232,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             ButtonSize::Regular,
         )
         .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, Review::go_back);
+            this.change_review(cx, |review| review.go_back());
         }))
         .child("Previous")
         .child(button_keys(
@@ -2284,7 +2284,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             if let Some(id) = &ticks {
                 this.toggle_tick(id, cx);
             }
-            this.change_review(cx, Review::go_on);
+            this.change_review(cx, |review| review.go_on());
         }))
         .child(label)
         .child(button_keys(

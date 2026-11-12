@@ -1216,8 +1216,8 @@ impl RowsBuilder<'_> {
             block.path.to_string()
         };
         let shows_markers = !block.has_one_piece();
-        for (index, hunk) in block.hunks.iter().enumerate() {
-            if let Some(gap) = hidden_lines_before(&block.hunks, index) {
+        for (index, hunk) in block.hunks().iter().enumerate() {
+            if let Some(gap) = hidden_lines_before(block.hunks(), index) {
                 self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow::new(
                     format!("{row_id}-above-{index}"),
                     gap,
@@ -1244,7 +1244,7 @@ impl RowsBuilder<'_> {
                 self.hang(here);
             }
         }
-        if let Some(gap) = hidden_lines_after(&block.hunks) {
+        if let Some(gap) = hidden_lines_after(block.hunks()) {
             self.rows.push(PageRow::HunkGap(Rc::new(HunkGapRow::new(
                 format!("{row_id}-below-end"),
                 gap,

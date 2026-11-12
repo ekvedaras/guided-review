@@ -52,6 +52,7 @@ mod outline;
 mod outline_extras;
 mod outline_images;
 mod outline_symbols;
+mod page;
 mod pick_code_source;
 mod piece_id;
 mod pr_description;

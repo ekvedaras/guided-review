@@ -6,7 +6,7 @@ use gpui::{App, Global, SharedString};
 use crate::app::active_session::session_of;
 use crate::app::components::icon::Icon;
 use crate::ide::IdeLaunch;
-use crate::viewer::{CodeLink, CodeOpener, Destination, Opened, Review};
+use crate::viewer::{CodeLink, CodeOpener, Destination, Opened};
 
 struct ActiveCodeOpener(CodeOpener);
 
@@ -63,7 +63,7 @@ fn open(destination: &Destination, cx: &mut App) {
     };
     match destination.open(|url| cx.open_url(url)) {
         Opened::InIde => session.update(cx, |session, cx| {
-            session.change(cx, Review::ide_started);
+            session.change(cx, |review| review.ide_started());
         }),
         Opened::IdeNotStarted(reason) => session.update(cx, |session, cx| {
             session.change(cx, |review| review.ide_not_started(&reason));

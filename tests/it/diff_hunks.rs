@@ -212,7 +212,7 @@ fn parts_of_one_file_show_in_one_block_in_line_order_whatever_order_the_step_nam
 
     assert_eq!(blocks.len(), 1);
     assert_eq!(
-        rows(&blocks[0].hunks),
+        rows(blocks[0].hunks()),
         [
             "@@",
             "-10 line 10",
@@ -234,7 +234,7 @@ fn a_row_two_parts_of_a_block_both_show_appears_once() {
     let blocks = shown_blocks(&review);
 
     assert_eq!(
-        rows(&blocks[0].hunks),
+        rows(blocks[0].hunks()),
         [
             "@@",
             " 7|7 line 7",

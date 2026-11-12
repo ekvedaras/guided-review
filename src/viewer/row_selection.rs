@@ -1,4 +1,4 @@
-use super::comments::CommentRefusal;
+use super::comments::{CommentPlace, CommentRefusal};
 use super::step_page::{DiffLine, LineLocation};
 
 /// A drag over rows of one file: where the mouse went down and where it is now.
@@ -27,6 +27,16 @@ impl RowSelection {
         &self.head
     }
 
+    /// The rows of a comment on lines, from its first to its last; `None` for a comment on a file.
+    pub fn of(place: &CommentPlace) -> Option<Self> {
+        let CommentPlace::Lines { start, end } = place else {
+            return None;
+        };
+        let mut selection = Self::start_at(start.clone());
+        selection.extend_to(end.clone());
+        Some(selection)
+    }
+
     /// A row of another file cannot join: a comment has one file.
     pub fn extend_to(&mut self, row: LineLocation) {
         if row.path == self.anchor.path {
@@ -36,13 +46,15 @@ impl RowSelection {
 
     /// The selected rows out of the rows a screen shows, in the order it shows them.
     /// `None` when the anchor or the head is not among them.
-    pub fn resolve(&self, shown: &[DiffLine]) -> Option<SelectedLines> {
-        let position = |at: &LineLocation| shown.iter().position(|row| &row.location == at);
+    pub fn resolve<'a>(
+        &self,
+        shown: impl Iterator<Item = &'a DiffLine> + Clone,
+    ) -> Option<SelectedLines> {
+        let position = |at: &LineLocation| shown.clone().position(|row| &row.location == at);
         let (anchor, head) = (position(&self.anchor)?, position(&self.head)?);
         let (first, last) = (anchor.min(head), anchor.max(head));
         SelectedLines::new(
             shown
-                .iter()
                 .skip(first)
                 .take(last - first + 1)
                 .filter(|row| row.location.path == self.anchor.path)

@@ -17,7 +17,7 @@ use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
 use crate::update::{ReleaseAsset, Target, Update, UpdateOffer, Version};
-use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId, TextBox};
+use crate::viewer::{AgentStatus, LineKind, LineLocation, TerminalId, TextBox};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -118,7 +118,7 @@ async fn shoot(
         })?;
         camera.take(&format!("{screen:02}-end"), cx).await?;
         if !layout.update(cx, |layout, cx| {
-            layout.change_review(cx, Review::go_forward)
+            layout.change_review(cx, |review| review.go_forward())
         })? {
             break;
         }
@@ -202,9 +202,11 @@ impl OneStepLayout {
 
     /// The overlays sit over a step whose code is open, so the comment box has lines to go on.
     fn go_to_first_open_code(&mut self, cx: &mut Context<Self>) {
-        self.change_review(cx, Review::go_to_summary);
+        self.change_review(cx, |review| review.go_to_summary());
         for _ in 0..MAX_SCREENS {
-            if !self.change_review(cx, Review::go_forward) || !self.added_lines(1, cx).is_empty() {
+            if !self.change_review(cx, |review| review.go_forward())
+                || !self.added_lines(1, cx).is_empty()
+            {
                 break;
             }
         }
@@ -298,14 +300,14 @@ impl OneStepLayout {
                 self.scroll_to_row(self.screen_list.item_count());
             }
             Scene::DescriptionFolds => {
-                self.change_review(cx, Review::go_to_summary);
+                self.change_review(cx, |review| review.go_to_summary());
                 self.toggle_description_folds(cx);
                 if let Some(row) = self.session.read(cx).rows().description_row() {
                     self.scroll_to_row(row);
                 }
             }
             Scene::PictureZoom => {
-                self.change_review(cx, Review::go_to_summary);
+                self.change_review(cx, |review| review.go_to_summary());
                 if let Some(picture) = self.session.read(cx).rows().first_summary_picture() {
                     self.picture_zoom
                         .update(cx, |zoom, cx| zoom.open(picture, None, window, cx));

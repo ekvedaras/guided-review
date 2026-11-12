@@ -24,6 +24,7 @@ mod jump;
 mod markdown;
 mod new_commits;
 mod outdated_lines;
+mod page;
 mod ports;
 mod pr_notes;
 mod pr_switcher;
@@ -91,6 +92,7 @@ pub use jump::{
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
+pub use page::Page;
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
     PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,

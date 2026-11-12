@@ -165,10 +165,10 @@ impl CommentDesk {
     }
 
     /// The drag ends: when the rows can take a comment, a draft opens on them and takes the keys.
-    pub(super) fn finish_selection(
+    pub(super) fn finish_selection<'a>(
         &mut self,
         state: &mut SavedState,
-        screen_lines: &[DiffLine],
+        screen_lines: impl Iterator<Item = &'a DiffLine> + Clone,
         freshness: TourFreshness,
         head: &Sha,
     ) -> Result<Option<CommentPlace>, CommentRefusal> {

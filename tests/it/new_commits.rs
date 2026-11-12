@@ -531,7 +531,8 @@ fn the_change_since_read_is_built_from_hunks_with_context_around_its_changes() {
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);
     let mut review = shop.open();
-    review.set_files_at_head(review.files_at_head_request().read(&shop.source()));
+    let files_at_head = review.files_at_head_request().read(&shop.source());
+    review.set_files_at_head(files_at_head);
     review.go_to(&"total".into());
 
     let page = review.current_step().unwrap();

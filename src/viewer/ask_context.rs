@@ -86,10 +86,9 @@ pub(super) fn context_for(
                 writeln!(text, "Place: a few lines no step of the tour holds").ok()?;
                 SafetyNetPage::of(tour, files, &display).pieces
             };
-            let rows: Vec<DiffLine> = shown.iter().flat_map(|p| p.lines().cloned()).collect();
             let mut selection = RowSelection::start_at(start.clone());
             selection.extend_to(end.clone());
-            let selected = selection.resolve(&rows)?;
+            let selected = selection.resolve(shown.iter().flat_map(PieceDiff::lines))?;
             writeln!(
                 text,
                 "\nSelected lines of {}",
