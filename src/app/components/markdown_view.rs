@@ -911,13 +911,9 @@ fn paint_code_background(
 }
 
 fn style_of(colors: &Colors, run: &Run) -> HighlightStyle {
-    let color = if run.link.is_some() {
-        Some(colors.accent.into())
-    } else if run.code {
-        Some(colors.code(Capture::String).into())
-    } else {
-        None
-    };
+    // Inline code keeps the colour of the text around it and is marked by its outline alone: on a
+    // page of diffs, green text reads as added.
+    let color = run.link.is_some().then(|| colors.accent.into());
     HighlightStyle {
         color,
         font_weight: run.bold.then_some(FontWeight::BOLD),
