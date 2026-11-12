@@ -5,13 +5,14 @@ use std::sync::Arc;
 
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
+use super::github_outage::OutageCause;
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 
 pub trait PullRequestTipsPort: Send + Sync {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips>;
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError>;
 }
 
 pub trait ViewedFilesPort: Send + Sync {
@@ -29,7 +30,7 @@ pub trait ViewedFilesPort: Send + Sync {
 
 pub trait PullRequestDescriptionPort: Send + Sync {
     /// The PR's body as markdown; empty when it has none.
-    fn pull_request_description(&self, pr: &PullRequestUrl) -> anyhow::Result<String>;
+    fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, GitHubError>;
 
     fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
 }
@@ -148,11 +149,24 @@ pub enum GitHubError {
     /// GitHub answered a new thread with `thread: null` and no error. It leaves an empty pending review behind.
     #[error("{0}")]
     ThreadNotCreated(String),
+    /// A server error, a timeout or no connection: GitHub as a whole is not answering.
+    #[error("GitHub is not answering ({0})")]
+    NotAnswering(OutageCause),
+    /// Built from an `anyhow::Error` by `From`, which tells an outage from the rest.
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(anyhow::Error),
 }
 
 impl GitHubError {
+    /// What went wrong without what was being done: the sidebar says that itself.
+    pub fn short_reason(&self) -> String {
+        match self {
+            Self::NoAccess(no_access) => no_access.reason().to_owned(),
+            Self::Other(error) => error.root_cause().to_string(),
+            typed => typed.to_string(),
+        }
+    }
+
     /// Says what was being done. `PendingReviewExists` and `ThreadNotCreated` already say it.
     #[must_use]
     pub fn context(self, context: impl std::fmt::Display + Send + Sync + 'static) -> Self {

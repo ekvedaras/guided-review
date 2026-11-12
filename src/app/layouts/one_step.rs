@@ -1112,11 +1112,23 @@ impl OneStepLayout {
                     .then(|| SharedString::from("Not synced with GitHub yet")),
             )
             .map(|notice| div().text_xs().text_color(colors.warning).child(notice));
-        let problems = sidebar.problems.iter().map(|problem| {
+        let problems = sidebar.problems.iter().map(|shown| {
             div()
-                .text_xs()
-                .text_color(colors.danger)
-                .child(problem.clone())
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.danger)
+                        .child(shown.headline.clone()),
+                )
+                .children(
+                    shown
+                        .detail
+                        .clone()
+                        .map(|detail| div().text_xs().text_color(colors.muted_text).child(detail)),
+                )
         });
         let changes_not_shown = sidebar
             .changes_not_shown

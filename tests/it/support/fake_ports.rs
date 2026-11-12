@@ -118,10 +118,32 @@ pub enum GitHubFault {
     ThreadReadsFail,
     /// Reading the PR's head, description, pending review and author fails as if the network were down.
     ReadsFail,
+    /// Every read of the PR (head, description, threads, viewed files, pending review, author) fails the way
+    /// the HTTP client reports it, so the outage is told from the rest by the real `From`.
+    ReadsFailWith(ReadFailure),
     /// Listing the relevant pull requests fails as if the network were down.
     RelevantListFails,
     /// A reply is refused as GitHub does for a thread that was deleted.
     ThreadIsGone,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadFailure {
+    /// GitHub answers with this HTTP status.
+    Status(u16),
+    TimedOut,
+}
+
+impl ReadFailure {
+    fn error(&self) -> GitHubError {
+        let error = match self {
+            Self::Status(status) => ureq::Error::StatusCode(*status),
+            Self::TimedOut => ureq::Error::Timeout(ureq::Timeout::Global),
+        };
+        anyhow::Error::from(error)
+            .context("could not read https://github.com/acme/shop/pull/7 from GitHub")
+            .into()
+    }
 }
 
 pub struct FakeGitHub {
@@ -222,7 +244,21 @@ impl FakeGitHub {
         Ok(())
     }
 
+    fn fail_if_reads_fail_with(&self) -> Result<(), GitHubError> {
+        let failure = self
+            .faults
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|fault| match fault {
+                GitHubFault::ReadsFailWith(failure) => Some(failure.clone()),
+                _ => None,
+            });
+        failure.map_or(Ok(()), |failure| Err(failure.error()))
+    }
+
     fn fail_if_reads_fail(&self) -> Result<(), GitHubError> {
+        self.fail_if_reads_fail_with()?;
         if self.is_faulty(&GitHubFault::ReadsFail) {
             return Err(anyhow::anyhow!("network is down").into());
         }
@@ -261,7 +297,7 @@ impl FakeGitHub {
 }
 
 impl PullRequestTipsPort for FakeGitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> anyhow::Result<PullRequestTips> {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError> {
         self.sent.record(GitHubCall::TipsOf(pr.clone()));
         self.fail_if_reads_fail()?;
         Ok(PullRequestTips {
@@ -272,7 +308,7 @@ impl PullRequestTipsPort for FakeGitHub {
 }
 
 impl PullRequestDescriptionPort for FakeGitHub {
-    fn pull_request_description(&self, _pr: &PullRequestUrl) -> anyhow::Result<String> {
+    fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, GitHubError> {
         self.fail_if_reads_fail()?;
         Ok(self.description_now())
     }
@@ -305,6 +341,7 @@ impl ViewedFilesPort for FakeGitHub {
     fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, GitHubError> {
         self.sent.record(GitHubCall::ViewedFilesOf(pr.clone()));
         self.check_access()?;
+        self.fail_if_reads_fail_with()?;
         Ok(self
             .viewed
             .lock()
@@ -360,6 +397,7 @@ impl RelevantPullRequestsPort for FakeGitHub {
 impl ReviewThreadsPort for FakeGitHub {
     fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError> {
         self.sent.record(GitHubCall::ThreadsOf(pr.clone()));
+        self.fail_if_reads_fail_with()?;
         if self.is_faulty(&GitHubFault::ThreadReadsFail) {
             return Err(anyhow::anyhow!("network is down").into());
         }

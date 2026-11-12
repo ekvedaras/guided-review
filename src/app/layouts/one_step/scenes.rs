@@ -45,10 +45,11 @@ enum Scene {
     PictureZoom,
     UpdateOffered,
     RenderedMarkdown,
+    GitHubOutage,
 }
 
 impl Scene {
-    const ALL: [Self; 20] = [
+    const ALL: [Self; 21] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -69,6 +70,7 @@ impl Scene {
         Self::PictureZoom,
         Self::UpdateOffered,
         Self::RenderedMarkdown,
+        Self::GitHubOutage,
     ];
 
     fn file_name(self) -> &'static str {
@@ -93,6 +95,7 @@ impl Scene {
             Self::PictureZoom => "40-picture-zoom",
             Self::UpdateOffered => "39-update-offered",
             Self::RenderedMarkdown => "41-rendered-markdown",
+            Self::GitHubOutage => "42-github-outage",
         }
     }
 }
@@ -383,6 +386,7 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -440,6 +444,12 @@ impl OneStepLayout {
                 .update(cx, |sheet, cx| sheet.close(window, cx)),
             Scene::StickyStepBar => self.scroll_to_row(0),
             Scene::Toasts => {
+                if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
+                    toaster.0.update(cx, ToastShelf::clear);
+                }
+            }
+            Scene::GitHubOutage => {
+                self.session.update(cx, ReviewSession::unstage_outage);
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);
                 }

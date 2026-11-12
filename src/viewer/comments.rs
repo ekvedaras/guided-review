@@ -358,5 +358,6 @@ fn classify(error: &GitHubError) -> Outcome {
             Outcome::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
         GitHubError::Other(error) => Outcome::Failed(format!("{error:#}")),
+        GitHubError::NotAnswering(_) => Outcome::Failed(error.to_string()),
     }
 }

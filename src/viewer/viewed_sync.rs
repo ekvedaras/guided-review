@@ -294,7 +294,7 @@ impl SyncRequest {
             Ok(_) => return SyncOutcome::nothing(&self.tour_head),
             Err(error) => {
                 return SyncOutcome {
-                    error: Some(error.into()),
+                    error: Some(error),
                     ..SyncOutcome::nothing(&self.tour_head)
                 };
             }
