@@ -35,7 +35,7 @@ use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
-use super::problems::{Problem, Read};
+use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -206,23 +206,7 @@ pub struct Review {
     /// The tour's own folder, whose pictures its summary shows and whose files its links open.
     tour_files: PathBuf,
     viewed_sync: ViewedSync,
-    /// Why the last read of the threads failed, until one goes through.
-    threads_not_read: Option<String>,
-    /// Why the last read of each of these failed, until one goes through.
-    not_read: BTreeMap<Read, String>,
-    /// Why the last IDE command could not be run, until one runs.
-    ide_not_started: Option<String>,
-    /// Why the code is read from GitHub though there is a clone; set by the source this review opened on.
-    code_on_github: Option<String>,
-    /// Where the saved review went when it could not be read.
-    saved_review_kept_as: Option<PathBuf>,
-    switch_failed: Option<String>,
-    /// Why the last sync of viewed marks failed, until one goes through.
-    viewed_not_synced: Option<String>,
-    /// Why the last Refresh did not go through; a Refresh that does opens a new review.
-    tour_not_refreshed: Option<String>,
-    /// The comment start and reason of the latest hand-off that found no thread, until the next hand-off.
-    hand_off_not_sent: Option<(String, String)>,
+    problems: Problems,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -286,15 +270,16 @@ impl Review {
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
             viewed_sync: ViewedSync::default(),
-            threads_not_read: None,
-            not_read: BTreeMap::new(),
-            ide_not_started: None,
-            code_on_github: source.fallback_reason().map(str::to_owned),
-            saved_review_kept_as,
-            switch_failed: None,
-            viewed_not_synced: None,
-            tour_not_refreshed: None,
-            hand_off_not_sent: None,
+            problems: {
+                let mut problems = Problems::default();
+                if let Some(reason) = source.fallback_reason() {
+                    problems.raise(Problem::CodeOnGitHub(reason.to_owned()));
+                }
+                if let Some(backup) = saved_review_kept_as {
+                    problems.raise(Problem::SavedReviewNotRead(backup));
+                }
+                problems
+            },
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
@@ -357,20 +342,45 @@ impl Review {
         &self.pr
     }
 
+    /// For a failure the reviewer must know about; it stays until its kind is cleared.
+    pub fn raise_problem(&mut self, problem: Problem) {
+        self.problems.raise(problem);
+    }
+
+    pub fn clear_problem(&mut self, kind: ProblemKind) {
+        self.problems.clear(kind);
+    }
+
+    /// The outcome of a Show agent: a terminal that did not come up is a problem until one does.
+    pub fn show_agent_result(&mut self, failure: Option<&anyhow::Error>) {
+        match failure {
+            Some(error) => {
+                self.raise_problem(Problem::ShowAgentFailed(format!("{error:#}")));
+            }
+            None => self.clear_problem(ProblemKind::ShowAgentFailed),
+        }
+    }
+
+    pub fn show_agent_failed(&self) -> bool {
+        self.problems
+            .list()
+            .any(|problem| problem.kind() == ProblemKind::ShowAgentFailed)
+    }
+
     pub fn could_not_read(&mut self, read: Read, error: &impl fmt::Display) {
-        self.not_read.insert(read, format!("{error:#}"));
+        self.raise_problem(Problem::NotRead(read, format!("{error:#}")));
     }
 
     pub fn ide_not_started(&mut self, error: &impl fmt::Display) {
-        self.ide_not_started = Some(format!("{error:#}"));
+        self.raise_problem(Problem::IdeNotStarted(format!("{error:#}")));
     }
 
     pub fn ide_started(&mut self) {
-        self.ide_not_started = None;
+        self.clear_problem(ProblemKind::IdeNotStarted);
     }
 
     pub fn pr_head_is(&mut self, head: Sha) {
-        self.not_read.remove(&Read::PrHead);
+        self.clear_problem(ProblemKind::NotRead(Read::PrHead));
         self.pr_head = Some(head);
     }
 
@@ -457,7 +467,7 @@ impl Review {
 
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
-        self.not_read.remove(&Read::PrDescription);
+        self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
         if self.state.pr_description() != body {
             self.state.record(|state| state.saw_pr_description(body))?;
         }
@@ -834,7 +844,7 @@ impl Review {
     }
 
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
-        self.threads_not_read = None;
+        self.clear_problem(ProblemKind::ThreadsNotRead);
         self.pulled_threads = threads.to_vec();
         self.place_threads();
     }
@@ -847,7 +857,7 @@ impl Review {
 
     /// The threads shown stay as they were, named as possibly old until a read goes through.
     pub fn threads_not_read(&mut self, error: &GitHubError) {
-        self.threads_not_read = Some(format!("{error:#}"));
+        self.raise_problem(Problem::ThreadsNotRead(format!("{error:#}")));
     }
 
     /// Placed by the rows a step shows, which depend on the files read at head, so again when those arrive.
@@ -876,12 +886,12 @@ impl Review {
     }
 
     pub fn pending_review_is(&mut self, exists: bool) {
-        self.not_read.remove(&Read::PendingReview);
+        self.clear_problem(ProblemKind::NotRead(Read::PendingReview));
         self.comment_desk.pending_review_is(exists);
     }
 
     pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
-        self.not_read.remove(&Read::LastReview);
+        self.clear_problem(ProblemKind::NotRead(Read::LastReview));
         self.last_review = last;
     }
 
@@ -998,13 +1008,13 @@ impl Review {
     fn show_pulled_threads(&mut self, threads: Option<&Result<Vec<ReviewThread>, String>>) {
         match threads {
             Some(Ok(threads)) => self.set_threads(threads),
-            Some(Err(reason)) => self.threads_not_read = Some(reason.clone()),
+            Some(Err(reason)) => self.raise_problem(Problem::ThreadsNotRead(reason.clone())),
             None => {}
         }
     }
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
-        self.not_read.remove(&Read::Authorship);
+        self.clear_problem(ProblemKind::NotRead(Read::Authorship));
         self.comment_desk.viewer_authorship_is(authored);
     }
 
@@ -1212,7 +1222,7 @@ impl Review {
 
     /// The window was asked for another PR and could not open it; named until another switch succeeds.
     pub fn switch_failed(&mut self, reason: String) {
-        self.switch_failed = Some(reason);
+        self.raise_problem(Problem::SwitchFailed(reason));
     }
 
     pub fn state_file(&self) -> ReviewStateFile {
@@ -1245,12 +1255,14 @@ impl Review {
         else {
             return;
         };
-        self.hand_off_not_sent = match (newest.thread(), newest.state()) {
+        match (newest.thread(), newest.state()) {
             (None, HandOffState::Failed(reason)) => {
-                Some((newest.comment().chars().take(60).collect(), reason.clone()))
+                let comment = newest.comment().chars().take(60).collect();
+                let reason = reason.clone();
+                self.raise_problem(Problem::HandOffNotSent { comment, reason });
             }
-            _ => None,
-        };
+            _ => self.clear_problem(ProblemKind::HandOffNotSent),
+        }
     }
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
@@ -1500,7 +1512,7 @@ impl Review {
     }
 
     pub fn refresh_failed(&mut self, error: &anyhow::Error) {
-        self.tour_not_refreshed = Some(format!("{error:#}"));
+        self.raise_problem(Problem::TourNotRefreshed(format!("{error:#}")));
     }
 
     pub fn repin_failed(&mut self) {
@@ -1606,12 +1618,12 @@ impl Review {
             }
             error = sync_error;
         });
-        self.viewed_not_synced = None;
+        self.clear_problem(ProblemKind::ViewedNotSynced);
         match error {
             Some(error) => {
                 let settled = self.viewed_sync.settle(error);
                 if let Err(error) = &settled {
-                    self.viewed_not_synced = Some(format!("{error:#}"));
+                    self.raise_problem(Problem::ViewedNotSynced(format!("{error:#}")));
                 }
                 settled
             }
@@ -1650,35 +1662,10 @@ impl Review {
             .state
             .refused_while_repinning()
             .then_some(Problem::ChangeNotKeptWhileRepinning);
-        let threads_not_read = self.threads_not_read.clone().map(Problem::ThreadsNotRead);
         not_saved
             .into_iter()
             .chain(not_kept)
-            .chain(threads_not_read)
-            .chain(
-                self.not_read
-                    .iter()
-                    .map(|(read, reason)| Problem::NotRead(*read, reason.clone())),
-            )
-            .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
-            .chain(self.code_on_github.clone().map(Problem::CodeOnGitHub))
-            .chain(self.viewed_not_synced.clone().map(Problem::ViewedNotSynced))
-            .chain(
-                self.tour_not_refreshed
-                    .clone()
-                    .map(Problem::TourNotRefreshed),
-            )
-            .chain(
-                self.saved_review_kept_as
-                    .clone()
-                    .map(Problem::SavedReviewNotRead),
-            )
-            .chain(
-                self.hand_off_not_sent
-                    .clone()
-                    .map(|(comment, reason)| Problem::HandOffNotSent { comment, reason }),
-            )
-            .chain(self.switch_failed.clone().map(Problem::SwitchFailed))
+            .chain(self.problems.list().cloned())
             .collect()
     }
 

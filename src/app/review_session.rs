@@ -62,7 +62,6 @@ pub struct ReviewSession {
     sidebar: SidebarRows,
     tour_agent: TourAgentState,
     /// Why the last Show agent failed, until the next one goes through.
-    show_agent_failed: Option<String>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// A hand-off being typed into the tour agent; the next one waits for it.
@@ -164,9 +163,8 @@ impl ReviewSession {
             },
         );
         let mut session = Self {
-            sidebar: SidebarRows::of(&review, &TourAgentState::Unknown, None),
+            sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
-            show_agent_failed: None,
             tour_agent_follow: None,
             show_agent: None,
             delivering: None,
@@ -872,18 +870,14 @@ impl ReviewSession {
             cx,
             move || agents.show(&pr),
             |this, shown, cx| {
-                this.show_agent_failed = shown.err().map(|error| format!("{error:#}"));
+                this.review.show_agent_result(shown.as_ref().err());
                 this.show_problems(cx);
             },
         ));
     }
 
     fn sidebar_rows(&self) -> SidebarRows {
-        SidebarRows::of(
-            &self.review,
-            &self.tour_agent,
-            self.show_agent_failed.as_deref(),
-        )
+        SidebarRows::of(&self.review, &self.tour_agent)
     }
 
     fn pull_from_github(&mut self, cx: &mut Context<Self>) {

@@ -1183,31 +1183,21 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_tour_agent);
             }))
         });
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
-                    )
-                    .children(show),
-            )
-            .children(
-                agent
-                    .show_failed
-                    .clone()
-                    .map(|reason| div().text_xs().text_color(colors.danger).child(reason)),
-            )
+        div().flex().flex_col().gap_1().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                )
+                .children(show),
+        )
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {

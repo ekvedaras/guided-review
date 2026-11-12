@@ -40,8 +40,6 @@ pub struct SidebarTourAgent {
     pub is_shown: bool,
     pub line: SharedString,
     pub can_show: bool,
-    /// Why the last Show agent did not bring the terminal up.
-    pub show_failed: Option<SharedString>,
 }
 
 pub struct SidebarRows {
@@ -63,7 +61,7 @@ pub struct SidebarRows {
 }
 
 impl SidebarRows {
-    pub fn of(review: &Review, tour_agent: &TourAgentState, show_failed: Option<&str>) -> Self {
+    pub fn of(review: &Review, tour_agent: &TourAgentState) -> Self {
         let progress = review.progress();
         let steps = review
             .sidebar()
@@ -88,11 +86,9 @@ impl SidebarRows {
         let is_old = review.last_review_is_old();
         Self {
             tour_agent: SidebarTourAgent {
-                is_shown: tour_agent.is_worth_a_line() || show_failed.is_some(),
+                is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
                 line: tour_agent.to_string().into(),
                 can_show: tour_agent.can_show(),
-                show_failed: show_failed
-                    .map(|reason| format!("Could not show the agent: {reason}").into()),
             },
             last_review: review.last_review().map(|last| SidebarLastReview {
                 headline: last.headline(is_old).into(),

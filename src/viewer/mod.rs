@@ -98,7 +98,7 @@ pub use ports::{
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
-pub use problems::{Problem, Read};
+pub use problems::{Problem, ProblemKind, Problems, Read};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{

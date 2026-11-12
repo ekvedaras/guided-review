@@ -57,6 +57,7 @@ mod piece_id;
 mod pr_description;
 mod pr_notes;
 mod pr_switcher;
+mod problems;
 mod read_ticks;
 mod refresh;
 mod release_install;
