@@ -8,7 +8,7 @@ use pulldown_cmark::{
 use super::highlight::{Span, highlight_snippet};
 use crate::image_facts;
 
-const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH.union(Options::ENABLE_TASKLISTS);
+pub(super) const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH.union(Options::ENABLE_TASKLISTS);
 
 /// A file of the tour's `folder` that `url` names by a plain relative path.
 fn file_in(folder: &Path, url: &str) -> Option<PathBuf> {

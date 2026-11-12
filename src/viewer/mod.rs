@@ -34,6 +34,7 @@ mod problems;
 mod reactions;
 mod refresh;
 mod relevant_prs;
+mod rendered_view;
 mod reopen_after_save;
 mod review;
 mod review_state;
@@ -54,11 +55,13 @@ mod viewed_sync;
 mod word_diff;
 mod work_agenda;
 
-pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
+pub use active_pr::{
+    ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, OpenOutcome, WriteDecision,
+};
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
-pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings};
+pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowWriting};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
@@ -119,6 +122,7 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
+pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
 pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen,

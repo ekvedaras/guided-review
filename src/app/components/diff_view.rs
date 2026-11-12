@@ -12,13 +12,14 @@ use gpui::{
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
 use crate::app::components::tooltip::tooltip;
 use crate::viewer::{
-    BoxEdges, CodeLink, HiddenLines, LineKind, LineLocation, MoreContext, PieceLabel, ShownLine,
+    BlockChange, BoxEdges, CodeLink, HiddenLines, LineKind, LineLocation, MoreContext, PieceLabel,
+    ShownLine,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
-use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone, inside_edge};
 
 /// What a gap row asks for: a few more lines from one side, or every hidden line.
 pub enum GapAsk<'a> {
@@ -346,8 +347,7 @@ fn laid_over(
         .collect()
 }
 
-/// A row's own colour sits inside the box's 1 px edge, so its corners are that much tighter.
-const INSIDE_EDGE_RADIUS: f32 = CARD_RADIUS - 1.;
+const INSIDE_EDGE_RADIUS: f32 = inside_edge(CARD_RADIUS);
 
 pub fn round_inside(edges: BoxEdges, layer: Div) -> Div {
     layer
@@ -580,6 +580,48 @@ pub fn only_whitespace_row(colors: &Colors, edges: BoxEdges) -> impl IntoElement
         .text_sm()
         .text_color(colors.muted_text)
         .child("Only whitespace changed.")
+}
+
+/// A block of a rendered Markdown file, with a bar on its left saying what the PR did to it. A
+/// removed block is dimmed rather than struck through, so it stays readable.
+pub fn rendered_block_row(
+    colors: &Colors,
+    edges: BoxEdges,
+    change: Option<BlockChange>,
+    block: impl IntoElement,
+) -> impl IntoElement {
+    let bar: gpui::Hsla = match change {
+        Some(BlockChange::Added) => colors.success.into(),
+        Some(BlockChange::Changed) => colors.warning.into(),
+        Some(BlockChange::Removed) => colors.danger.into(),
+        None => gpui::transparent_black(),
+    };
+    box_row(colors, edges).child(
+        div()
+            .flex()
+            .px_2()
+            .gap_3()
+            .child(div().flex_none().w(px(3.)).rounded(px(1.5)).bg(bar))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .py_1()
+                    .when(change == Some(BlockChange::Removed), |text| {
+                        text.opacity(0.5)
+                    })
+                    .child(block),
+            ),
+    )
+}
+
+pub fn rendered_file_waiting_row(colors: &Colors, edges: BoxEdges) -> impl IntoElement {
+    box_row(colors, edges)
+        .px_2()
+        .py_1()
+        .text_sm()
+        .text_color(colors.muted_text)
+        .child("Reading the file…")
 }
 
 /// A binary file has no lines to show, so it gets one row that opens the file.

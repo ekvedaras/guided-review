@@ -36,6 +36,15 @@ impl TourWriting {
         matches!(self.stage, WritingStage::Failed(_))
     }
 
+    /// The tour was written, but opening it failed.
+    pub(super) fn failed_to_open(reason: &str) -> Self {
+        let mut writing = Self::starting();
+        writing.stage = WritingStage::Failed(format!(
+            "The tour was written but could not be opened: {reason}"
+        ));
+        writing
+    }
+
     pub(super) fn started(&mut self, started: anyhow::Result<TerminalId>) {
         match started {
             Ok(terminal) => {

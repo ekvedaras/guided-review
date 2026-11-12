@@ -290,7 +290,9 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             heading.fold.hash(&mut hasher);
             heading.piece.hash(&mut hasher);
             heading.repin_label.hash(&mut hasher);
+            heading.view.hash(&mut hasher);
         }
+        PageRow::RenderedBlock(block) => block.hash(&mut hasher),
         PageRow::BinaryFile(binary) => {
             binary.piece.hash(&mut hasher);
             binary.link.hash(&mut hasher);
@@ -329,6 +331,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             view.commented_lines.hash(&mut hasher);
             view.hand_off_line.hash(&mut hasher);
             view.failed_hand_off.hash(&mut hasher);
+            view.delete_asked.hash(&mut hasher);
             reply_lines.hash(&mut hasher);
             for (id, text) in &view.edit_drafts {
                 id.hash(&mut hasher);
@@ -358,6 +361,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
         | PageRow::RouteHeading
         | PageRow::NoChangeSinceRead
         | PageRow::OnlyWhitespace
+        | PageRow::RenderedFileWaiting
         | PageRow::PieceEnd => {}
     }
     RowKey(hasher.finish())
@@ -428,6 +432,7 @@ mod tests {
             commented_lines: Arc::new([]),
             reply_draft: None,
             edit_drafts: BTreeMap::new(),
+            delete_asked: None,
             hand_off_line: None,
             agent_is_working: false,
             followed: None,

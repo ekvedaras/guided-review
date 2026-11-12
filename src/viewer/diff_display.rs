@@ -121,6 +121,11 @@ impl FilesAtHead {
         self.head == *head
     }
 
+    /// The whole text of a file at head; `None` when it was not read.
+    pub(super) fn text(&self, path: &FilePath) -> Option<&str> {
+        self.files.get(path).map(|file| file.text.as_str())
+    }
+
     /// Lines `first` to `last` (1-based, both included) of a file at head; none when the file was not read.
     pub(super) fn lines(&self, path: &str, first: usize, last: usize) -> Vec<String> {
         self.files.get(path).map_or_else(Vec::new, |file| {

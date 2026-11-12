@@ -29,6 +29,8 @@ struct Build {
     pr: PullRequestUrl,
     /// Agent replies that came while the PR on screen reopened.
     held_replies: Vec<(HandOffId, AgentReplied)>,
+    /// The build opens a tour the loading screen waited for, so a failure shows there.
+    after_writing: bool,
 }
 
 /// Names one build, so its result can be told from the result of an older one.
@@ -43,6 +45,14 @@ pub enum OpenOrigin {
     /// A tour agent the app started. It writes or fixes tours on its own time, so its open never pulls
     /// the window away from what the reviewer reads.
     AppStartedAgent,
+}
+
+/// What an open request of a PR comes to, by whether the PR has a tour.
+pub enum OpenOutcome {
+    Tour(OpenDecision),
+    /// No tour yet: the loading screen shows it being written, as when the reviewer picks the PR with no
+    /// tour in the switcher.
+    Writing(WriteDecision),
 }
 
 pub enum OpenDecision {
@@ -160,6 +170,17 @@ impl ActivePr {
         }
     }
 
+    /// The one way in for an open request, whoever sent it: a PR with a tour is requested, a PR without
+    /// one gets its tour written.
+    pub fn open(&mut self, pr: PullRequestUrl, origin: OpenOrigin, tour: TourFact) -> OpenOutcome {
+        match tour {
+            TourFact::Ready => OpenOutcome::Tour(self.request(pr, origin)),
+            TourFact::Missing | TourFact::Writing | TourFact::WritingFailed => {
+                OpenOutcome::Writing(self.write(pr))
+            }
+        }
+    }
+
     /// An open of a PR being written is its writer saying the tour is checked, which ends the writing.
     pub fn request(&mut self, pr: PullRequestUrl, origin: OpenOrigin) -> OpenDecision {
         let was_written = self.writings.iter().any(|(writing, _)| writing == &pr);
@@ -182,7 +203,11 @@ impl ActivePr {
             return OpenDecision::KeepInBackground;
         }
         self.waiting_for = None;
-        OpenDecision::Build(self.build(pr))
+        let ticket = self.build(pr);
+        if let Some(build) = &mut self.building {
+            build.after_writing = is_awaited && was_written;
+        }
+        OpenDecision::Build(ticket)
     }
 
     pub fn finished<Built>(
@@ -199,7 +224,10 @@ impl ActivePr {
         }
         self.switching = None;
         let Build {
-            pr, held_replies, ..
+            pr,
+            held_replies,
+            after_writing,
+            ..
         } = build;
         match built {
             Ok(built) => {
@@ -209,9 +237,18 @@ impl ActivePr {
                 self.replies_for_reopened = held_replies;
                 Finished::Switch(built)
             }
-            Err(error) => Finished::Stay {
-                reason: format!("could not open {pr}: {error:#}"),
-            },
+            Err(error) => {
+                let reason = format!("could not open {pr}: {error:#}");
+                if after_writing {
+                    self.writings.push((
+                        pr.clone(),
+                        TourWriting::failed_to_open(&format!("{error:#}")),
+                    ));
+                    self.waiting_for = Some(pr);
+                    self.remember();
+                }
+                Finished::Stay { reason }
+            }
         }
     }
 
@@ -271,6 +308,7 @@ impl ActivePr {
             ticket,
             pr,
             held_replies,
+            after_writing: false,
         });
         ticket
     }

@@ -651,6 +651,17 @@ impl ReviewThreadsPort for GitHub {
         .map_err(|error| error.context("could not edit the comment"))?;
         Ok(())
     }
+
+    fn delete_comment(&self, comment_id: &CommentId) -> Result<(), GitHubError> {
+        self.graphql(
+            "mutation($input: DeletePullRequestReviewCommentInput!) {
+                deletePullRequestReviewComment(input: $input) { clientMutationId }
+            }",
+            &serde_json::json!({"input": {"id": comment_id}}),
+        )
+        .map_err(|error| error.context("could not delete the comment"))?;
+        Ok(())
+    }
 }
 
 impl ReviewWritesPort for GitHub {

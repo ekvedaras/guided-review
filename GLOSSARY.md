@@ -24,6 +24,8 @@
 
 **File block**: The one box a page shows for all its diff pieces of one file, in line order. A thin label marks where each piece starts: at the first line of its symbol, not at its first changed line. Blank lines and lines with only closing brackets never move a label.
 
+**Rendered view**: A file block showing its file as it reads instead of its diff lines: a Markdown file formatted, each top-level block (heading, paragraph, list, fence) with a bar for added, changed or removed, removed blocks dimmed where they were; an SVG as its before and after pictures. The Code / Rendered switch in the box header changes it, per file. Markdown starts as code, an SVG rendered; a raster picture has no code, so it shows its pictures and offers no switch. A rendered box takes no line comments; the threads on its lines are listed after the file. The choice is not saved. Avoid: preview, rich diff.
+
 **File path**: A file's path in the repo, relative to its root, with `/` separators. A renamed file is named by its new path on both sides.
 
 **Outline**: A short list of all diff pieces in a PR, with no code. A tour writer reads it first and opens only the pieces it needs.

@@ -119,3 +119,14 @@ Decided:
 - A failed build with no window still ends the app. A failed build while only Settings shows puts its reason in a line under the Settings title, as well as in the app log, so a reviewer who ran `open` sees why nothing opened.
 
 Open: neither case above has been tried on a real window yet.
+
+## 2026-11-12: `open` of a PR with no tour writes one
+
+Until now `guided-review open` (and `restart`) refused a PR with no tour ("run `/tour` first") before it reached the app, while the same PR picked in the PR switcher got a tour agent. Now `open` sends the request whatever is on disk, and the app decides with `ActivePr::open(pr, origin, TourFact)`: a PR with a tour is requested as before; one without goes through `ActivePr::write`, the switcher's path, so there is one tour-writing flow. The app answers `writing`, and the CLI prints "No tour of <pr> yet; guided-review app is writing one and opens it when it is ready".
+
+- With a PR on screen the loading screen covers it, as for the switcher. With no window the app opens one holding only the loading screen (`WritingWindow`, `AppWindow::WritingOnly`); the writer's own `open` of the finished tour turns that window into the review, as for Settings-only. With the Settings-only window up, the writing is followed with no screen and the review takes the window when the tour lands.
+- Closing the loading-screen window quits, unless the finished tour is building. A written tour that then fails to build does not end the app: `ActivePr::finished` puts the writing back as Failed ("The tour was written but could not be opened: ..."), so the loading screen shows the reason with Try again, and the window stays (`FailedBuild::ShowInWriting`). Settings asked for while it shows is refused until the review is up.
+- Unlike the switcher, `open` does not check that herdr is reachable first; a writer that cannot start shows as Failed on the loading screen, with Try again.
+- `open_review` still refuses a PR with no tour, as a last guard.
+
+Open: not tried on a real window.
