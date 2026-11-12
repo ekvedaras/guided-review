@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
+    TourAgentPort, TourAgentStart,
 };
 use tempfile::TempDir;
 
@@ -26,6 +27,10 @@ fn fake_hc(dir: &Path) -> PathBuf {
 echo "$@" >> "{dir}/calls"
 if [ "$1" = "server" ] && [ -f "{dir}/server-down" ]; then
   echo "no server" >&2
+  exit 1
+fi
+if [ "$1" = "ls" ] && [ -f "{dir}/fail-ls" ]; then
+  cat "{dir}/fail-ls" >&2
   exit 1
 fi
 if [ "$1" = "send" ] && [ "$4" = "idle" ] && [ -f "{dir}/refuse-idle" ]; then
@@ -223,9 +228,27 @@ fn the_link_is_on_while_the_server_answers_and_off_with_its_reason_when_not() {
     assert_eq!(calls(dir.path(), "calls"), ["server status --json"]);
 
     std::fs::write(dir.path().join("server-down"), "").unwrap();
-    let reason = agents.link().unwrap_err();
-    assert!(reason.contains("does not answer"), "{reason}");
-    assert!(reason.contains("no server"), "{reason}");
+    assert_eq!(agents.link(), Err(AgentLinkOff::ServerNotRunning));
+}
+
+#[test]
+fn a_command_that_fails_while_the_server_answers_is_the_reason_without_the_command_line() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("fail-ls"),
+        "cannot save terminals: registry writer stopped",
+    )
+    .unwrap();
+    let agents = adapter(dir.path());
+
+    let error = agents.terminals_of(&pr()).unwrap_err();
+
+    let refused = error.downcast_ref::<HerdrRefused>().unwrap();
+    assert_eq!(
+        refused.reason,
+        "cannot save terminals: registry writer stopped"
+    );
+    assert_eq!(agents.link(), Ok(()));
 }
 
 #[test]
@@ -233,9 +256,7 @@ fn the_link_is_off_when_hc_is_not_installed() {
     let dir = TempDir::new().unwrap();
     let agents = HcTourAgents::with_binaries(dir.path().join("no-hc"), dir.path().join("no-app"));
 
-    let reason = agents.link().unwrap_err();
-
-    assert!(reason.contains("not on PATH"), "{reason}");
+    assert_eq!(agents.link(), Err(AgentLinkOff::HcMissing));
 }
 
 #[test]

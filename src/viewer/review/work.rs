@@ -7,7 +7,7 @@ use crate::viewer::hand_offs::{AgentReplied, HandOffId};
 use crate::viewer::problems::Read;
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
-    AGENT_START_RETRY, AfterLanding, Done, Job, Work, WorkKind, WorkOutcome,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, Work, WorkKind, WorkOutcome,
 };
 
 impl Review {
@@ -63,6 +63,12 @@ impl ReviewCore {
             }
             WorkKind::DeliverHandOff => {
                 Job::DeliverHandOff(self.state.hand_offs().delivery_request(&self.pr)?)
+            }
+            WorkKind::CheckAgentLink => {
+                if !self.agent_link_is_off {
+                    return None;
+                }
+                Job::CheckAgentLink(pr)
             }
         })
     }
@@ -127,6 +133,15 @@ impl ReviewCore {
                     .ok();
                 return after;
             }
+            Done::AgentLink(state) => {
+                if state.can_retry() {
+                    self.work
+                        .want_in(WorkKind::CheckAgentLink, AGENT_LINK_RECHECK);
+                } else {
+                    self.tour_agent_is(&state);
+                }
+                return AfterLanding::TourAgentIs(state);
+            }
         }
         AfterLanding::Nothing
     }
@@ -139,12 +154,22 @@ impl ReviewCore {
     /// What the follow of the tour agent saw. A status moves the hand-offs on and takes the seen
     /// marks off those it ended without answering; any news may let the next hand-off go.
     pub fn tour_agent_is(&mut self, state: &TourAgentState) {
+        self.agent_link_is_off = state.can_retry();
+        if self.agent_link_is_off {
+            self.work
+                .want_in(WorkKind::CheckAgentLink, AGENT_LINK_RECHECK);
+        }
         if let TourAgentState::Agent { status, .. } = state {
             self.record_hand_offs(|hand_offs| hand_offs.agent_status_is(*status))
                 .ok();
             self.work.want(WorkKind::TakeSeenMarksOff);
         }
         self.work.want(WorkKind::DeliverHandOff);
+    }
+
+    /// Retry beside the message of an off link: looks at herdr now, not when the timer says.
+    pub fn retry_agent_link(&mut self) {
+        self.work.want(WorkKind::CheckAgentLink);
     }
 
     /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the
