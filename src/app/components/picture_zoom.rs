@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use gpui::{
     App, Bounds, Context, Entity, FocusHandle, Global, InteractiveElement, IntoElement,
@@ -44,7 +45,7 @@ impl PictureZoom {
 
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
-            presence: Presence::default(),
+            presence: Presence::lasting(OVERLAY),
             zoom: None,
             focus: cx.focus_handle(),
             owner_focus,
@@ -62,7 +63,7 @@ impl PictureZoom {
             picture,
             page_place,
         });
-        self.presence.open();
+        self.presence.open(Instant::now());
         window.focus(&self.focus, cx);
         cx.notify();
     }

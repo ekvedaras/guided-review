@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -11,17 +12,15 @@ use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
-use crate::viewer::{
-    CloneRowProblem, Motion, Presence, SaveOutcome, SettingProblem, Settings, Shown,
-};
+use crate::viewer::{CloneRowProblem, Motion, Presence, SaveOutcome, SettingProblem, Settings};
 
 use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
 };
 use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
-use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, fade_out, pop_when_shown, slide_in};
-use super::overlay::{close_presence, rise_for};
+use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, slide_in};
+use super::overlay::{close_presence, rise_for, scrim_fade};
 use super::palette::{
     CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, inside_edge,
 };
@@ -257,7 +256,7 @@ impl SettingsPanel {
         Self {
             home,
             loaded: None,
-            presence: Presence::default(),
+            presence: Presence::lasting(OVERLAY),
             focus: cx.focus_handle(),
             owner_focus,
             placement,
@@ -296,7 +295,7 @@ impl SettingsPanel {
             Ok(editing) => Loaded::Ready(Box::new(editing)),
             Err(error) => Loaded::Failed(format!("{error:#}").into()),
         });
-        self.presence.open();
+        self.presence.open(Instant::now());
         self.clone_focus.clear();
         window.focus(&self.focus, cx);
         cx.notify();
@@ -333,7 +332,7 @@ impl SettingsPanel {
             Placement::SheetOverReview => close_presence(self, cx, |this| &mut this.presence),
             // The window goes with it, so there is nothing to leave to.
             Placement::WholeWindow => {
-                self.presence.close(Motion::Reduced);
+                self.presence.close(Motion::Reduced, Instant::now());
             }
         }
         window.focus(&self.owner_focus, cx);
@@ -1801,13 +1800,7 @@ impl Render for SettingsPanel {
                     .inset_0()
                     .bg(colors.scrim)
                     .on_click(cx.listener(|this, _, window, cx| this.request_close(window, cx)));
-                let scrim_id = ("settings-scrim-fade", self.presence.turn());
-                let scrim = match self.presence.shown() {
-                    Some(Shown::Leaving) => fade_out(scrim, scrim_id, STATE).into_any_element(),
-                    Some(Shown::Entering) | None => {
-                        fade_in(scrim, scrim_id, STATE).into_any_element()
-                    }
-                };
+                let scrim = scrim_fade(scrim, "settings-scrim-fade", &self.presence);
                 div()
                     .absolute()
                     .inset_0()

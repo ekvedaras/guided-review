@@ -14,6 +14,8 @@ use gpui::{
     SpringConfig, Styled, StyledText, Svg, Transformation, div, percentage, px, relative, size,
 };
 
+use crate::viewer::Stretch;
+
 use super::palette::Colors;
 
 /// Press, hover-adjacent swaps, a chevron turning.
@@ -102,26 +104,6 @@ pub fn slide_in<E: IntoElement + Styled + 'static>(
     })
 }
 
-/// The reverse of `slide_in`: fades out while moving `distance` towards `edge`.
-pub fn slide_out<E: IntoElement + Styled + 'static>(
-    element: E,
-    id: impl Into<ElementId>,
-    duration: Duration,
-    edge: Edge,
-    distance: Pixels,
-) -> AnimationElement<E> {
-    element.with_animation(id, one_shot(duration), move |element, delta| {
-        let away = distance * delta;
-        let element = element.relative().opacity(1. - delta);
-        match edge {
-            Edge::Left => element.left(-away),
-            Edge::Right => element.left(away),
-            Edge::Top => element.top(-away),
-            Edge::Bottom => element.top(away),
-        }
-    })
-}
-
 /// Fades out over `duration`.
 pub fn fade_out<E: IntoElement + Styled + 'static>(
     element: E,
@@ -160,12 +142,29 @@ pub fn rise_in<E: IntoElement + Styled + 'static>(
     slide_in(element, id, OVERLAY, Edge::Bottom, OVERLAY_RISE)
 }
 
-/// An overlay's exit, the reverse of `rise_in`: fades out and sinks `OVERLAY_RISE` over `OVERLAY`.
-pub fn sink_out<E: IntoElement + Styled + 'static>(
+/// Plays a stretch of an overlay's timeline (`Presence::travel`): 0 is gone and 1 is fully in, and
+/// `apply` gets the position on it. An entrance and a leave are the same move, travelled in the two
+/// directions, so a switch of direction midway continues where it was.
+pub fn along<E: IntoElement + Styled + 'static>(
     element: E,
     id: impl Into<ElementId>,
+    travel: Stretch,
+    apply: impl Fn(E, f32) -> E + 'static,
 ) -> AnimationElement<E> {
-    slide_out(element, id, OVERLAY, Edge::Bottom, OVERLAY_RISE)
+    let animation = Animation::new(travel.lasts.max(Duration::from_millis(1)));
+    element.with_animation(id, animation, move |element, delta| {
+        apply(element, travel.from + (travel.to - travel.from) * delta)
+    })
+}
+
+/// How far in an overlay's panel is at a position on its timeline, on the entrance's easing.
+pub fn panel_level(position: f32) -> f32 {
+    ease_out(position)
+}
+
+/// How far in an overlay's scrim is: it takes `STATE` of the timeline's `OVERLAY`.
+pub fn scrim_level(position: f32) -> f32 {
+    ease_out((position * OVERLAY.as_secs_f32() / STATE.as_secs_f32()).min(1.))
 }
 
 /// A bar whose width follows a share from 0 to 1. A new share glides from the length on show; the

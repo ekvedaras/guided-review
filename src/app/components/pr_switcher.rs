@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -18,6 +19,7 @@ use crate::viewer::{
 use super::chip::{chip, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
+use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
 };
@@ -131,7 +133,7 @@ impl PrSwitcherView {
             }
         });
         let mut view = Self {
-            presence: Presence::default(),
+            presence: Presence::lasting(OVERLAY),
             query: String::new(),
             shown: Vec::new(),
             scrolled: px(0.),
@@ -151,7 +153,7 @@ impl PrSwitcherView {
     }
 
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.presence.open();
+        self.presence.open(Instant::now());
         self.query.clear();
         self.refusal = None;
         let (home, active) = (self.switching.home.clone(), self.switching.active.clone());

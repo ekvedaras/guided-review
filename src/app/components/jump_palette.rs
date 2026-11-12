@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
@@ -13,6 +15,7 @@ use crate::viewer::{
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
 use super::markdown_view::InlineMarkdown;
+use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
 };
@@ -122,7 +125,7 @@ impl JumpPalette {
 
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
-            presence: Presence::default(),
+            presence: Presence::lasting(OVERLAY),
             query: String::new(),
             rows: Vec::new(),
             entry_count: 0,
@@ -137,7 +140,7 @@ impl JumpPalette {
     }
 
     pub fn open(&mut self, groups: Vec<PaletteGroup>, window: &mut Window, cx: &mut Context<Self>) {
-        self.presence.open();
+        self.presence.open(Instant::now());
         self.query.clear();
         self.set_groups(groups);
         window.focus(&self.focus, cx);

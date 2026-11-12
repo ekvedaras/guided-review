@@ -82,4 +82,4 @@
 
 **Toast**: A short note at the bottom right of the window about an outcome that is otherwise easy to miss. It leaves by itself unless it tells of a failure. Avoid: notification, snackbar.
 
-**Presence**: Whether an overlay (palette, PR switcher, Settings, shortcuts sheet, Ask panel, zoomed picture) is on screen, and whether it is leaving. A leaving overlay is still drawn, plays the reverse of its entrance and takes no input; once the move has played it is dropped. Closing under reduced motion drops it at once, and opening one that is leaving brings it back. Avoid: fade-out state, closing flag.
+**Presence**: Whether an overlay (palette, PR switcher, Settings, shortcuts sheet, Ask panel, zoomed picture) is on screen, and whether it is leaving. A leaving overlay is still drawn, plays the reverse of its entrance and takes no input; a reopening, or a close during the entrance, continues from where the move had got to; once the move has played it is dropped. Closing under reduced motion drops it at once, and opening one that is leaving brings it back. Avoid: fade-out state, closing flag.

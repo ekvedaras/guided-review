@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
@@ -9,6 +11,7 @@ use crate::viewer::{Command, Presence, ShortcutGroup, in_group};
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
+use super::motion::OVERLAY;
 use super::overlay::{close_presence, modal_layer_for, overlay_panel, picker_footer, rise_for};
 use super::palette::Colors;
 use super::step_notes::note_label;
@@ -25,7 +28,7 @@ impl ShortcutsSheet {
 
     pub fn new(owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
         Self {
-            presence: Presence::default(),
+            presence: Presence::lasting(OVERLAY),
             focus: cx.focus_handle(),
             owner_focus,
         }
@@ -39,7 +42,7 @@ impl ShortcutsSheet {
         if self.presence.is_open() {
             self.close(window, cx);
         } else {
-            self.presence.open();
+            self.presence.open(Instant::now());
             window.focus(&self.focus, cx);
             cx.notify();
         }

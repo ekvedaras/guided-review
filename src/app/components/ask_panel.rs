@@ -24,7 +24,7 @@ use super::card::card;
 use super::icon::{Icon, icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::{MarkdownView, parsed_markdown};
-use super::motion::{Edge, OVERLAY, PANEL_SLIDE, busy_dot, slide_in, slide_out};
+use super::motion::{OVERLAY, PANEL_SLIDE, along, busy_dot, panel_level};
 use super::overlay::{close_presence, input_blocker};
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
 use super::text_box::{Field, TextBox};
@@ -152,6 +152,9 @@ pub struct AskPanel {
     leaving_target: Option<AskTarget>,
 }
 
+/// How wide the panel is once in.
+const PANEL_WIDTH: f32 = 380.;
+
 impl AskPanel {
     pub const KEY_CONTEXT: &str = "AskInput";
 
@@ -196,7 +199,7 @@ impl AskPanel {
             focus: cx.focus_handle(),
             question_focus: cx.focus_handle(),
             layout_focus,
-            presence: Presence::default(),
+            presence: Presence::lasting(OVERLAY),
             leaving_target: None,
         }
     }
@@ -237,7 +240,7 @@ impl AskPanel {
         self.change(cx, |review, processes| {
             review.open_ask(place, label, &settings, Instant::now(), processes);
         });
-        self.presence.open();
+        self.presence.open(Instant::now());
         self.leaving_target = None;
         match self.desk(cx).target() {
             Some(AskTarget::Ready { .. }) => {
@@ -568,7 +571,7 @@ impl Render for AskPanel {
             .key_context(Self::KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key_down))
-            .w(px(380.))
+            .w(px(PANEL_WIDTH))
             .flex_none()
             .h_full()
             .flex()
@@ -638,26 +641,23 @@ impl Render for AskPanel {
             )
             .children(input.map(|input| div().flex_none().p_3().child(input)));
         // The page runs under the rounded corners, so they cut into the page and not into the sidebar.
+        let panel = match self.presence.shown() {
+            Some(Shown::Leaving) => panel.child(input_blocker()),
+            Some(Shown::Entering) | None => panel,
+        };
+        let id = ("ask-panel-slide", self.presence.turn());
+        let travel = self.presence.travel();
         div()
             .flex_none()
             .h_full()
             .bg(colors.background)
-            .child(match self.presence.shown() {
-                Some(Shown::Leaving) => slide_out(
-                    panel.child(input_blocker()),
-                    ("ask-panel-slide", self.presence.turn()),
-                    OVERLAY,
-                    Edge::Right,
-                    PANEL_SLIDE,
-                ),
-                Some(Shown::Entering) | None => slide_in(
-                    panel,
-                    ("ask-panel-slide", self.presence.turn()),
-                    OVERLAY,
-                    Edge::Right,
-                    PANEL_SLIDE,
-                ),
-            })
+            .child(along(panel, id, travel, |panel, position| {
+                let level = panel_level(position);
+                panel
+                    .relative()
+                    .opacity(level)
+                    .left(PANEL_SLIDE * (1. - level))
+            }))
             .into_any_element()
     }
 }
