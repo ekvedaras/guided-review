@@ -4,9 +4,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentReplied, Audience, CommentId, CommentPlace, HandOffId, HandOffState, LineLocation,
-    PieceDiff, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, StepId, TextBox,
-    ThreadComment, ThreadId,
+    AgentReplied, Audience, CommentGesture, CommentId, CommentPlace, HandOffId, HandOffState,
+    LineLocation, PieceDiff, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
+    StepId, TextBox, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -81,7 +81,10 @@ impl Pull {
             .clone();
         review.begin_selection(row.clone());
         review.extend_selection(row);
-        review.finish_selection().unwrap().unwrap()
+        review
+            .open_comment_box(CommentGesture::DragEnded)
+            .unwrap()
+            .unwrap()
     }
 
     /// A comment on line ten sent with Ask agent, so one hand-off is queued.

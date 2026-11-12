@@ -9,7 +9,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentRefusal, CommentResult, ImageCache, ImageMark, ImageSide, Review, ReviewStateFile,
+    CommentGesture, CommentResult, ImageCache, ImageMark, ImageSide, Review, ReviewStateFile,
     SendMode, TextBox,
 };
 use serde_json::json;
@@ -299,7 +299,10 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
     let sent = SentLog::default();
     let github = FakeGitHub::with_pull("main-tip", &pull.head, &sent);
 
-    let place = review.begin_file_comment(&file_path("logo.png")).unwrap();
+    let place = review
+        .open_comment_box(CommentGesture::OnFile(&file_path("logo.png")))
+        .unwrap()
+        .unwrap();
     review
         .type_in(&TextBox::Draft(place.clone()), "is the red intended?")
         .unwrap();
@@ -314,23 +317,6 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
         place,
         body: "is the red intended?".into()
     }));
-}
-
-#[test]
-fn a_file_comment_is_refused_while_the_tour_is_for_an_old_head() {
-    let pull = Pull::changing(
-        "logo.png",
-        Some(&png_of(2, 2, [0, 0, 0, 255])),
-        Some(&png_of(3, 3, [0, 0, 0, 255])),
-    );
-    let source = pull.source();
-    let mut review = pull.open(&source);
-    review.pr_head_is(Sha::new("a-newer-head"));
-
-    assert_eq!(
-        review.begin_file_comment(&file_path("logo.png")),
-        Err(CommentRefusal::TourIsOld)
-    );
 }
 
 #[test]

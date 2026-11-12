@@ -85,11 +85,11 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, Ask, Audience, CodeLink, Command, CommentBox, CommentPlace, GitHubPort,
-    HandOffId, InFlight, LineLocation, NextScreen, NoteSubject, NotesButton, PaletteAction, Place,
-    QueuedComment, ReadProgress, Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review,
-    Screen, ScreenTravel, SendMode, StepId, TextBox, ThreadId, ThreadView, ToastTone, TourLead,
-    Travel,
+    AgentReplied, Audience, CodeLink, Command, CommentBox, CommentGesture, CommentPlace,
+    GitHubPort, HandOffId, InFlight, LineLocation, NextScreen, NoteSubject, NotesButton,
+    PaletteAction, Place, QueuedComment, ReadProgress, Reopen, ReopenAfterSave, RestartGuard,
+    RestartStep, Review, Screen, ScreenTravel, SendMode, StepId, TextBox, ThreadId, ThreadView,
+    ToastTone, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -279,7 +279,7 @@ impl OneStepLayout {
         }
         let use_as_comment_subscription =
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
-                this.use_as_comment(ask, window, cx);
+                this.open_comment_box(CommentGesture::AskAnswer(ask), window, cx);
             });
         cx.subscribe(&ask, |this, panel, HandToAgent { ask, place }, cx| {
             let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
@@ -555,39 +555,32 @@ impl OneStepLayout {
             self.code_selection = None;
             cx.notify();
         }
-        let ended = self.session.update(cx, |session, cx| {
-            let review = session.review();
-            if !review.is_selecting() {
-                return None;
-            }
-            let finished = session.change(cx, Review::finish_selection);
-            if let Ok(Some(place)) = &finished {
-                session.compose(place.clone(), cx);
-            }
-            Some(finished)
-        });
-        let Some(finished) = ended else {
+        if !self.session.read(cx).review().is_selecting() {
             return;
-        };
-        match finished {
-            Ok(Some(_)) => window.focus(&self.composer_focus, cx),
-            Ok(None) => {}
-            Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
+        self.open_comment_box(CommentGesture::DragEnded, window, cx);
         self.frame_stats.selection_ended(started.elapsed());
-        cx.notify();
     }
 
-    fn begin_file_comment(&mut self, path: &FilePath, window: &mut Window, cx: &mut Context<Self>) {
-        let begun = self.session.update(cx, |session, cx| {
-            let begun = session.change(cx, |review| review.begin_file_comment(path));
-            if let Ok(place) = &begun {
-                session.compose(place.clone(), cx);
-            }
-            begun
+    /// The box that opens takes the keys. A refusal is named above the page until the next press
+    /// on the rows or the next answer used as a comment.
+    fn open_comment_box(
+        &mut self,
+        gesture: CommentGesture,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let opened = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.open_comment_box(gesture))
         });
-        match begun {
-            Ok(_) => window.focus(&self.composer_focus, cx),
+        match opened {
+            Ok(Some(_)) => {
+                if matches!(gesture, CommentGesture::AskAnswer(_)) {
+                    self.selection_notice = None;
+                }
+                window.focus(&self.composer_focus, cx);
+            }
+            Ok(None) => {}
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
         cx.notify();
@@ -599,7 +592,7 @@ impl OneStepLayout {
         let comment_path = path.clone();
         let on_comment: OnImageComment = Rc::new(move |window, cx| {
             layout.update(cx, |this, cx| {
-                this.begin_file_comment(&comment_path, window, cx);
+                this.open_comment_box(CommentGesture::OnFile(&comment_path), window, cx);
             });
         });
         let session = self.session.read(cx);
@@ -625,24 +618,6 @@ impl OneStepLayout {
         Rc::new(move |window, cx| {
             layout.update(cx, |this, cx| act(this, place.clone(), window, cx));
         })
-    }
-
-    fn use_as_comment(&mut self, ask: &Ask, window: &mut Window, cx: &mut Context<Self>) {
-        let used = self.session.update(cx, |session, cx| {
-            let used = session.change(cx, |review| review.use_as_comment(ask));
-            if let Ok(place) = &used {
-                session.compose(place.clone(), cx);
-            }
-            used
-        });
-        match used {
-            Ok(_) => {
-                self.selection_notice = None;
-                window.focus(&self.composer_focus, cx);
-            }
-            Err(refusal) => self.selection_notice = Some(refusal.to_string()),
-        }
-        cx.notify();
     }
 
     fn queued_comment(&self, queued: &QueuedComment, cx: &mut Context<Self>) -> QueuedCommentNote {

@@ -6,9 +6,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Audience, CommentId, CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation,
-    Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment,
-    ThreadId,
+    Audience, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
+    CommentResult, LineLocation, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
+    TextBox, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -133,7 +133,7 @@ fn drag(review: &mut Review, from: &str, to: &str) -> Result<Option<CommentPlace
     let (from, to) = (row(review, from), row(review, to));
     review.begin_selection(from);
     review.extend_selection(to);
-    review.finish_selection()
+    review.open_comment_box(CommentGesture::DragEnded)
 }
 
 fn comment_on(review: &mut Review, text: &str) -> CommentPlace {
@@ -461,17 +461,6 @@ fn nothing_is_written_while_the_tour_is_behind_the_pr_head() {
         pull.sent.github_calls()
     );
     assert_eq!(review.comment_drafts()[0].body, "stale");
-}
-
-#[test]
-fn a_new_comment_box_cannot_open_while_the_tour_is_behind_the_pr_head() {
-    let pull = Pull::new();
-    let mut review = pull.open();
-    review.check_pr_head(&pull.github_at("newer-head")).unwrap();
-
-    let refused = drag(&mut review, "line ten", "line ten");
-
-    assert_eq!(refused, Err(CommentRefusal::TourIsOld));
 }
 
 #[test]

@@ -7,10 +7,10 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentReplied, AgentReplyRefused, AgentReplyRequest, AgentStatus, Audience, CommentId,
-    CommentPlace, CommentResult, HandOffId, HandOffState, LineLocation, Problem, Reaction,
-    ReactionChange, ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark, SendMode,
-    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    AgentReplied, AgentReplyRefused, AgentReplyRequest, AgentStatus, Audience, CommentGesture,
+    CommentId, CommentPlace, CommentResult, HandOffId, HandOffState, LineLocation, Problem,
+    Reaction, ReactionChange, ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark,
+    SendMode, Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
     ThreadMessage, TourAgentPort, TourAgents,
 };
 use serde_json::json;
@@ -117,7 +117,10 @@ fn comment_on_line_ten(review: &mut Review, body: &str) -> CommentPlace {
         .clone();
     review.begin_selection(row.clone());
     review.extend_selection(row);
-    let place = review.finish_selection().unwrap().unwrap();
+    let place = review
+        .open_comment_box(CommentGesture::DragEnded)
+        .unwrap()
+        .unwrap();
     review
         .type_in(&TextBox::Draft(place.clone()), body)
         .unwrap();

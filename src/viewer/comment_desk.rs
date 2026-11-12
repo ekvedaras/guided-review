@@ -1,5 +1,6 @@
 use crate::pull_request::{PullRequestUrl, Sha};
 
+use super::ask::Ask;
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
     CommentResult, Origin, Outcome, QueuedComment, SendMode,
@@ -74,6 +75,17 @@ pub enum TextBox {
     Edit(CommentId),
     /// The body of the review being finished.
     FinishBody,
+}
+
+/// What the reviewer did to open a comment box.
+#[derive(Debug, Clone, Copy)]
+pub enum CommentGesture<'a> {
+    /// The drag over rows ended; a click is a drag over one row.
+    DragEnded,
+    /// The comment button under a picture: the comment is on the whole file.
+    OnFile(&'a FilePath),
+    /// Use as comment on an Ask: its latest answer goes into the box on its lines.
+    AskAnswer(&'a Ask),
 }
 
 /// A comment box as it is drawn: its draft, what it is doing and what stops it.

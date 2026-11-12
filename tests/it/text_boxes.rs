@@ -8,8 +8,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Audience, BoxState, CommentId, CommentPlace, CommentProblem, CommentRefusal, PieceDiff, Review,
-    ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment, ThreadId,
+    Audience, BoxState, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
+    PieceDiff, Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment,
+    ThreadId,
 };
 use serde_json::json;
 
@@ -131,7 +132,10 @@ fn open_box(review: &mut Review, kind: Kind) -> TextBox {
                 .location
                 .clone();
             review.begin_selection(row);
-            let place = review.finish_selection().unwrap().unwrap();
+            let place = review
+                .open_comment_box(CommentGesture::DragEnded)
+                .unwrap()
+                .unwrap();
             return TextBox::Draft(place);
         }
         Kind::Reply => TextBox::Reply(ThreadId::new("T1")),
@@ -374,4 +378,75 @@ fn a_discarded_comment_box_takes_its_problem_with_it() {
 
     assert_eq!(place_again, place);
     assert_eq!(state_of(&review, &place), Some((BoxState::Composing, None)));
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Gesture {
+    ClickOnLineTen,
+    CommentOnFile,
+}
+
+fn open_by(review: &mut Review, gesture: Gesture) -> Result<Option<CommentPlace>, CommentRefusal> {
+    let notes = file_path("notes.txt");
+    match gesture {
+        Gesture::ClickOnLineTen => {
+            let row = review
+                .current_step()
+                .unwrap()
+                .pieces
+                .iter()
+                .flat_map(PieceDiff::lines)
+                .find(|row| row.text == "line ten")
+                .unwrap()
+                .location
+                .clone();
+            review.begin_selection(row);
+            review.open_comment_box(CommentGesture::DragEnded)
+        }
+        Gesture::CommentOnFile => review.open_comment_box(CommentGesture::OnFile(&notes)),
+    }
+}
+
+#[test]
+fn a_gesture_that_opens_a_comment_box_gives_it_the_keys() {
+    for gesture in [Gesture::ClickOnLineTen, Gesture::CommentOnFile] {
+        let pull = Pull::new();
+        let mut review = pull.open();
+
+        let place = open_by(&mut review, gesture).unwrap().unwrap();
+
+        assert_eq!(review.composing(), Some(&place), "{gesture:?}");
+        assert_eq!(
+            review.text_of(&TextBox::Draft(place)),
+            Some(""),
+            "{gesture:?}"
+        );
+    }
+}
+
+#[test]
+fn a_refused_gesture_says_why_and_opens_no_box() {
+    for gesture in [Gesture::ClickOnLineTen, Gesture::CommentOnFile] {
+        let pull = Pull::new();
+        let mut review = pull.open();
+        review.pr_head_is(Sha::new("newer-head"));
+
+        let refused = open_by(&mut review, gesture);
+
+        assert_eq!(refused, Err(CommentRefusal::TourIsOld), "{gesture:?}");
+        assert_eq!(
+            CommentRefusal::TourIsOld.to_string(),
+            "Update tour to comment"
+        );
+        assert_eq!(review.comment_boxes().count(), 0, "{gesture:?}");
+        assert_eq!(review.composing(), None, "{gesture:?}");
+    }
+}
+
+#[test]
+fn a_drag_that_ended_on_no_rows_opens_nothing_and_says_nothing() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+
+    assert_eq!(review.open_comment_box(CommentGesture::DragEnded), Ok(None));
 }

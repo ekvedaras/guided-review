@@ -10,8 +10,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentRefusal, PieceDiff, Problem, Review, ReviewStateFile, Side, StepId,
-    TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
+    CommentGesture, CommentPlace, CommentRefusal, PieceDiff, Problem, Review, ReviewStateFile,
+    Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
 
@@ -330,7 +330,7 @@ fn drag_over(review: &mut Review, text: &str) -> Result<Option<CommentPlace>, Co
         .clone();
     review.begin_selection(at.clone());
     review.extend_selection(at);
-    review.finish_selection()
+    review.open_comment_box(CommentGesture::DragEnded)
 }
 
 #[test]

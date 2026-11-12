@@ -8,9 +8,10 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    Audience, CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
-    ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile, ReviewThread,
-    SendMode, Side, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    Audience, CommentGesture, CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown,
+    Problem, Reaction, ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile,
+    ReviewThread, SendMode, Side, TextBox, ThreadAction, ThreadActionResult, ThreadComment,
+    ThreadId,
 };
 use serde_json::json;
 
@@ -136,7 +137,10 @@ fn drag(review: &mut Review, from: &str, to: &str) -> CommentPlace {
     let (from, to) = (row(review, from), row(review, to));
     review.begin_selection(from);
     review.extend_selection(to);
-    review.finish_selection().unwrap().unwrap()
+    review
+        .open_comment_box(CommentGesture::DragEnded)
+        .unwrap()
+        .unwrap()
 }
 
 #[test]

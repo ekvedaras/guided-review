@@ -15,7 +15,7 @@ use super::ask::{Ask, Place};
 use super::ask_context;
 use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
-use super::comment_desk::{CommentBox, CommentDesk, TextBox, TourFreshness};
+use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
@@ -616,9 +616,22 @@ impl Review {
         }
     }
 
+    /// Opens the comment box the gesture asks for, which then takes the keys, or says why it
+    /// cannot open. `Ok(None)` when a drag ended on no rows.
+    pub fn open_comment_box(
+        &mut self,
+        gesture: CommentGesture,
+    ) -> Result<Option<CommentPlace>, CommentRefusal> {
+        match gesture {
+            CommentGesture::DragEnded => self.finish_selection(),
+            CommentGesture::OnFile(path) => self.begin_file_comment(path).map(Some),
+            CommentGesture::AskAnswer(ask) => self.use_as_comment(ask).map(Some),
+        }
+    }
+
     /// Puts the Ask's latest answer into the comment box on its lines, after any text already
     /// there. The reviewer edits and sends it; nothing goes to GitHub here.
-    pub fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
+    fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
         if matches!(ask.place, Place::Tour | Place::Step { .. }) {
             return Err(CommentRefusal::NoLines);
         }
@@ -1072,7 +1085,7 @@ impl Review {
     }
 
     /// The drag ends: when the rows can take a comment, a comment box opens on them.
-    pub fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
+    fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
         let screen_lines = self.screen_lines();
         let freshness = self.tour_freshness();
         self.comment_desk
@@ -1080,7 +1093,7 @@ impl Review {
     }
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
-    pub fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
+    fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
         let freshness = self.tour_freshness();
         self.comment_desk
             .begin_file_comment(&mut self.state, path, freshness, &self.head)

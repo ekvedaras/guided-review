@@ -10,8 +10,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPool, AskId, Asks, CommentRefusal, LineLocation, Opening,
-    Place, Review, ReviewStateFile, StepId, TextBox,
+    AgentLaunch, AgentLauncher, AgentPool, AskId, Asks, CommentGesture, CommentRefusal,
+    LineLocation, Opening, Place, Review, ReviewStateFile, StepId, TextBox,
 };
 use serde_json::json;
 
@@ -426,7 +426,10 @@ fn use_as_comment_fills_a_comment_box_on_the_asked_lines_with_the_answer() {
     let place = lines_of_total(&mut review, "return 1;", "return 2;");
     let (asks, id) = answered(&shop, &review, place);
 
-    let comment = review.use_as_comment(asks.get(id).unwrap()).unwrap();
+    let comment = review
+        .open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()))
+        .unwrap()
+        .unwrap();
 
     let guided_review::viewer::CommentPlace::Lines { start, end } = &comment else {
         panic!("a comment on lines is not on a file");
@@ -448,12 +451,18 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
         piece: "app/Order.php#Order::total".parse().unwrap(),
     };
     let (asks, id) = answered(&shop, &review, piece);
-    let first = review.use_as_comment(asks.get(id).unwrap()).unwrap();
+    let first = review
+        .open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()))
+        .unwrap()
+        .unwrap();
     review
         .type_in(&TextBox::Draft(first.clone()), "My note")
         .unwrap();
 
-    let second = review.use_as_comment(asks.get(id).unwrap()).unwrap();
+    let second = review
+        .open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()))
+        .unwrap()
+        .unwrap();
 
     assert_eq!(first, second);
     assert_eq!(review.comment_drafts()[0].body, "My note\n\npong");
@@ -468,19 +477,23 @@ fn use_as_comment_is_refused_without_lines_on_an_old_tour_and_for_an_ask_on_olde
     let (asks_on_lines, on_lines) = answered(&shop, &review, on_lines);
 
     assert_eq!(
-        review.use_as_comment(asks.get(on_step).unwrap()),
+        review.open_comment_box(CommentGesture::AskAnswer(asks.get(on_step).unwrap())),
         Err(CommentRefusal::NoLines)
     );
     let second_head = shop.commit_second_head();
     review.pr_head_is(Sha::new(&second_head));
     assert_eq!(
-        review.use_as_comment(asks_on_lines.get(on_lines).unwrap()),
+        review.open_comment_box(CommentGesture::AskAnswer(
+            asks_on_lines.get(on_lines).unwrap()
+        )),
         Err(CommentRefusal::TourIsOld)
     );
     shop.repin_onto(&second_head);
     let mut review = shop.open();
     assert_eq!(
-        review.use_as_comment(asks_on_lines.get(on_lines).unwrap()),
+        review.open_comment_box(CommentGesture::AskAnswer(
+            asks_on_lines.get(on_lines).unwrap()
+        )),
         Err(CommentRefusal::AskIsOnOlderCode)
     );
     assert_eq!(review.comment_drafts(), []);
@@ -494,7 +507,7 @@ fn use_as_comment_is_refused_for_an_ask_with_no_answer_yet() {
     let mut asks = shop.asks();
     let id = asks.start(place, review.head());
 
-    let refused = review.use_as_comment(asks.get(id).unwrap());
+    let refused = review.open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()));
 
     assert_eq!(refused, Err(CommentRefusal::NoAnswerYet));
     assert_eq!(shop.open().comment_drafts().first(), None);
@@ -529,7 +542,10 @@ fn a_comment_box_on_lines_asks_about_the_same_place_as_the_drag_that_opened_it()
     review.extend_selection(to);
     let dragged = review.place_of_lines(&review.selected_lines().unwrap());
 
-    let comment_place = review.finish_selection().unwrap().unwrap();
+    let comment_place = review
+        .open_comment_box(CommentGesture::DragEnded)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(review.ask_place_of(&comment_place), Some(dragged));
     review.go_to_summary();
