@@ -4,6 +4,8 @@ use std::sync::LazyLock;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
+mod blade;
+
 use crate::code_source::{CodeSource, FileAt, FileStatus};
 use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
@@ -167,6 +169,7 @@ impl FileSpans {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HighlightLanguage {
     Php,
+    Blade,
     TypeScript,
     Tsx,
     JavaScript,
@@ -180,6 +183,9 @@ enum HighlightLanguage {
 
 impl HighlightLanguage {
     fn for_path(path: &str) -> Option<Self> {
+        if path.ends_with(".blade.php") {
+            return Some(Self::Blade);
+        }
         let extension = path.rsplit_once('.')?.1;
         match extension {
             "php" => Some(Self::Php),
@@ -204,9 +210,18 @@ impl HighlightLanguage {
             "shell" | "zsh" | "console" => "sh",
             "yaml" => "yml",
             "rust" => "rs",
+            "blade" => "blade.php",
             other => return Self::for_path(&format!("snippet.{other}")),
         };
         Self::for_path(&format!("snippet.{extension}"))
+    }
+
+    /// None when the language's query is broken, which leaves the file plain.
+    fn highlight(self, source: &str) -> Option<Vec<Vec<Span>>> {
+        match self {
+            Self::Blade => highlight_blade(source),
+            _ => Some(highlight_file(self.configuration()?, source)),
+        }
     }
 
     /// Compiling a language's queries takes milliseconds, so each is compiled once, on first use, and shared.
@@ -238,7 +253,7 @@ impl HighlightLanguage {
             Self::JavaScript => &JAVASCRIPT,
             Self::Json => &JSON,
             Self::Css => &CSS,
-            Self::Html => &HTML,
+            Self::Blade | Self::Html => &HTML,
             Self::Rust => &RUST,
             Self::Bash => &BASH,
             Self::Yaml => &YAML,
@@ -250,6 +265,7 @@ impl HighlightLanguage {
     fn compile(self) -> Option<HighlightConfiguration> {
         // The later pattern wins, so a grammar's own additions come after the JavaScript base they extend.
         let (name, language, highlights, injections, locals) = match self {
+            Self::Blade => return Self::Html.compile(),
             Self::Php => (
                 "php",
                 tree_sitter_php::LANGUAGE_PHP.into(),
@@ -350,14 +366,46 @@ impl HighlightLanguage {
 /// Spans per line of a whole file. Whole files, because a PHP fragment is read as HTML
 /// and a multi-line string or comment is only coloured right with the lines around it.
 fn highlight_file(configuration: &HighlightConfiguration, source: &str) -> Vec<Vec<Span>> {
-    let line_starts: Vec<usize> = std::iter::once(0)
-        .chain(source.match_indices('\n').map(|(at, _)| at + 1))
-        .collect();
-    let mut lines: Vec<Vec<Span>> = vec![Vec::new(); line_starts.len()];
+    split_into_lines(source, &highlight_ranges(configuration, source))
+}
+
+/// A Blade file is HTML with Blade parts and PHP in them, each part coloured by its own grammar.
+fn highlight_blade(source: &str) -> Option<Vec<Vec<Span>>> {
+    let html = HighlightLanguage::Html.configuration()?;
+    let php = HighlightLanguage::Php.configuration()?;
+    let scan = blade::BladeScan::of(source);
+    let mut ranges = highlight_ranges(html, &scan.html_only(source));
+    ranges.extend(scan.marks.iter().cloned());
+    for code in &scan.php {
+        let Some(inner) = source.get(code.range.clone()) else {
+            continue;
+        };
+        let standalone = format!("{}{inner}{}", code.opening, code.closing);
+        let shift = code.opening.len();
+        ranges.extend(
+            highlight_ranges(php, &standalone)
+                .into_iter()
+                .filter(|(range, _)| range.start >= shift && range.end <= shift + inner.len())
+                .map(|(range, capture)| {
+                    let start = code.range.start + range.start - shift;
+                    (start..start + range.len(), capture)
+                }),
+        );
+    }
+    ranges.sort_by_key(|(range, _)| range.start);
+    Some(split_into_lines(source, &ranges))
+}
+
+/// The innermost capture of every coloured stretch, in source order.
+fn highlight_ranges(
+    configuration: &HighlightConfiguration,
+    source: &str,
+) -> Vec<(Range<usize>, Capture)> {
+    let mut ranges = Vec::new();
     let mut highlighter = Highlighter::new();
     let Ok(events) = highlighter.highlight(configuration, source.as_bytes(), None, None, |_| None)
     else {
-        return lines;
+        return ranges;
     };
     let mut open: Vec<usize> = Vec::new();
     for event in events.map_while(Result::ok) {
@@ -367,32 +415,38 @@ fn highlight_file(configuration: &HighlightConfiguration, source: &str) -> Vec<V
                 open.pop();
             }
             HighlightEvent::Source { start, end } => {
-                let Some(&capture) = open.last() else {
-                    continue;
-                };
-                let Some(capture) = Capture::ALL.get(capture).copied() else {
-                    continue;
-                };
-                let mut at = start;
-                while at < end {
-                    let line = line_starts.partition_point(|&line_start| line_start <= at) - 1;
-                    let line_end = line_starts
-                        .get(line + 1)
-                        .map_or(source.len(), |&next| next - 1);
-                    let stop = end.min(line_end);
-                    let (Some(&line_start), Some(spans)) =
-                        (line_starts.get(line), lines.get_mut(line))
-                    else {
-                        break;
-                    };
-                    if stop > at
-                        && let Some(span) = Span::new(at - line_start..stop - line_start, capture)
-                    {
-                        spans.push(span);
-                    }
-                    at = stop.max(line_end) + 1;
+                if let Some(capture) = open.last().and_then(|&open| Capture::ALL.get(open)) {
+                    ranges.push((start..end, *capture));
                 }
             }
+        }
+    }
+    ranges
+}
+
+fn split_into_lines(source: &str, ranges: &[(Range<usize>, Capture)]) -> Vec<Vec<Span>> {
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(source.match_indices('\n').map(|(at, _)| at + 1))
+        .collect();
+    let mut lines: Vec<Vec<Span>> = vec![Vec::new(); line_starts.len()];
+    for (range, capture) in ranges {
+        let mut at = range.start;
+        while at < range.end {
+            let line = line_starts.partition_point(|&line_start| line_start <= at) - 1;
+            let line_end = line_starts
+                .get(line + 1)
+                .map_or(source.len(), |&next| next - 1);
+            let stop = range.end.min(line_end);
+            let (Some(&line_start), Some(spans)) = (line_starts.get(line), lines.get_mut(line))
+            else {
+                break;
+            };
+            if stop > at
+                && let Some(span) = Span::new(at - line_start..stop - line_start, *capture)
+            {
+                spans.push(span);
+            }
+            at = stop.max(line_end) + 1;
         }
     }
     lines
@@ -466,17 +520,14 @@ impl HighlightRequest {
             let Ok(text) = source.file_at(&target.sha, &target.path) else {
                 continue;
             };
-            let Some(configuration) = language.configuration() else {
+            let Some(lines) = language.highlight(&text) else {
                 continue;
             };
             let side = match target.side {
                 Side::Base => &mut base,
                 Side::Head => &mut head,
             };
-            side.insert(
-                target.shown_path.clone(),
-                FileSpans::of(highlight_file(configuration, &text)),
-            );
+            side.insert(target.shown_path.clone(), FileSpans::of(lines));
         }
         Highlights {
             base_sha: self.base.clone(),
@@ -525,10 +576,9 @@ pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
     } else {
         text.to_owned()
     };
-    let Some(configuration) = language.configuration() else {
+    let Some(mut lines) = language.highlight(&source) else {
         return vec![Vec::new(); line_count];
     };
-    let mut lines = highlight_file(configuration, &source);
     if needs_php_tag {
         lines.remove(0);
     }

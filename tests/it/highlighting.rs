@@ -215,3 +215,120 @@ fn a_code_fence_in_a_language_we_cannot_colour_stays_plain() {
         vec![vec![]]
     );
 }
+
+const BLADE: &str = r#"@extends('layouts.app')
+{{-- the list --}}
+<ul class="{{ $class }}">
+@foreach ($users as $user)
+    <li>{{ $user->name }} {!! $user->bio !!}</li>
+@endforeach
+</ul>
+@php
+    $total = count($users);
+@endphp
+<a href="mailto:me@example.com" @click="open = true">mail</a>
+"#;
+
+fn blade_captures(line: usize) -> Vec<(String, Capture)> {
+    let lines = guided_review::viewer::highlight_snippet(Some("blade"), BLADE);
+    let text = BLADE.lines().nth(line).unwrap();
+    lines
+        .get(line)
+        .unwrap()
+        .iter()
+        .map(|span| (text.get(span.range()).unwrap().to_owned(), span.capture))
+        .collect()
+}
+
+fn has(captures: &[(String, Capture)], text: &str, capture: Capture) -> bool {
+    captures.iter().any(|(t, c)| t == text && *c == capture)
+}
+
+#[test]
+fn a_blade_directive_is_a_keyword_and_its_arguments_are_php() {
+    let foreach = blade_captures(3);
+    assert!(has(&foreach, "@foreach", Capture::Keyword), "{foreach:?}");
+    assert!(has(&foreach, "users", Capture::Variable), "{foreach:?}");
+    assert!(has(&foreach, "as", Capture::Keyword), "{foreach:?}");
+    assert!(has(&foreach, "user", Capture::Variable), "{foreach:?}");
+    assert!(has(&blade_captures(5), "@endforeach", Capture::Keyword));
+    assert!(has(&blade_captures(0), "@extends", Capture::Keyword));
+}
+
+#[test]
+fn html_around_blade_is_still_coloured_as_html() {
+    let item = blade_captures(4);
+    assert!(has(&item, "li", Capture::Tag), "{item:?}");
+    let attribute = blade_captures(2);
+    assert!(
+        has(&attribute, "class", Capture::Attribute),
+        "{attribute:?}"
+    );
+    assert!(has(&attribute, "ul", Capture::Tag), "{attribute:?}");
+}
+
+#[test]
+fn blade_echoes_have_special_delimiters_and_php_inside() {
+    let echoes = blade_captures(4);
+    assert!(
+        has(&echoes, "{{", Capture::PunctuationSpecial),
+        "{echoes:?}"
+    );
+    assert!(
+        has(&echoes, "{!!", Capture::PunctuationSpecial),
+        "{echoes:?}"
+    );
+    assert!(has(&echoes, "user", Capture::Variable), "{echoes:?}");
+    assert!(has(&echoes, "name", Capture::Property), "{echoes:?}");
+}
+
+#[test]
+fn a_blade_comment_is_a_comment() {
+    let comment = blade_captures(1);
+    assert!(
+        has(&comment, "{{-- the list --}}", Capture::Comment),
+        "{comment:?}"
+    );
+}
+
+#[test]
+fn php_inside_a_php_block_is_coloured() {
+    assert!(has(&blade_captures(8), "total", Capture::Variable));
+    assert!(has(&blade_captures(8), "count", Capture::Function));
+    assert!(has(&blade_captures(7), "@php", Capture::Keyword));
+    assert!(has(&blade_captures(9), "@endphp", Capture::Keyword));
+}
+
+#[test]
+fn an_at_sign_that_is_not_a_directive_stays_html() {
+    let link = blade_captures(10);
+    assert!(has(&link, "a", Capture::Tag), "{link:?}");
+    assert!(
+        !link
+            .iter()
+            .any(|(t, c)| t.contains("@click") && *c == Capture::Keyword),
+        "{link:?}"
+    );
+    assert!(has(&link, "@click", Capture::Attribute), "{link:?}");
+    assert!(
+        has(&link, "mailto:me@example.com", Capture::String),
+        "{link:?}"
+    );
+}
+
+#[test]
+fn a_blade_file_is_coloured_as_blade() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("v.blade.php", "<p>a</p>\n");
+    let base = repo.commit("base");
+    repo.write("v.blade.php", "<p>@if ($a)</p>\n");
+    let head = repo.commit("head");
+    let (mut review, source) = open_review(&repo, &base, &head);
+
+    highlighted(&mut review, &source);
+
+    let all = lines(&review);
+    let added = captures_in(line_with(&all, Side::Head, "@if"));
+    assert!(added.contains(&("@if", Capture::Keyword)), "{added:?}");
+    assert!(added.contains(&("p", Capture::Tag)), "{added:?}");
+}
