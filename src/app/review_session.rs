@@ -21,13 +21,15 @@ use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::sidebar_rows::SidebarRows;
+use crate::app::updater::release_install_in_the_way;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
-    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead,
-    RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen, SendMode, TextBox,
-    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, WorkPorts, line_count,
+    FinishResult, GitHubError, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
+    OldHead, OutageCause, Problem, ProblemKind, Read, RefreshBrief, RepinnedTour, Review,
+    ReviewChange, ReviewVerdict, Screen, SendMode, TextBox, ThreadAction, ThreadActionResult,
+    ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkPorts,
+    announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -54,6 +56,9 @@ pub struct ReviewSession {
     rows: PageRows,
     sidebar: SidebarRows,
     tour_agent: TourAgentState,
+    /// What the sidebar said before a snapshot scene staged another line.
+    #[cfg(feature = "snapshots")]
+    tour_agent_before_staging: Option<TourAgentState>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -106,11 +111,14 @@ impl EventEmitter<SessionEvent> for ReviewSession {}
 
 impl ReviewSession {
     pub fn new(
-        review: Review,
+        mut review: Review,
         wiring: SessionWiring,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        if let Some(in_the_way) = release_install_in_the_way() {
+            review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
+        }
         let SessionWiring {
             source,
             github,
@@ -133,6 +141,8 @@ impl ReviewSession {
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
+            #[cfg(feature = "snapshots")]
+            tour_agent_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -246,8 +256,16 @@ impl ReviewSession {
                 },
                 |this, outcome, cx| {
                     let after = this.change(cx, |review| review.land(outcome));
-                    if after == AfterLanding::FollowNewTourAgent {
-                        this.follow_tour_agent(cx);
+                    match after {
+                        AfterLanding::Nothing => {}
+                        AfterLanding::TourAgentIs(state) if state.can_retry() => {
+                            this.tour_agent = state;
+                            this.show_problems(cx);
+                        }
+                        // Herdr is back: the follow looks again, tells the sidebar what it finds and keeps it up.
+                        AfterLanding::FollowNewTourAgent | AfterLanding::TourAgentIs(_) => {
+                            this.follow_tour_agent(cx);
+                        }
                     }
                 },
             )
@@ -573,11 +591,46 @@ impl ReviewSession {
         cx.notify();
     }
 
+    /// Three reads that fail the way a GitHub outage fails them, through the review's own path.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
+        let outage = GitHubError::NotAnswering(OutageCause::ServerError(503));
+        self.review.could_not_read(Read::PrHead, &outage);
+        self.review.could_not_read(Read::PrDescription, &outage);
+        self.review.threads_not_read(&outage);
+        self.show_problems(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_outage(&mut self, cx: &mut Context<Self>) {
+        self.review.clear_problem(ProblemKind::GitHubNotAnswering);
+        self.show_problems(cx);
+    }
+
     #[cfg(feature = "snapshots")]
     pub fn unstage(&mut self, cx: &mut Context<Self>) {
         self.screen_list.reset(0);
         self.rows = PageRows::none();
         self.rebuild_rows(cx);
+    }
+
+    /// Shows herdr running but failing in the sidebar, as it did when its registry writer stopped.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_agent_link_off(&mut self, cx: &mut Context<Self>) {
+        let off = TourAgentState::LinkOff(crate::viewer::AgentLinkOff::HerdrFailed(
+            "cannot save terminals: registry writer stopped".to_owned(),
+        ));
+        let before = std::mem::replace(&mut self.tour_agent, off);
+        self.tour_agent_before_staging.get_or_insert(before);
+        self.show_problems(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_agent_link_off(&mut self, cx: &mut Context<Self>) {
+        if let Some(before) = self.tour_agent_before_staging.take() {
+            self.tour_agent = before;
+            self.show_problems(cx);
+        }
     }
 
     pub fn switch_failed(&mut self, reason: String, cx: &mut Context<Self>) {
@@ -594,10 +647,19 @@ impl ReviewSession {
     /// problem that was not there before is also a toast that stays until dismissed.
     fn show_sidebar(&mut self, cx: &mut Context<Self>) {
         let sidebar = self.sidebar_rows();
-        for problem in &sidebar.problems {
-            if !self.sidebar.problems.contains(problem) {
-                post_toast(cx, ToastTone::Danger, problem.to_string());
-            }
+        let before: Vec<Problem> = self
+            .sidebar
+            .problems
+            .iter()
+            .map(|shown| shown.problem.clone())
+            .collect();
+        let after: Vec<Problem> = sidebar
+            .problems
+            .iter()
+            .map(|shown| shown.problem.clone())
+            .collect();
+        for announcement in announcements(&before, &after) {
+            post_toast(cx, announcement.tone, announcement.text);
         }
         self.sidebar = sidebar;
     }
@@ -688,6 +750,11 @@ impl ReviewSession {
         let text = ask.hand_off_text(&pr, place);
         cx.background_executor()
             .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
+    }
+
+    /// Retry beside the message of an off link.
+    pub fn retry_agent_link(&mut self, cx: &mut Context<Self>) {
+        self.change(cx, |review| review.retry_agent_link());
     }
 
     /// Whether the comment box offers Ask agent.

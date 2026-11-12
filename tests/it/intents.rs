@@ -172,6 +172,21 @@ fn settings_open_blocks_the_jump_palette_and_the_pr_switcher() {
 }
 
 #[test]
+fn the_pr_switcher_asked_for_by_a_launch_opens_it_and_never_closes_it() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let review = three_step_review(&repo);
+
+    assert_eq!(
+        review.decide(Intent::ShowPrSwitcher, WindowMoment::default()),
+        Effect::OpenPrSwitcher
+    );
+    assert_eq!(
+        review.decide(Intent::ShowPrSwitcher, SETTINGS_OPEN),
+        Effect::Refused(Refusal::SettingsOpen)
+    );
+}
+
+#[test]
 fn settings_asked_for_from_outside_open_it_and_never_close_it() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let review = three_step_review(&repo);

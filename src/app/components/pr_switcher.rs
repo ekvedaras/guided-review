@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, Entity, FocusHandle, FontWeight, Global, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString,
+    App, Context, Entity, EventEmitter, FocusHandle, FontWeight, Global, InteractiveElement,
+    IntoElement, KeyDownEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
@@ -63,7 +63,7 @@ impl PrSwitching {
                 .await;
             list.update(cx, |list, cx| {
                 list.loaded(answer, &home);
-                list.agent_link(link);
+                list.agent_link(link.map_err(|off| off.to_string()));
                 list.check_tours(&home, active.read(cx));
                 cx.notify();
             });
@@ -72,8 +72,21 @@ impl PrSwitching {
     }
 }
 
+/// Where the switcher shows: over the PR on screen, or alone in the window while no PR is open yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitcherPlace {
+    OverReview,
+    /// It stays open while a picked PR opens or its tour is written, as there is nothing behind it;
+    /// closing it closes the window.
+    WholeWindow,
+}
+
+/// The switcher was closed while it filled the window.
+pub struct SwitcherDismissed;
+
 /// The overlay behind the PR title: the reviewer's relevant PRs under a query box.
 pub struct PrSwitcherView {
+    place: SwitcherPlace,
     presence: Presence,
     query: String,
     shown: Vec<ShownRow>,
@@ -122,10 +135,17 @@ impl ShownRow {
     }
 }
 
+impl EventEmitter<SwitcherDismissed> for PrSwitcherView {}
+
 impl PrSwitcherView {
     pub const KEY_CONTEXT: &str = "PrSwitcherInput";
 
-    pub fn new(switching: PrSwitching, owner_focus: FocusHandle, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        switching: PrSwitching,
+        place: SwitcherPlace,
+        owner_focus: FocusHandle,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let list_changes = cx.observe(&switching.list, |this, _, cx| {
             if this.presence.is_open() {
                 this.refresh_shown(cx);
@@ -133,6 +153,7 @@ impl PrSwitcherView {
             }
         });
         let mut view = Self {
+            place,
             presence: Presence::lasting(OVERLAY),
             query: String::new(),
             shown: Vec::new(),
@@ -168,13 +189,45 @@ impl PrSwitcherView {
         cx.notify();
     }
 
+    /// Opens it, or leaves it as it is when it is open already.
+    pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.presence.is_open() {
+            self.open(window, cx);
+        }
+    }
+
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.place == SwitcherPlace::WholeWindow {
+            cx.emit(SwitcherDismissed);
+            return;
+        }
         if !self.presence.is_open() {
             return;
         }
         close_presence(self, cx, |this| &mut this.presence);
         window.focus(&self.owner_focus, cx);
         cx.notify();
+    }
+
+    /// The picked PR did not open; the reviewer may pick another.
+    pub fn refuse(&mut self, reason: String, cx: &mut Context<Self>) {
+        self.refusal = Some(reason.into());
+        cx.notify();
+    }
+
+    /// After a pick, the switcher goes away unless it is all the window holds.
+    fn picked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.place {
+            SwitcherPlace::OverReview => self.close(window, cx),
+            SwitcherPlace::WholeWindow => {
+                let (home, active) = (self.switching.home.clone(), self.switching.active.clone());
+                self.switching.list.update(cx, |list, cx| {
+                    list.check_tours(&home, active.read(cx));
+                });
+                self.refresh_shown(cx);
+                cx.notify();
+            }
+        }
     }
 
     fn refresh_shown(&mut self, cx: &Context<Self>) {
@@ -187,7 +240,7 @@ impl PrSwitcherView {
         let selected = self.switching.list.read(cx).selected();
         match self.switching.list.read(cx).pick(selected) {
             Ok(Pick::Show(pr)) => {
-                self.close(window, cx);
+                self.picked(window, cx);
                 self.switching.active.update(cx, |active, cx| {
                     active.picked(pr.clone());
                     cx.notify();
@@ -195,8 +248,8 @@ impl PrSwitcherView {
                 (self.switching.show)(pr);
             }
             Ok(Pick::Write(pr)) => {
-                self.close(window, cx);
                 tour_writer::write(pr, cx);
+                self.picked(window, cx);
             }
             Err(refusal) => {
                 self.refusal = Some(refusal.to_string().into());
@@ -354,11 +407,14 @@ impl Render for PrSwitcherView {
             "No pull request matches."
         };
         let message = self.refusal.clone().or_else(|| self.notice.clone());
+        let closes_on_scrim = self.place == SwitcherPlace::OverReview;
         modal_layer_for(&colors, "pr-switcher-scrim", &self.presence)
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|this, _, window, cx| this.close(window, cx)),
-            )
+            .when(closes_on_scrim, |scrim| {
+                scrim.on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.close(window, cx)),
+                )
+            })
             .child(rise_for(
                 overlay_panel(&colors)
                     .id("pr-switcher")

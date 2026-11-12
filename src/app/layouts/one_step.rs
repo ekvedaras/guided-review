@@ -55,7 +55,7 @@ use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
-use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching};
+use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching, SwitcherPlace};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
@@ -73,6 +73,7 @@ use crate::app::components::thread_view::{
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
+use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -241,7 +242,8 @@ impl OneStepLayout {
             },
         )
         .detach();
-        let pr_switcher = cx.new(|cx| PrSwitcherView::new(switching, focus.clone(), cx));
+        let pr_switcher = cx
+            .new(|cx| PrSwitcherView::new(switching, SwitcherPlace::OverReview, focus.clone(), cx));
         let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
         cx.subscribe_in(
@@ -895,6 +897,10 @@ impl OneStepLayout {
         self.act(Intent::ShowSettings, window, cx);
     }
 
+    pub fn show_pr_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.act(Intent::ShowPrSwitcher, window, cx);
+    }
+
     /// The one place that reacts to Save having written `config.toml`. The PR on screen was built with the
     /// old settings, so it opens again, once no Ask answers and no hand-off is being typed; the panel
     /// closes either way and the wait shows in the window (see `waiting_for_reopen`).
@@ -1018,6 +1024,9 @@ impl OneStepLayout {
             Effect::OpenSettings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
+            Effect::OpenPrSwitcher => self
+                .pr_switcher
+                .update(cx, |switcher, cx| switcher.show(window, cx)),
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
@@ -1086,6 +1095,19 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_tour_agent);
             }))
         });
+        let retry = agent.can_retry.then(|| {
+            icon_label_button(
+                colors,
+                "retry-tour-agent-link",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Refresh,
+                "Retry",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::retry_agent_link);
+            }))
+        });
         div().flex().flex_col().gap_1().child(
             div()
                 .flex()
@@ -1099,7 +1121,8 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
                 )
-                .children(show),
+                .children(show)
+                .children(retry),
         )
     }
 
@@ -1129,11 +1152,23 @@ impl OneStepLayout {
                     .then(|| SharedString::from("Not synced with GitHub yet")),
             )
             .map(|notice| div().text_xs().text_color(colors.warning).child(notice));
-        let problems = sidebar.problems.iter().map(|problem| {
+        let problems = sidebar.problems.iter().map(|shown| {
             div()
-                .text_xs()
-                .text_color(colors.danger)
-                .child(problem.clone())
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.danger)
+                        .child(shown.headline.clone()),
+                )
+                .children(
+                    shown
+                        .detail
+                        .clone()
+                        .map(|detail| div().text_xs().text_color(colors.muted_text).child(detail)),
+                )
         });
         let changes_not_shown = sidebar
             .changes_not_shown
@@ -1263,7 +1298,8 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// Settings and the shortcuts sheet, at the foot of the sidebar.
+    /// Settings and the shortcuts sheet at the foot of the sidebar, under a quiet line with the version
+    /// this app runs, so the Settings row stays at the very bottom.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
         let shortcuts = button(
             colors,
@@ -1284,10 +1320,9 @@ impl OneStepLayout {
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
-        div()
-            .flex_none()
+        let row = div()
             .px_2()
-            .py_2()
+            .pb_2()
             .flex()
             .items_center()
             .gap_1()
@@ -1313,7 +1348,13 @@ impl OneStepLayout {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),
             )
-            .child(shortcuts)
+            .child(shortcuts);
+        let version = div().px_4().pt_2().pb_1().flex().child(
+            version_link(colors, "sidebar-version", colors.faint_text())
+                .text_xs()
+                .line_height(px(12.)),
+        );
+        div().flex_none().child(version).child(row)
     }
 
     /// The PR this review is of, and the window-wide actions.

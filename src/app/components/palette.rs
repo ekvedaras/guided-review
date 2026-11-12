@@ -651,6 +651,11 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(0.), self.accent.opacity(0.25).into()).spread_radius(px(3.))]
     }
 
+    /// Fainter than `muted_text`, for what is there to look up and not read day to day, like the version.
+    pub fn faint_text(&self) -> Rgba {
+        self.muted_text.opacity(0.6)
+    }
+
     /// The soft disc behind the current step's trail dot.
     pub fn trail_glow(&self) -> Rgba {
         self.trail.start.opacity(0.28)

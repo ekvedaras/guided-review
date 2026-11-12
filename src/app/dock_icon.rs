@@ -1,9 +1,9 @@
 //! A binary run straight from `cargo install` has no app bundle, so macOS shows a blank Dock icon
 //! unless the app hands it one while it runs.
 
-use crate::app::assets::Assets;
+use crate::app_icon::AppIcon;
 
-const SIZE: u32 = 512;
+const SIZE: u16 = 512;
 
 #[cfg(target_os = "macos")]
 #[expect(
@@ -34,19 +34,8 @@ pub fn show() {
 pub fn show() {}
 
 fn picture() -> Option<Vec<u8>> {
-    let tree = if cfg!(debug_assertions) {
-        let mut options = usvg::Options::default();
-        options.fontdb_mut().load_system_fonts();
-        usvg::Tree::from_str(Assets::DEV_APP_ICON, &options).ok()?
-    } else {
-        usvg::Tree::from_str(Assets::APP_ICON, &usvg::Options::default()).ok()?
-    };
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(SIZE, SIZE)?;
-    let scale = SIZE as f32 / tree.size().width();
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
-    pixmap.encode_png().ok()
+    AppIcon::RUNNING
+        .png(SIZE)
+        .inspect_err(|error| eprintln!("could not draw the Dock icon: {error:#}"))
+        .ok()
 }

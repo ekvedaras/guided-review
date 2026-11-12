@@ -1,12 +1,66 @@
 //! Updates: finding a newer published release of the app and installing it in place of this one.
 
+mod app_bundle;
 mod release_install;
 
 use std::str::FromStr;
 
 use anyhow::Context;
 
-pub use release_install::{Installed, ReleaseInstall, SkillLink};
+pub use app_bundle::{
+    AppBundle, BundlePlaced, IN_LOGIN_SHELL, Relaunch, info_plist, relaunch_in_login_shell,
+    write_bundle_template,
+};
+pub use release_install::{InTheWay, Installed, ReleaseInstall, SkillLink};
+
+/// The build of this binary as `--version` prints it and the app shows it: the release version and
+/// the commit it was built from, marked `-dirty` when built with uncommitted changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppVersion {
+    shown: &'static str,
+    /// The tag of the release this build is, when it was built clean from the commit of that tag.
+    release_tag: Option<&'static str>,
+}
+
+impl AppVersion {
+    pub const RUNNING: Self = Self::new(
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            " (",
+            env!("GUIDED_REVIEW_GIT"),
+            ")"
+        ),
+        if env!("GUIDED_REVIEW_RELEASE_TAG").is_empty() {
+            None
+        } else {
+            Some(env!("GUIDED_REVIEW_RELEASE_TAG"))
+        },
+    );
+
+    pub const fn new(shown: &'static str, release_tag: Option<&'static str>) -> Self {
+        Self { shown, release_tag }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.shown
+    }
+
+    /// Where a click on the version leads: the release's own page, or for a source build that is no
+    /// release, the list of releases, as its commit may never have been pushed.
+    pub fn page(self) -> String {
+        let releases = format!("{}/releases", env!("CARGO_PKG_REPOSITORY"));
+        match self.release_tag {
+            Some(tag) => format!("{releases}/tag/{tag}"),
+            None => releases,
+        }
+    }
+}
+
+impl std::fmt::Display for AppVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.shown)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {

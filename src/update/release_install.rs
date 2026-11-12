@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -6,6 +7,7 @@ use anyhow::Context;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
+use super::app_bundle::{AppBundle, BUNDLE_FOLDER, BundlePlaced};
 use super::{ReleasesPort, Update, Version};
 
 /// The way the README installs a release: each version unpacked in its own folder under
@@ -17,14 +19,33 @@ pub struct ReleaseInstall {
     versions: PathBuf,
     bin_link: PathBuf,
     skill_link: PathBuf,
+    bundle: AppBundle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
     pub version: Version,
-    /// The bin link, which now runs the new version.
+    /// The new version's own binary, which the restart runs: never the bin link or a name looked up on
+    /// `PATH`, either of which may lead to another binary by then.
     pub program: PathBuf,
     pub skill: SkillLink,
+}
+
+/// A `guided-review` that is not the release install but runs in its place, so the release install's
+/// updates never reach the reviewer. Removing `binary` puts it right.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InTheWay {
+    /// The app runs `binary` itself.
+    Runs {
+        binary: PathBuf,
+        release_install: PathBuf,
+    },
+    /// The app is the release install, but `binary` comes before it on `PATH`, so `guided-review` in a
+    /// terminal or run by the tour skill is that one.
+    FirstOnPath {
+        binary: PathBuf,
+        release_install: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +61,7 @@ impl ReleaseInstall {
             versions: home.join(".local/share/guided-review"),
             bin_link: home.join(".local/bin/guided-review"),
             skill_link: home.join(".claude/skills/tour"),
+            bundle: AppBundle::in_home(home),
         }
     }
 
@@ -50,6 +72,40 @@ impl ReleaseInstall {
             return false;
         };
         fs::canonicalize(exe).is_ok_and(|exe| exe == linked)
+    }
+
+    /// The `guided-review` that runs in place of the release install, when one is installed: `exe`
+    /// itself, or the first `guided-review` on `path` that does not lead to it.
+    pub fn in_the_way(&self, exe: &Path, path: &OsStr) -> Option<InTheWay> {
+        let release = self.linked_into_versions(&self.bin_link)?;
+        let release_install = self.bin_link.clone();
+        if !self.runs(exe) {
+            return Some(InTheWay::Runs {
+                binary: exe.to_path_buf(),
+                release_install,
+            });
+        }
+        let first_on_path = std::env::split_paths(path)
+            .map(|folder| folder.join("guided-review"))
+            .find(|binary| binary.is_file())?;
+        let leads_to_release = fs::canonicalize(&first_on_path).is_ok_and(|it| it == release);
+        (!leads_to_release).then_some(InTheWay::FirstOnPath {
+            binary: first_on_path,
+            release_install,
+        })
+    }
+
+    /// Puts the bundle of the running release in `~/Applications` when it is missing or another
+    /// version's. An update by 0.6.0, which knew nothing of the bundle, leaves it so.
+    pub fn bring_bundle_up_to_date(&self, exe: &Path) -> anyhow::Result<BundlePlaced> {
+        let release = self
+            .linked_into_versions(&self.bin_link)
+            .filter(|_| self.runs(exe))
+            .and_then(|binary| binary.parent().map(Path::to_path_buf));
+        match release {
+            Some(release) => self.bundle.place_from(&release.join(BUNDLE_FOLDER)),
+            None => Ok(BundlePlaced::NotInRelease),
+        }
     }
 
     /// Checks the archive against its checksum file, unpacks it beside the versions there are, and
@@ -84,10 +140,12 @@ impl ReleaseInstall {
             }
             None => SkillLink::NotOurs,
         };
-        relink(&self.bin_link, &release.join("guided-review"))?;
+        self.bundle.place_from(&release.join(BUNDLE_FOLDER))?;
+        let program = release.join("guided-review");
+        relink(&self.bin_link, &program)?;
         Ok(Installed {
             version: update.version,
-            program: self.bin_link.clone(),
+            program,
             skill,
         })
     }

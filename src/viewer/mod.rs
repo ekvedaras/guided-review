@@ -18,6 +18,7 @@ mod diff_fence;
 mod display_options;
 mod file_block;
 mod finish_review;
+mod github_outage;
 mod hand_offs;
 mod highlight;
 mod image_preview;
@@ -62,7 +63,9 @@ pub use active_pr::{
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
-pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowWriting};
+pub use app_window::{
+    AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
+};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
@@ -86,6 +89,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
+pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
     HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, SeenMark, ThreadMessage,
@@ -101,7 +105,7 @@ pub use intent::{
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };
-pub use markdown::{Block, Markdown, Run};
+pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use page::{
@@ -118,7 +122,7 @@ pub use ports::{
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
-pub use problems::{Problem, ProblemKind, Problems, Read};
+pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
@@ -147,12 +151,13 @@ pub use thread_actions::{
 pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
-    AgentStatus, AppAgent, LiveTerminal, OwnAgentHandOff, SendOutcome, TerminalId, TourAgentPort,
-    TourAgentStart, TourAgentState, TourAgents,
+    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff, SendOutcome,
+    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
 pub use work_agenda::{
-    AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind, WorkOutcome, WorkPorts,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind,
+    WorkOutcome, WorkPorts,
 };

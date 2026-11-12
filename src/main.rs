@@ -20,13 +20,19 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{StepId, Tour};
 use guided_review::tour_check;
+use guided_review::update::{
+    AppVersion, BundlePlaced, IN_LOGIN_SHELL, ReleaseInstall, Version, relaunch_in_login_shell,
+    write_bundle_template,
+};
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
+use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
-#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GUIDED_REVIEW_GIT"), ")"), about)]
+#[command(version = AppVersion::RUNNING.as_str(), about)]
 struct Cli {
+    /// With none, as when Guided Review.app is launched, the app shows the PR switcher
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -66,6 +72,11 @@ enum Command {
     },
     /// Show the app's Settings, also with no PR open
     Settings,
+    /// Put Guided Review.app in ~/Applications, from this release install
+    InstallApp,
+    /// Write the Info.plist and the icon pictures the release archive's Guided Review.app is made of
+    #[command(hide = true)]
+    BundleTemplate { out: std::path::PathBuf },
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
         pr: PullRequestUrl,
@@ -102,7 +113,10 @@ enum EvalAction {
 }
 
 fn main() -> anyhow::Result<()> {
-    match Cli::parse().command {
+    let Some(command) = Cli::parse().command else {
+        return launch();
+    };
+    match command {
         Command::Outline { pr } => outline(&pr),
         Command::Show { pr, ids, around } => show(&pr, &ids, around),
         Command::TourPath { pr } => tour_path(&pr),
@@ -112,6 +126,8 @@ fn main() -> anyhow::Result<()> {
         Command::Open { pr } => open(&pr, &Launch::Open),
         Command::Restart { pr, at } => open(&pr, &Launch::Restart { at }),
         Command::Settings => settings(),
+        Command::InstallApp => install_app(),
+        Command::BundleTemplate { out } => write_bundle_template(&out, Version::running()),
         Command::AgentReply {
             pr,
             hand_off,
@@ -336,6 +352,47 @@ fn settings() -> anyhow::Result<()> {
         }
         other => anyhow::bail!("{other}"),
     }
+}
+
+/// A launch of Guided Review.app first runs itself again through the login shell, then shows the PR
+/// switcher; `guided-review` with no command shows it too.
+fn launch() -> anyhow::Result<()> {
+    let exe = std::env::current_exe().context("could not find the guided-review binary")?;
+    let shell = std::env::var_os("SHELL");
+    let is_in_login_shell = std::env::var_os(IN_LOGIN_SHELL).is_some();
+    if let Some(relaunch) = relaunch_in_login_shell(&exe, shell.as_deref(), is_in_login_shell) {
+        let error = std::process::Command::new(&relaunch.program)
+            .args(&relaunch.args)
+            .env(IN_LOGIN_SHELL, "1")
+            .exec();
+        return Err(error).with_context(|| {
+            format!(
+                "could not run the app through {}",
+                relaunch.program.display()
+            )
+        });
+    }
+    let answer = hand_over(&AppFolder::in_home(&home_folder()?), &Request::ShowSwitcher)?;
+    match answer {
+        Answer::ShowingSwitcher => {
+            println!("{answer}");
+            Ok(())
+        }
+        other => anyhow::bail!("{other}"),
+    }
+}
+
+fn install_app() -> anyhow::Result<()> {
+    let exe = std::env::current_exe().context("could not find the guided-review binary")?;
+    let placed = ReleaseInstall::in_home(&home_folder()?).bring_bundle_up_to_date(&exe)?;
+    match placed {
+        BundlePlaced::Refreshed => println!("Guided Review.app is in ~/Applications"),
+        BundlePlaced::Current => println!("Guided Review.app in ~/Applications is up to date"),
+        BundlePlaced::NotInRelease => anyhow::bail!(
+            "only a release install carries Guided Review.app; this guided-review is not one"
+        ),
+    }
+    Ok(())
 }
 
 fn serve() -> anyhow::Result<()> {

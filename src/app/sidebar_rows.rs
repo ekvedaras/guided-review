@@ -4,7 +4,9 @@
 use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
-use crate::viewer::{ApproveWarning, ReadProgress, Review, Screen, StepId, TourAgentState};
+use crate::viewer::{
+    ApproveWarning, Problem, ReadProgress, Review, Screen, StepId, TourAgentState,
+};
 
 pub struct SidebarStep {
     pub id: StepId,
@@ -40,6 +42,25 @@ pub struct SidebarTourAgent {
     pub is_shown: bool,
     pub line: SharedString,
     pub can_show: bool,
+    pub can_retry: bool,
+}
+
+/// A problem as the sidebar lists it: the headline, and under it, quieter, what it leaves out.
+#[derive(Clone)]
+pub struct SidebarProblem {
+    pub headline: SharedString,
+    pub detail: Option<SharedString>,
+    pub problem: Problem,
+}
+
+impl SidebarProblem {
+    fn of(problem: Problem) -> Self {
+        Self {
+            headline: problem.to_string().into(),
+            detail: problem.detail().map(SharedString::from),
+            problem,
+        }
+    }
 }
 
 pub struct SidebarRows {
@@ -52,7 +73,7 @@ pub struct SidebarRows {
     pub sync_banner: Option<SharedString>,
     pub not_synced: bool,
     /// What went wrong that the reviewer must know about, until it is put right.
-    pub problems: Vec<SharedString>,
+    pub problems: Vec<SidebarProblem>,
     /// Changed code no page shows, named so the reviewer reads it on GitHub.
     pub changes_not_shown: Option<SharedString>,
     pub is_summary_current: bool,
@@ -89,6 +110,7 @@ impl SidebarRows {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
                 line: tour_agent.to_string().into(),
                 can_show: tour_agent.can_show(),
+                can_retry: tour_agent.can_retry(),
             },
             last_review: review.last_review().map(|last| SidebarLastReview {
                 headline: last.headline(is_old).into(),
@@ -106,8 +128,8 @@ impl SidebarRows {
             changes_not_shown: changes_not_shown_notice(&review.changes_not_shown()),
             problems: review
                 .problems()
-                .iter()
-                .map(|problem| problem.to_string().into())
+                .into_iter()
+                .map(SidebarProblem::of)
                 .collect(),
             is_summary_current: review.screen() == &Screen::Summary,
             steps,

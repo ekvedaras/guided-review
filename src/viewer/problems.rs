@@ -1,8 +1,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
+use crate::update::InTheWay;
+
+use super::github_outage::{Affected, Outage, OutageCause, waiting};
 use super::saved_state::RepinRunning;
+use super::toasts::ToastTone;
 
 /// Something that went wrong which the reviewer must know about, shown until it is put right.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +18,8 @@ pub enum Problem {
     ChangeNotKeptWhileRepinning,
     /// The threads shown are as GitHub had them at the last read that went through.
     ThreadsNotRead(String),
+    /// GitHub does not answer: one problem for all the reads that failed because of it.
+    GitHubNotAnswering(Outage),
     /// A read from GitHub failed, so what the screen shows for it is missing or as of an earlier read.
     NotRead(Read, String),
     /// A code link was clicked and its IDE command could not be run, so nothing opened.
@@ -33,6 +40,8 @@ pub enum Problem {
     SwitchFailed(String),
     /// Show agent was clicked and the terminal did not come up.
     ShowAgentFailed(String),
+    /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
+    ReleaseInstallInTheWay(InTheWay),
 }
 
 /// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
@@ -45,6 +54,8 @@ pub enum ProblemKind {
     ChangeNotKeptWhileRepinning,
     /// Cleared by a read of the threads that goes through.
     ThreadsNotRead,
+    /// Cleared when each read it keeps from going through goes through.
+    GitHubNotAnswering,
     /// Cleared by a good read of the same thing from GitHub.
     NotRead(Read),
     /// Cleared by the next IDE command that runs.
@@ -65,6 +76,8 @@ pub enum ProblemKind {
     SwitchFailed,
     /// Cleared by the next Show agent that brings the terminal up.
     ShowAgentFailed,
+    /// Raised when the review opens; a review opened once the binary is removed has none.
+    ReleaseInstallInTheWay,
 }
 
 impl Problem {
@@ -73,6 +86,7 @@ impl Problem {
             Self::NotSaved(_) => ProblemKind::NotSaved,
             Self::ChangeNotKeptWhileRepinning => ProblemKind::ChangeNotKeptWhileRepinning,
             Self::ThreadsNotRead(_) => ProblemKind::ThreadsNotRead,
+            Self::GitHubNotAnswering(_) => ProblemKind::GitHubNotAnswering,
             Self::NotRead(read, _) => ProblemKind::NotRead(*read),
             Self::IdeNotStarted(_) => ProblemKind::IdeNotStarted,
             Self::CodeOnGitHub(_) => ProblemKind::CodeOnGitHub,
@@ -83,6 +97,7 @@ impl Problem {
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
+            Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
         }
     }
 }
@@ -102,6 +117,29 @@ impl Problems {
         self.raised.remove(&kind);
     }
 
+    /// A read failed because GitHub does not answer. Returns how long to wait before it is tried again.
+    pub fn github_not_answering(&mut self, cause: OutageCause, affected: Affected) -> Duration {
+        let mut outage = match self.raised.remove(&ProblemKind::GitHubNotAnswering) {
+            Some(Problem::GitHubNotAnswering(outage)) => outage,
+            _ => Outage::new(cause),
+        };
+        let retry_in = outage.failed(cause, affected);
+        self.raise(Problem::GitHubNotAnswering(outage));
+        retry_in
+    }
+
+    /// GitHub answered a read, with the data or with an error of its own: it is answering.
+    pub fn github_answered(&mut self, affected: Affected) {
+        let Some(Problem::GitHubNotAnswering(mut outage)) =
+            self.raised.remove(&ProblemKind::GitHubNotAnswering)
+        else {
+            return;
+        };
+        if !outage.answered(affected) {
+            self.raise(Problem::GitHubNotAnswering(outage));
+        }
+    }
+
     /// In the order of the kinds.
     pub fn list(&self) -> impl Iterator<Item = &Problem> {
         self.raised.values()
@@ -118,23 +156,84 @@ pub enum Read {
     LastReview,
 }
 
+impl Problem {
+    /// A line under the problem, for what the headline leaves out.
+    pub fn detail(&self) -> Option<String> {
+        let Self::GitHubNotAnswering(outage) = self else {
+            return None;
+        };
+        let affected: Vec<String> = outage
+            .affected()
+            .map(|affected| affected.to_string())
+            .collect();
+        Some(format!("Not checked: {}.", affected.join(", ")))
+    }
+
+    /// What the reviewer is told when this problem is new. An outage is not the reviewer's failure
+    /// and the sidebar keeps it, so its note leaves by itself; other problems stay until dismissed.
+    pub fn announcement(&self) -> Announcement {
+        match self {
+            Self::GitHubNotAnswering(outage) => Announcement {
+                tone: ToastTone::Neutral,
+                text: format!("GitHub is not answering ({})", outage.cause()),
+            },
+            other => Announcement {
+                tone: ToastTone::Danger,
+                text: other.to_string(),
+            },
+        }
+    }
+
+    /// An outage is one story whatever its cause, retry time and reads become; any other problem is
+    /// told again when its words change.
+    fn is_told_by(&self, earlier: &Self) -> bool {
+        match (self, earlier) {
+            (Self::GitHubNotAnswering(_), Self::GitHubNotAnswering(_)) => true,
+            _ => self == earlier,
+        }
+    }
+}
+
+pub struct Announcement {
+    pub tone: ToastTone,
+    pub text: String,
+}
+
+/// The notes to show now that the problems went from `before` to `after`.
+pub fn announcements(before: &[Problem], after: &[Problem]) -> Vec<Announcement> {
+    let is_outage = |problem: &Problem| matches!(problem, Problem::GitHubNotAnswering(_));
+    let new = after
+        .iter()
+        .filter(|problem| !before.iter().any(|earlier| problem.is_told_by(earlier)))
+        .map(Problem::announcement);
+    let back =
+        (before.iter().any(is_outage) && !after.iter().any(is_outage)).then(|| Announcement {
+            tone: ToastTone::Success,
+            text: "GitHub is back".to_owned(),
+        });
+    new.chain(back).collect()
+}
+
 impl fmt::Display for Problem {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::GitHubNotAnswering(outage) => write!(
+                formatter,
+                "GitHub is not answering ({}). Some things may be out of date; trying again in {}.",
+                outage.cause(),
+                waiting(outage.retry_in())
+            ),
             Self::NotSaved(reason) => write!(formatter, "Not saved to disk: {reason}"),
             Self::ChangeNotKeptWhileRepinning => write!(formatter, "Not kept: {RepinRunning}"),
-            Self::ThreadsNotRead(reason) => write!(
-                formatter,
-                "Comments may be out of date, could not read them from GitHub: {reason}"
-            ),
-            Self::NotRead(Read::PrHead, reason) => write!(
-                formatter,
-                "New commits on the PR are not checked, could not read its head from GitHub: {reason}"
-            ),
-            Self::NotRead(Read::PrDescription, reason) => write!(
-                formatter,
-                "The PR description may be out of date, could not read it from GitHub: {reason}"
-            ),
+            Self::ThreadsNotRead(reason) => {
+                write!(formatter, "Comments may be out of date: {reason}")
+            }
+            Self::NotRead(Read::PrHead, reason) => {
+                write!(formatter, "New commits on the PR are not checked: {reason}")
+            }
+            Self::NotRead(Read::PrDescription, reason) => {
+                write!(formatter, "The PR description may be out of date: {reason}")
+            }
             Self::NotRead(Read::PendingReview, reason) => write!(
                 formatter,
                 "Could not look for a pending review on GitHub, so Comment now may be wrong: {reason}"
@@ -145,7 +244,7 @@ impl fmt::Display for Problem {
             ),
             Self::NotRead(Read::LastReview, reason) => write!(
                 formatter,
-                "Could not read your last review from GitHub, so Finish review may not show it: {reason}"
+                "Your last review could not be read, so Finish review may not show it: {reason}"
             ),
             Self::IdeNotStarted(reason) => write!(
                 formatter,
@@ -179,6 +278,26 @@ impl fmt::Display for Problem {
             Self::ShowAgentFailed(reason) => {
                 write!(formatter, "Could not show the agent: {reason}")
             }
+            Self::ReleaseInstallInTheWay(InTheWay::Runs {
+                binary,
+                release_install,
+            }) => write!(
+                formatter,
+                "Updates do not reach this app: it runs {binary}, not the release install \
+                 {release_install}. Remove {binary} and start guided-review again.",
+                binary = binary.display(),
+                release_install = release_install.display(),
+            ),
+            Self::ReleaseInstallInTheWay(InTheWay::FirstOnPath {
+                binary,
+                release_install,
+            }) => write!(
+                formatter,
+                "Updates do not reach guided-review in a terminal or the tour skill: {binary} comes \
+                 before the release install {release_install} on PATH. Remove {binary}.",
+                binary = binary.display(),
+                release_install = release_install.display(),
+            ),
         }
     }
 }

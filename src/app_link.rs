@@ -13,6 +13,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::tour::StepId;
+use crate::update::AppBundle;
 use crate::viewer::{AgentReplied, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
@@ -60,6 +61,9 @@ pub enum Request {
     },
     /// Show Settings: over the PR on screen, or in a window of its own when no PR is open.
     ShowSettings,
+    /// Show the PR switcher, as a launch of Guided Review.app does: over the PR on screen, or in a
+    /// window of its own when no PR is open.
+    ShowSwitcher,
     Quit,
 }
 
@@ -114,6 +118,8 @@ pub enum Answer {
     },
     /// Settings is on screen.
     ShowingSettings,
+    /// The PR switcher is on screen, or Settings being edited are, which come first.
+    ShowingSwitcher,
     /// Saving what is typed, then quitting.
     Quitting,
     /// The request was written by another build and was not acted on.
@@ -139,6 +145,7 @@ impl std::fmt::Display for Answer {
             }
             Self::NotShown { pr } => write!(f, "guided-review app does not show {pr}"),
             Self::ShowingSettings => write!(f, "guided-review app is showing Settings"),
+            Self::ShowingSwitcher => write!(f, "guided-review app is showing the PR switcher"),
             Self::Quitting => write!(f, "guided-review app is quitting"),
             Self::OtherBuild => write!(f, "guided-review app is another build"),
         }
@@ -153,23 +160,31 @@ pub struct AnswerLine {
 
 /// Where the app keeps its socket, its lock and its log.
 #[derive(Debug, Clone)]
-pub struct AppFolder(PathBuf);
+pub struct AppFolder {
+    home: PathBuf,
+}
 
 impl AppFolder {
     pub fn in_home(home: &Path) -> Self {
-        Self(home.join(".guided-review"))
+        Self {
+            home: home.to_path_buf(),
+        }
+    }
+
+    fn folder(&self) -> PathBuf {
+        self.home.join(".guided-review")
     }
 
     pub fn socket(&self) -> PathBuf {
-        self.0.join("app.sock")
+        self.folder().join("app.sock")
     }
 
     pub fn lock(&self) -> PathBuf {
-        self.0.join("app.lock")
+        self.folder().join("app.lock")
     }
 
     pub fn log(&self) -> PathBuf {
-        self.0.join("app.log")
+        self.folder().join("app.log")
     }
 }
 
@@ -342,7 +357,9 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> Option<()> {
 fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
     let program = match std::env::var_os(APP_COMMAND_VARIABLE) {
         Some(program) => PathBuf::from(program),
-        None => std::env::current_exe().context("could not find the guided-review binary")?,
+        None => AppBundle::in_home(&folder.home).launcher_for(
+            &std::env::current_exe().context("could not find the guided-review binary")?,
+        ),
     };
     let log_path = folder.log();
     if let Some(dir) = log_path.parent() {

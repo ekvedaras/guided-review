@@ -58,7 +58,7 @@
 
 **Tour agent**: The AI session, in a herdr terminal, that answers for the tour of one PR. At most one per PR. The viewer finds it by the herdr label `gr.pr=<url>`, never by a stored terminal id, and a terminal claimed for another PR loses the label.
 
-**Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why and the tour agent features are off.
+**Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why (`hc` missing, the herdr server not running, or herdr running but a command failed) and the tour agent features are off. The app looks again every 30 s and on Retry, and the features come back when herdr answers.
 
 **Text box**: A box the reviewer writes text for GitHub in. There are four kinds: a comment box (a new comment on lines or on a file, its text called a draft), a reply box under a thread, the edit of one of the reviewer's own comments, and the body of the review being finished. Each kind opens, takes typing, and is left, given up or sent in the same way. A box left with nothing written in it goes. The text of every kind but an edit is saved while typing, so it comes back after a restart. Avoid: composer.
 
@@ -78,8 +78,14 @@
 
 **Release install**: The app as the README installs a release: each version in its own folder under `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` (and usually `~/.claude/skills/tour`) linked into the newest. Only a release install updates itself. Avoid: managed install.
 
+**App bundle**: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Launched with no PR, it shows the PR switcher alone in the window. Avoid: launcher, wrapper.
+
+**In the way**: Of the release install: another `guided-review` that the app runs instead of it, or that comes before its bin link on `PATH`, so updates never reach the reviewer. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary to remove. Avoid: shadowing.
+
 **Update**: A published release newer than the running app, built for this Mac, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
 
 **Toast**: A short note at the bottom right of the window about an outcome that is otherwise easy to miss. It leaves by itself unless it tells of a failure. Avoid: notification, snackbar.
 
 **Presence**: Whether an overlay (palette, PR switcher, Settings, shortcuts sheet, Ask panel, zoomed picture) is on screen, and whether it is leaving. A leaving overlay is still drawn, plays the reverse of its entrance and takes no input; a reopening, or a close during the entrance, continues from where the move had got to; once the move has played it is dropped. Closing under reduced motion drops it at once, and opening one that is leaving brings it back. Avoid: fade-out state, closing flag.
+
+**GitHub outage**: GitHub not answering reads that are fine: a server error (5xx), a timeout or no connection. A refused token or a missing page (4xx) is not one, as the reviewer can put those right and trying again changes nothing. While it lasts the sidebar holds one problem for all the reads it keeps from going through, with what may be old under it, and the reads are tried again by themselves, 30 s, 1 min, 2 min, up to every 5 min, besides when the window comes to the front. It ends when each of those reads goes through. Avoid: network error, downtime.

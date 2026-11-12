@@ -23,6 +23,8 @@ pub enum Intent {
     ToggleWhitespace,
     ToggleJump,
     TogglePrSwitcher,
+    /// The PR switcher asked for from outside the window, by a launch of Guided Review.app.
+    ShowPrSwitcher,
     ToggleSettings,
     /// Settings asked for from outside the window, by `guided-review settings`.
     ShowSettings,
@@ -60,6 +62,8 @@ pub enum Effect {
     Toggle(Overlay),
     /// Opens Settings, which is closed.
     OpenSettings,
+    /// Opens the PR switcher, or leaves it open.
+    OpenPrSwitcher,
     AskAboutScreen,
     OpenFinishForm,
     OpenOnGitHub(PullRequestUrl),
@@ -150,12 +154,16 @@ impl Intent {
             Self::MarkReadAndGoOn
             | Self::ToggleWhitespace
             | Self::TogglePrSwitcher
+            | Self::ShowPrSwitcher
             | Self::AskAboutScreen
             | Self::FinishReview
             | Self::OpenOnGitHub
             | Self::RestartApp => false,
         };
-        let waits_for_settings = matches!(self, Self::ToggleJump | Self::TogglePrSwitcher);
+        let waits_for_settings = matches!(
+            self,
+            Self::ToggleJump | Self::TogglePrSwitcher | Self::ShowPrSwitcher
+        );
         if refused_while_reopening && moment.reopening == Reopening::Underway {
             Some(Refusal::Reopening)
         } else if waits_for_settings && moment.settings == SettingsSheet::Open {
@@ -190,6 +198,7 @@ impl ReviewCore {
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
             Intent::ToggleJump => Effect::Toggle(Overlay::Jump),
             Intent::TogglePrSwitcher => Effect::Toggle(Overlay::PrSwitcher),
+            Intent::ShowPrSwitcher => Effect::OpenPrSwitcher,
             Intent::ToggleSettings => Effect::Toggle(Overlay::Settings),
             Intent::ShowSettings => match moment.settings {
                 SettingsSheet::Open => Effect::Nothing,

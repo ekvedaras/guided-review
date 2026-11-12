@@ -330,6 +330,25 @@ fn the_whole_summary_goes_in_folded_with_its_pictures_uploaded_and_its_pages_as_
 }
 
 #[test]
+fn a_table_in_the_summary_goes_in_as_markdown_text() {
+    let shop = Shop::new();
+    let github = shop.github("## Why\n\nBecause.");
+    let table = "| | Deal holds all stock |\n|---|---|\n| Before | reminder **sent** |";
+    let mut review = shop.open_with_summary(table);
+
+    let request = review
+        .start_adding_to_notes(&NoteSubject::ReviewerSummary)
+        .unwrap();
+    review.apply_to_notes(request.run(&github)).unwrap();
+
+    assert!(
+        github
+            .description_now()
+            .contains(&format!("\n\n{table}\n\n</details>"))
+    );
+}
+
+#[test]
 fn a_tour_without_a_reviewer_summary_offers_no_summary_button() {
     let shop = Shop::new();
     let review = shop.open_with_summary("");

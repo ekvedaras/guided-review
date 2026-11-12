@@ -12,7 +12,9 @@
 mod support;
 
 mod active_pr;
+mod agent_link;
 mod agent_reply;
+mod app_bundle;
 mod app_link;
 mod app_state;
 mod app_window;
@@ -32,6 +34,7 @@ mod fake_app;
 mod file_path;
 mod file_reads;
 mod finish_review;
+mod github_outage;
 mod github_releases;
 mod github_threads;
 mod hand_offs;
