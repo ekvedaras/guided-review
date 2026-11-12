@@ -10,8 +10,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentGesture, CommentPlace, CommentRefusal, PieceDiff, Problem, Review, ReviewStateFile,
-    Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
+    CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
+    ReviewStateFile, Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
 
@@ -402,6 +402,28 @@ fn a_ticked_step_whose_pieces_stayed_the_same_shows_no_change_since_it_was_read(
 
     assert!(review.current_step().unwrap().since_read.is_some());
     assert_eq!(lines_of(&review, "keep"), Vec::<String>::new());
+}
+
+#[test]
+fn a_piece_untouched_since_the_read_says_so_in_its_open_box() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.tick(&["keep"]);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+    review.go_to(&"keep".into());
+
+    review.toggle_fold(&"keep".into());
+
+    let rows = review.page().rows();
+    let header = rows
+        .iter()
+        .position(|row| matches!(row, PageRow::PieceHeader(_)))
+        .unwrap();
+    assert!(matches!(
+        rows.get(header + 1),
+        Some(PageRow::NoChangeSinceRead)
+    ));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use gpui::{App, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px};
 
-use crate::tour::Step;
+use crate::viewer::StepNotes;
 
 use super::chip::callout;
 use super::icon::{Icon, sized_icon};
@@ -8,24 +8,8 @@ use super::markdown_view::{InlineMarkdown, bullet};
 use super::palette::{Colors, Tone};
 
 /// The check hint and the TLDR the tour writer put on a step.
-#[derive(IntoElement, Clone, Hash)]
-pub struct StepNotes {
-    check: Option<String>,
-    tldr: Vec<String>,
-}
-
-impl StepNotes {
-    pub fn of(step: &Step) -> Self {
-        Self {
-            check: step.check.clone(),
-            tldr: step.tldr.clone(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.check.is_none() && self.tldr.is_empty()
-    }
-}
+#[derive(IntoElement)]
+pub struct StepNotesCard(pub StepNotes);
 
 /// The line height of `text_base`, which the TLDR's bullets centre on.
 const TLDR_LINE: gpui::Pixels = px(26.);
@@ -38,10 +22,11 @@ pub fn note_label(text: impl Into<gpui::SharedString>) -> gpui::Div {
         .child(text.into())
 }
 
-impl RenderOnce for StepNotes {
+impl RenderOnce for StepNotesCard {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let check = self.check.map(|check| {
+        let Self(notes) = self;
+        let check = notes.check.map(|check| {
             callout(&colors, Tone::Accent)
                 .flex()
                 .flex_col()
@@ -57,13 +42,13 @@ impl RenderOnce for StepNotes {
                 )
                 .child(InlineMarkdown::new("step-check", &check))
         });
-        let tldr = (!self.tldr.is_empty()).then(|| {
+        let tldr = (!notes.tldr.is_empty()).then(|| {
             div()
                 .flex()
                 .flex_col()
                 .gap_1()
                 .child(note_label("TLDR").pb_0p5().text_color(colors.muted_text))
-                .children(self.tldr.into_iter().enumerate().map(|(index, line)| {
+                .children(notes.tldr.into_iter().enumerate().map(|(index, line)| {
                     div()
                         .flex()
                         .items_start()

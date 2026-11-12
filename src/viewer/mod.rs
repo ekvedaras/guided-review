@@ -92,7 +92,12 @@ pub use jump::{
 pub use markdown::{Block, Markdown, Run};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
-pub use page::Page;
+pub use page::{
+    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
+    Page, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
+    SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow,
+    ThreadRowPlace, Toolbar, line_count,
+};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
     PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,

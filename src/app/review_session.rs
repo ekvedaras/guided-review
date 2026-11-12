@@ -19,7 +19,7 @@ use crate::app::components::new_commits_banner::RepinProgress;
 use crate::app::components::refresh_banner::RefreshProgress;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
-use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
+use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
@@ -27,7 +27,7 @@ use crate::viewer::{
     FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Place,
     Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
     TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, WorkingCopy, follow_outdated,
+    TourRefresher, TourReloader, TourRepinner, WorkingCopy, follow_outdated, line_count,
 };
 
 const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -149,13 +149,7 @@ impl ReviewSession {
             async {}
         })
         .detach();
-        let rows = PageRows::of(
-            &review,
-            Vec::new(),
-            &RowFacts {
-                open_details: &open_details,
-            },
-        );
+        let rows = PageRows::of(&review, &open_details);
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
@@ -264,7 +258,7 @@ impl ReviewSession {
 
     /// For when the Asks changed: their lines get row markers.
     pub fn asks_changed(&mut self, cx: &mut Context<Self>) {
-        if (self.asked_lines_of)(self.review.screen(), cx) != self.rows.asked_lines() {
+        if (self.asked_lines_of)(self.review.screen(), cx) != self.review.asked_lines() {
             self.rebuild_rows(cx);
         }
     }
@@ -521,13 +515,11 @@ impl ReviewSession {
 
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
         let started = Instant::now();
-        let rows = PageRows::of(
-            &self.review,
-            (self.asked_lines_of)(self.review.screen(), cx),
-            &RowFacts {
-                open_details: &self.open_details,
-            },
-        );
+        let asked_lines = (self.asked_lines_of)(self.review.screen(), cx);
+        if asked_lines != self.review.asked_lines() {
+            self.review.set_asked_lines(asked_lines);
+        }
+        let rows = PageRows::of(&self.review, &self.open_details);
         match rows.change_from(&self.rows) {
             RowsChange::OtherScreen => self.screen_list.reset(rows.len()),
             RowsChange::Spliced { old, new_count } => self.splice_keeping_place(old, new_count),
@@ -537,7 +529,7 @@ impl ReviewSession {
         self.show_sidebar(cx);
         self.old_head = self.review.old_head();
         self.refresh_brief = self.review.refresh_brief();
-        if self.rows.has_images_to_load() {
+        if self.rows.has_pictures_waiting() {
             self.load_images(cx);
         }
         self.frame_stats
@@ -567,7 +559,7 @@ impl ReviewSession {
         for step in &mut self.sidebar.steps {
             step.is_ticked = true;
         }
-        self.rows.stage_all_read(total);
+        self.rows.stage_all_read(total, &self.open_details);
         self.screen_list.reset(self.rows.len());
         cx.notify();
     }

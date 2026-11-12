@@ -223,6 +223,8 @@ pub struct ReviewCore {
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     pr_notes: PrNotes,
+    /// The lines of the open screen that have Asks. The Ask panel keeps the Asks and hands these in.
+    asked_lines: Vec<Place>,
 }
 
 impl Review {
@@ -363,6 +365,7 @@ impl ReviewCore {
             comment_desk: CommentDesk::default(),
             display_options,
             pr_notes: PrNotes::default(),
+            asked_lines: Vec::new(),
             tour_files,
         })
     }
@@ -389,6 +392,15 @@ impl ReviewCore {
     fn image_preview_request(&self, path: &FilePath) -> Option<ImagePreviewRequest> {
         let file = self.files.iter().find(|file| file.path == *path)?;
         Some(ImagePreviewRequest::for_file(file, &self.base, &self.head))
+    }
+
+    /// The selected lines with Asks on the open screen; each gets an ask marker under its last line.
+    pub fn asked_lines(&self) -> &[Place] {
+        &self.asked_lines
+    }
+
+    pub fn set_asked_lines(&mut self, asked_lines: Vec<Place>) {
+        self.asked_lines = asked_lines;
     }
 
     pub fn display_options(&self) -> &DisplayOptions {

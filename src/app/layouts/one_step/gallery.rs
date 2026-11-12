@@ -177,7 +177,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         failed_hand_off: None,
     };
     ThreadElement::new(
-        Rc::new(view),
+        Arc::new(view),
         ThreadDrafts {
             can_reply_now: true,
             can_ask_agent: true,

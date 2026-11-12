@@ -32,9 +32,9 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    BoxEdges, CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment,
-    OnRowGesture, OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row,
-    hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
+    CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
+    OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row, hung_row, hunk_gap,
+    no_change_since_read_row, only_whitespace_row, piece_end,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -43,7 +43,7 @@ use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
-    InlineMarkdown, MarkdownView, UnderPicture, bullet, parsed_markdown,
+    InlineMarkdown, MarkdownView, PreparedMarkdown, UnderPicture, bullet, parsed_markdown,
 };
 use crate::app::components::motion::{
     BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
@@ -62,7 +62,7 @@ use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
     RowMark, check_flag, count_badge, row_note, sidebar_row, skim_chip,
 };
-use crate::app::components::step_notes::note_label;
+use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
     OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
@@ -72,10 +72,7 @@ use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, Titl
 use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
-use crate::app::page_rows::{
-    AskAt, DESCRIPTION_KEY, PageRow, ReviewerSummaryRow, RouteStopRow, ScreenFooter, SelectedRows,
-    StepHeading, StepIntro, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
-};
+use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::review_session::{
     AskedLinesOf, ReviewSession, SessionEvent, SessionWiring, TourWork,
 };
@@ -85,11 +82,13 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, Audience, CodeLink, Command, CommentBox, CommentGesture, CommentPlace,
-    GitHubPort, HandOffId, InFlight, LineLocation, NextScreen, NoteSubject, NotesButton,
-    PaletteAction, Place, QueuedComment, ReadProgress, Reopen, ReopenAfterSave, RestartGuard,
-    RestartStep, Review, Screen, ScreenTravel, SendMode, StepId, TextBox, ThreadId, ThreadView,
-    ToastTone, TourLead, Travel,
+    AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
+    CommentPlace, GitHubPort, HandOffId, InFlight, LineLocation, NextScreen, NoteSubject,
+    NotesButton, PageRow, PaletteAction, Place, QueuedComment, ReadProgress, Reopen,
+    ReopenAfterSave, RestartGuard, RestartStep, Review, ReviewerSummaryRow, RouteStopRow, Screen,
+    ScreenFooter, ScreenTravel, SelectedRows, SendMode, StepHeading, StepId, StepIntro,
+    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
+    Toolbar, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -506,10 +505,10 @@ impl OneStepLayout {
             CodeGesture::PressTwice => {
                 let session = self.session.read(cx);
                 let screen = session.review().screen().clone();
-                self.code_selection = match session.rows().row(at.row) {
-                    Some(PageRow::Line(line)) => CodeSelection::word(screen, at, line.code()),
-                    _ => None,
-                };
+                self.code_selection = session
+                    .rows()
+                    .line(at.row)
+                    .and_then(|line| CodeSelection::word(screen, at, &line.code));
             }
             CodeGesture::Over => match &mut self.code_selection {
                 Some(selection) if selection.is_dragging() => selection.drag_to(at),
@@ -529,10 +528,7 @@ impl OneStepLayout {
             return;
         };
         let rows = session.rows();
-        let text = selection.text(|row| match rows.row(row)? {
-            PageRow::Line(line) => Some(line.code()),
-            _ => None,
-        });
+        let text = selection.text(|row| rows.line(row).map(|line| line.code.as_ref()));
         let lines = text.lines().count();
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         post_toast(
@@ -776,7 +772,7 @@ impl OneStepLayout {
         })
     }
 
-    fn thread_element(&self, view: &Rc<ThreadView>, cx: &mut Context<Self>) -> ThreadElement {
+    fn thread_element(&self, view: &Arc<ThreadView>, cx: &mut Context<Self>) -> ThreadElement {
         let id = view.thread.id.clone();
         let review = self.session.read(cx).review();
         let can_comment_now = review.can_comment_now();
@@ -794,7 +790,7 @@ impl OneStepLayout {
             })
             .collect();
         ThreadElement::new(
-            Rc::clone(view),
+            Arc::clone(view),
             ThreadDrafts {
                 can_reply_now: can_comment_now,
                 can_ask_agent,
@@ -903,15 +899,8 @@ impl OneStepLayout {
 
     /// Asks about the screen, as its toolbar's Ask button does.
     fn ask_about_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let rows = self.session.read(cx).rows();
-        let ask = (0..rows.len()).find_map(|index| match rows.row(index) {
-            Some(PageRow::Toolbar(toolbar)) => toolbar
-                .ask
-                .as_ref()
-                .map(|ask| (ask.place.clone(), ask.label.clone())),
-            _ => None,
-        });
-        let Some((place, label)) = ask else {
+        let Some(AskAt { place, label, .. }) = self.session.read(cx).rows().screen_ask().cloned()
+        else {
             return;
         };
         let ask = self.ask.clone();
@@ -1459,14 +1448,12 @@ impl OneStepLayout {
     /// Once the step's heading has scrolled away, a slim bar under the title bar keeps where the
     /// reader is and the tick in reach. Read from the list's own scroll state; nothing is built.
     fn sticky_step_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        let Some(PageRow::StepHeading(heading)) = self.session.read(cx).rows().row(0) else {
-            return None;
-        };
+        let heading = self.session.read(cx).rows().step_heading()?;
         let is_scrolled_away = self.screen_list.logical_scroll_top().item_ix > 0;
         if !is_scrolled_away {
             return None;
         }
-        let heading = Rc::clone(heading);
+        let heading = Arc::clone(heading);
         let colors = Colors::active(cx);
         let bar = div()
             .w_full()
@@ -1719,9 +1706,9 @@ impl OneStepLayout {
             PageRow::HunkGap(gap) => hunk_gap(
                 &colors,
                 edges,
-                gap.id.clone(),
+                SharedString::from(&gap.id),
                 &gap.gap,
-                gap.label.clone(),
+                SharedString::from(&gap.label),
                 &self.on_gap_ask(cx),
             )
             .into_any_element(),
@@ -1731,7 +1718,7 @@ impl OneStepLayout {
                     .code_selection
                     .as_ref()
                     .filter(|selection| selection.is_on(self.session.read(cx).review().screen()))
-                    .and_then(|selection| selection.range_on(index, line.code().len()));
+                    .and_then(|selection| selection.range_on(index, line.code.len()));
                 let on_code_gesture = Rc::clone(&self.on_code_gesture);
                 let path = line.location.path.clone();
                 let scroll_x = self
@@ -1804,11 +1791,17 @@ impl OneStepLayout {
                 )
             })
             .collect();
+        let rows = self.session.read(cx).rows();
+        let (prepared_summary, prepared_description) = (
+            rows.prepared_reviewer_summary(),
+            rows.prepared_description(),
+        );
         let reviewer_summary = columns
             .reviewer_summary
             .as_ref()
-            .map(|summary| self.reviewer_summary(summary, cx));
-        let description = columns.description.clone().map(|description| {
+            .zip(prepared_summary)
+            .map(|(summary, prepared)| self.reviewer_summary(summary, prepared, cx));
+        let description = prepared_description.map(|description| {
             self.markdown_card(
                 "PR DESCRIPTION",
                 MarkdownView::new(DESCRIPTION_KEY, description)
@@ -1845,9 +1838,14 @@ impl OneStepLayout {
             .into_any_element()
     }
 
-    fn reviewer_summary(&self, summary: &ReviewerSummaryRow, cx: &mut Context<Self>) -> Div {
+    fn reviewer_summary(
+        &self,
+        summary: &ReviewerSummaryRow,
+        prepared: Rc<PreparedMarkdown>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let colors = Colors::active(cx);
-        let (session, buttons) = (self.session.clone(), Rc::clone(&summary.picture_buttons));
+        let (session, buttons) = (self.session.clone(), Arc::clone(&summary.picture_buttons));
         let under_picture: UnderPicture = Rc::new(move |path, cx| {
             let state = buttons.get(path)?;
             Some(
@@ -1862,8 +1860,8 @@ impl OneStepLayout {
                 .into_any_element(),
             )
         });
-        let markdown = MarkdownView::new("reviewer-summary", Rc::clone(&summary.markdown))
-            .under_each_picture(under_picture);
+        let markdown =
+            MarkdownView::new("reviewer-summary", prepared).under_each_picture(under_picture);
         self.markdown_card("REVIEWER SUMMARY", markdown, cx)
             .child(notes_button(
                 &colors,
@@ -1980,7 +1978,7 @@ impl OneStepLayout {
                 format!("step-why-{index}"),
                 parsed_markdown(&intro.why),
             )))
-            .children(intro.notes.clone());
+            .children(intro.notes.clone().map(StepNotesCard));
         let diagram = intro.diagram.as_ref().map(|diagram| {
             div()
                 .min_w_0()
@@ -2372,17 +2370,25 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
         .gap_3()
         .text_sm()
         .text_color(colors.muted_text)
-        .child(item(Icon::Milestone, stats.steps.clone()))
+        .child(item(Icon::Milestone, SharedString::from(&stats.steps)))
         .child(dot())
-        .child(item(Icon::FileText, stats.files.clone()))
+        .child(item(Icon::FileText, SharedString::from(&stats.files)))
         .child(dot())
         .child(
             div()
                 .flex()
                 .gap_2()
                 .font_family(crate::app::components::palette::CODE_FONT)
-                .child(div().text_color(colors.success).child(stats.added.clone()))
-                .child(div().text_color(colors.danger).child(stats.removed.clone())),
+                .child(
+                    div()
+                        .text_color(colors.success)
+                        .child(SharedString::from(&stats.added)),
+                )
+                .child(
+                    div()
+                        .text_color(colors.danger)
+                        .child(SharedString::from(&stats.removed)),
+                ),
         )
         .children(stats.open_threads.clone().map(|threads| {
             div()
@@ -2390,7 +2396,7 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .child(dot())
-                .child(item(Icon::MessageSquare, threads))
+                .child(item(Icon::MessageSquare, SharedString::from(threads)))
         }))
 }
 
@@ -2416,7 +2422,7 @@ fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl Into
                 disc.bg(colors.background)
                     .border_color(colors.current_border)
                     .text_color(colors.accent)
-                    .child(stop.number.clone())
+                    .child(SharedString::from(&stop.number))
             }
         });
     let line = |is_shown: bool| {
@@ -2489,7 +2495,7 @@ fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl Into
                                 .flex_none()
                                 .text_xs()
                                 .text_color(colors.muted_text)
-                                .child(details)
+                                .child(SharedString::from(details))
                         })),
                 )
                 .children((!stop.why.is_empty()).then(|| {

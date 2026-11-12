@@ -6,10 +6,9 @@ use gpui::{
 
 use crate::pieces::PieceId;
 use crate::viewer::{
-    JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
+    JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind, PieceLabel,
 };
 
-use super::diff_view::PieceLabel;
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
 use super::markdown_view::InlineMarkdown;
@@ -298,7 +297,7 @@ fn piece_label(colors: &Colors, label: PieceLabel) -> impl IntoElement {
             div()
                 .flex_none()
                 .font_weight(FontWeight::MEDIUM)
-                .child(name)
+                .child(SharedString::from(name))
         }))
         .child(
             div()
@@ -312,13 +311,13 @@ fn piece_label(colors: &Colors, label: PieceLabel) -> impl IntoElement {
                         .overflow_hidden()
                         .text_ellipsis_start()
                         .text_color(colors.muted_text)
-                        .child(folder),
+                        .child(SharedString::from(folder)),
                 )
                 .child(
                     div()
                         .flex_none()
                         .when(symbol.is_some(), |file| file.text_color(colors.muted_text))
-                        .child(file),
+                        .child(SharedString::from(file)),
                 ),
         )
 }

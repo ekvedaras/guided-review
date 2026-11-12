@@ -9,8 +9,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentGesture, CommentResult, ImageCache, ImageMark, ImageSide, Review, ReviewStateFile,
-    SendMode, TextBox,
+    CommentGesture, CommentResult, ImageCache, ImageMark, ImageSide, PageRow, Review,
+    ReviewStateFile, SendMode, TextBox,
 };
 use serde_json::json;
 
@@ -285,6 +285,33 @@ fn an_svg_keeps_its_text_diff_next_to_the_picture() {
         .unwrap();
     assert!(preview.is_svg);
     assert!(loaded(preview.head.as_ref()).starts_with("48×32"));
+}
+
+#[test]
+fn a_comment_box_on_the_whole_image_hangs_under_its_picture() {
+    let pull = Pull::changing(
+        "logo.png",
+        Some(&png_of(2, 2, [0, 0, 0, 255])),
+        Some(&png_of(3, 3, [0, 0, 0, 255])),
+    );
+    let source = pull.source();
+    let mut review = pull.open(&source);
+
+    review
+        .open_comment_box(CommentGesture::OnFile(&file_path("logo.png")))
+        .unwrap();
+
+    let page = review.page();
+    let picture = page
+        .rows()
+        .iter()
+        .position(|row| matches!(row, PageRow::Image { .. }))
+        .unwrap();
+    assert!(matches!(
+        page.row(picture + 1),
+        Some(PageRow::Composer { .. })
+    ));
+    assert!(page.edges(picture).closes);
 }
 
 #[test]

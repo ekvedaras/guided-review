@@ -12,7 +12,6 @@ use super::OneStepLayout;
 use crate::app::components::diff_view::RowGesture;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
-use crate::app::page_rows::PageRow;
 use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
@@ -216,11 +215,9 @@ impl OneStepLayout {
     fn added_lines(&self, count: usize, cx: &App) -> Vec<(usize, LineLocation)> {
         let rows = self.session.read(cx).rows();
         (0..rows.len())
-            .filter_map(|index| match rows.row(index) {
-                Some(PageRow::Line(line)) if line.kind == LineKind::Added => {
-                    Some((index, line.location.clone()))
-                }
-                _ => None,
+            .filter_map(|index| {
+                let line = rows.line(index)?;
+                (line.kind == LineKind::Added).then(|| (index, line.location.clone()))
             })
             .take(count)
             .collect()

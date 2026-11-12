@@ -1,35 +1,98 @@
-//! The page of the open screen, laid out for reading. `Review::page` builds it once per change of the
-//! review and keeps it, so every question about what the screen shows reads the same page.
+//! The page of the open screen, laid out as rows for reading. `Review::page` builds it once per change
+//! of the review and keeps it, so drawing the rows and every question about what the screen shows
+//! read the same page.
+
+mod build;
+mod rows;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub use rows::{
+    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
+    PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter, ShownLine,
+    StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
+    line_count,
+};
 
 use super::ask::Place;
 use super::file_block::FileBlock;
+use super::jump::{JumpPlace, JumpTarget};
 use super::review::{ReviewCore, Screen};
 use super::row_selection::{RowSelection, SelectedLines};
-use super::step_page::DiffLine;
+use super::step_page::{DiffLine, LineLocation};
 use crate::file_path::FilePath;
+use crate::pieces::PieceId;
 
-/// The content of one screen: a step's pieces in their file blocks, the safety net's, or none on the summary.
+/// The content of one screen as rows: the summary, a step's text and its file boxes, or the safety
+/// net's, with what hangs under their lines.
+#[derive(Clone)]
 pub struct Page {
     screen: Screen,
+    rows: Vec<PageRow>,
+    edges: Vec<BoxEdges>,
     blocks: Vec<FileBlock>,
+    diagram: Option<Arc<str>>,
+    line_rows: HashMap<LineLocation, usize>,
+    pieces: Vec<PieceAt>,
     images_to_load: Vec<FilePath>,
+}
+
+#[derive(Clone)]
+struct PieceAt {
+    id: PieceId,
+    path: FilePath,
+    row: usize,
+}
+
+/// The rows a drag selected, as rows of the page: those in `rows` that show a line of `path`.
+pub struct SelectedRows {
+    rows: std::ops::RangeInclusive<usize>,
+    path: FilePath,
+}
+
+impl SelectedRows {
+    pub fn contains(&self, row: usize, line: &LineLocation) -> bool {
+        self.rows.contains(&row) && line.path == self.path
+    }
 }
 
 impl Page {
     pub(super) fn of(review: &ReviewCore) -> Self {
         let screen = review.screen().clone();
-        let pieces = match &screen {
-            Screen::Step(_) => review
-                .current_step()
-                .map(|page| page.pieces)
-                .unwrap_or_default(),
+        let laid = match &screen {
+            Screen::Summary => Some(build::summary(review)),
+            Screen::Step(_) => review.current_step().map(|page| build::step(review, page)),
             Screen::SafetyNet => review
                 .safety_net()
-                .map(|page| page.pieces)
-                .unwrap_or_default(),
-            Screen::Summary => Vec::new(),
+                .map(|page| build::safety_net(review, page)),
         };
-        let blocks = FileBlock::group(pieces);
+        let build::Laid {
+            rows,
+            blocks,
+            diagram,
+        } = laid.unwrap_or_else(|| build::Laid {
+            rows: Vec::new(),
+            blocks: Vec::new(),
+            diagram: None,
+        });
+        let mut line_rows = HashMap::new();
+        let mut pieces = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            match row {
+                PageRow::Line(line) => {
+                    line_rows.entry(line.location.clone()).or_insert(index);
+                }
+                PageRow::PieceHeader(heading) | PageRow::PieceMarker(heading) => {
+                    pieces.push(PieceAt {
+                        id: heading.piece.clone(),
+                        path: heading.path.clone(),
+                        row: index,
+                    });
+                }
+                _ => {}
+            }
+        }
         let mut images_to_load: Vec<FilePath> = Vec::new();
         for path in blocks
             .iter()
@@ -45,13 +108,72 @@ impl Page {
         }
         Self {
             screen,
+            edges: rows::box_edges(&rows),
+            rows,
             blocks,
+            diagram,
+            line_rows,
+            pieces,
             images_to_load,
         }
     }
 
     pub fn screen(&self) -> &Screen {
         &self.screen
+    }
+
+    pub fn rows(&self) -> &[PageRow] {
+        &self.rows
+    }
+
+    pub fn row(&self, index: usize) -> Option<&PageRow> {
+        self.rows.get(index)
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Where the row meets the edge of its piece box.
+    pub fn edges(&self, index: usize) -> BoxEdges {
+        self.edges.get(index).copied().unwrap_or_default()
+    }
+
+    /// The line a row shows; `None` for a row that is not a line.
+    pub fn line(&self, index: usize) -> Option<&ShownLine> {
+        match self.rows.get(index)? {
+            PageRow::Line(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    /// The first row that shows the line.
+    pub fn row_of_line(&self, line: &LineLocation) -> Option<usize> {
+        self.line_rows.get(line).copied()
+    }
+
+    /// The row a jump lands on: a file's first piece, a symbol's piece, else the top.
+    pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
+        let piece = match &target.place {
+            JumpPlace::StepTop => None,
+            JumpPlace::File(path) => self.pieces.iter().find(|piece| piece.path == *path),
+            JumpPlace::Piece(id) => self.pieces.iter().find(|piece| piece.id == *id),
+        };
+        piece.map_or(0, |piece| piece.row)
+    }
+
+    /// The rows a drag runs over, for drawing them; `None` when it started or is now off this page.
+    pub fn selected_rows(&self, selection: &RowSelection) -> Option<SelectedRows> {
+        let anchor = self.row_of_line(selection.anchor())?;
+        let head = self.row_of_line(selection.head())?;
+        Some(SelectedRows {
+            rows: anchor.min(head)..=anchor.max(head),
+            path: selection.anchor().path.clone(),
+        })
     }
 
     /// Every line the screen shows, top to bottom.
@@ -84,8 +206,107 @@ impl Page {
         }
     }
 
-    /// The pictures of the page that are not loaded yet, each once.
+    /// The pictures of the page that are not loaded yet, each once, folded boxes too.
     pub fn images_to_load(&self) -> &[FilePath] {
         &self.images_to_load
+    }
+
+    /// A picture row on the page waits for its picture.
+    pub fn has_pictures_waiting(&self) -> bool {
+        self.rows.iter().any(|row| {
+            matches!(
+                row,
+                PageRow::Image {
+                    is_loaded: false,
+                    ..
+                }
+            )
+        })
+    }
+
+    /// The mermaid source of the diagram this screen shows, if it shows one.
+    pub fn diagram(&self) -> Option<&str> {
+        self.diagram.as_deref()
+    }
+
+    pub fn diagram_row(&self) -> Option<usize> {
+        self.rows
+            .iter()
+            .position(|row| matches!(row, PageRow::StepIntro(intro) if intro.diagram.is_some()))
+    }
+
+    /// The row of the summary that holds the PR description, and the description.
+    pub fn description(&self) -> Option<(usize, &crate::viewer::Markdown)> {
+        self.rows
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| match row {
+                PageRow::SummaryColumns(columns) => columns
+                    .description
+                    .as_ref()
+                    .map(|description| (index, description.as_ref())),
+                _ => None,
+            })
+    }
+
+    /// What the screen's own Ask button asks about, as its toolbar offers it.
+    pub fn screen_ask(&self) -> Option<&AskAt> {
+        self.rows.iter().find_map(|row| match row {
+            PageRow::Toolbar(toolbar) => toolbar.ask.as_ref(),
+            _ => None,
+        })
+    }
+
+    /// The heading of a step page.
+    pub fn step_heading(&self) -> Option<&Arc<StepHeading>> {
+        match self.rows.first()? {
+            PageRow::StepHeading(heading) => Some(heading),
+            _ => None,
+        }
+    }
+
+    /// The most characters a line of this file has on the page; how far its box can scroll sideways.
+    pub fn widest_line(&self, path: &FilePath) -> usize {
+        self.rows
+            .iter()
+            .filter_map(|row| match row {
+                PageRow::Line(line) if line.location.path == *path => {
+                    Some(line.code.chars().count())
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The footer of the page as it is once every step is read, and its heading ticked.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_all_read(&mut self, steps: usize) {
+        for row in &mut self.rows {
+            match row {
+                PageRow::ScreenFooter(footer) => {
+                    *row = PageRow::ScreenFooter(Arc::new(ScreenFooter {
+                        ticks: None,
+                        has_previous: footer.has_previous,
+                        next: footer.next.clone(),
+                        lead: Some(crate::viewer::TourLead::Finish {
+                            steps,
+                            can_finish: true,
+                        }),
+                    }));
+                }
+                PageRow::StepHeading(heading) => {
+                    *row = PageRow::StepHeading(Arc::new(StepHeading {
+                        id: heading.id.clone(),
+                        title: Arc::clone(&heading.title),
+                        number: heading.number,
+                        is_ticked: true,
+                        is_gone: heading.is_gone,
+                        folds_on_title_click: heading.folds_on_title_click,
+                    }));
+                }
+                _ => {}
+            }
+        }
     }
 }
