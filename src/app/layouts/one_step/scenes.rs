@@ -49,10 +49,11 @@ enum Scene {
     UpdateOffered,
     ReleaseInstallInTheWay,
     RenderedMarkdown,
+    AgentLinkOff,
 }
 
 impl Scene {
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 22] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -74,6 +75,7 @@ impl Scene {
         Self::UpdateOffered,
         Self::ReleaseInstallInTheWay,
         Self::RenderedMarkdown,
+        Self::AgentLinkOff,
     ];
 
     fn file_name(self) -> &'static str {
@@ -99,6 +101,7 @@ impl Scene {
             Self::UpdateOffered => "39-update-offered",
             Self::ReleaseInstallInTheWay => "43-release-install-in-the-way",
             Self::RenderedMarkdown => "41-rendered-markdown",
+            Self::AgentLinkOff => "42-agent-link-off",
         }
     }
 }
@@ -395,6 +398,7 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -477,6 +481,9 @@ impl OneStepLayout {
             Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {
                 review.clear_problem(ProblemKind::ReleaseInstallInTheWay);
             }),
+            Scene::AgentLinkOff => self
+                .session
+                .update(cx, ReviewSession::unstage_agent_link_off),
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.markdown_box(cx) {
                     self.change_review(cx, |review| {

@@ -12,6 +12,7 @@
 mod support;
 
 mod active_pr;
+mod agent_link;
 mod agent_reply;
 mod app_link;
 mod app_state;

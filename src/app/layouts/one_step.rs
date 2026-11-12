@@ -1070,6 +1070,19 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_tour_agent);
             }))
         });
+        let retry = agent.can_retry.then(|| {
+            icon_label_button(
+                colors,
+                "retry-tour-agent-link",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Refresh,
+                "Retry",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::retry_agent_link);
+            }))
+        });
         div().flex().flex_col().gap_1().child(
             div()
                 .flex()
@@ -1083,7 +1096,8 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
                 )
-                .children(show),
+                .children(show)
+                .children(retry),
         )
     }
 

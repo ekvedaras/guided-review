@@ -60,7 +60,7 @@ impl PrSwitching {
                 .await;
             list.update(cx, |list, cx| {
                 list.loaded(answer, &home);
-                list.agent_link(link);
+                list.agent_link(link.map_err(|off| off.to_string()));
                 list.check_tours(&home, active.read(cx));
                 cx.notify();
             });

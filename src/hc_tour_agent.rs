@@ -14,7 +14,8 @@ use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    AgentStatus, AppAgent, LiveTerminal, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
+    TourAgentPort, TourAgentStart,
 };
 
 const APP_LABEL: &str = "app=guided-review";
@@ -89,11 +90,11 @@ impl HcTourAgents {
             .output()
             .with_context(|| format!("could not run `hc {}`", args.join(" ")))?;
         if !output.status.success() {
-            bail!(
-                "`hc {}` failed: {}",
-                args.join(" "),
-                herdr_words(&output.stderr)
-            );
+            return Err(HerdrRefused {
+                command: args.join(" "),
+                reason: herdr_words(&output.stderr),
+            }
+            .into());
         }
         if output.stdout.iter().all(u8::is_ascii_whitespace) {
             return Ok(Value::Null);
@@ -144,14 +145,11 @@ fn status_in(line: &Value, address: &str) -> Option<AgentStatus> {
 }
 
 impl TourAgentPort for HcTourAgents {
-    fn link(&self) -> Result<(), String> {
+    fn link(&self) -> Result<(), AgentLinkOff> {
         match self.hc(&["server", "status", "--json"]) {
             Ok(_) => Ok(()),
-            Err(error) if self.hc_is_missing() => Err(format!(
-                "`{}` is not on PATH ({error:#})",
-                self.hc.display()
-            )),
-            Err(error) => Err(format!("the herdr server does not answer: {error:#}")),
+            Err(_) if self.hc_is_missing() => Err(AgentLinkOff::HcMissing),
+            Err(_) => Err(AgentLinkOff::ServerNotRunning),
         }
     }
 

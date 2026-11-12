@@ -1,7 +1,8 @@
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort, TourAgentState, TourAgents,
+    AgentLinkOff, AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort,
+    TourAgentState, TourAgents,
 };
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -211,14 +212,11 @@ fn following_stops_when_nobody_wants_the_changes_any_more() {
 
 #[test]
 fn without_herdr_the_agent_link_is_off_and_says_why() {
-    let fake = Arc::new(FakeTourAgent::new().without_herdr("hc is not on PATH"));
+    let fake = Arc::new(FakeTourAgent::new().without_herdr(AgentLinkOff::HcMissing));
 
     let state = agents(&fake).lookup(&pr());
 
-    assert_eq!(
-        state,
-        TourAgentState::LinkOff("hc is not on PATH".to_owned())
-    );
+    assert_eq!(state, TourAgentState::LinkOff(AgentLinkOff::HcMissing));
     assert!(agents(&fake).claim(&pr(), &TerminalId::new("t1")).is_err());
     assert_eq!(fake.calls().len(), 0);
 }
@@ -257,9 +255,9 @@ fn the_sidebar_line_names_the_agent_and_its_status() {
     );
     assert_eq!(TourAgentState::None.to_string(), "Tour agent: none");
     assert!(
-        TourAgentState::LinkOff("hc is not on PATH".to_owned())
+        TourAgentState::LinkOff(AgentLinkOff::HcMissing)
             .to_string()
-            .contains("hc is not on PATH")
+            .contains("not on PATH")
     );
 }
 
@@ -376,7 +374,7 @@ fn an_open_from_a_terminal_the_app_started_comes_from_an_app_started_agent() {
     assert_eq!(agents.origin_of(Some("t1")), OpenOrigin::AppStartedAgent);
     assert_eq!(agents.origin_of(Some("mine")), OpenOrigin::Reviewer);
     assert_eq!(agents.origin_of(None), OpenOrigin::Reviewer);
-    let without_herdr = Arc::new(FakeTourAgent::new().without_herdr("no hc"));
+    let without_herdr = Arc::new(FakeTourAgent::new().without_herdr(AgentLinkOff::HcMissing));
     assert_eq!(
         self::agents(&without_herdr).origin_of(Some("t1")),
         OpenOrigin::Reviewer
@@ -475,7 +473,7 @@ fn the_ask_panel_line_says_what_became_of_the_hand_off() {
 #[test]
 fn the_sidebar_names_the_tour_agent_only_when_there_is_one_or_it_cannot_be_reached() {
     assert!(on("w1:t2", AgentStatus::Working).is_worth_a_line());
-    assert!(TourAgentState::LinkOff("no hc".into()).is_worth_a_line());
+    assert!(TourAgentState::LinkOff(AgentLinkOff::HcMissing).is_worth_a_line());
     assert!(!TourAgentState::None.is_worth_a_line());
     assert!(!TourAgentState::Unknown.is_worth_a_line());
 }
