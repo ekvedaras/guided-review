@@ -20,10 +20,11 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{StepId, Tour};
 use guided_review::tour_check;
+use guided_review::update::AppVersion;
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
 
 #[derive(Parser)]
-#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GUIDED_REVIEW_GIT"), ")"), about)]
+#[command(version = AppVersion::RUNNING.as_str(), about)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

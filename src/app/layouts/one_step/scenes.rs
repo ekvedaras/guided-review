@@ -16,8 +16,11 @@ use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
 use crate::file_path::FilePath;
-use crate::update::{ReleaseAsset, Target, Update, UpdateOffer, Version};
-use crate::viewer::{AgentStatus, FileView, LineKind, LineLocation, PageRow, TerminalId, TextBox};
+use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
+use crate::viewer::{
+    AgentStatus, FileView, LineKind, LineLocation, PageRow, Problem, ProblemKind, TerminalId,
+    TextBox,
+};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -44,12 +47,13 @@ enum Scene {
     DescriptionFolds,
     PictureZoom,
     UpdateOffered,
+    ReleaseInstallInTheWay,
     RenderedMarkdown,
     AgentLinkOff,
 }
 
 impl Scene {
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 22] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -69,6 +73,7 @@ impl Scene {
         Self::DescriptionFolds,
         Self::PictureZoom,
         Self::UpdateOffered,
+        Self::ReleaseInstallInTheWay,
         Self::RenderedMarkdown,
         Self::AgentLinkOff,
     ];
@@ -94,6 +99,7 @@ impl Scene {
             Self::DescriptionFolds => "36-description-folds",
             Self::PictureZoom => "40-picture-zoom",
             Self::UpdateOffered => "39-update-offered",
+            Self::ReleaseInstallInTheWay => "43-release-install-in-the-way",
             Self::RenderedMarkdown => "41-rendered-markdown",
             Self::AgentLinkOff => "42-agent-link-off",
         }
@@ -373,6 +379,12 @@ impl OneStepLayout {
                     Updates::stage(&home, UpdateOffer::Available(update), cx);
                 }
             }
+            Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {
+                review.raise_problem(Problem::ReleaseInstallInTheWay(InTheWay::Runs {
+                    binary: "/Users/you/.cargo/bin/guided-review".into(),
+                    release_install: "/Users/you/.local/bin/guided-review".into(),
+                }));
+            }),
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.go_to_first_markdown_box(cx) {
                     self.change_review(cx, |review| {
@@ -466,6 +478,9 @@ impl OneStepLayout {
                     cx.remove_global::<Updates>();
                 }
             }
+            Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {
+                review.clear_problem(ProblemKind::ReleaseInstallInTheWay);
+            }),
             Scene::AgentLinkOff => self
                 .session
                 .update(cx, ReviewSession::unstage_agent_link_off),

@@ -73,6 +73,7 @@ use crate::app::components::thread_view::{
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
+use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -1260,7 +1261,8 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// Settings and the shortcuts sheet, at the foot of the sidebar.
+    /// Settings and the shortcuts sheet at the foot of the sidebar, under a quiet line with the version
+    /// this app runs, so the Settings row stays at the very bottom.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
         let shortcuts = button(
             colors,
@@ -1281,10 +1283,9 @@ impl OneStepLayout {
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
-        div()
-            .flex_none()
+        let row = div()
             .px_2()
-            .py_2()
+            .pb_2()
             .flex()
             .items_center()
             .gap_1()
@@ -1310,7 +1311,13 @@ impl OneStepLayout {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),
             )
-            .child(shortcuts)
+            .child(shortcuts);
+        let version = div().px_4().pt_2().pb_1().flex().child(
+            version_link(colors, "sidebar-version", colors.faint_text())
+                .text_xs()
+                .line_height(px(12.)),
+        );
+        div().flex_none().child(version).child(row)
     }
 
     /// The PR this review is of, and the window-wide actions.

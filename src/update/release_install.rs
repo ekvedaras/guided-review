@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -22,9 +23,27 @@ pub struct ReleaseInstall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
     pub version: Version,
-    /// The bin link, which now runs the new version.
+    /// The new version's own binary, which the restart runs: never the bin link or a name looked up on
+    /// `PATH`, either of which may lead to another binary by then.
     pub program: PathBuf,
     pub skill: SkillLink,
+}
+
+/// A `guided-review` that is not the release install but runs in its place, so the release install's
+/// updates never reach the reviewer. Removing `binary` puts it right.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InTheWay {
+    /// The app runs `binary` itself.
+    Runs {
+        binary: PathBuf,
+        release_install: PathBuf,
+    },
+    /// The app is the release install, but `binary` comes before it on `PATH`, so `guided-review` in a
+    /// terminal or run by the tour skill is that one.
+    FirstOnPath {
+        binary: PathBuf,
+        release_install: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +69,27 @@ impl ReleaseInstall {
             return false;
         };
         fs::canonicalize(exe).is_ok_and(|exe| exe == linked)
+    }
+
+    /// The `guided-review` that runs in place of the release install, when one is installed: `exe`
+    /// itself, or the first `guided-review` on `path` that does not lead to it.
+    pub fn in_the_way(&self, exe: &Path, path: &OsStr) -> Option<InTheWay> {
+        let release = self.linked_into_versions(&self.bin_link)?;
+        let release_install = self.bin_link.clone();
+        if !self.runs(exe) {
+            return Some(InTheWay::Runs {
+                binary: exe.to_path_buf(),
+                release_install,
+            });
+        }
+        let first_on_path = std::env::split_paths(path)
+            .map(|folder| folder.join("guided-review"))
+            .find(|binary| binary.is_file())?;
+        let leads_to_release = fs::canonicalize(&first_on_path).is_ok_and(|it| it == release);
+        (!leads_to_release).then_some(InTheWay::FirstOnPath {
+            binary: first_on_path,
+            release_install,
+        })
     }
 
     /// Checks the archive against its checksum file, unpacks it beside the versions there are, and
@@ -84,10 +124,11 @@ impl ReleaseInstall {
             }
             None => SkillLink::NotOurs,
         };
-        relink(&self.bin_link, &release.join("guided-review"))?;
+        let program = release.join("guided-review");
+        relink(&self.bin_link, &program)?;
         Ok(Installed {
             version: update.version,
-            program: self.bin_link.clone(),
+            program,
             skill,
         })
     }
