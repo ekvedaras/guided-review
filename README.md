@@ -16,11 +16,14 @@ Install guided-review (https://github.com/ekvedaras/guided-review) for me from i
 3. Download both into a new empty folder ~/.local/share/guided-review/<version>/, check the archive with `shasum -a 256 -c <archive>.sha256`, and unpack it there with `tar xzf`.
 4. Link the binary: `mkdir -p ~/.local/bin` and `ln -sf` the unpacked guided-review binary to ~/.local/bin/guided-review. Remove the macOS quarantine flag from the unpacked binary with `xattr -d com.apple.quarantine <path>` (ignore "No such xattr").
 5. Link the tour skill: point ~/.claude/skills/tour at the unpacked skills/tour folder with `ln -sfn`. If ~/.claude/skills/tour exists and is a real folder rather than a link, ask me before replacing it.
-6. If ~/.local/bin is not on my PATH, tell me which line to add to my shell profile; do not edit it yourself.
-7. Run `guided-review --version` and tell me the installed version.
+6. Put the app in ~/Applications: run the unpacked binary with `install-app`. It makes ~/Applications/Guided Review.app from the release's bundle, for the Dock, Spotlight and Raycast.
+7. If ~/.local/bin is not on my PATH, tell me which line to add to my shell profile; do not edit it yourself.
+8. Run `guided-review --version` and tell me the installed version.
 ```
 
-After that, the app updates itself: when a newer release is out, an Update button shows in the sidebar, above Settings. One click downloads it, checks it, moves the links to it and restarts the app. Each version keeps its own folder, so the old one is still there.
+After that, the app updates itself: when a newer release is out, an Update button shows in the sidebar, above Settings. One click downloads it, checks it, moves the links to it, refreshes Guided Review.app and restarts the app. Each version keeps its own folder, so the old one is still there.
+
+Guided Review.app starts the app from the Dock, Spotlight or Raycast and shows the PR switcher to pick a PR. It runs the app through your login shell, so `gh`, `claude` and `hc` are found as in a terminal.
 
 Other ways to install, and what it needs: [Requirements](#requirements) and [Install](#install).
 
@@ -71,6 +74,7 @@ tar xzf guided-review-$VERSION-$TARGET.tar.gz -C ~/.local/share/guided-review/$V
 RELEASE=~/.local/share/guided-review/$VERSION/guided-review-$VERSION-$TARGET
 ln -sf "$RELEASE/guided-review" ~/.local/bin/guided-review
 ln -sfn "$RELEASE/skills/tour" ~/.claude/skills/tour
+"$RELEASE/guided-review" install-app   # ~/Applications/Guided Review.app
 ```
 
 `~/.local/bin` must be on `PATH`, also for agents the app starts.
