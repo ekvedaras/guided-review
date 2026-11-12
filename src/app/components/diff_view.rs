@@ -18,7 +18,7 @@ use crate::viewer::{
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::chip::chip;
 use super::icon::{Icon, sized_icon};
-use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, Tone, inside_edge};
 
 /// What a gap row asks for: a few more lines from one side, or every hidden line.
 pub enum GapAsk<'a> {
@@ -346,8 +346,7 @@ fn laid_over(
         .collect()
 }
 
-/// A row's own colour sits inside the box's 1 px edge, so its corners are that much tighter.
-const INSIDE_EDGE_RADIUS: f32 = CARD_RADIUS - 1.;
+const INSIDE_EDGE_RADIUS: f32 = inside_edge(CARD_RADIUS);
 
 pub fn round_inside(edges: BoxEdges, layer: Div) -> Div {
     layer
