@@ -14,6 +14,7 @@ pub mod fake_app;
 pub mod fake_ports;
 pub mod fake_tour_agent;
 pub mod graphql;
+pub mod work;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;

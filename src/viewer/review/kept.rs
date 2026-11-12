@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::ReviewCore;
 use crate::viewer::page::Page;
+use crate::viewer::work_agenda::WorkAgenda;
 
 /// The open review, with the page of its screen built once and kept until the review changes.
 ///
@@ -30,6 +31,11 @@ impl Review {
 
     pub(super) fn into_core(self) -> ReviewCore {
         self.review
+    }
+
+    /// The work agenda is no input of the page, so it changes without dropping the page.
+    pub(super) fn work_mut(&mut self) -> &mut WorkAgenda {
+        &mut self.review.work
     }
 }
 

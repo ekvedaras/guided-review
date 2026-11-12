@@ -42,7 +42,6 @@ mod settings;
 mod shortcuts;
 mod step_page;
 mod suggestion;
-mod sync_state;
 mod thread_actions;
 mod threads;
 mod toasts;
@@ -51,6 +50,7 @@ mod tour_writing;
 mod typing_save;
 mod viewed_sync;
 mod word_diff;
+mod work_agenda;
 
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
 pub use agent_event::AgentEvent;
@@ -78,9 +78,8 @@ pub use finish_review::{
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use hand_offs::{
-    AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, DeliveryOutcome,
-    DeliveryRequest, HandOff, HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement,
-    SeenMark, SeenMarkOff, SeenMarkOffOutcome, ThreadMessage,
+    AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
+    HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, SeenMark, ThreadMessage,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{
@@ -125,7 +124,6 @@ pub use shortcuts::{Chord, Command, KeyCap, KeyScope, ShortcutGroup, in_group, k
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
 };
-pub use sync_state::SyncState;
 pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
@@ -138,3 +136,6 @@ pub use tour_agent::{
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
+pub use work_agenda::{
+    AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind, WorkOutcome, WorkPorts,
+};

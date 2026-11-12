@@ -228,7 +228,7 @@ impl HandOff {
 }
 
 /// Sending the oldest queued hand-off to the tour agent, owned so it can run on a background thread.
-pub struct DeliveryRequest {
+pub(super) struct DeliveryRequest {
     id: HandOffId,
     pr: PullRequestUrl,
     text: String,
@@ -237,7 +237,7 @@ pub struct DeliveryRequest {
 
 impl DeliveryRequest {
     /// A delivered hand-off puts the seen mark on the reviewer's comment.
-    pub fn run(
+    pub(super) fn run(
         self,
         agents: &TourAgents,
         github: &(impl ReviewThreadsPort + ?Sized),
@@ -264,7 +264,7 @@ impl DeliveryRequest {
     }
 }
 
-pub struct DeliveryOutcome {
+pub(super) struct DeliveryOutcome {
     id: HandOffId,
     how: Delivery,
     seen_mark: SeenMark,
@@ -272,12 +272,12 @@ pub struct DeliveryOutcome {
 
 impl DeliveryOutcome {
     /// A tour agent was started, so there is a new terminal to follow.
-    pub fn started_an_agent(&self) -> bool {
+    pub(super) fn started_an_agent(&self) -> bool {
         matches!(self.how, Delivery::AgentStarted)
     }
 
     /// The agent was just started and took nothing yet; no status change may come to try again on.
-    pub fn wants_another_try_soon(&self) -> bool {
+    pub(super) fn wants_another_try_soon(&self) -> bool {
         matches!(self.how, Delivery::AgentStarting)
     }
 }
@@ -409,7 +409,7 @@ impl HandOffs {
 
     /// The oldest queued hand-off, unless one was delivered and its agent has not started on it:
     /// they go one at a time, in the order they were sent.
-    pub fn delivery_request(&self, pr: &PullRequestUrl) -> Option<DeliveryRequest> {
+    pub(super) fn delivery_request(&self, pr: &PullRequestUrl) -> Option<DeliveryRequest> {
         if self.0.iter().any(|h| h.state == HandOffState::Delivered) {
             return None;
         }
@@ -422,7 +422,7 @@ impl HandOffs {
         })
     }
 
-    pub fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
+    pub(super) fn apply_delivery(&mut self, outcome: DeliveryOutcome) {
         let state = match outcome.how {
             Delivery::Delivered => HandOffState::Delivered,
             Delivery::Waiting | Delivery::AgentStarting | Delivery::AgentStarted => return,
@@ -436,7 +436,7 @@ impl HandOffs {
 
     /// A delivered hand-off is working once the agent is seen working; when it then goes idle with no
     /// answer, it ended without one.
-    pub fn agent_status_is(&mut self, status: AgentStatus) {
+    pub(super) fn agent_status_is(&mut self, status: AgentStatus) {
         for hand_off in &mut self.0 {
             hand_off.state = match (&hand_off.state, status) {
                 (HandOffState::Delivered, AgentStatus::Working) => HandOffState::Working,
@@ -464,7 +464,7 @@ impl HandOffs {
     }
 
     /// Hand-offs the agent ended without answering whose comment still shows the seen mark.
-    pub fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
+    pub(super) fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
         self.0
             .iter()
             .filter(|hand_off| {
@@ -480,7 +480,7 @@ impl HandOffs {
             .collect()
     }
 
-    pub fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) {
+    pub(super) fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) {
         if let Some(hand_off) = self.0.iter_mut().find(|h| h.id == outcome.id) {
             hand_off.seen_mark = outcome.seen_mark;
         }
@@ -507,7 +507,7 @@ impl HandOffs {
     }
 
     /// Queues a failed hand-off again. One with no thread cannot go: the agent would have nowhere to answer.
-    pub fn try_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
+    pub(super) fn try_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
         let hand_off = self
             .0
             .iter_mut()
@@ -526,7 +526,7 @@ impl HandOffs {
     }
 
     /// The agent's reply is on GitHub, whatever the hand-off was doing before.
-    pub fn replied(
+    pub(super) fn replied(
         &mut self,
         id: HandOffId,
         replied: &AgentReplied,
@@ -770,18 +770,18 @@ impl AgentReplyRequest {
 }
 
 /// Taking the seen mark off a hand-off the agent ended without answering, owned so it can run off the UI thread.
-pub struct SeenMarkOff {
+pub(super) struct SeenMarkOff {
     id: HandOffId,
     comment: CommentId,
 }
 
-pub struct SeenMarkOffOutcome {
+pub(super) struct SeenMarkOffOutcome {
     id: HandOffId,
     seen_mark: SeenMark,
 }
 
 impl SeenMarkOff {
-    pub fn run(self, github: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
+    pub(super) fn run(self, github: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
         SeenMarkOffOutcome {
             id: self.id,
             seen_mark: SeenMark::take_off(github, &self.comment),

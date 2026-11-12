@@ -159,8 +159,7 @@ fn a_change_is_saved_at_once() {
 
     review.tick(&notes()).unwrap();
     review
-        .record_hand_offs(|hand_offs| hand_offs.replied(hand_off, &AgentReplied::default()))
-        .unwrap()
+        .hand_off_replied(hand_off, &AgentReplied::default())
         .unwrap();
 
     assert!(pull.open().is_ticked(&notes()));
@@ -204,8 +203,7 @@ fn while_a_re_pin_runs_what_the_tour_agent_did_is_kept_in_memory_but_not_saved()
     let hand_off = pull.hand_off(&mut review);
 
     review.start_repin();
-    let recorded =
-        review.record_hand_offs(|hand_offs| hand_offs.replied(hand_off, &AgentReplied::default()));
+    let recorded = review.hand_off_replied(hand_off, &AgentReplied::default());
 
     assert!(recorded.is_err());
     assert_eq!(hand_off_states(&review), [HandOffState::Answered]);
@@ -224,8 +222,7 @@ fn once_a_re_pin_failed_changes_are_saved_again_and_nothing_is_named_as_not_kept
     review.repin_failed();
     review.tick(&notes()).unwrap();
     review
-        .record_hand_offs(|hand_offs| hand_offs.replied(hand_off, &AgentReplied::default()))
-        .unwrap()
+        .hand_off_replied(hand_off, &AgentReplied::default())
         .unwrap();
 
     assert_eq!(review.problems(), []);

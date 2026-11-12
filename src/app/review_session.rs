@@ -23,16 +23,13 @@ use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    AgentReplied, AgentStatus, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
+    AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
     FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Place,
-    Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, SyncState,
-    TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, WorkingCopy, follow_outdated, line_count,
+    RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen, SendMode, StepId, TextBox,
+    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
+    TourReloader, TourRepinner, WorkPorts, line_count,
 };
 
-const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
-/// How long to wait before handing off again to an agent whose screen had not settled since it started.
-const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Rows laid out beyond the visible part, so a fast scroll does not show a blank edge.
 const LIST_OVERDRAW: f32 = 300.;
@@ -60,12 +57,10 @@ pub struct ReviewSession {
     rows: PageRows,
     sidebar: SidebarRows,
     tour_agent: TourAgentState,
-    /// Why the last Show agent failed, until the next one goes through.
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
-    /// A hand-off being typed into the tour agent; the next one waits for it.
-    delivering: Option<Task<()>>,
-    delivery_retry: Option<Task<()>>,
+    /// Wakes the session when the review's earliest work wanted later falls due.
+    work_timer: Option<Task<()>>,
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
@@ -78,17 +73,7 @@ pub struct ReviewSession {
     image_cache: ImageCache,
     image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
     loading_images: HashSet<FilePath>,
-    is_retrying_comments: bool,
-    sync_state: SyncState,
-    pr_head_check: Option<Task<()>>,
     reload: Option<Task<()>>,
-    threads_pull: Option<Task<()>>,
-    pr_description_pull: Option<Task<()>>,
-    taking_seen_marks_off: Option<Task<()>>,
-    working_copy_check: Option<Task<()>>,
-    push_debounce: Option<Task<()>>,
-    pending_review_check: Option<Task<()>>,
-    last_review_pull: Option<Task<()>>,
     typing_save: Option<Task<()>>,
     frame_stats: FrameStatsHook,
     _focus_subscription: Subscription,
@@ -140,7 +125,8 @@ impl ReviewSession {
         } = wiring;
         let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
-                this.pull_from_github(cx);
+                this.review.pull_from_github();
+                this.run_due_work(cx);
             }
         });
         let open_details = OpenDetails::default();
@@ -155,8 +141,7 @@ impl ReviewSession {
             tour_agent: TourAgentState::Unknown,
             tour_agent_follow: None,
             show_agent: None,
-            delivering: None,
-            delivery_retry: None,
+            work_timer: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
             screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
@@ -171,17 +156,7 @@ impl ReviewSession {
             image_cache: ImageCache::under(&std::env::home_dir().unwrap_or_default()),
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
-            is_retrying_comments: false,
-            sync_state: SyncState::default(),
-            pr_head_check: None,
             reload: None,
-            threads_pull: None,
-            pr_description_pull: None,
-            taking_seen_marks_off: None,
-            working_copy_check: None,
-            push_debounce: None,
-            pending_review_check: None,
-            last_review_pull: None,
             typing_save: None,
             frame_stats,
             _focus_subscription: focus_subscription,
@@ -246,6 +221,7 @@ impl ReviewSession {
     }
 
     /// For changes of the review together with what the session keeps beside it for the rows.
+    /// A change may make work due, so the due work starts after it.
     fn change_session<T>(
         &mut self,
         cx: &mut Context<Self>,
@@ -253,7 +229,45 @@ impl ReviewSession {
     ) -> T {
         let result = change(self);
         self.rebuild_rows(cx);
+        self.run_due_work(cx);
         result
+    }
+
+    /// Starts each piece of work the review says is due on a background thread and lands its
+    /// outcome back in the review, which may make more due; then sleeps until the next is due.
+    fn run_due_work(&mut self, cx: &mut Context<Self>) {
+        for work in self.review.due_work(Instant::now()) {
+            let (github, source, agents) = (
+                Arc::clone(&self.github),
+                Arc::clone(&self.source),
+                self.tour_work.tour_agents.clone(),
+            );
+            self.run_off_thread(
+                cx,
+                move || {
+                    work.run(&WorkPorts {
+                        github: github.as_ref(),
+                        source: source.as_ref(),
+                        agents: &agents,
+                    })
+                },
+                |this, outcome, cx| {
+                    let after = this.change(cx, |review| review.land(outcome));
+                    if after == AfterLanding::FollowNewTourAgent {
+                        this.follow_tour_agent(cx);
+                    }
+                },
+            )
+            .detach();
+        }
+        self.work_timer = self.review.next_due().map(|due| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(due.saturating_duration_since(Instant::now()))
+                    .await;
+                this.update(cx, Self::run_due_work).ok();
+            })
+        });
     }
 
     /// For when the Asks changed: their lines get row markers.
@@ -309,7 +323,6 @@ impl ReviewSession {
             }
         })
         .ok();
-        self.sync_after_debounce(cx);
     }
 
     pub fn send_comment(
@@ -357,7 +370,6 @@ impl ReviewSession {
         if matches!(result, Ok(CommentResult::Sent)) {
             post_toast(cx, ToastTone::Success, sent_note("Comment", mode, audience));
         }
-        self.deliver_hand_offs(cx);
     }
 
     /// Runs a thread action in the background, then shows the threads as GitHub has them.
@@ -378,7 +390,6 @@ impl ReviewSession {
                 if let (ThreadActionResult::Done, Some(note)) = (&result, note) {
                     post_toast(cx, ToastTone::Success, note);
                 }
-                this.deliver_hand_offs(cx);
                 on_done(&result, cx);
             },
         )
@@ -404,7 +415,6 @@ impl ReviewSession {
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_finish(outcome));
                 if result == FinishResult::Sent {
-                    this.pull_last_review(cx);
                     post_toast(cx, ToastTone::Success, finish_note(verdict));
                 }
                 on_done(&result, cx);
@@ -597,7 +607,7 @@ impl ReviewSession {
         let screen = self.review.screen().clone();
         self.save_typing_now();
         let replaced = std::mem::replace(&mut self.review, repinned.review);
-        self.review.keep_comment_boxes_of(replaced);
+        self.review.carry_on_from(replaced);
         self.source = repinned.source;
         self.image_pictures.clear();
         self.loading_images.clear();
@@ -635,11 +645,13 @@ impl ReviewSession {
         )
         .detach();
         self.follow_tour_agent(cx);
-        self.pull_from_github(cx);
+        self.review.pull_from_github();
+        self.run_due_work(cx);
     }
 
     /// Looks for the PR's tour agent and keeps its status. The follow is a thread of its own because it
-    /// blocks on herdr's events for as long as the session lives, and ends when the session is gone.
+    /// blocks on herdr's events for as long as the session lives, and ends when the session is gone;
+    /// it is a stream of news for the review, not work with one outcome, so it is not on the agenda.
     fn follow_tour_agent(&mut self, cx: &mut Context<Self>) {
         let (changes, mut arrived) = futures::channel::mpsc::unbounded();
         let agents = self.tour_work.tour_agents.clone();
@@ -653,13 +665,10 @@ impl ReviewSession {
         self.tour_agent_follow = Some(cx.spawn(async move |this, cx| {
             while let Some(state) = futures::StreamExt::next(&mut arrived).await {
                 let shown = this.update(cx, |this, cx| {
-                    if let TourAgentState::Agent { status, .. } = &state {
-                        this.agent_status_is(*status);
-                        this.take_seen_marks_off(cx);
-                    }
+                    this.review.tour_agent_is(&state);
                     this.tour_agent = state;
                     this.show_problems(cx);
-                    this.deliver_hand_offs(cx);
+                    this.run_due_work(cx);
                 });
                 if shown.is_err() {
                     break;
@@ -668,12 +677,12 @@ impl ReviewSession {
         }));
     }
 
-    /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
-    /// Ends with what the Ask panel says of it.
     pub fn is_delivering_hand_offs(&self) -> bool {
-        self.delivering.is_some()
+        self.review.is_delivering_hand_offs()
     }
 
+    /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
+    /// Ends with what the Ask panel says of it.
     pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
         let agents = self.tour_work.tour_agents.clone();
         let pr = self.review.pr().clone();
@@ -687,91 +696,12 @@ impl ReviewSession {
         !matches!(self.tour_agent, TourAgentState::LinkOff(_))
     }
 
-    fn agent_status_is(&mut self, status: AgentStatus) {
-        let recorded = self
-            .review
-            .record_hand_offs(|hand_offs| hand_offs.agent_status_is(status));
-        if let Err(error) = recorded {
-            eprintln!("could not save where a hand-off is: {error:#}");
-        }
-    }
-
-    /// One batch at a time, so a burst of status changes does not take a mark off twice.
-    fn take_seen_marks_off(&mut self, cx: &mut Context<Self>) {
-        if self.taking_seen_marks_off.is_some() {
-            return;
-        }
-        let requests = self.review.hand_offs().seen_marks_to_take_off();
-        if requests.is_empty() {
-            return;
-        }
-        let github = Arc::clone(&self.github);
-        self.taking_seen_marks_off = Some(self.run_off_thread(
-            cx,
-            move || {
-                requests
-                    .into_iter()
-                    .map(|request| request.run(github.as_ref()))
-                    .collect::<Vec<_>>()
-            },
-            |this, outcomes, cx| {
-                this.taking_seen_marks_off = None;
-                for outcome in outcomes {
-                    if let Err(error) = this.change(cx, |review| {
-                        review.record_hand_offs(|hand_offs| hand_offs.apply_seen_mark_off(outcome))
-                    }) {
-                        eprintln!("could not save where a hand-off is: {error:#}");
-                    }
-                }
-            },
-        ));
-    }
-
-    /// Types the oldest queued hand-off into the tour agent when it is idle. One at a time; the next goes
-    /// when the agent next turns idle.
-    fn deliver_hand_offs(&mut self, cx: &mut Context<Self>) {
-        if self.delivering.is_some() {
-            return;
-        }
-        let Some(request) = self.review.hand_offs().delivery_request(self.review.pr()) else {
-            return;
-        };
-        let agents = self.tour_work.tour_agents.clone();
-        let github = Arc::clone(&self.github);
-        self.delivering = Some(self.run_off_thread(
-            cx,
-            move || request.run(&agents, github.as_ref()),
-            |this, outcome, cx| {
-                this.delivering = None;
-                cx.notify();
-                let started_an_agent = outcome.started_an_agent();
-                let try_again_soon = outcome.wants_another_try_soon();
-                if let Err(error) = this.change(cx, |review| {
-                    review.record_hand_offs(|hand_offs| hand_offs.apply_delivery(outcome))
-                }) {
-                    eprintln!("could not save where a hand-off is: {error:#}");
-                }
-                if started_an_agent {
-                    this.follow_tour_agent(cx);
-                }
-                if try_again_soon {
-                    this.delivery_retry = Some(cx.spawn(async move |this, cx| {
-                        cx.background_executor().timer(AGENT_START_RETRY).await;
-                        this.update(cx, Self::deliver_hand_offs).ok();
-                    }));
-                }
-            },
-        ));
-    }
-
+    /// The button is offered only for a failed hand-off in a thread, so an error other than a save
+    /// the sidebar names is a bug.
     pub fn try_hand_off_again(&mut self, hand_off: HandOffId, cx: &mut Context<Self>) {
-        let queued = self.change(cx, |review| {
-            review.record_hand_offs(|hand_offs| hand_offs.try_again(hand_off))
-        });
-        if let Err(error) = queued.and_then(|tried| tried) {
+        if let Err(error) = self.change(cx, |review| review.try_hand_off_again(hand_off)) {
             eprintln!("could not queue hand-off {hand_off} again: {error:#}");
         }
-        self.deliver_hand_offs(cx);
     }
 
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
@@ -791,70 +721,6 @@ impl ReviewSession {
         SidebarRows::of(&self.review, &self.tour_agent)
     }
 
-    fn pull_from_github(&mut self, cx: &mut Context<Self>) {
-        self.check_pr_head(cx);
-        self.check_working_copy(cx);
-        self.pull_pr_description(cx);
-        self.sync(cx);
-        self.pull_threads(cx);
-        self.pull_pending_review(cx);
-        self.pull_last_review(cx);
-        self.retry_queued_comments(cx);
-    }
-
-    fn check_pr_head(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
-        self.pr_head_check = Some(self.run_off_thread(
-            cx,
-            move || github.pull_request_tips(&pr),
-            |this, tips, cx| match tips {
-                Ok(tips) => this.change(cx, |review| review.pr_head_is(tips.head)),
-                Err(error) => this.change(cx, |review| review.could_not_read(Read::PrHead, &error)),
-            },
-        ));
-    }
-
-    /// Pushes what is queued and pulls what changed on GitHub, off the UI thread.
-    fn sync(&mut self, cx: &mut Context<Self>) {
-        if !self.sync_state.start_or_queue() {
-            return;
-        }
-        let request = self.review.sync_request();
-        let github = Arc::clone(&self.github);
-        self.run_off_thread(
-            cx,
-            move || request.run(github.as_ref()),
-            |this, outcome, cx| {
-                if let Err(error) = this.change(cx, |review| review.apply_sync(outcome)) {
-                    eprintln!("could not sync with GitHub: {error:#}");
-                }
-                if this.sync_state.finish_and_wants_again() {
-                    this.sync(cx);
-                }
-            },
-        )
-        .detach();
-    }
-
-    fn sync_after_debounce(&mut self, cx: &mut Context<Self>) {
-        self.push_debounce = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(PUSH_DEBOUNCE).await;
-            this.update(cx, Self::sync).ok();
-        }));
-    }
-
-    /// The reviewer may check out another branch while the app is open; focus is when to notice.
-    fn check_working_copy(&mut self, cx: &mut Context<Self>) {
-        let (source, head) = (Arc::clone(&self.source), self.review.head().clone());
-        self.working_copy_check = Some(self.run_off_thread(
-            cx,
-            move || source.working_tree_is_at(&head),
-            |this, is_at, cx| {
-                this.change(cx, |review| review.working_copy_is(WorkingCopy::of(is_at)));
-            },
-        ));
-    }
-
     pub fn add_to_notes(&mut self, subject: &NoteSubject, cx: &mut Context<Self>) {
         let Some(request) = self.change(cx, |review| review.start_adding_to_notes(subject)) else {
             return;
@@ -864,133 +730,21 @@ impl ReviewSession {
             cx,
             move || request.run(github.as_ref()),
             |this, outcome, cx| {
-                if let Err(error) = this.change(cx, |review| review.apply_to_notes(outcome)) {
-                    eprintln!("warning: could not keep the PR's description: {error:#}");
-                }
+                // A save that is refused or fails is named by the review's problems.
+                this.change(cx, |review| review.apply_to_notes(outcome))
+                    .ok();
             },
         )
         .detach();
     }
 
-    fn pull_pr_description(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
-        self.pr_description_pull = Some(self.run_off_thread(
-            cx,
-            move || github.pull_request_description(&pr),
-            |this, body, cx| match body {
-                Ok(body) => {
-                    if let Err(error) = this.change(cx, |review| review.set_pr_description(&body)) {
-                        eprintln!("warning: could not keep the PR's description: {error:#}");
-                    }
-                }
-                Err(error) => {
-                    this.change(cx, |review| {
-                        review.could_not_read(Read::PrDescription, &error);
-                    });
-                }
-            },
-        ));
-    }
-
-    /// Outdated threads are followed to their lines in the same trip, so they never jump once shown.
-    fn pull_threads(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
-        let (source, head) = (Arc::clone(&self.source), self.review.head().clone());
-        self.threads_pull = Some(self.run_off_thread(
-            cx,
-            move || {
-                github.review_threads(&pr).map(|threads| {
-                    let followed = follow_outdated(&threads, source.as_ref(), &head);
-                    (threads, followed)
-                })
-            },
-            |this, threads, cx| match threads {
-                Ok((threads, followed)) => this.change(cx, |review| {
-                    review.set_threads(&threads);
-                    review.set_followed_lines(followed);
-                }),
-                Err(error) => this.change(cx, |review| review.threads_not_read(&error)),
-            },
-        ));
-    }
-
-    /// The review the viewer sent last, which the finish button shows and updates.
-    fn pull_last_review(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
-        self.last_review_pull = Some(self.run_off_thread(
-            cx,
-            move || github.viewer_latest_review(&pr),
-            |this, last, cx| {
-                this.change(cx, |review| match last {
-                    Ok(last) => review.last_review_is(last),
-                    Err(error) => review.could_not_read(Read::LastReview, &error),
-                });
-            },
-        ));
-    }
-
-    /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the pending
-    /// review are read again so the reply shows under the asked comment.
     pub fn hand_off_replied(
         &mut self,
         id: HandOffId,
         replied: &AgentReplied,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        self.change(cx, |review| {
-            review.record_hand_offs(|hand_offs| hand_offs.replied(id, replied))
-        })??;
-        self.pull_threads(cx);
-        self.pull_pending_review(cx);
-        Ok(())
-    }
-
-    /// What the finish dialog needs from GitHub: whether a pending review exists and who wrote the PR.
-    fn pull_pending_review(&mut self, cx: &mut Context<Self>) {
-        let (github, pr) = (Arc::clone(&self.github), self.review.pr().clone());
-        self.pending_review_check = Some(self.run_off_thread(
-            cx,
-            move || (github.has_pending_review(&pr), github.viewer_authored(&pr)),
-            |this, (exists, authored), cx| {
-                this.change(cx, |review| {
-                    match exists {
-                        Ok(exists) => review.pending_review_is(exists),
-                        Err(error) => review.could_not_read(Read::PendingReview, &error),
-                    }
-                    match authored {
-                        Ok(authored) => review.viewer_authorship_is(authored),
-                        Err(error) => review.could_not_read(Read::Authorship, &error),
-                    }
-                });
-            },
-        ));
-    }
-
-    /// Sends the queue oldest first, one comment at a time, until one does not go.
-    fn retry_queued_comments(&mut self, cx: &mut Context<Self>) {
-        if self.is_retrying_comments {
-            return;
-        }
-        let Some(request) = self.review.queued_comment_request() else {
-            return;
-        };
-        self.is_retrying_comments = true;
-        let github = Arc::clone(&self.github);
-        self.run_off_thread(
-            cx,
-            move || request.run(github.as_ref()),
-            |this, outcome, cx| {
-                this.is_retrying_comments = false;
-                match this.change(cx, |review| review.apply_comment(outcome)) {
-                    Ok(CommentResult::Sent) => {
-                        this.retry_queued_comments(cx);
-                    }
-                    Ok(_) => {}
-                    Err(error) => eprintln!("could not send a queued comment: {error:#}"),
-                }
-            },
-        )
-        .detach();
+        self.change(cx, |review| review.hand_off_replied(id, replied))
     }
 
     /// Loads the pictures of the screen once each, off the main thread. A load that ends after `reopen`

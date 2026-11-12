@@ -1,4 +1,5 @@
 mod kept;
+mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -51,6 +52,7 @@ use super::thread_actions::{
 use super::threads::{self, ReviewThread, ThreadId, ThreadPlacement};
 use super::typing_save::TypingSave;
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
+use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
@@ -225,6 +227,7 @@ pub struct ReviewCore {
     pr_notes: PrNotes,
     /// The lines of the open screen that have Asks. The Ask panel keeps the Asks and hands these in.
     asked_lines: Vec<Place>,
+    work: WorkAgenda,
 }
 
 impl Review {
@@ -291,11 +294,13 @@ impl Review {
         CommentDesk::suggest_change(&mut self.state, place, rows.lines())
     }
 
-    /// A review reopened after a re-pin goes on showing what the boxes of the one it replaces were
-    /// doing: which takes the keys, which are sending and why a send did not go.
-    pub fn keep_comment_boxes_of(&mut self, replaced: Self) {
-        self.comment_desk
-            .keep_boxes_of(replaced.into_core().comment_desk);
+    /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
+    /// comment boxes were doing (which takes the keys, which are sending and why a send did not
+    /// go), and its work, whose outcomes still land here.
+    pub fn carry_on_from(&mut self, replaced: Self) {
+        let replaced = replaced.into_core();
+        self.comment_desk.keep_boxes_of(replaced.comment_desk);
+        self.work = replaced.work;
     }
 }
 
@@ -366,6 +371,7 @@ impl ReviewCore {
             display_options,
             pr_notes: PrNotes::default(),
             asked_lines: Vec::new(),
+            work: WorkAgenda::default(),
             tour_files,
         })
     }
@@ -998,7 +1004,9 @@ impl ReviewCore {
         self.comment_desk.discard(&mut self.state, text_box)
     }
 
+    /// Whatever came of it, the next hand-off may go now.
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
+        self.work.want(WorkKind::DeliverHandOff);
         let step = match &self.screen {
             Screen::Step(id) => Some(id.clone()),
             _ => None,
@@ -1078,8 +1086,13 @@ impl ReviewCore {
             .finish_review_request(&self.pr, verdict, body)
     }
 
+    /// A sent review is read back, so the finish button shows it.
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
-        self.comment_desk.apply_finish(&mut self.state, outcome)
+        let result = self.comment_desk.apply_finish(&mut self.state, outcome);
+        if result == FinishResult::Sent {
+            self.work.want(WorkKind::PullLastReview);
+        }
+        result
     }
 
     pub fn begin_selection(&mut self, row: LineLocation) {
@@ -1165,7 +1178,7 @@ impl ReviewCore {
 
     /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
     /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
-    pub fn record_hand_offs<T>(
+    fn record_hand_offs<T>(
         &mut self,
         change: impl FnOnce(&mut HandOffs) -> T,
     ) -> anyhow::Result<T> {
@@ -1186,7 +1199,14 @@ impl ReviewCore {
         self.state.file().clone()
     }
 
+    /// A comment sent from its box. Whatever came of it, the next hand-off may go now.
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
+        let result = self.land_comment(outcome);
+        self.work.want(WorkKind::DeliverHandOff);
+        result
+    }
+
+    fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
         let step = match &self.screen {
             Screen::Step(id) => Some(id.clone()),
@@ -1476,7 +1496,9 @@ impl ReviewCore {
     }
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
+    /// Viewed marks sync once no other tick or untick came for `PUSH_DEBOUNCE`.
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
+        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
@@ -1489,6 +1511,7 @@ impl ReviewCore {
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
+        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         let coverage = self.coverage();
         self.state.change(|state| {
             state.untick(id);

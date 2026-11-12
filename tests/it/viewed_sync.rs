@@ -1,11 +1,18 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_tour_agent::FakeTourAgent;
+use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
-use guided_review::viewer::{Problem, Review, ReviewStateFile, SyncState, ViewedState};
+use guided_review::viewer::{
+    PUSH_DEBOUNCE, Problem, Review, ReviewStateFile, TourAgents, ViewedState, Work, WorkKind,
+    WorkPorts,
+};
 use serde_json::json;
+use std::sync::Arc;
+use std::time::Instant;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -68,6 +75,29 @@ impl Shop {
             .unwrap();
         let state_file = ReviewStateFile::for_pr(self.repo.home(), &self.pr());
         Review::open(tour, &source, state_file).unwrap()
+    }
+
+    fn source(&self) -> LocalGit {
+        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+            .unwrap()
+            .unwrap()
+    }
+
+    fn drive_at(&self, review: &mut Review, github: &FakeGitHub, now: Instant) -> Vec<WorkKind> {
+        drive_without_agents(review, github, &self.source(), now)
+    }
+
+    fn land(&self, review: &mut Review, work: Work, github: &FakeGitHub) {
+        let (source, agents) = (
+            self.source(),
+            TourAgents::new(Arc::new(FakeTourAgent::new())),
+        );
+        let ports = WorkPorts {
+            github,
+            source: &source,
+            agents: &agents,
+        };
+        review.land(work.run(&ports));
     }
 }
 
@@ -308,23 +338,60 @@ fn nothing_syncs_while_the_tour_is_not_at_the_pull_request_head() {
     );
 }
 
-#[test]
-fn a_sync_asked_for_while_one_runs_runs_once_more_after_it() {
-    let mut sync = SyncState::default();
-
-    assert!(sync.start_or_queue());
-    assert!(!sync.start_or_queue());
-    assert!(!sync.start_or_queue());
-
-    assert!(sync.finish_and_wants_again());
-    assert!(sync.start_or_queue());
-    assert!(!sync.finish_and_wants_again());
+fn syncs(due: &[Work]) -> usize {
+    due.iter()
+        .filter(|work| work.kind() == WorkKind::SyncViewed)
+        .count()
 }
 
 #[test]
-fn a_sync_that_finishes_with_nothing_asked_leaves_the_next_free_to_start() {
-    let mut sync = SyncState::default();
-    assert!(sync.start_or_queue());
-    assert!(!sync.finish_and_wants_again());
-    assert!(sync.start_or_queue());
+fn a_tick_syncs_once_no_other_tick_came_for_the_debounce() {
+    let shop = Shop::with_pull();
+    let github = all_unviewed(&shop);
+    let mut review = shop.open();
+    let start = Instant::now();
+
+    review.tick(&"a-only".into()).unwrap();
+    assert_eq!(shop.drive_at(&mut review, &github, start), []);
+    let second_tick = start + PUSH_DEBOUNCE / 2;
+    review.tick(&"c-only".into()).unwrap();
+    assert_eq!(shop.drive_at(&mut review, &github, second_tick), []);
+
+    assert_eq!(
+        shop.drive_at(&mut review, &github, start + PUSH_DEBOUNCE),
+        [],
+        "the second tick put it off"
+    );
+    assert_eq!(review.next_due(), Some(second_tick + PUSH_DEBOUNCE));
+    assert_eq!(
+        shop.drive_at(&mut review, &github, second_tick + PUSH_DEBOUNCE),
+        [WorkKind::SyncViewed]
+    );
+    assert_eq!(github.viewed_state("c.txt"), ViewedState::Viewed);
+}
+
+#[test]
+fn a_sync_due_while_one_runs_runs_once_more_after_it_and_no_more() {
+    let shop = Shop::with_pull();
+    let github = all_unviewed(&shop);
+    let mut review = shop.open();
+    let now = Instant::now();
+    review.pull_from_github();
+    let first = review
+        .due_work(now)
+        .into_iter()
+        .find(|work| work.kind() == WorkKind::SyncViewed)
+        .unwrap();
+
+    review.pull_from_github();
+    review.pull_from_github();
+    assert_eq!(syncs(&review.due_work(now)), 0, "one runs");
+    shop.land(&mut review, first, &github);
+
+    let again = review.due_work(now);
+    assert_eq!(syncs(&again), 1);
+    for work in again {
+        shop.land(&mut review, work, &github);
+    }
+    assert_eq!(syncs(&review.due_work(now)), 0);
 }

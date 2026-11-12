@@ -464,7 +464,7 @@ fn a_review_reopened_in_place_of_another_goes_on_showing_what_its_comment_boxes_
     let shown = state_of(&review, &place);
 
     let mut reopened = pull.open();
-    reopened.keep_comment_boxes_of(review);
+    reopened.carry_on_from(review);
 
     assert!(shown.is_some());
     assert_eq!(state_of(&reopened, &place), shown);

@@ -1,6 +1,7 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::work::drive_without_agents;
 use crate::support::{drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
@@ -8,9 +9,10 @@ use guided_review::tour::Tour;
 use guided_review::viewer::{
     Audience, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
     CommentResult, LineLocation, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
-    TextBox, ThreadComment, ThreadId,
+    TextBox, ThreadComment, ThreadId, WorkKind,
 };
 use serde_json::json;
+use std::time::Instant;
 
 fn thread_on_line_ten(body: &str) -> ReviewThread {
     ReviewThread {
@@ -94,6 +96,18 @@ impl Pull {
         self.open_at(&self.head)
     }
 
+    fn source(&self) -> LocalGit {
+        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+            .unwrap()
+            .unwrap()
+    }
+
+    /// What the window coming to the front does: GitHub is read again and the queue is sent.
+    fn come_back(&self, review: &mut Review, github: &FakeGitHub) -> Vec<WorkKind> {
+        review.pull_from_github();
+        drive_without_agents(review, github, &self.source(), Instant::now())
+    }
+
     fn open_at(&self, head: &str) -> Review {
         let tour: Tour = serde_json::from_value(json!({
             "pr": PR,
@@ -104,9 +118,7 @@ impl Pull {
             "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "notes.txt"}], "children": []}],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
-            .unwrap()
-            .unwrap();
+        let source = self.source();
         let state_file = ReviewStateFile::for_pr(self.repo.home(), &self.pr());
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
@@ -411,10 +423,47 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
     );
 
     github.heal(&GitHubFault::ConnectionLost);
-    review.send_queued_comments(&github).unwrap();
+    pull.come_back(&mut review, &github);
 
     assert_eq!(review.queued_comments(), []);
     assert!(github.has_pending_review_now());
+}
+
+#[test]
+fn queued_comments_go_oldest_first_one_after_another_until_the_queue_is_empty() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    github.inject(GitHubFault::ConnectionLost);
+    for (line, body) in [("line ten", "first"), ("line thirty", "second")] {
+        let place = comment_on(&mut review, line);
+        typed(&mut review, &place, body);
+        review
+            .send_comment(&place, SendMode::AddToReview, &github)
+            .unwrap();
+    }
+    assert_eq!(review.queued_comments().len(), 2);
+    github.heal(&GitHubFault::ConnectionLost);
+    let before = pull.sent.github_calls().len();
+
+    let ran = pull.come_back(&mut review, &github);
+
+    assert_eq!(
+        ran.iter()
+            .filter(|kind| **kind == WorkKind::SendQueuedComment)
+            .count(),
+        2
+    );
+    assert_eq!(review.queued_comments(), []);
+    let sent: Vec<String> = pull.sent.github_calls()[before..]
+        .iter()
+        .cloned()
+        .filter_map(|call| match call {
+            GitHubCall::AddThread { body, .. } => Some(body),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent, ["first", "second"]);
 }
 
 #[test]
@@ -429,7 +478,7 @@ fn a_queued_comment_keeps_waiting_while_github_is_unreachable() {
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();
 
-    review.send_queued_comments(&github).unwrap();
+    pull.come_back(&mut review, &github);
 
     assert_eq!(review.queued_comments().len(), 1);
 }
@@ -509,13 +558,20 @@ fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
     let mut repinned = pull.open_at(&later);
 
     let before = pull.sent.github_calls().len();
-    repinned
-        .send_queued_comments(&pull.github_at(&later))
-        .unwrap();
+    pull.come_back(&mut repinned, &pull.github_at(&later));
 
     assert_eq!(repinned.queued_comments().len(), 1);
     assert_eq!(repinned.queued_comments()[0].draft.body, "later please");
-    assert_eq!(pull.sent.github_calls().len(), before);
+    assert!(
+        pull.sent.github_calls()[before..]
+            .iter()
+            .all(|call| !matches!(
+                call,
+                GitHubCall::AddThread { .. } | GitHubCall::CommentNow { .. }
+            )),
+        "{:?}",
+        pull.sent.github_calls()
+    );
 }
 
 #[test]

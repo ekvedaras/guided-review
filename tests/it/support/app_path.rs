@@ -21,8 +21,6 @@ pub trait AppPath {
         mode: SendMode,
         github: &dyn GitHubPort,
     ) -> anyhow::Result<Option<CommentResult>>;
-    /// Oldest first, stopping at the first comment that does not go, like the app's retry.
-    fn send_queued_comments(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()>;
     fn act_on_thread(
         &mut self,
         action: ThreadAction,
@@ -99,15 +97,6 @@ impl AppPath for Review {
             return Ok(None);
         };
         self.apply_comment(request.run(github)).map(Some)
-    }
-
-    fn send_queued_comments(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        while let Some(request) = self.queued_comment_request() {
-            if self.apply_comment(request.run(github))? != CommentResult::Sent {
-                break;
-            }
-        }
-        Ok(())
     }
 
     fn act_on_thread(

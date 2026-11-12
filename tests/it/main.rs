@@ -85,4 +85,5 @@ mod tour_writing;
 mod updates;
 mod viewed_sync;
 mod viewer;
+mod work_agenda;
 mod write_comments;
