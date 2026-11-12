@@ -647,18 +647,28 @@ impl Render for AskPanel {
         };
         let id = ("ask-panel-slide", self.presence.turn());
         let travel = self.presence.travel();
-        div()
-            .flex_none()
-            .h_full()
-            .bg(colors.background)
-            .child(along(panel, id, travel, |panel, position| {
-                let level = panel_level(position);
-                panel
-                    .relative()
-                    .opacity(level)
-                    .left(PANEL_SLIDE * (1. - level))
-            }))
-            .into_any_element()
+        // The panel's room grows and shrinks with its move, so the page glides wider as it leaves
+        // instead of jumping when it is gone.
+        along(
+            div()
+                .flex_none()
+                .h_full()
+                .flex()
+                .justify_end()
+                .overflow_hidden()
+                .bg(colors.background)
+                .child(along(panel, id, travel, |panel, position| {
+                    let level = panel_level(position);
+                    panel
+                        .relative()
+                        .opacity(level)
+                        .left(PANEL_SLIDE * (1. - level))
+                })),
+            ("ask-panel-room", self.presence.turn()),
+            travel,
+            |room, position| room.w(px(PANEL_WIDTH * panel_level(position))),
+        )
+        .into_any_element()
     }
 }
 
