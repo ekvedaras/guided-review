@@ -68,9 +68,8 @@ impl HcTourAgents {
     /// looks commands up in it: without the folder of the running `guided-review` in front, an agent
     /// may find no `guided-review` at all (docs/wiki/agent-runs.md).
     pub fn path_for_agents(guided_review: &Path, path: Option<&OsStr>) -> String {
-        let mut folders: Vec<PathBuf> = path
-            .map(|path| std::env::split_paths(path).collect())
-            .unwrap_or_default();
+        let mut folders: Vec<PathBuf> =
+            path.map_or_default(|path| std::env::split_paths(path).collect());
         if let Some(own) = guided_review.parent()
             && !folders.iter().any(|folder| folder == own)
         {

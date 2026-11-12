@@ -492,8 +492,7 @@ impl FileLines<'_> {
         let text = self
             .at_head
             .and_then(|file| file.line(head_line))
-            .map(str::to_owned)
-            .unwrap_or_default();
+            .map_or_default(str::to_owned);
         Some(self.changed_row(
             Side::Head,
             LineKind::Context {

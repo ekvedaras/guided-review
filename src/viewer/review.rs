@@ -1576,10 +1576,7 @@ impl ReviewCore {
             };
             (!self.is_ticked(id)).then(|| UnreadStep {
                 id: id.clone(),
-                title: self
-                    .step(id)
-                    .map(|step| step.title.clone())
-                    .unwrap_or_default(),
+                title: self.step(id).map_or_default(|step| step.title.clone()),
             })
         })
     }

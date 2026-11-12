@@ -107,8 +107,7 @@ fn capitalized(word: &str) -> String {
     let mut chars = word.chars();
     chars
         .next()
-        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
-        .unwrap_or_default()
+        .map_or_default(|first| first.to_uppercase().collect::<String>() + chars.as_str())
 }
 
 impl GitHub {
@@ -221,8 +220,7 @@ impl GitHub {
         }
         Ok(answer
             .get_mut("data")
-            .map(serde_json::Value::take)
-            .unwrap_or_default())
+            .map_or_default(serde_json::Value::take))
     }
 
     /// Returns the id of the pending review the thread went into, when GitHub says it.

@@ -675,8 +675,7 @@ impl AgentLauncher for FakeAgentLauncher {
             launch
                 .resume
                 .as_ref()
-                .map(|id| format!(", resuming {id}"))
-                .unwrap_or_default()
+                .map_or_default(|id| format!(", resuming {id}"))
         ));
         let turns: Vec<&str> = self.turns.iter().map(String::as_str).collect();
         Ok(Box::new(FakeAgent::answering(&turns, &self.sent)))

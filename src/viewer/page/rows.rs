@@ -341,7 +341,7 @@ impl ShownLine {
             LineKind::Removed => (number, String::new(), '-'),
             LineKind::Added => (String::new(), number, '+'),
             LineKind::Context { base_line, .. } => (
-                base_line.map(|line| line.to_string()).unwrap_or_default(),
+                base_line.map_or_default(|line| line.to_string()),
                 number,
                 ' ',
             ),

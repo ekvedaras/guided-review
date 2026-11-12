@@ -114,8 +114,7 @@ impl PageRows {
     pub fn edges(&self, index: usize) -> BoxEdges {
         self.page
             .as_deref()
-            .map(|page| page.edges(index))
-            .unwrap_or_default()
+            .map_or_default(|page| page.edges(index))
     }
 
     pub fn line(&self, index: usize) -> Option<&ShownLine> {
@@ -139,8 +138,7 @@ impl PageRows {
         self.page
             .as_deref()
             .and_then(Page::description)
-            .map(|(_, description)| description.diagrams())
-            .unwrap_or_default()
+            .map_or_default(|(_, description)| description.diagrams())
     }
 
     pub fn prepared_reviewer_summary(&self) -> Option<Rc<PreparedMarkdown>> {
@@ -156,8 +154,7 @@ impl PageRows {
         self.summary
             .description
             .as_ref()
-            .map(|description| description.fold_keys(DESCRIPTION_KEY))
-            .unwrap_or_default()
+            .map_or_default(|description| description.fold_keys(DESCRIPTION_KEY))
     }
 
     #[cfg(feature = "snapshots")]
