@@ -256,17 +256,14 @@ impl PreparedTable {
         let cells = |row: &[Vec<Run>], bold: bool| -> Vec<Rc<InlineText>> {
             (0..columns)
                 .map(|column| {
-                    let runs: Vec<Run> = row
-                        .get(column)
-                        .map(|cell| {
-                            cell.iter()
-                                .map(|run| Run {
-                                    bold: run.bold || bold,
-                                    ..run.clone()
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let runs: Vec<Run> = row.get(column).map_or_default(|cell| {
+                        cell.iter()
+                            .map(|run| Run {
+                                bold: run.bold || bold,
+                                ..run.clone()
+                            })
+                            .collect()
+                    });
                     Rc::new(InlineText::of(&runs))
                 })
                 .collect()

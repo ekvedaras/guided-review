@@ -856,8 +856,7 @@ impl RenderOnce for ThreadElement {
             .thread
             .comments
             .first()
-            .map(|comment| comment.author.clone())
-            .unwrap_or_default();
+            .map_or_default(|comment| comment.author.clone());
         let marks = self.marks(&colors);
         let summary = format!(
             "{}{} · {first_author} · {comment_count} comment{}",

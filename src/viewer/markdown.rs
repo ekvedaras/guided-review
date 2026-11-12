@@ -820,7 +820,7 @@ impl Builder {
             self.close_top();
         }
         Markdown {
-            blocks: self.stack.pop().map(|open| open.blocks).unwrap_or_default(),
+            blocks: self.stack.pop().map_or_default(|open| open.blocks),
         }
     }
 }

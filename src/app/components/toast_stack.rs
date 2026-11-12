@@ -79,8 +79,7 @@ impl ToastShelf {
         self.texts
             .iter()
             .find(|(id, _)| *id == toast.id.get())
-            .map(|(_, text)| text.clone())
-            .unwrap_or_default()
+            .map_or_default(|(_, text)| text.clone())
     }
 
     #[cfg(feature = "snapshots")]

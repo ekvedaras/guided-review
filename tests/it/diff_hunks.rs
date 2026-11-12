@@ -74,7 +74,7 @@ fn rows(hunks: &[DiffHunk]) -> Vec<String> {
                     LineKind::Context { base_line, .. } => format!(
                         "{} {}|{number} {}",
                         if row.is_inside_hunk() { "" } else { "~" },
-                        base_line.map(|line| line.to_string()).unwrap_or_default(),
+                        base_line.map_or_default(|line| line.to_string()),
                         row.text
                     ),
                 }

@@ -296,8 +296,7 @@ impl ActivePr {
         let held_replies = if self.is_reopening(&pr) {
             self.building
                 .take()
-                .map(|build| build.held_replies)
-                .unwrap_or_default()
+                .map_or_default(|build| build.held_replies)
         } else {
             Vec::new()
         };
