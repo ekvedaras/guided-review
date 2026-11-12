@@ -49,6 +49,12 @@ pub fn open_code_hint(link: &CodeLink, cx: &App) -> SharedString {
         .into()
 }
 
+/// A page about the app itself, never code, so it opens in the browser even with no review to ask.
+#[allow(clippy::disallowed_methods, reason = "opens a URL, beside `open`")]
+pub fn open_app_page(url: &str, cx: &mut App) {
+    cx.open_url(url);
+}
+
 /// A file of the reviewer's own, outside any clone, in the IDE they set.
 #[allow(clippy::disallowed_methods, reason = "opens a URL, beside `open`")]
 pub fn open_file_in_ide(launch: &IdeLaunch, cx: &mut App) -> std::io::Result<()> {

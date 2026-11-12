@@ -42,6 +42,7 @@ One family for text (`TEXT_FONT`) and one for code (`CODE_FONT`); every text nam
 - `text_sm`: body, controls, sidebar rows. `Large` and `Regular` buttons use it; `Small` buttons `text_xs`.
 - `note_label`: `text_xs` semibold capitals in `muted_text` (or a tone's text inside a callout). Every label over a heading, a section or a note uses it: a screen's place ("STEP 3 OF 11"), "THE TOUR", "REVIEWER SUMMARY", "PR DESCRIPTION", "WHAT TO CHECK", the shortcuts sheet's groups (1775047, 1b942e8).
 - `muted_text` for secondary lines; `sidebar_text` a step quieter than `text`, so the page leads.
+- `faint_text()`, `muted_text` at 60 %, for what is there to look up and not read day to day: only the version line above Settings at the foot of the sidebar (2026-11-12). It is a link with no link look at rest; under the mouse it turns `accent` with a pointer, and opens the release's page (`AppVersion::page`).
 
 ## Icons
 

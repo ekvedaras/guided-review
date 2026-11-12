@@ -21,6 +21,7 @@ use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::sidebar_rows::SidebarRows;
+use crate::app::updater::release_install_in_the_way;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
@@ -110,11 +111,14 @@ impl EventEmitter<SessionEvent> for ReviewSession {}
 
 impl ReviewSession {
     pub fn new(
-        review: Review,
+        mut review: Review,
         wiring: SessionWiring,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        if let Some(in_the_way) = release_install_in_the_way() {
+            review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
+        }
         let SessionWiring {
             source,
             github,

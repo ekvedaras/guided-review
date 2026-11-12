@@ -3,6 +3,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::update::InTheWay;
+
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
 use super::saved_state::RepinRunning;
 use super::toasts::ToastTone;
@@ -38,6 +40,8 @@ pub enum Problem {
     SwitchFailed(String),
     /// Show agent was clicked and the terminal did not come up.
     ShowAgentFailed(String),
+    /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
+    ReleaseInstallInTheWay(InTheWay),
 }
 
 /// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
@@ -72,6 +76,8 @@ pub enum ProblemKind {
     SwitchFailed,
     /// Cleared by the next Show agent that brings the terminal up.
     ShowAgentFailed,
+    /// Raised when the review opens; a review opened once the binary is removed has none.
+    ReleaseInstallInTheWay,
 }
 
 impl Problem {
@@ -91,6 +97,7 @@ impl Problem {
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
+            Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
         }
     }
 }
@@ -271,6 +278,26 @@ impl fmt::Display for Problem {
             Self::ShowAgentFailed(reason) => {
                 write!(formatter, "Could not show the agent: {reason}")
             }
+            Self::ReleaseInstallInTheWay(InTheWay::Runs {
+                binary,
+                release_install,
+            }) => write!(
+                formatter,
+                "Updates do not reach this app: it runs {binary}, not the release install \
+                 {release_install}. Remove {binary} and start guided-review again.",
+                binary = binary.display(),
+                release_install = release_install.display(),
+            ),
+            Self::ReleaseInstallInTheWay(InTheWay::FirstOnPath {
+                binary,
+                release_install,
+            }) => write!(
+                formatter,
+                "Updates do not reach guided-review in a terminal or the tour skill: {binary} comes \
+                 before the release install {release_install} on PATH. Remove {binary}.",
+                binary = binary.display(),
+                release_install = release_install.display(),
+            ),
         }
     }
 }

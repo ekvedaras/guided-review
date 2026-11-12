@@ -5,12 +5,6 @@ use gpui::{AssetSource, SharedString};
 /// The app's own pictures, built into the binary, so `cargo install` needs nothing beside it.
 pub struct Assets;
 
-impl Assets {
-    pub const APP_ICON: &str = include_str!("../../assets/app-icon.svg");
-    /// A debug build's icon carries a badge, so it is not taken for the installed app in the Dock.
-    pub const DEV_APP_ICON: &str = include_str!("../../assets/app-icon-dev.svg");
-}
-
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
         let bytes: &'static [u8] = match path {

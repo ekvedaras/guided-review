@@ -311,6 +311,28 @@ fn settings_asks_the_running_app_to_show_settings_and_says_so() {
 }
 
 #[test]
+fn a_launch_with_no_command_asks_the_running_app_to_show_the_pr_switcher() {
+    let (repo, github) = shop_with_a_tour_file();
+    let seen = Seen::default();
+    let app = fake_app(
+        repo.home(),
+        None,
+        vec![answer_line(BUILD, r#""showing_switcher""#)],
+        Arc::clone(&seen),
+    );
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&[]);
+
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(run.stdout.contains("PR switcher"), "stdout: {}", run.stdout);
+    let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
+    assert_eq!(request["request"], "show_switcher");
+}
+
+#[test]
 fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_in_a_new_one() {
     let (repo, github) = shop_with_a_tour_file();
     let script = start_script(repo.home());
