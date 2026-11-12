@@ -1381,7 +1381,7 @@ impl OneStepLayout {
         }));
         div()
             .flex_none()
-            .px_4()
+            .px_2()
             .py_2()
             .flex()
             .items_center()
@@ -1486,7 +1486,7 @@ impl OneStepLayout {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .px_2()
+                    .px_4()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -1522,7 +1522,7 @@ impl OneStepLayout {
             .border_b_1()
             .border_color(colors.subtle_border)
             .shadow(colors.sticky_shadow())
-            .child(step_chip(&colors, &heading))
+            .child(step_place(&colors, &heading))
             .child(
                 div()
                     .flex_1()
@@ -1628,7 +1628,7 @@ impl OneStepLayout {
                 .flex_col()
                 .items_start()
                 .gap_2()
-                .child(tour_chip(&colors, "SUMMARY", ChipVoice::OnTheTrail))
+                .child(tour_place(&colors, "SUMMARY", TourStop::On))
                 .child(
                     div()
                         .text_2xl()
@@ -1637,12 +1637,10 @@ impl OneStepLayout {
                 )
                 .into_any_element(),
             PageRow::SummaryStats(stats) => summary_stats(&colors, &stats).into_any_element(),
-            PageRow::RouteHeading => div()
+            PageRow::RouteHeading => note_label("THE TOUR")
                 .pt_6()
-                .pb_3()
-                .text_lg()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child("The tour")
+                .pb_2()
+                .text_color(colors.muted_text)
                 .into_any_element(),
             PageRow::RouteStop(stop) => route_stop(&stop, cx).into_any_element(),
             PageRow::TourLead(lead) => div()
@@ -1866,6 +1864,9 @@ impl OneStepLayout {
                 .flex_1()
                 .min_w(DESCRIPTION_MIN_WIDTH)
                 .max_w(READING_WIDTH)
+                .flex()
+                .flex_col()
+                .gap_6()
                 .children(reviewer_summary)
                 .children(description)
         });
@@ -1925,7 +1926,6 @@ impl OneStepLayout {
     ) -> Div {
         let colors = Colors::active(cx);
         div()
-            .pt_6()
             .pb_4()
             .w_full()
             .max_w(READING_WIDTH)
@@ -2144,7 +2144,7 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
                 .flex_col()
                 .items_start()
                 .gap_2()
-                .child(step_chip(&colors, heading))
+                .child(step_place(&colors, heading))
                 .child(title),
         )
         .child(tick_button(
@@ -2155,56 +2155,45 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
         ))
 }
 
-/// The step's place on the tour, in a chip that carries the trail's dot; a gone step's is quiet.
-fn step_chip(colors: &Colors, heading: &StepHeading) -> impl IntoElement {
+/// The step's place on the tour, over its heading; a gone step's has no trail dot.
+fn step_place(colors: &Colors, heading: &StepHeading) -> impl IntoElement {
     let text = match (heading.number, heading.is_gone) {
         (_, true) => "Gone since the last version".to_owned(),
         (Some((number, count)), false) => format!("Step {number} of {count}"),
         (None, false) => "Step".to_owned(),
     };
-    let voice = if heading.is_gone {
-        ChipVoice::Quiet
+    let stop = if heading.is_gone {
+        TourStop::Off
     } else {
-        ChipVoice::OnTheTrail
+        TourStop::On
     };
-    tour_chip(colors, text.to_uppercase(), voice)
+    tour_place(colors, text.to_uppercase(), stop)
 }
 
-/// Whether a place chip is a stop on the trail, or a step no longer on it.
+/// Whether a screen is a stop on the trail, or a step no longer on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChipVoice {
-    OnTheTrail,
-    Quiet,
+enum TourStop {
+    On,
+    Off,
 }
 
-/// A screen's place on the tour, over its heading.
-fn tour_chip(colors: &Colors, text: impl Into<SharedString>, voice: ChipVoice) -> impl IntoElement {
-    let chip = div()
+/// A screen's place on the tour, over its heading: a label like every other label on the page,
+/// led by the trail's dot when the screen is on the trail.
+fn tour_place(colors: &Colors, text: impl Into<SharedString>, stop: TourStop) -> impl IntoElement {
+    div()
         .flex()
         .items_center()
         .gap_1p5()
-        .px_2()
-        .py_0p5()
-        .rounded_full()
-        .border_1()
-        .text_xs()
-        .font_weight(FontWeight::MEDIUM);
-    let chip = if voice == ChipVoice::Quiet {
-        chip.bg(colors.surface)
-            .border_color(colors.subtle_border)
-            .text_color(colors.muted_text)
-    } else {
-        chip.bg(colors.current)
-            .border_color(colors.current_border)
-            .text_color(colors.accent)
-            .child(
+        .text_color(colors.muted_text)
+        .when(stop == TourStop::On, |place| {
+            place.child(
                 div()
                     .size(px(6.))
                     .rounded_full()
                     .bg(colors.trail.left_right()),
             )
-    };
-    chip.child(text.into())
+        })
+        .child(note_label(text))
 }
 
 fn repin_notes(colors: &Colors, gone_pieces: usize, text_may_be_old: bool) -> impl IntoElement {
