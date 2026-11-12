@@ -1637,12 +1637,10 @@ impl OneStepLayout {
                 )
                 .into_any_element(),
             PageRow::SummaryStats(stats) => summary_stats(&colors, &stats).into_any_element(),
-            PageRow::RouteHeading => div()
+            PageRow::RouteHeading => note_label("THE TOUR")
                 .pt_6()
-                .pb_3()
-                .text_lg()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child("The tour")
+                .pb_2()
+                .text_color(colors.muted_text)
                 .into_any_element(),
             PageRow::RouteStop(stop) => route_stop(&stop, cx).into_any_element(),
             PageRow::TourLead(lead) => div()
@@ -1866,6 +1864,9 @@ impl OneStepLayout {
                 .flex_1()
                 .min_w(DESCRIPTION_MIN_WIDTH)
                 .max_w(READING_WIDTH)
+                .flex()
+                .flex_col()
+                .gap_6()
                 .children(reviewer_summary)
                 .children(description)
         });
@@ -1925,7 +1926,6 @@ impl OneStepLayout {
     ) -> Div {
         let colors = Colors::active(cx);
         div()
-            .pt_6()
             .pb_4()
             .w_full()
             .max_w(READING_WIDTH)
