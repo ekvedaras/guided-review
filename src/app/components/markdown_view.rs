@@ -1,3 +1,4 @@
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
     InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
@@ -15,12 +16,14 @@ use std::sync::Arc;
 use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::image_facts::is_svg_path;
-use crate::viewer::{Block, Capture, FenceLine, Markdown, Run, Span, fence_lines};
+use crate::viewer::{
+    Block, Capture, ColumnAlignment, FenceLine, Markdown, Run, Span, Table, fence_lines,
+};
 
 use super::diagram::{DiagramSet, DiagramView};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, inside_edge};
 use super::picture_zoom::{ZoomedPicture, zoom_picture};
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
@@ -179,6 +182,7 @@ enum PreparedBlock {
         body: Vec<Self>,
     },
     Rule,
+    Table(PreparedTable),
     Picture {
         path: Arc<Path>,
         /// Width over height, so the picture's room is kept before it loads.
@@ -207,6 +211,99 @@ impl PreparedBlock {
             _ => None,
         }
     }
+}
+
+/// A table with its cells made into text once and its columns weighed by the text they hold.
+#[derive(Debug, PartialEq)]
+struct PreparedTable {
+    columns: Vec<TableColumn>,
+    header: Vec<Rc<InlineText>>,
+    rows: Vec<Vec<Rc<InlineText>>>,
+    /// About what the cells take on one line each, so a small table is not stretched across the
+    /// column, and a large one wraps inside its cells.
+    natural_width: f32,
+}
+
+#[derive(Debug, PartialEq)]
+struct TableColumn {
+    alignment: ColumnAlignment,
+    /// Its longest cell in characters (wide ones count double): the column's share of the width.
+    weight: f32,
+    /// Its longest word, which the column never narrows past, so a header is not broken mid-word.
+    least_width: f32,
+}
+
+impl TableColumn {
+    fn least_width(&self) -> f32 {
+        self.least_width * PreparedTable::CHARACTER_WIDTH * 1.1 + PreparedTable::CELL_FRAME
+    }
+
+    fn natural_width(&self) -> f32 {
+        self.weight * PreparedTable::CHARACTER_WIDTH + PreparedTable::CELL_FRAME
+    }
+}
+
+impl PreparedTable {
+    /// Points one character of the longest cell takes at `text_sm`; a guess, as text is not measured here.
+    const CHARACTER_WIDTH: f32 = 7.5;
+    /// Padding on both sides of a cell plus its divider.
+    const CELL_FRAME: f32 = 25.;
+    /// Even an empty column keeps this much of the width.
+    const LEAST_WEIGHT: f32 = 5.;
+
+    fn of(table: &Table) -> Self {
+        let columns = table.alignments.len().max(table.header.len());
+        let cells = |row: &[Vec<Run>], bold: bool| -> Vec<Rc<InlineText>> {
+            (0..columns)
+                .map(|column| {
+                    let runs: Vec<Run> = row
+                        .get(column)
+                        .map(|cell| {
+                            cell.iter()
+                                .map(|run| Run {
+                                    bold: run.bold || bold,
+                                    ..run.clone()
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Rc::new(InlineText::of(&runs))
+                })
+                .collect()
+        };
+        let header = cells(&table.header, true);
+        let rows: Vec<_> = table.rows.iter().map(|row| cells(row, false)).collect();
+        let cells_of = |column: usize| {
+            std::iter::once(&header)
+                .chain(&rows)
+                .filter_map(move |row| row.get(column))
+        };
+        let columns: Vec<_> = (0..columns)
+            .map(|column| TableColumn {
+                alignment: table.alignments.get(column).copied().unwrap_or_default(),
+                weight: cells_of(column)
+                    .map(|cell| text_units(&cell.text))
+                    .fold(Self::LEAST_WEIGHT, f32::max),
+                least_width: cells_of(column)
+                    .flat_map(|cell| cell.text.split_whitespace().map(text_units))
+                    .fold(0., f32::max),
+            })
+            .collect();
+        let natural_width = columns.iter().map(TableColumn::natural_width).sum();
+        Self {
+            columns,
+            header,
+            rows,
+            natural_width,
+        }
+    }
+}
+
+/// Characters of `text`, those outside Latin counting double, as emoji and CJK are about twice as wide.
+fn text_units(text: &str) -> f32 {
+    text.chars()
+        .map(|c| if u32::from(c) > 0x2000 { 2. } else { 1. })
+        .sum()
 }
 
 #[derive(Debug, PartialEq)]
@@ -281,6 +378,7 @@ fn prepare_block(block: &Block) -> PreparedBlock {
             body: prepare(body),
         },
         Block::Rule => PreparedBlock::Rule,
+        Block::Table(table) => PreparedBlock::Table(PreparedTable::of(table)),
         Block::Picture {
             path,
             width,
@@ -418,6 +516,7 @@ fn suggestion_view(colors: &Colors, removed: &[Arc<str>], added: &[SharedString]
             div()
                 .px_2()
                 .py_1()
+                .rounded_t(px(inside_edge(CONTROL_RADIUS)))
                 .bg(colors.header_band())
                 .border_b_1()
                 .border_color(colors.subtle_border)
@@ -531,6 +630,7 @@ fn block_element(
             .into_any_element(),
         PreparedBlock::Details { summary, body } => details(summary, body, key, embeds, window, cx),
         PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
+        PreparedBlock::Table(table) => table_view(&colors, table, key),
         PreparedBlock::Picture {
             path,
             ratio,
@@ -582,6 +682,63 @@ fn block_element(
                 .into_any_element()
         }
     }
+}
+
+/// Wraps inside its cells rather than scrolling: a summary's table is prose, and a column scrolled
+/// out of sight hides what the reviewer is meant to read. Columns share the width by their longest cell.
+fn table_view(colors: &Colors, table: &PreparedTable, key: &str) -> AnyElement {
+    let row =
+        |cells: &[Rc<InlineText>], row_key: String, ground: Option<gpui::Rgba>, first: bool| {
+            let row = div().flex().w_full().when_some(ground, Styled::bg);
+            let row = if first {
+                row.rounded_t(px(inside_edge(CONTROL_RADIUS)))
+            } else {
+                row.border_t_1().border_color(colors.subtle_border)
+            };
+            row.children(cells.iter().zip(&table.columns).enumerate().map(
+                |(index, (cell, column))| {
+                    let mut cell_view = div()
+                        .flex_basis(px(column.natural_width()))
+                        .min_w(px(column.least_width()))
+                        .px_3()
+                        .py_1()
+                        .when(index > 0, |cell| {
+                            cell.border_l_1().border_color(colors.subtle_border)
+                        })
+                        .child(styled_text(colors, cell, &format!("{row_key}-{index}")));
+                    cell_view.style().flex_grow = Some(column.weight);
+                    match column.alignment {
+                        ColumnAlignment::Left => cell_view,
+                        ColumnAlignment::Center => cell_view.text_center(),
+                        ColumnAlignment::Right => cell_view.text_right(),
+                    }
+                },
+            ))
+        };
+    div()
+        .id(SharedString::from(format!("table-{key}")))
+        .flex()
+        .flex_col()
+        .w_full()
+        .max_w(px(table.natural_width))
+        .rounded(px(CONTROL_RADIUS))
+        .border_1()
+        .border_color(colors.subtle_border)
+        .text_sm()
+        .child(row(
+            &table.header,
+            format!("{key}-head"),
+            Some(colors.inset),
+            true,
+        ))
+        .children(
+            table
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(index, cells)| row(cells, format!("{key}-{index}"), None, false)),
+        )
+        .into_any_element()
 }
 
 fn details(
@@ -730,6 +887,17 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
                 ..Run::default()
             }],
             Block::Rule => Vec::new(),
+            Block::Table(table) => table
+                .header
+                .iter()
+                .chain(table.rows.iter().flatten())
+                .flat_map(|cell| {
+                    cell.iter().cloned().chain([Run {
+                        text: " ".into(),
+                        ..Run::default()
+                    }])
+                })
+                .collect(),
             Block::Picture { alt, .. } => vec![Run {
                 text: alt.clone(),
                 ..Run::default()
@@ -968,6 +1136,26 @@ mod tests {
         assert!(heading.styled.iter().all(|(_, run)| run.bold));
         assert_eq!(paragraph.text.as_ref(), "plain soft");
         assert!(paragraph.styled.iter().all(|(_, run)| !run.bold));
+    }
+
+    #[test]
+    fn a_table_is_prepared_with_a_bold_header_and_columns_weighed_by_their_longest_cell() {
+        let blocks = prepared("| a | long header |\n|:-:|--:|\n| wider cell | x |\n| y |");
+
+        let [PreparedBlock::Table(table)] = &blocks[..] else {
+            panic!("expected a table");
+        };
+        assert!(
+            table
+                .header
+                .iter()
+                .all(|cell| cell.styled.iter().all(|(_, run)| run.bold))
+        );
+        assert_eq!(table.columns[0].alignment, ColumnAlignment::Center);
+        assert_eq!(table.columns[1].alignment, ColumnAlignment::Right);
+        assert_eq!(table.columns[0].weight, 10.);
+        assert_eq!(table.columns[1].weight, 11.);
+        assert!(table.rows.iter().all(|row| row.len() == 2));
     }
 
     #[test]

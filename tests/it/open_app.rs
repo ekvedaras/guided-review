@@ -228,21 +228,60 @@ fn a_refusal_from_the_app_fails_the_open_with_its_reason() {
     );
 }
 
-#[test]
-fn the_no_tour_refusal_comes_before_any_app_is_asked_or_started() {
+fn shop_without_a_tour_file() -> (FixtureRepo, FakeGitHub) {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let sha = repo.commit("base");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &sha, &sha);
+    (repo, github)
+}
+
+fn writing_line() -> String {
+    answer_line(BUILD, &format!(r#"{{"writing":{{"pr":"{PR}"}}}}"#))
+}
+
+#[test]
+fn open_of_a_pr_without_a_tour_asks_the_running_app_and_says_it_is_writing_one() {
+    let (repo, github) = shop_without_a_tour_file();
+    let seen = Seen::default();
+    let app = fake_app(repo.home(), None, vec![writing_line()], Arc::clone(&seen));
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["open", PR]);
+
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(
+        run.stdout.contains("No tour") && run.stdout.contains("writing one"),
+        "stdout: {}",
+        run.stdout
+    );
+    let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
+    assert_eq!(request["request"]["open"]["pr"], PR);
+}
+
+#[test]
+fn open_of_a_pr_without_a_tour_starts_the_app_when_none_answers_and_hands_it_the_pr() {
+    let (repo, github) = shop_without_a_tour_file();
     let script = start_script(repo.home());
+    let seen = Seen::default();
+    let app = fake_app(
+        repo.home(),
+        Some(repo.home().join("started")),
+        vec![writing_line()],
+        Arc::clone(&seen),
+    );
 
     let run = GuidedReview::new(&repo, &github)
         .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
-    assert!(!run.success);
-    assert!(run.stderr.contains("run `/tour"), "stderr: {}", run.stderr);
-    assert!(!repo.home().join("started").exists());
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(repo.home().join("started").exists());
+    let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
+    assert_eq!(request["request"]["open"]["pr"], PR);
 }
 
 fn showing_settings_line() -> String {

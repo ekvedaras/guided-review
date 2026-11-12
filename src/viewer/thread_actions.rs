@@ -28,6 +28,10 @@ pub enum ThreadAction {
     EditComment {
         comment_id: CommentId,
     },
+    /// Removes the viewer's own comment, once the reviewer has said yes to the question.
+    DeleteComment {
+        comment_id: CommentId,
+    },
     /// Adds the viewer's reaction to a comment, or takes it back.
     SetReaction {
         comment_id: CommentId,
@@ -53,6 +57,8 @@ pub struct ThreadActionRequest {
     pub(super) draft_body: Option<String>,
     /// The tour is behind the PR head: the thread may sit on lines the tour does not show.
     pub(super) freshness: TourFreshness,
+    /// What the review already knows stops the action, so it never reaches GitHub.
+    pub(super) refusal: Option<CommentRefusal>,
 }
 
 pub struct ThreadActionOutcome {
@@ -94,6 +100,9 @@ impl ThreadActionRequest {
         &self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     ) -> Result<ThreadActionResult, GitHubError> {
+        if let Some(refusal) = &self.refusal {
+            return Ok(ThreadActionResult::Refused(refusal.clone()));
+        }
         match &self.action {
             ThreadAction::Reply { .. } if self.freshness == TourFreshness::Behind => {
                 return Ok(ThreadActionResult::Refused(CommentRefusal::TourIsOld));
@@ -125,6 +134,7 @@ impl ThreadActionRequest {
                 };
                 github.edit_comment(comment_id, body)?;
             }
+            ThreadAction::DeleteComment { comment_id } => github.delete_comment(comment_id)?,
             ThreadAction::Resolve { thread_id } => {
                 github.set_thread_resolved(thread_id, Resolution::Resolved)?;
             }

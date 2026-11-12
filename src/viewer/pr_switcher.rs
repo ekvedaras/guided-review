@@ -268,7 +268,8 @@ impl SwitcherRow {
 }
 
 impl TourFact {
-    fn of(pr: &PullRequestUrl, home: &Path) -> Self {
+    /// What the disk says of the PR's tour.
+    pub fn of(pr: &PullRequestUrl, home: &Path) -> Self {
         if Tour::path_for(home, pr).exists() {
             Self::Ready
         } else {

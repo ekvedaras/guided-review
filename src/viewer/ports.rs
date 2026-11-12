@@ -67,6 +67,9 @@ pub trait ReviewThreadsPort: Send + Sync {
 
     /// Replaces the body of one of the viewer's own comments, sent or still in the pending review.
     fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), GitHubError>;
+
+    /// Removes one of the viewer's own comments, sent or still in the pending review.
+    fn delete_comment(&self, comment_id: &CommentId) -> Result<(), GitHubError>;
 }
 
 /// The viewer's own review: what it holds so far, new comments, and sending it.

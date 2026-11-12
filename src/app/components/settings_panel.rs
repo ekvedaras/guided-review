@@ -20,7 +20,7 @@ use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, rise_in, slide_in};
 use super::palette::{
-    CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone,
+    CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, inside_edge,
 };
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
@@ -1359,6 +1359,10 @@ impl SettingsPanel {
             .justify_center()
             .px_8()
             .bg(colors.overlay)
+            .when(
+                matches!(self.placement, Placement::SheetOverReview),
+                |bar| bar.rounded_b(px(inside_edge(CARD_RADIUS))),
+            )
             .border_t_1()
             .border_color(colors.border)
             .shadow(colors.bar_shadow())

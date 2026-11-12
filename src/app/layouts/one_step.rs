@@ -34,7 +34,8 @@ use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
     OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row, hung_row, hunk_gap,
-    no_change_since_read_row, only_whitespace_row, piece_end,
+    no_change_since_read_row, only_whitespace_row, piece_end, rendered_block_row,
+    rendered_file_waiting_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -57,6 +58,7 @@ use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching, SwitcherPlace};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
@@ -65,8 +67,8 @@ use crate::app::components::sidebar_row::{
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
-    OnCommentEdit, OnReplyDraft, OnThreadAction, OnTryHandOffAgain, ReplyDraftChange,
-    ThreadChanges, ThreadDrafts, ThreadElement,
+    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnReplyDraft, OnThreadAction,
+    OnTryHandOffAgain, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
 };
 use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -82,12 +84,13 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Effect, GitHubPort, HandOffId, InFlight, Intent, LineLocation, NextScreen,
-    NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment, ReadProgress, Reopen,
-    ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange,
-    ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode,
-    SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox,
-    ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, WindowMoment,
+    CommentPlace, Effect, FileView, GitHubPort, HandOffId, InFlight, Intent, LineLocation,
+    NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment, ReadProgress,
+    Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -555,6 +558,43 @@ impl OneStepLayout {
     }
 
     /// The comments on the whole file are rows under it, not part of it.
+    fn view_switch(&self, switch: &ViewSwitch, cx: &mut Context<Self>) -> Stateful<Div> {
+        let segment = |view: FileView, label: &'static str, cx: &mut Context<Self>| {
+            let path = switch.path.clone();
+            Segment::new(
+                format!("view-{label}-{path}"),
+                label,
+                cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| {
+                        review.display_options_mut().show_file_as(&path, view);
+                    });
+                }),
+            )
+        };
+        let segments = vec![
+            segment(FileView::Code, "Code", cx),
+            segment(FileView::Rendered, "Rendered", cx),
+        ];
+        let picked = match switch.view {
+            FileView::Code => 0,
+            FileView::Rendered => 1,
+        };
+        div()
+            .id(SharedString::from(format!("view-switch-{}", switch.path)))
+            .flex_none()
+            .child(
+                Segmented::new(
+                    format!("view-{}", switch.path),
+                    SegmentLayout::Row {
+                        segment_width: px(76.),
+                    },
+                    segments,
+                )
+                .compact()
+                .picked(Some(picked)),
+            )
+    }
+
     fn image_row(&self, path: &FilePath, cx: &mut Context<Self>) -> ImageRow {
         let layout = cx.entity();
         let comment_path = path.clone();
@@ -726,6 +766,18 @@ impl OneStepLayout {
         })
     }
 
+    fn on_delete_question(&self) -> OnDeleteQuestion {
+        let session = self.session.clone();
+        Rc::new(move |comment_id, question, cx| {
+            session.update(cx, |session, cx| {
+                session.change(cx, |review| match question {
+                    DeleteQuestion::Ask => review.ask_to_delete(comment_id),
+                    DeleteQuestion::Withdraw => review.withdraw_delete(),
+                });
+            });
+        })
+    }
+
     fn on_finish_body_edit(&self) -> OnBodyEdit {
         let session = self.session.clone();
         Rc::new(move |text, cx| {
@@ -772,6 +824,7 @@ impl OneStepLayout {
             ThreadChanges {
                 on_reply_draft: self.on_reply_draft(&view.thread.id),
                 on_comment_edit: self.on_comment_edit(),
+                on_delete_question: self.on_delete_question(),
                 on_toggle: Box::new(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.toggle_thread_fold(&id));
                 })),
@@ -1025,6 +1078,19 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_tour_agent);
             }))
         });
+        let retry = agent.can_retry.then(|| {
+            icon_label_button(
+                colors,
+                "retry-tour-agent-link",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Refresh,
+                "Retry",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::retry_agent_link);
+            }))
+        });
         div().flex().flex_col().gap_1().child(
             div()
                 .flex()
@@ -1038,7 +1104,8 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
                 )
-                .children(show),
+                .children(show)
+                .children(retry),
         )
     }
 
@@ -1541,10 +1608,18 @@ impl OneStepLayout {
                     .ask
                     .as_ref()
                     .map(|ask| self.ask_at(ask, ButtonKind::Ghost, cx));
+                let view_switch = heading
+                    .view
+                    .as_ref()
+                    .map(|switch| self.view_switch(switch, cx));
                 let header = PieceHeader::new(
                     heading.label.clone(),
                     heading.repin_label,
-                    open_code.into_iter().chain(ask).collect(),
+                    view_switch
+                        .into_iter()
+                        .chain(open_code)
+                        .chain(ask)
+                        .collect(),
                 )
                 .closing_its_box(edges.closes);
                 match heading.fold.clone() {
@@ -1609,6 +1684,16 @@ impl OneStepLayout {
                 .child(self.image_row(&path, cx))
                 .into_any_element(),
             PageRow::OnlyWhitespace => only_whitespace_row(&colors, edges).into_any_element(),
+            PageRow::RenderedBlock(block) => rendered_block_row(
+                &colors,
+                edges,
+                block.change,
+                MarkdownView::new(block.key.to_string(), parsed_markdown(&block.source)),
+            )
+            .into_any_element(),
+            PageRow::RenderedFileWaiting => {
+                rendered_file_waiting_row(&colors, edges).into_any_element()
+            }
             PageRow::HunkGap(gap) => hunk_gap(
                 &colors,
                 edges,

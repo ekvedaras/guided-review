@@ -100,6 +100,10 @@ pub enum Answer {
     Refused {
         reason: String,
     },
+    /// The PR has no tour, so the app shows a tour agent writing one; the agent's own `open` ends it.
+    Writing {
+        pr: String,
+    },
     /// The reviewer reads another PR, so the app does not switch; its PR switcher marks this one ready.
     KeptInBackground {
         pr: String,
@@ -126,6 +130,10 @@ impl std::fmt::Display for Answer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Opening { pr } => write!(f, "guided-review app is opening {pr}"),
+            Self::Writing { pr } => write!(
+                f,
+                "No tour of {pr} yet; guided-review app is writing one and opens it when it is ready"
+            ),
             Self::Reloaded { pr } => write!(f, "guided-review app reloaded the tour of {pr}"),
             Self::Refused { reason } => write!(f, "guided-review app refused: {reason}"),
             Self::KeptInBackground { pr } => write!(

@@ -55,6 +55,9 @@ pub struct ReviewSession {
     rows: PageRows,
     sidebar: SidebarRows,
     tour_agent: TourAgentState,
+    /// What the sidebar said before a snapshot scene staged another line.
+    #[cfg(feature = "snapshots")]
+    tour_agent_before_staging: Option<TourAgentState>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -137,6 +140,8 @@ impl ReviewSession {
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
+            #[cfg(feature = "snapshots")]
+            tour_agent_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -250,8 +255,16 @@ impl ReviewSession {
                 },
                 |this, outcome, cx| {
                     let after = this.change(cx, |review| review.land(outcome));
-                    if after == AfterLanding::FollowNewTourAgent {
-                        this.follow_tour_agent(cx);
+                    match after {
+                        AfterLanding::Nothing => {}
+                        AfterLanding::TourAgentIs(state) if state.can_retry() => {
+                            this.tour_agent = state;
+                            this.show_problems(cx);
+                        }
+                        // Herdr is back: the follow looks again, tells the sidebar what it finds and keeps it up.
+                        AfterLanding::FollowNewTourAgent | AfterLanding::TourAgentIs(_) => {
+                            this.follow_tour_agent(cx);
+                        }
                     }
                 },
             )
@@ -584,6 +597,25 @@ impl ReviewSession {
         self.rebuild_rows(cx);
     }
 
+    /// Shows herdr running but failing in the sidebar, as it did when its registry writer stopped.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_agent_link_off(&mut self, cx: &mut Context<Self>) {
+        let off = TourAgentState::LinkOff(crate::viewer::AgentLinkOff::HerdrFailed(
+            "cannot save terminals: registry writer stopped".to_owned(),
+        ));
+        let before = std::mem::replace(&mut self.tour_agent, off);
+        self.tour_agent_before_staging.get_or_insert(before);
+        self.show_problems(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_agent_link_off(&mut self, cx: &mut Context<Self>) {
+        if let Some(before) = self.tour_agent_before_staging.take() {
+            self.tour_agent = before;
+            self.show_problems(cx);
+        }
+    }
+
     pub fn switch_failed(&mut self, reason: String, cx: &mut Context<Self>) {
         self.review.switch_failed(reason);
         self.show_problems(cx);
@@ -692,6 +724,11 @@ impl ReviewSession {
         let text = ask.hand_off_text(&pr, place);
         cx.background_executor()
             .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
+    }
+
+    /// Retry beside the message of an off link.
+    pub fn retry_agent_link(&mut self, cx: &mut Context<Self>) {
+        self.change(cx, |review| review.retry_agent_link());
     }
 
     /// Whether the comment box offers Ask agent.
@@ -831,12 +868,14 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     }
 }
 
-/// What a toast says once a thread action went through; an edit or a reaction shows in place.
+/// What a toast says once a thread action went through; an edit or a reaction shows in place,
+/// a deleted comment is gone, so a toast says it was.
 fn thread_action_note(action: &ThreadAction) -> Option<String> {
     match action {
         ThreadAction::Reply { mode, audience, .. } => Some(sent_note("Reply", *mode, *audience)),
         ThreadAction::Resolve { .. } => Some("Thread resolved".to_owned()),
         ThreadAction::Unresolve { .. } => Some("Thread unresolved".to_owned()),
+        ThreadAction::DeleteComment { .. } => Some("Comment deleted".to_owned()),
         ThreadAction::EditComment { .. } | ThreadAction::SetReaction { .. } => None,
     }
 }

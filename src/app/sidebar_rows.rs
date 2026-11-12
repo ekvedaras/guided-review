@@ -40,6 +40,7 @@ pub struct SidebarTourAgent {
     pub is_shown: bool,
     pub line: SharedString,
     pub can_show: bool,
+    pub can_retry: bool,
 }
 
 pub struct SidebarRows {
@@ -89,6 +90,7 @@ impl SidebarRows {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
                 line: tour_agent.to_string().into(),
                 can_show: tour_agent.can_show(),
+                can_retry: tour_agent.can_retry(),
             },
             last_review: review.last_review().map(|last| SidebarLastReview {
                 headline: last.headline(is_old).into(),

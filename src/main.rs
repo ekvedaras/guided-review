@@ -10,7 +10,6 @@ use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
-use guided_review::open_review::require_tour;
 use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
 use guided_review::pieces;
@@ -318,7 +317,6 @@ enum Launch {
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
     let home = home_folder()?;
-    require_tour(pr, &home)?;
     let folder = AppFolder::in_home(&home);
     let request = Request::Open(OpenRequest {
         pr: pr.to_string(),
@@ -334,7 +332,10 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         Launch::Open => hand_over(&folder, &request)?,
     };
     match answer {
-        Answer::Opening { .. } | Answer::Reloaded { .. } | Answer::KeptInBackground { .. } => {
+        Answer::Opening { .. }
+        | Answer::Writing { .. }
+        | Answer::Reloaded { .. }
+        | Answer::KeptInBackground { .. } => {
             println!("{answer}");
             Ok(())
         }

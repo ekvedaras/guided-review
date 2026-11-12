@@ -19,6 +19,7 @@ mod switcher_window;
 mod tour_writer;
 mod updater;
 mod word_keys;
+mod writing_window;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -41,8 +42,9 @@ use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
-    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, PrSwitcher, RelevantPullRequestsPort,
-    ReviewStateFile, ShowReview, ShowSettings, ShowSwitcher, TourAgents, keystroke,
+    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
+    RelevantPullRequestsPort, ReviewStateFile, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
+    TourAgents, TourFact, WriteDecision, keystroke,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -61,6 +63,7 @@ use layouts::one_step::{
 use review_session::TourWork;
 use settings_window::SettingsWindow;
 use switcher_window::SwitcherWindow;
+use writing_window::WritingWindow;
 
 /// What the app's loop takes in: requests from outside, and the app's own asks of itself.
 enum Asked {
@@ -179,6 +182,7 @@ fn refused(reason: &str) -> Answer {
 type OneWindow = AppWindow<
     WindowHandle<SettingsWindow>,
     WindowHandle<SwitcherWindow>,
+    WindowHandle<WritingWindow>,
     WindowHandle<OneStepLayout>,
 >;
 
@@ -250,11 +254,23 @@ async fn answer_requests(
                 claim_terminal(&pr, &open, cx);
                 let origin = origin_of(&open, cx).await;
                 let active = screen.borrow().active.clone();
-                let decision = active.update(cx, |active, cx| {
-                    let decision = active.request(pr.clone(), origin);
+                let tour = TourFact::of(&pr, &home);
+                let outcome = active.update(cx, |active, cx| {
+                    let outcome = active.open(pr.clone(), origin, tour);
                     cx.notify();
-                    decision
+                    outcome
                 });
+                let decision = match outcome {
+                    OpenOutcome::Tour(decision) => decision,
+                    OpenOutcome::Writing(decision) => {
+                        show_writing(&screen, &active, cx);
+                        if decision == WriteDecision::StartWriter {
+                            cx.update(|cx| tour_writer::start_writer(pr, cx));
+                        }
+                        reply.send(Answer::Writing { pr: open.pr }).ok();
+                        continue;
+                    }
+                };
                 match decision {
                     OpenDecision::KeepInBackground => {
                         reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
@@ -311,6 +327,9 @@ fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answe
                     })
                     .map(|()| AppWindow::SettingsOnly(WindowHandle::new(window.window_id())))
             }
+            ShowSettings::NotWhileWriting => Err(anyhow::anyhow!(
+                "a tour is being written; Settings opens once it is shown"
+            )),
         }
     });
     match shown {
@@ -341,6 +360,9 @@ fn show_switcher(screen: &SharedScreen, cx: &mut AsyncApp) -> Answer {
             ShowSwitcher::RaiseSettings(window) => window
                 .update(cx, |_, window, _| window.activate_window())
                 .map(|()| AppWindow::SettingsOnly(window)),
+            ShowSwitcher::RaiseWriting(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| AppWindow::WritingOnly(window)),
             ShowSwitcher::OpenSwitcherOnly => open_switcher_window(cx).map(AppWindow::SwitcherOnly),
         }
     });
@@ -512,6 +534,8 @@ async fn build_and_show(
                         })
                         .ok();
                 }),
+                // `ActivePr::finished` put the failure on the loading screen, which observes it.
+                FailedBuild::ShowInWriting(_) => {}
                 FailedBuild::ShowInReview(window) => cx.update(|cx| {
                     window
                         .update(cx, |layout, _, cx| layout.switch_failed(reason, cx))
@@ -528,6 +552,9 @@ async fn build_and_show(
                     ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, &pr, cx),
                     ShowReview::TurnSwitcherIntoReview(window) => {
                         turn_switcher_into_review(window, opened, &pr, cx)
+                    }
+                    ShowReview::TurnWritingIntoReview(window) => {
+                        turn_writing_into_review(window, opened, &pr, cx)
                     }
                     ShowReview::OpenWindow => open_window(opened, &pr, cx),
                 };
@@ -595,6 +622,64 @@ fn turn_into_review(
         window.replace_root(cx, |window, cx| {
             new_layout(opened, pr, Some(settings), window, cx)
         });
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
+}
+
+/// The window shows the loading screen of the tour being written: the one over the PR on screen, or with
+/// no PR open a window holding only that screen.
+fn show_writing(screen: &SharedScreen, active: &Entity<ActivePr>, cx: &mut AsyncApp) {
+    let window = screen.borrow().window;
+    let shown = cx.update(|cx| {
+        cx.activate(true);
+        match window.show_writing() {
+            ShowWriting::OpenWindow => {
+                open_writing_window(active, cx).map(|window| Some(AppWindow::WritingOnly(window)))
+            }
+            ShowWriting::Raise(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| None),
+            ShowWriting::OverReview(window) => window
+                .update(cx, |_, window, _| window.activate_window())
+                .map(|()| None),
+            ShowWriting::LeaveSettings => Ok(None),
+            ShowWriting::ReplaceSwitcher(window) => {
+                replace_switcher_with_writing(window, active, cx)
+                    .map(|window| Some(AppWindow::WritingOnly(window)))
+            }
+        }
+    });
+    match shown {
+        Ok(Some(window)) => screen.borrow_mut().window = window,
+        Ok(None) => {}
+        Err(error) => eprintln!("could not show the tour being written: {error:#}"),
+    }
+}
+
+/// The PR picked in the switcher has no tour yet: the switcher's window shows the loading screen of the
+/// tour being written.
+fn replace_switcher_with_writing(
+    window: WindowHandle<SwitcherWindow>,
+    active: &Entity<ActivePr>,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<WritingWindow>> {
+    window.update(cx, |_, window, cx| {
+        window.set_window_title(&marked_if_dev("Writing a tour".to_owned()));
+        window.replace_root(cx, |window, cx| WritingWindow::new(active, window, cx));
+        window.activate_window();
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
+}
+
+/// The window that held only the loading screen becomes the review's.
+fn turn_writing_into_review(
+    window: WindowHandle<WritingWindow>,
+    opened: OpenedReview,
+    pr: &PullRequestUrl,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    window.update(cx, |_, window, cx| {
+        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -688,6 +773,18 @@ fn open_switcher_window(cx: &mut App) -> anyhow::Result<WindowHandle<SwitcherWin
     cx.open_window(options, |window, cx| {
         cx.set_global(Appearance::of(window));
         cx.new(|cx| SwitcherWindow::new(switching, window, cx))
+    })
+}
+
+fn open_writing_window(
+    active: &Entity<ActivePr>,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<WritingWindow>> {
+    let options = window_options("Writing a tour".to_owned(), cx);
+    let active = active.clone();
+    cx.open_window(options, |window, cx| {
+        cx.set_global(Appearance::of(window));
+        cx.new(|cx| WritingWindow::new(&active, window, cx))
     })
 }
 

@@ -155,6 +155,8 @@ pub struct ThreadView {
     pub reply_draft: Option<String>,
     /// The text of each comment of this thread that is being edited.
     pub edit_drafts: BTreeMap<CommentId, String>,
+    /// The comment of this thread the reviewer is being asked to confirm the deletion of.
+    pub delete_asked: Option<CommentId>,
     /// Where the comment sent with Ask agent is, when this thread has one.
     pub hand_off_line: Option<Arc<str>>,
     /// The agent is at work on the thread's latest hand-off, so its line shows it busy.
@@ -253,16 +255,27 @@ fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
     piece.lines().any(|row| row.holds(location))
 }
 
+/// What the reviewer has begun in the threads and not finished.
+pub(super) struct ThreadWork<'a> {
+    pub reply_drafts: &'a BTreeMap<ThreadId, String>,
+    pub comment_edits: &'a BTreeMap<CommentId, String>,
+    pub delete_asked: Option<&'a CommentId>,
+}
+
 /// Turns placed threads into what a screen shows. `shown` is the code the screen has.
 pub(super) fn views(
     placed: Placed<'_>,
     shown: &[PieceDiff],
     flipped: &BTreeSet<ThreadId>,
     files_at_head: &FilesAtHead,
-    reply_drafts: &BTreeMap<ThreadId, String>,
-    comment_edits: &BTreeMap<CommentId, String>,
+    work: &ThreadWork<'_>,
     hand_offs: &HandOffs,
 ) -> Vec<ThreadView> {
+    let ThreadWork {
+        reply_drafts,
+        comment_edits,
+        delete_asked,
+    } = work;
     placed
         .threads
         .iter()
@@ -282,6 +295,9 @@ pub(super) fn views(
                     Some((comment.id.clone(), text.clone()))
                 })
                 .collect(),
+            delete_asked: delete_asked
+                .filter(|asked| thread.comments.iter().any(|comment| &comment.id == *asked))
+                .cloned(),
             hand_off_line: hand_offs.line_for(&thread.id),
             agent_is_working: hand_offs.is_working_on(&thread.id),
             failed_hand_off: hand_offs.failed_in(&thread.id),

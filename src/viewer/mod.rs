@@ -34,6 +34,7 @@ mod problems;
 mod reactions;
 mod refresh;
 mod relevant_prs;
+mod rendered_view;
 mod reopen_after_save;
 mod review;
 mod review_state;
@@ -54,11 +55,15 @@ mod viewed_sync;
 mod word_diff;
 mod work_agenda;
 
-pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, WriteDecision};
+pub use active_pr::{
+    ActivePr, BuildTicket, Finished, OpenDecision, OpenOrigin, OpenOutcome, WriteDecision,
+};
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
-pub use app_window::{AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher};
+pub use app_window::{
+    AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
+};
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
 pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
@@ -97,7 +102,7 @@ pub use intent::{
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };
-pub use markdown::{Block, Markdown, Run};
+pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use page::{
@@ -119,6 +124,7 @@ pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };
+pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
 pub use reopen_after_save::{InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen,
@@ -139,12 +145,13 @@ pub use thread_actions::{
 pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
-    AgentStatus, AppAgent, LiveTerminal, OwnAgentHandOff, SendOutcome, TerminalId, TourAgentPort,
-    TourAgentStart, TourAgentState, TourAgents,
+    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff, SendOutcome,
+    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
 pub use work_agenda::{
-    AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind, WorkOutcome, WorkPorts,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind,
+    WorkOutcome, WorkPorts,
 };

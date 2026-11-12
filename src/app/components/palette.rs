@@ -17,6 +17,13 @@ pub const CARD_RADIUS: f32 = 12.;
 pub const CONTROL_RADIUS: f32 = 8.;
 pub const INNER_RADIUS: f32 = 6.;
 
+/// The corners of what paints its own ground along the edge of a rounded surface with a 1 px
+/// border. gpui clips children to a rectangle, never to the parent's corners, so a band at a
+/// sheet's foot or a box's head that is not rounded itself shows square past the curve.
+pub const fn inside_edge(surface_radius: f32) -> f32 {
+    surface_radius - 1.
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Appearance {
     Light,

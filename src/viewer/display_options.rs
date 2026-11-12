@@ -7,8 +7,11 @@ use super::code_link::CodeLinks;
 use super::diff_display::{DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
+use super::rendered_view::{FileView, FileViews, RenderedBlock, Rendering};
+use crate::pieces::ChangedFile;
+use std::sync::Arc;
 
-/// How the review's lines look: colours, context, whitespace and pictures. None of it changes
+/// How the review's lines look: colours, context, whitespace, pictures and each file's view. None of it changes
 /// pieces, coverage or ticks, and none of it is saved. What is read off the main thread for
 /// another base or head, e.g. before a re-pin, is dropped.
 pub struct DisplayOptions {
@@ -20,6 +23,7 @@ pub struct DisplayOptions {
     ignores_whitespace: bool,
     wraps_lines: bool,
     image_previews: HashMap<FilePath, ImagePreview>,
+    file_views: FileViews,
 }
 
 impl DisplayOptions {
@@ -33,6 +37,7 @@ impl DisplayOptions {
             ignores_whitespace: false,
             wraps_lines: false,
             image_previews: HashMap::new(),
+            file_views: FileViews::default(),
         }
     }
 
@@ -102,6 +107,27 @@ impl DisplayOptions {
         }
         self.image_previews.insert(preview.path.clone(), preview);
         true
+    }
+
+    /// The view a file box that can be rendered shows.
+    pub fn file_view(&self, path: &FilePath, rendering: Rendering) -> FileView {
+        self.file_views.view(path, rendering)
+    }
+
+    pub fn show_file_as(&mut self, path: &FilePath, view: FileView) {
+        self.file_views.show_as(path, view);
+    }
+
+    /// The blocks of a Markdown file as its rendered view shows them; `None` until its text is read.
+    pub fn rendered_markdown(&self, path: &FilePath) -> Option<&Arc<[Arc<RenderedBlock>]>> {
+        self.file_views.markdown(path)
+    }
+
+    /// Cuts the Markdown files whose text is known now into the blocks their rendered view shows.
+    pub(super) fn cut_markdown(&mut self, files: &[ChangedFile]) {
+        let files_at_head = &self.files_at_head;
+        self.file_views
+            .cut_markdown(files, |path| files_at_head.text(path));
     }
 
     pub(super) fn display<'a>(&'a self, links: &'a CodeLinks<'a>) -> DiffDisplay<'a> {

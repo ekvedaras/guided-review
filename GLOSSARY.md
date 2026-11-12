@@ -24,6 +24,8 @@
 
 **File block**: The one box a page shows for all its diff pieces of one file, in line order. A thin label marks where each piece starts: at the first line of its symbol, not at its first changed line. Blank lines and lines with only closing brackets never move a label.
 
+**Rendered view**: A file block showing its file as it reads instead of its diff lines: a Markdown file formatted, each top-level block (heading, paragraph, list, fence) with a bar for added, changed or removed, removed blocks dimmed where they were; an SVG as its before and after pictures. The Code / Rendered switch in the box header changes it, per file. Markdown starts as code, an SVG rendered; a raster picture has no code, so it shows its pictures and offers no switch. A rendered box takes no line comments; the threads on its lines are listed after the file. The choice is not saved. Avoid: preview, rich diff.
+
 **File path**: A file's path in the repo, relative to its root, with `/` separators. A renamed file is named by its new path on both sides.
 
 **Outline**: A short list of all diff pieces in a PR, with no code. A tour writer reads it first and opens only the pieces it needs.
@@ -56,7 +58,7 @@
 
 **Tour agent**: The AI session, in a herdr terminal, that answers for the tour of one PR. At most one per PR. The viewer finds it by the herdr label `gr.pr=<url>`, never by a stored terminal id, and a terminal claimed for another PR loses the label.
 
-**Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why and the tour agent features are off.
+**Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why (`hc` missing, the herdr server not running, or herdr running but a command failed) and the tour agent features are off. The app looks again every 30 s and on Retry, and the features come back when herdr answers.
 
 **Text box**: A box the reviewer writes text for GitHub in. There are four kinds: a comment box (a new comment on lines or on a file, its text called a draft), a reply box under a thread, the edit of one of the reviewer's own comments, and the body of the review being finished. Each kind opens, takes typing, and is left, given up or sent in the same way. A box left with nothing written in it goes. The text of every kind but an edit is saved while typing, so it comes back after a restart. Avoid: composer.
 
