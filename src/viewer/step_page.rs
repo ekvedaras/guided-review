@@ -259,7 +259,7 @@ impl PieceDiff {
         })
     }
 
-    pub fn lines(&self) -> impl Iterator<Item = &DiffLine> {
+    pub fn lines(&self) -> impl Iterator<Item = &DiffLine> + Clone {
         self.hunks.iter().flat_map(|hunk| hunk.rows.iter())
     }
 }

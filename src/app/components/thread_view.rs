@@ -88,7 +88,7 @@ struct ReplyBox<'a> {
 /// Folded threads (resolved, outdated, by a bot) show one line and a toggle.
 #[derive(IntoElement)]
 pub struct ThreadElement {
-    view: Rc<ThreadView>,
+    view: Arc<ThreadView>,
     can_reply_now: bool,
     can_ask_agent: bool,
     reply: Option<String>,
@@ -149,7 +149,7 @@ fn before_block(colors: &Colors, before: &[String]) -> gpui::Div {
 }
 
 impl ThreadElement {
-    pub fn new(view: Rc<ThreadView>, drafts: ThreadDrafts, changes: ThreadChanges) -> Self {
+    pub fn new(view: Arc<ThreadView>, drafts: ThreadDrafts, changes: ThreadChanges) -> Self {
         let ThreadDrafts {
             can_reply_now,
             can_ask_agent,

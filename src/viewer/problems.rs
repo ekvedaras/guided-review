@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use super::review::RepinRunning;
+use super::saved_state::RepinRunning;
 
 /// Something that went wrong which the reviewer must know about, shown until it is put right.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,10 +25,87 @@ pub enum Problem {
     ViewedNotSynced(String),
     /// The AI Refresh ended and the steps marked as old are still as they were.
     TourNotRefreshed(String),
+    /// `open` named the PR shown, and its tour file could not be read again.
+    TourNotReloaded(String),
     /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
     SwitchFailed(String),
+    /// Show agent was clicked and the terminal did not come up.
+    ShowAgentFailed(String),
+}
+
+/// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
+/// its kind names what clears it. The order of the kinds is the order the sidebar lists them in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProblemKind {
+    /// Kept by the saved state, not raised: gone when a save goes through.
+    NotSaved,
+    /// Kept by the saved state, not raised: gone when the re-pin ends.
+    ChangeNotKeptWhileRepinning,
+    /// Cleared by a read of the threads that goes through.
+    ThreadsNotRead,
+    /// Cleared by a good read of the same thing from GitHub.
+    NotRead(Read),
+    /// Cleared by the next IDE command that runs.
+    IdeNotStarted,
+    /// Raised when the review opens; a review opened on the clone has none.
+    CodeOnGitHub,
+    /// Cleared by a sync of viewed marks that goes through.
+    ViewedNotSynced,
+    /// Stays: a Refresh that goes through opens a new review.
+    TourNotRefreshed,
+    /// Stays: a reload that goes through opens a new review.
+    TourNotReloaded,
+    /// Raised when the review opens; the old file is kept, so nothing clears it.
+    SavedReviewNotRead,
+    /// Replaced by the next hand-off, which clears it when that one is sent.
+    HandOffNotSent,
+    /// Stays: a switch that goes through opens another review.
+    SwitchFailed,
+    /// Cleared by the next Show agent that brings the terminal up.
+    ShowAgentFailed,
+}
+
+impl Problem {
+    pub fn kind(&self) -> ProblemKind {
+        match self {
+            Self::NotSaved(_) => ProblemKind::NotSaved,
+            Self::ChangeNotKeptWhileRepinning => ProblemKind::ChangeNotKeptWhileRepinning,
+            Self::ThreadsNotRead(_) => ProblemKind::ThreadsNotRead,
+            Self::NotRead(read, _) => ProblemKind::NotRead(*read),
+            Self::IdeNotStarted(_) => ProblemKind::IdeNotStarted,
+            Self::CodeOnGitHub(_) => ProblemKind::CodeOnGitHub,
+            Self::SavedReviewNotRead(_) => ProblemKind::SavedReviewNotRead,
+            Self::ViewedNotSynced(_) => ProblemKind::ViewedNotSynced,
+            Self::TourNotRefreshed(_) => ProblemKind::TourNotRefreshed,
+            Self::TourNotReloaded(_) => ProblemKind::TourNotReloaded,
+            Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
+            Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
+            Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
+        }
+    }
+}
+
+/// The problems a review holds, one per kind. Those of the saved state are not held here.
+#[derive(Debug, Default)]
+pub struct Problems {
+    raised: BTreeMap<ProblemKind, Problem>,
+}
+
+impl Problems {
+    pub fn raise(&mut self, problem: Problem) {
+        self.raised.insert(problem.kind(), problem);
+    }
+
+    pub fn clear(&mut self, kind: ProblemKind) {
+        self.raised.remove(&kind);
+    }
+
+    /// In the order of the kinds.
+    pub fn list(&self) -> impl Iterator<Item = &Problem> {
+        self.raised.values()
+    }
 }
 
 /// What the app reads from GitHub that has no problem of its own.
@@ -89,11 +167,18 @@ impl fmt::Display for Problem {
             Self::TourNotRefreshed(reason) => {
                 write!(formatter, "The tour was not refreshed: {reason}")
             }
+            Self::TourNotReloaded(reason) => write!(
+                formatter,
+                "The tour could not be read again, so it shows as it was: {reason}"
+            ),
             Self::HandOffNotSent { comment, reason } => write!(
                 formatter,
                 "The agent will not get your comment \"{comment}\": {reason}"
             ),
             Self::SwitchFailed(reason) => write!(formatter, "Not switched: {reason}"),
+            Self::ShowAgentFailed(reason) => {
+                write!(formatter, "Could not show the agent: {reason}")
+            }
         }
     }
 }

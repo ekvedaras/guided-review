@@ -1,6 +1,10 @@
+mod kept;
+mod work;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage;
@@ -8,55 +12,55 @@ use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::{Step, Tour};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::AskSettings;
 
-use super::ask::{Ask, Place};
+use super::ask::{Ask, Asks, Place};
 use super::ask_context;
+use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
-use super::comment_desk::{CommentDesk, TourFreshness};
+use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
-    CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
-    QueuedComment, SendMode,
+    CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult, QueuedComment,
+    SendMode,
 };
-use super::diff_display::HiddenLines;
-use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest, MoreContext};
+use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
 };
-use super::hand_offs::{
-    AgentReplied, Audience, DeliveryOutcome, DeliveryRequest, HandOff, HandOffId, HandOffState,
-    SeenMarkOff, SeenMarkOffOutcome,
-};
+use super::hand_offs::{Audience, HandOffState, HandOffs};
 use super::highlight::{HighlightRequest, Highlights};
-use super::image_preview::{ImagePreview, ImagePreviewRequest};
+use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
+use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
-use super::problems::{Problem, Read};
+use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
+use super::saved_state::SavedState;
 use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement};
-use super::tour_agent::AgentStatus;
-use super::typing_save::{Saves, TypingSave};
+use super::threads::{self, ReviewThread, ThreadId, ThreadPlacement};
+use super::typing_save::TypingSave;
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
+use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 
 pub use crate::tour::StepId;
+pub use kept::Review;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
@@ -182,7 +186,8 @@ pub struct OldHead {
     pub pr_head: Sha,
 }
 
-pub struct Review {
+/// What the reviewer reads and does on one PR. Reached through `Review`, which keeps the page built from it.
+pub struct ReviewCore {
     tour: Tour,
     pr: PullRequestUrl,
     base: Sha,
@@ -202,8 +207,7 @@ pub struct Review {
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
-    state: ReviewState,
-    state_file: ReviewStateFile,
+    state: SavedState,
     /// Skim and ticked steps start folded; these are the steps whose fold the reviewer flipped.
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
@@ -212,25 +216,7 @@ pub struct Review {
     /// The tour's own folder, whose pictures its summary shows and whose files its links open.
     tour_files: PathBuf,
     viewed_sync: ViewedSync,
-    repin_running: bool,
-    refused_while_repinning: bool,
-    /// Why the last read of the threads failed, until one goes through.
-    threads_not_read: Option<String>,
-    /// Why the last read of each of these failed, until one goes through.
-    not_read: BTreeMap<Read, String>,
-    /// Why the last IDE command could not be run, until one runs.
-    ide_not_started: Option<String>,
-    /// Why the code is read from GitHub though there is a clone; set by the source this review opened on.
-    code_on_github: Option<String>,
-    /// Where the saved review went when it could not be read.
-    saved_review_kept_as: Option<PathBuf>,
-    switch_failed: Option<String>,
-    /// Why the last sync of viewed marks failed, until one goes through.
-    viewed_not_synced: Option<String>,
-    /// Why the last Refresh did not go through; a Refresh that does opens a new review.
-    tour_not_refreshed: Option<String>,
-    /// The comment start and reason of the latest hand-off that found no thread, until the next hand-off.
-    hand_off_not_sent: Option<(String, String)>,
+    problems: Problems,
     /// The diff from each older head some step was read at to the tour's head.
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
@@ -241,7 +227,11 @@ pub struct Review {
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     pr_notes: PrNotes,
-    saves: Arc<Saves>,
+    ask_desk: AskDesk,
+    work: WorkAgenda,
+    /// The screen whose end the window last had on show; the forward key ticks a step only then.
+    /// Not saved, and no input of the page.
+    seen_end_of: Option<Screen>,
 }
 
 impl Review {
@@ -251,7 +241,111 @@ impl Review {
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
-        let (state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        ReviewCore::open(tour, source, state_file).map(Self::keeping_page_of)
+    }
+
+    /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
+    /// only while their step is shown.
+    pub fn image_preview_requests(&self) -> Vec<ImagePreviewRequest> {
+        self.page()
+            .images_to_load()
+            .iter()
+            .filter_map(|path| self.image_preview_request(path))
+            .collect()
+    }
+
+    /// Opens the comment box the gesture asks for, which then takes the keys, or says why it
+    /// cannot open. `Ok(None)` when a drag ended on no rows.
+    pub fn open_comment_box(
+        &mut self,
+        gesture: CommentGesture,
+    ) -> Result<Option<CommentPlace>, CommentRefusal> {
+        match gesture {
+            CommentGesture::DragEnded => {
+                let page = Arc::clone(self.page());
+                self.finish_selection(&page)
+            }
+            CommentGesture::OnFile(path) => self.begin_file_comment(path).map(Some),
+            CommentGesture::AskAnswer(ask) => self.use_as_comment(ask).map(Some),
+        }
+    }
+
+    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
+    /// file, or lines not on this screen.
+    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
+        let page = self.page();
+        let selected = page.selected(&RowSelection::of(comment)?)?;
+        Some(page.place_of(&selected))
+    }
+
+    /// The place an Ask about selected rows is about: the rows and the pieces holding them.
+    pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
+        self.page().place_of(selected)
+    }
+
+    /// The rows being dragged over, for drawing them.
+    pub fn selected_lines(&self) -> Option<SelectedLines> {
+        self.page().selected(self.row_selection()?)
+    }
+
+    /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
+    /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
+    pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
+        let Some(rows) = RowSelection::of(place).and_then(|lines| self.page().selected(&lines))
+        else {
+            return Ok(None);
+        };
+        CommentDesk::suggest_change(&mut self.state, place, rows.lines())
+    }
+
+    /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
+    /// comment boxes were doing (which takes the keys, which are sending and why a send did not
+    /// go), its work, whose outcomes still land here, and which screen's end the window saw.
+    pub fn carry_on_from(&mut self, replaced: Self) {
+        let replaced = replaced.into_core();
+        self.comment_desk.keep_boxes_of(replaced.comment_desk);
+        self.work = replaced.work;
+        self.seen_end_of = replaced.seen_end_of;
+        self.ask_desk = replaced.ask_desk;
+        self.check_asks_for_code_changes();
+    }
+
+    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
+    pub fn open_ask(
+        &mut self,
+        place: Place,
+        label: String,
+        settings: &AskSettings,
+        now: Instant,
+        processes: &mut dyn AskProcesses,
+    ) {
+        let clone = self.ask_desk.clone_folder().cloned();
+        let target = self.ask_target(place, label, clone, settings);
+        let head = self.head().clone();
+        self.check_asks_for_code_changes();
+        self.change_asks(|desk| desk.open(target, &head, now, processes));
+    }
+
+    fn check_asks_for_code_changes(&mut self) {
+        let changed = self
+            .ask_desk
+            .all()
+            .iter()
+            .filter(|ask| self.code_changed_since(ask))
+            .map(|ask| ask.id)
+            .collect();
+        self.change_asks(|desk| desk.code_changed_is(changed));
+    }
+}
+
+impl ReviewCore {
+    fn open(
+        tour: Tour,
+        source: &dyn CodeSource,
+        state_file: ReviewStateFile,
+    ) -> anyhow::Result<Self> {
+        let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let pr: PullRequestUrl = tour.pr.parse()?;
         let (base, head) = (tour.base.clone(), tour.head.clone());
@@ -275,6 +369,7 @@ impl Review {
                 Some((read_head.clone(), files))
             })
             .collect();
+        let display_options = DisplayOptions::for_code(base.clone(), head.clone());
         Ok(Self {
             tour,
             pr,
@@ -290,45 +385,36 @@ impl Review {
             threads: ThreadPlacement::default(),
             thread_fold_flipped: BTreeSet::new(),
             screen: Screen::Summary,
-            state,
-            state_file,
+            state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
             viewed_sync: ViewedSync::default(),
-            repin_running: false,
-            refused_while_repinning: false,
-            threads_not_read: None,
-            not_read: BTreeMap::new(),
-            ide_not_started: None,
-            code_on_github: source.fallback_reason().map(str::to_owned),
-            saved_review_kept_as,
-            switch_failed: None,
-            viewed_not_synced: None,
-            tour_not_refreshed: None,
-            hand_off_not_sent: None,
+            problems: {
+                let mut problems = Problems::default();
+                if let Some(reason) = source.fallback_reason() {
+                    problems.raise(Problem::CodeOnGitHub(reason.to_owned()));
+                }
+                if let Some(backup) = saved_review_kept_as {
+                    problems.raise(Problem::SavedReviewNotRead(backup));
+                }
+                problems
+            },
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
             comment_desk: CommentDesk::default(),
-            display_options: DisplayOptions::default(),
+            display_options,
             pr_notes: PrNotes::default(),
+            ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
+            work: WorkAgenda::default(),
+            seen_end_of: None,
             tour_files,
-            saves: Arc::default(),
         })
     }
 
     /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.
     pub fn highlight_request(&self) -> HighlightRequest {
         HighlightRequest::for_files(&self.files, &self.tour.base, &self.tour.head)
-    }
-
-    /// Colours read for another base or head, e.g. before a re-pin, are dropped. Says whether they were kept.
-    pub fn set_highlights(&mut self, highlights: Highlights) -> bool {
-        if !highlights.is_of(&self.tour.base, &self.tour.head) {
-            return false;
-        }
-        self.display_options.set_highlights(highlights);
-        true
     }
 
     /// Context lines come from the files at head, read off the main thread like the colours.
@@ -338,69 +424,30 @@ impl Review {
 
     /// Files read at another head, e.g. before a re-pin, are dropped. Says whether they were kept.
     pub fn set_files_at_head(&mut self, files_at_head: FilesAtHead) -> bool {
-        if !files_at_head.is_at(&self.tour.head) {
-            return false;
+        let kept = self.display_options.set_files_at_head(files_at_head);
+        if kept {
+            self.place_threads();
         }
-        self.display_options.set_files_at_head(files_at_head);
-        self.place_threads();
-        true
+        kept
     }
 
-    /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
-    /// only while their step is shown.
-    pub fn image_preview_requests(&self) -> Vec<ImagePreviewRequest> {
-        let mut requests: Vec<ImagePreviewRequest> = Vec::new();
-        for piece in self.screen_pieces().iter().filter(|piece| piece.is_image) {
-            let path = piece.id.path();
-            let is_wanted = self.display_options.image_preview(path.as_str()).is_none()
-                && !requests.iter().any(|request| request.path() == path);
-            let file = self.files.iter().find(|file| file.path == *path);
-            if let (true, Some(file)) = (is_wanted, file) {
-                requests.push(ImagePreviewRequest::for_file(file, &self.base, &self.head));
-            }
-        }
-        requests
+    fn image_preview_request(&self, path: &FilePath) -> Option<ImagePreviewRequest> {
+        let file = self.files.iter().find(|file| file.path == *path)?;
+        Some(ImagePreviewRequest::for_file(file, &self.base, &self.head))
     }
 
-    /// A preview loaded for another base or head, e.g. before a re-open, is dropped. Says whether it was kept.
-    pub fn set_image_preview(&mut self, preview: ImagePreview) -> bool {
-        self.display_options
-            .set_image_preview(preview, &self.base, &self.head)
+    /// Every Ask of the PR, the place the Ask panel is open on and the processes answering.
+    pub fn asks(&self) -> &AskDesk {
+        &self.ask_desk
     }
 
-    pub fn image_preview(&self, path: &FilePath) -> Option<&ImagePreview> {
-        self.display_options.image_preview(path.as_str())
+    pub fn display_options(&self) -> &DisplayOptions {
+        &self.display_options
     }
 
-    pub fn show_more_context(&mut self, more: &MoreContext) {
-        self.display_options.show_more_context(more);
-    }
-
-    /// Every line of the gap, from the side it can be shown from; a gap that does not say how many
-    /// lines it hides shows the usual few more.
-    pub fn show_hidden_lines(&mut self, gap: &HiddenLines) {
-        let either_side = gap.after_above.as_ref().or(gap.before_below.as_ref());
-        match (either_side, gap.count) {
-            (Some(more), Some(count)) => self.display_options.show_lines(more, count),
-            (Some(more), None) => self.display_options.show_more_context(more),
-            (None, _) => {}
-        }
-    }
-
-    pub fn ignores_whitespace(&self) -> bool {
-        self.display_options.ignores_whitespace()
-    }
-
-    pub fn toggle_ignore_whitespace(&mut self) {
-        self.display_options.toggle_ignore_whitespace();
-    }
-
-    pub fn wraps_lines(&self) -> bool {
-        self.display_options.wraps_lines()
-    }
-
-    pub fn toggle_wrap_lines(&mut self) {
-        self.display_options.toggle_wrap_lines();
+    /// Nothing of it is saved, so it changes freely, even while a re-pin runs.
+    pub fn display_options_mut(&mut self) -> &mut DisplayOptions {
+        &mut self.display_options
     }
 
     pub fn screen(&self) -> &Screen {
@@ -411,20 +458,49 @@ impl Review {
         &self.pr
     }
 
+    pub(super) fn has_seen_end_of_screen(&self) -> bool {
+        self.seen_end_of.as_ref() == Some(&self.screen)
+    }
+
+    /// For a failure the reviewer must know about; it stays until its kind is cleared.
+    pub fn raise_problem(&mut self, problem: Problem) {
+        self.problems.raise(problem);
+    }
+
+    pub fn clear_problem(&mut self, kind: ProblemKind) {
+        self.problems.clear(kind);
+    }
+
+    /// The outcome of a Show agent: a terminal that did not come up is a problem until one does.
+    pub fn show_agent_result(&mut self, failure: Option<&anyhow::Error>) {
+        match failure {
+            Some(error) => {
+                self.raise_problem(Problem::ShowAgentFailed(format!("{error:#}")));
+            }
+            None => self.clear_problem(ProblemKind::ShowAgentFailed),
+        }
+    }
+
+    pub fn show_agent_failed(&self) -> bool {
+        self.problems
+            .list()
+            .any(|problem| problem.kind() == ProblemKind::ShowAgentFailed)
+    }
+
     pub fn could_not_read(&mut self, read: Read, error: &impl fmt::Display) {
-        self.not_read.insert(read, format!("{error:#}"));
+        self.raise_problem(Problem::NotRead(read, format!("{error:#}")));
     }
 
     pub fn ide_not_started(&mut self, error: &impl fmt::Display) {
-        self.ide_not_started = Some(format!("{error:#}"));
+        self.raise_problem(Problem::IdeNotStarted(format!("{error:#}")));
     }
 
     pub fn ide_started(&mut self) {
-        self.ide_not_started = None;
+        self.clear_problem(ProblemKind::IdeNotStarted);
     }
 
     pub fn pr_head_is(&mut self, head: Sha) {
-        self.not_read.remove(&Read::PrHead);
+        self.clear_problem(ProblemKind::NotRead(Read::PrHead));
         self.pr_head = Some(head);
     }
 
@@ -511,9 +587,9 @@ impl Review {
 
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
-        self.not_read.remove(&Read::PrDescription);
-        if self.state.saw_pr_description(body) {
-            self.save_viewer_sections()?;
+        self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
+        if self.state.pr_description() != body {
+            self.state.record(|state| state.saw_pr_description(body))?;
         }
         Ok(())
     }
@@ -662,7 +738,7 @@ impl Review {
 
     /// Puts the Ask's latest answer into the comment box on its lines, after any text already
     /// there. The reviewer edits and sends it; nothing goes to GitHub here.
-    pub fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
+    fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
         if matches!(ask.place, Place::Tour | Place::Step { .. }) {
             return Err(CommentRefusal::NoLines);
         }
@@ -677,10 +753,8 @@ impl Review {
             return Err(CommentRefusal::NotInsideHunk);
         }
         let answer = ask.latest_answer().ok_or(CommentRefusal::NoAnswerYet)?;
-        let place = CommentDesk::add_to_draft(&mut self.state, &selected, &self.head, answer);
-        self.save_viewer_sections()
-            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        Ok(place)
+        self.comment_desk
+            .add_to_draft(&mut self.state, &selected, &self.head, answer)
     }
 
     /// The rows an Ask about lines or a piece is on, in its step at the tour head.
@@ -698,65 +772,26 @@ impl Review {
             }
             None => self.safety_net()?.pieces,
         };
-        let rows: Vec<DiffLine> = match only_piece {
-            Some(id) => pieces
+        let blocks = FileBlock::group(pieces);
+        let shown: Vec<&DiffLine> = match only_piece {
+            Some(id) => blocks
                 .iter()
+                .flat_map(|block| &block.pieces)
                 .filter(|shown| shown.id == *id)
-                .flat_map(|shown| shown.lines().cloned())
+                .flat_map(PieceDiff::lines)
                 .collect(),
-            None => in_shown_order(pieces),
+            None => blocks.iter().flat_map(FileBlock::lines).collect(),
         };
         let (start, end) = match place {
             Place::Lines { start, end, .. } => (start.clone(), end.clone()),
             _ => (
-                rows.first()?.location.clone(),
-                rows.last()?.location.clone(),
+                shown.first()?.location.clone(),
+                shown.last()?.location.clone(),
             ),
         };
         let mut selection = RowSelection::start_at(start);
         selection.extend_to(end);
-        selection.resolve(&rows)
-    }
-
-    /// The place an Ask about selected rows is about: the rows and the pieces holding them.
-    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
-    /// file, or lines not on this screen.
-    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
-        let CommentPlace::Lines { start, end } = comment else {
-            return None;
-        };
-        let lines = self.screen_lines();
-        let first = lines.iter().position(|line| &line.location == start)?;
-        let last = lines.iter().position(|line| &line.location == end)?;
-        let selected = SelectedLines::new(lines.get(first..=last)?.to_vec())?;
-        Some(self.place_of_lines(&selected))
-    }
-
-    pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
-        let (step, pieces) = match &self.screen {
-            Screen::Step(id) => (
-                Some(id.clone()),
-                self.current_step()
-                    .map(|page| page.pieces)
-                    .unwrap_or_default(),
-            ),
-            _ => (
-                None,
-                self.safety_net()
-                    .map(|page| page.pieces)
-                    .unwrap_or_default(),
-            ),
-        };
-        Place::Lines {
-            step,
-            start: selected.first().clone(),
-            end: selected.last().clone(),
-            pieces: pieces
-                .iter()
-                .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
-                .map(|piece| piece.id.clone())
-                .collect(),
-        }
+        selection.resolve(shown.into_iter())
     }
 
     /// The place the Ask panel opens on, ready only when an AI has code to read and the place is still in the tour.
@@ -809,7 +844,7 @@ impl Review {
             steps: &'a [Step],
             depth: usize,
             current: Option<&StepId>,
-            review: &Review,
+            review: &ReviewCore,
             into: &mut Vec<SidebarEntry<'a>>,
         ) {
             for step in steps {
@@ -891,7 +926,7 @@ impl Review {
     }
 
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
-        self.threads_not_read = None;
+        self.clear_problem(ProblemKind::ThreadsNotRead);
         self.pulled_threads = threads.to_vec();
         self.place_threads();
     }
@@ -904,7 +939,7 @@ impl Review {
 
     /// The threads shown stay as they were, named as possibly old until a read goes through.
     pub fn threads_not_read(&mut self, error: &GitHubError) {
-        self.threads_not_read = Some(format!("{error:#}"));
+        self.raise_problem(Problem::ThreadsNotRead(format!("{error:#}")));
     }
 
     /// Placed by the rows a step shows, which depend on the files read at head, so again when those arrive.
@@ -933,12 +968,12 @@ impl Review {
     }
 
     pub fn pending_review_is(&mut self, exists: bool) {
-        self.not_read.remove(&Read::PendingReview);
+        self.clear_problem(ProblemKind::NotRead(Read::PendingReview));
         self.comment_desk.pending_review_is(exists);
     }
 
     pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
-        self.not_read.remove(&Read::LastReview);
+        self.clear_problem(ProblemKind::NotRead(Read::LastReview));
         self.last_review = last;
     }
 
@@ -970,81 +1005,50 @@ impl Review {
 
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
         let reply_body = match &action {
-            ThreadAction::Reply { thread_id, .. } => self.reply_draft(thread_id).map(str::to_owned),
+            ThreadAction::Reply { thread_id, .. } => {
+                self.state.reply_draft(thread_id).map(str::to_owned)
+            }
             _ => None,
         };
         self.comment_desk
             .thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
     }
 
-    /// Opens the edit of one of the viewer's own comments on its current text. Nothing opens for
-    /// a comment someone else wrote.
-    pub fn open_edit(&mut self, comment_id: &CommentId) {
+    /// The text in the box as typed so far; `None` while it is not open.
+    pub fn text_of(&self, text_box: &TextBox) -> Option<&str> {
+        self.comment_desk.text_of(&self.state, text_box)
+    }
+
+    /// Opens a reply box, or the edit of one of the viewer's own comments on its current text;
+    /// nothing opens for a comment someone else wrote.
+    pub fn open_box(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
         self.comment_desk
-            .open_edit(&self.pulled_threads, comment_id);
+            .open(&mut self.state, &self.pulled_threads, text_box)
     }
 
-    /// The text of the comment's open edit, as typed so far.
-    pub fn comment_edit(&self, comment_id: &CommentId) -> Option<&str> {
-        self.comment_desk
-            .comment_edits()
-            .get(comment_id)
-            .map(String::as_str)
+    /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
+    pub fn type_in(&mut self, text_box: &TextBox, text: &str) -> anyhow::Result<()> {
+        self.comment_desk.type_in(&mut self.state, text_box, text)
     }
 
-    pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.comment_desk.type_in_edit(comment_id, text);
-        Ok(())
+    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
+    pub fn leave(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
+        self.comment_desk.leave(&mut self.state, text_box)
     }
 
-    pub fn discard_edit(&mut self, comment_id: &CommentId) {
-        self.comment_desk.discard_edit(comment_id);
+    pub fn discard(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
+        self.comment_desk.discard(&mut self.state, text_box)
     }
 
-    pub fn reply_draft(&self, thread_id: &ThreadId) -> Option<&str> {
-        self.state.reply_draft(thread_id)
-    }
-
-    /// Opens the reply box; the text typed in it is saved by `edit_reply`.
-    pub fn open_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
-        self.state.open_reply(thread_id);
-        self.save_viewer_sections()
-    }
-
-    pub fn edit_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
-        self.state.write_reply(thread_id, text);
-        self.save_viewer_sections()
-    }
-
-    pub fn discard_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
-        self.state.drop_reply(thread_id);
-        self.save_viewer_sections()
-    }
-
-    pub fn finish_body(&self) -> &str {
-        self.state.finish_body()
-    }
-
-    pub fn edit_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
-        self.state.write_finish_body(text);
-        self.save_viewer_sections()
-    }
-
+    /// Whatever came of it, the next hand-off may go now.
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
+        self.work.want(WorkKind::DeliverHandOff);
         let step = match &self.screen {
             Screen::Step(id) => Some(id.clone()),
             _ => None,
         };
-        if self
-            .comment_desk
-            .apply_thread_action(&mut self.state, &outcome, step)
-        {
-            // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
-            if self.save_viewer_sections().is_err() {
-                self.saves.typed();
-            }
-        }
+        self.comment_desk
+            .apply_thread_action(&mut self.state, &outcome, step);
         self.show_pulled_threads(outcome.threads.as_ref());
         if outcome.result == ThreadActionResult::Done {
             match &outcome.action {
@@ -1074,13 +1078,13 @@ impl Review {
     fn show_pulled_threads(&mut self, threads: Option<&Result<Vec<ReviewThread>, String>>) {
         match threads {
             Some(Ok(threads)) => self.set_threads(threads),
-            Some(Err(reason)) => self.threads_not_read = Some(reason.clone()),
+            Some(Err(reason)) => self.raise_problem(Problem::ThreadsNotRead(reason.clone())),
             None => {}
         }
     }
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
-        self.not_read.remove(&Read::Authorship);
+        self.clear_problem(ProblemKind::NotRead(Read::Authorship));
         self.comment_desk.viewer_authorship_is(authored);
     }
 
@@ -1118,13 +1122,11 @@ impl Review {
             .finish_review_request(&self.pr, verdict, body)
     }
 
+    /// A sent review is read back, so the finish button shows it.
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
         let result = self.comment_desk.apply_finish(&mut self.state, outcome);
         if result == FinishResult::Sent {
-            // The review is on GitHub; a body that fails to clear is saved again with the next typing.
-            if self.save_viewer_sections().is_err() {
-                self.saves.typed();
-            }
+            self.work.want(WorkKind::PullLastReview);
         }
         result
     }
@@ -1146,126 +1148,31 @@ impl Review {
         self.comment_desk.row_selection()
     }
 
-    /// The rows being dragged over, for drawing them.
-    pub fn selected_lines(&self) -> Option<SelectedLines> {
-        self.comment_desk
-            .row_selection()?
-            .resolve(&self.screen_lines())
-    }
-
     pub fn cancel_selection(&mut self) {
         self.comment_desk.cancel_selection();
     }
 
-    /// The drag ends: when the rows can take a comment, a comment box opens on them.
-    pub fn finish_selection(&mut self) -> Result<Option<CommentPlace>, CommentRefusal> {
-        let screen_lines = self.screen_lines();
+    /// The drag ends: when the rows of the page can take a comment, a comment box opens on them.
+    fn finish_selection(&mut self, page: &Page) -> Result<Option<CommentPlace>, CommentRefusal> {
         let freshness = self.tour_freshness();
-        let place = self.comment_desk.finish_selection(
-            &mut self.state,
-            &screen_lines,
-            freshness,
-            &self.head,
-        )?;
-        if place.is_some() {
-            self.save_viewer_sections()
-                .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        }
-        Ok(place)
+        self.comment_desk
+            .finish_selection(&mut self.state, page.lines(), freshness, &self.head)
     }
 
     /// The comment box of a picture opens on the whole file, under the same rules as on lines.
-    pub fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
+    fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
         let freshness = self.tour_freshness();
-        let place = CommentDesk::begin_file_comment(&mut self.state, path, freshness, &self.head)?;
-        self.save_viewer_sections()
-            .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        Ok(place)
-    }
-
-    /// Every row the current screen shows, top to bottom.
-    fn screen_lines(&self) -> Vec<DiffLine> {
-        in_shown_order(self.screen_pieces())
-    }
-
-    fn screen_pieces(&self) -> Vec<PieceDiff> {
-        match &self.screen {
-            Screen::Step(_) => self
-                .current_step()
-                .map(|page| page.pieces)
-                .unwrap_or_default(),
-            Screen::SafetyNet => self
-                .safety_net()
-                .map(|page| page.pieces)
-                .unwrap_or_default(),
-            Screen::Summary => Vec::new(),
-        }
-    }
-
-    pub fn comment_drafts(&self) -> &[CommentDraft] {
-        self.state.comment_drafts()
+        self.comment_desk
+            .begin_file_comment(&mut self.state, path, freshness, &self.head)
     }
 
     pub fn queued_comments(&self) -> &[QueuedComment] {
         self.state.comment_queue()
     }
 
-    /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
-    pub fn type_in_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.write_draft(place, body);
-        self.saves.typed();
-        Ok(())
-    }
-
-    pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.write_reply(thread_id, text);
-        self.saves.typed();
-        Ok(())
-    }
-
-    pub fn type_in_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.write_finish_body(text);
-        self.saves.typed();
-        Ok(())
-    }
-
     /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
     pub fn typing_save(&mut self) -> Option<TypingSave> {
-        if !self.saves.take_typing_unsaved() {
-            return None;
-        }
-        Some(TypingSave::new(
-            self.state_file.clone(),
-            Arc::clone(&self.saves),
-            self.state.typed_text(),
-        ))
-    }
-
-    /// Saved at once, so a crash loses nothing.
-    pub fn edit_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
-        self.state.write_draft(place, body);
-        self.save_viewer_sections()
-    }
-
-    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
-    pub fn leave_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
-        let is_blank = self
-            .comment_drafts()
-            .iter()
-            .any(|draft| &draft.place == place && draft.body.trim().is_empty());
-        if is_blank {
-            self.discard_draft(place)?;
-        }
-        Ok(())
-    }
-
-    pub fn discard_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
-        self.state.drop_draft(place);
-        self.state.drop_queued(place);
-        self.save_viewer_sections()
+        self.state.typing_save()
     }
 
     /// "Suggest change" shows only when the range starts and ends on lines of the head.
@@ -1273,85 +1180,45 @@ impl Review {
         CommentDesk::can_suggest_change(place)
     }
 
-    /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
-    /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
-    pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
-        let Some(rows) = self.rows_of(place) else {
-            return Ok(None);
-        };
-        let body = CommentDesk::suggest_change(&mut self.state, place, &rows);
-        if body.is_some() {
-            self.save_viewer_sections()?;
-        }
-        Ok(body)
+    /// The comment boxes open on this review, each with what it is doing; each hangs under the
+    /// last line of its place, or under the picture of its file.
+    pub fn comment_boxes(&self) -> impl Iterator<Item = CommentBox<'_>> {
+        self.comment_desk
+            .comment_boxes(&self.state, self.tour_freshness())
     }
 
-    fn rows_of(&self, place: &CommentPlace) -> Option<Vec<DiffLine>> {
-        let CommentPlace::Lines { start, end } = place else {
-            return None;
-        };
-        let mut selection = RowSelection::start_at(start.clone());
-        selection.extend_to(end.clone());
-        let rows = selection.resolve(&self.screen_lines())?;
-        Some(rows.lines().to_vec())
+    pub fn comment_box(&self, place: &CommentPlace) -> Option<CommentBox<'_>> {
+        self.comment_boxes()
+            .find(|comment_box| &comment_box.draft.place == place)
     }
 
-    /// `None` when there is no such draft.
-    pub fn comment_request(&self, place: &CommentPlace, mode: SendMode) -> Option<CommentRequest> {
-        self.comment_request_for(place, mode, Audience::Author)
+    /// The comment box that takes the keys.
+    pub fn composing(&self) -> Option<&CommentPlace> {
+        self.comment_desk.composing()
     }
 
-    /// `None` when there is no such draft.
-    pub fn comment_request_for(
-        &self,
+    /// The box shows as sending until `apply_comment` takes the outcome. `None` when there is no such draft.
+    pub fn start_sending(
+        &mut self,
         place: &CommentPlace,
         mode: SendMode,
         audience: Audience,
     ) -> Option<CommentRequest> {
-        CommentDesk::comment_request(&self.state, place, mode, audience, &self.head, &self.pr)
+        self.comment_desk
+            .start_sending(&self.state, place, mode, audience, (&self.head, &self.pr))
     }
 
-    pub fn hand_offs(&self) -> &[HandOff] {
-        self.state.hand_offs().all()
+    pub fn hand_offs(&self) -> &HandOffs {
+        self.state.hand_offs()
     }
 
-    /// The oldest queued hand-off to send to the tour agent, when it is time to try.
-    pub fn delivery_request(&self) -> Option<DeliveryRequest> {
-        self.state.hand_offs().delivery_request(&self.pr)
-    }
-
-    pub fn apply_delivery(&mut self, outcome: DeliveryOutcome) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().apply_delivery(outcome);
-        self.save_viewer_sections()
-    }
-
-    pub fn hand_off_replied(
+    /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
+    /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
+    fn record_hand_offs<T>(
         &mut self,
-        id: HandOffId,
-        replied: &AgentReplied,
-    ) -> anyhow::Result<()> {
-        self.state.hand_off_replied(id, replied)?;
-        self.save_viewer_sections()
-    }
-
-    pub fn seen_marks_to_take_off(&self) -> Vec<SeenMarkOff> {
-        self.state.hand_offs().seen_marks_to_take_off()
-    }
-
-    pub fn apply_seen_mark_off(&mut self, outcome: SeenMarkOffOutcome) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().apply_seen_mark_off(outcome);
-        self.save_viewer_sections()
-    }
-
-    /// Queues a failed hand-off again; it goes to the tour agent like a new one.
-    pub fn try_hand_off_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().try_again(id)?;
-        self.save_viewer_sections()
-    }
-
-    pub fn agent_status_is(&mut self, status: AgentStatus) -> anyhow::Result<()> {
-        self.state.hand_offs_mut().agent_status_is(status);
-        self.save_viewer_sections()
+        change: impl FnOnce(&mut HandOffs) -> T,
+    ) -> anyhow::Result<T> {
+        self.state.record(|state| change(state.hand_offs_mut()))
     }
 
     /// The oldest comment in the queue, to send again.
@@ -1361,14 +1228,21 @@ impl Review {
 
     /// The window was asked for another PR and could not open it; named until another switch succeeds.
     pub fn switch_failed(&mut self, reason: String) {
-        self.switch_failed = Some(reason);
+        self.raise_problem(Problem::SwitchFailed(reason));
     }
 
     pub fn state_file(&self) -> ReviewStateFile {
-        self.state_file.clone()
+        self.state.file().clone()
     }
 
+    /// A comment sent from its box. Whatever came of it, the next hand-off may go now.
     pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
+        let result = self.land_comment(outcome);
+        self.work.want(WorkKind::DeliverHandOff);
+        result
+    }
+
+    fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
         let step = match &self.screen {
             Screen::Step(id) => Some(id.clone()),
@@ -1380,8 +1254,7 @@ impl Review {
             .apply_comment(&mut self.state, outcome, step);
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
-        self.save_viewer_sections()?;
-        Ok(result)
+        result
     }
 
     fn note_new_hand_off(&mut self, hand_offs_before: usize) {
@@ -1394,12 +1267,14 @@ impl Review {
         else {
             return;
         };
-        self.hand_off_not_sent = match (newest.thread(), newest.state()) {
+        match (newest.thread(), newest.state()) {
             (None, HandOffState::Failed(reason)) => {
-                Some((newest.comment().chars().take(60).collect(), reason.clone()))
+                let comment = newest.comment().chars().take(60).collect();
+                let reason = reason.clone();
+                self.raise_problem(Problem::HandOffNotSent { comment, reason });
             }
-            _ => None,
-        };
+            _ => self.clear_problem(ProblemKind::HandOffNotSent),
+        }
     }
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
@@ -1460,12 +1335,12 @@ impl Review {
                 PaletteAction::MarkStepRead
             }
         });
-        let wrap = if self.wraps_lines() {
+        let wrap = if self.display_options.wraps_lines() {
             PaletteAction::StopWrappingLines
         } else {
             PaletteAction::WrapLines
         };
-        let whitespace = if self.ignores_whitespace() {
+        let whitespace = if self.display_options.ignores_whitespace() {
             PaletteAction::ShowWhitespace
         } else {
             PaletteAction::HideWhitespace
@@ -1520,6 +1395,19 @@ impl Review {
     /// False when there is no screen after this one.
     pub fn go_forward(&mut self) -> bool {
         self.step_by(1)
+    }
+
+    /// For the scroll script, which scrolls through every piece, so a folded step is opened.
+    pub fn go_forward_unfolded(&mut self) -> bool {
+        if !self.go_forward() {
+            return false;
+        }
+        if let Screen::Step(id) = self.screen.clone()
+            && self.is_folded(&id)
+        {
+            self.toggle_fold(&id);
+        }
+        true
     }
 
     /// The Next button: on to the next screen that is not a step already read, which the sidebar
@@ -1642,43 +1530,48 @@ impl Review {
         self.state.read_tick(id).is_some()
     }
 
-    /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
     /// The re-pin writes the state file from another thread and this review is replaced when it
     /// is done, so from now on nothing it holds may be saved over the re-pin's record.
     pub fn start_repin(&mut self) {
-        self.repin_running = true;
+        self.state.start_repin();
     }
 
     pub fn refresh_failed(&mut self, error: &anyhow::Error) {
-        self.tour_not_refreshed = Some(format!("{error:#}"));
+        self.raise_problem(Problem::TourNotRefreshed(format!("{error:#}")));
+    }
+
+    /// `open` named the PR shown and its tour file could not be read again.
+    pub fn reload_failed(&mut self, error: &anyhow::Error) {
+        self.raise_problem(Problem::TourNotReloaded(format!("{error:#}")));
     }
 
     pub fn repin_failed(&mut self) {
-        self.repin_running = false;
-        self.refused_while_repinning = false;
+        self.state.repin_failed();
     }
 
+    /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
+    /// Viewed marks sync once no other tick or untick came for `PUSH_DEBOUNCE`.
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
+        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
-        self.state.tick(id, &self.head);
-        self.fold_flipped.remove(id);
         let coverage = self.coverage();
-        self.viewed_sync
-            .wish_after_tick(&mut self.state, &coverage, id);
-        self.save_viewer_sections()
+        self.state.change(|state| {
+            state.tick(id, &self.head);
+            self.fold_flipped.remove(id);
+            self.viewed_sync.wish_after_tick(state, &coverage, id);
+        })
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        self.state.untick(id);
-        self.fold_flipped.remove(id);
+        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         let coverage = self.coverage();
-        self.viewed_sync
-            .wish_after_untick(&mut self.state, &coverage, id);
-        self.save_viewer_sections()
+        self.state.change(|state| {
+            state.untick(id);
+            self.fold_flipped.remove(id);
+            self.viewed_sync.wish_after_untick(state, &coverage, id);
+        })
     }
 
     /// Skim, ticked and gone steps fold; the reviewer can flip that for the session without losing the tick.
@@ -1748,19 +1641,22 @@ impl Review {
             return Ok(());
         }
         let coverage = self.coverage();
-        let (unticked, error) =
-            self.viewed_sync
-                .take_in(&mut self.state, &coverage, &self.head, outcome);
-        for step in &unticked {
-            self.fold_flipped.remove(step);
-        }
-        let saved = self.save_viewer_sections();
-        self.viewed_not_synced = None;
+        let mut error = None;
+        let saved = self.state.record(|state| {
+            let (unticked, sync_error) = self
+                .viewed_sync
+                .take_in(state, &coverage, &self.head, outcome);
+            for step in &unticked {
+                self.fold_flipped.remove(step);
+            }
+            error = sync_error;
+        });
+        self.clear_problem(ProblemKind::ViewedNotSynced);
         match error {
             Some(error) => {
                 let settled = self.viewed_sync.settle(error);
                 if let Err(error) = &settled {
-                    self.viewed_not_synced = Some(format!("{error:#}"));
+                    self.raise_problem(Problem::ViewedNotSynced(format!("{error:#}")));
                 }
                 settled
             }
@@ -1794,63 +1690,16 @@ impl Review {
 
     /// What went wrong that the reviewer must know about, until it is put right.
     pub fn problems(&self) -> Vec<Problem> {
-        let not_saved = self.saves.problem().map(Problem::NotSaved);
+        let not_saved = self.state.not_saved().map(Problem::NotSaved);
         let not_kept = self
-            .refused_while_repinning
+            .state
+            .refused_while_repinning()
             .then_some(Problem::ChangeNotKeptWhileRepinning);
-        let threads_not_read = self.threads_not_read.clone().map(Problem::ThreadsNotRead);
         not_saved
             .into_iter()
             .chain(not_kept)
-            .chain(threads_not_read)
-            .chain(
-                self.not_read
-                    .iter()
-                    .map(|(read, reason)| Problem::NotRead(*read, reason.clone())),
-            )
-            .chain(self.ide_not_started.clone().map(Problem::IdeNotStarted))
-            .chain(self.code_on_github.clone().map(Problem::CodeOnGitHub))
-            .chain(self.viewed_not_synced.clone().map(Problem::ViewedNotSynced))
-            .chain(
-                self.tour_not_refreshed
-                    .clone()
-                    .map(Problem::TourNotRefreshed),
-            )
-            .chain(
-                self.saved_review_kept_as
-                    .clone()
-                    .map(Problem::SavedReviewNotRead),
-            )
-            .chain(
-                self.hand_off_not_sent
-                    .clone()
-                    .map(|(comment, reason)| Problem::HandOffNotSent { comment, reason }),
-            )
-            .chain(self.switch_failed.clone().map(Problem::SwitchFailed))
+            .chain(self.problems.list().cloned())
             .collect()
-    }
-
-    /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
-    /// these are written into a freshly loaded file.
-    fn save_viewer_sections(&mut self) -> anyhow::Result<()> {
-        self.refuse_changes_while_repinning()?;
-        let turn = self.saves.next_turn();
-        self.saves.write(turn, || {
-            self.state_file
-                .update(|saved| saved.take_viewer_sections(&self.state))
-        })?;
-        self.saves.typing_saved();
-        Ok(())
-    }
-
-    /// A refused change is named to the reviewer until the re-pin ends.
-    fn refuse_changes_while_repinning(&mut self) -> anyhow::Result<()> {
-        if self.repin_running {
-            self.refused_while_repinning = true;
-            Err(RepinRunning.into())
-        } else {
-            Ok(())
-        }
     }
 
     pub fn reading_place(&self) -> ReadingPlace {
@@ -1900,30 +1749,10 @@ impl Review {
     }
 }
 
-#[derive(Debug)]
-pub struct RepinRunning;
-
-impl fmt::Display for RepinRunning {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter
-            .write_str("the tour is being updated to the new commits; try again when it is done")
-    }
-}
-
-impl std::error::Error for RepinRunning {}
-
 /// The head a step was last read at: its tick, or the tick a re-pin took away.
 fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a Sha> {
     state
         .read_tick(step)
         .or_else(|| state.read_before(step))
         .map(|tick| &tick.head)
-}
-
-/// Rows as a screen shows them: the pieces of one file in one block, in line order.
-fn in_shown_order(pieces: Vec<PieceDiff>) -> Vec<DiffLine> {
-    FileBlock::group(pieces)
-        .iter()
-        .flat_map(|block| block.lines().cloned())
-        .collect()
 }

@@ -1,5 +1,6 @@
 use guided_review::file_path::FilePath;
 use guided_review::pieces::PieceId;
+use guided_review::viewer::PieceLabel;
 
 fn path(text: &str) -> FilePath {
     FilePath::new(text).unwrap()
@@ -126,5 +127,29 @@ fn a_clone_shares_the_symbol_text() {
     assert_eq!(
         clone.symbol_path().unwrap().as_ptr(),
         id.symbol_path().unwrap().as_ptr()
+    );
+}
+
+fn label(id: &str) -> PieceLabel {
+    PieceLabel::of(&id.parse().unwrap())
+}
+
+#[test]
+fn a_part_the_tour_numbers_as_a_hunk_shows_no_name_of_its_own() {
+    let part = label("GLOSSARY.md#hunk-1");
+
+    assert_eq!(part.symbol, None);
+    assert_eq!(part.shown_name(), None);
+}
+
+#[test]
+fn a_symbol_shows_its_name_and_a_whole_file_its_file_name() {
+    assert_eq!(
+        label("app/Order.php#Order::total").shown_name().as_deref(),
+        Some("Order::total")
+    );
+    assert_eq!(
+        label("app/Order.php").shown_name().as_deref(),
+        Some("Order.php")
     );
 }

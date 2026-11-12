@@ -1,5 +1,6 @@
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -10,9 +11,8 @@ use gpui::{
 
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
 use crate::app::components::tooltip::tooltip;
-use crate::pieces::PieceId;
 use crate::viewer::{
-    Capture, CodeLink, DiffLine, HiddenLines, LineKind, LineLocation, MoreContext,
+    BoxEdges, CodeLink, HiddenLines, LineKind, LineLocation, MoreContext, PieceLabel, ShownLine,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
@@ -69,75 +69,11 @@ pub struct CodeSelectionHooks {
 // grouped in hunks like on GitHub, the bands between hunks, and the box's bottom edge. Each row is one
 // item of the screen's list, so only the rows on screen are drawn.
 
-/// What a `DiffRow` draws, prepared once per change of the review, so a frame copies no text.
-pub struct DiffRowLine {
-    pub location: LineLocation,
-    pub kind: LineKind,
-    /// Base and head numbers and the sign, padded so one monospace text fills the gutter.
-    gutter: SharedString,
-    code: SharedString,
-    /// Cut to char boundaries already; coloured when drawn, so a theme switch needs no rebuild.
-    highlights: Vec<(Range<usize>, Capture)>,
-    /// The words that changed, cut to char boundaries already.
-    changed_words: Vec<Range<usize>>,
-    code_link: CodeLink,
-    /// Rows outside GitHub's hunks show no button. Rows of the change since the read show one, to say why they take no comment.
-    offers_comment_button: bool,
-    /// A long line wraps onto more rows instead of being cut at the box's edge.
-    pub wraps: bool,
-}
-
-impl DiffRowLine {
-    pub fn code(&self) -> &str {
-        &self.code
-    }
-
-    pub fn of(line: DiffLine, wraps: bool) -> Self {
-        let number = line.location.line.to_string();
-        let (base_number, head_number, sign) = match line.kind {
-            LineKind::Removed => (number, String::new(), '-'),
-            LineKind::Added => (String::new(), number, '+'),
-            LineKind::Context { base_line, .. } => (
-                base_line.map(|line| line.to_string()).unwrap_or_default(),
-                number,
-                ' ',
-            ),
-        };
-        let highlights = line
-            .spans
-            .iter()
-            .map(|span| (span.range(), span.capture))
-            .filter(|(range, _)| {
-                line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
-            })
-            .collect();
-        let changed_words = line
-            .changed
-            .iter()
-            .filter(|range| {
-                line.text.is_char_boundary(range.start) && line.text.is_char_boundary(range.end)
-            })
-            .cloned()
-            .collect();
-        Self {
-            offers_comment_button: line.offers_comment_button(),
-            changed_words,
-            wraps,
-            gutter: format!("{base_number:>5} {head_number:>5} {sign} ").into(),
-            code: line.text.into(),
-            highlights,
-            code_link: line.code_link,
-            location: line.location,
-            kind: line.kind,
-        }
-    }
-}
-
 /// One line of a piece: a gutter that opens the line in the IDE or on GitHub, the "+" that starts a comment, and the
 /// code as one styled text.
 #[derive(IntoElement)]
 pub struct DiffRow {
-    line: Rc<DiffRowLine>,
+    line: Arc<ShownLine>,
     is_selected: bool,
     /// Without it the row takes no comment.
     on_gesture: Option<OnRowGesture>,
@@ -149,7 +85,7 @@ pub struct DiffRow {
 }
 
 impl DiffRow {
-    pub fn new(line: Rc<DiffRowLine>) -> Self {
+    pub fn new(line: Arc<ShownLine>) -> Self {
         Self {
             line,
             is_selected: false,
@@ -236,7 +172,7 @@ impl RenderOnce for DiffRow {
             Some(selected) => with_selection(&highlights, selected, colors.text_selection),
             None => highlights,
         };
-        let code = StyledText::new(line.code.clone()).with_highlights(highlights);
+        let code = StyledText::new(SharedString::from(&line.code)).with_highlights(highlights);
         let code_layout = code.layout().clone();
         let code = div()
             .flex_1()
@@ -299,7 +235,7 @@ impl RenderOnce for DiffRow {
             .when(edges.closes, |gutter| {
                 gutter.rounded_bl(px(INSIDE_EDGE_RADIUS))
             })
-            .child(line.gutter.clone());
+            .child(SharedString::from(&line.gutter));
         let comment_button = div().w(px(16.)).flex_none();
         let comment_button = match self
             .on_gesture
@@ -345,7 +281,7 @@ impl RenderOnce for DiffRow {
                     on_gesture(RowGesture::Over, &location, window, cx);
                 })
             });
-        let fill = edges.round_inside(div().flex_1().min_w_0().flex());
+        let fill = round_inside(edges, div().flex_1().min_w_0().flex());
         let fill = match line.kind {
             _ if self.is_selected => fill.bg(colors.current),
             LineKind::Removed => fill.bg(colors.removed_line),
@@ -410,23 +346,15 @@ fn laid_over(
         .collect()
 }
 
-/// Where a row of a piece box meets the box's rounded edge: the box closes at its end and above what
-/// hangs under a line, like a thread, and opens again below it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct BoxEdges {
-    pub opens: bool,
-    pub closes: bool,
-}
-
 /// A row's own colour sits inside the box's 1 px edge, so its corners are that much tighter.
 const INSIDE_EDGE_RADIUS: f32 = CARD_RADIUS - 1.;
 
-impl BoxEdges {
-    pub fn round_inside(self, layer: Div) -> Div {
-        layer
-            .when(self.opens, |layer| layer.rounded_t(px(INSIDE_EDGE_RADIUS)))
-            .when(self.closes, |layer| layer.rounded_b(px(INSIDE_EDGE_RADIUS)))
-    }
+pub fn round_inside(edges: BoxEdges, layer: Div) -> Div {
+    layer
+        .when(edges.opens, |layer| layer.rounded_t(px(INSIDE_EDGE_RADIUS)))
+        .when(edges.closes, |layer| {
+            layer.rounded_b(px(INSIDE_EDGE_RADIUS))
+        })
 }
 
 /// A row of a piece box, drawing the box's top or bottom edge where it opens or closes there.
@@ -453,46 +381,6 @@ pub fn piece_row(colors: &Colors) -> Div {
         .w_full()
         .border_x_1()
         .border_color(colors.subtle_border)
-}
-
-/// A piece's name cut into what is shown, once, so a frame shares the text instead of copying it.
-#[derive(Debug, Clone)]
-pub struct PieceLabel {
-    /// With its trailing slash, or empty at the repo root.
-    pub folder: SharedString,
-    pub file_name: SharedString,
-    pub symbol: Option<SharedString>,
-    /// The last part of the symbol: `total` of `Order::total`.
-    pub symbol_name: Option<SharedString>,
-    /// A part the tour numbers (`hunk-1`) where the file has no symbol to name it by; the number
-    /// means nothing to the reader, so it is not shown.
-    pub is_part: bool,
-}
-
-impl PieceLabel {
-    /// What a marker inside a box of several pieces names: the symbol, the file for a whole-file
-    /// piece, and nothing for a numbered part, which the gap above it already sets apart.
-    pub fn shown_name(&self) -> Option<SharedString> {
-        self.symbol
-            .clone()
-            .or_else(|| (!self.is_part).then(|| self.file_name.clone()))
-    }
-
-    pub fn of(id: &PieceId) -> Self {
-        Self {
-            folder: SharedString::from(id.folder().to_owned()),
-            file_name: SharedString::from(id.file_name().to_owned()),
-            symbol: id
-                .symbol_path()
-                .filter(|_| !id.is_hunk())
-                .map(|symbol| symbol.to_owned().into()),
-            symbol_name: id
-                .symbol_name()
-                .filter(|_| !id.is_hunk())
-                .map(|name| name.to_owned().into()),
-            is_part: id.is_hunk(),
-        }
-    }
 }
 
 /// The top of a piece box: the piece's name, its re-pin label, and its buttons (open the code, ask).
@@ -537,9 +425,12 @@ impl RenderOnce for PieceHeader {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let piece = self.piece;
-        let symbol = piece
-            .symbol
-            .map(|symbol| div().flex_none().text_color(colors.accent).child(symbol));
+        let symbol = piece.symbol.map(|symbol| {
+            div()
+                .flex_none()
+                .text_color(colors.accent)
+                .child(SharedString::from(symbol))
+        });
         div()
             .w_full()
             .h(px(34.))
@@ -579,13 +470,13 @@ impl RenderOnce for PieceHeader {
                                     .text_color(colors.muted_text)
                                     .text_ellipsis_start()
                                     .overflow_hidden()
-                                    .child(piece.folder),
+                                    .child(SharedString::from(piece.folder)),
                             )
                             .child(
                                 div()
                                     .flex_none()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(piece.file_name),
+                                    .child(SharedString::from(piece.file_name)),
                             ),
                     )
                     .children(symbol),
@@ -631,7 +522,7 @@ impl PieceMarker {
 impl RenderOnce for PieceMarker {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let name = self.piece.shown_name();
+        let name = self.piece.shown_name().map(SharedString::from);
         box_row(&colors, self.edges)
             .group("piece-marker")
             .h(px(24.))
@@ -783,8 +674,7 @@ pub fn hunk_gap(
         })
     });
     let has_asks = down.is_some() || up.is_some();
-    let band = edges
-        .round_inside(div())
+    let band = round_inside(edges, div())
         .id(id)
         .h(px(28.))
         .px_2()
@@ -802,33 +692,4 @@ pub fn hunk_gap(
         })
         .child(div().pl_1().child(label));
     box_row(colors, edges).child(band)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn label(id: &str) -> PieceLabel {
-        PieceLabel::of(&id.parse().unwrap())
-    }
-
-    #[test]
-    fn a_part_the_tour_numbers_as_a_hunk_shows_no_name_of_its_own() {
-        let part = label("GLOSSARY.md#hunk-1");
-
-        assert_eq!(part.symbol, None);
-        assert_eq!(part.shown_name(), None);
-    }
-
-    #[test]
-    fn a_symbol_shows_its_name_and_a_whole_file_its_file_name() {
-        assert_eq!(
-            label("app/Order.php#Order::total").shown_name().as_deref(),
-            Some("Order::total")
-        );
-        assert_eq!(
-            label("app/Order.php").shown_name().as_deref(),
-            Some("Order.php")
-        );
-    }
 }

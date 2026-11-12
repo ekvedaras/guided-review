@@ -228,7 +228,7 @@ impl HandOff {
 }
 
 /// Sending the oldest queued hand-off to the tour agent, owned so it can run on a background thread.
-pub struct DeliveryRequest {
+pub(super) struct DeliveryRequest {
     id: HandOffId,
     pr: PullRequestUrl,
     text: String,
@@ -237,7 +237,7 @@ pub struct DeliveryRequest {
 
 impl DeliveryRequest {
     /// A delivered hand-off puts the seen mark on the reviewer's comment.
-    pub fn run(
+    pub(super) fn run(
         self,
         agents: &TourAgents,
         github: &(impl ReviewThreadsPort + ?Sized),
@@ -264,7 +264,7 @@ impl DeliveryRequest {
     }
 }
 
-pub struct DeliveryOutcome {
+pub(super) struct DeliveryOutcome {
     id: HandOffId,
     how: Delivery,
     seen_mark: SeenMark,
@@ -272,12 +272,12 @@ pub struct DeliveryOutcome {
 
 impl DeliveryOutcome {
     /// A tour agent was started, so there is a new terminal to follow.
-    pub fn started_an_agent(&self) -> bool {
+    pub(super) fn started_an_agent(&self) -> bool {
         matches!(self.how, Delivery::AgentStarted)
     }
 
     /// The agent was just started and took nothing yet; no status change may come to try again on.
-    pub fn wants_another_try_soon(&self) -> bool {
+    pub(super) fn wants_another_try_soon(&self) -> bool {
         matches!(self.how, Delivery::AgentStarting)
     }
 }
@@ -526,7 +526,7 @@ impl HandOffs {
     }
 
     /// The agent's reply is on GitHub, whatever the hand-off was doing before.
-    pub fn replied(
+    pub(super) fn replied(
         &mut self,
         id: HandOffId,
         replied: &AgentReplied,
@@ -770,18 +770,18 @@ impl AgentReplyRequest {
 }
 
 /// Taking the seen mark off a hand-off the agent ended without answering, owned so it can run off the UI thread.
-pub struct SeenMarkOff {
+pub(super) struct SeenMarkOff {
     id: HandOffId,
     comment: CommentId,
 }
 
-pub struct SeenMarkOffOutcome {
+pub(super) struct SeenMarkOffOutcome {
     id: HandOffId,
     seen_mark: SeenMark,
 }
 
 impl SeenMarkOff {
-    pub fn run(self, github: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
+    pub(super) fn run(self, github: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
         SeenMarkOffOutcome {
             id: self.id,
             seen_mark: SeenMark::take_off(github, &self.comment),

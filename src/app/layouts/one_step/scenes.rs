@@ -12,12 +12,11 @@ use super::OneStepLayout;
 use crate::app::components::diff_view::RowGesture;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
-use crate::app::page_rows::PageRow;
 use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
 use crate::update::{ReleaseAsset, Target, Update, UpdateOffer, Version};
-use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId};
+use crate::viewer::{AgentStatus, LineKind, LineLocation, TerminalId, TextBox};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -118,7 +117,7 @@ async fn shoot(
         })?;
         camera.take(&format!("{screen:02}-end"), cx).await?;
         if !layout.update(cx, |layout, cx| {
-            layout.change_review(cx, Review::go_forward)
+            layout.change_review(cx, |review| review.go_forward())
         })? {
             break;
         }
@@ -202,9 +201,11 @@ impl OneStepLayout {
 
     /// The overlays sit over a step whose code is open, so the comment box has lines to go on.
     fn go_to_first_open_code(&mut self, cx: &mut Context<Self>) {
-        self.change_review(cx, Review::go_to_summary);
+        self.change_review(cx, |review| review.go_to_summary());
         for _ in 0..MAX_SCREENS {
-            if !self.change_review(cx, Review::go_forward) || !self.added_lines(1, cx).is_empty() {
+            if !self.change_review(cx, |review| review.go_forward())
+                || !self.added_lines(1, cx).is_empty()
+            {
                 break;
             }
         }
@@ -214,11 +215,9 @@ impl OneStepLayout {
     fn added_lines(&self, count: usize, cx: &App) -> Vec<(usize, LineLocation)> {
         let rows = self.session.read(cx).rows();
         (0..rows.len())
-            .filter_map(|index| match rows.row(index) {
-                Some(PageRow::Line(line)) if line.kind == LineKind::Added => {
-                    Some((index, line.location.clone()))
-                }
-                _ => None,
+            .filter_map(|index| {
+                let line = rows.line(index)?;
+                (line.kind == LineKind::Added).then(|| (index, line.location.clone()))
             })
             .take(count)
             .collect()
@@ -239,7 +238,8 @@ impl OneStepLayout {
                 .update(cx, |switcher, cx| switcher.open(window, cx)),
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
-                    session.type_in_finish_body(
+                    session.type_in(
+                        &TextBox::FinishBody,
                         "Reads well. Two small questions inline, nothing blocking.",
                         cx,
                     );
@@ -297,14 +297,14 @@ impl OneStepLayout {
                 self.scroll_to_row(self.screen_list.item_count());
             }
             Scene::DescriptionFolds => {
-                self.change_review(cx, Review::go_to_summary);
+                self.change_review(cx, |review| review.go_to_summary());
                 self.toggle_description_folds(cx);
                 if let Some(row) = self.session.read(cx).rows().description_row() {
                     self.scroll_to_row(row);
                 }
             }
             Scene::PictureZoom => {
-                self.change_review(cx, Review::go_to_summary);
+                self.change_review(cx, |review| review.go_to_summary());
                 if let Some(picture) = self.session.read(cx).rows().first_summary_picture() {
                     self.picture_zoom
                         .update(cx, |zoom, cx| zoom.open(picture, None, window, cx));
@@ -340,20 +340,20 @@ impl OneStepLayout {
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.close(window, cx)),
             Scene::FinishReview => {
-                self.session
-                    .update(cx, |session, cx| session.type_in_finish_body("", cx));
+                self.session.update(cx, |session, cx| {
+                    session.type_in(&TextBox::FinishBody, "", cx);
+                });
                 cx.set_global(StagedFinishReview(false));
             }
             Scene::CommentComposer => {
                 self.session.update(cx, |session, cx| {
-                    let places: Vec<_> = session
+                    let drafts: Vec<_> = session
                         .review()
-                        .comment_drafts()
-                        .iter()
-                        .map(|draft| draft.place.clone())
+                        .comment_boxes()
+                        .map(|comment_box| TextBox::Draft(comment_box.draft.place.clone()))
                         .collect();
-                    for place in &places {
-                        session.discard_comment(place, cx);
+                    for draft in &drafts {
+                        session.discard(draft, cx);
                     }
                 });
                 window.focus(&self.focus, cx);
@@ -425,8 +425,9 @@ impl OneStepLayout {
         self.on_row_gesture(RowGesture::Over, last, cx);
         self.end_row_selection(window, cx);
         self.session.update(cx, |session, cx| {
-            if let Some(place) = session.composing().cloned() {
-                session.type_in_comment(&place, "Should a blank value be refused here?", cx);
+            if let Some(place) = session.review().composing().cloned() {
+                let draft = TextBox::Draft(place);
+                session.type_in(&draft, "Should a blank value be refused here?", cx);
             }
         });
     }

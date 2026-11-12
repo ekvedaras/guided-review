@@ -4,14 +4,14 @@ use std::sync::Arc;
 
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, SentLog};
-use crate::support::{FixtureRepo, on_github};
+use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentPlace, CommentRefusal, PieceDiff, Problem, Review, ReviewStateFile, Side, StepId,
-    ThreadId, TourRepinner, ViewedState, repin_tour,
+    CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
+    ReviewStateFile, Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
 };
 use serde_json::json;
 
@@ -330,7 +330,7 @@ fn drag_over(review: &mut Review, text: &str) -> Result<Option<CommentPlace>, Co
         .clone();
     review.begin_selection(at.clone());
     review.extend_selection(at);
-    review.finish_selection()
+    review.open_comment_box(CommentGesture::DragEnded)
 }
 
 #[test]
@@ -358,7 +358,7 @@ fn since_the_read_a_head_line_takes_a_comment_and_an_older_head_line_says_why_no
         drag_over(&mut review, "return 2;"),
         Err(CommentRefusal::OlderHeadLine)
     );
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
     let place = drag_over(&mut review, "return 3;").unwrap().unwrap();
 
     assert_eq!(
@@ -368,7 +368,7 @@ fn since_the_read_a_head_line_takes_a_comment_and_an_older_head_line_says_why_no
             end: full_diff_line
         }
     );
-    assert_eq!(review.comment_drafts().len(), 1);
+    assert_eq!(drafts(&review).len(), 1);
 }
 
 #[test]
@@ -402,6 +402,28 @@ fn a_ticked_step_whose_pieces_stayed_the_same_shows_no_change_since_it_was_read(
 
     assert!(review.current_step().unwrap().since_read.is_some());
     assert_eq!(lines_of(&review, "keep"), Vec::<String>::new());
+}
+
+#[test]
+fn a_piece_untouched_since_the_read_says_so_in_its_open_box() {
+    let shop = Shop::with_tour_at_first_head();
+    shop.tick(&["keep"]);
+    let second_head = shop.commit_second_head();
+    shop.repin_onto(&second_head);
+    let mut review = shop.open();
+    review.go_to(&"keep".into());
+
+    review.toggle_fold(&"keep".into());
+
+    let rows = review.page().rows();
+    let header = rows
+        .iter()
+        .position(|row| matches!(row, PageRow::PieceHeader(_)))
+        .unwrap();
+    assert!(matches!(
+        rows.get(header + 1),
+        Some(PageRow::NoChangeSinceRead)
+    ));
 }
 
 #[test]
@@ -531,7 +553,8 @@ fn the_change_since_read_is_built_from_hunks_with_context_around_its_changes() {
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);
     let mut review = shop.open();
-    review.set_files_at_head(review.files_at_head_request().read(&shop.source()));
+    let files_at_head = review.files_at_head_request().read(&shop.source());
+    review.set_files_at_head(files_at_head);
     review.go_to(&"total".into());
 
     let page = review.current_step().unwrap();
@@ -605,12 +628,14 @@ fn ticks_on_the_open_review_are_refused_while_a_re_pin_runs_so_they_cannot_overw
 fn text_typed_while_a_re_pin_runs_is_named_as_not_kept_until_the_re_pin_ends() {
     let shop = Shop::with_tour_at_first_head();
     let mut review = shop.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
 
     review.start_repin();
     assert!(
         review
-            .type_in_reply(&ThreadId::new("T1"), "because")
+            .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
             .is_err()
     );
 
@@ -642,7 +667,7 @@ fn colours_and_context_lines_read_before_a_re_pin_do_not_reach_the_re_pinned_rev
     shop.repin_onto(&second_head);
     let mut review = shop.open();
 
-    review.set_highlights(highlights);
+    review.display_options_mut().set_highlights(highlights);
     review.set_files_at_head(files_at_head);
 
     review.go_to(&"keep".into());

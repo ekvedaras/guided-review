@@ -6,7 +6,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{CommentDraft, CommentPlace, CommentProblem, QueuedComment};
+use crate::viewer::{BoxState, CommentDraft, CommentPlace, CommentProblem, QueuedComment};
 
 use super::button::{
     ButtonKind, ButtonSize, button as styled_button, button_icon, icon_label_button, joined,
@@ -37,15 +37,6 @@ pub struct ComposerActions {
     pub on_discard: OnCompose,
 }
 
-/// What the box is doing: only one of these at a time.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ComposerState {
-    /// Shown, but keys go elsewhere.
-    Idle,
-    Composing,
-    Sending,
-}
-
 /// Which ways out the box offers; they are independent facts, not modes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CommentCapabilities {
@@ -60,7 +51,7 @@ pub struct CommentCapabilities {
 pub struct CommentComposer {
     draft: CommentDraft,
     focus: FocusHandle,
-    state: ComposerState,
+    state: BoxState,
     capabilities: CommentCapabilities,
     /// What stops the comment, or what went wrong with the last send.
     problem: Option<CommentProblem>,
@@ -75,7 +66,7 @@ impl CommentComposer {
     pub fn new(
         draft: CommentDraft,
         focus: FocusHandle,
-        state: ComposerState,
+        state: BoxState,
         capabilities: CommentCapabilities,
         problem: Option<CommentProblem>,
         actions: ComposerActions,
@@ -119,7 +110,7 @@ impl RenderOnce for CommentComposer {
         });
         let actions = self.actions;
         let on_focus = Rc::clone(&actions.on_focus);
-        let body = if self.state == ComposerState::Composing {
+        let body = if self.state == BoxState::Composing {
             let (on_type, on_submit, on_stop) = (
                 Rc::clone(&actions.on_type),
                 Rc::clone(&actions.on_add_to_review),
@@ -141,7 +132,7 @@ impl RenderOnce for CommentComposer {
         } else {
             div().child(self.draft.body.clone()).into_any_element()
         };
-        let buttons = (self.state != ComposerState::Sending).then(|| {
+        let buttons = (self.state != BoxState::Sending).then(|| {
             let capabilities = self.capabilities;
             let ask_agent = capabilities.ask_agent.then(|| {
                 let mut parts = vec![button(
@@ -260,7 +251,7 @@ impl RenderOnce for CommentComposer {
                     .text_color(colors.danger)
                     .child(shown(problem))
             }))
-            .children((self.state == ComposerState::Sending).then(|| {
+            .children((self.state == BoxState::Sending).then(|| {
                 div()
                     .flex()
                     .items_center()

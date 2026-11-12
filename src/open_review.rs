@@ -13,8 +13,8 @@ use crate::pull_request::PullRequestUrl;
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::Tour;
 use crate::viewer::{
-    Asks, GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader,
-    TourRepinner, WorkingCopy,
+    GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader, TourRepinner,
+    WorkingCopy,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -78,9 +78,7 @@ pub fn open_review(
 
     let agent_folder = clone.clone().unwrap_or_else(|| home.to_path_buf());
     let ask = AskSetup {
-        asks: Asks::load(Arc::new(opened.state_file()))?,
         launcher: Arc::new(ClaudeCli::new()),
-        clone: clone.clone(),
         settings: config.ask_settings(),
     };
     let refresher = TourRefresher {

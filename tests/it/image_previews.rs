@@ -9,8 +9,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentRefusal, CommentResult, ImageCache, ImageMark, ImageSide, Review, ReviewStateFile,
-    SendMode,
+    CommentGesture, CommentResult, ImageCache, ImageMark, ImageSide, PageRow, Review,
+    ReviewStateFile, SendMode, TextBox,
 };
 use serde_json::json;
 
@@ -113,7 +113,7 @@ impl Pull {
     fn load_preview(&self, review: &mut Review, source: &CountingSource) {
         for request in review.image_preview_requests() {
             let preview = request.load(source, &self.cache());
-            review.set_image_preview(preview);
+            review.display_options_mut().set_image_preview(preview);
         }
     }
 }
@@ -135,13 +135,19 @@ fn a_changed_image_shows_both_sides_with_pixel_size_file_size_and_the_change() {
     let source = pull.source();
     let mut review = pull.open(&source);
     assert!(
-        review.image_preview(&file_path("logo.png")).is_none(),
+        review
+            .display_options()
+            .image_preview(&file_path("logo.png"))
+            .is_none(),
         "nothing loads before it is asked for"
     );
 
     pull.load_preview(&mut review, &source);
 
-    let preview = review.image_preview(&file_path("logo.png")).unwrap();
+    let preview = review
+        .display_options()
+        .image_preview(&file_path("logo.png"))
+        .unwrap();
     assert_eq!(
         (loaded(preview.base.as_ref()), loaded(preview.head.as_ref())),
         (
@@ -163,7 +169,10 @@ fn an_added_image_is_one_image_marked_added_and_a_deleted_one_marked_deleted() {
     let source = added.source();
     let mut review = added.open(&source);
     added.load_preview(&mut review, &source);
-    let preview = review.image_preview(&file_path("new.png")).unwrap();
+    let preview = review
+        .display_options()
+        .image_preview(&file_path("new.png"))
+        .unwrap();
     assert!(preview.base.is_none());
     assert_eq!(
         loaded(preview.head.as_ref()),
@@ -178,7 +187,10 @@ fn an_added_image_is_one_image_marked_added_and_a_deleted_one_marked_deleted() {
     let source = deleted.source();
     let mut review = deleted.open(&source);
     deleted.load_preview(&mut review, &source);
-    let preview = review.image_preview(&file_path("old.png")).unwrap();
+    let preview = review
+        .display_options()
+        .image_preview(&file_path("old.png"))
+        .unwrap();
     assert!(preview.head.is_none());
     assert_eq!(
         loaded(preview.base.as_ref()),
@@ -200,7 +212,10 @@ fn a_side_above_ten_megabytes_is_never_fetched_and_shows_only_its_facts() {
 
     pull.load_preview(&mut review, &source);
 
-    let preview = review.image_preview(&file_path("big.png")).unwrap();
+    let preview = review
+        .display_options()
+        .image_preview(&file_path("big.png"))
+        .unwrap();
     assert!(matches!(preview.base, Some(ImageSide::TooLarge { .. })));
     assert_eq!(
         loaded(preview.base.as_ref()),
@@ -240,6 +255,7 @@ fn bytes_of_the_same_blob_come_from_the_disk_cache_even_in_a_later_session() {
     );
     assert!(
         review
+            .display_options()
             .image_preview(&file_path("a.png"))
             .unwrap()
             .head
@@ -263,9 +279,39 @@ fn an_svg_keeps_its_text_diff_next_to_the_picture() {
     let piece = &page.pieces[0];
     assert!(piece.is_image);
     assert!(piece.lines().any(|line| line.text.contains("width=\"48\"")));
-    let preview = review.image_preview(&file_path("icon.svg")).unwrap();
+    let preview = review
+        .display_options()
+        .image_preview(&file_path("icon.svg"))
+        .unwrap();
     assert!(preview.is_svg);
     assert!(loaded(preview.head.as_ref()).starts_with("48×32"));
+}
+
+#[test]
+fn a_comment_box_on_the_whole_image_hangs_under_its_picture() {
+    let pull = Pull::changing(
+        "logo.png",
+        Some(&png_of(2, 2, [0, 0, 0, 255])),
+        Some(&png_of(3, 3, [0, 0, 0, 255])),
+    );
+    let source = pull.source();
+    let mut review = pull.open(&source);
+
+    review
+        .open_comment_box(CommentGesture::OnFile(&file_path("logo.png")))
+        .unwrap();
+
+    let page = review.page();
+    let picture = page
+        .rows()
+        .iter()
+        .position(|row| matches!(row, PageRow::Image { .. }))
+        .unwrap();
+    assert!(matches!(
+        page.row(picture + 1),
+        Some(PageRow::Composer { .. })
+    ));
+    assert!(page.edges(picture).closes);
 }
 
 #[test]
@@ -280,8 +326,13 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
     let sent = SentLog::default();
     let github = FakeGitHub::with_pull("main-tip", &pull.head, &sent);
 
-    let place = review.begin_file_comment(&file_path("logo.png")).unwrap();
-    review.edit_draft(&place, "is the red intended?").unwrap();
+    let place = review
+        .open_comment_box(CommentGesture::OnFile(&file_path("logo.png")))
+        .unwrap()
+        .unwrap();
+    review
+        .type_in(&TextBox::Draft(place.clone()), "is the red intended?")
+        .unwrap();
     let result = review
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();
@@ -293,23 +344,6 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
         place,
         body: "is the red intended?".into()
     }));
-}
-
-#[test]
-fn a_file_comment_is_refused_while_the_tour_is_for_an_old_head() {
-    let pull = Pull::changing(
-        "logo.png",
-        Some(&png_of(2, 2, [0, 0, 0, 255])),
-        Some(&png_of(3, 3, [0, 0, 0, 255])),
-    );
-    let source = pull.source();
-    let mut review = pull.open(&source);
-    review.pr_head_is(Sha::new("a-newer-head"));
-
-    assert_eq!(
-        review.begin_file_comment(&file_path("logo.png")),
-        Err(CommentRefusal::TourIsOld)
-    );
 }
 
 #[test]
@@ -375,8 +409,13 @@ fn a_preview_loaded_for_another_head_is_dropped() {
         .write_bytes("logo.png", &png_of(8, 8, [0, 255, 0, 255]));
     let newer_head = pull.repo.commit("newer head");
     let mut new_review = pull.open_at(&newer_head, &source);
-    new_review.set_image_preview(stale);
+    new_review.display_options_mut().set_image_preview(stale);
 
-    assert!(new_review.image_preview(&file_path("logo.png")).is_none());
+    assert!(
+        new_review
+            .display_options()
+            .image_preview(&file_path("logo.png"))
+            .is_none()
+    );
     assert_eq!(new_review.image_preview_requests().len(), 1);
 }

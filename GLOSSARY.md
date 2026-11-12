@@ -38,7 +38,7 @@
 
 **Screen**: What the viewer shows now: the summary, one step, or the safety net.
 
-**Page**: The content of one screen, laid out for reading: a step page holds the step's text, its pieces and their threads; the safety net page holds the uncovered pieces.
+**Page**: The content of one screen, laid out for reading: the summary page holds the summary, the route and the PR description; a step page holds the step's text, its pieces and their threads; the safety net page holds the uncovered pieces. Under a line it shows, in this order: threads, queued comments, comment boxes and the ask marker of lines with Asks.
 
 **Code link**: A link to a file or a line of the PR's code: a diff line, a piece, or a link in the tour's text. The viewer opens it in the reviewer's IDE when the file is in the working copy of a local clone, else on GitHub, and says why. When the clone is not checked out clean at the tour's head, it still opens in the IDE, with a note that the lines may differ. Removed lines and deleted files always open on GitHub, at base.
 
@@ -57,6 +57,8 @@
 **Tour agent**: The AI session, in a herdr terminal, that answers for the tour of one PR. At most one per PR. The viewer finds it by the herdr label `gr.pr=<url>`, never by a stored terminal id, and a terminal claimed for another PR loses the label.
 
 **Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why and the tour agent features are off.
+
+**Text box**: A box the reviewer writes text for GitHub in. There are four kinds: a comment box (a new comment on lines or on a file, its text called a draft), a reply box under a thread, the edit of one of the reviewer's own comments, and the body of the review being finished. Each kind opens, takes typing, and is left, given up or sent in the same way. A box left with nothing written in it goes. The text of every kind but an edit is saved while typing, so it comes back after a restart. Avoid: composer.
 
 **Ask agent**: The comment box's second send action. The comment or reply is posted to GitHub like any other and also handed off to the tour agent. A comment sent with the plain action is for the PR author only; the agent never sees it.
 

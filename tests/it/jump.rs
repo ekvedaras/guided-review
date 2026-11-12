@@ -313,8 +313,8 @@ fn the_actions_follow_what_the_open_screen_allows() {
     assert!(on_step.contains(&"Wrap lines"));
 
     review.tick(&"totals".into()).unwrap();
-    review.toggle_ignore_whitespace();
-    review.toggle_wrap_lines();
+    review.display_options_mut().toggle_ignore_whitespace();
+    review.display_options_mut().toggle_wrap_lines();
     let flipped = actions(&review);
     assert!(flipped.contains(&"Mark step as unread"));
     assert!(flipped.contains(&"Show whitespace"));

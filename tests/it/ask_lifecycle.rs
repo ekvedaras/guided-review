@@ -1,17 +1,19 @@
+use crate::support::drafts;
 use crate::support::line;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeAgentLauncher, SentLog};
+use crate::support::fake_ports::{FakeAgentLauncher, FakeAskProcesses, SentLog};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPool, AskId, Asks, CommentRefusal, LineLocation, Opening,
-    Place, Review, ReviewStateFile, StepId,
+    AgentLaunch, AgentLauncher, AgentPool, AskDesk, AskId, Asks, CommentGesture, CommentRefusal,
+    LineLocation, Opening, PageRow, Place, QUESTION_NOT_SENT, Question, Review, ReviewStateFile,
+    StepId, TextBox,
 };
 use serde_json::json;
 
@@ -426,17 +428,20 @@ fn use_as_comment_fills_a_comment_box_on_the_asked_lines_with_the_answer() {
     let place = lines_of_total(&mut review, "return 1;", "return 2;");
     let (asks, id) = answered(&shop, &review, place);
 
-    let comment = review.use_as_comment(asks.get(id).unwrap()).unwrap();
+    let comment = review
+        .open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()))
+        .unwrap()
+        .unwrap();
 
     let guided_review::viewer::CommentPlace::Lines { start, end } = &comment else {
         panic!("a comment on lines is not on a file");
     };
     assert_eq!((start.line, end.line), (line(7), line(7)));
     assert!(!comment.is_single_line());
-    let drafts = shop.open().comment_drafts().to_vec();
-    assert_eq!(drafts.len(), 1);
-    assert_eq!(drafts[0].place, comment);
-    assert_eq!(drafts[0].body, "pong");
+    let saved = drafts(&shop.open());
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].place, comment);
+    assert_eq!(saved[0].body, "pong");
 }
 
 #[test]
@@ -448,13 +453,21 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
         piece: "app/Order.php#Order::total".parse().unwrap(),
     };
     let (asks, id) = answered(&shop, &review, piece);
-    let first = review.use_as_comment(asks.get(id).unwrap()).unwrap();
-    review.edit_draft(&first, "My note").unwrap();
+    let first = review
+        .open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()))
+        .unwrap()
+        .unwrap();
+    review
+        .type_in(&TextBox::Draft(first.clone()), "My note")
+        .unwrap();
 
-    let second = review.use_as_comment(asks.get(id).unwrap()).unwrap();
+    let second = review
+        .open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()))
+        .unwrap()
+        .unwrap();
 
     assert_eq!(first, second);
-    assert_eq!(review.comment_drafts()[0].body, "My note\n\npong");
+    assert_eq!(drafts(&review)[0].body, "My note\n\npong");
 }
 
 #[test]
@@ -466,22 +479,26 @@ fn use_as_comment_is_refused_without_lines_on_an_old_tour_and_for_an_ask_on_olde
     let (asks_on_lines, on_lines) = answered(&shop, &review, on_lines);
 
     assert_eq!(
-        review.use_as_comment(asks.get(on_step).unwrap()),
+        review.open_comment_box(CommentGesture::AskAnswer(asks.get(on_step).unwrap())),
         Err(CommentRefusal::NoLines)
     );
     let second_head = shop.commit_second_head();
     review.pr_head_is(Sha::new(&second_head));
     assert_eq!(
-        review.use_as_comment(asks_on_lines.get(on_lines).unwrap()),
+        review.open_comment_box(CommentGesture::AskAnswer(
+            asks_on_lines.get(on_lines).unwrap()
+        )),
         Err(CommentRefusal::TourIsOld)
     );
     shop.repin_onto(&second_head);
     let mut review = shop.open();
     assert_eq!(
-        review.use_as_comment(asks_on_lines.get(on_lines).unwrap()),
+        review.open_comment_box(CommentGesture::AskAnswer(
+            asks_on_lines.get(on_lines).unwrap()
+        )),
         Err(CommentRefusal::AskIsOnOlderCode)
     );
-    assert_eq!(review.comment_drafts(), []);
+    assert_eq!(drafts(&review), []);
 }
 
 #[test]
@@ -492,10 +509,10 @@ fn use_as_comment_is_refused_for_an_ask_with_no_answer_yet() {
     let mut asks = shop.asks();
     let id = asks.start(place, review.head());
 
-    let refused = review.use_as_comment(asks.get(id).unwrap());
+    let refused = review.open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()));
 
     assert_eq!(refused, Err(CommentRefusal::NoAnswerYet));
-    assert_eq!(shop.open().comment_drafts().first(), None);
+    assert_eq!(drafts(&shop.open()).first(), None);
 }
 
 #[test]
@@ -527,7 +544,10 @@ fn a_comment_box_on_lines_asks_about_the_same_place_as_the_drag_that_opened_it()
     review.extend_selection(to);
     let dragged = review.place_of_lines(&review.selected_lines().unwrap());
 
-    let comment_place = review.finish_selection().unwrap().unwrap();
+    let comment_place = review
+        .open_comment_box(CommentGesture::DragEnded)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(review.ask_place_of(&comment_place), Some(dragged));
     review.go_to_summary();
@@ -536,4 +556,128 @@ fn a_comment_box_on_lines_asks_about_the_same_place_as_the_drag_that_opened_it()
         None,
         "the lines are not on this screen"
     );
+}
+
+fn open_ask(review: &mut Review, place: &Place, processes: &mut FakeAskProcesses) -> AskId {
+    review.open_ask(
+        place.clone(),
+        "the place".to_owned(),
+        &AskSettings::default(),
+        Instant::now(),
+        processes,
+    );
+    review.asks().selected().unwrap()
+}
+
+fn send(review: &mut Review, question: &str, processes: &mut FakeAskProcesses) -> Question {
+    review.change_asks(|desk| desk.send(question, Instant::now(), processes))
+}
+
+fn ask_markers(review: &Review) -> Vec<Place> {
+    review
+        .page()
+        .rows()
+        .iter()
+        .filter_map(|row| match row {
+            PageRow::AskMarker(at) => Some(at.place.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn opening_the_same_place_again_goes_on_with_its_empty_draft_and_its_process() {
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    let mut processes = FakeAskProcesses::default();
+
+    let draft = open_ask(&mut review, &total_step(), &mut processes);
+    review.change_asks(AskDesk::close);
+    let again = open_ask(&mut review, &total_step(), &mut processes);
+
+    assert_eq!(again, draft);
+    assert_eq!(processes.log, ["start 1"]);
+    let elsewhere = open_ask(&mut review, &Place::Tour, &mut processes);
+    assert_ne!(elsewhere, draft);
+    assert_eq!(send(&mut review, "Why?", &mut processes), Question::Taken);
+    let after_a_question = open_ask(&mut review, &Place::Tour, &mut processes);
+    assert_ne!(
+        after_a_question, elsewhere,
+        "an Ask with a question is no draft"
+    );
+}
+
+#[test]
+fn a_process_that_died_before_the_question_is_started_once_more_then_the_ask_says_it_was_not_sent()
+{
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    let mut processes = FakeAskProcesses::default();
+    let restarted = open_ask(&mut review, &total_step(), &mut processes);
+    processes.deliveries_failing = 1;
+
+    assert_eq!(send(&mut review, "Why?", &mut processes), Question::Taken);
+
+    assert_eq!(
+        processes.log,
+        [
+            "start 1",
+            "not delivered to 1",
+            "stop 1",
+            "start 1",
+            "deliver to 1: Question: Why?"
+        ]
+    );
+    assert!(review.asks().is_answering(restarted));
+    assert_eq!(review.asks().get(restarted).unwrap().failure, None);
+
+    let lost = open_ask(&mut review, &Place::Tour, &mut processes);
+    processes.deliveries_failing = 2;
+    assert_eq!(send(&mut review, "And?", &mut processes), Question::Taken);
+
+    let lost_ask = review.asks().get(lost).unwrap();
+    assert_eq!(lost_ask.failure.as_deref(), Some(QUESTION_NOT_SENT));
+    assert!(!review.asks().is_answering(lost));
+    assert_eq!(
+        processes
+            .log
+            .iter()
+            .filter(|line| *line == "start 2")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn asked_lines_show_an_ask_marker_on_the_page_of_their_screen_once_they_have_a_question() {
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    let mut processes = FakeAskProcesses::default();
+    let lines = lines_of_total(&mut review, "return 1;", "return 2;");
+
+    open_ask(&mut review, &lines, &mut processes);
+    assert_eq!(ask_markers(&review), [], "an empty draft has no marker");
+    send(&mut review, "Why?", &mut processes);
+
+    assert_eq!(ask_markers(&review), [lines]);
+    review.go_to(&StepId::from("keep"));
+    assert_eq!(ask_markers(&review), []);
+}
+
+#[test]
+fn a_place_counts_its_asks_with_a_question_and_not_its_draft() {
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    let mut processes = FakeAskProcesses::default();
+    let lines = lines_of_total(&mut review, "return 1;", "return 2;");
+    for place in [total_step(), total_step(), Place::Tour] {
+        open_ask(&mut review, &place, &mut processes);
+        send(&mut review, "Why?", &mut processes);
+    }
+
+    open_ask(&mut review, &total_step(), &mut processes);
+
+    assert_eq!(review.asks().count_at(&total_step()), 2);
+    assert_eq!(review.asks().count_at(&Place::Tour), 1);
+    assert_eq!(review.asks().count_at(&lines), 0);
 }

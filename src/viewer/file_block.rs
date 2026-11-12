@@ -8,11 +8,13 @@ use crate::line_number::LineNumber;
 /// The pieces of one file that a page shows, in one box, in line order. The rows of all pieces
 /// are joined, so a row two pieces both show appears once. A label marks where each piece starts:
 /// at the first row that belongs to it.
+#[derive(Debug, Clone)]
 pub struct FileBlock {
     pub path: FilePath,
     /// In the order the page names them.
     pub pieces: Vec<PieceDiff>,
-    pub hunks: Vec<DiffHunk>,
+    /// `None` for a block of one piece, which shows that piece's own hunks.
+    joined: Option<Vec<DiffHunk>>,
     starts: Vec<PieceStart>,
 }
 
@@ -42,11 +44,11 @@ impl FileBlock {
     }
 
     fn of(path: FilePath, pieces: Vec<PieceDiff>) -> Self {
-        if let [piece] = pieces.as_slice() {
+        if pieces.len() == 1 {
             return Self {
                 path,
-                hunks: piece.hunks.clone(),
                 pieces,
+                joined: None,
                 starts: Vec::new(),
             };
         }
@@ -55,8 +57,15 @@ impl FileBlock {
         Self {
             path,
             pieces,
-            hunks,
+            joined: Some(hunks),
             starts,
+        }
+    }
+
+    pub fn hunks(&self) -> &[DiffHunk] {
+        match &self.joined {
+            Some(hunks) => hunks,
+            None => self.pieces.first().map_or(&[], |piece| &piece.hunks),
         }
     }
 
@@ -64,8 +73,8 @@ impl FileBlock {
         self.pieces.len() == 1
     }
 
-    pub fn lines(&self) -> impl Iterator<Item = &DiffLine> {
-        self.hunks.iter().flat_map(|hunk| hunk.rows.iter())
+    pub fn lines(&self) -> impl Iterator<Item = &DiffLine> + Clone {
+        self.hunks().iter().flat_map(|hunk| hunk.rows.iter())
     }
 
     /// The piece whose rows begin at this row, and whether it began once before.

@@ -139,7 +139,7 @@ fn more_context_above_reads_the_lines_at_head_and_they_take_no_comment() {
     let mut review = three_changes().open_step(json!([{"file": "notes.txt"}]));
     let more = shown_hunks(&review)[0].more_above.clone().unwrap();
 
-    review.show_more_context(&more);
+    review.display_options_mut().show_more_context(&more);
 
     let hunks = shown_hunks(&review);
     assert_eq!(
@@ -167,7 +167,7 @@ fn more_context_below_joins_a_change_with_the_next_one_when_the_gap_is_shown() {
     let mut review = three_changes().open_step(json!([{"file": "notes.txt"}]));
     let more = shown_hunks(&review)[0].more_below.clone().unwrap();
 
-    review.show_more_context(&more);
+    review.display_options_mut().show_more_context(&more);
 
     let hunks = shown_hunks(&review);
     assert_eq!(hunks.len(), 1);
@@ -212,7 +212,7 @@ fn parts_of_one_file_show_in_one_block_in_line_order_whatever_order_the_step_nam
 
     assert_eq!(blocks.len(), 1);
     assert_eq!(
-        rows(&blocks[0].hunks),
+        rows(blocks[0].hunks()),
         [
             "@@",
             "-10 line 10",
@@ -234,7 +234,7 @@ fn a_row_two_parts_of_a_block_both_show_appears_once() {
     let blocks = shown_blocks(&review);
 
     assert_eq!(
-        rows(&blocks[0].hunks),
+        rows(blocks[0].hunks()),
         [
             "@@",
             " 7|7 line 7",
@@ -341,9 +341,9 @@ fn whitespace_changes() -> Pull {
 fn ignoring_whitespace_shows_lines_that_only_change_whitespace_as_unchanged() {
     let mut review = whitespace_changes().open_step(json!([{"file": "notes.txt"}]));
 
-    review.toggle_ignore_whitespace();
+    review.display_options_mut().toggle_ignore_whitespace();
 
-    assert!(review.ignores_whitespace());
+    assert!(review.display_options().ignores_whitespace());
     assert_eq!(
         rows(&shown_hunks(&review)),
         [
@@ -359,7 +359,7 @@ fn ignoring_whitespace_shows_lines_that_only_change_whitespace_as_unchanged() {
             " 24|24 line 24",
         ]
     );
-    review.toggle_ignore_whitespace();
+    review.display_options_mut().toggle_ignore_whitespace();
     assert_eq!(shown_hunks(&review).len(), 2);
 }
 
@@ -369,7 +369,7 @@ fn a_piece_that_changes_only_whitespace_says_so_when_whitespace_is_ignored() {
         Pull::changing("notes.txt", "a\nb\n", "a\n  b\n").open_step(json!([{"file": "notes.txt"}]));
     assert!(!review.current_step().unwrap().pieces[0].changes_only_whitespace);
 
-    review.toggle_ignore_whitespace();
+    review.display_options_mut().toggle_ignore_whitespace();
 
     let piece = review.current_step().unwrap().pieces.remove(0);
     assert!(piece.hunks.is_empty());
@@ -391,7 +391,7 @@ fn ignoring_whitespace_changes_no_piece_and_no_read_tick() {
     review.tick(&"notes".into()).unwrap();
     let before = (piece_ids(&review), review.progress());
 
-    review.toggle_ignore_whitespace();
+    review.display_options_mut().toggle_ignore_whitespace();
 
     assert_eq!((piece_ids(&review), review.progress()), before);
     assert!(review.is_ticked(&"notes".into()));
@@ -450,7 +450,7 @@ fn showing_every_hidden_line_of_a_gap_joins_the_changes_around_it() {
     let between = hidden_lines_before(&shown_hunks(&review), 1).unwrap();
     assert_eq!(between.count, Some(63), "lines 14 to 76");
 
-    review.show_hidden_lines(&between);
+    review.display_options_mut().show_hidden_lines(&between);
 
     let hunks = shown_hunks(&review);
     assert_eq!(hunks.len(), 1);

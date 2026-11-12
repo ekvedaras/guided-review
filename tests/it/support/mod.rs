@@ -14,6 +14,7 @@ pub mod fake_app;
 pub mod fake_ports;
 pub mod fake_tour_agent;
 pub mod graphql;
+pub mod work;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -23,7 +24,7 @@ use std::thread;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use guided_review::ide::NoIde;
-use guided_review::viewer::{CodeLink, Destination, Review};
+use guided_review::viewer::{CodeLink, CommentDraft, Destination, Review};
 use tempfile::TempDir;
 
 pub fn file_path(path: &str) -> guided_review::file_path::FilePath {
@@ -288,6 +289,23 @@ pub fn svg_of(width: u32, height: u32) -> String {
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">\n<rect width=\"{width}\" height=\"{height}\" fill=\"red\"/>\n</svg>\n"
     )
+}
+
+/// The drafts of the open comment boxes, in the order they opened.
+pub fn drafts(review: &Review) -> Vec<CommentDraft> {
+    review
+        .comment_boxes()
+        .map(|comment_box| comment_box.draft.clone())
+        .collect()
+}
+
+/// What the app does once typing pauses: the typed text goes to the state file.
+pub fn save_typing(review: &mut Review) {
+    review
+        .typing_save()
+        .expect("something was typed")
+        .run()
+        .unwrap();
 }
 
 /// Where `link` opens on GitHub, for a review with no IDE.
