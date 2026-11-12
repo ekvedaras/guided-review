@@ -41,10 +41,25 @@ tours_root="${GUIDED_REVIEW_TOURS_DIR:-$HOME/.guided-review/tours}"
 tour_in_root="${tour#"$tours_root"/}"
 
 # A fixed, short path: Settings shows paths under HOME, so they match from run to run, and herdr refuses
-# socket paths longer than macOS allows. One run at a time.
+# socket paths longer than macOS allows. So one run at a time on the machine: agents in other worktrees
+# share the path, and a second run waits for the first instead of wiping its files.
 work=/tmp/guided-review-snapshot
+lock=/tmp/guided-review-snapshot.lock
+until mkdir "$lock" 2>/dev/null; do
+    holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+        rm -rf "$lock"
+        continue
+    fi
+    if [ -z "${waiting:-}" ]; then
+        echo "another snapshot run is going (pid ${holder:-?}); waiting for it" >&2
+        waiting=1
+    fi
+    sleep 2
+done
+echo $$ >"$lock/pid"
+trap 'rm -rf "$work" "$lock"' EXIT
 rm -rf "$work"
-trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/tours/$(dirname "$tour_in_root")"
 cp "$tour" "$work/tours/$tour_in_root"
 # The tour's own files, like its summary's pictures, sit in a folder beside it.
