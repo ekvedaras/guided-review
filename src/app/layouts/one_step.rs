@@ -89,7 +89,7 @@ use crate::viewer::{
     AgentReplied, Ask, Audience, CodeLink, Command, CommentPlace, GitHubPort, HandOffId, InFlight,
     LineLocation, NextScreen, NoteSubject, NotesButton, PaletteAction, Place, QueuedComment,
     ReadProgress, Reopen, ReopenAfterSave, RestartGuard, RestartStep, Review, Screen, ScreenTravel,
-    SendMode, StepId, ThreadId, ThreadView, ToastTone, TourLead, Travel,
+    SendMode, StepId, TextBox, ThreadId, ThreadView, ToastTone, TourLead, Travel,
 };
 
 #[cfg(feature = "snapshots")]
@@ -677,11 +677,11 @@ impl OneStepLayout {
         let problem = session.comment_problem(place);
         let ask_place = review.ask_place_of(place);
         let on_type = {
-            let (layout, place) = (cx.entity(), place.clone());
+            let (layout, draft) = (cx.entity(), TextBox::Draft(place.clone()));
             Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
                 layout.update(cx, |this, cx| {
                     this.session
-                        .update(cx, |session, cx| session.type_in_comment(&place, &body, cx));
+                        .update(cx, |session, cx| session.type_in(&draft, &body, cx));
                 });
             })
         };
@@ -772,24 +772,9 @@ impl OneStepLayout {
 
     /// Reply text goes to the core, which saves it, so it survives scrolling and restarts.
     fn on_reply_draft(&self, thread_id: &ThreadId) -> OnReplyDraft {
-        let (session, thread_id) = (self.session.clone(), thread_id.clone());
+        let (session, reply) = (self.session.clone(), TextBox::Reply(thread_id.clone()));
         Rc::new(move |change, cx| {
-            session.update(cx, |session, cx| {
-                // A refused or failed save is one of the review's problems, which the sidebar shows.
-                match change {
-                    ReplyDraftChange::Edit(text) => session.type_in_reply(&thread_id, &text, cx),
-                    ReplyDraftChange::Open => {
-                        session
-                            .change(cx, |review| review.open_reply(&thread_id))
-                            .ok();
-                    }
-                    ReplyDraftChange::Discard => {
-                        session
-                            .change(cx, |review| review.discard_reply(&thread_id))
-                            .ok();
-                    }
-                }
-            });
+            session.update(cx, |session, cx| change_box(session, &reply, change, cx));
         })
     }
 
@@ -797,20 +782,17 @@ impl OneStepLayout {
     fn on_comment_edit(&self) -> OnCommentEdit {
         let session = self.session.clone();
         Rc::new(move |comment_id, change, cx| {
-            session.update(cx, |session, cx| match change {
-                ReplyDraftChange::Edit(text) => session.type_in_edit(comment_id, &text, cx),
-                ReplyDraftChange::Open => session.change(cx, |review| review.open_edit(comment_id)),
-                ReplyDraftChange::Discard => {
-                    session.change(cx, |review| review.discard_edit(comment_id));
-                }
-            });
+            let edit = TextBox::Edit(comment_id.clone());
+            session.update(cx, |session, cx| change_box(session, &edit, change, cx));
         })
     }
 
     fn on_finish_body_edit(&self) -> OnBodyEdit {
         let session = self.session.clone();
         Rc::new(move |text, cx| {
-            session.update(cx, |session, cx| session.type_in_finish_body(&text, cx));
+            session.update(cx, |session, cx| {
+                session.type_in(&TextBox::FinishBody, &text, cx);
+            });
         })
     }
 
@@ -828,13 +810,15 @@ impl OneStepLayout {
         let review = self.session.read(cx).review();
         let can_comment_now = review.can_comment_now();
         let can_ask_agent = self.session.read(cx).agent_link_is_on();
-        let reply = review.reply_draft(&view.thread.id).map(str::to_owned);
+        let reply = review
+            .text_of(&TextBox::Reply(view.thread.id.clone()))
+            .map(str::to_owned);
         let edits = view
             .thread
             .comments
             .iter()
             .filter_map(|comment| {
-                let text = review.comment_edit(&comment.id)?;
+                let text = review.text_of(&TextBox::Edit(comment.id.clone()))?;
                 Some((comment.id.clone(), text.to_owned()))
             })
             .collect();
@@ -1245,7 +1229,11 @@ impl OneStepLayout {
             sidebar.finishing,
             sidebar.approve_warning,
             sidebar.last_review.clone(),
-            session.review().finish_body().to_owned(),
+            session
+                .review()
+                .text_of(&TextBox::FinishBody)
+                .unwrap_or_default()
+                .to_owned(),
             self.on_finish_body_edit(),
             self.on_finish_review(),
         )
@@ -2094,6 +2082,24 @@ const PAGE_TOP: Pixels = px(24.);
 
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
+/// A refused or failed save is one of the review's problems, which the sidebar shows.
+fn change_box(
+    session: &mut ReviewSession,
+    text_box: &TextBox,
+    change: ReplyDraftChange,
+    cx: &mut Context<ReviewSession>,
+) {
+    match change {
+        ReplyDraftChange::Edit(text) => session.type_in(text_box, &text, cx),
+        ReplyDraftChange::Open => {
+            session.change(cx, |review| review.open_box(text_box)).ok();
+        }
+        ReplyDraftChange::Discard => {
+            session.change(cx, |review| review.discard(text_box)).ok();
+        }
+    }
+}
+
 fn page_column_row(colors: &Colors, index: usize, row: AnyElement) -> AnyElement {
     let column = div().relative().px_6();
     if index == 0 {

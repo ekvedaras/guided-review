@@ -17,7 +17,7 @@ use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
 use crate::update::{ReleaseAsset, Target, Update, UpdateOffer, Version};
-use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId};
+use crate::viewer::{AgentStatus, LineKind, LineLocation, Review, TerminalId, TextBox};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -239,7 +239,8 @@ impl OneStepLayout {
                 .update(cx, |switcher, cx| switcher.open(window, cx)),
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
-                    session.type_in_finish_body(
+                    session.type_in(
+                        &TextBox::FinishBody,
                         "Reads well. Two small questions inline, nothing blocking.",
                         cx,
                     );
@@ -340,8 +341,9 @@ impl OneStepLayout {
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.close(window, cx)),
             Scene::FinishReview => {
-                self.session
-                    .update(cx, |session, cx| session.type_in_finish_body("", cx));
+                self.session.update(cx, |session, cx| {
+                    session.type_in(&TextBox::FinishBody, "", cx);
+                });
                 cx.set_global(StagedFinishReview(false));
             }
             Scene::CommentComposer => {
@@ -426,7 +428,8 @@ impl OneStepLayout {
         self.end_row_selection(window, cx);
         self.session.update(cx, |session, cx| {
             if let Some(place) = session.composing().cloned() {
-                session.type_in_comment(&place, "Should a blank value be refused here?", cx);
+                let draft = TextBox::Draft(place);
+                session.type_in(&draft, "Should a blank value be refused here?", cx);
             }
         });
     }

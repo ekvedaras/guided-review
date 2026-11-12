@@ -10,7 +10,7 @@ use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     CommentRefusal, CommentResult, ImageCache, ImageMark, ImageSide, Review, ReviewStateFile,
-    SendMode,
+    SendMode, TextBox,
 };
 use serde_json::json;
 
@@ -301,7 +301,7 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
 
     let place = review.begin_file_comment(&file_path("logo.png")).unwrap();
     review
-        .type_in_draft(&place, "is the red intended?")
+        .type_in(&TextBox::Draft(place.clone()), "is the red intended?")
         .unwrap();
     let result = review
         .send_comment(&place, SendMode::AddToReview, &github)

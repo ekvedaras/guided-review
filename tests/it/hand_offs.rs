@@ -10,8 +10,8 @@ use guided_review::viewer::{
     AgentReplied, AgentReplyRefused, AgentReplyRequest, AgentStatus, Audience, CommentId,
     CommentPlace, CommentResult, HandOffId, HandOffState, LineLocation, Problem, Reaction,
     ReactionChange, ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark, SendMode,
-    Side, TerminalId, ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadMessage,
-    TourAgentPort, TourAgents,
+    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    ThreadMessage, TourAgentPort, TourAgents,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -118,7 +118,9 @@ fn comment_on_line_ten(review: &mut Review, body: &str) -> CommentPlace {
     review.begin_selection(row.clone());
     review.extend_selection(row);
     let place = review.finish_selection().unwrap().unwrap();
-    review.type_in_draft(&place, body).unwrap();
+    review
+        .type_in(&TextBox::Draft(place.clone()), body)
+        .unwrap();
     place
 }
 
@@ -286,8 +288,10 @@ fn reply(
     github: &FakeGitHub,
 ) -> ThreadActionResult {
     let thread = ThreadId::new("T1");
-    review.open_reply(&thread).unwrap();
-    review.type_in_reply(&thread, text).unwrap();
+    review.open_box(&TextBox::Reply(thread.clone())).unwrap();
+    review
+        .type_in(&TextBox::Reply(thread.clone()), text)
+        .unwrap();
     review.act_on_thread(
         ThreadAction::Reply {
             thread_id: thread,

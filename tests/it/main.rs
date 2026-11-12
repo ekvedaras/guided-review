@@ -74,6 +74,7 @@ mod show;
 mod step_details;
 mod summary_instructions;
 mod symbol_edges;
+mod text_boxes;
 mod timestamp;
 mod toasts;
 mod tour_agent;

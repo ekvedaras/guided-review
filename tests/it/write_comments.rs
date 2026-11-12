@@ -7,7 +7,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     CommentId, CommentPlace, CommentProblem, CommentRefusal, CommentResult, LineLocation, Problem,
-    Review, ReviewStateFile, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
+    Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -140,7 +140,9 @@ fn comment_on(review: &mut Review, text: &str) -> CommentPlace {
 }
 
 fn typed(review: &mut Review, place: &CommentPlace, body: &str) {
-    review.type_in_draft(place, body).unwrap();
+    review
+        .type_in(&TextBox::Draft(place.clone()), body)
+        .unwrap();
     save_typing(review);
 }
 
@@ -208,20 +210,6 @@ fn a_selection_on_expanded_context_takes_no_comment() {
 
     assert_eq!(refused, Err(CommentRefusal::NotInsideHunk));
     assert_eq!(review.comment_drafts(), []);
-}
-
-#[test]
-fn unsent_text_survives_a_restart() {
-    let pull = Pull::new();
-    let mut review = pull.open();
-    let place = comment_on(&mut review, "line ten");
-    typed(&mut review, &place, "why ten?");
-
-    let reopened = pull.open();
-
-    assert_eq!(reopened.comment_drafts().len(), 1);
-    assert_eq!(reopened.comment_drafts()[0].body, "why ten?");
-    assert_eq!(reopened.comment_drafts()[0].place, place);
 }
 
 #[test]
@@ -486,17 +474,6 @@ fn a_new_comment_box_cannot_open_while_the_tour_is_behind_the_pr_head() {
 }
 
 #[test]
-fn discarding_removes_the_draft_from_the_state_file() {
-    let pull = Pull::new();
-    let mut review = pull.open();
-    let place = comment_on(&mut review, "line ten");
-
-    review.discard_draft(&place).unwrap();
-
-    assert_eq!(pull.open().comment_drafts(), []);
-}
-
-#[test]
 fn a_draft_written_before_a_repin_keeps_its_text_but_is_not_sent_to_the_old_lines() {
     let pull = Pull::new();
     let mut review = pull.open();
@@ -587,7 +564,7 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
     assert!(matches!(drafts[1].place, CommentPlace::Lines { .. }));
 
     review
-        .type_in_draft(&file, "about the file, edited")
+        .type_in(&TextBox::Draft(file.clone()), "about the file, edited")
         .unwrap();
     save_typing(&mut review);
 
@@ -690,22 +667,4 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
     let reopened = pull.open();
     assert_eq!(reopened.comment_drafts(), []);
     assert_eq!(reopened.queued_comments()[0].draft.body, "later");
-}
-
-#[test]
-fn leaving_a_comment_box_drops_it_when_nothing_was_written_and_keeps_it_when_something_was() {
-    let pull = Pull::new();
-    let mut review = pull.open();
-    let empty = comment_on(&mut review, "line ten");
-    typed(&mut review, &empty, "  \n ");
-
-    review.leave_draft(&empty).unwrap();
-
-    assert_eq!(review.comment_drafts(), []);
-    let written = comment_on(&mut review, "line ten");
-    typed(&mut review, &written, "why ten?");
-
-    review.leave_draft(&written).unwrap();
-
-    assert_eq!(review.comment_drafts().len(), 1);
 }

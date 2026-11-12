@@ -23,11 +23,11 @@ use crate::app::page_rows::{PageRows, RowFacts, RowsChange, line_count};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::code_source::CodeSource;
 use crate::viewer::{
-    AgentReplied, AgentStatus, Ask, Audience, CommentId, CommentOutcome, CommentPlace,
-    CommentProblem, CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache,
-    LineLocation, NoteSubject, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review,
-    ReviewVerdict, Screen, SendMode, StepId, SyncState, ThreadAction, ThreadActionResult, ThreadId,
-    ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
+    AgentReplied, AgentStatus, Ask, Audience, CommentOutcome, CommentPlace, CommentProblem,
+    CommentRefusal, CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation,
+    NoteSubject, OldHead, Place, Read, RefreshBrief, RepinnedTour, Review, ReviewVerdict, Screen,
+    SendMode, StepId, SyncState, TextBox, ThreadAction, ThreadActionResult, ToastTone,
+    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkingCopy,
     follow_outdated,
 };
 
@@ -108,8 +108,9 @@ enum BoxHeight {
 }
 
 impl BoxHeight {
-    fn of(lines_before: Option<usize>, text: &str) -> Self {
-        if lines_before == Some(line_count(text)) {
+    /// The finish body is in the finish dialog, not in the rows.
+    fn of(text_box: &TextBox, lines_before: Option<usize>, text: &str) -> Self {
+        if *text_box == TextBox::FinishBody || lines_before == Some(line_count(text)) {
             Self::Same
         } else {
             Self::Changed
@@ -318,39 +319,17 @@ impl ReviewSession {
         self.change_session(cx, |session| {
             let left = session.composing.take();
             match left {
-                Some(place) => session.review.leave_draft(&place),
+                Some(place) => session.review.leave(&TextBox::Draft(place)),
                 None => Ok(()),
             }
         })
         .ok();
     }
 
-    pub fn type_in_comment(&mut self, place: &CommentPlace, text: &str, cx: &mut Context<Self>) {
-        let lines_before = self
-            .review
-            .comment_drafts()
-            .iter()
-            .find(|draft| &draft.place == place)
-            .map(|draft| line_count(&draft.body));
-        let kept = self.review.type_in_draft(place, text);
-        self.typed(&kept, BoxHeight::of(lines_before, text), cx);
-    }
-
-    pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str, cx: &mut Context<Self>) {
-        let lines_before = self.review.reply_draft(thread_id).map(line_count);
-        let kept = self.review.type_in_reply(thread_id, text);
-        self.typed(&kept, BoxHeight::of(lines_before, text), cx);
-    }
-
-    pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str, cx: &mut Context<Self>) {
-        let lines_before = self.review.comment_edit(comment_id).map(line_count);
-        let kept = self.review.type_in_edit(comment_id, text);
-        self.typed(&kept, BoxHeight::of(lines_before, text), cx);
-    }
-
-    pub fn type_in_finish_body(&mut self, text: &str, cx: &mut Context<Self>) {
-        let kept = self.review.type_in_finish_body(text);
-        self.typed(&kept, BoxHeight::Same, cx);
+    pub fn type_in(&mut self, text_box: &TextBox, text: &str, cx: &mut Context<Self>) {
+        let lines_before = self.review.text_of(text_box).map(line_count);
+        let kept = self.review.type_in(text_box, text);
+        self.typed(&kept, BoxHeight::of(text_box, lines_before, text), cx);
     }
 
     pub fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
@@ -373,7 +352,7 @@ impl ReviewSession {
                 session.composing = None;
             }
             session.comment_problems.remove(place);
-            session.review.discard_draft(place)
+            session.review.discard(&TextBox::Draft(place.clone()))
         })
         .ok();
     }

@@ -10,7 +10,7 @@ use guided_review::tour::Tour;
 use guided_review::viewer::{
     Audience, CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown, Problem, Reaction,
     ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile, ReviewThread,
-    SendMode, Side, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    SendMode, Side, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -321,9 +321,11 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
     let mut review = pull.open();
     review.pull_pending_review(&github).unwrap();
     assert!(review.can_comment_now());
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
 
     let now = review.act_on_thread(
@@ -335,9 +337,11 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
         &github,
     );
     assert_eq!(now, ThreadActionResult::Done);
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "and also")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "and also")
         .unwrap();
 
     let added = review.act_on_thread(
@@ -362,9 +366,11 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
         .with_web_pending_review();
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
 
     let result = review.act_on_thread(
@@ -545,7 +551,9 @@ fn suggest_change_keeps_the_text_already_typed() {
     let pull = Pull::new();
     let mut review = pull.open();
     let place = drag(&mut review, "line ten", "line ten");
-    review.type_in_draft(&place, "use a name").unwrap();
+    review
+        .type_in(&TextBox::Draft(place.clone()), "use a name")
+        .unwrap();
 
     let body = review.suggest_change(&place).unwrap().unwrap();
 
@@ -583,33 +591,16 @@ fn a_thread_knows_the_lines_a_suggestion_is_against() {
 }
 
 #[test]
-fn a_reply_being_written_is_saved_and_comes_back_after_reopening() {
-    let pull = Pull::new();
-    let mut review = pull.open();
-
-    review.open_reply(&ThreadId::new("T1")).unwrap();
-    review
-        .type_in_reply(&ThreadId::new("T1"), "because it was slow")
-        .unwrap();
-    save_typing(&mut review);
-
-    let reopened = pull.open();
-    assert_eq!(
-        reopened.reply_draft(&ThreadId::new("T1")),
-        Some("because it was slow")
-    );
-    assert_eq!(reopened.reply_draft(&ThreadId::new("T2")), None);
-}
-
-#[test]
-fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
+fn a_reply_draft_goes_when_the_reply_is_sent() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
     save_typing(&mut review);
 
@@ -621,12 +612,10 @@ fn a_reply_draft_goes_when_the_reply_is_sent_or_discarded() {
         },
         &github,
     );
-    assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
-
-    review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.type_in_reply(&ThreadId::new("T1"), "again").unwrap();
-    review.discard_reply(&ThreadId::new("T1")).unwrap();
-    assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
+    assert_eq!(
+        pull.open().text_of(&TextBox::Reply(ThreadId::new("T1"))),
+        None
+    );
 }
 
 #[test]
@@ -634,9 +623,11 @@ fn a_failed_reply_keeps_its_draft() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
     save_typing(&mut review);
     github.inject(GitHubFault::ConnectionLost);
@@ -651,7 +642,7 @@ fn a_failed_reply_keeps_its_draft() {
     );
 
     assert_eq!(
-        pull.open().reply_draft(&ThreadId::new("T1")),
+        pull.open().text_of(&TextBox::Reply(ThreadId::new("T1"))),
         Some("because")
     );
 }
@@ -662,9 +653,11 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pr_head_is(Sha::new("newer-head"));
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
     save_typing(&mut review);
 
@@ -690,7 +683,7 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
         "nothing was sent"
     );
     assert_eq!(
-        review.reply_draft(&ThreadId::new("T1")),
+        review.text_of(&TextBox::Reply(ThreadId::new("T1"))),
         Some("because"),
         "the text stays"
     );
@@ -701,24 +694,39 @@ fn typed_text_reaches_the_file_only_when_its_save_runs_off_the_ui_thread() {
     let pull = Pull::new();
     let mut review = pull.open();
     let place = drag(&mut review, "line 9", "line ten");
-    review.open_reply(&ThreadId::new("T1")).unwrap();
-
-    review.type_in_draft(&place, "use a name").unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
         .unwrap();
-    review.type_in_finish_body("overall fine").unwrap();
+
+    review
+        .type_in(&TextBox::Draft(place), "use a name")
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
+        .unwrap();
+    review
+        .type_in(&TextBox::FinishBody, "overall fine")
+        .unwrap();
 
     let before = pull.open();
-    assert_eq!(before.reply_draft(&ThreadId::new("T1")), Some(""));
-    assert_eq!(before.finish_body(), "");
-    assert_eq!(review.reply_draft(&ThreadId::new("T1")), Some("because"));
+    assert_eq!(
+        before.text_of(&TextBox::Reply(ThreadId::new("T1"))),
+        Some("")
+    );
+    assert_eq!(before.text_of(&TextBox::FinishBody), None);
+    assert_eq!(
+        review.text_of(&TextBox::Reply(ThreadId::new("T1"))),
+        Some("because")
+    );
 
     review.typing_save().unwrap().run().unwrap();
 
     let after = pull.open();
-    assert_eq!(after.reply_draft(&ThreadId::new("T1")), Some("because"));
-    assert_eq!(after.finish_body(), "overall fine");
+    assert_eq!(
+        after.text_of(&TextBox::Reply(ThreadId::new("T1"))),
+        Some("because")
+    );
+    assert_eq!(after.text_of(&TextBox::FinishBody), Some("overall fine"));
     assert_eq!(after.comment_drafts()[0].body, "use a name");
     assert!(review.typing_save().is_none());
 }
@@ -727,31 +735,42 @@ fn typed_text_reaches_the_file_only_when_its_save_runs_off_the_ui_thread() {
 fn a_typing_save_that_a_later_save_overtook_is_dropped() {
     let pull = Pull::new();
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
     let stale = review.typing_save().unwrap();
 
-    review.discard_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .discard(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
     stale.run().unwrap();
 
-    assert_eq!(pull.open().reply_draft(&ThreadId::new("T1")), None);
+    assert_eq!(
+        pull.open().text_of(&TextBox::Reply(ThreadId::new("T1"))),
+        None
+    );
 }
 
 #[test]
 fn a_save_made_at_once_takes_the_typed_text_with_it() {
     let pull = Pull::new();
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
 
-    review.open_reply(&ThreadId::new("T2")).unwrap();
+    review
+        .open_box(&TextBox::Reply(ThreadId::new("T2")))
+        .unwrap();
 
     assert_eq!(
-        pull.open().reply_draft(&ThreadId::new("T1")),
+        pull.open().text_of(&TextBox::Reply(ThreadId::new("T1"))),
         Some("because")
     );
     assert!(review.typing_save().is_none());
@@ -772,9 +791,11 @@ fn break_saves(pull: &Pull) -> PathBuf {
 fn typed_text_whose_save_failed_is_saved_again_by_the_next_save() {
     let pull = Pull::new();
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
     let lock = break_saves(&pull);
 
@@ -787,7 +808,7 @@ fn typed_text_whose_save_failed_is_saved_again_by_the_next_save() {
     std::fs::remove_dir(&lock).unwrap();
     review.typing_save().unwrap().run().unwrap();
     assert_eq!(
-        pull.open().reply_draft(&ThreadId::new("T1")),
+        pull.open().text_of(&TextBox::Reply(ThreadId::new("T1"))),
         Some("because")
     );
     assert_eq!(review.problems(), []);
@@ -815,10 +836,14 @@ fn a_reply_sends_its_draft_as_last_typed() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.type_in_reply(&ThreadId::new("T1"), "becau").unwrap();
     review
-        .type_in_reply(&ThreadId::new("T1"), "because")
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "becau")
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
 
     let result = review.act_on_thread(
@@ -842,8 +867,12 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
     let pull = Pull::new();
     let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.open_reply(&ThreadId::new("T1")).unwrap();
-    review.type_in_reply(&ThreadId::new("T1"), "  ").unwrap();
+    review
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Reply(ThreadId::new("T1")), "  ")
+        .unwrap();
     let calls_before = pull.sent.github_calls();
 
     let result = review.act_on_thread(
@@ -908,10 +937,12 @@ fn editing_my_comment_opens_its_text_and_sends_the_new_text_in_its_place() {
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
 
-    review.open_edit(&CommentId::new("C1"));
+    review
+        .open_box(&TextBox::Edit(CommentId::new("C1")))
+        .unwrap();
     assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("why?"));
     review
-        .type_in_edit(&CommentId::new("C1"), "why not?")
+        .type_in(&TextBox::Edit(CommentId::new("C1")), "why not?")
         .unwrap();
     let result = review.act_on_thread(edit("C1"), &github);
 
@@ -931,7 +962,9 @@ fn a_comment_of_someone_else_cannot_be_opened_for_editing() {
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
 
-    review.open_edit(&CommentId::new("C1"));
+    review
+        .open_box(&TextBox::Edit(CommentId::new("C1")))
+        .unwrap();
 
     assert_eq!(edit_box_of(&review, "C1"), None);
 }
@@ -942,9 +975,11 @@ fn an_edit_that_fails_keeps_the_new_text_and_says_why() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
-    review.open_edit(&CommentId::new("C1"));
     review
-        .type_in_edit(&CommentId::new("C1"), "why not?")
+        .open_box(&TextBox::Edit(CommentId::new("C1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Edit(CommentId::new("C1")), "why not?")
         .unwrap();
     github.inject(GitHubFault::ConnectionLost);
 
@@ -964,8 +999,12 @@ fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
     let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
     review.pull_threads(&github).unwrap();
-    review.open_edit(&CommentId::new("C1"));
-    review.type_in_edit(&CommentId::new("C1"), "  \n").unwrap();
+    review
+        .open_box(&TextBox::Edit(CommentId::new("C1")))
+        .unwrap();
+    review
+        .type_in(&TextBox::Edit(CommentId::new("C1")), "  \n")
+        .unwrap();
 
     let result = review.act_on_thread(edit("C1"), &github);
 
@@ -981,18 +1020,4 @@ fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
             .any(|call| matches!(call, GitHubCall::EditComment { .. }))
     );
     assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("  \n"));
-}
-
-#[test]
-fn an_edit_given_up_leaves_the_comment_as_it_was() {
-    let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
-    let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
-    review.open_edit(&CommentId::new("C1"));
-
-    review.discard_edit(&CommentId::new("C1"));
-
-    assert_eq!(edit_box_of(&review, "C1"), None);
-    assert_eq!(shown_thread(&review).comments[0].body, "why?");
 }

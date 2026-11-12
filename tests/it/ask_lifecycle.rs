@@ -11,7 +11,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPool, AskId, Asks, CommentRefusal, LineLocation, Opening,
-    Place, Review, ReviewStateFile, StepId,
+    Place, Review, ReviewStateFile, StepId, TextBox,
 };
 use serde_json::json;
 
@@ -449,7 +449,9 @@ fn use_as_comment_on_a_piece_comments_on_all_its_lines_and_adds_to_text_already_
     };
     let (asks, id) = answered(&shop, &review, piece);
     let first = review.use_as_comment(asks.get(id).unwrap()).unwrap();
-    review.type_in_draft(&first, "My note").unwrap();
+    review
+        .type_in(&TextBox::Draft(first.clone()), "My note")
+        .unwrap();
 
     let second = review.use_as_comment(asks.get(id).unwrap()).unwrap();
 

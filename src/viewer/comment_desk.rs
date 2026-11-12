@@ -58,6 +58,18 @@ enum PullRequestAuthorship {
     OwnedBySomeoneElse,
 }
 
+/// One box the reviewer writes text in, named by what its text becomes on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TextBox {
+    /// A new comment on lines or on a file.
+    Draft(CommentPlace),
+    Reply(ThreadId),
+    /// New text for one of the reviewer's own comments.
+    Edit(CommentId),
+    /// The body of the review being finished.
+    FinishBody,
+}
+
 /// Whether the tour shows the PR as it is now: a comment on an older tour may land on lines the tour does not show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TourFreshness {
@@ -303,9 +315,98 @@ impl CommentDesk {
         &self.comment_edits
     }
 
+    /// `None` while the box is not open; the finish body counts as open once it has text.
+    pub(super) fn text_of<'a>(
+        &'a self,
+        state: &'a ReviewState,
+        text_box: &TextBox,
+    ) -> Option<&'a str> {
+        match text_box {
+            TextBox::Draft(place) => state.draft_at(place).map(|draft| draft.body.as_str()),
+            TextBox::Reply(thread_id) => state.reply_draft(thread_id),
+            TextBox::Edit(comment_id) => self.comment_edits.get(comment_id).map(String::as_str),
+            TextBox::FinishBody => Some(state.finish_body()).filter(|body| !body.is_empty()),
+        }
+    }
+
+    /// A draft opens only from a gesture on lines, which checks them first, so here it is left as
+    /// it is; the finish body is always there to type in.
+    pub(super) fn open(
+        &mut self,
+        state: &mut SavedState,
+        threads: &[ReviewThread],
+        text_box: &TextBox,
+    ) -> anyhow::Result<()> {
+        match text_box {
+            TextBox::Draft(_) | TextBox::FinishBody => Ok(()),
+            TextBox::Reply(thread_id) => state.record(|state| state.open_reply(thread_id)),
+            TextBox::Edit(comment_id) => {
+                self.open_edit(threads, comment_id);
+                Ok(())
+            }
+        }
+    }
+
+    /// For every key: changes the text in memory only. The typing save takes saved boxes to disk,
+    /// off the UI thread; an edit is not saved.
+    pub(super) fn type_in(
+        &mut self,
+        state: &mut SavedState,
+        text_box: &TextBox,
+        text: &str,
+    ) -> anyhow::Result<()> {
+        match text_box {
+            TextBox::Draft(place) => state.type_in(|state| state.write_draft(place, text)),
+            TextBox::Reply(thread_id) => state.type_in(|state| state.write_reply(thread_id, text)),
+            TextBox::Edit(comment_id) => {
+                state.refuse_while_repinning()?;
+                if let Some(edit) = self.comment_edits.get_mut(comment_id) {
+                    text.clone_into(edit);
+                }
+                Ok(())
+            }
+            TextBox::FinishBody => state.type_in(|state| state.write_finish_body(text)),
+        }
+    }
+
+    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
+    pub(super) fn leave(
+        &mut self,
+        state: &mut SavedState,
+        text_box: &TextBox,
+    ) -> anyhow::Result<()> {
+        let is_blank = self
+            .text_of(state, text_box)
+            .is_some_and(|text| text.trim().is_empty());
+        if is_blank {
+            self.discard(state, text_box)?;
+        }
+        Ok(())
+    }
+
+    /// A draft goes together with the queued comment at its place, which is shown in its stead.
+    pub(super) fn discard(
+        &mut self,
+        state: &mut SavedState,
+        text_box: &TextBox,
+    ) -> anyhow::Result<()> {
+        match text_box {
+            TextBox::Draft(place) => state.record(|state| {
+                state.drop_draft(place);
+                state.drop_queued(place);
+            }),
+            TextBox::Reply(thread_id) => state.record(|state| state.drop_reply(thread_id)),
+            TextBox::Edit(comment_id) => {
+                self.comment_edits.remove(comment_id);
+                Ok(())
+            }
+            TextBox::FinishBody => state.record(|state| state.write_finish_body("")),
+        }
+    }
+
     /// Opens the edit on the comment's current text, when the viewer wrote it. Another
     /// person's comment is left alone, as is an edit already open.
-    pub(super) fn open_edit(&mut self, threads: &[ReviewThread], comment_id: &CommentId) {
+    fn open_edit(&mut self, threads: &[ReviewThread], comment_id: &CommentId) {
         let own_comment = threads
             .iter()
             .flat_map(|thread| &thread.comments)
@@ -315,16 +416,6 @@ impl CommentDesk {
                 .entry(comment_id.clone())
                 .or_insert_with(|| comment.body.clone());
         }
-    }
-
-    pub(super) fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) {
-        if let Some(edit) = self.comment_edits.get_mut(comment_id) {
-            text.clone_into(edit);
-        }
-    }
-
-    pub(super) fn discard_edit(&mut self, comment_id: &CommentId) {
-        self.comment_edits.remove(comment_id);
     }
 
     pub(super) fn apply_thread_action(

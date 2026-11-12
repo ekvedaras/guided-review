@@ -15,7 +15,7 @@ use super::ask::{Ask, Place};
 use super::ask_context;
 use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
-use super::comment_desk::{CommentDesk, TourFreshness};
+use super::comment_desk::{CommentDesk, TextBox, TourFreshness};
 use super::comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult,
     QueuedComment, SendMode,
@@ -44,7 +44,7 @@ use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRe
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement};
+use super::threads::{self, ReviewThread, ThreadId, ThreadPlacement};
 use super::typing_save::TypingSave;
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use crate::file_path::FilePath;
@@ -923,53 +923,39 @@ impl Review {
 
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
         let reply_body = match &action {
-            ThreadAction::Reply { thread_id, .. } => self.reply_draft(thread_id).map(str::to_owned),
+            ThreadAction::Reply { thread_id, .. } => {
+                self.state.reply_draft(thread_id).map(str::to_owned)
+            }
             _ => None,
         };
         self.comment_desk
             .thread_action_request(&self.pr, action, reply_body, self.tour_freshness())
     }
 
-    /// Opens the edit of one of the viewer's own comments on its current text. Nothing opens for
-    /// a comment someone else wrote.
-    pub fn open_edit(&mut self, comment_id: &CommentId) {
+    /// The text in the box as typed so far; `None` while it is not open.
+    pub fn text_of(&self, text_box: &TextBox) -> Option<&str> {
+        self.comment_desk.text_of(&self.state, text_box)
+    }
+
+    /// Opens a reply box, or the edit of one of the viewer's own comments on its current text;
+    /// nothing opens for a comment someone else wrote.
+    pub fn open_box(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
         self.comment_desk
-            .open_edit(&self.pulled_threads, comment_id);
+            .open(&mut self.state, &self.pulled_threads, text_box)
     }
 
-    /// The text of the comment's open edit, as typed so far.
-    pub fn comment_edit(&self, comment_id: &CommentId) -> Option<&str> {
-        self.comment_desk
-            .comment_edits()
-            .get(comment_id)
-            .map(String::as_str)
+    /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
+    pub fn type_in(&mut self, text_box: &TextBox, text: &str) -> anyhow::Result<()> {
+        self.comment_desk.type_in(&mut self.state, text_box, text)
     }
 
-    pub fn type_in_edit(&mut self, comment_id: &CommentId, text: &str) -> anyhow::Result<()> {
-        self.state.refuse_while_repinning()?;
-        self.comment_desk.type_in_edit(comment_id, text);
-        Ok(())
+    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
+    pub fn leave(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
+        self.comment_desk.leave(&mut self.state, text_box)
     }
 
-    pub fn discard_edit(&mut self, comment_id: &CommentId) {
-        self.comment_desk.discard_edit(comment_id);
-    }
-
-    pub fn reply_draft(&self, thread_id: &ThreadId) -> Option<&str> {
-        self.state.reply_draft(thread_id)
-    }
-
-    /// Opens the reply box; the text typed in it is saved by `type_in_reply` and `typing_save`.
-    pub fn open_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
-        self.state.record(|state| state.open_reply(thread_id))
-    }
-
-    pub fn discard_reply(&mut self, thread_id: &ThreadId) -> anyhow::Result<()> {
-        self.state.record(|state| state.drop_reply(thread_id))
-    }
-
-    pub fn finish_body(&self) -> &str {
-        self.state.finish_body()
+    pub fn discard(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
+        self.comment_desk.discard(&mut self.state, text_box)
     }
 
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
@@ -1125,42 +1111,9 @@ impl Review {
         self.state.comment_queue()
     }
 
-    /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
-    pub fn type_in_draft(&mut self, place: &CommentPlace, body: &str) -> anyhow::Result<()> {
-        self.state.type_in(|state| state.write_draft(place, body))
-    }
-
-    pub fn type_in_reply(&mut self, thread_id: &ThreadId, text: &str) -> anyhow::Result<()> {
-        self.state
-            .type_in(|state| state.write_reply(thread_id, text))
-    }
-
-    pub fn type_in_finish_body(&mut self, text: &str) -> anyhow::Result<()> {
-        self.state.type_in(|state| state.write_finish_body(text))
-    }
-
     /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
     pub fn typing_save(&mut self) -> Option<TypingSave> {
         self.state.typing_save()
-    }
-
-    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
-    pub fn leave_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
-        let is_blank = self
-            .comment_drafts()
-            .iter()
-            .any(|draft| &draft.place == place && draft.body.trim().is_empty());
-        if is_blank {
-            self.discard_draft(place)?;
-        }
-        Ok(())
-    }
-
-    pub fn discard_draft(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
-        self.state.record(|state| {
-            state.drop_draft(place);
-            state.drop_queued(place);
-        })
     }
 
     /// "Suggest change" shows only when the range starts and ends on lines of the head.

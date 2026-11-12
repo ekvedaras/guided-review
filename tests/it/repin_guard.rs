@@ -5,7 +5,7 @@ use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentReplied, Audience, CommentId, CommentPlace, HandOffId, HandOffState, LineLocation,
-    PieceDiff, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, StepId,
+    PieceDiff, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side, StepId, TextBox,
     ThreadComment, ThreadId,
 };
 use serde_json::json;
@@ -89,7 +89,9 @@ impl Pull {
         let mut github = FakeGitHub::with_pull("main-tip", &self.head, &self.sent);
         github.threads = vec![thread_on_line_ten()];
         let place = self.draft_on_line_ten(review);
-        review.type_in_draft(&place, "why ten?").unwrap();
+        review
+            .type_in(&TextBox::Draft(place.clone()), "why ten?")
+            .unwrap();
         let request = review
             .comment_request_for(&place, SendMode::CommentNow, Audience::Agent)
             .unwrap();
@@ -167,21 +169,26 @@ fn while_a_re_pin_runs_the_reviewer_s_changes_are_refused_and_nothing_changes() 
     let pull = Pull::new();
     let mut review = pull.open();
     let place = pull.draft_on_line_ten(&mut review);
-    review.open_reply(&ThreadId::new("T1")).unwrap();
+    review
+        .open_box(&TextBox::Reply(ThreadId::new("T1")))
+        .unwrap();
 
     review.start_repin();
     let refused = [
         review.tick(&notes()),
-        review.type_in_draft(&place, "why ten?"),
-        review.type_in_reply(&ThreadId::new("T1"), "because"),
-        review.type_in_finish_body("looks good"),
+        review.type_in(&TextBox::Draft(place), "why ten?"),
+        review.type_in(&TextBox::Reply(ThreadId::new("T1")), "because"),
+        review.type_in(&TextBox::FinishBody, "looks good"),
     ];
 
     assert!(refused.iter().all(Result::is_err));
     assert!(!review.is_ticked(&notes()));
     assert_eq!(review.comment_drafts().first().unwrap().body, "");
-    assert_eq!(review.reply_draft(&ThreadId::new("T1")), Some(""));
-    assert_eq!(review.finish_body(), "");
+    assert_eq!(
+        review.text_of(&TextBox::Reply(ThreadId::new("T1"))),
+        Some("")
+    );
+    assert_eq!(review.text_of(&TextBox::FinishBody), None);
     assert!(review.typing_save().is_none(), "nothing typed to save");
     assert_eq!(review.problems(), [Problem::ChangeNotKeptWhileRepinning]);
     assert!(!pull.open().is_ticked(&notes()));
