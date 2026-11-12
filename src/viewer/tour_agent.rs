@@ -113,10 +113,59 @@ pub struct TourAgentStart {
 /// At most this many tour agents the app started stay alive.
 const MAX_APP_AGENTS: usize = 3;
 
+/// Why tour agents cannot be reached. Each case asks the reviewer for a different thing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentLinkOff {
+    HcMissing,
+    /// `hc` is there and herdr's server does not answer.
+    ServerNotRunning,
+    /// The server answers and a command failed, with the reason herdr gave.
+    HerdrFailed(String),
+}
+
+impl fmt::Display for AgentLinkOff {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::HcMissing => write!(
+                formatter,
+                "`hc`, herdr's command line, is not installed or not on PATH"
+            ),
+            Self::ServerNotRunning => {
+                write!(
+                    formatter,
+                    "the herdr server is not running, start herdr and retry"
+                )
+            }
+            Self::HerdrFailed(reason) => write!(
+                formatter,
+                "herdr is running but failed: {reason}. `hc server restart` may fix it, but it can pause running terminals"
+            ),
+        }
+    }
+}
+
+/// A herdr command that ran and failed. The reason is what herdr said, without the command line.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("`hc {command}` failed: {reason}")]
+pub struct HerdrRefused {
+    pub command: String,
+    pub reason: String,
+}
+
+impl AgentLinkOff {
+    fn because_of(error: &anyhow::Error) -> Self {
+        Self::HerdrFailed(
+            error
+                .downcast_ref::<HerdrRefused>()
+                .map_or_else(|| format!("{error:#}"), |refused| refused.reason.clone()),
+        )
+    }
+}
+
 /// Herdr behind the viewer: where a PR's tour agent runs and what it does. One adapter, `hc`.
 pub trait TourAgentPort: Send + Sync {
     /// Whether tour agents can be reached at all; the reason when not.
-    fn link(&self) -> Result<(), String>;
+    fn link(&self) -> Result<(), AgentLinkOff>;
 
     /// The live terminals labelled as the tour agent of the PR.
     fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>>;
@@ -166,7 +215,7 @@ pub enum TourAgentState {
     /// Not looked yet.
     Unknown,
     /// Tour agents cannot be reached, for this reason.
-    LinkOff(String),
+    LinkOff(AgentLinkOff),
     None,
     Agent {
         terminal: TerminalId,
@@ -179,6 +228,11 @@ impl TourAgentState {
         matches!(self, Self::Agent { .. })
     }
 
+    /// The sidebar offers Retry beside the reason tour agents are off.
+    pub fn can_retry(&self) -> bool {
+        matches!(self, Self::LinkOff(_))
+    }
+
     /// There is an agent, or news about why there cannot be one; "none" and "looking" say nothing.
     pub fn is_worth_a_line(&self) -> bool {
         matches!(self, Self::Agent { .. } | Self::LinkOff(_))
@@ -189,10 +243,7 @@ impl fmt::Display for TourAgentState {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Unknown => write!(formatter, "Tour agent: looking"),
-            Self::LinkOff(reason) => write!(
-                formatter,
-                "Tour agent is off, it needs herdr (`hc`) and its server running: {reason}"
-            ),
+            Self::LinkOff(reason) => write!(formatter, "Tour agent is off: {reason}"),
             Self::None => write!(formatter, "Tour agent: none"),
             Self::Agent { terminal, status } => {
                 write!(formatter, "Tour agent `{terminal}`: {status}")
@@ -415,7 +466,7 @@ impl TourAgents {
             return TourAgentState::LinkOff(reason);
         }
         self.find(pr)
-            .unwrap_or_else(|error| TourAgentState::LinkOff(format!("{error:#}")))
+            .unwrap_or_else(|error| TourAgentState::LinkOff(AgentLinkOff::because_of(&error)))
     }
 
     /// Passes the agent's state now and at each status change, blocking until herdr's stream ends.
@@ -444,7 +495,7 @@ impl TourAgents {
         });
         if let Err(error) = followed {
             // The stream is over either way, so there is nothing left to break.
-            let _ended = on_change(TourAgentState::LinkOff(format!("{error:#}")));
+            let _ended = on_change(TourAgentState::LinkOff(AgentLinkOff::because_of(&error)));
         }
     }
 

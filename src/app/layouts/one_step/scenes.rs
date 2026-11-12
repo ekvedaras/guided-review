@@ -45,10 +45,11 @@ enum Scene {
     PictureZoom,
     UpdateOffered,
     RenderedMarkdown,
+    AgentLinkOff,
 }
 
 impl Scene {
-    const ALL: [Self; 20] = [
+    const ALL: [Self; 21] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -69,6 +70,7 @@ impl Scene {
         Self::PictureZoom,
         Self::UpdateOffered,
         Self::RenderedMarkdown,
+        Self::AgentLinkOff,
     ];
 
     fn file_name(self) -> &'static str {
@@ -93,6 +95,7 @@ impl Scene {
             Self::PictureZoom => "40-picture-zoom",
             Self::UpdateOffered => "39-update-offered",
             Self::RenderedMarkdown => "41-rendered-markdown",
+            Self::AgentLinkOff => "42-agent-link-off",
         }
     }
 }
@@ -383,6 +386,7 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -462,6 +466,9 @@ impl OneStepLayout {
                     cx.remove_global::<Updates>();
                 }
             }
+            Scene::AgentLinkOff => self
+                .session
+                .update(cx, ReviewSession::unstage_agent_link_off),
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.markdown_box(cx) {
                     self.change_review(cx, |review| {
