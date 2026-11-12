@@ -11,8 +11,8 @@ use crate::pieces::PieceId;
 use crate::tour::Step;
 use crate::viewer::{
     Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LineKind, LineLocation,
-    Markdown, NextScreen, NotesButton, Place, QueuedComment, StepId, SummaryStats, ThreadView,
-    TourLead,
+    Markdown, NextScreen, NotesButton, Place, QueuedComment, RenderedBlock, StepId, SummaryStats,
+    ThreadView, TourLead, ViewSwitch,
 };
 
 #[derive(Clone)]
@@ -47,6 +47,10 @@ pub enum PageRow {
         is_loaded: bool,
     },
     OnlyWhitespace,
+    /// A top-level block of a Markdown file in its rendered view.
+    RenderedBlock(Arc<RenderedBlock>),
+    /// A Markdown file in its rendered view whose text is not read yet.
+    RenderedFileWaiting,
     HunkGap(Arc<HunkGapRow>),
     Line(Arc<ShownLine>),
     /// Under its line inside the piece box, or after the code.
@@ -200,6 +204,8 @@ pub struct PieceHeading {
     /// "changed" or "new" after a re-pin.
     pub repin_label: Option<&'static str>,
     pub code_link: Option<CodeLink>,
+    /// Set on the header of a box whose file can be rendered.
+    pub view: Option<ViewSwitch>,
 }
 
 /// A piece's name cut into what is shown, once, so drawing shares the text instead of copying it.
@@ -395,6 +401,8 @@ impl PageRow {
             | Self::BinaryFile(_)
             | Self::Image { .. }
             | Self::OnlyWhitespace
+            | Self::RenderedBlock(_)
+            | Self::RenderedFileWaiting
             | Self::HunkGap(_)
             | Self::Line(_) => BoxPart::Boxed,
             Self::Thread {

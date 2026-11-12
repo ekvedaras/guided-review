@@ -55,6 +55,7 @@ pub struct Segmented {
     picked: Option<usize>,
     thumb_tone: Tone,
     is_invalid: bool,
+    is_compact: bool,
 }
 
 impl Segmented {
@@ -66,6 +67,7 @@ impl Segmented {
             picked: None,
             thumb_tone: Tone::Neutral,
             is_invalid: false,
+            is_compact: false,
         }
     }
 
@@ -80,6 +82,12 @@ impl Segmented {
         self
     }
 
+    /// Short enough to sit in a box header beside its buttons.
+    pub fn compact(mut self) -> Self {
+        self.is_compact = true;
+        self
+    }
+
     /// What is picked cannot be saved: the track's edge turns danger.
     pub fn invalid(mut self, is_invalid: bool) -> Self {
         self.is_invalid = is_invalid;
@@ -88,7 +96,9 @@ impl Segmented {
 }
 
 const SEGMENT_HEIGHT: Pixels = px(28.);
+const COMPACT_SEGMENT_HEIGHT: Pixels = px(20.);
 const TRACK_PADDING: Pixels = px(3.);
+const COMPACT_TRACK_PADDING: Pixels = px(2.);
 
 fn count_of(segments: &[Segment]) -> f32 {
     f32::from(u16::try_from(segments.len().max(1)).unwrap_or(u16::MAX))
@@ -103,6 +113,7 @@ impl RenderOnce for Segmented {
         let colors = Colors::active(cx);
         let count = count_of(&self.segments);
         let layout = self.layout;
+        let is_compact = self.is_compact;
         let (thumb_ground, thumb_border, picked_text) = match self.thumb_tone {
             Tone::Neutral => (colors.raised_fill(), colors.border, colors.accent),
             tone => {
@@ -146,11 +157,16 @@ impl RenderOnce for Segmented {
                 div()
                     .id(segment.id)
                     .relative()
-                    .h(SEGMENT_HEIGHT)
+                    .h(if is_compact {
+                        COMPACT_SEGMENT_HEIGHT
+                    } else {
+                        SEGMENT_HEIGHT
+                    })
                     .flex()
                     .items_center()
                     .gap_2()
-                    .px_3()
+                    .when(is_compact, |segment| segment.px_2().text_xs())
+                    .when(!is_compact, Styled::px_3)
                     .rounded(px(INNER_RADIUS))
                     .cursor_pointer()
                     .whitespace_nowrap()
@@ -176,7 +192,11 @@ impl RenderOnce for Segmented {
         div()
             .id(self.id)
             .flex_none()
-            .p(TRACK_PADDING)
+            .p(if is_compact {
+                COMPACT_TRACK_PADDING
+            } else {
+                TRACK_PADDING
+            })
             .rounded(px(CONTROL_RADIUS))
             .border_1()
             .border_color(if self.is_invalid {

@@ -15,8 +15,9 @@ use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
+use crate::file_path::FilePath;
 use crate::update::{ReleaseAsset, Target, Update, UpdateOffer, Version};
-use crate::viewer::{AgentStatus, LineKind, LineLocation, TerminalId, TextBox};
+use crate::viewer::{AgentStatus, FileView, LineKind, LineLocation, PageRow, TerminalId, TextBox};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -43,10 +44,11 @@ enum Scene {
     DescriptionFolds,
     PictureZoom,
     UpdateOffered,
+    RenderedMarkdown,
 }
 
 impl Scene {
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 20] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -66,6 +68,7 @@ impl Scene {
         Self::DescriptionFolds,
         Self::PictureZoom,
         Self::UpdateOffered,
+        Self::RenderedMarkdown,
     ];
 
     fn file_name(self) -> &'static str {
@@ -89,6 +92,7 @@ impl Scene {
             Self::DescriptionFolds => "36-description-folds",
             Self::PictureZoom => "40-picture-zoom",
             Self::UpdateOffered => "39-update-offered",
+            Self::RenderedMarkdown => "41-rendered-markdown",
         }
     }
 }
@@ -212,6 +216,56 @@ impl OneStepLayout {
         self.scroll_to_row(0);
     }
 
+    /// The first screen with a Markdown file's box, for its rendered view; `None` when no screen has one.
+    fn go_to_first_markdown_box(&mut self, cx: &mut Context<Self>) -> Option<FilePath> {
+        self.change_review(cx, |review| review.go_to_summary());
+        for _ in 0..MAX_SCREENS {
+            if let Some(path) = self.markdown_box(cx) {
+                return Some(path);
+            }
+            if !self.change_review(cx, |review| review.go_forward()) {
+                break;
+            }
+        }
+        None
+    }
+
+    fn markdown_box(&self, cx: &App) -> Option<FilePath> {
+        let rows = self.session.read(cx).rows();
+        (0..rows.len()).find_map(|index| match rows.row(index)? {
+            PageRow::PieceHeader(heading) => heading
+                .view
+                .as_ref()
+                .filter(|switch| {
+                    std::path::Path::new(switch.path.as_str())
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+                })
+                .map(|switch| switch.path.clone()),
+            _ => None,
+        })
+    }
+
+    /// A skim step folds its boxes; the scene shows the rendered file, so its box is opened.
+    fn open_box(&mut self, path: &FilePath, cx: &mut Context<Self>) {
+        let fold = self.row_of_box(path, cx).and_then(|row| {
+            match self.session.read(cx).rows().row(row)? {
+                PageRow::PieceHeader(heading) => heading.fold.clone(),
+                _ => None,
+            }
+        });
+        if let Some(fold) = fold.filter(|fold| fold.is_folded) {
+            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
+        }
+    }
+
+    fn row_of_box(&self, path: &FilePath, cx: &App) -> Option<usize> {
+        let rows = self.session.read(cx).rows();
+        (0..rows.len()).find(|index| {
+            matches!(rows.row(*index), Some(PageRow::PieceHeader(heading)) if heading.path == *path)
+        })
+    }
+
     fn added_lines(&self, count: usize, cx: &App) -> Vec<(usize, LineLocation)> {
         let rows = self.session.read(cx).rows();
         (0..rows.len())
@@ -316,6 +370,19 @@ impl OneStepLayout {
                     Updates::stage(&home, UpdateOffer::Available(update), cx);
                 }
             }
+            Scene::RenderedMarkdown => {
+                if let Some(path) = self.go_to_first_markdown_box(cx) {
+                    self.change_review(cx, |review| {
+                        review
+                            .display_options_mut()
+                            .show_file_as(&path, FileView::Rendered);
+                    });
+                    self.open_box(&path, cx);
+                    if let Some(row) = self.row_of_box(&path, cx) {
+                        self.scroll_to_row(row);
+                    }
+                }
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self.session.read(cx).review().palette(query);
@@ -394,6 +461,16 @@ impl OneStepLayout {
                 if cx.has_global::<Updates>() {
                     cx.remove_global::<Updates>();
                 }
+            }
+            Scene::RenderedMarkdown => {
+                if let Some(path) = self.markdown_box(cx) {
+                    self.change_review(cx, |review| {
+                        review
+                            .display_options_mut()
+                            .show_file_as(&path, FileView::Code);
+                    });
+                }
+                self.go_to_first_open_code(cx);
             }
         }
         cx.notify();

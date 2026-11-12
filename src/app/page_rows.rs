@@ -290,7 +290,9 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             heading.fold.hash(&mut hasher);
             heading.piece.hash(&mut hasher);
             heading.repin_label.hash(&mut hasher);
+            heading.view.hash(&mut hasher);
         }
+        PageRow::RenderedBlock(block) => block.hash(&mut hasher),
         PageRow::BinaryFile(binary) => {
             binary.piece.hash(&mut hasher);
             binary.link.hash(&mut hasher);
@@ -358,6 +360,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
         | PageRow::RouteHeading
         | PageRow::NoChangeSinceRead
         | PageRow::OnlyWhitespace
+        | PageRow::RenderedFileWaiting
         | PageRow::PieceEnd => {}
     }
     RowKey(hasher.finish())
