@@ -31,6 +31,7 @@ const M: KeyCap = key("m", "M");
 const C: KeyCap = key("c", "C");
 const W: KeyCap = key("w", "W");
 const G: KeyCap = key("g", "G");
+const Q: KeyCap = key("q", "Q");
 const COMMA: KeyCap = key(",", ",");
 const QUESTION: KeyCap = key("?", "?");
 
@@ -46,6 +47,8 @@ pub enum KeyScope {
     Window,
     /// In a comment, reply or edit box.
     TextBox,
+    /// Anywhere in the app, whichever of its windows has the focus.
+    App,
     /// Anywhere in the review's window but a box that takes typing, which has its own: a comment
     /// box left open elsewhere on the page does not stop it.
     NotTyping,
@@ -98,10 +101,11 @@ pub enum Command {
     Shortcuts,
     OpenOnGitHub,
     CloseWindow,
+    Quit,
 }
 
 impl Command {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -116,6 +120,7 @@ impl Command {
         Self::Shortcuts,
         Self::OpenOnGitHub,
         Self::CloseWindow,
+        Self::Quit,
     ];
 
     /// Every way to press it; the first is the one a button shows.
@@ -136,6 +141,7 @@ impl Command {
             Self::Shortcuts => &[&[QUESTION]],
             Self::OpenOnGitHub => &[&[G]],
             Self::CloseWindow => &[&[Cmd, W]],
+            Self::Quit => &[&[Cmd, Q]],
         }
     }
 
@@ -149,6 +155,7 @@ impl Command {
             | Self::Shortcuts
             | Self::OpenOnGitHub => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
+            Self::Quit => KeyScope::App,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
         }
@@ -162,9 +169,11 @@ impl Command {
             Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines => ShortcutGroup::View,
-            Self::Settings | Self::Shortcuts | Self::OpenOnGitHub | Self::CloseWindow => {
-                ShortcutGroup::App
-            }
+            Self::Settings
+            | Self::Shortcuts
+            | Self::OpenOnGitHub
+            | Self::CloseWindow
+            | Self::Quit => ShortcutGroup::App,
         }
     }
 
@@ -185,6 +194,7 @@ impl Command {
             Self::Shortcuts => "This list of shortcuts",
             Self::OpenOnGitHub => "Open the pull request on GitHub",
             Self::CloseWindow => "Close the window and quit",
+            Self::Quit => "Quit",
         }
     }
 
