@@ -1163,6 +1163,12 @@ impl Review {
             .find(|comment_box| &comment_box.draft.place == place)
     }
 
+    /// A review reopened after a re-pin goes on showing what the boxes of the one it replaces were
+    /// doing: which takes the keys, which are sending and why a send did not go.
+    pub fn keep_comment_boxes_of(&mut self, replaced: Self) {
+        self.comment_desk.keep_boxes_of(replaced.comment_desk);
+    }
+
     /// The comment box that takes the keys.
     pub fn composing(&self) -> Option<&CommentPlace> {
         self.comment_desk.composing()

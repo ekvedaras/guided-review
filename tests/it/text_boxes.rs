@@ -450,3 +450,22 @@ fn a_drag_that_ended_on_no_rows_opens_nothing_and_says_nothing() {
 
     assert_eq!(review.open_comment_box(CommentGesture::DragEnded), Ok(None));
 }
+
+#[test]
+fn a_review_reopened_in_place_of_another_goes_on_showing_what_its_comment_boxes_were_doing() {
+    let pull = Pull::new();
+    let github = pull.github();
+    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+    review
+        .send_comment(&place, SendMode::AddToReview, &github)
+        .unwrap();
+    let shown = state_of(&review, &place);
+
+    let mut reopened = pull.open();
+    reopened.keep_comment_boxes_of(review);
+
+    assert!(shown.is_some());
+    assert_eq!(state_of(&reopened, &place), shown);
+}

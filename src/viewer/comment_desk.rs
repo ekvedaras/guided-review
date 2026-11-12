@@ -22,9 +22,9 @@ use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Everything the reviewer writes to GitHub: the drag that opens a comment box, the comments,
-/// replies and finished review, and what GitHub said about the pending review and the PR's author.
-/// The texts themselves live in the review state and change only through its gate, `SavedState`.
+/// Everything the reviewer writes to GitHub: the drag that opens a comment box, every text box
+/// from its opening to its send, and what GitHub said about the pending review and the PR's author.
+/// The saved texts live in the review state and change only through its gate, `SavedState`.
 #[derive(Default)]
 pub(super) struct CommentDesk {
     selection: Option<RowSelection>,
@@ -35,6 +35,12 @@ pub(super) struct CommentDesk {
     /// The text of each of the viewer's comments being edited. Not saved: an edit not sent is
     /// given up with the app, as the comment on GitHub is still whole.
     comment_edits: BTreeMap<CommentId, String>,
+    boxes: BoxActivity,
+}
+
+/// What the comment boxes are doing. Not saved, but kept when a re-pin reopens the review.
+#[derive(Default)]
+struct BoxActivity {
     /// The comment box that takes the keys.
     composing: Option<CommentPlace>,
     /// Comment boxes whose text is on its way to GitHub.
@@ -228,7 +234,7 @@ impl CommentDesk {
                 }
             })
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
-        self.composing = Some(place.clone());
+        self.boxes.composing = Some(place.clone());
         Ok(())
     }
 
@@ -260,8 +266,12 @@ impl CommentDesk {
         state.record(|state| append_to_draft(state, place, &suggestion_block(&kept_lines)))
     }
 
+    pub(super) fn keep_boxes_of(&mut self, replaced: Self) {
+        self.boxes = replaced.boxes;
+    }
+
     pub(super) fn composing(&self) -> Option<&CommentPlace> {
-        self.composing.as_ref()
+        self.boxes.composing.as_ref()
     }
 
     pub(super) fn comment_boxes<'a>(
@@ -271,14 +281,14 @@ impl CommentDesk {
     ) -> impl Iterator<Item = CommentBox<'a>> {
         state.comment_drafts().iter().map(move |draft| {
             let place = &draft.place;
-            let box_state = if self.sending.contains(place) {
+            let box_state = if self.boxes.sending.contains(place) {
                 BoxState::Sending
-            } else if self.composing.as_ref() == Some(place) {
+            } else if self.boxes.composing.as_ref() == Some(place) {
                 BoxState::Composing
             } else {
                 BoxState::Idle
             };
-            let problem = self.send_problems.get(place).cloned().or_else(|| {
+            let problem = self.boxes.send_problems.get(place).cloned().or_else(|| {
                 (freshness == TourFreshness::Behind)
                     .then_some(CommentProblem::Refused(CommentRefusal::TourIsOld))
             });
@@ -301,8 +311,8 @@ impl CommentDesk {
         (tour_head, pr): (&Sha, &PullRequestUrl),
     ) -> Option<CommentRequest> {
         let draft = state.draft_at(place)?.clone();
-        self.sending.insert(place.clone());
-        self.send_problems.remove(place);
+        self.boxes.sending.insert(place.clone());
+        self.boxes.send_problems.remove(place);
         Some(CommentRequest::new(
             Origin::Draft,
             draft,
@@ -349,17 +359,17 @@ impl CommentDesk {
 
     /// A sent or queued comment closes the box; any other keeps it, with why.
     fn show_landing(&mut self, place: &CommentPlace, result: &anyhow::Result<CommentResult>) {
-        self.sending.remove(place);
+        self.boxes.sending.remove(place);
         let problem = match result {
             Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
-                self.composing = None;
+                self.boxes.composing = None;
                 return;
             }
             Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal.clone()),
             Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.as_str().into()),
             Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
         };
-        self.send_problems.insert(place.clone(), problem);
+        self.boxes.send_problems.insert(place.clone(), problem);
     }
 
     fn settle(
@@ -461,7 +471,7 @@ impl CommentDesk {
         match text_box {
             TextBox::Draft(place) => {
                 if state.draft_at(place).is_some() {
-                    self.composing = Some(place.clone());
+                    self.boxes.composing = Some(place.clone());
                 }
                 Ok(())
             }
@@ -523,7 +533,7 @@ impl CommentDesk {
         match text_box {
             TextBox::Draft(place) => {
                 self.stop_composing(place);
-                self.send_problems.remove(place);
+                self.boxes.send_problems.remove(place);
                 state.record(|state| {
                     state.drop_draft(place);
                     state.drop_queued(place);
@@ -539,8 +549,8 @@ impl CommentDesk {
     }
 
     fn stop_composing(&mut self, place: &CommentPlace) {
-        if self.composing.as_ref() == Some(place) {
-            self.composing = None;
+        if self.boxes.composing.as_ref() == Some(place) {
+            self.boxes.composing = None;
         }
     }
 

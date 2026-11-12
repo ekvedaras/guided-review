@@ -604,7 +604,8 @@ impl ReviewSession {
     fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
         let screen = self.review.screen().clone();
         self.save_typing_now();
-        self.review = repinned.review;
+        let replaced = std::mem::replace(&mut self.review, repinned.review);
+        self.review.keep_comment_boxes_of(replaced);
         self.source = repinned.source;
         self.image_pictures.clear();
         self.loading_images.clear();
