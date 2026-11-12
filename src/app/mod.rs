@@ -608,8 +608,8 @@ fn turn_writing_into_review(
 
 actions!(app, [Quit]);
 
-/// cmd+q ends the app from whichever window has the focus, as cmd+w does from the review's: what
-/// is answering is not waited for. The menu item is what macOS shows the key beside.
+/// cmd+q ends the app from whichever window has the focus. The review's window answers it first,
+/// warning once while work is in flight; this is for a window with no review. The menu item is what macOS shows the key beside.
 fn quit_on_cmd_q(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.set_menus([Menu {

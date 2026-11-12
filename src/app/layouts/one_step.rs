@@ -83,10 +83,10 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Effect, FileView, GitHubPort, HandOffId, InFlight, Intent, LineLocation,
-    NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment, ReadProgress,
-    Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight, Intent,
+    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment,
+    ReadProgress, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep,
+    Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
     SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
     SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
     Travel, ViewSwitch, WindowMoment,
@@ -113,6 +113,8 @@ actions!(
         CloseWindow
     ]
 );
+
+use crate::app::Quit;
 
 type OnCodeSpot = Rc<dyn Fn(CodeGesture, CodeSpot, &mut Window, &mut App)>;
 
@@ -841,9 +843,7 @@ impl OneStepLayout {
         restart: &RestartArgs,
         cx: &mut Context<Self>,
     ) {
-        let in_flight = self.in_flight(cx);
-        if let RestartStep::Warn(warning) = self.restart_guard.ask(in_flight, Instant::now()) {
-            post_toast(cx, ToastTone::Danger, warning);
+        if !self.may_leave(Departure::Restart, cx) {
             return;
         }
         let started = std::process::Command::new(program)
@@ -855,6 +855,22 @@ impl OneStepLayout {
             .spawn();
         if let Err(error) = started {
             post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
+        }
+    }
+
+    /// Whether the app may be left now: with an Ask answering or a hand-off being sent the first
+    /// ask only warns, and the same ask again soon after goes ahead.
+    fn may_leave(&mut self, departure: Departure, cx: &mut Context<Self>) -> bool {
+        let in_flight = self.in_flight(cx);
+        match self
+            .restart_guard
+            .ask_to(departure, in_flight, Instant::now())
+        {
+            RestartStep::Restart => true,
+            RestartStep::Warn(warning) => {
+                post_toast(cx, ToastTone::Danger, warning);
+                false
+            }
         }
     }
 
@@ -2896,7 +2912,16 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &OpenPrOnGitHub, window, cx| {
                 this.act(Intent::OpenOnGitHub, window, cx);
             }))
-            .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                if this.may_leave(Departure::CloseWindow, cx) {
+                    window.remove_window();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &Quit, _, cx| {
+                if this.may_leave(Departure::Quit, cx) {
+                    cx.quit();
+                }
+            }))
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
