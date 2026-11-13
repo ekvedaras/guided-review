@@ -31,6 +31,51 @@ impl PageChange {
     pub(super) fn holds(&self, id: &ChangeId) -> bool {
         self.ids.contains(id)
     }
+
+    pub(super) fn is_in_view(&self, visible: &Range<usize>) -> bool {
+        self.rows.start < visible.end && visible.start < self.rows.end
+    }
+}
+
+/// Where the focused change is in the window, in pixels from the top of the view: what `Down` and
+/// `Up` need to tell a change the reader has not seen all of from one they have.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChangeInView {
+    pub view_height: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+impl ChangeInView {
+    /// How far to scroll to bring the unseen part of a change taller than the view nearer, a
+    /// step that leaves a fifth of the view for the reader to keep their place. A change that fits
+    /// the view is moved on from, not scrolled.
+    fn unseen_scroll(self, way: Way) -> Option<f32> {
+        if self.bottom - self.top <= self.view_height {
+            return None;
+        }
+        let step = self.view_height * 4.0 / 5.0;
+        match way {
+            Way::Next => {
+                let unseen = self.bottom - self.view_height;
+                (unseen > 0.0).then(|| unseen.min(step))
+            }
+            Way::Previous => {
+                let unseen = -self.top;
+                (unseen > 0.0).then(|| -unseen.min(step))
+            }
+        }
+    }
+}
+
+/// What a press of `Down` or `Up` asks the window to do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReadStep {
+    /// Scroll the page by this many pixels, down when positive.
+    Scroll(f32),
+    /// The focus moved; show this row of the page.
+    Focused(usize),
+    Nothing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +105,63 @@ impl Review {
     /// Shows the same lines the gap button under the focused change shows.
     pub fn show_more_below(&mut self) -> bool {
         self.show_more(|change| change.more_below.clone())
+    }
+
+    /// A click on this row of the page: focuses the change it is in. Says whether the focus moved.
+    pub fn focus_change_at_row(&mut self, row: usize) -> bool {
+        let page = Arc::clone(self.page());
+        let Some(at) = page
+            .changes()
+            .iter()
+            .position(|change| change.rows.contains(&row))
+        else {
+            return false;
+        };
+        if page.focused_index() == Some(at) {
+            return false;
+        }
+        page.changes()
+            .get(at)
+            .is_some_and(|change| self.focus(change).is_some())
+    }
+
+    /// The window shows these rows of the page. A focus that is not among them goes to the first
+    /// change that is. Says whether the focus moved.
+    pub fn follow_scroll(&mut self, visible: Range<usize>) -> bool {
+        let page = Arc::clone(self.page());
+        page.change_to_focus_for_view(&visible)
+            .is_some_and(|change| self.focus(change).is_some())
+    }
+
+    /// `Down`: scrolls through a focused change taller than the view until its end shows, then
+    /// focuses the next change; at the last one it does nothing.
+    pub fn read_down(&mut self, focused: Option<ChangeInView>) -> ReadStep {
+        self.read(Way::Next, focused)
+    }
+
+    /// `Up`: like `read_down`, the other way.
+    pub fn read_up(&mut self, focused: Option<ChangeInView>) -> ReadStep {
+        self.read(Way::Previous, focused)
+    }
+
+    fn read(&mut self, way: Way, focused: Option<ChangeInView>) -> ReadStep {
+        let page = Arc::clone(self.page());
+        let Some(at) = page.focused_index() else {
+            return self
+                .step_focus(way)
+                .map_or(ReadStep::Nothing, ReadStep::Focused);
+        };
+        if let Some(scroll) = focused.and_then(|view| view.unseen_scroll(way)) {
+            return ReadStep::Scroll(scroll);
+        }
+        let target = match way {
+            Way::Next => at.checked_add(1),
+            Way::Previous => at.checked_sub(1),
+        };
+        target
+            .and_then(|target| page.changes().get(target))
+            .and_then(|change| self.focus(change))
+            .map_or(ReadStep::Nothing, ReadStep::Focused)
     }
 
     fn show_more(&mut self, edge: impl FnOnce(&PageChange) -> Option<MoreContext>) -> bool {

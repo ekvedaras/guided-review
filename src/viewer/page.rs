@@ -6,6 +6,7 @@ mod build;
 mod rows;
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 pub use rows::{
@@ -150,6 +151,26 @@ impl Page {
 
     pub(super) fn focused_index(&self) -> Option<usize> {
         self.focused
+    }
+
+    /// The change that should take the focus when the window shows these rows: the first one in
+    /// view, unless the focused change is in view. `None` when the focus stays.
+    pub fn change_to_focus_for_view(&self, visible: &Range<usize>) -> Option<&PageChange> {
+        if self
+            .focused_change()
+            .is_some_and(|change| change.is_in_view(visible))
+        {
+            return None;
+        }
+        self.changes
+            .iter()
+            .find(|change| change.is_in_view(visible))
+    }
+
+    /// Whether the change at this row of the page is the focused one.
+    pub fn is_in_focused_change(&self, row: usize) -> bool {
+        self.focused_change()
+            .is_some_and(|change| change.rows.contains(&row))
     }
 
     /// The change that has the focus; none on a screen with no code, or while the focus is elsewhere.

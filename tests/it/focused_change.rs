@@ -1,14 +1,17 @@
 //! The focused change: which change of the screen the change keys act on.
 
-use crate::support::FixtureRepo;
+use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    LineKind, PageChange, PageRow, Review, ReviewStateFile, hidden_lines_before,
+    ChangeInView, LineKind, LineLocation, PageChange, PageRow, ReadStep, Review, ReviewStateFile,
+    Side, hidden_lines_before,
 };
 use serde_json::{Value, json};
 use std::fmt::Write;
+use std::ops::Range;
+use std::sync::Arc;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -285,4 +288,240 @@ fn the_key_does_nothing_where_the_file_has_no_more_lines_on_that_edge() {
 
     assert_eq!(shown(&review), before);
     assert_eq!(focused(&review).as_deref(), Some("five"));
+}
+
+fn row_of(review: &Review, path: &str, number: usize) -> usize {
+    review
+        .page()
+        .row_of_line(&LineLocation {
+            path: file_path(path),
+            side: Side::Head,
+            line: line(number),
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_click_on_a_line_focuses_the_change_it_is_in_unchanged_lines_around_it_too() {
+    let mut review = Pull::new().open_on_the_code();
+
+    assert!(review.focus_change_at_row(row_of(&review, "notes.txt", 22)));
+    assert_eq!(focused(&review).as_deref(), Some("twenty"));
+
+    assert!(review.focus_change_at_row(row_of(&review, "other.txt", 5)));
+    assert_eq!(focused(&review).as_deref(), Some("five"));
+}
+
+#[test]
+fn a_click_outside_every_change_leaves_the_focus_alone() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    assert!(!review.focus_change_at_row(0));
+
+    assert_eq!(focused(&review).as_deref(), Some("twenty"));
+}
+
+#[test]
+fn a_click_in_the_focused_change_changes_nothing_so_the_page_is_kept() {
+    let mut review = Pull::new().open_on_the_code();
+    review.focus_change_at_row(row_of(&review, "notes.txt", 20));
+    let page = Arc::clone(review.page());
+
+    assert!(!review.focus_change_at_row(row_of(&review, "notes.txt", 21)));
+
+    assert!(Arc::ptr_eq(&page, review.page()));
+}
+
+/// The rows of the screen as they are: the change at `at` of the page's changes.
+fn rows_of_change(review: &Review, at: usize) -> Range<usize> {
+    review.page().changes()[at].rows()
+}
+
+#[test]
+fn a_focus_that_is_in_view_stays_where_it_is() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+    let page = Arc::clone(review.page());
+    let all = 0..page.len();
+
+    assert!(!review.follow_scroll(all));
+
+    assert_eq!(focused(&review).as_deref(), Some("twenty"));
+    assert!(Arc::ptr_eq(&page, review.page()));
+}
+
+#[test]
+fn a_focus_that_scrolled_out_of_view_goes_to_the_first_change_in_view() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 1);
+    let visible = rows_of_change(&review, 2).start..rows_of_change(&review, 3).end;
+
+    assert!(review.follow_scroll(visible));
+
+    assert_eq!(focused(&review).as_deref(), Some("thirty"));
+}
+
+#[test]
+fn a_change_with_one_row_in_view_counts_as_in_view() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 1);
+    let last_row = rows_of_change(&review, 0).end - 1;
+
+    assert!(!review.follow_scroll(last_row..last_row + 1));
+
+    assert_eq!(focused(&review).as_deref(), Some("ten"));
+}
+
+#[test]
+fn with_no_change_in_view_the_focus_stays() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 1);
+
+    assert!(!review.follow_scroll(0..1));
+
+    assert_eq!(focused(&review).as_deref(), Some("ten"));
+}
+
+#[test]
+fn a_screen_with_code_and_no_focus_gives_it_to_the_first_change_in_view() {
+    let mut review = Pull::new().open_on_the_code();
+    let visible = rows_of_change(&review, 1).start..review.page().len();
+
+    assert!(review.follow_scroll(visible));
+
+    assert_eq!(focused(&review).as_deref(), Some("twenty"));
+}
+
+#[test]
+fn a_screen_with_no_code_gets_no_focus_from_the_scroll() {
+    let mut review = Pull::new().open_on_the_code();
+    review.go_back();
+    let all = 0..review.page().len();
+
+    assert!(!review.follow_scroll(all));
+
+    assert_eq!(focused(&review), None);
+}
+
+/// A change of 250 pixels in a view of 100.
+fn tall(top: f32, bottom: f32) -> ChangeInView {
+    ChangeInView {
+        view_height: 100.0,
+        top,
+        bottom,
+    }
+}
+
+#[test]
+fn down_scrolls_a_change_taller_than_the_view_until_its_end_shows() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    assert_eq!(
+        review.read_down(Some(tall(0.0, 250.0))),
+        ReadStep::Scroll(80.0)
+    );
+    assert_eq!(
+        review.read_down(Some(tall(-80.0, 170.0))),
+        ReadStep::Scroll(70.0)
+    );
+    assert_eq!(focused(&review).as_deref(), Some("twenty"));
+}
+
+#[test]
+fn down_moves_on_to_the_next_change_once_the_end_of_a_tall_one_shows() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    let step = review.read_down(Some(tall(-150.0, 100.0)));
+
+    assert_eq!(
+        step,
+        ReadStep::Focused(review.page().changes()[2].first_row())
+    );
+    assert_eq!(focused(&review).as_deref(), Some("thirty"));
+}
+
+#[test]
+fn down_moves_on_from_a_change_that_fits_the_view_even_when_it_is_cut_off() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    let step = review.read_down(Some(tall(60.0, 140.0)));
+
+    assert!(matches!(step, ReadStep::Focused(_)));
+    assert_eq!(focused(&review).as_deref(), Some("thirty"));
+}
+
+#[test]
+fn down_with_no_measure_of_the_change_moves_on() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    assert!(matches!(review.read_down(None), ReadStep::Focused(_)));
+    assert_eq!(focused(&review).as_deref(), Some("thirty"));
+}
+
+#[test]
+fn up_scrolls_a_change_taller_than_the_view_until_its_start_shows() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    assert_eq!(
+        review.read_up(Some(tall(-150.0, 100.0))),
+        ReadStep::Scroll(-80.0)
+    );
+    assert_eq!(
+        review.read_up(Some(tall(-30.0, 220.0))),
+        ReadStep::Scroll(-30.0)
+    );
+    assert_eq!(focused(&review).as_deref(), Some("twenty"));
+}
+
+#[test]
+fn up_moves_back_to_the_previous_change_once_the_start_of_a_tall_one_shows() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 2);
+
+    let step = review.read_up(Some(tall(0.0, 250.0)));
+
+    assert_eq!(
+        step,
+        ReadStep::Focused(review.page().changes()[0].first_row())
+    );
+    assert_eq!(focused(&review).as_deref(), Some("ten"));
+}
+
+#[test]
+fn down_at_the_last_change_and_up_at_the_first_do_nothing() {
+    let mut review = Pull::new().open_on_the_code();
+    focus_change_number(&mut review, 4);
+    assert_eq!(review.read_down(None), ReadStep::Nothing);
+    assert_eq!(focused(&review).as_deref(), Some("five"));
+
+    focus_change_number(&mut review, 1);
+    assert_eq!(review.read_up(None), ReadStep::Nothing);
+    assert_eq!(focused(&review).as_deref(), Some("ten"));
+}
+
+#[test]
+fn down_and_up_with_no_focus_focus_the_first_and_the_last_change() {
+    let pull = Pull::new();
+    let mut review = pull.open_on_the_code();
+    assert!(matches!(review.read_down(None), ReadStep::Focused(_)));
+    assert_eq!(focused(&review).as_deref(), Some("ten"));
+
+    let mut review = pull.open_on_the_code();
+    assert!(matches!(review.read_up(None), ReadStep::Focused(_)));
+    assert_eq!(focused(&review).as_deref(), Some("five"));
+}
+
+#[test]
+fn down_and_up_on_a_screen_with_no_code_do_nothing() {
+    let mut review = Pull::new().open_on_the_code();
+    review.go_back();
+
+    assert_eq!(review.read_down(None), ReadStep::Nothing);
+    assert_eq!(review.read_up(None), ReadStep::Nothing);
 }
