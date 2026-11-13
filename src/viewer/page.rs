@@ -55,6 +55,7 @@ pub struct SelectedRows {
 /// The header of a file block that has scrolled away above the view, kept in sight.
 pub struct PinnedHeader {
     pub header: Arc<PieceHeading>,
+    pub header_row: usize,
     /// The symbol of the piece the top row is in, in a block of several pieces; a block of one
     /// piece names its symbol in its own header.
     pub symbol: Option<Arc<str>>,
@@ -282,7 +283,7 @@ impl Page {
             return None;
         }
         let mut symbol = None;
-        for row in self.rows.get(..top_row)?.iter().rev() {
+        for (index, row) in self.rows.get(..top_row)?.iter().enumerate().rev() {
             match row {
                 PageRow::PieceEnd => return None,
                 PageRow::PieceMarker(marker) if symbol.is_none() => {
@@ -291,6 +292,7 @@ impl Page {
                 PageRow::PieceHeader(header) => {
                     return Some(PinnedHeader {
                         header: Arc::clone(header),
+                        header_row: index,
                         symbol: symbol.flatten(),
                     });
                 }

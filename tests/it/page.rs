@@ -426,6 +426,11 @@ fn a_file_header_is_pinned_only_once_it_has_scrolled_away() {
         Some(("notes.txt".to_owned(), None)),
         "a box of one piece names its symbol in its own header"
     );
+    assert_eq!(
+        page.pinned_header(row_of(page, "+10"))
+            .map(|pinned| pinned.header_row),
+        Some(header)
+    );
     assert_eq!(pinned_at(page, row_of(page, "end")), None, "the box ends");
     assert_eq!(
         pinned_at(page, row_of(page, "footer")),

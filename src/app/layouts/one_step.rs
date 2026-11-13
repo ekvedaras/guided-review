@@ -86,14 +86,14 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight, Intent,
-    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment,
-    ReadProgress, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep,
-    Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, ViewSwitch, WindowMoment,
+    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, CodeLink, Command, CommentBox,
+    CommentGesture, CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight,
+    Intent, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place,
+    QueuedComment, ReadProgress, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
+    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
+    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
+    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
+    Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1606,6 +1606,16 @@ impl OneStepLayout {
         if pinned.symbol.is_some() {
             label.symbol = pinned.symbol;
         }
+        let header = PieceHeader::new(label, pinned.header.repin_label, Vec::new()).pinned();
+        let header = match pinned.header.fold.clone() {
+            Some(fold) => header.with_fold_toggle(Self::box_fold_toggle(
+                fold,
+                "pinned-fold-box",
+                Some(pinned.header_row),
+                cx,
+            )),
+            None => header,
+        };
         let colors = Colors::active(cx);
         Some(
             div()
@@ -1615,8 +1625,49 @@ impl OneStepLayout {
                 .right_0()
                 .px_6()
                 .bg(colors.background)
-                .child(PieceHeader::new(label, pinned.header.repin_label, Vec::new()).pinned()),
+                .child(header),
         )
+    }
+
+    /// The chevron that opens or folds a file box. Folded from the pinned header, the box's own
+    /// header is scrolled to, so the reader stays at the box they folded.
+    fn box_fold_toggle(
+        fold: BoxFold,
+        id: &str,
+        header_row: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let colors = Colors::active(cx);
+        div()
+            .id(SharedString::from(format!("{id}-{}", fold.path)))
+            .flex_none()
+            .w(px(14.))
+            .h(px(14.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(INNER_RADIUS))
+            .cursor_pointer()
+            .hover(|chevron| chevron.bg(colors.hover))
+            .active(|chevron| chevron.bg(colors.pressed))
+            .child(turn_to(
+                sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                SharedString::from(format!("{id}-chevron")),
+                !fold.is_folded,
+                1.,
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| {
+                    review.toggle_box_fold(&fold.step, &fold.path);
+                });
+                if let Some(row) = header_row {
+                    // From the row above, so the step bar does not cover the header.
+                    this.screen_list.scroll_to(ListOffset {
+                        item_ix: row.saturating_sub(1),
+                        offset_in_item: Pixels::ZERO,
+                    });
+                }
+            }))
     }
 
     /// Where the view is on the page, as a thumb on its right edge that drags the page. A press on
@@ -1874,31 +1925,7 @@ impl OneStepLayout {
                 .closing_its_box(edges.closes);
                 match heading.fold.clone() {
                     Some(fold) => header
-                        .with_fold_toggle(
-                            div()
-                                .id(SharedString::from(format!("fold-box-{}", fold.path)))
-                                .flex_none()
-                                .w(px(14.))
-                                .h(px(14.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(INNER_RADIUS))
-                                .cursor_pointer()
-                                .hover(|chevron| chevron.bg(colors.hover))
-                                .active(|chevron| chevron.bg(colors.pressed))
-                                .child(turn_to(
-                                    sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
-                                    "fold-box-chevron",
-                                    !fold.is_folded,
-                                    1.,
-                                ))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.change_review(cx, |review| {
-                                        review.toggle_box_fold(&fold.step, &fold.path);
-                                    });
-                                })),
-                        )
+                        .with_fold_toggle(Self::box_fold_toggle(fold, "fold-box", None, cx))
                         .into_any_element(),
                     None => header.into_any_element(),
                 }
