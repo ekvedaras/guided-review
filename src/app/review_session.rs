@@ -25,11 +25,10 @@ use crate::app::updater::release_install_in_the_way;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
-    FinishResult, GitHubError, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
-    OldHead, OutageCause, Problem, ProblemKind, Read, RefreshBrief, RepinnedTour, Review,
-    ReviewChange, ReviewVerdict, Screen, SendMode, TextBox, ThreadAction, ThreadActionResult,
-    ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, WorkPorts,
-    announcements, line_count,
+    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Problem,
+    RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen, SendMode, TextBox,
+    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
+    TourReloader, TourRepinner, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -594,6 +593,8 @@ impl ReviewSession {
     /// Three reads that fail the way a GitHub outage fails them, through the review's own path.
     #[cfg(feature = "snapshots")]
     pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
+        use crate::viewer::{GitHubError, OutageCause, Read};
+
         let outage = GitHubError::NotAnswering(OutageCause::ServerError(503));
         self.review.could_not_read(Read::PrHead, &outage);
         self.review.could_not_read(Read::PrDescription, &outage);
@@ -603,7 +604,8 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     pub fn unstage_outage(&mut self, cx: &mut Context<Self>) {
-        self.review.clear_problem(ProblemKind::GitHubNotAnswering);
+        self.review
+            .clear_problem(crate::viewer::ProblemKind::GitHubNotAnswering);
         self.show_problems(cx);
     }
 
