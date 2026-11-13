@@ -152,6 +152,7 @@ fn a_finished_review_reads_the_last_review_again() {
     let mut review = pull.open();
     review.viewer_authorship_is(false);
     let github = pull.github();
+    drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
     let request = review
         .finish_review_request(guided_review::viewer::ReviewVerdict::Approve, "")
         .unwrap();

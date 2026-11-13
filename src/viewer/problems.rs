@@ -40,6 +40,8 @@ pub enum Problem {
     SwitchFailed(String),
     /// Show agent was clicked and the terminal did not come up.
     ShowAgentFailed(String),
+    /// GitHub refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
+    ReviewingMarkNotChanged(String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
     ReleaseInstallInTheWay(InTheWay),
 }
@@ -76,6 +78,8 @@ pub enum ProblemKind {
     SwitchFailed,
     /// Cleared by the next Show agent that brings the terminal up.
     ShowAgentFailed,
+    /// Cleared by the next change of the 👀 on the PR that goes through.
+    ReviewingMarkNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
     ReleaseInstallInTheWay,
 }
@@ -97,6 +101,7 @@ impl Problem {
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
+            Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
         }
     }
@@ -278,6 +283,10 @@ impl fmt::Display for Problem {
             Self::ShowAgentFailed(reason) => {
                 write!(formatter, "Could not show the agent: {reason}")
             }
+            Self::ReviewingMarkNotChanged(reason) => write!(
+                formatter,
+                "The 👀 on the PR may tell its author the wrong thing; trying again when the window comes to the front: {reason}"
+            ),
             Self::ReleaseInstallInTheWay(InTheWay::Runs {
                 binary,
                 release_install,

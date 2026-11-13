@@ -68,6 +68,8 @@
 
 **Seen mark**: The 👀 the viewer puts on the reviewer's comment on GitHub when its hand-off is delivered to the tour agent. The agent's first reply takes it off; so does the viewer when the agent ends without answering. When GitHub refuses either, the line under the thread says so.
 
+**Reviewing mark**: The 👀 the viewer puts on the PR itself while the reviewer reviews it, so its author sees someone is on it. It goes on when a review opens on a PR that is not the reviewer's own, unless the reviewer's last review was sent on the tour's head (opened again only to look), and comes off once a review of the reviewer's is sent after that, from the app or from the GitHub web page. When GitHub refuses either, the sidebar says so, and it is tried again when the window comes to the front. Avoid: eyes reaction, seen mark (that is the 👀 on a comment).
+
 **PR notes**: The `Notes` section of the PR description. A step's diagram, a picture of the reviewer summary, or the whole reviewer summary can be added to it, each folded in a `<details>`, from the button under it; a description with no such section gets one at its end. Pictures are uploaded to GitHub first, where only those who can see the repository can open them; the summary's links to other files of the tour's folder become plain text. A hidden comment in the fold tells the app a picture or summary is there already.
 
 **Shortcuts sheet**: The overlay that lists every key the app answers, by heading (Navigate, Read, Comment, View, App), opened with `?`. It reads the same table the keys are bound from. Avoid: cheat sheet, help.

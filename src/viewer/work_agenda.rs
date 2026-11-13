@@ -13,6 +13,8 @@ use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort};
+use super::reactions::ReactionChange;
+use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
 use super::tour_agent::{TourAgentState, TourAgents};
 use super::viewed_sync::{SyncOutcome, SyncRequest};
@@ -35,6 +37,7 @@ pub enum WorkKind {
     PullPendingReview,
     PullLastReview,
     SendQueuedComment,
+    ChangeReviewingMark,
     TakeSeenMarksOff,
     DeliverHandOff,
     CheckAgentLink,
@@ -52,7 +55,7 @@ enum WhileRunning {
 
 impl WorkKind {
     /// What a window coming to the front reads and sends again.
-    pub(super) const PULLS_FROM_GITHUB: [Self; 8] = [
+    pub(super) const PULLS_FROM_GITHUB: [Self; 9] = [
         Self::CheckPrHead,
         Self::CheckWorkingCopy,
         Self::PullPrDescription,
@@ -61,11 +64,12 @@ impl WorkKind {
         Self::PullPendingReview,
         Self::PullLastReview,
         Self::SendQueuedComment,
+        Self::ChangeReviewingMark,
     ];
 
     fn while_running(self) -> WhileRunning {
         match self {
-            Self::SyncViewed => WhileRunning::RunsAgainAfter,
+            Self::SyncViewed | Self::ChangeReviewingMark => WhileRunning::RunsAgainAfter,
             Self::SendQueuedComment
             | Self::TakeSeenMarksOff
             | Self::DeliverHandOff
@@ -203,10 +207,17 @@ pub(super) enum Job {
     CheckWorkingCopy(Sha),
     PullPrDescription(PullRequestUrl),
     SyncViewed(SyncRequest),
-    PullThreads { pr: PullRequestUrl, head: Sha },
+    PullThreads {
+        pr: PullRequestUrl,
+        head: Sha,
+    },
     PullPendingReview(PullRequestUrl),
     PullLastReview(PullRequestUrl),
     SendQueuedComment(CommentRequest),
+    ChangeReviewingMark {
+        pr: PullRequestUrl,
+        change: ReactionChange,
+    },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
     CheckAgentLink(PullRequestUrl),
@@ -223,6 +234,7 @@ impl Job {
             Self::PullPendingReview(_) => WorkKind::PullPendingReview,
             Self::PullLastReview(_) => WorkKind::PullLastReview,
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
+            Self::ChangeReviewingMark { .. } => WorkKind::ChangeReviewingMark,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
             Self::DeliverHandOff(_) => WorkKind::DeliverHandOff,
             Self::CheckAgentLink(_) => WorkKind::CheckAgentLink,
@@ -258,6 +270,10 @@ impl Work {
             },
             Job::PullLastReview(pr) => Done::LastReview(github.viewer_latest_review(&pr)),
             Job::SendQueuedComment(request) => Done::QueuedComment(request.run(github)),
+            Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
+                change,
+                result: github.set_pull_request_reaction(&pr, REVIEWING_MARK, change),
+            },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
                 requests
                     .into_iter()
@@ -294,6 +310,10 @@ pub(super) enum Done {
     },
     LastReview(Result<Option<SubmittedReview>, GitHubError>),
     QueuedComment(CommentOutcome),
+    ReviewingMark {
+        change: ReactionChange,
+        result: Result<(), GitHubError>,
+    },
     SeenMarksOff(Vec<SeenMarkOffOutcome>),
     Delivery(DeliveryOutcome),
     AgentLink(TourAgentState),

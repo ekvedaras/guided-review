@@ -9,10 +9,10 @@ use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, CommentId,
     CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
-    RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId,
-    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
+    ReactionChange, ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -59,6 +59,11 @@ pub enum GitHubCall {
     },
     SetReaction {
         comment_id: CommentId,
+        reaction: Reaction,
+        change: ReactionChange,
+    },
+    SetPullRequestReaction {
+        pr: PullRequestUrl,
         reaction: Reaction,
         change: ReactionChange,
     },
@@ -320,6 +325,23 @@ impl PullRequestDescriptionPort for FakeGitHub {
         });
         self.fail_if_connection_lost()?;
         body.clone_into(&mut self.description.lock().unwrap());
+        Ok(())
+    }
+}
+
+impl PullRequestReactionsPort for FakeGitHub {
+    fn set_pull_request_reaction(
+        &self,
+        pr: &PullRequestUrl,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), GitHubError> {
+        self.sent.record(GitHubCall::SetPullRequestReaction {
+            pr: pr.clone(),
+            reaction,
+            change,
+        });
+        self.fail_if_connection_lost()?;
         Ok(())
     }
 }

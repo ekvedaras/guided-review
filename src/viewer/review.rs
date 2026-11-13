@@ -44,8 +44,10 @@ use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::problems::{Problem, ProblemKind, Problems, Read};
+use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
+use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
 use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
@@ -230,6 +232,7 @@ pub struct ReviewCore {
     pr_notes: PrNotes,
     ask_desk: AskDesk,
     work: WorkAgenda,
+    reviewing_mark: ReviewingMark,
     /// The last news of the tour agent said tour agents cannot be reached. Not saved.
     agent_link_is_off: bool,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
@@ -352,6 +355,7 @@ impl ReviewCore {
         let tour_files = state_file.tour_files().to_owned();
         let pr: PullRequestUrl = tour.pr.parse()?;
         let (base, head) = (tour.base.clone(), tour.head.clone());
+        let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
         let steps = tour
             .steps()
@@ -411,6 +415,7 @@ impl ReviewCore {
             pr_notes: PrNotes::default(),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
+            reviewing_mark,
             agent_link_is_off: false,
             seen_end_of: None,
             tour_files,
@@ -1015,7 +1020,27 @@ impl ReviewCore {
     pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
         self.clear_problem(ProblemKind::NotRead(Read::LastReview));
         self.github_answered(Affected::LastReview);
+        self.reviewing_mark.last_review_is(last.as_ref());
         self.last_review = last;
+        self.want_reviewing_mark_sent();
+    }
+
+    fn want_reviewing_mark_sent(&mut self) {
+        if self.reviewing_mark.change_to_send().is_some() {
+            self.work.want(WorkKind::ChangeReviewingMark);
+        }
+    }
+
+    fn reviewing_mark_landed(&mut self, change: ReactionChange, result: Result<(), GitHubError>) {
+        match result {
+            Ok(()) => {
+                self.clear_problem(ProblemKind::ReviewingMarkNotChanged);
+                self.reviewing_mark.sent(change);
+            }
+            Err(error) => {
+                self.raise_problem(Problem::ReviewingMarkNotChanged(error.short_reason()));
+            }
+        }
     }
 
     /// The viewer's latest sent review, from this app or the GitHub web page.
@@ -1144,6 +1169,8 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::NotRead(Read::Authorship));
         self.github_answered(Affected::Authorship);
         self.comment_desk.viewer_authorship_is(authored);
+        self.reviewing_mark.viewer_authorship_is(authored);
+        self.want_reviewing_mark_sent();
     }
 
     /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.

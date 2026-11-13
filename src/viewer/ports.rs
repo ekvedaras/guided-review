@@ -35,6 +35,16 @@ pub trait PullRequestDescriptionPort: Send + Sync {
     fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
 }
 
+/// The viewer's reactions on the PR itself, which GitHub shows under its description.
+pub trait PullRequestReactionsPort: Send + Sync {
+    fn set_pull_request_reaction(
+        &self,
+        pr: &PullRequestUrl,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), GitHubError>;
+}
+
 pub trait PictureUploadPort: Send + Sync {
     /// The address GitHub keeps the picture at, open only to those who can see the PR's repository.
     fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String>;
@@ -120,6 +130,7 @@ pub trait ReviewWritesPort: Send + Sync {
 pub trait GitHubPort:
     PullRequestTipsPort
     + PullRequestDescriptionPort
+    + PullRequestReactionsPort
     + PictureUploadPort
     + ViewedFilesPort
     + ReviewThreadsPort
@@ -130,6 +141,7 @@ pub trait GitHubPort:
 impl<T> GitHubPort for T where
     T: PullRequestTipsPort
         + PullRequestDescriptionPort
+        + PullRequestReactionsPort
         + PictureUploadPort
         + ViewedFilesPort
         + ReviewThreadsPort

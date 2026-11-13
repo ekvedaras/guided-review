@@ -15,10 +15,10 @@ use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
     CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestTipsPort, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
-    SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState, percent_encode_path,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
+    ReactionChange, ReactionCount, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -151,6 +151,27 @@ impl GitHub {
         self.pull_request_ids
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// `subject_id` is the GitHub node id of what is reacted to: a comment or a PR.
+    fn change_reaction(
+        &self,
+        subject_id: &str,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), GitHubError> {
+        let mutation = match change {
+            ReactionChange::Add => "addReaction",
+            ReactionChange::Remove => "removeReaction",
+        };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            &serde_json::json!({"input": {"subjectId": subject_id, "content": reaction.github_name()}}),
+        )?;
+        Ok(())
     }
 
     fn pull_request_id(&self, pr: &PullRequestUrl) -> Result<String, GitHubError> {
@@ -456,6 +477,19 @@ struct UploadedJson {
 
 /// GitHub's own drag-and-drop store, so the picture is seen only by those who can see the repository.
 /// It is not in GitHub's documented API, but it takes the token `gh` holds.
+impl PullRequestReactionsPort for GitHub {
+    fn set_pull_request_reaction(
+        &self,
+        pr: &PullRequestUrl,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), GitHubError> {
+        let id = self.pull_request_id(pr)?;
+        self.change_reaction(&id, reaction, change)
+            .map_err(|error| error.context(format!("could not change the reaction on {pr}")))
+    }
+}
+
 impl PictureUploadPort for GitHub {
     fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String> {
         let name = picture
@@ -649,19 +683,8 @@ impl ReviewThreadsPort for GitHub {
         reaction: Reaction,
         change: ReactionChange,
     ) -> Result<(), GitHubError> {
-        let mutation = match change {
-            ReactionChange::Add => "addReaction",
-            ReactionChange::Remove => "removeReaction",
-        };
-        self.graphql(
-            &format!(
-                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
-                capitalized(mutation)
-            ),
-            &serde_json::json!({"input": {"subjectId": comment_id, "content": reaction.github_name()}}),
-        )
-        .map_err(|error| error.context("could not change the reaction"))?;
-        Ok(())
+        self.change_reaction(comment_id.as_str(), reaction, change)
+            .map_err(|error| error.context("could not change the reaction"))
     }
 
     fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), GitHubError> {

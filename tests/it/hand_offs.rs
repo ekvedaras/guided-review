@@ -1278,6 +1278,9 @@ fn a_reply_of_the_agent_reads_the_threads_and_the_pending_review_again() {
     let pull = Pull::new();
     let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
     let (mut review, id) = delivered_one(&pull, &github);
+    let agents = agents_of(&Arc::new(FakeTourAgent::new()));
+    review.viewer_authorship_is(false);
+    pull.drive(&mut review, &agents, &github);
     let done = reply_request(&pull, id, "Because of the loop.")
         .unwrap()
         .run(&github)
@@ -1285,11 +1288,7 @@ fn a_reply_of_the_agent_reads_the_threads_and_the_pending_review_again() {
     let calls_before = pull.sent.github_calls().len();
 
     replied(&mut review, id, done.replied());
-    let ran = pull.drive(
-        &mut review,
-        &agents_of(&Arc::new(FakeTourAgent::new())),
-        &github,
-    );
+    let ran = pull.drive(&mut review, &agents, &github);
 
     assert_eq!(
         kinds(&ran),

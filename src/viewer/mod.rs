@@ -40,6 +40,7 @@ mod rendered_view;
 mod reopen_after_save;
 mod review;
 mod review_state;
+mod reviewing_mark;
 mod row_selection;
 mod saved_state;
 mod screen_travel;
@@ -116,8 +117,9 @@ pub use page::{
 };
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
-    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, RefreshWriter,
+    Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile,
+    ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
