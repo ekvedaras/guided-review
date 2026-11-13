@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Release notes from the change notes in changes/: every note added in the range, grouped by kind,
-# then the commit subjects folded away for the maintainer, ending on a compare link.
+# each ending on the PR that added it and its author, then the commit subjects folded away for the
+# maintainer, ending on a compare link.
 # Usage: scripts/release-notes <from-tag-or-empty> <to-ref>   (empty from = every note up to <to-ref>)
 set -euo pipefail
 
@@ -9,7 +10,8 @@ to="${2:?usage: scripts/release-notes <from-tag-or-empty> <to-ref>}"
 
 cd "$(dirname "$0")/.."
 
-repo_url="https://github.com/${GITHUB_REPOSITORY:-ekvedaras/guided-review}"
+repo="${GITHUB_REPOSITORY:-ekvedaras/guided-review}"
+repo_url="https://github.com/$repo"
 range="${from:+$from..}$to"
 
 kinds="added changed fixed removed"
@@ -23,6 +25,24 @@ kind_heading() {
     esac
 }
 
+# "(#43 by @login)" for the merged PR that added the note, else "(<sha> by @login)" for its commit.
+# Nothing when GitHub cannot be asked, so a preview works offline.
+credit() {
+    local sha by
+    sha=$(git log --diff-filter=A --format=%H -1 "$to" -- "$1")
+    if ! by=$(gh api "repos/$repo/commits/$sha/pulls" \
+        --jq 'first(.[] | select(.merged_at != null)) | "#\(.number) by @\(.user.login)"' 2>/dev/null); then
+        by=""
+    fi
+    if [ -z "$by" ]; then
+        if ! by=$(gh api "repos/$repo/commits/$sha" --jq '.author.login // empty' 2>/dev/null); then
+            by=""
+        fi
+        if [ -n "$by" ]; then by="${sha:0:7} by @$by"; fi
+    fi
+    if [ -n "$by" ]; then echo " ($by)"; fi
+}
+
 notes=$(scripts/change-notes-in "$from" "$to")
 
 printed_any=false
@@ -33,7 +53,8 @@ for kind in $kinds; do
     echo "## $(kind_heading "$kind")"
     echo
     for note in $of_kind; do
-        git show "$to:$note" | awk 'NR == 1 { print "- " $0; next } { print "  " $0 }' | sed 's/^  $//'
+        git show "$to:$note" | sed -e '/^$/d' -e '$s/$/'"$(credit "$note" | sed 's/[&/\\]/\\&/g')"'/' |
+            awk 'NR == 1 { print "- " $0; next } { print "  " $0 }'
     done
     printed_any=true
 done
