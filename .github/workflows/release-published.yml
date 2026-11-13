@@ -5,6 +5,11 @@ name: Release published
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose notes to delete, like v0.9.0
+        required: true
 
 permissions:
   contents: write
@@ -18,14 +23,26 @@ jobs:
           ref: main
           fetch-depth: 0
       - env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        # The commit goes through the API, not git push: GitHub signs it, and main requires signed commits.
         run: |
           notes=$(scripts/change-notes-in "$(scripts/previous-release-tag "$TAG")" "$TAG")
-          [ -n "$notes" ] || exit 0
-          for note in $notes; do
-            if [ -f "$note" ]; then git rm -q "$note"; fi
-          done
-          git diff --cached --quiet && exit 0
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -qm "changes: the notes released in $TAG are gone from changes/; they stay readable at the tag"
-          git push origin main
+          deletions=$(for note in $notes; do
+            if [ -f "$note" ]; then jq -n --arg path "$note" '{path: $path}'; fi
+          done | jq -s .)
+          [ "$deletions" != "[]" ] || exit 0
+          jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$(git rev-parse HEAD)" \
+            --arg headline "changes: the notes released in $TAG are gone from changes/; they stay readable at the tag" \
+            --argjson deletions "$deletions" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { url } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: "main"},
+                expectedHeadOid: $head,
+                message: {headline: $headline},
+                fileChanges: {deletions: $deletions}
+              }}
+            }' | gh api graphql --input -
