@@ -29,7 +29,7 @@ One edge per level. A thing gets a border or a change of ground, rarely both, an
 - Bands under the title bar (`notice_band`) are a tone's ground with an edge below, across the page column.
 - A control that can be pushed (`Secondary` button, segment thumb) is raised: `raised` gradient, `border`, `control_shadow`. A `Ghost` button has no edge until hovered.
 
-2026-11-13: the maintainer asked the "Writing the tour" screen to read as one page: the sidebar column, the title bar and the page all on the page's `background` token (the review window's root ground is `background` instead of `sidebar_ground` while a tour is written), and no shadow under the header bar. That shadow was the review page underneath bleeding up into the title bar, so the page content is not built while the loading screen is up (commit SHA_HERE).
+2026-11-13: the maintainer asked the "Writing the tour" screen to read as one page: the sidebar column, the title bar and the page all on the page's `background` token (the review window's root ground is `background` instead of `sidebar_ground` while a tour is written), and no shadow under the header bar. That shadow was the review page underneath bleeding up into the title bar, so the page content is not built while the loading screen is up (commit 8b5a2fe).
 
 ## Accent
 
