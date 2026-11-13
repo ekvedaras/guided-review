@@ -78,6 +78,7 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
+use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};

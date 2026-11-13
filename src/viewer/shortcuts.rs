@@ -131,7 +131,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 25] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
