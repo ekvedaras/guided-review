@@ -1,0 +1,1 @@
+The PR switcher shows your pull requests at once on start, from the last list GitHub gave, and brings it up to date in the background. When the new list comes in, the PR under the pointer, or the selected one, stays on the same row, so a click does not land on a different PR.

@@ -45,8 +45,8 @@ use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
-    RelevantPullRequestsPort, ReviewStateFile, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
-    TourAgents, TourFact, WriteDecision, keystroke,
+    RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
+    ShowSettings, ShowSwitcher, ShowWriting, TourAgents, TourFact, WriteDecision, keystroke,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -139,7 +139,8 @@ fn pr_switching(
         home: home.to_path_buf(),
         active,
         agents: Arc::new(HcTourAgents::new()),
-        list: cx.new(|_| PrSwitcher::default()),
+        list: cx
+            .new(|_| PrSwitcher::remembering_in(RememberedPullRequestsFile::in_home(home), home)),
         show: Arc::new(move |pr| {
             let (reply, _) = std::sync::mpsc::channel();
             let open = open_request_of(&home_folder, &pr);

@@ -318,6 +318,15 @@ impl PrSwitcherView {
         )
         .h(px(36.))
         .when(!has_tour, |row| row.text_color(colors.muted_text))
+        .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            this.switching.list.update(cx, |list, _| {
+                if *is_hovered {
+                    list.hover(index);
+                } else {
+                    list.unhover(index);
+                }
+            });
+        }))
         .on_click(cx.listener(move |this, _, window, cx| {
             this.switching.list.update(cx, |list, _| list.select(index));
             this.pick(window, cx);
