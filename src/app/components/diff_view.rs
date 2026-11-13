@@ -383,6 +383,8 @@ pub fn piece_row(colors: &Colors) -> Div {
         .border_color(colors.subtle_border)
 }
 
+pub const PIECE_HEADER_HEIGHT: Pixels = px(34.);
+
 /// The top of a piece box: the piece's name, its re-pin label, and its buttons (open the code, ask).
 #[derive(IntoElement)]
 pub struct PieceHeader {
@@ -433,7 +435,7 @@ impl RenderOnce for PieceHeader {
         });
         div()
             .w_full()
-            .h(px(34.))
+            .h(PIECE_HEADER_HEIGHT)
             .flex()
             .items_center()
             .px_3()

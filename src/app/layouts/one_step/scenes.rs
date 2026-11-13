@@ -52,10 +52,11 @@ enum Scene {
     AgentLinkOff,
     GitHubOutage,
     RefreshRunning,
+    PinnedFileHeader,
 }
 
 impl Scene {
-    const ALL: [Self; 24] = [
+    const ALL: [Self; 25] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -80,6 +81,7 @@ impl Scene {
         Self::AgentLinkOff,
         Self::GitHubOutage,
         Self::RefreshRunning,
+        Self::PinnedFileHeader,
     ];
 
     fn file_name(self) -> &'static str {
@@ -108,6 +110,7 @@ impl Scene {
             Self::AgentLinkOff => "42-agent-link-off",
             Self::GitHubOutage => "44-github-outage",
             Self::RefreshRunning => "45-refresh-running",
+            Self::PinnedFileHeader => "46-pinned-file-header",
         }
     }
 }
@@ -274,6 +277,15 @@ impl OneStepLayout {
         }
     }
 
+    /// A symbol's label with code under it, so the pinned header has a symbol to name.
+    fn first_marker_over_code(&self, cx: &App) -> Option<usize> {
+        let rows = self.session.read(cx).rows();
+        (0..rows.len()).find(|index| {
+            matches!(rows.row(*index), Some(PageRow::PieceMarker(_)))
+                && matches!(rows.row(index + 1), Some(PageRow::Line(_)))
+        })
+    }
+
     fn row_of_box(&self, path: &FilePath, cx: &App) -> Option<usize> {
         let rows = self.session.read(cx).rows();
         (0..rows.len()).find(|index| {
@@ -354,6 +366,12 @@ impl OneStepLayout {
             Scene::StickyStepBar => {
                 let rows = self.screen_list.item_count();
                 self.scroll_to_row(rows / 2);
+            }
+            Scene::PinnedFileHeader => {
+                let row = self
+                    .first_marker_over_code(cx)
+                    .unwrap_or_else(|| self.screen_list.item_count() / 2);
+                self.scroll_to_row(row);
             }
             Scene::Toasts => {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
@@ -470,7 +488,7 @@ impl OneStepLayout {
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.close(window, cx)),
-            Scene::StickyStepBar => self.scroll_to_row(0),
+            Scene::StickyStepBar | Scene::PinnedFileHeader => self.scroll_to_row(0),
             Scene::Toasts => {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);

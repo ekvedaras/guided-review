@@ -33,9 +33,9 @@ use crate::app::components::comment_composer::{
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
-    OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row, hung_row, hunk_gap,
-    no_change_since_read_row, only_whitespace_row, piece_end, rendered_block_row,
-    rendered_file_waiting_row,
+    OnScrollX, PIECE_HEADER_HEIGHT, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row,
+    hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
+    rendered_block_row, rendered_file_waiting_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -1552,7 +1552,7 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let bar = div()
             .w_full()
-            .h(px(44.))
+            .h(STICKY_STEP_BAR_HEIGHT)
             .px_6()
             .flex()
             .items_center()
@@ -1583,6 +1583,53 @@ impl OneStepLayout {
             Edge::Top,
             BANNER_DROP,
         )))
+    }
+
+    /// The header of the file box the reader is in stays under the step bar while its code
+    /// scrolls under it, naming the symbol there. It takes over when the real header reaches it.
+    fn pinned_file_header(
+        &self,
+        under: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let pin_line = self.screen_list.viewport_bounds().top() + under + PIECE_HEADER_HEIGHT;
+        let pinned = self
+            .session
+            .read(cx)
+            .rows()
+            .pinned_header(self.row_at(pin_line))?;
+        let mut label = pinned.header.label.clone();
+        if pinned.symbol.is_some() {
+            label.symbol = pinned.symbol;
+        }
+        let colors = Colors::active(cx);
+        Some(
+            div()
+                .absolute()
+                .top(under)
+                .left_0()
+                .right_0()
+                .px_6()
+                .bg(colors.background)
+                .child(PieceHeader::new(
+                    label,
+                    pinned.header.repin_label,
+                    Vec::new(),
+                )),
+        )
+    }
+
+    /// The first row of the screen whose bottom is below `y`, in window pixels.
+    fn row_at(&self, y: Pixels) -> usize {
+        let mut row = self.screen_list.logical_scroll_top().item_ix;
+        while self
+            .screen_list
+            .bounds_for_item(row)
+            .is_some_and(|bounds| bounds.bottom() <= y)
+        {
+            row += 1;
+        }
+        row
     }
 
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
@@ -2162,6 +2209,7 @@ const SUMMARY_LINE: Pixels = px(26.);
 const PAGE_WASH_HEIGHT: Pixels = px(184.);
 /// The list's top padding, which the wash reaches up through to the column's top edge.
 const PAGE_TOP: Pixels = px(24.);
+const STICKY_STEP_BAR_HEIGHT: Pixels = px(44.);
 
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
@@ -2956,6 +3004,16 @@ impl Render for OneStepLayout {
             expect(unused_mut, reason = "the gallery picture has no step")
         )]
         let mut sticky_bar = self.sticky_step_bar(cx);
+        let pinned_header_top = if sticky_bar.is_some() {
+            STICKY_STEP_BAR_HEIGHT
+        } else {
+            Pixels::ZERO
+        };
+        #[cfg_attr(
+            not(feature = "snapshots"),
+            expect(unused_mut, reason = "the gallery picture has no code")
+        )]
+        let mut pinned_header = self.pinned_file_header(pinned_header_top, cx);
         let screen = div().size_full().child(
             list(
                 self.screen_list.clone(),
@@ -2983,6 +3041,7 @@ impl Render for OneStepLayout {
             .is_some_and(|staged| staged.0)
         {
             sticky_bar = None;
+            pinned_header = None;
             gallery::gallery(&colors)
         } else {
             screen.into_any_element()
@@ -2992,6 +3051,7 @@ impl Render for OneStepLayout {
             .flex_1()
             .min_h_0()
             .child(screen)
+            .children(pinned_header)
             .children(sticky_bar);
         div()
             .key_context(key_context.as_str())

@@ -52,6 +52,14 @@ pub struct SelectedRows {
     path: FilePath,
 }
 
+/// The header of a file block that has scrolled away above the view, kept in sight.
+pub struct PinnedHeader {
+    pub header: Arc<PieceHeading>,
+    /// The symbol of the piece the top row is in, in a block of several pieces; a block of one
+    /// piece names its symbol in its own header.
+    pub symbol: Option<Arc<str>>,
+}
+
 impl SelectedRows {
     pub fn contains(&self, row: usize, line: &LineLocation) -> bool {
         self.rows.contains(&row) && line.path == self.path
@@ -262,6 +270,34 @@ impl Page {
             PageRow::Toolbar(toolbar) => toolbar.ask.as_ref(),
             _ => None,
         })
+    }
+
+    /// What stays pinned at the top while `top_row` is the first row in view: the header of its file
+    /// block, once that header has scrolled away, with the symbol the reader is in.
+    pub fn pinned_header(&self, top_row: usize) -> Option<PinnedHeader> {
+        if matches!(
+            self.rows.get(top_row)?,
+            PageRow::PieceHeader(_) | PageRow::PieceEnd
+        ) {
+            return None;
+        }
+        let mut symbol = None;
+        for row in self.rows.get(..top_row)?.iter().rev() {
+            match row {
+                PageRow::PieceEnd => return None,
+                PageRow::PieceMarker(marker) if symbol.is_none() => {
+                    symbol = Some(marker.label.symbol.clone());
+                }
+                PageRow::PieceHeader(header) => {
+                    return Some(PinnedHeader {
+                        header: Arc::clone(header),
+                        symbol: symbol.flatten(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// The heading of a step page.
