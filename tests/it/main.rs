@@ -21,6 +21,7 @@ mod app_window;
 mod ask;
 mod ask_adapters;
 mod ask_lifecycle;
+mod avatars;
 mod check;
 mod code_links;
 mod code_source;

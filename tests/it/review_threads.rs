@@ -87,6 +87,7 @@ fn step(id: &str, pieces: Value) -> Value {
 
 fn comment(author: &str, is_bot: bool, body: &str) -> ThreadComment {
     ThreadComment {
+        avatar_url: None,
         id: CommentId::new(&format!("C_{body}")),
         reactions: Vec::new(),
         author: author.into(),

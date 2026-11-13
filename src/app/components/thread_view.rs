@@ -6,9 +6,10 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
-    deferred, div, px,
+    deferred, div, img, px,
 };
 
+use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::viewer::{
     Audience, CommentId, HandOffId, Reaction, ReactionChange, ReactionCount, SendMode,
@@ -813,6 +814,42 @@ impl ThreadElement {
 }
 
 /// A line that says the thread is waiting on GitHub, with the dot that breathes while it waits.
+/// The author's picture as a circle, or their first letter in one while it downloads or when it cannot.
+fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement {
+    let circle = div()
+        .flex_none()
+        .size(px(AVATAR_SIZE))
+        .rounded_full()
+        .overflow_hidden();
+    let picture = comment
+        .avatar_url
+        .as_deref()
+        .and_then(|url| AvatarPictures::picture(url, cx));
+    match picture {
+        Some(picture) => circle
+            .child(img(picture).size_full().rounded_full())
+            .into_any_element(),
+        None => circle
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(colors.subtle_border)
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(
+                comment
+                    .author
+                    .chars()
+                    .next()
+                    .map(|first| first.to_uppercase().collect::<String>())
+                    .unwrap_or_default(),
+            )
+            .into_any_element(),
+    }
+}
+
+const AVATAR_SIZE: f32 = 20.;
+
 fn busy_line(colors: &Colors, text: &'static str) -> gpui::Div {
     div()
         .flex()
@@ -918,6 +955,7 @@ impl RenderOnce for ThreadElement {
                             .flex()
                             .items_center()
                             .gap_2()
+                            .child(avatar(&colors, comment, cx))
                             .child(
                                 div()
                                     .text_sm()

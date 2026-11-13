@@ -112,6 +112,7 @@ fn path() -> FilePath {
 
 fn comment(id: &str, author: &str, body: &str, reactions: Vec<ReactionCount>) -> ThreadComment {
     ThreadComment {
+        avatar_url: None,
         id: CommentId::new(id),
         author: author.to_owned(),
         is_bot: author.ends_with("[bot]"),

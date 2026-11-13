@@ -116,6 +116,7 @@ impl Pull {
 
 fn comment(id: &str, author: &str, body: &str) -> ThreadComment {
     ThreadComment {
+        avatar_url: None,
         id: CommentId::new(id),
         author: author.into(),
         is_bot: false,

@@ -28,6 +28,7 @@ fn thread_on_line_ten(body: &str) -> ReviewThread {
         original_start_line: None,
         original_commit: None,
         comments: vec![ThreadComment {
+            avatar_url: None,
             id: CommentId::new("C1"),
             author: "me".into(),
             is_bot: false,

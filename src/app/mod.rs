@@ -3,6 +3,7 @@
 
 mod active_session;
 pub mod assets;
+mod avatar_pictures;
 mod code_links;
 mod code_selection;
 pub mod components;
@@ -108,6 +109,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             bind_keys(cx);
             quit_on_cmd_q(cx);
             components::toast_stack::Toaster::install(cx);
+            avatar_pictures::AvatarPictures::install(cx);
             updater::Updates::install(&home, cx);
             word_keys::take_before_macos(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)

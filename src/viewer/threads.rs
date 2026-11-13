@@ -83,6 +83,8 @@ pub struct ReviewThread {
 pub struct ThreadComment {
     pub id: CommentId,
     pub author: String,
+    /// GitHub's address of the author's picture; `None` for a deleted account.
+    pub avatar_url: Option<String>,
     pub is_bot: bool,
     /// The viewer wrote it, so the viewer may edit it.
     pub by_viewer: bool,

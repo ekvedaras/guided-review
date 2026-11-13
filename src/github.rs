@@ -14,7 +14,7 @@ use crate::line_number::LineNumber;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
+    AvatarPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
     PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
     ReactionChange, ReactionCount, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
     ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
@@ -1039,7 +1039,7 @@ const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $numb
     reviewThreads(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes { id isResolved isOutdated path line startLine originalLine originalStartLine diffSide subjectType
-        comments(first: 50) { nodes { id url body viewerDidAuthor reactionGroups { content viewerHasReacted reactors { totalCount } } originalCommit { oid } author { login __typename } } } }
+        comments(first: 50) { nodes { id url body viewerDidAuthor reactionGroups { content viewerHasReacted reactors { totalCount } } originalCommit { oid } author { login __typename avatarUrl(size: 64) } } } }
     }
   } }
 }";
@@ -1135,6 +1135,8 @@ pub(crate) fn parse_review_threads(
     #[derive(Deserialize)]
     struct AuthorJson {
         login: String,
+        #[serde(default, rename = "avatarUrl")]
+        avatar_url: String,
         #[serde(rename = "__typename")]
         kind: String,
     }
@@ -1181,6 +1183,11 @@ pub(crate) fn parse_review_threads(
                     .nodes
                     .into_iter()
                     .map(|comment| ThreadComment {
+                        avatar_url: comment
+                            .author
+                            .as_ref()
+                            .map(|author| author.avatar_url.clone())
+                            .filter(|url| !url.is_empty()),
                         is_bot: comment
                             .author
                             .as_ref()
@@ -1209,4 +1216,25 @@ pub(crate) fn parse_review_threads(
             })
             .collect(),
     })
+}
+
+/// Avatars are public on GitHub's picture host, so no token goes along.
+pub struct GitHubAvatars;
+
+/// Far above a 64 px picture; a bigger answer is not an avatar.
+const AVATAR_LIMIT: u64 = 1024 * 1024;
+
+impl AvatarPort for GitHubAvatars {
+    fn avatar(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        let mut response = ureq::get(url)
+            .header("User-Agent", "guided-review")
+            .call()
+            .with_context(|| format!("could not download {url}"))?;
+        response
+            .body_mut()
+            .with_config()
+            .limit(AVATAR_LIMIT)
+            .read_to_vec()
+            .with_context(|| format!("could not download {url}"))
+    }
 }
