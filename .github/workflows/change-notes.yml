@@ -1,0 +1,28 @@
+name: Change notes
+
+# Its own workflow, since it also runs on `edited`: adding "changelog: none" to the PR body must
+# re-run this check, and must not re-run or cancel the macOS test in ci.yml.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: change-notes-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  change-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          BASE: origin/${{ github.base_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s\n' "$PR_BODY" | tr -d '\r' | grep -qix 'changelog: none'; then export CHANGELOG_NONE=1; fi
+          scripts/changes-check "$BASE" HEAD

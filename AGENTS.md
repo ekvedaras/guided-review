@@ -27,9 +27,13 @@ The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/gu
 
 `scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]` puts each scene side by side, before left. Markers number spots on the after picture, in its pixels: `{ "21-jump-palette": [{ "x": 640, "y": 260, "n": 1 }] }`.
 
+## Change notes
+
+Every change a user can see adds a note to `changes/`, in the same commit as the change: `changes/<added|changed|fixed|removed>-<slug>.md`, one or two sentences written for a user. A PR with many changes adds many notes. Read `changes/README.md` before writing one. The `change-notes` workflow fails a PR that touches `src/` or `skills/` with no new note; a line `changelog: none` in the PR body lets it pass.
+
 ## Releasing
 
-Bump the version in `Cargo.toml` and `Cargo.lock`, then push the tag `v<version>`. The release workflow builds the archives and creates a draft release whose notes are the commit subjects since the previous `v*` tag, grouped by prefix. Review the draft on GitHub and publish it. Preview the notes locally with `scripts/release-notes <from-tag-or-empty> <to-ref>`, e.g. `scripts/release-notes "" main`.
+Bump the version in `Cargo.toml` and `Cargo.lock`, then push the tag `v<version>`. The release workflow builds the archives and creates a draft release whose notes are the change notes added to `changes/` since the previous `v*` tag, grouped by kind, with the commit subjects folded under them. Review the draft on GitHub and publish it. Preview the notes locally with `scripts/release-notes <from-tag-or-empty> <to-ref>`, e.g. `scripts/release-notes "" main`.
 
 ## herdr
 

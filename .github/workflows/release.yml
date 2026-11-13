@@ -102,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # the notes read every commit since the previous v* tag
+          fetch-depth: 0 # the notes read every change note and commit since the previous v* tag
       - uses: actions/download-artifact@v4
         with:
           path: dist

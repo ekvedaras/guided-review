@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Release notes from commit subjects: grouped by the prefix before the first colon,
-# user-facing groups first, one bullet per commit, ending on a compare link.
-# Usage: scripts/release-notes <from-tag-or-empty> <to-ref>   (empty from = every commit up to <to-ref>)
+# Release notes from the change notes in changes/: every note added in the range, grouped by kind,
+# then the commit subjects folded away for the maintainer, ending on a compare link.
+# Usage: scripts/release-notes <from-tag-or-empty> <to-ref>   (empty from = every note up to <to-ref>)
 set -euo pipefail
 
 from="${1-}"
@@ -12,40 +12,53 @@ cd "$(dirname "$0")/.."
 repo_url="https://github.com/${GITHUB_REPOSITORY:-ekvedaras/guided-review}"
 range="${from:+$from..}$to"
 
-# Prefixes are matched case-insensitively. Lower rank prints first.
-git log --no-merges --format='%h%x09%s' "$range" |
-    awk -F'\t' '
-    function classify(prefix) {
-        p = tolower(prefix)
-        if (p == "app")                                   return "1\tApp"
-        if (p == "viewer")                                return "2\tViewer"
-        if (p == "cli")                                   return "3\tCLI"
-        if (p == "git")                                   return "4\tGit"
-        if (p ~ /^(hc|herdr)/)                            return "5\therdr"
-        if (p ~ /^(tour|skill)/)                          return "6\tTour skill"
-        if (p ~ /^(readme|docs|glossary)$/)               return "8\tDocs"
-        if (p ~ /^(build|github|ci|release|scripts)/)     return "9\tBuild and CI"
-        if (p ~ /^tests?$/)                               return "10\tTests"
-        if (p ~ /^wiki/)                                  return "11\tWiki"
-        if (p ~ /^agents/)                                return "12\tAGENTS"
-        return "7\tOther"
-    }
-    {
-        hash = $1
-        subject = $2
-        colon = index(subject, ":")
-        if (colon > 0) {
-            group = classify(substr(subject, 1, colon - 1))
-        } else {
-            group = classify("")
-        }
-        print group "\t" hash "\t" subject
-    }' |
-    sort -s -t$'\t' -k1,1n |
-    awk -F'\t' '
-    $2 != current { if (current != "") print ""; print "## " $2; print ""; current = $2 }
-    { print "- " $4 " (" $3 ")" }'
+kinds="added changed fixed removed"
 
+kind_heading() {
+    case "$1" in
+        added) echo "Added" ;;
+        changed) echo "Changed" ;;
+        fixed) echo "Fixed" ;;
+        removed) echo "Removed" ;;
+    esac
+}
+
+if [ -n "$from" ]; then
+    notes=$(git diff --name-only --diff-filter=A "$from" "$to" -- changes/)
+else
+    notes=$(git ls-tree -r --name-only "$to" -- changes/)
+fi
+notes=$(printf '%s\n' "$notes" | grep -v '^changes/README.md$' | grep . || true)
+
+for note in $notes; do
+    kind=$(basename "$note" | cut -d- -f1)
+    case " $kinds " in
+        *" $kind "*) ;;
+        *) echo "$note: the name must start with one of: $kinds" >&2; exit 1 ;;
+    esac
+done
+
+printed_any=false
+for kind in $kinds; do
+    of_kind=$(printf '%s\n' "$notes" | grep "^changes/$kind-" || true)
+    [ -z "$of_kind" ] && continue
+    $printed_any && echo
+    echo "## $(kind_heading "$kind")"
+    echo
+    for note in $of_kind; do
+        git show "$to:$note" | awk 'NR == 1 { print "- " $0; next } { print "  " $0 }' | sed 's/^  $//'
+    done
+    printed_any=true
+done
+
+$printed_any || echo "No changes users can see."
+
+echo
+echo "<details><summary>Commits</summary>"
+echo
+git log --no-merges --format='- %s (%h)' "$range"
+echo
+echo "</details>"
 echo
 if [ -n "$from" ]; then
     echo "**Full changelog**: $repo_url/compare/$from...$to"
