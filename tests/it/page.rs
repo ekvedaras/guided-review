@@ -231,6 +231,7 @@ fn thread_on(id: &str, line_at: Option<usize>) -> ReviewThread {
         original_start_line: None,
         original_commit: None,
         comments: vec![ThreadComment {
+            avatar_url: None,
             id: CommentId::new(&format!("{id}-1")),
             author: "alice".into(),
             is_bot: false,

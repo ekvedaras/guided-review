@@ -32,6 +32,7 @@ pub enum Intent {
     AskAboutScreen,
     FinishReview,
     OpenOnGitHub,
+    CheckForUpdates,
     RestartApp,
 }
 
@@ -49,6 +50,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
             PaletteAction::Settings => Self::ToggleSettings,
             PaletteAction::Shortcuts => Self::ToggleShortcuts,
+            PaletteAction::CheckForUpdates => Self::CheckForUpdates,
             PaletteAction::RestartApp => Self::RestartApp,
         }
     }
@@ -68,6 +70,8 @@ pub enum Effect {
     OpenFinishForm,
     OpenOnGitHub(PullRequestUrl),
     Restart(RestartArgs),
+    /// Asks GitHub for a newer release now.
+    CheckForUpdates,
     Nothing,
     Refused(Refusal),
 }
@@ -158,6 +162,7 @@ impl Intent {
             | Self::AskAboutScreen
             | Self::FinishReview
             | Self::OpenOnGitHub
+            | Self::CheckForUpdates
             | Self::RestartApp => false,
         };
         let waits_for_settings = matches!(
@@ -208,6 +213,7 @@ impl ReviewCore {
             Intent::AskAboutScreen => Effect::AskAboutScreen,
             Intent::FinishReview => Effect::OpenFinishForm,
             Intent::OpenOnGitHub => Effect::OpenOnGitHub(self.pr().clone()),
+            Intent::CheckForUpdates => Effect::CheckForUpdates,
             Intent::RestartApp => Effect::Restart(self.restart_args()),
         }
     }

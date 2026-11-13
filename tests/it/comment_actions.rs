@@ -76,6 +76,7 @@ impl Pull {
 
 fn comment(id: &str, body: &str) -> ThreadComment {
     ThreadComment {
+        avatar_url: None,
         id: CommentId::new(id),
         author: "alice".into(),
         is_bot: false,
@@ -202,6 +203,7 @@ fn shown_thread_is_folded(review: &Review) -> bool {
 fn a_thread_folds_once_it_is_resolved_even_when_the_reviewer_opened_it() {
     let pull = Pull::new();
     let by_bot = ThreadComment {
+        avatar_url: None,
         is_bot: true,
         ..comment("C1", "nit")
     };
@@ -912,6 +914,7 @@ fn suggest_change_adds_nothing_when_the_commented_lines_are_not_on_the_screen() 
 
 fn mine(id: &str, body: &str) -> ThreadComment {
     ThreadComment {
+        avatar_url: None,
         by_viewer: true,
         author: "me".into(),
         ..comment(id, body)

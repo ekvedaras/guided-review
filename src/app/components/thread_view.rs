@@ -6,9 +6,10 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
-    deferred, div, px,
+    deferred, div, img, px,
 };
 
+use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::viewer::{
     Audience, CommentId, HandOffId, Reaction, ReactionChange, ReactionCount, SendMode,
@@ -813,6 +814,72 @@ impl ThreadElement {
 }
 
 /// A line that says the thread is waiting on GitHub, with the dot that breathes while it waits.
+/// An agent's comment shows the agent's mark with the person it works for small at its corner.
+fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement {
+    if !comment.is_by_agent() {
+        return person_avatar(colors, comment, AVATAR_SIZE, cx);
+    }
+    let agent = div()
+        .size_full()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(colors.primary_fill())
+        .child(sized_icon(Icon::Sparkles, gpui::rgb(0xffffff), px(12.)));
+    let person = div()
+        .absolute()
+        .right(px(-3.))
+        .bottom(px(-3.))
+        .p(px(1.))
+        .rounded_full()
+        .bg(colors.surface)
+        .child(person_avatar(colors, comment, AGENT_PERSON_SIZE, cx));
+    div()
+        .flex_none()
+        .relative()
+        .size(px(AVATAR_SIZE))
+        .child(agent)
+        .child(person)
+        .into_any_element()
+}
+
+/// The author's picture as a circle, or their first letter in one while it downloads or when it cannot.
+fn person_avatar(colors: &Colors, comment: &ThreadComment, size: f32, cx: &mut App) -> AnyElement {
+    let circle = div()
+        .flex_none()
+        .size(px(size))
+        .rounded_full()
+        .overflow_hidden();
+    let picture = comment
+        .avatar_url
+        .as_deref()
+        .and_then(|url| AvatarPictures::picture(url, cx));
+    match picture {
+        Some(picture) => circle
+            .child(img(picture).size_full().rounded_full())
+            .into_any_element(),
+        None => circle
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(colors.subtle_border)
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(
+                comment
+                    .author
+                    .chars()
+                    .next()
+                    .map_or_default(|first| first.to_uppercase().collect::<String>()),
+            )
+            .into_any_element(),
+    }
+}
+
+const AVATAR_SIZE: f32 = 20.;
+const AGENT_PERSON_SIZE: f32 = 10.;
+
 fn busy_line(colors: &Colors, text: &'static str) -> gpui::Div {
     div()
         .flex()
@@ -856,7 +923,7 @@ impl RenderOnce for ThreadElement {
             .thread
             .comments
             .first()
-            .map_or_default(|comment| comment.author.clone());
+            .map_or_default(ThreadComment::shown_author);
         let marks = self.marks(&colors);
         let summary = format!(
             "{}{} · {first_author} · {comment_count} comment{}",
@@ -918,11 +985,15 @@ impl RenderOnce for ThreadElement {
                             .flex()
                             .items_center()
                             .gap_2()
+                            .child(avatar(&colors, comment, cx))
                             .child(
                                 div()
                                     .text_sm()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(comment.author.clone()),
+                                    .when(comment.is_by_agent(), |name| {
+                                        name.text_color(colors.accent)
+                                    })
+                                    .child(comment.shown_author()),
                             )
                             .children((comment.by_viewer && being_edited.is_none()).then(|| {
                                 let (on_comment_edit, comment_id) =
@@ -994,7 +1065,7 @@ impl RenderOnce for ThreadElement {
                             }
                             None => MarkdownView::new(
                                 format!("thread-{id}-{index}"),
-                                parsed_markdown(&comment.body),
+                                parsed_markdown(comment.shown_body()),
                             )
                             .on_lines(Arc::clone(&self.view.commented_lines))
                             .into_any_element(),

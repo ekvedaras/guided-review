@@ -18,7 +18,7 @@ fn page(has_next: bool, cursor: &str, nodes: &str) -> String {
 }
 
 const LINE_THREAD: &str = r#"{"id":"T1","isResolved":true,"isOutdated":false,"path":"a.php","line":227,"startLine":167,"originalLine":179,"originalStartLine":167,"diffSide":"LEFT","subjectType":"LINE","comments":{"nodes":[
-  {"id":"C1","url":"https://github.com/acme/shop/pull/7#r1","body":"named arguments","reactionGroups":[{"content":"HEART","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}],"originalCommit":{"oid":"9d6f"},"viewerDidAuthor":true,"author":{"login":"alice","__typename":"User"}},
+  {"id":"C1","url":"https://github.com/acme/shop/pull/7#r1","body":"named arguments","reactionGroups":[{"content":"HEART","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}],"originalCommit":{"oid":"9d6f"},"viewerDidAuthor":true,"author":{"login":"alice","__typename":"User","avatarUrl":"https://avatars.githubusercontent.com/u/1?v=4"}},
   {"id":"C2","url":"https://github.com/acme/shop/pull/7#r2","body":"done","originalCommit":{"oid":"9d6f"},"author":{"login":"review-bot","__typename":"Bot"}}]}}"#;
 
 const OUTDATED_FILE_THREAD: &str = r#"{"id":"T2","isResolved":false,"isOutdated":true,"path":"b.php","line":null,"startLine":null,"originalLine":435,"originalStartLine":null,"diffSide":"RIGHT","subjectType":"FILE","comments":{"nodes":[
@@ -80,7 +80,16 @@ fn review_threads_are_read_over_graphql_page_by_page() {
     );
     assert!(file.is_outdated && file.is_file_comment);
     assert_eq!((file.line, file.original_line), (None, Some(line(435))));
+    assert_eq!(
+        on_line
+            .comments
+            .iter()
+            .map(|comment| comment.avatar_url.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("https://avatars.githubusercontent.com/u/1?v=4"), None]
+    );
     assert_eq!(file.comments[0].author, "ghost");
+    assert_eq!(file.comments[0].avatar_url, None);
 
     let asked: Vec<serde_json::Value> = asked
         .lock()

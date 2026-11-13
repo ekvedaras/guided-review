@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use gpui::{App, AppContext, Context, Entity, EventEmitter, Global, SharedString, Task};
 
 use crate::github::GitHub;
 use crate::update::{
-    InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version,
+    Build, InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version,
     find_update,
 };
 use crate::viewer::ToastTone;
@@ -62,6 +63,20 @@ impl Updates {
         });
         cx.set_global(Self(updater));
     }
+}
+
+/// Which build runs, looked up once: the snapshot build is `Test` wherever it lies.
+pub fn running_build() -> Build {
+    static BUILD: OnceLock<Build> = OnceLock::new();
+    *BUILD.get_or_init(|| {
+        if cfg!(feature = "snapshots") {
+            return Build::Test;
+        }
+        match (std::env::home_dir(), std::env::current_exe()) {
+            (Some(home), Ok(exe)) => ReleaseInstall::in_home(&home).build_of(&exe),
+            _ => Build::Local,
+        }
+    })
 }
 
 /// Looked up again for each review opened, so removing the binary named clears it.
@@ -181,6 +196,41 @@ impl Updater {
         cx.emit(UpdateInstalled {
             program: installed.program.clone(),
         });
+    }
+
+    /// One check now, asked for by the reviewer, so it says how it went even when there is nothing new.
+    pub fn check_now(&mut self, cx: &mut Context<Self>) {
+        post_toast(cx, ToastTone::Neutral, "Checking for updates…".to_owned());
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async {
+                    find_update(&GitHub::from_env(), Version::running(), Target::running())
+                })
+                .await;
+            this.update(cx, |updater, cx| {
+                match found {
+                    Ok(update) => {
+                        let note = match &update {
+                            Some(update) => format!(
+                                "Version {} is out: update from the sidebar",
+                                update.version
+                            ),
+                            None => "Guided Review is up to date".to_owned(),
+                        };
+                        updater.offer.found(update);
+                        post_toast(cx, ToastTone::Neutral, note);
+                    }
+                    Err(error) => post_toast(
+                        cx,
+                        ToastTone::Danger,
+                        format!("Could not check for updates: {error:#}"),
+                    ),
+                }
+                updater.offer_changed(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn offer_changed(&mut self, cx: &mut Context<Self>) {

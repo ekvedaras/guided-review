@@ -54,6 +54,10 @@ impl ReviewCore {
             WorkKind::PullPendingReview => Job::PullPendingReview(pr),
             WorkKind::PullLastReview => Job::PullLastReview(pr),
             WorkKind::SendQueuedComment => Job::SendQueuedComment(self.queued_comment_request()?),
+            WorkKind::ChangeReviewingMark => Job::ChangeReviewingMark {
+                pr,
+                change: self.reviewing_mark.change_to_send()?,
+            },
             WorkKind::TakeSeenMarksOff => {
                 let requests = self.state.hand_offs().seen_marks_to_take_off();
                 if requests.is_empty() {
@@ -108,6 +112,7 @@ impl ReviewCore {
             }
             Done::LastReview(Ok(last)) => self.last_review_is(last),
             Done::LastReview(Err(error)) => self.could_not_read(Read::LastReview, &error),
+            Done::ReviewingMark { change, result } => self.reviewing_mark_landed(change, result),
             Done::QueuedComment(outcome) => {
                 if matches!(self.land_comment(outcome), Ok(CommentResult::Sent)) {
                     self.work.want(WorkKind::SendQueuedComment);
@@ -173,13 +178,20 @@ impl ReviewCore {
     }
 
     /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the
-    /// pending review are read again so the reply shows under the asked comment.
+    /// pending review are read again so the reply shows under the asked comment. While a re-pin runs it
+    /// is kept for the re-pinned review, which saves it: the agent's reply is on GitHub either way.
     pub fn hand_off_replied(
         &mut self,
         id: HandOffId,
         replied: &AgentReplied,
     ) -> anyhow::Result<()> {
-        self.record_hand_offs(|hand_offs| hand_offs.replied(id, replied))??;
+        if self.state.is_repinning() {
+            self.state
+                .keep_until_repinned(|state| state.hand_offs_mut().replied(id, replied))?;
+            self.replies_after_repin.push((id, replied.clone()));
+        } else {
+            self.record_hand_offs(|hand_offs| hand_offs.replied(id, replied))??;
+        }
         self.work.want(WorkKind::PullThreads);
         self.work.want(WorkKind::PullPendingReview);
         Ok(())

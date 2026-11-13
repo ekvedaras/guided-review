@@ -112,6 +112,7 @@ fn path() -> FilePath {
 
 fn comment(id: &str, author: &str, body: &str, reactions: Vec<ReactionCount>) -> ThreadComment {
     ThreadComment {
+        avatar_url: None,
         id: CommentId::new(id),
         author: author.to_owned(),
         is_bot: author.ends_with("[bot]"),
@@ -139,7 +140,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
             comment(
                 "c2",
                 "you",
-                "Refused: Save says why under the setting.\n\n> each problem shown under its setting",
+                "🤖 Refused: Save says why under the setting.\n\n> each problem shown under its setting",
                 Vec::new(),
             ),
             comment("c4", "you", "Never mind, I see it now.", Vec::new()),

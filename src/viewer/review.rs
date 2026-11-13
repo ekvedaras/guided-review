@@ -34,7 +34,7 @@ use super::finish_review::{
     SubmittedReview,
 };
 use super::github_outage::{Affected, OutageCause};
-use super::hand_offs::{Audience, HandOffState, HandOffs};
+use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
@@ -44,8 +44,10 @@ use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::problems::{Problem, ProblemKind, Problems, Read};
+use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
+use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
 use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
@@ -59,6 +61,7 @@ use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
+use crate::update::Build;
 
 pub use crate::tour::StepId;
 pub use kept::Review;
@@ -230,6 +233,9 @@ pub struct ReviewCore {
     pr_notes: PrNotes,
     ask_desk: AskDesk,
     work: WorkAgenda,
+    reviewing_mark: ReviewingMark,
+    /// Agent replies taken while a re-pin ran, which the re-pinned review applies and saves.
+    replies_after_repin: Vec<(HandOffId, AgentReplied)>,
     /// The last news of the tour agent said tour agents cannot be reached. Not saved.
     agent_link_is_off: bool,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
@@ -311,6 +317,11 @@ impl Review {
         self.seen_end_of = replaced.seen_end_of;
         self.ask_desk = replaced.ask_desk;
         self.check_asks_for_code_changes();
+        for (id, replied) in replaced.replies_after_repin {
+            if let Err(error) = self.hand_off_replied(id, &replied) {
+                eprintln!("could not carry the reply to {id} into the re-pinned review: {error:#}");
+            }
+        }
     }
 
     /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
@@ -352,6 +363,7 @@ impl ReviewCore {
         let tour_files = state_file.tour_files().to_owned();
         let pr: PullRequestUrl = tour.pr.parse()?;
         let (base, head) = (tour.base.clone(), tour.head.clone());
+        let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
         let steps = tour
             .steps()
@@ -411,6 +423,8 @@ impl ReviewCore {
             pr_notes: PrNotes::default(),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
+            reviewing_mark,
+            replies_after_repin: Vec::new(),
             agent_link_is_off: false,
             seen_end_of: None,
             tour_files,
@@ -1015,7 +1029,27 @@ impl ReviewCore {
     pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
         self.clear_problem(ProblemKind::NotRead(Read::LastReview));
         self.github_answered(Affected::LastReview);
+        self.reviewing_mark.last_review_is(last.as_ref());
         self.last_review = last;
+        self.want_reviewing_mark_sent();
+    }
+
+    fn want_reviewing_mark_sent(&mut self) {
+        if self.reviewing_mark.change_to_send().is_some() {
+            self.work.want(WorkKind::ChangeReviewingMark);
+        }
+    }
+
+    fn reviewing_mark_landed(&mut self, change: ReactionChange, result: Result<(), GitHubError>) {
+        match result {
+            Ok(()) => {
+                self.clear_problem(ProblemKind::ReviewingMarkNotChanged);
+                self.reviewing_mark.sent(change);
+            }
+            Err(error) => {
+                self.raise_problem(Problem::ReviewingMarkNotChanged(error.short_reason()));
+            }
+        }
     }
 
     /// The viewer's latest sent review, from this app or the GitHub web page.
@@ -1144,6 +1178,8 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::NotRead(Read::Authorship));
         self.github_answered(Affected::Authorship);
         self.comment_desk.viewer_authorship_is(authored);
+        self.reviewing_mark.viewer_authorship_is(authored);
+        self.want_reviewing_mark_sent();
     }
 
     /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.
@@ -1376,12 +1412,13 @@ impl ReviewCore {
     }
 
     /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
-    pub fn palette(&self, query: &str) -> Vec<PaletteGroup> {
-        jump::palette(self.jump_targets(""), &self.palette_actions(), query)
+    pub fn palette(&self, query: &str, build: Build) -> Vec<PaletteGroup> {
+        jump::palette(self.jump_targets(""), &self.palette_actions(build), query)
     }
 
     /// What the palette can do on the open screen.
-    pub fn palette_actions(&self) -> Vec<PaletteAction> {
+    /// Checking for updates only where the build takes them.
+    pub fn palette_actions(&self, build: Build) -> Vec<PaletteAction> {
         let step = match &self.screen {
             Screen::Step(id) => Some(id),
             Screen::Summary | Screen::SafetyNet => None,
@@ -1410,6 +1447,9 @@ impl ReviewCore {
         let finish = self
             .can_finish_review()
             .then_some(PaletteAction::FinishReview);
+        let check_for_updates = build
+            .takes_updates()
+            .then_some(PaletteAction::CheckForUpdates);
         next_unread
             .into_iter()
             .chain(tick)
@@ -1421,8 +1461,9 @@ impl ReviewCore {
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,
                 PaletteAction::Shortcuts,
-                PaletteAction::RestartApp,
             ])
+            .chain(check_for_updates)
+            .chain([PaletteAction::RestartApp])
             .collect()
     }
 

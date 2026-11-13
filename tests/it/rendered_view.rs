@@ -310,6 +310,7 @@ fn thread_on_line(number: usize) -> ReviewThread {
         original_start_line: None,
         original_commit: Some("abc".into()),
         comments: vec![ThreadComment {
+            avatar_url: None,
             id: CommentId::new("c1"),
             author: "alice".into(),
             is_bot: false,

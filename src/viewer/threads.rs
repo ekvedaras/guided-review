@@ -79,10 +79,15 @@ pub struct ReviewThread {
     pub comments: Vec<ThreadComment>,
 }
 
+/// Marks what a tour agent wrote on GitHub, where it shares the reviewer's account.
+pub const AGENT_MARK: &str = "🤖";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadComment {
     pub id: CommentId,
     pub author: String,
+    /// GitHub's address of the author's picture; `None` for a deleted account.
+    pub avatar_url: Option<String>,
     pub is_bot: bool,
     /// The viewer wrote it, so the viewer may edit it.
     pub by_viewer: bool,
@@ -94,6 +99,27 @@ pub struct ThreadComment {
 }
 
 impl ThreadComment {
+    /// Written by the author's tour agent, which posts under their account with the robot in front.
+    pub fn is_by_agent(&self) -> bool {
+        self.body.starts_with(AGENT_MARK)
+    }
+
+    /// `<login>'s agent` for an agent's comment.
+    pub fn shown_author(&self) -> String {
+        if self.is_by_agent() {
+            format!("{}'s agent", self.author)
+        } else {
+            self.author.clone()
+        }
+    }
+
+    /// An agent's comment without the robot, which the page shows in its own way.
+    pub fn shown_body(&self) -> &str {
+        self.body
+            .strip_prefix(AGENT_MARK)
+            .map_or(self.body.as_str(), str::trim_start)
+    }
+
     /// All eight reactions in GitHub's order, with zero for the ones nobody used.
     pub fn reaction_summary(&self) -> Vec<ReactionCount> {
         Reaction::ALL

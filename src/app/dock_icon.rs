@@ -39,3 +39,19 @@ fn picture() -> Option<Vec<u8>> {
         .inspect_err(|error| eprintln!("could not draw the Dock icon: {error:#}"))
         .ok()
 }
+
+/// No Dock icon and no turn at the front: for the snapshot run, which draws in the background.
+#[cfg(target_os = "macos")]
+pub fn stay_in_background() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return;
+    };
+    NSApplication::sharedApplication(main_thread)
+        .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn stay_in_background() {}

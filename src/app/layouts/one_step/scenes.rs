@@ -14,7 +14,7 @@ use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
-use crate::app::updater::Updates;
+use crate::app::updater::{Updates, running_build};
 use crate::file_path::FilePath;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
@@ -295,7 +295,7 @@ impl OneStepLayout {
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
             Scene::JumpPalette => {
-                let groups = self.session.read(cx).review().palette("");
+                let groups = self.session.read(cx).review().palette("", running_build());
                 self.jump
                     .update(cx, |palette, cx| palette.open(groups, window, cx));
             }
@@ -383,7 +383,7 @@ impl OneStepLayout {
                 }
             }
             Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {
-                review.raise_problem(Problem::ReleaseInstallInTheWay(InTheWay::Runs {
+                review.raise_problem(Problem::ReleaseInstallInTheWay(InTheWay::FirstOnPath {
                     binary: "/Users/you/.cargo/bin/guided-review".into(),
                     release_install: "/Users/you/.local/bin/guided-review".into(),
                 }));
@@ -405,7 +405,11 @@ impl OneStepLayout {
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::JumpActions => {
                 let query = ">";
-                let groups = self.session.read(cx).review().palette(query);
+                let groups = self
+                    .session
+                    .read(cx)
+                    .review()
+                    .palette(query, running_build());
                 self.jump.update(cx, |palette, cx| {
                     palette.open(Vec::new(), window, cx);
                     palette.stage_query(query, groups);

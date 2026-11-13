@@ -10,11 +10,8 @@ use super::comments::SendMode;
 use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review::StepId;
-use super::threads::{CommentId, ReviewThread, ThreadId};
+use super::threads::{AGENT_MARK, CommentId, ReviewThread, ThreadId};
 use super::tour_agent::{AgentStatus, SendOutcome, TourAgents};
-
-/// Marks what the tour agent wrote on GitHub, where it shares the reviewer's account.
-const ROBOT: &str = "🤖";
 
 const WORKING_ON_IT: &str = "Working on it…";
 
@@ -554,7 +551,7 @@ impl HandOffs {
         id: HandOffId,
         body: &str,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
-        let said = body.trim().trim_start_matches(ROBOT).trim_start();
+        let said = body.trim().trim_start_matches(AGENT_MARK).trim_start();
         if said.is_empty() {
             return Err(AgentReplyRefused::Empty);
         }
@@ -567,7 +564,7 @@ impl HandOffs {
             pr,
             hand_off,
             AgentReplyKind::Answer {
-                body: format!("{ROBOT} {said}"),
+                body: format!("{AGENT_MARK} {said}"),
                 replacing,
             },
         )
@@ -735,7 +732,8 @@ impl AgentReplyRequest {
                 replacing: None,
             } => (self.post(github, body)?.0, None),
             AgentReplyKind::WorkingOnIt => {
-                let (placement, reply) = self.post(github, &format!("{ROBOT} {WORKING_ON_IT}"))?;
+                let (placement, reply) =
+                    self.post(github, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
                 (placement, Some(reply))
             }
         };

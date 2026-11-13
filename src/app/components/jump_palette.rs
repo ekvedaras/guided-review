@@ -115,6 +115,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::Settings => Icon::Settings,
         PaletteAction::Shortcuts => Icon::Keyboard,
         PaletteAction::RestartApp => Icon::RotateCcw,
+        PaletteAction::CheckForUpdates => Icon::Refresh,
     }
 }
 

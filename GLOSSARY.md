@@ -66,7 +66,11 @@
 
 **Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, working on it (the agent posted "Working on it…" and its answer will replace that comment), answered, ended without an answer, or failed. It holds the id of its GitHub thread and of the reviewer's comment.
 
+**Agent comment**: A comment whose text starts with 🤖, which a tour agent posted under its person's account. The app names it `<login>'s agent` in the accent colour, with the agent's mark as its picture and the person's picture small at its corner, and shows the text without the 🤖. On GitHub it stays as posted.
+
 **Seen mark**: The 👀 the viewer puts on the reviewer's comment on GitHub when its hand-off is delivered to the tour agent. The agent's first reply takes it off; so does the viewer when the agent ends without answering. When GitHub refuses either, the line under the thread says so.
+
+**Reviewing mark**: The 👀 the viewer puts on the PR itself while the reviewer reviews it, so its author sees someone is on it. It goes on when a review opens on a PR that is not the reviewer's own, unless the reviewer's last review was sent on the tour's head (opened again only to look), and comes off once a review of the reviewer's is sent after that, from the app or from the GitHub web page. When GitHub refuses either, the sidebar says so, and it is tried again when the window comes to the front. Avoid: eyes reaction, seen mark (that is the 👀 on a comment).
 
 **PR notes**: The `Notes` section of the PR description. A step's diagram, a picture of the reviewer summary, or the whole reviewer summary can be added to it, each folded in a `<details>`, from the button under it; a description with no such section gets one at its end. Pictures are uploaded to GitHub first, where only those who can see the repository can open them; the summary's links to other files of the tour's folder become plain text. A hidden comment in the fold tells the app a picture or summary is there already.
 
@@ -80,7 +84,9 @@
 
 **App bundle**: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Launched with no PR, it shows the PR switcher alone in the window. Avoid: launcher, wrapper.
 
-**In the way**: Of the release install: another `guided-review` that the app runs instead of it, or that comes before its bin link on `PATH`, so updates never reach the reviewer. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary to remove. Avoid: shadowing.
+**In the way**: Of the release install, while it runs: another `guided-review` that comes before its bin link on `PATH`, so the tour skill and a terminal run that one and miss updates. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary. Avoid: shadowing.
+
+**Build**: Which app runs: the release install (no badge; it alone checks for updates, also from the palette's Check for updates), a local build such as `cargo install` (badge `DEV`), or the snapshot build (badge `TEST`). A local build running is not a problem; its badge says it. Avoid: dev mode.
 
 **Update**: A published release newer than the running app, built for this Mac, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
 

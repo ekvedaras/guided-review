@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
-    InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
+    InteractiveText, IntoElement, MouseButton, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
     Window, canvas, div, fill, img, point, px,
 };
@@ -15,12 +15,15 @@ use std::sync::Arc;
 
 use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
+use crate::app::code_selection::TextSpot;
+use crate::app::prose_selection::ProseSelections;
 use crate::image_facts::is_svg_path;
 use crate::viewer::{
     Block, Capture, ColumnAlignment, FenceLine, Markdown, Run, Span, Table, fence_lines,
 };
 
 use super::diagram::{DiagramSet, DiagramView};
+use super::diff_view::{byte_at, with_selection};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
 use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, inside_edge};
@@ -443,6 +446,8 @@ pub struct MarkdownView {
 struct Embeds {
     diagrams: DiagramSet,
     under_picture: Option<UnderPicture>,
+    /// The body's key, so its texts take part in the prose selection.
+    selectable_as: Option<SharedString>,
 }
 
 /// Drawn under a picture of the tour's folder, by its path; `None` draws nothing.
@@ -476,7 +481,9 @@ impl MarkdownView {
 }
 
 impl RenderOnce for MarkdownView {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        ProseSelections::body_drawn(&self.key, cx);
+        self.embeds.selectable_as = Some(self.key.clone());
         blocks(
             &self.markdown.blocks,
             &self.key,
@@ -574,7 +581,14 @@ fn block_element(
 ) -> AnyElement {
     let colors = Colors::active(cx);
     match block {
-        PreparedBlock::Text { text, scale } => inline_text(&colors, text, key, *scale),
+        PreparedBlock::Text { text, scale } => inline_text(
+            &colors,
+            text,
+            key,
+            *scale,
+            embeds.selectable_as.as_ref(),
+            cx,
+        ),
         PreparedBlock::List {
             first_number,
             items,
@@ -627,7 +641,9 @@ fn block_element(
             .into_any_element(),
         PreparedBlock::Details { summary, body } => details(summary, body, key, embeds, window, cx),
         PreparedBlock::Rule => div().h(px(1.)).bg(colors.subtle_border).into_any_element(),
-        PreparedBlock::Table(table) => table_view(&colors, table, key),
+        PreparedBlock::Table(table) => {
+            table_view(&colors, table, key, embeds.selectable_as.as_ref(), cx)
+        }
         PreparedBlock::Picture {
             path,
             ratio,
@@ -683,8 +699,14 @@ fn block_element(
 
 /// Wraps inside its cells rather than scrolling: a summary's table is prose, and a column scrolled
 /// out of sight hides what the reviewer is meant to read. Columns share the width by their longest cell.
-fn table_view(colors: &Colors, table: &PreparedTable, key: &str) -> AnyElement {
-    let row =
+fn table_view(
+    colors: &Colors,
+    table: &PreparedTable,
+    key: &str,
+    selectable_as: Option<&SharedString>,
+    cx: &mut App,
+) -> AnyElement {
+    let mut row =
         |cells: &[Rc<InlineText>], row_key: String, ground: Option<gpui::Rgba>, first: bool| {
             let row = div().flex().w_full().when_some(ground, Styled::bg);
             let row = if first {
@@ -702,7 +724,13 @@ fn table_view(colors: &Colors, table: &PreparedTable, key: &str) -> AnyElement {
                         .when(index > 0, |cell| {
                             cell.border_l_1().border_color(colors.subtle_border)
                         })
-                        .child(styled_text(colors, cell, &format!("{row_key}-{index}")));
+                        .child(styled_text(
+                            colors,
+                            cell,
+                            &format!("{row_key}-{index}"),
+                            selectable_as,
+                            cx,
+                        ));
                     cell_view.style().flex_grow = Some(column.weight);
                     match column.alignment {
                         ColumnAlignment::Left => cell_view,
@@ -775,6 +803,8 @@ fn details(
             summary,
             &format!("{key}-summary"),
             1.0,
+            None,
+            cx,
         )));
     div()
         .flex()
@@ -866,7 +896,7 @@ impl InlineMarkdown {
 
 impl RenderOnce for InlineMarkdown {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        styled_text(&Colors::active(cx), &self.text, &self.key)
+        styled_text(&Colors::active(cx), &self.text, &self.key, None, cx)
     }
 }
 
@@ -911,10 +941,17 @@ fn runs_of(blocks: &[Block]) -> Vec<Run> {
     runs
 }
 
-fn inline_text(colors: &Colors, text: &Rc<InlineText>, key: &str, scale: f32) -> AnyElement {
+fn inline_text(
+    colors: &Colors,
+    text: &Rc<InlineText>,
+    key: &str,
+    scale: f32,
+    selectable_as: Option<&SharedString>,
+    cx: &mut App,
+) -> AnyElement {
     div()
         .text_size(gpui::rems(scale))
-        .child(styled_text(colors, text, key))
+        .child(styled_text(colors, text, key, selectable_as, cx))
         .into_any_element()
 }
 
@@ -977,27 +1014,34 @@ impl InlineText {
     }
 }
 
-fn styled_text(colors: &Colors, inline: &Rc<InlineText>, key: &str) -> AnyElement {
-    let styled = StyledText::new(inline.text.clone()).with_highlights(inline.highlights(colors));
-    let backgrounds = (!inline.code_ranges.is_empty())
-        .then(|| code_backgrounds(styled.layout().clone(), inline.code_ranges.clone()));
-    let text = if inline.links.is_empty() {
-        styled.into_any_element()
-    } else {
-        let ranges = inline
-            .links
-            .iter()
-            .map(|(range, _)| range.clone())
-            .collect();
-        let links = Rc::clone(inline);
-        InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
-            .on_click(ranges, move |index, _, cx| {
-                if let Some((_, url)) = links.links.get(index) {
-                    open_link(url, cx);
-                }
-            })
-            .into_any_element()
+/// With `selectable_as`, the text is the next row of that body's prose selection: it draws its
+/// part of it and a drag over it carries it on.
+fn styled_text(
+    colors: &Colors,
+    inline: &Rc<InlineText>,
+    key: &str,
+    selectable_as: Option<&SharedString>,
+    cx: &mut App,
+) -> AnyElement {
+    let row = selectable_as.map(|body| {
+        (
+            body.clone(),
+            ProseSelections::text_drawn(body, inline.text.clone(), cx),
+        )
+    });
+    let highlights = inline.highlights(colors);
+    let highlights = match row
+        .as_ref()
+        .and_then(|(body, row)| ProseSelections::range_on(body, *row, inline.text.len(), cx))
+    {
+        Some(selected) => with_selection(&highlights, selected, colors.text_selection),
+        None => highlights,
     };
+    let styled = StyledText::new(inline.text.clone()).with_highlights(highlights);
+    let layout = styled.layout().clone();
+    let backgrounds = (!inline.code_ranges.is_empty())
+        .then(|| code_backgrounds(layout.clone(), inline.code_ranges.clone()));
+    let text = selectable_text(styled_links(styled, inline, key), row, layout);
     match backgrounds {
         Some(backgrounds) => div()
             .relative()
@@ -1006,6 +1050,70 @@ fn styled_text(colors: &Colors, inline: &Rc<InlineText>, key: &str) -> AnyElemen
             .into_any_element(),
         None => text,
     }
+}
+
+fn selectable_text(
+    text: AnyElement,
+    row: Option<(SharedString, usize)>,
+    layout: TextLayout,
+) -> AnyElement {
+    let Some((body, row)) = row else {
+        return text;
+    };
+    let (press_body, move_body) = (body.clone(), body);
+    let (press_layout, move_layout) = (layout.clone(), layout);
+    div()
+        .cursor_text()
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            let at = TextSpot {
+                row,
+                byte: byte_at(&press_layout, event.position),
+            };
+            match event.click_count {
+                2 => ProseSelections::press_twice(&press_body, at, cx),
+                _ => ProseSelections::press(press_body.clone(), at, cx),
+            }
+            window.refresh();
+        })
+        .on_mouse_move(move |event, window, cx| {
+            if event.pressed_button == Some(MouseButton::Left) {
+                let at = TextSpot {
+                    row,
+                    byte: byte_at(&move_layout, event.position),
+                };
+                ProseSelections::drag_over(&move_body, at, cx);
+                window.refresh();
+            }
+        })
+        .on_mouse_up(MouseButton::Left, |_, window, cx| {
+            ProseSelections::end_drag(cx);
+            window.refresh();
+        })
+        .on_mouse_up_out(MouseButton::Left, |_, window, cx| {
+            ProseSelections::end_drag(cx);
+            window.refresh();
+        })
+        .child(text)
+        .into_any_element()
+}
+
+fn styled_links(styled: StyledText, inline: &Rc<InlineText>, key: &str) -> AnyElement {
+    if inline.links.is_empty() {
+        return styled.into_any_element();
+    }
+    let ranges = inline
+        .links
+        .iter()
+        .map(|(range, _)| range.clone())
+        .collect();
+    let links = Rc::clone(inline);
+    InteractiveText::new(SharedString::from(format!("text-{key}")), styled)
+        .on_click(ranges, move |index, _, cx| {
+            if let Some((_, url)) = links.links.get(index) {
+                open_link(url, cx);
+            }
+        })
+        .into_any_element()
 }
 
 /// Rounded backgrounds behind inline code, one per line a code run covers. Drawn under the text,

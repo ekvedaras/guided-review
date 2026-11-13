@@ -84,6 +84,7 @@ impl Shop {
             original_start_line: start.map(line),
             original_commit: Some(self.commented.clone()),
             comments: vec![ThreadComment {
+                avatar_url: None,
                 id: CommentId::new(&format!("{id}-c")),
                 author: "me".into(),
                 is_bot: false,

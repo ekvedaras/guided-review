@@ -1,30 +1,39 @@
-//! The code text the reader drags over to copy, as rows of the screen's list and byte offsets in
-//! their code. A looks-only state of the layout, like the drag that opens a comment.
+//! The text the reader drags over to copy: code, as rows of the screen's list, or prose, as the texts
+//! of one markdown body in reading order; with byte offsets in each. A looks-only state, like the drag
+//! that opens a comment.
 
 use std::ops::Range;
 
+use gpui::SharedString;
+
 use crate::viewer::Screen;
 
-/// A spot in the code of one list row.
+/// A spot in one row: a list row's code, or one text of a markdown body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CodeSpot {
+pub struct TextSpot {
     pub row: usize,
     pub byte: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct CodeSelection {
-    /// Rows are of this screen; another screen has other rows under the same numbers.
-    screen: Screen,
-    anchor: CodeSpot,
-    head: CodeSpot,
+pub struct TextSelection<Scope> {
+    /// Where the rows are: the code rows of a screen, or the texts of a markdown body. Another scope
+    /// has other rows under the same numbers.
+    scope: Scope,
+    anchor: TextSpot,
+    head: TextSpot,
     is_dragging: bool,
 }
 
-impl CodeSelection {
-    pub fn start(screen: Screen, at: CodeSpot) -> Self {
+/// Code in the rows of a screen's list.
+pub type CodeSelection = TextSelection<Screen>;
+/// Prose in the texts of the markdown body under this key.
+pub type ProseSelection = TextSelection<SharedString>;
+
+impl<Scope: PartialEq> TextSelection<Scope> {
+    pub fn start(scope: Scope, at: TextSpot) -> Self {
         Self {
-            screen,
+            scope,
             anchor: at,
             head: at,
             is_dragging: true,
@@ -33,7 +42,7 @@ impl CodeSelection {
 
     /// The word around `at` in `code`, the row's code, as a double click picks it in an IDE: letters,
     /// digits and `_`. `None` off a word.
-    pub fn word(screen: Screen, at: CodeSpot, code: &str) -> Option<Self> {
+    pub fn word(scope: Scope, at: TextSpot, code: &str) -> Option<Self> {
         let is_word = |c: char| c.is_alphanumeric() || c == '_';
         let byte = code.floor_char_boundary(at.byte);
         let (before, after) = code.split_at(byte);
@@ -49,12 +58,12 @@ impl CodeSelection {
             .find(|c: char| !is_word(c))
             .map_or(code.len(), |end| byte + end);
         Some(Self {
-            screen,
-            anchor: CodeSpot {
+            scope,
+            anchor: TextSpot {
                 row: at.row,
                 byte: start,
             },
-            head: CodeSpot {
+            head: TextSpot {
                 row: at.row,
                 byte: end,
             },
@@ -62,7 +71,7 @@ impl CodeSelection {
         })
     }
 
-    pub fn drag_to(&mut self, at: CodeSpot) {
+    pub fn drag_to(&mut self, at: TextSpot) {
         if self.is_dragging {
             self.head = at;
         }
@@ -78,11 +87,11 @@ impl CodeSelection {
         self.is_dragging
     }
 
-    pub fn is_on(&self, screen: &Screen) -> bool {
-        &self.screen == screen
+    pub fn is_on(&self, scope: &Scope) -> bool {
+        &self.scope == scope
     }
 
-    fn ends(&self) -> (CodeSpot, CodeSpot) {
+    fn ends(&self) -> (TextSpot, TextSpot) {
         if self.anchor <= self.head {
             (self.anchor, self.head)
         } else {
@@ -121,11 +130,11 @@ impl CodeSelection {
 mod tests {
     use super::*;
 
-    fn spot(row: usize, byte: usize) -> CodeSpot {
-        CodeSpot { row, byte }
+    fn spot(row: usize, byte: usize) -> TextSpot {
+        TextSpot { row, byte }
     }
 
-    fn dragged(from: CodeSpot, to: CodeSpot) -> CodeSelection {
+    fn dragged(from: TextSpot, to: TextSpot) -> CodeSelection {
         let mut selection = CodeSelection::start(Screen::Summary, from);
         selection.drag_to(to);
         selection.end_drag();

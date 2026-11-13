@@ -4,6 +4,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pieces::PieceId;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
+use guided_review::update::Build;
 use guided_review::viewer::{Command, JumpPlace, PaletteEntry, Review, ReviewStateFile, Screen};
 use serde_json::{Value, json};
 
@@ -232,7 +233,7 @@ fn entry_name(entry: &PaletteEntry) -> String {
 /// Each group as `Heading: entry, entry`.
 fn palette(review: &Review, query: &str) -> Vec<String> {
     review
-        .palette(query)
+        .palette(query, Build::Local)
         .iter()
         .map(|group| {
             let entries: Vec<String> = group.entries.iter().map(entry_name).collect();
@@ -242,8 +243,12 @@ fn palette(review: &Review, query: &str) -> Vec<String> {
 }
 
 fn actions(review: &Review) -> Vec<&'static str> {
+    actions_on(review, Build::Local)
+}
+
+fn actions_on(review: &Review, build: Build) -> Vec<&'static str> {
     review
-        .palette_actions()
+        .palette_actions(build)
         .iter()
         .map(|action| action.label())
         .collect()
@@ -341,7 +346,7 @@ fn an_action_names_the_shortcut_that_does_it() {
     let review = open(shop_tour());
 
     let settings = review
-        .palette_actions()
+        .palette_actions(Build::Local)
         .into_iter()
         .find(|action| action.label() == "Settings")
         .unwrap();
@@ -367,4 +372,13 @@ fn the_palette_offers_a_restart_that_comes_back_to_this_screen() {
     let review = open(shop_tour());
 
     assert_eq!(palette(&review, ">restart"), ["Actions: Restart app here"]);
+}
+
+#[test]
+fn only_the_release_build_can_check_for_updates() {
+    let review = open(shop_tour());
+
+    assert!(actions_on(&review, Build::Release).contains(&"Check for updates"));
+    assert!(!actions_on(&review, Build::Local).contains(&"Check for updates"));
+    assert!(!actions_on(&review, Build::Test).contains(&"Check for updates"));
 }

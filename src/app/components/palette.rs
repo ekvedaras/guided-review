@@ -17,6 +17,10 @@ pub const CARD_RADIUS: f32 = 12.;
 pub const CONTROL_RADIUS: f32 = 8.;
 pub const INNER_RADIUS: f32 = 6.;
 
+/// The page lies right of the sidebar; what stands in for the page while the tour is written keeps
+/// to the same line, so the page's edge runs unbroken from the title bar down.
+pub const SIDEBAR_WIDTH: f32 = 300.;
+
 /// The corners of what paints its own ground along the edge of a rounded surface with a 1 px
 /// border. gpui clips children to a rectangle, never to the parent's corners, so a band at a
 /// sheet's foot or a box's head that is not rounded itself shows square past the curve.

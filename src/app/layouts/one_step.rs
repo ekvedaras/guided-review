@@ -17,7 +17,7 @@ use crate::app::active_session::use_active_session;
 use crate::app::code_links::{
     open_code, open_code_hint, open_code_icon, open_code_label, open_link, use_code_opener,
 };
-use crate::app::code_selection::{CodeSelection, CodeSpot};
+use crate::app::code_selection::{CodeSelection, TextSpot};
 use crate::app::components::ask_panel::{
     AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
 };
@@ -26,7 +26,7 @@ use crate::app::components::button::{
     toggle_button,
 };
 use crate::app::components::card::card;
-use crate::app::components::chip::{callout, chip, dev_build_chip, dropping_in, notice_band};
+use crate::app::components::chip::{build_chip, callout, chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, OnCompose, QueuedCommentNote,
 };
@@ -52,7 +52,7 @@ use crate::app::components::motion::{
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
-    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
+    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching, SwitcherPlace};
@@ -62,7 +62,8 @@ use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
-    RowMark, check_flag, count_badge, row_note, sidebar_row, skim_chip,
+    RowMark, RowPlace, check_flag, count_badge, row_label, row_note, row_places, sidebar_row,
+    skim_chip,
 };
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -76,9 +77,10 @@ use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
+use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::SidebarTourAgent;
-use crate::app::updater::{UpdateInstalled, Updater, Updates};
+use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
@@ -117,7 +119,7 @@ actions!(
 
 use crate::app::Quit;
 
-type OnCodeSpot = Rc<dyn Fn(CodeGesture, CodeSpot, &mut Window, &mut App)>;
+type OnTextSpot = Rc<dyn Fn(CodeGesture, TextSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
@@ -143,7 +145,9 @@ pub struct OneStepLayout {
     composer_focus: FocusHandle,
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
-    on_code_gesture: OnCodeSpot,
+    /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
+    hovered_touching_row: Option<(usize, RowPlace)>,
+    on_code_gesture: OnTextSpot,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
@@ -251,7 +255,11 @@ impl OneStepLayout {
             window,
             |this, palette, event: &JumpEvent, window, cx| match event {
                 JumpEvent::QueryChanged(query) => {
-                    let groups = this.session.read(cx).review().palette(query);
+                    let groups = this
+                        .session
+                        .read(cx)
+                        .review()
+                        .palette(query, running_build());
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
                 JumpEvent::Act(action) => this.act((*action).into(), window, cx),
@@ -308,7 +316,7 @@ impl OneStepLayout {
                 .ok();
         });
         let layout_handle = cx.weak_entity();
-        let on_code_gesture: OnCodeSpot = Rc::new(move |gesture, at, window, cx| {
+        let on_code_gesture: OnTextSpot = Rc::new(move |gesture, at, window, cx| {
             layout_handle
                 .update(cx, |this, cx| {
                     if gesture != CodeGesture::Over {
@@ -342,6 +350,7 @@ impl OneStepLayout {
             composer_focus: cx.focus_handle(),
             ask,
             code_selection: None,
+            hovered_touching_row: None,
             on_code_gesture,
             selection_notice: None,
             frame_stats,
@@ -474,7 +483,7 @@ impl OneStepLayout {
         });
     }
 
-    fn on_code_gesture(&mut self, gesture: CodeGesture, at: CodeSpot, cx: &mut Context<Self>) {
+    fn on_code_gesture(&mut self, gesture: CodeGesture, at: TextSpot, cx: &mut Context<Self>) {
         match gesture {
             CodeGesture::Press => {
                 let screen = self.session.read(cx).review().screen().clone();
@@ -497,6 +506,11 @@ impl OneStepLayout {
     }
 
     fn copy_selection(&mut self, _: &CopySelection, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = ProseSelections::text(cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            post_toast(cx, ToastTone::Neutral, "Copied".to_owned());
+            return;
+        }
         let session = self.session.read(cx);
         let Some(selection) = self
             .code_selection
@@ -995,7 +1009,7 @@ impl OneStepLayout {
                 .session
                 .update(cx, |session, cx| session.apply(change, cx)),
             Effect::Toggle(Overlay::Jump) => {
-                let groups = self.session.read(cx).review().palette("");
+                let groups = self.session.read(cx).review().palette("", running_build());
                 self.jump.update(cx, |palette, cx| {
                     if palette.is_open() {
                         palette.close(window, cx);
@@ -1035,6 +1049,14 @@ impl OneStepLayout {
                 Err(error) => {
                     post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
                 }
+            },
+            Effect::CheckForUpdates => match cx.try_global::<Updates>().cloned() {
+                Some(Updates(updater)) => updater.update(cx, Updater::check_now),
+                None => post_toast(
+                    cx,
+                    ToastTone::Neutral,
+                    "This build does not take updates".to_owned(),
+                ),
             },
             Effect::Nothing | Effect::Refused(_) => {}
         }
@@ -1126,22 +1148,73 @@ impl OneStepLayout {
         )
     }
 
+    /// A row touching the current one tells the layout while the mouse is on it.
+    fn touching_hover(
+        &self,
+        row: Stateful<Div>,
+        index: usize,
+        place: RowPlace,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        if !matches!(
+            place,
+            RowPlace::JustAboveCurrent | RowPlace::JustBelowCurrent
+        ) {
+            return row;
+        }
+        row.on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            let hovered = is_hovered.then_some((index, place));
+            if this.hovered_touching_row != hovered {
+                this.hovered_touching_row = hovered;
+                cx.notify();
+            }
+        }))
+    }
+
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
         let progress = sidebar.progress;
-        let summary_row = sidebar_row(
-            &colors,
-            "summary",
-            0,
-            sidebar.is_summary_current,
-            RowMark::Page,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, |review| review.go_to_summary());
-        }))
-        .child("Summary");
+        let places = row_places(
+            &std::iter::once(sidebar.is_summary_current)
+                .chain(sidebar.steps.iter().map(|step| step.is_current))
+                .chain(
+                    sidebar
+                        .safety_net
+                        .iter()
+                        .map(|safety_net| safety_net.is_current),
+                )
+                .collect::<Vec<_>>(),
+        );
+        // By its index and place then: once the current row moves, a row kept from before no longer counts.
+        let hovered_touching = self
+            .hovered_touching_row
+            .filter(|(index, place)| places.get(*index) == Some(place))
+            .map(|(_, place)| place);
+        let last_index = places.len().saturating_sub(1);
+        let mut places = places.into_iter();
+        let summary_place = places.next().unwrap_or(RowPlace::Apart);
+        let step_places: Vec<RowPlace> = places.by_ref().take(sidebar.steps.len()).collect();
+        let safety_net_place = places.next().unwrap_or(RowPlace::Apart);
+        let summary_row = self
+            .touching_hover(
+                sidebar_row(
+                    &colors,
+                    "summary",
+                    0,
+                    summary_place,
+                    RowMark::Page,
+                    hovered_touching,
+                ),
+                0,
+                summary_place,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, |review| review.go_to_summary());
+            }))
+            .child(row_label("Summary"));
         let sync_notices = sidebar
             .sync_banner
             .clone()
@@ -1192,43 +1265,59 @@ impl OneStepLayout {
             self.on_finish_review(),
         )
         .opened_by(self.finish_form_request);
-        let step_rows = sidebar.steps.iter().map(|step| {
-            let id: StepId = step.id.clone();
-            let mark = if step.is_gone {
-                RowMark::Gone
-            } else if step.is_ticked {
-                RowMark::Read
-            } else {
-                RowMark::Unread
-            };
-            sidebar_row(
-                &colors,
-                SharedString::from(format!("step-{id}")),
-                step.depth,
-                step.is_current,
-                mark,
-            )
-            .when(step.is_skim && !step.is_current, |row| {
-                row.text_color(colors.muted_text)
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to(&id));
-            }))
-            .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
-                format!("sidebar-{}", step.id),
-                &step.label,
-            )))
-            .children(step.has_check.then(|| check_flag(&colors)))
-            .children(step.is_skim.then(|| skim_chip(&colors)))
-            .children(count_badge(&colors, step.thread_count))
-        });
+        let step_rows = sidebar
+            .steps
+            .iter()
+            .zip(step_places.into_iter().enumerate())
+            .map(|(step, (offset, place))| {
+                let id: StepId = step.id.clone();
+                let mark = if step.is_gone {
+                    RowMark::Gone
+                } else if step.is_ticked {
+                    RowMark::Read
+                } else {
+                    RowMark::Unread
+                };
+                self.touching_hover(
+                    sidebar_row(
+                        &colors,
+                        SharedString::from(format!("step-{id}")),
+                        step.depth,
+                        place,
+                        mark,
+                        hovered_touching,
+                    ),
+                    offset + 1,
+                    place,
+                    cx,
+                )
+                .when(step.is_skim && !step.is_current, |row| {
+                    row.text_color(colors.muted_text)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| review.go_to(&id));
+                }))
+                .child(row_label(InlineMarkdown::new(
+                    format!("sidebar-{}", step.id),
+                    &step.label,
+                )))
+                .children(step.has_check.then(|| check_flag(&colors)))
+                .children(step.is_skim.then(|| skim_chip(&colors)))
+                .children(count_badge(&colors, step.thread_count))
+            });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
-            sidebar_row(
-                &colors,
-                "safety-net",
-                0,
-                safety_net.is_current,
-                RowMark::Page,
+            self.touching_hover(
+                sidebar_row(
+                    &colors,
+                    "safety-net",
+                    0,
+                    safety_net_place,
+                    RowMark::Page,
+                    hovered_touching,
+                ),
+                last_index,
+                safety_net_place,
+                cx,
             )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, |review| review.go_to_safety_net());
@@ -1258,7 +1347,7 @@ impl OneStepLayout {
             .children(problems)
             .children(sync_notices);
         div()
-            .w(px(300.))
+            .w(px(SIDEBAR_WIDTH))
             .flex_none()
             .h_full()
             .flex()
@@ -1276,7 +1365,7 @@ impl OneStepLayout {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(colors.muted_text)
                             .child("Guided review")
-                            .children(dev_build_chip(&colors)),
+                            .children(build_chip(&colors)),
                     ),
             )
             .child(header)
@@ -1763,7 +1852,7 @@ impl OneStepLayout {
                     .with_code_selection(CodeSelectionHooks {
                         selected: code_selection,
                         on_gesture: Rc::new(move |gesture, byte, window, cx| {
-                            on_code_gesture(gesture, CodeSpot { row: index, byte }, window, cx);
+                            on_code_gesture(gesture, TextSpot { row: index, byte }, window, cx);
                         }),
                     })
                     .with_gestures(Rc::clone(&self.on_row_gesture))
@@ -2910,6 +2999,9 @@ impl Render for OneStepLayout {
             // Before the press reaches what is under the pointer, so a double click's word, chosen
             // there, is not the selection cleared here.
             .capture_any_mouse_down(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                if event.button == MouseButton::Left && ProseSelections::clear_unless_dragging(cx) {
+                    cx.notify();
+                }
                 if event.button == MouseButton::Left
                     && this
                         .code_selection

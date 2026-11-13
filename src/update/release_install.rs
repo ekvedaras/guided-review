@@ -35,17 +35,37 @@ pub struct Installed {
 /// updates never reach the reviewer. Removing `binary` puts it right.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InTheWay {
-    /// The app runs `binary` itself.
-    Runs {
-        binary: PathBuf,
-        release_install: PathBuf,
-    },
     /// The app is the release install, but `binary` comes before it on `PATH`, so `guided-review` in a
     /// terminal or run by the tour skill is that one.
     FirstOnPath {
         binary: PathBuf,
         release_install: PathBuf,
     },
+}
+
+/// Which build of the app runs: the release install, which updates itself, or one built from source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Build {
+    Release,
+    /// Built from source, as by `cargo install`: never updated, so marked `DEV`.
+    Local,
+    /// The snapshot build, marked `TEST` in its pictures.
+    Test,
+}
+
+impl Build {
+    /// The mark beside the app's name; the release has none.
+    pub fn badge(self) -> Option<&'static str> {
+        match self {
+            Self::Release => None,
+            Self::Local => Some("DEV"),
+            Self::Test => Some("TEST"),
+        }
+    }
+
+    pub fn takes_updates(self) -> bool {
+        self == Self::Release
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +87,14 @@ impl ReleaseInstall {
 
     /// Whether `exe` is the binary the bin link points at in the release folders. A binary built from
     /// source, or moved in by hand, has no link to move, so it is never updated.
+    pub fn build_of(&self, exe: &Path) -> Build {
+        if self.runs(exe) {
+            Build::Release
+        } else {
+            Build::Local
+        }
+    }
+
     pub fn runs(&self, exe: &Path) -> bool {
         let Some(linked) = self.linked_into_versions(&self.bin_link) else {
             return false;
@@ -74,16 +102,13 @@ impl ReleaseInstall {
         fs::canonicalize(exe).is_ok_and(|exe| exe == linked)
     }
 
-    /// The `guided-review` that runs in place of the release install, when one is installed: `exe`
-    /// itself, or the first `guided-review` on `path` that does not lead to it.
+    /// The first `guided-review` on `path` that does not lead to the release install, while the release
+    /// install runs. A local build running says so with its `DEV` badge instead.
     pub fn in_the_way(&self, exe: &Path, path: &OsStr) -> Option<InTheWay> {
         let release = self.linked_into_versions(&self.bin_link)?;
         let release_install = self.bin_link.clone();
         if !self.runs(exe) {
-            return Some(InTheWay::Runs {
-                binary: exe.to_path_buf(),
-                release_install,
-            });
+            return None;
         }
         let first_on_path = std::env::split_paths(path)
             .map(|folder| folder.join("guided-review"))

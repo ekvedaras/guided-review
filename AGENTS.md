@@ -4,7 +4,7 @@ Rust 2024 gpui app.
 
 ## The gate
 
-`scripts/check` is the gate before every commit: fmt, clippy, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself.
+`scripts/check` is the gate before every commit: fmt, clippy, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself. `rust-toolchain.toml` pins Rust for both, so CI's clippy is never newer than yours; raise it in its own commit.
 
 - Start it with `run_in_background` and read only until it ends. A commit stages what is on disk, so edit nothing while it runs, and stage first or check `git diff` against what you commit.
 - Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`.
@@ -19,7 +19,7 @@ Rust 2024 gpui app.
 
 ## Install
 
-The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`). Once the gate is green, run `cargo install --path . --locked` and check that `guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit.
+The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`), run by its full path: a plain `guided-review` is the release install in `~/.local/bin`, which comes first on PATH, so `/tour` and normal use never run a trial build. Once the gate is green, run `cargo install --path . --locked` and check that `~/.cargo/bin/guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit.
 
 ## Seeing the app
 

@@ -79,6 +79,18 @@ impl SavedState {
         Ok(changed)
     }
 
+    /// Made in memory only, while a re-pin runs, for news the caller hands on to the re-pinned review.
+    pub(super) fn keep_until_repinned<T>(
+        &mut self,
+        change: impl FnOnce(&mut ReviewState) -> T,
+    ) -> T {
+        change(&mut self.state)
+    }
+
+    pub(super) fn is_repinning(&self) -> bool {
+        self.repin.running
+    }
+
     /// For what the review keeps outside its state but would lose all the same when the re-pin replaces it.
     pub(super) fn refuse_while_repinning(&mut self) -> anyhow::Result<()> {
         if self.repin.running {

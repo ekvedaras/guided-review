@@ -16,6 +16,13 @@ const INDENT_PER_DEPTH: f32 = 16.;
 /// on its first line even when it wraps.
 const LINE_HEIGHT: f32 = 22.;
 const MARK_SIZE: f32 = 14.;
+/// The row's inset at top, bottom and right, so a mark in its corner is as far from the top edge as
+/// from the right. Text keeps `TEXT_END` more room at the right.
+const ROW_INSET: f32 = 3.;
+const TEXT_END: f32 = 5.;
+/// A pill in the corner, like `skim`, keeps the room beside it that its line leaves above it: a
+/// `text_xs` pill is 12 px times phi high in a `LINE_HEIGHT` line.
+const PILL_END: f32 = (LINE_HEIGHT - 12. * 1.618) / 2.;
 
 /// What the reader has done with the screen a row opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,22 +35,25 @@ pub enum RowMark {
     Page,
 }
 
-/// The look every clickable row of the sidebar shares: a mark, then the caller's label.
+/// The look every clickable row of the sidebar shares: a mark, then the caller's label. The current row squares
+/// the corners it shares with `hovered_touching`, the touching row under the mouse.
 pub fn sidebar_row(
     colors: &Colors,
     id: impl Into<ElementId>,
     depth: usize,
-    is_current: bool,
+    place: RowPlace,
     mark: RowMark,
+    hovered_touching: Option<RowPlace>,
 ) -> Stateful<Div> {
+    let is_current = place == RowPlace::Current;
     div()
         .id(id)
         .relative()
         .line_height(px(LINE_HEIGHT))
         .mx_2()
         .pl(indent(depth))
-        .pr_2()
-        .py(px(3.))
+        .pr(px(ROW_INSET))
+        .py(px(ROW_INSET))
         .flex()
         .items_start()
         .gap_2()
@@ -60,9 +70,24 @@ pub fn sidebar_row(
                 row.bg(colors.current)
                     .border_color(colors.current_border)
                     .font_weight(FontWeight::MEDIUM)
+                    .map(|row| match hovered_touching {
+                        Some(RowPlace::JustAboveCurrent) => row.rounded_t(px(0.)),
+                        Some(RowPlace::JustBelowCurrent) => row.rounded_b(px(0.)),
+                        _ => row,
+                    })
             } else {
                 row.border_color(gpui::transparent_black())
-                    .hover(|row| row.bg(colors.hover))
+                    .map(|row| match place {
+                        RowPlace::JustAboveCurrent => {
+                            row.hover(|row| row.bg(colors.hover).rounded_b(px(0.)))
+                        }
+                        RowPlace::JustBelowCurrent => {
+                            row.hover(|row| row.bg(colors.hover).rounded_t(px(0.)))
+                        }
+                        RowPlace::Current | RowPlace::Apart => {
+                            row.hover(|row| row.bg(colors.hover))
+                        }
+                    })
                     .active(|row| row.bg(colors.pressed))
             }
         })
@@ -87,17 +112,24 @@ pub fn check_flag(colors: &Colors) -> impl IntoElement {
     div()
         .id("check-flag")
         .flex_none()
-        .h(px(LINE_HEIGHT))
+        .size(px(LINE_HEIGHT))
         .flex()
         .items_center()
+        .justify_center()
         .tooltip(tooltip(|_| "Has something to check".into()))
         .child(sized_icon(Icon::Flag, colors.warning, px(12.)))
+}
+
+/// A row's label: it takes the room left and keeps clear of the row's right edge.
+pub fn row_label(label: impl IntoElement) -> Div {
+    div().flex_1().min_w_0().pr(px(TEXT_END)).child(label)
 }
 
 /// Small text after a row's label, centred on the label's first line like the badges.
 pub fn row_note(colors: &Colors, note: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex_none()
+        .mr(px(TEXT_END))
         .h(px(LINE_HEIGHT))
         .flex()
         .items_center()
@@ -110,6 +142,7 @@ pub fn row_note(colors: &Colors, note: impl Into<SharedString>) -> impl IntoElem
 pub fn skim_chip(colors: &Colors) -> impl IntoElement {
     div()
         .flex_none()
+        .mr(px(PILL_END))
         .h(px(LINE_HEIGHT))
         .flex()
         .items_center()
@@ -186,9 +219,11 @@ pub fn count_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
     (count > 0).then(|| {
         div()
             .flex_none()
+            .min_w(px(LINE_HEIGHT))
             .h(px(LINE_HEIGHT))
             .flex()
             .items_center()
+            .justify_center()
             .child(
                 div()
                     .px_1p5()
@@ -206,4 +241,62 @@ pub fn count_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
 
 fn indent(depth: usize) -> Pixels {
     px(FLAT_INDENT + INDENT_PER_DEPTH * depth as f32)
+}
+
+/// Where a row stands to the current one. Rows touch, so a hovered neighbour and the current row
+/// square the corners where they meet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowPlace {
+    Current,
+    JustAboveCurrent,
+    JustBelowCurrent,
+    Apart,
+}
+
+/// The place of each row, from whether each is current, top to bottom.
+pub fn row_places(is_current: &[bool]) -> Vec<RowPlace> {
+    let is_current_at =
+        |index: Option<usize>| index.and_then(|index| is_current.get(index)) == Some(&true);
+    is_current
+        .iter()
+        .enumerate()
+        .map(|(index, &is_current_row)| {
+            if is_current_row {
+                RowPlace::Current
+            } else if is_current_at(Some(index + 1)) {
+                RowPlace::JustAboveCurrent
+            } else if is_current_at(index.checked_sub(1)) {
+                RowPlace::JustBelowCurrent
+            } else {
+                RowPlace::Apart
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_rows_touching_the_current_one_know_their_side() {
+        assert_eq!(
+            row_places(&[false, false, true, false, false]),
+            [
+                RowPlace::Apart,
+                RowPlace::JustAboveCurrent,
+                RowPlace::Current,
+                RowPlace::JustBelowCurrent,
+                RowPlace::Apart,
+            ]
+        );
+        assert_eq!(
+            row_places(&[true, false]),
+            [RowPlace::Current, RowPlace::JustBelowCurrent]
+        );
+        assert_eq!(
+            row_places(&[false, false]),
+            [RowPlace::Apart, RowPlace::Apart]
+        );
+    }
 }

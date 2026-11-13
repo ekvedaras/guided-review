@@ -10,6 +10,7 @@ mod ask;
 mod ask_context;
 mod ask_desk;
 mod ask_target;
+mod avatars;
 mod code_link;
 mod comment_desk;
 mod comments;
@@ -40,6 +41,7 @@ mod rendered_view;
 mod reopen_after_save;
 mod review;
 mod review_state;
+mod reviewing_mark;
 mod row_selection;
 mod saved_state;
 mod screen_travel;
@@ -71,6 +73,7 @@ pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
 };
 pub use ask_target::{AskTarget, Unavailable};
+pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, TourFreshness};
@@ -116,8 +119,9 @@ pub use page::{
 };
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestTipsPort, RefreshWriter, Resolution, ReviewThreadsPort,
-    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, RefreshWriter,
+    Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile,
+    ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
