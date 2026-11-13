@@ -262,3 +262,11 @@ fn the_notice_at_start_counts_the_problems_and_points_to_settings() {
         None
     );
 }
+
+#[test]
+fn a_chord_is_spelled_for_a_line_of_text_with_the_symbols_its_caps_use() {
+    assert_eq!(chord("w").spelled(), "W");
+    assert_eq!(chord("cmd-shift-enter").spelled(), "⌘⇧↵");
+    assert_eq!(chord("alt-left").spelled(), "⌥←");
+    assert_eq!(chord("escape").spelled(), "esc");
+}

@@ -931,3 +931,21 @@ fn the_keymap_of_settings_is_the_keys_as_edited() {
         [chord("down"), chord("j")]
     );
 }
+
+#[test]
+fn key_problems_follow_each_edit_before_any_save() {
+    let (_home, mut settings) = loaded_from(KEYED_CONFIG);
+    assert_eq!(settings.key_problems(), []);
+
+    settings.set_key(Command::WrapLines, chord("m"));
+    assert_eq!(
+        settings.key_problems(),
+        [KeyProblem::Clash {
+            chord: chord("m"),
+            commands: [Command::ToggleRead, Command::WrapLines],
+        }]
+    );
+
+    settings.reset_key(Command::WrapLines);
+    assert_eq!(settings.key_problems(), []);
+}

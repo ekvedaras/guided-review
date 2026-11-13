@@ -201,6 +201,24 @@ impl Chord {
             .join("-")
     }
 
+    /// The chord as a line of text says it: `⌘⇧↵`, `W`, `esc`.
+    pub fn spelled(self) -> String {
+        self.caps()
+            .map(|cap| match cap {
+                KeyCap::Modifier(Modifier::Cmd) => "⌘",
+                KeyCap::Modifier(Modifier::Ctrl) => "⌃",
+                KeyCap::Modifier(Modifier::Alt) => "⌥",
+                KeyCap::Modifier(Modifier::Shift) => "⇧",
+                KeyCap::Key(Key::Left) => "←",
+                KeyCap::Key(Key::Right) => "→",
+                KeyCap::Key(Key::Up) => "↑",
+                KeyCap::Key(Key::Down) => "↓",
+                KeyCap::Key(Key::Enter) => "↵",
+                KeyCap::Key(key) => key.face(),
+            })
+            .collect()
+    }
+
     pub fn caps(self) -> impl Iterator<Item = KeyCap> {
         self.modifiers
             .iter()

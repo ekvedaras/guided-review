@@ -1,0 +1,1 @@
+Every key now shows in Settings under Keys, where you can change it by pressing the new one or reset it. Keys you set are kept in `[keys]` in `config.toml`, take effect when you save, and a line that cannot be used is reported without undoing the others.

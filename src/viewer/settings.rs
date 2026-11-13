@@ -475,6 +475,11 @@ impl Settings {
             .unwrap_or_else(|| command.default_chords().to_vec())
     }
 
+    /// What is wrong with the keys as edited, before any Save.
+    pub fn key_problems(&self) -> Vec<KeyProblem> {
+        self.edited.keys.resolve().problems
+    }
+
     /// The keymap the app binds once these keys are saved.
     pub fn keymap(&self) -> Keymap {
         self.edited.keys.resolve().keymap

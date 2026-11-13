@@ -77,6 +77,7 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
+use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -2211,7 +2212,13 @@ impl OneStepLayout {
         });
         let wrap = toolbar.wraps_lines.map(|is_on| {
             toolbar_toggle(&colors, "wrap-lines", is_on, Icon::WrapText, "Wrap lines")
-                .tooltip(tooltip(|_| "Wrap long lines (W)".into()))
+                .tooltip(tooltip(|cx| {
+                    match keymap(cx).first_chord(Command::WrapLines) {
+                        Some(chord) => format!("Wrap long lines ({})", chord.spelled()),
+                        None => "Wrap long lines".to_owned(),
+                    }
+                    .into()
+                }))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.change_review(cx, |review| {
                         review.display_options_mut().toggle_wrap_lines();
