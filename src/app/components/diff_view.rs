@@ -383,6 +383,8 @@ pub fn piece_row(colors: &Colors) -> Div {
         .border_color(colors.subtle_border)
 }
 
+pub const PIECE_HEADER_HEIGHT: Pixels = px(34.);
+
 /// The top of a piece box: the piece's name, its re-pin label, and its buttons (open the code, ask).
 #[derive(IntoElement)]
 pub struct PieceHeader {
@@ -391,6 +393,7 @@ pub struct PieceHeader {
     buttons: Vec<Stateful<Div>>,
     fold_toggle: Option<Stateful<Div>>,
     closes_box: bool,
+    is_pinned: bool,
 }
 
 impl PieceHeader {
@@ -405,12 +408,19 @@ impl PieceHeader {
             buttons,
             fold_toggle: None,
             closes_box: false,
+            is_pinned: false,
         }
     }
 
     /// Nothing follows it in its box: it rounds the box's bottom corners too.
     pub fn closing_its_box(mut self, closes_box: bool) -> Self {
         self.closes_box = closes_box;
+        self
+    }
+
+    /// Kept at the top of the view over its scrolled code: square, flush with the bar above it.
+    pub fn pinned(mut self) -> Self {
+        self.is_pinned = true;
         self
     }
 
@@ -433,14 +443,14 @@ impl RenderOnce for PieceHeader {
         });
         div()
             .w_full()
-            .h(px(34.))
+            .h(PIECE_HEADER_HEIGHT)
             .flex()
             .items_center()
             .px_3()
             .gap_2()
             .bg(colors.header_band())
             .border_1()
-            .rounded_t(px(CARD_RADIUS))
+            .when(!self.is_pinned, |header| header.rounded_t(px(CARD_RADIUS)))
             .when(self.closes_box, |header| {
                 header
                     .rounded_b(px(CARD_RADIUS))

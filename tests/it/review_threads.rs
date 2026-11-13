@@ -228,7 +228,7 @@ fn a_thread_on_a_line_only_the_safety_net_shows_hangs_under_that_line_there() {
 }
 
 #[test]
-fn an_outdated_thread_is_folded_at_the_end_of_the_step_holding_its_file() {
+fn an_outdated_thread_stays_open_at_the_end_of_the_step_holding_its_file() {
     let mut review = Shop::with_pull().open(steps());
     review.set_threads(&[outdated("old", "config.yml")]);
 
@@ -236,7 +236,7 @@ fn an_outdated_thread_is_folded_at_the_end_of_the_step_holding_its_file() {
     let page = review.current_step().unwrap();
     assert_eq!(ids(&page.threads), ["old"]);
     assert!(page.threads[0].anchor.is_none());
-    assert!(page.threads[0].is_folded);
+    assert!(!page.threads[0].is_folded, "only resolving folds a thread");
 }
 
 #[test]

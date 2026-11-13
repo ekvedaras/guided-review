@@ -114,9 +114,9 @@ pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, 
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use page::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
-    Page, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
-    SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow,
-    ThreadRowPlace, Toolbar, line_count,
+    Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,
+    ScreenFooter, SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
+    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
 };
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,

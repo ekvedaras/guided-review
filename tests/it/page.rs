@@ -395,3 +395,63 @@ fn thread_folded(page: &Page) -> Option<bool> {
         _ => None,
     })
 }
+
+fn pinned_at(page: &Page, row: usize) -> Option<(String, Option<String>)> {
+    page.pinned_header(row).map(|pinned| {
+        (
+            pinned.header.path.to_string(),
+            pinned.symbol.as_deref().map(str::to_owned),
+        )
+    })
+}
+
+fn cart_step() -> Value {
+    json!([{"id": "cart", "title": "Cart", "why": "because",
+        "pieces": [
+            {"file": "app/Cart.php", "symbol": "Cart::total"},
+            {"file": "app/Cart.php", "symbol": "Cart"},
+        ], "children": []}])
+}
+
+#[test]
+fn a_file_header_is_pinned_only_once_it_has_scrolled_away() {
+    let review = Pull::new().open(notes_step());
+    let page = review.page();
+    let header = row_of(page, "header notes.txt");
+
+    assert_eq!(pinned_at(page, header - 1), None, "above the box");
+    assert_eq!(pinned_at(page, header), None, "the header is in view");
+    assert_eq!(
+        pinned_at(page, row_of(page, "+10")),
+        Some(("notes.txt".to_owned(), None)),
+        "a box of one piece names its symbol in its own header"
+    );
+    assert_eq!(
+        page.pinned_header(row_of(page, "+10"))
+            .map(|pinned| pinned.header_row),
+        Some(header)
+    );
+    assert_eq!(pinned_at(page, row_of(page, "end")), None, "the box ends");
+    assert_eq!(
+        pinned_at(page, row_of(page, "footer")),
+        None,
+        "past the box"
+    );
+}
+
+#[test]
+fn a_pinned_header_names_the_symbol_the_top_row_is_in() {
+    let review = Pull::cart().open(cart_step());
+    let page = review.page();
+    let in_cart = page.row_of_line(&at_head("app/Cart.php", 5)).unwrap();
+    let in_total = page.row_of_line(&at_head("app/Cart.php", 11)).unwrap();
+
+    assert_eq!(
+        pinned_at(page, in_cart),
+        Some(("app/Cart.php".to_owned(), Some("Cart".to_owned())))
+    );
+    assert_eq!(
+        pinned_at(page, in_total),
+        Some(("app/Cart.php".to_owned(), Some("Cart::total".to_owned())))
+    );
+}

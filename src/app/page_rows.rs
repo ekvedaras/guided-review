@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 use crate::viewer::{
-    AskAt, BoxEdges, JumpTarget, LineKind, Page, PageRow, Review, RowSelection, SelectedRows,
-    ShownLine, StepHeading, line_count,
+    AskAt, BoxEdges, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review, RowSelection,
+    SelectedRows, ShownLine, StepHeading, line_count,
 };
 
 /// What the PR description's `MarkdownView` is keyed by, so its folds can be told apart.
@@ -190,6 +190,10 @@ impl PageRows {
 
     pub fn step_heading(&self) -> Option<&Arc<StepHeading>> {
         self.page.as_deref()?.step_heading()
+    }
+
+    pub fn pinned_header(&self, top_row: usize) -> Option<PinnedHeader> {
+        self.page.as_deref()?.pinned_header(top_row)
     }
 
     /// The footer of the screen as it is once every step is read, and its heading ticked.

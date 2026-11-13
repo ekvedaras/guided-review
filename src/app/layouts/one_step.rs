@@ -33,9 +33,9 @@ use crate::app::components::comment_composer::{
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
     CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
-    OnScrollX, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row, hung_row, hunk_gap,
-    no_change_since_read_row, only_whitespace_row, piece_end, rendered_block_row,
-    rendered_file_waiting_row,
+    OnScrollX, PIECE_HEADER_HEIGHT, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row,
+    hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
+    rendered_block_row, rendered_file_waiting_row,
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -51,6 +51,7 @@ use crate::app::components::motion::{
     pop_in, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
+use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
 };
@@ -85,14 +86,14 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, BoxEdges, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight, Intent,
-    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place, QueuedComment,
-    ReadProgress, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep,
-    Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, ViewSwitch, WindowMoment,
+    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, CodeLink, Command, CommentBox,
+    CommentGesture, CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight,
+    Intent, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place,
+    QueuedComment, ReadProgress, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
+    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
+    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
+    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
+    Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -156,6 +157,8 @@ pub struct OneStepLayout {
     code_scroll_x: CodeScrollX,
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
+    /// While the page's scrollbar is dragged: how far below the thumb's top the pointer holds it.
+    scrollbar_grab: Option<Pixels>,
     /// The rows of the last drag, to ask the AI about.
     frame_stats: FrameStatsHook,
     #[cfg(feature = "snapshots")]
@@ -353,6 +356,7 @@ impl OneStepLayout {
             hovered_touching_row: None,
             on_code_gesture,
             selection_notice: None,
+            scrollbar_grab: None,
             frame_stats,
             #[cfg(feature = "snapshots")]
             _snapshots: scenes::start(window, cx),
@@ -1552,7 +1556,7 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let bar = div()
             .w_full()
-            .h(px(44.))
+            .h(STICKY_STEP_BAR_HEIGHT)
             .px_6()
             .flex()
             .items_center()
@@ -1583,6 +1587,181 @@ impl OneStepLayout {
             Edge::Top,
             BANNER_DROP,
         )))
+    }
+
+    /// The header of the file box the reader is in stays under the step bar while its code
+    /// scrolls under it, naming the symbol there. It takes over when the real header reaches it.
+    fn pinned_file_header(
+        &self,
+        under: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let pin_line = self.screen_list.viewport_bounds().top() + under + PIECE_HEADER_HEIGHT;
+        let pinned = self
+            .session
+            .read(cx)
+            .rows()
+            .pinned_header(self.row_at(pin_line))?;
+        let mut label = pinned.header.label.clone();
+        if pinned.symbol.is_some() {
+            label.symbol = pinned.symbol;
+        }
+        let header = PieceHeader::new(label, pinned.header.repin_label, Vec::new()).pinned();
+        let header = match pinned.header.fold.clone() {
+            Some(fold) => header.with_fold_toggle(Self::box_fold_toggle(
+                fold,
+                "pinned-fold-box",
+                Some(pinned.header_row),
+                cx,
+            )),
+            None => header,
+        };
+        let colors = Colors::active(cx);
+        Some(
+            div()
+                .absolute()
+                .top(under)
+                .left_0()
+                .right_0()
+                .px_6()
+                .bg(colors.background)
+                .child(header),
+        )
+    }
+
+    /// The chevron that opens or folds a file box. Folded from the pinned header, the box's own
+    /// header is scrolled to, so the reader stays at the box they folded.
+    fn box_fold_toggle(
+        fold: BoxFold,
+        id: &str,
+        header_row: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let colors = Colors::active(cx);
+        div()
+            .id(SharedString::from(format!("{id}-{}", fold.path)))
+            .flex_none()
+            .w(px(14.))
+            .h(px(14.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(INNER_RADIUS))
+            .cursor_pointer()
+            .hover(|chevron| chevron.bg(colors.hover))
+            .active(|chevron| chevron.bg(colors.pressed))
+            .child(turn_to(
+                sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                SharedString::from(format!("{id}-chevron")),
+                !fold.is_folded,
+                1.,
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| {
+                    review.toggle_box_fold(&fold.step, &fold.path);
+                });
+                if let Some(row) = header_row {
+                    // From the row above, so the step bar does not cover the header.
+                    this.screen_list.scroll_to(ListOffset {
+                        item_ix: row.saturating_sub(1),
+                        offset_in_item: Pixels::ZERO,
+                    });
+                }
+            }))
+    }
+
+    /// Where the view is on the page, as a thumb on its right edge that drags the page. A press on
+    /// the track off the thumb takes the thumb's middle there.
+    fn page_scrollbar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let thumb = self.scroll_thumb()?;
+        let colors = Colors::active(cx);
+        let is_dragging = self.scrollbar_grab.is_some();
+        Some(
+            div()
+                .id("page-scrollbar")
+                .group("page-scrollbar")
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                .w(px(12.))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let on_track = event.position.y - this.screen_list.viewport_bounds().top();
+                        let is_on_thumb =
+                            on_track >= thumb.top && on_track <= thumb.top + thumb.height;
+                        this.scrollbar_grab = Some(if is_on_thumb {
+                            on_track - thumb.top
+                        } else {
+                            thumb.height / 2.
+                        });
+                        this.screen_list.scrollbar_drag_started();
+                        this.drag_scrollbar_to(event.position.y, cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(thumb.top)
+                        .right(px(3.))
+                        .w(px(6.))
+                        .h(thumb.height)
+                        .rounded_full()
+                        .bg(colors
+                            .muted_text
+                            .opacity(if is_dragging { 0.6 } else { 0.3 }))
+                        .group_hover("page-scrollbar", |thumb| {
+                            thumb.bg(colors.muted_text.opacity(0.6))
+                        }),
+                ),
+        )
+    }
+
+    fn scroll_thumb(&self) -> Option<ScrollThumb> {
+        ScrollThumb::of(
+            self.screen_list.viewport_bounds().size.height,
+            -self.screen_list.scroll_px_offset_for_scrollbar().y,
+            self.screen_list.max_offset_for_scrollbar().y,
+        )
+    }
+
+    /// `pointer_y` is in window pixels.
+    fn drag_scrollbar_to(&mut self, pointer_y: Pixels, cx: &mut Context<Self>) {
+        let (Some(grab), Some(thumb)) = (self.scrollbar_grab, self.scroll_thumb()) else {
+            return;
+        };
+        let viewport = self.screen_list.viewport_bounds();
+        let scrolled = thumb.scrolled_at(
+            pointer_y - viewport.top() - grab,
+            viewport.size.height,
+            self.screen_list.max_offset_for_scrollbar().y,
+        );
+        self.screen_list
+            .set_offset_from_scrollbar(gpui::point(Pixels::ZERO, -scrolled));
+        cx.notify();
+    }
+
+    fn end_scrollbar_drag(&mut self, cx: &mut Context<Self>) {
+        if self.scrollbar_grab.take().is_some() {
+            self.screen_list.scrollbar_drag_ended();
+            cx.notify();
+        }
+    }
+
+    /// The first row of the screen whose bottom is below `y`, in window pixels.
+    fn row_at(&self, y: Pixels) -> usize {
+        let mut row = self.screen_list.logical_scroll_top().item_ix;
+        // gpui reports a row's bounds without the list's top padding, which it paints rows below.
+        while self
+            .screen_list
+            .bounds_for_item(row)
+            .is_some_and(|bounds| bounds.bottom() + PAGE_TOP <= y)
+        {
+            row += 1;
+        }
+        row
     }
 
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
@@ -1746,31 +1925,7 @@ impl OneStepLayout {
                 .closing_its_box(edges.closes);
                 match heading.fold.clone() {
                     Some(fold) => header
-                        .with_fold_toggle(
-                            div()
-                                .id(SharedString::from(format!("fold-box-{}", fold.path)))
-                                .flex_none()
-                                .w(px(14.))
-                                .h(px(14.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(INNER_RADIUS))
-                                .cursor_pointer()
-                                .hover(|chevron| chevron.bg(colors.hover))
-                                .active(|chevron| chevron.bg(colors.pressed))
-                                .child(turn_to(
-                                    sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
-                                    "fold-box-chevron",
-                                    !fold.is_folded,
-                                    1.,
-                                ))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.change_review(cx, |review| {
-                                        review.toggle_box_fold(&fold.step, &fold.path);
-                                    });
-                                })),
-                        )
+                        .with_fold_toggle(Self::box_fold_toggle(fold, "fold-box", None, cx))
                         .into_any_element(),
                     None => header.into_any_element(),
                 }
@@ -2162,6 +2317,7 @@ const SUMMARY_LINE: Pixels = px(26.);
 const PAGE_WASH_HEIGHT: Pixels = px(184.);
 /// The list's top padding, which the wash reaches up through to the column's top edge.
 const PAGE_TOP: Pixels = px(24.);
+const STICKY_STEP_BAR_HEIGHT: Pixels = px(44.);
 
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
@@ -2956,6 +3112,16 @@ impl Render for OneStepLayout {
             expect(unused_mut, reason = "the gallery picture has no step")
         )]
         let mut sticky_bar = self.sticky_step_bar(cx);
+        let pinned_header_top = if sticky_bar.is_some() {
+            STICKY_STEP_BAR_HEIGHT
+        } else {
+            Pixels::ZERO
+        };
+        #[cfg_attr(
+            not(feature = "snapshots"),
+            expect(unused_mut, reason = "the gallery picture has no code")
+        )]
+        let mut pinned_header = self.pinned_file_header(pinned_header_top, cx);
         let screen = div().size_full().child(
             list(
                 self.screen_list.clone(),
@@ -2983,6 +3149,7 @@ impl Render for OneStepLayout {
             .is_some_and(|staged| staged.0)
         {
             sticky_bar = None;
+            pinned_header = None;
             gallery::gallery(&colors)
         } else {
             screen.into_any_element()
@@ -2992,10 +3159,25 @@ impl Render for OneStepLayout {
             .flex_1()
             .min_h_0()
             .child(screen)
-            .children(sticky_bar);
+            .children(pinned_header)
+            .children(sticky_bar)
+            .children(self.page_scrollbar(cx));
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
+            .when(self.scrollbar_grab.is_some(), |root| {
+                root.on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                    if event.pressed_button == Some(MouseButton::Left) {
+                        this.drag_scrollbar_to(event.position.y, cx);
+                    } else {
+                        this.end_scrollbar_drag(cx);
+                    }
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.end_scrollbar_drag(cx)),
+                )
+            })
             // Before the press reaches what is under the pointer, so a double click's word, chosen
             // there, is not the selection cleared here.
             .capture_any_mouse_down(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
