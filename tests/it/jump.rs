@@ -354,6 +354,24 @@ fn an_action_names_the_shortcut_that_does_it() {
 }
 
 #[test]
+fn the_whitespace_and_ask_actions_name_their_shortcuts() {
+    use guided_review::viewer::PaletteAction;
+
+    assert_eq!(
+        PaletteAction::HideWhitespace.command(),
+        Some(Command::HideWhitespace)
+    );
+    assert_eq!(
+        PaletteAction::ShowWhitespace.command(),
+        Some(Command::HideWhitespace)
+    );
+    assert_eq!(
+        PaletteAction::AskAboutStep.command(),
+        Some(Command::AskAboutStep)
+    );
+}
+
+#[test]
 fn the_sidebar_flags_steps_with_something_to_check_and_marks_skim_steps() {
     let review = open(vec![
         json!({"id": "totals", "title": "Totals", "why": "w", "check": "Rounding", "pieces": [{"file": "app/Order.php"}]}),

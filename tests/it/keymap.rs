@@ -270,3 +270,24 @@ fn a_chord_is_spelled_for_a_line_of_text_with_the_symbols_its_caps_use() {
     assert_eq!(chord("alt-left").spelled(), "⌥←");
     assert_eq!(chord("escape").spelled(), "esc");
 }
+
+#[test]
+fn the_new_simple_keys_change_and_clear_through_the_keys_table() {
+    let keymap = keymap_of("[keys]\nhide_whitespace = \"x\"\nask_about_step = []").unwrap();
+
+    assert_eq!(keys(&keymap, Command::HideWhitespace), ["x"]);
+    assert!(keymap.first_chord(Command::AskAboutStep).is_none());
+}
+
+#[test]
+fn s_on_the_page_clashes_with_a_command_of_the_window() {
+    let problems = keymap_of("[keys]\nsettings = \"s\"").unwrap_err();
+
+    assert_eq!(
+        problems,
+        [KeyProblem::Clash {
+            chord: chord("s"),
+            commands: [Command::HideWhitespace, Command::Settings],
+        }]
+    );
+}

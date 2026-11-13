@@ -188,6 +188,12 @@ impl PageRows {
         self.page.as_deref()?.screen_ask()
     }
 
+    pub fn offers_hiding_whitespace(&self) -> bool {
+        self.page
+            .as_deref()
+            .is_some_and(Page::offers_hiding_whitespace)
+    }
+
     pub fn step_heading(&self) -> Option<&Arc<StepHeading>> {
         self.page.as_deref()?.step_heading()
     }

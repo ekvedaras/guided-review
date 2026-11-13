@@ -60,10 +60,10 @@ use components::settings_panel::SettingsPanel;
 use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    CloseWindow, Collaborators, CopySelection, FocusNextChange, FocusPreviousChange, GoBack,
-    GoForward, GoToNextUnread, OneStepLayout, OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove,
-    ShowMoreBelow, ToggleJump, TogglePieceLabels, ToggleRead, ToggleRenderedView, ToggleSettings,
-    ToggleShortcuts, ToggleWrapLines,
+    AskAboutStep, CloseWindow, Collaborators, CopySelection, FocusNextChange, FocusPreviousChange,
+    GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenPrOnGitHub, ReadDown, ReadUp,
+    ShowMoreAbove, ShowMoreBelow, ToggleJump, TogglePieceLabels, ToggleRead, ToggleRenderedView,
+    ToggleSettings, ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -784,6 +784,8 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitToAgent, context),
                 Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
+                Command::HideWhitespace => KeyBinding::new(&keys, ToggleWhitespace, context),
+                Command::AskAboutStep => KeyBinding::new(&keys, AskAboutStep, context),
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
                 Command::OpenOnGitHub => KeyBinding::new(&keys, OpenPrOnGitHub, context),

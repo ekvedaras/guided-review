@@ -325,6 +325,13 @@ impl Page {
         })
     }
 
+    /// Whether the screen's toolbar has the Hide whitespace toggle.
+    pub fn offers_hiding_whitespace(&self) -> bool {
+        self.rows.iter().any(
+            |row| matches!(row, PageRow::Toolbar(toolbar) if toolbar.ignores_whitespace.is_some()),
+        )
+    }
+
     /// What stays pinned at the top while `top_row` is the first row in view: the header of its file
     /// block, once that header has scrolled away, with the symbol the reader is in.
     pub fn pinned_header(&self, top_row: usize) -> Option<PinnedHeader> {
