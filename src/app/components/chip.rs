@@ -25,6 +25,7 @@ pub fn chip(colors: &Colors, tone: Tone) -> Div {
 
 /// Marks a window not of the release install, `DEV` or `TEST`, so it is not taken for the app that updates.
 pub fn build_chip(colors: &Colors) -> Option<Div> {
+    #[cfg(feature = "snapshots")]
     if crate::app::snapshots::hides_build_badge() {
         return None;
     }
