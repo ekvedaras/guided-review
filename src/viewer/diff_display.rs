@@ -150,11 +150,17 @@ pub enum PieceView {
     SinceRead(PieceId),
 }
 
+/// Which change of which piece: the n-th changed hunk of the piece's file, as GitHub cuts them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ChangeId {
+    piece: PieceView,
+    change: usize,
+}
+
 /// The reviewer's ask for more unchanged lines on one edge of one change of a piece.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MoreContext {
-    piece: PieceView,
-    change: usize,
+    change: ChangeId,
     pub edge: Edge,
 }
 
@@ -162,6 +168,9 @@ pub struct MoreContext {
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
     pub rows: Vec<DiffLine>,
+    /// Every change these lines hold, first to last. More lines shown between two changes join
+    /// them into one hunk, which keeps the identity of each.
+    pub changes: Vec<ChangeId>,
     /// `None` at the top of the file or next to another change.
     pub more_above: Option<MoreContext>,
     pub more_below: Option<MoreContext>,
@@ -293,9 +302,12 @@ impl DiffDisplay<'_> {
                 if !rows.iter().any(DiffLine::is_change) {
                     return None;
                 }
-                let more = |edge| MoreContext {
+                let id = ChangeId {
                     piece: view.clone(),
                     change,
+                };
+                let more = |edge| MoreContext {
+                    change: id.clone(),
                     edge,
                 };
                 let wanted = |edge| {
@@ -304,6 +316,7 @@ impl DiffDisplay<'_> {
                 let above = file_lines.unchanged_above(line_above, wanted(Edge::Above));
                 let below = file_lines.unchanged_below(line_below, wanted(Edge::Below));
                 Some(Segment {
+                    id: id.clone(),
                     more_above: file_lines
                         .is_unchanged(above.first().copied().unwrap_or(line_above + 1) - 1)
                         .then(|| more(Edge::Above)),
@@ -330,6 +343,7 @@ impl DiffDisplay<'_> {
                     );
                     hunk.rows.extend(segment.rows.iter().cloned());
                     hunk.more_below.clone_from(&segment.more_below);
+                    hunk.changes.push(segment.id.clone());
                     *previous = segment;
                 }
                 _ => {
@@ -341,6 +355,7 @@ impl DiffDisplay<'_> {
                         .collect();
                     let hunk = DiffHunk {
                         rows,
+                        changes: vec![segment.id.clone()],
                         more_above: segment.more_above.clone(),
                         more_below: segment.more_below.clone(),
                     };
@@ -421,6 +436,7 @@ fn without_whitespace(text: &str) -> String {
 
 /// One change of a piece with the unchanged head lines picked around it.
 struct Segment {
+    id: ChangeId,
     /// The head lines right above and below the change; context grows away from them.
     line_above: usize,
     line_below: usize,

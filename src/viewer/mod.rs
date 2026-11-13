@@ -20,6 +20,7 @@ mod diff_fence;
 mod display_options;
 mod file_block;
 mod finish_review;
+mod focused_change;
 mod github_outage;
 mod hand_offs;
 mod highlight;
@@ -86,8 +87,8 @@ pub use comments::{
     CommentResult, QueuedComment, SendMode,
 };
 pub use diff_display::{
-    DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext, hidden_lines_after,
-    hidden_lines_before,
+    ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,
+    hidden_lines_after, hidden_lines_before,
 };
 pub use diff_fence::{FenceLine, fence_lines};
 pub use display_options::DisplayOptions;
@@ -96,6 +97,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
+pub use focused_change::PageChange;
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,

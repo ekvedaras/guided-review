@@ -17,6 +17,7 @@ pub use rows::{
 
 use super::ask::Place;
 use super::file_block::FileBlock;
+use super::focused_change::PageChange;
 use super::jump::{JumpPlace, JumpTarget};
 use super::review::{ReviewCore, Screen};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -37,6 +38,9 @@ pub struct Page {
     pieces: Vec<PieceAt>,
     images_to_load: Vec<FilePath>,
     rendered: Vec<FilePath>,
+    changes: Vec<PageChange>,
+    /// The index in `changes` of the focused change, when the screen shows it.
+    focused: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -82,12 +86,18 @@ impl Page {
             blocks,
             diagram,
             rendered,
+            changes,
         } = laid.unwrap_or_else(|| build::Laid {
             rows: Vec::new(),
             blocks: Vec::new(),
             diagram: None,
             rendered: Vec::new(),
+            changes: Vec::new(),
         });
+        let focused = review
+            .display_options()
+            .focused_change()
+            .and_then(|id| changes.iter().position(|change| change.holds(id)));
         let mut line_rows = HashMap::new();
         let mut pieces = Vec::new();
         for (index, row) in rows.iter().enumerate() {
@@ -128,7 +138,23 @@ impl Page {
             pieces,
             images_to_load,
             rendered,
+            changes,
+            focused,
         }
+    }
+
+    /// Every change of the screen, top to bottom.
+    pub fn changes(&self) -> &[PageChange] {
+        &self.changes
+    }
+
+    pub(super) fn focused_index(&self) -> Option<usize> {
+        self.focused
+    }
+
+    /// The change that has the focus; none on a screen with no code, or while the focus is elsewhere.
+    pub fn focused_change(&self) -> Option<&PageChange> {
+        self.changes.get(self.focused?)
     }
 
     pub fn screen(&self) -> &Screen {

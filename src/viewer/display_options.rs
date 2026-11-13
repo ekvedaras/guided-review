@@ -4,7 +4,7 @@ use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
-use super::diff_display::{DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
+use super::diff_display::{ChangeId, DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
 use super::rendered_view::{FileView, FileViews, RenderedBlock, Rendering};
@@ -24,6 +24,7 @@ pub struct DisplayOptions {
     wraps_lines: bool,
     image_previews: HashMap<FilePath, ImagePreview>,
     file_views: FileViews,
+    focused_change: Option<ChangeId>,
 }
 
 impl DisplayOptions {
@@ -38,6 +39,7 @@ impl DisplayOptions {
             wraps_lines: false,
             image_previews: HashMap::new(),
             file_views: FileViews::default(),
+            focused_change: None,
         }
     }
 
@@ -78,6 +80,15 @@ impl DisplayOptions {
             (Some(more), None) => self.show_more_context(more),
             (None, _) => {}
         }
+    }
+
+    /// The change the change keys act on, when it is on the screen shown.
+    pub fn focused_change(&self) -> Option<&ChangeId> {
+        self.focused_change.as_ref()
+    }
+
+    pub(super) fn focus_change(&mut self, change: ChangeId) {
+        self.focused_change = Some(change);
     }
 
     pub fn ignores_whitespace(&self) -> bool {

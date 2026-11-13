@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::diff_display::{DiffHunk, MoreContext};
+use super::diff_display::{ChangeId, DiffHunk, MoreContext};
 use super::step_page::{DiffLine, LineKind, LineLocation, PieceDiff, Side};
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
@@ -157,6 +157,7 @@ struct PlacedRow<'a> {
 struct Edges<'a> {
     first: Place,
     last: Place,
+    changes: &'a [ChangeId],
     more_above: &'a Option<MoreContext>,
     more_below: &'a Option<MoreContext>,
 }
@@ -176,6 +177,7 @@ fn joined(pieces: &[PieceDiff]) -> (Vec<DiffHunk>, Vec<Option<usize>>) {
             edges.push(Edges {
                 first: first.place,
                 last: last.place,
+                changes: &hunk.changes,
                 more_above: &hunk.more_above,
                 more_below: &hunk.more_below,
             });
@@ -207,6 +209,11 @@ fn joined(pieces: &[PieceDiff]) -> (Vec<DiffHunk>, Vec<Option<usize>>) {
         .into_iter()
         .map(|(first, last, rows)| DiffHunk {
             rows,
+            changes: edges
+                .iter()
+                .filter(|edge| first <= edge.first && edge.last <= last)
+                .flat_map(|edge| edge.changes.iter().cloned())
+                .collect(),
             more_above: edges
                 .iter()
                 .find(|edge| edge.first == first)
