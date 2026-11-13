@@ -28,6 +28,8 @@ const AGENTS_SPACE: &str = "guided-review";
 /// Not plain "guided-review": a space nobody named is called after its repo, and the maintainer's own
 /// space of this repo already is.
 const AGENTS_SPACE_NAME: &str = "guided-review agents";
+/// The macOS app `herdr-app` drives.
+const HERDR_APP_NAME: &str = "Herdr";
 
 /// Herdr-app takes up a newly labelled terminal a moment after `hc run` returns; until then it knows
 /// no space or tab to name.
@@ -37,6 +39,7 @@ const ADOPTION_WAIT: Duration = Duration::from_millis(100);
 pub struct HcTourAgents {
     hc: PathBuf,
     herdr_app: PathBuf,
+    open: PathBuf,
     /// The `PATH` an agent the app starts runs with.
     agents_path: String,
 }
@@ -55,8 +58,15 @@ impl HcTourAgents {
         Self {
             hc,
             herdr_app,
+            open: PathBuf::from("/usr/bin/open"),
             agents_path: String::new(),
         }
+    }
+
+    /// What brings an app to the front: macOS `open`, or a stand-in in tests.
+    pub fn opening_apps_with(mut self, open: PathBuf) -> Self {
+        self.open = open;
+        self
     }
 
     pub fn giving_agents_path(mut self, path: &str) -> Self {
@@ -277,7 +287,7 @@ impl TourAgentPort for HcTourAgents {
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }
-        Ok(())
+        self.bring_herdr_to_the_front()
     }
 
     fn app_started(&self) -> anyhow::Result<Vec<AppAgent>> {
@@ -412,6 +422,22 @@ enum Naming {
 }
 
 impl HcTourAgents {
+    /// `agent.focus` switches the Herdr window to the terminal but leaves the window behind ours.
+    fn bring_herdr_to_the_front(&self) -> anyhow::Result<()> {
+        let output = Command::new(&self.open)
+            .args(["-a", HERDR_APP_NAME])
+            .stdin(Stdio::null())
+            .output()
+            .with_context(|| format!("could not run `{}`", self.open.display()))?;
+        if !output.status.success() {
+            bail!(
+                "could not bring {HERDR_APP_NAME} to the front: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
     fn herdr_app(&self, args: &[&str]) -> anyhow::Result<Output> {
         Command::new(&self.herdr_app)
             .args(args)

@@ -75,7 +75,22 @@ fi
 }
 
 fn adapter(dir: &Path) -> HcTourAgents {
-    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir))
+    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir)).opening_apps_with(fake_open(dir))
+}
+
+/// A stand-in for macOS `open` that logs each call.
+fn fake_open(dir: &Path) -> PathBuf {
+    let script = dir.join("open");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> \"{}/open-calls\"\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
 }
 
 fn answer(dir: &Path, subcommand: &str, body: &str) {
@@ -705,4 +720,18 @@ fn the_app_started_agents_are_listed_with_their_pr_status_and_when_it_changed() 
             "get t9 --json"
         ]
     );
+}
+
+#[test]
+fn showing_an_agent_brings_the_herdr_window_to_the_front_after_focusing_its_terminal() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "get",
+        &format!(r#"{{"address":"t7","labels":{{"app":"guided-review","gr.pr":"{PR}"}}}}"#),
+    );
+
+    adapter(dir.path()).show(&TerminalId::new("t7")).unwrap();
+
+    assert_eq!(calls(dir.path(), "open-calls"), ["-a Herdr"]);
 }
