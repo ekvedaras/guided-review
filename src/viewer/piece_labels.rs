@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::step_page::{LineKind, PieceDiff};
+use super::step_page::PieceDiff;
 use crate::file_path::FilePath;
 
 /// A piece that changes this many lines or fewer is tiny: one line added, removed or rewritten, or a
@@ -33,7 +33,7 @@ impl PieceLabels {
     }
 
     pub(super) fn starting_for(pieces: &[PieceDiff]) -> Self {
-        let sizes: Vec<usize> = pieces.iter().map(changed_lines).collect();
+        let sizes: Vec<usize> = pieces.iter().map(|piece| piece.changed_lines).collect();
         Self::starting_for_sizes(&sizes)
     }
 
@@ -43,15 +43,6 @@ impl PieceLabels {
             Self::Hidden => Self::Shown,
         }
     }
-}
-
-fn changed_lines(piece: &PieceDiff) -> usize {
-    piece
-        .hunks
-        .iter()
-        .flat_map(|hunk| &hunk.rows)
-        .filter(|row| matches!(row.kind, LineKind::Added | LineKind::Removed))
-        .count()
 }
 
 /// The piece-label toggle in the header of a file box that has labels, set to what the box shows.

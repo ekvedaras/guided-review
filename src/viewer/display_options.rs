@@ -4,7 +4,8 @@ use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
-use super::diff_display::{ChangeId, DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
+use super::diff_display::{DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
+use super::focused_change::Focus;
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
 use super::more_lines::MoreLines;
@@ -29,7 +30,7 @@ pub struct DisplayOptions {
     image_previews: HashMap<FilePath, ImagePreview>,
     file_views: FileViews,
     piece_labels: FileLabels,
-    focused_change: Option<ChangeId>,
+    focused_change: Option<Focus>,
 }
 
 impl DisplayOptions {
@@ -98,11 +99,11 @@ impl DisplayOptions {
     }
 
     /// The change the change keys act on, when it is on the screen shown.
-    pub fn focused_change(&self) -> Option<&ChangeId> {
+    pub fn focused_change(&self) -> Option<&Focus> {
         self.focused_change.as_ref()
     }
 
-    pub(super) fn focus_change(&mut self, change: ChangeId) {
+    pub(super) fn focus_change(&mut self, change: Focus) {
         self.focused_change = Some(change);
     }
 

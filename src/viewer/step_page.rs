@@ -147,6 +147,8 @@ pub struct PieceDiff {
     pub repin_status: Option<RepinStatus>,
     /// The lines its symbol spans at head; unchanged rows there belong to it.
     pub head_lines: Option<RangeInclusive<usize>>,
+    /// Lines the piece adds and removes in the PR, whether or not whitespace changes are shown.
+    pub changed_lines: usize,
 }
 
 pub struct StepPage<'a> {
@@ -256,6 +258,7 @@ impl PieceDiff {
             is_image,
             repin_status: None,
             head_lines: piece.head_lines.clone(),
+            changed_lines: part.removed_lines.len() + part.added_lines.len(),
         })
     }
 
@@ -285,6 +288,7 @@ impl PieceDiff {
             is_image: false,
             repin_status: None,
             head_lines: piece.head_lines.clone(),
+            changed_lines: part.removed_lines.len() + part.added_lines.len(),
         };
         let Some(file) = since_files
             .iter()

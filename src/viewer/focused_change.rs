@@ -18,6 +18,8 @@ use crate::update::Build;
 #[derive(Debug, Clone)]
 pub struct PageChange {
     path: FilePath,
+    /// A rendered file box is one change with no changed hunk of its own.
+    is_rendered_file: bool,
     view: Option<ViewSwitch>,
     labels: Option<LabelSwitch>,
     pub(super) ids: Vec<ChangeId>,
@@ -34,6 +36,7 @@ impl PageChange {
         more: (Option<MoreContext>, Option<MoreContext>),
     ) -> Self {
         Self {
+            is_rendered_file: ids.is_empty(),
             path: file.path,
             view: file.view,
             labels: file.labels,
@@ -42,6 +45,11 @@ impl PageChange {
             more_above: more.0,
             more_below: more.1,
         }
+    }
+
+    /// The Code / Rendered switch of the change's file box, when it has one.
+    pub fn view(&self) -> Option<&ViewSwitch> {
+        self.view.as_ref()
     }
 
     /// The file the change is in.
@@ -58,13 +66,31 @@ impl PageChange {
         self.rows.start
     }
 
-    pub(super) fn holds(&self, id: &ChangeId) -> bool {
-        self.ids.contains(id)
+    pub(super) fn holds(&self, focus: &Focus) -> bool {
+        match focus {
+            Focus::Change(id) => self.ids.contains(id),
+            Focus::RenderedFile(path) => self.is_rendered_file && self.path == *path,
+        }
+    }
+
+    fn focus_target(&self) -> Focus {
+        match self.ids.first() {
+            Some(id) => Focus::Change(id.clone()),
+            None => Focus::RenderedFile(self.path.clone()),
+        }
     }
 
     pub(super) fn is_in_view(&self, visible: &Range<usize>) -> bool {
         self.rows.start < visible.end && visible.start < self.rows.end
     }
+}
+
+/// What has the focus: a changed hunk, or a file box shown rendered, which has no hunks but must
+/// keep the focus so the key that rendered it can switch it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Focus {
+    Change(ChangeId),
+    RenderedFile(FilePath),
 }
 
 /// What the box of a change's file offers: the Code / Rendered switch and the piece labels' toggle.
@@ -157,9 +183,10 @@ impl Review {
         if page.focused_index() == Some(at) {
             return false;
         }
-        page.changes()
-            .get(at)
-            .is_some_and(|change| self.focus(change).is_some())
+        page.changes().get(at).is_some_and(|change| {
+            self.focus(change);
+            true
+        })
     }
 
     /// The window shows these rows of the page. A focus that is not among them goes to the first
@@ -167,7 +194,10 @@ impl Review {
     pub fn follow_scroll(&mut self, visible: Range<usize>) -> bool {
         let page = Arc::clone(self.page());
         page.change_to_focus_for_view(&visible)
-            .is_some_and(|change| self.focus(change).is_some())
+            .is_some_and(|change| {
+                self.focus(change);
+                true
+            })
     }
 
     /// `Down`: scrolls through a focused change taller than the view until its end shows, then
@@ -197,7 +227,7 @@ impl Review {
         };
         target
             .and_then(|target| page.changes().get(target))
-            .and_then(|change| self.focus(change))
+            .map(|change| self.focus(change))
             .map_or(ReadStep::Nothing, ReadStep::Focused)
     }
 
@@ -256,6 +286,14 @@ impl Review {
             FileView::Rendered => FileView::Code,
         };
         self.display_options_mut().show_file_as(&switch.path, view);
+        let page = Arc::clone(self.page());
+        if let Some(change) = page
+            .changes()
+            .iter()
+            .find(|change| *change.path() == switch.path)
+        {
+            self.focus(change);
+        }
         true
     }
 
@@ -278,12 +316,12 @@ impl Review {
             }
             (Way::Previous, None) => count.checked_sub(1)?,
         };
-        self.focus(page.changes().get(target)?)
+        Some(self.focus(page.changes().get(target)?))
     }
 
-    fn focus(&mut self, change: &PageChange) -> Option<usize> {
-        let id = change.ids.first()?.clone();
-        self.display_options_mut().focus_change(id);
-        Some(change.first_row())
+    fn focus(&mut self, change: &PageChange) -> usize {
+        self.display_options_mut()
+            .focus_change(change.focus_target());
+        change.first_row()
     }
 }

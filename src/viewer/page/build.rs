@@ -452,14 +452,15 @@ impl<'a> Builder<'a> {
         let header = match block.pieces.as_slice() {
             [piece] => PieceHeading {
                 fold,
-                view: Some(switch),
+                view: Some(switch.clone()),
                 ..heading_of(piece, ask_of)
             },
             _ => PieceHeading {
-                view: Some(switch),
+                view: Some(switch.clone()),
                 ..whole_file_heading(&block, fold)
             },
         };
+        let header_row = self.rows.len();
         self.rows.push(PageRow::PieceHeader(Arc::new(header)));
         let path = block.path.clone();
         let display_options = self.review.display_options();
@@ -481,6 +482,16 @@ impl<'a> Builder<'a> {
             here.extend(self.under_lines.take_at(&line.location));
         }
         self.hang(here);
+        self.changes.push(PageChange::new(
+            ChangeFile {
+                path: path.clone(),
+                view: Some(switch),
+                labels: None,
+            },
+            Vec::new(),
+            header_row..self.rows.len(),
+            (None, None),
+        ));
         self.rows.push(PageRow::PieceEnd);
         self.rendered.push(path);
         self.blocks.push(block);

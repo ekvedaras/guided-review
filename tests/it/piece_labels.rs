@@ -77,6 +77,19 @@ impl Pull {
         let mut pieces = symbols("app/Tiny.php", &["a", "b", "c"]);
         pieces.extend(symbols("app/Large.php", &["x", "y"]));
         pieces.push(json!({"file": "README.md"}));
+        self.open_with(pieces)
+    }
+
+    fn open_pieces(&self, symbols: &[(&str, &str)]) -> Review {
+        self.open_with(
+            symbols
+                .iter()
+                .map(|(file, symbol)| json!({"file": file, "symbol": symbol}))
+                .collect(),
+        )
+    }
+
+    fn open_with(&self, pieces: Vec<Value>) -> Review {
         let tour: Tour = serde_json::from_value(json!({
             "pr": PR, "base": self.base, "head": self.head, "title": "Cart", "summary": [],
             "steps": [{"id": "cart", "title": "Cart", "why": "because", "pieces": pieces,
@@ -409,4 +422,91 @@ fn the_keys_and_the_palettes_actions_ask_for_the_same_toggle_of_the_focused_file
         Intent::from(PaletteAction::ShowCode),
         Intent::ToggleRenderedView
     );
+}
+
+/// Two methods whose only changes are two re-indented lines each.
+fn reindented_cart() -> Review {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let body = |indent: &str| {
+        let lines = [
+            format!("{indent}$a = 1;"),
+            format!("{indent}$b = 2;"),
+            "return 0;".to_owned(),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        php(&[("x", &lines), ("y", &lines)])
+    };
+    repo.write("app/Cart.php", &body(""));
+    let base = repo.commit("base");
+    repo.write("app/Cart.php", &body("  "));
+    let head = repo.commit("head");
+    Pull { repo, base, head }
+        .open_pieces(&[("app/Cart.php", "Cart::x"), ("app/Cart.php", "Cart::y")])
+}
+
+#[test]
+fn hide_whitespace_does_not_move_the_starting_state_of_the_labels() {
+    let mut review = reindented_cart();
+    assert_eq!(labels_of(&review, "app/Cart.php"), Some(PieceLabels::Shown));
+
+    review.display_options_mut().toggle_ignore_whitespace();
+
+    assert_eq!(labels_of(&review, "app/Cart.php"), Some(PieceLabels::Shown));
+}
+
+#[test]
+fn a_reviewers_label_choice_survives_hide_whitespace() {
+    let mut review = reindented_cart();
+    review
+        .display_options_mut()
+        .show_piece_labels(&file_path("app/Cart.php"), PieceLabels::Hidden);
+
+    review.display_options_mut().toggle_ignore_whitespace();
+    review.display_options_mut().toggle_ignore_whitespace();
+
+    assert_eq!(
+        labels_of(&review, "app/Cart.php"),
+        Some(PieceLabels::Hidden)
+    );
+}
+
+#[test]
+fn a_rendered_file_keeps_the_focus_so_r_switches_it_back() {
+    let mut review = Pull::new().open();
+    focus_file(&mut review, "README.md");
+    assert!(review.toggle_focused_file_view());
+
+    let focused = review
+        .page()
+        .focused_change()
+        .map(|change| change.path().clone());
+    assert_eq!(focused, Some(file_path("README.md")));
+
+    assert!(review.toggle_focused_file_view());
+    let view = review
+        .page()
+        .focused_change()
+        .and_then(|change| change.view().map(|switch| switch.view));
+    assert_eq!(view, Some(FileView::Code));
+}
+
+#[test]
+fn tab_moves_on_from_a_rendered_file_and_back_to_it() {
+    let mut review = Pull::new().open();
+    focus_file(&mut review, "README.md");
+    review.toggle_focused_file_view();
+
+    review.focus_next_change();
+    let next = review
+        .page()
+        .focused_change()
+        .map(|change| change.path().clone());
+    assert_ne!(next, Some(file_path("README.md")));
+
+    review.focus_previous_change();
+    let back = review
+        .page()
+        .focused_change()
+        .map(|change| change.path().clone());
+    assert_eq!(back, Some(file_path("README.md")));
 }
