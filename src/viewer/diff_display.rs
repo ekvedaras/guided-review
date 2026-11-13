@@ -14,7 +14,6 @@ use super::word_diff::changed_words;
 
 /// GitHub's diff shows this many unchanged lines around a change; only those take comments.
 const GITHUB_CONTEXT_LINES: usize = 3;
-const MORE_CONTEXT_LINES: usize = 20;
 
 /// Whether GitHub shows this head line in the diff of `hunks`: in a hunk or in the context around it.
 pub(super) fn is_in_github_diff(hunks: &[crate::code_source::Hunk], head_line: usize) -> bool {
@@ -248,10 +247,6 @@ pub(super) struct DiffDisplay<'a> {
 }
 
 impl DiffDisplay<'_> {
-    pub(super) fn more_lines(more_context: &mut HashMap<MoreContext, usize>, more: &MoreContext) {
-        *more_context.entry(more.clone()).or_default() += MORE_CONTEXT_LINES;
-    }
-
     pub(super) fn hunks(
         &self,
         view: &PieceView,

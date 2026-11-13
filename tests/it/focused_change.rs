@@ -5,8 +5,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    ChangeInView, LineKind, LineLocation, PageChange, PageRow, ReadStep, Review, ReviewStateFile,
-    Side, hidden_lines_before,
+    ChangeInView, LineKind, LineLocation, MoreLines, PageChange, PageRow, ReadStep, Review,
+    ReviewStateFile, Side, hidden_lines_before,
 };
 use serde_json::{Value, json};
 use std::fmt::Write;
@@ -239,6 +239,40 @@ fn the_key_above_shows_what_the_gap_button_over_the_change_shows() {
 
     assert_eq!(shown(&by_key), shown(&by_button));
     assert!(shown(&by_key).contains(&" 7".to_owned()));
+}
+
+#[test]
+fn the_keys_and_the_gap_buttons_show_the_number_of_lines_the_reviewer_set() {
+    let pull = Pull::new();
+    let two = MoreLines::new(2).unwrap();
+    let mut by_key = pull.open_on_the_code();
+    by_key.display_options_mut().use_more_lines(two);
+    focus_change_number(&mut by_key, 1);
+    let mut by_button = pull.open_on_the_code();
+    by_button.display_options_mut().use_more_lines(two);
+    let hunks = by_button.current_step().unwrap().pieces[0].hunks.clone();
+    let button = hidden_lines_before(&hunks, 1).unwrap().after_above.unwrap();
+
+    assert!(by_key.show_more_below());
+    by_button.display_options_mut().show_more_context(&button);
+
+    assert_eq!(shown(&by_key), shown(&by_button));
+    assert!(shown(&by_key).contains(&" 15".to_owned()));
+    assert!(!shown(&by_key).contains(&" 16".to_owned()));
+}
+
+#[test]
+fn the_key_above_shows_the_number_of_lines_the_reviewer_set() {
+    let mut review = Pull::new().open_on_the_code();
+    review
+        .display_options_mut()
+        .use_more_lines(MoreLines::new(2).unwrap());
+    focus_change_number(&mut review, 2);
+
+    assert!(review.show_more_above());
+
+    assert!(shown(&review).contains(&" 15".to_owned()));
+    assert!(!shown(&review).contains(&" 14".to_owned()));
 }
 
 #[test]

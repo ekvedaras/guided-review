@@ -66,6 +66,18 @@ fn an_opened_review_can_be_built_off_the_ui_thread() {
 }
 
 #[test]
+fn the_review_shows_as_many_more_lines_as_the_config_says() {
+    let repo = shop_with_a_tour();
+    let config = repo.home().join(".guided-review/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(config, "more_lines = 5\n").unwrap();
+
+    let opened = open_review(&pr(), repo.path(), repo.home()).unwrap();
+
+    assert_eq!(opened.review.display_options().more_lines().get(), 5);
+}
+
+#[test]
 fn a_pr_without_a_tour_is_refused_with_the_command_that_writes_one() {
     let repo = FixtureRepo::cloned_from("acme/shop");
 

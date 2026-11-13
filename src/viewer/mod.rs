@@ -29,6 +29,7 @@ mod intent;
 mod jump;
 mod keymap;
 mod markdown;
+mod more_lines;
 mod new_commits;
 mod outdated_lines;
 mod page;
@@ -116,6 +117,7 @@ pub use jump::{
 };
 pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
+pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use page::{

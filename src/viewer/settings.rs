@@ -12,6 +12,7 @@ use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 
 use super::chord::Chord;
 use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
+use super::more_lines::{MoreLines, MoreLinesEntry};
 use super::shortcuts::Command;
 
 /// The reviewer's settings in `~/.guided-review/config.toml`, as the Settings panel shows and edits them.
@@ -35,6 +36,7 @@ struct Values {
     summary_instructions: SummaryInstructionsChoice,
     clones: Vec<CloneRow>,
     keys: KeyChanges,
+    more_lines: MoreLinesEntry,
 }
 
 impl Values {
@@ -67,6 +69,7 @@ impl Values {
                 })
                 .collect(),
             keys: key_changes_in(document),
+            more_lines: more_lines_in(document),
         }
     }
 
@@ -135,6 +138,8 @@ pub enum SettingProblem {
     AskModelBlank,
     /// Custom is picked and no template is typed.
     IdeTemplateBlank,
+    /// The `more_lines` is not a whole number the app can show; the text as written.
+    MoreLinesNotACount(String),
     Key(KeyProblem),
 }
 
@@ -158,6 +163,11 @@ impl SettingProblem {
             Self::AskEffortUnknown(text) => {
                 format!("{text:?} is not an effort Claude accepts: low, medium, high, xhigh or max")
             }
+            Self::MoreLinesNotACount(written) => format!(
+                "{written} is not a whole number from {} to {}",
+                MoreLines::MIN,
+                MoreLines::MAX
+            ),
             Self::Key(problem) => problem.message(),
         }
     }
@@ -201,6 +211,7 @@ const ASK_MODEL_CUSTOM: &str = "ask_model_custom";
 const IDE_CUSTOM: &str = "ide_custom";
 const CLONES: &str = "clones";
 const KEYS: &str = "keys";
+const MORE_LINES: &str = "more_lines";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
@@ -405,6 +416,7 @@ impl Settings {
                     problem,
                     SettingProblem::SummaryInstructionsUnreadable(_)
                         | SettingProblem::AskEffortUnknown(_)
+                        | SettingProblem::MoreLinesNotACount(_)
                         | SettingProblem::Key(_)
                 )
             })
@@ -444,6 +456,9 @@ impl Settings {
                 SettingProblem::SummaryInstructionsUnreadable(written.clone()),
             ),
             _ => {}
+        }
+        if let MoreLinesEntry::NotACount(written) = &self.edited.more_lines {
+            problems.push(SettingProblem::MoreLinesNotACount(written.clone()));
         }
         if let Err(key_problems) = self.edited.keys.keymap() {
             problems.extend(key_problems.into_iter().map(SettingProblem::Key));
@@ -511,6 +526,15 @@ impl Settings {
         self.edited.keys.remove(name);
     }
 
+    /// What the number's text box shows: the number, or what was typed that is not one.
+    pub fn more_lines_text(&self) -> String {
+        self.edited.more_lines.text()
+    }
+
+    pub fn set_more_lines_text(&mut self, text: &str) {
+        self.edited.more_lines = MoreLinesEntry::of_text(text);
+    }
+
     pub fn has_unsaved_changes(&self) -> bool {
         self.edited != self.saved
     }
@@ -552,6 +576,9 @@ impl Settings {
         }
         if saved.keys != edited.keys {
             write_keys(root, &saved.keys, &edited.keys)?;
+        }
+        if saved.more_lines != edited.more_lines {
+            set_value(root, MORE_LINES, more_lines_value(&edited.more_lines));
         }
         self.write()?;
         self.saved = self.edited.clone();
@@ -622,6 +649,23 @@ fn write_keys(root: &mut Table, saved: &KeyChanges, edited: &KeyChanges) -> anyh
         }
     }
     Ok(())
+}
+
+fn more_lines_in(document: &DocumentMut) -> MoreLinesEntry {
+    let Some(item) = document.get(MORE_LINES) else {
+        return MoreLinesEntry::Default;
+    };
+    item.as_integer().map_or_else(
+        || MoreLinesEntry::NotACount(item.to_string().trim().to_owned()),
+        MoreLinesEntry::of_integer,
+    )
+}
+
+fn more_lines_value(entry: &MoreLinesEntry) -> Option<Value> {
+    match entry {
+        MoreLinesEntry::Count(lines) => i64::try_from(lines.get()).ok().map(Value::from),
+        MoreLinesEntry::Default | MoreLinesEntry::NotACount(_) => None,
+    }
 }
 
 fn key_changes_in(document: &DocumentMut) -> KeyChanges {
