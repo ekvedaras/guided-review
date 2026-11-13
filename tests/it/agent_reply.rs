@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use guided_review::app_link::AppFolder;
 use guided_review::viewer::{CommentId, HandOffState, ReviewState, ReviewStateFile};
 
-use crate::support::fake_app::accept_request;
+use crate::support::fake_app::{CliEnded, accept_before};
 use crate::support::graphql::serve_graphql;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 
@@ -69,7 +69,12 @@ fn run_agent_reply(
 }
 
 /// Answers one request line with `answer`, recording the line.
-fn fake_app(home: &Path, answer: &str) -> (std::thread::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
+fn fake_app(
+    home: &Path,
+    cli_ended: &CliEnded,
+    answer: &str,
+) -> (std::thread::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
+    let cli_ended = cli_ended.clone();
     let socket = AppFolder::in_home(home).socket();
     std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
     let listener = UnixListener::bind(socket).unwrap();
@@ -77,7 +82,11 @@ fn fake_app(home: &Path, answer: &str) -> (std::thread::JoinHandle<()>, Arc<Mute
     let log = Arc::clone(&seen);
     let line = format!(r#"{{"version":"{BUILD}","answer":{answer}}}"#);
     let thread = std::thread::spawn(move || {
-        let stream = accept_request(&listener, "the agent-reply request from the CLI");
+        let stream = accept_before(
+            &listener,
+            &cli_ended,
+            "the agent-reply request from the CLI",
+        );
         let mut request = String::new();
         BufReader::new(&stream).read_line(&mut request).unwrap();
         log.lock().unwrap().push(request);
@@ -120,8 +129,10 @@ fn the_reply_is_posted_into_the_pending_review_and_the_state_file_marks_it_answe
 fn a_running_app_is_told_and_marks_the_hand_off_itself() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     with_one_hand_off(repo.home());
+    let cli_ended = CliEnded::default();
     let (app, seen) = fake_app(
         repo.home(),
+        &cli_ended,
         &format!(r#"{{"hand_off_answered":{{"pr":"{PR}"}}}}"#),
     );
 
@@ -131,6 +142,7 @@ fn a_running_app_is_told_and_marks_the_hand_off_itself() {
         "h0",
     );
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
@@ -147,7 +159,12 @@ fn a_running_app_is_told_and_marks_the_hand_off_itself() {
 fn an_app_showing_another_pr_leaves_the_marking_to_the_state_file() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     with_one_hand_off(repo.home());
-    let (app, _) = fake_app(repo.home(), &format!(r#"{{"not_shown":{{"pr":"{PR}"}}}}"#));
+    let cli_ended = CliEnded::default();
+    let (app, _) = fake_app(
+        repo.home(),
+        &cli_ended,
+        &format!(r#"{{"not_shown":{{"pr":"{PR}"}}}}"#),
+    );
 
     let (run, _) = run_reply(
         &repo,
@@ -155,6 +172,7 @@ fn an_app_showing_another_pr_leaves_the_marking_to_the_state_file() {
         "h0",
     );
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert_eq!(hand_off_state(repo.home()), HandOffState::Answered);

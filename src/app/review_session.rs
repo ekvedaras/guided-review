@@ -487,17 +487,39 @@ impl ReviewSession {
     }
 
     /// Runs only on the button, in the background: the user's `claude` rewrites the marked steps.
+    /// Each tool claude uses shows in the banner, so a long refresh is seen to be working.
     pub fn refresh_tour(&mut self, cx: &mut Context<Self>) {
-        if self.refresh_progress == RefreshProgress::Running {
+        if self.is_refreshing() {
             return;
         }
-        self.refresh_progress = RefreshProgress::Running;
+        self.refresh_progress = RefreshProgress::Running { activity: None };
         self.save_typing_now();
         cx.notify();
+        let (activities, mut arrived) = futures::channel::mpsc::unbounded();
+        cx.spawn(async move |this, cx| {
+            while let Some(activity) = futures::StreamExt::next(&mut arrived).await {
+                let shown = this.update(cx, |this, cx| {
+                    if this.is_refreshing() {
+                        this.refresh_progress = RefreshProgress::Running {
+                            activity: Some(activity),
+                        };
+                        cx.notify();
+                    }
+                });
+                if shown.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         let refresher = Arc::clone(&self.tour_work.refresher);
         self.run_off_thread(
             cx,
-            move || refresher.run(),
+            move || {
+                refresher.run(&mut |activity| {
+                    activities.unbounded_send(activity).ok();
+                })
+            },
             |this, refreshed, cx| match refreshed {
                 Ok(refreshed) => {
                     this.refresh_progress = RefreshProgress::Idle;
@@ -511,6 +533,10 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    fn is_refreshing(&self) -> bool {
+        matches!(self.refresh_progress, RefreshProgress::Running { .. })
     }
 
     /// Runs `request` on a background thread, then hands its outcome to `apply` on the UI thread.
@@ -614,6 +640,31 @@ impl ReviewSession {
         self.screen_list.reset(0);
         self.rows = PageRows::none();
         self.rebuild_rows(cx);
+    }
+
+    /// A refresh under way on a tour with many new pieces, as the banner shows it mid-run.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_refresh_running(&mut self, cx: &mut Context<Self>) {
+        self.refresh_brief = RefreshBrief {
+            stale_steps: vec![crate::viewer::StaleStep {
+                id: "staged".into(),
+                title: "Staged step".to_owned(),
+            }],
+            unplaced_new_pieces: Vec::new(),
+            new_or_changed_pieces: 48,
+            pieces: 157,
+        };
+        self.refresh_progress = RefreshProgress::Running {
+            activity: Some("Read app/Pricing.php".to_owned()),
+        };
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_refresh_running(&mut self, cx: &mut Context<Self>) {
+        self.refresh_brief = self.review.refresh_brief();
+        self.refresh_progress = RefreshProgress::Idle;
+        cx.notify();
     }
 
     /// Shows herdr running but failing in the sidebar, as it did when its registry writer stopped.

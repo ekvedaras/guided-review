@@ -27,6 +27,8 @@ The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/gu
 
 `scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]` puts each scene side by side, before left. Markers number spots on the after picture, in its pixels: `{ "21-jump-palette": [{ "x": 640, "y": 260, "n": 1 }] }`.
 
+A PR that changes what the app shows puts before and after pictures in its Evidence: snapshot `main` and the branch, run `snapshot-compare`, and upload with `gh attach`. When no scene shows the change, stage one in `scenes.rs` in the same PR, so the next change to it has a picture too.
+
 ## Change notes
 
 Every change a user can see adds a note to `changes/`, in the same commit as the change: `changes/<added|changed|fixed|removed>-<slug>.md`, one or two sentences written for a user. A PR with many changes adds many notes. Read `changes/README.md` before writing one. The `change-notes` workflow fails a PR that touches `src/` or `skills/` with no new note; a line `changelog: none` in the PR body lets it pass.

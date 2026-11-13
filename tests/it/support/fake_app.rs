@@ -2,30 +2,43 @@
 
 use std::io::ErrorKind;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// Long enough for a CLI process to start and connect, short enough that a red run fails in seconds.
-pub const REQUEST_DEADLINE: Duration = Duration::from_secs(5);
+/// Marked by the test once the CLI process under test has ended. A fake app waits for the CLI until then,
+/// never by the clock, so a busy machine cannot fail it.
+#[derive(Clone, Default)]
+pub struct CliEnded(Arc<AtomicBool>);
 
-/// The next connection, or a panic naming `waiting_for` once `deadline` passes.
-pub fn accept_within(listener: &UnixListener, deadline: Duration, waiting_for: &str) -> UnixStream {
+impl CliEnded {
+    pub fn mark(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_marked(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+const POLL: Duration = Duration::from_millis(10);
+
+/// The next connection, or a panic naming `waiting_for` once the CLI ended without making it.
+pub fn accept_before(
+    listener: &UnixListener,
+    cli_ended: &CliEnded,
+    waiting_for: &str,
+) -> UnixStream {
     listener.set_nonblocking(true).unwrap();
-    let give_up = Instant::now() + deadline;
     let stream = loop {
+        let last_try = cli_ended.is_marked();
         match listener.accept() {
             Ok((stream, _)) => break stream,
-            Err(error) if error.kind() == ErrorKind::WouldBlock && Instant::now() < give_up => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => panic!("fake app gave up waiting for {waiting_for}: {error}"),
+            Err(error) if error.kind() == ErrorKind::WouldBlock && !last_try => thread::sleep(POLL),
+            Err(error) => panic!("the CLI ended before it sent {waiting_for}: {error}"),
         }
     };
     stream.set_nonblocking(false).unwrap();
     stream
-}
-
-/// The next connection, or a panic naming `waiting_for` after `REQUEST_DEADLINE`.
-pub fn accept_request(listener: &UnixListener, waiting_for: &str) -> UnixStream {
-    accept_within(listener, REQUEST_DEADLINE, waiting_for)
 }

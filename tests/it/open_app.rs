@@ -2,13 +2,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use guided_review::app_link::AppFolder;
 
 const BUILD: &str = "test-build";
 
-use crate::support::fake_app::accept_request;
+use crate::support::fake_app::{CliEnded, accept_before};
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -48,20 +48,21 @@ fn opening_line() -> String {
 /// Waits for `ready`, then answers each request line with the next of `answers`, recording the requests.
 fn fake_app(
     home: &Path,
+    cli_ended: &CliEnded,
     ready: Option<PathBuf>,
     answers: Vec<String>,
     seen: Seen,
 ) -> std::thread::JoinHandle<()> {
     let socket = AppFolder::in_home(home).socket();
     let listener = ready.is_none().then(|| bind(&socket));
+    let cli_ended = cli_ended.clone();
     std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while ready.as_ref().is_some_and(|file| !file.exists()) && Instant::now() < deadline {
+        while ready.as_ref().is_some_and(|file| !file.exists()) && !cli_ended.is_marked() {
             std::thread::sleep(Duration::from_millis(10));
         }
         let listener = listener.unwrap_or_else(|| bind(&socket));
         for answer in answers {
-            let stream = accept_request(&listener, "a request line from the CLI");
+            let stream = accept_before(&listener, &cli_ended, "a request line from the CLI");
             let mut line = String::new();
             BufReader::new(&stream).read_line(&mut line).unwrap();
             seen.lock().unwrap().push(line);
@@ -81,14 +82,22 @@ fn bind(socket: &Path) -> UnixListener {
 #[test]
 fn open_sends_the_request_to_the_running_app_and_says_what_it_did() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let seen = Seen::default();
-    let app = fake_app(repo.home(), None, vec![opening_line()], Arc::clone(&seen));
+    let app = fake_app(
+        repo.home(),
+        &cli_ended,
+        None,
+        vec![opening_line()],
+        Arc::clone(&seen),
+    );
 
     let run = GuidedReview::new(&repo, &github)
         .with_env("HC_TERMINAL_ID", Path::new("t1b"))
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(
@@ -110,10 +119,12 @@ fn open_sends_the_request_to_the_running_app_and_says_what_it_did() {
 #[test]
 fn open_starts_the_app_when_none_answers_then_hands_it_the_pr() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let script = start_script(repo.home());
     let seen = Seen::default();
     let app = fake_app(
         repo.home(),
+        &cli_ended,
         Some(repo.home().join("started")),
         vec![opening_line()],
         Arc::clone(&seen),
@@ -124,6 +135,7 @@ fn open_starts_the_app_when_none_answers_then_hands_it_the_pr() {
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(repo.home().join("started").exists());
@@ -133,10 +145,12 @@ fn open_starts_the_app_when_none_answers_then_hands_it_the_pr() {
 #[test]
 fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let script = start_script(repo.home());
     let seen = Seen::default();
     let old_app = fake_app(
         repo.home(),
+        &cli_ended,
         None,
         vec![
             answer_line("0.0.0-older", r#""other_build""#),
@@ -147,11 +161,13 @@ fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
     let new_app = {
         let home = repo.home().to_path_buf();
         let seen = Arc::clone(&seen);
+        let cli_ended = cli_ended.clone();
         std::thread::spawn(move || {
             old_app.join().unwrap();
             std::fs::remove_file(AppFolder::in_home(&home).socket()).unwrap();
             fake_app(
                 &home,
+                &cli_ended,
                 Some(home.join("started")),
                 vec![opening_line()],
                 seen,
@@ -166,6 +182,7 @@ fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     new_app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     let requests: Vec<serde_json::Value> = seen
@@ -183,8 +200,10 @@ fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
 #[test]
 fn an_open_the_app_keeps_in_the_background_succeeds_and_says_so() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let app = fake_app(
         repo.home(),
+        &cli_ended,
         None,
         vec![answer_line(
             BUILD,
@@ -197,6 +216,7 @@ fn an_open_the_app_keeps_in_the_background_succeeds_and_says_so() {
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(run.stdout.contains("PR switcher"), "stdout: {}", run.stdout);
@@ -205,8 +225,10 @@ fn an_open_the_app_keeps_in_the_background_succeeds_and_says_so() {
 #[test]
 fn a_refusal_from_the_app_fails_the_open_with_its_reason() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let app = fake_app(
         repo.home(),
+        &cli_ended,
         None,
         vec![answer_line(
             BUILD,
@@ -219,6 +241,7 @@ fn a_refusal_from_the_app_fails_the_open_with_its_reason() {
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(!run.success);
     assert!(
@@ -242,13 +265,21 @@ fn writing_line() -> String {
 #[test]
 fn open_of_a_pr_without_a_tour_asks_the_running_app_and_says_it_is_writing_one() {
     let (repo, github) = shop_without_a_tour_file();
+    let cli_ended = CliEnded::default();
     let seen = Seen::default();
-    let app = fake_app(repo.home(), None, vec![writing_line()], Arc::clone(&seen));
+    let app = fake_app(
+        repo.home(),
+        &cli_ended,
+        None,
+        vec![writing_line()],
+        Arc::clone(&seen),
+    );
 
     let run = GuidedReview::new(&repo, &github)
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(
@@ -263,10 +294,12 @@ fn open_of_a_pr_without_a_tour_asks_the_running_app_and_says_it_is_writing_one()
 #[test]
 fn open_of_a_pr_without_a_tour_starts_the_app_when_none_answers_and_hands_it_the_pr() {
     let (repo, github) = shop_without_a_tour_file();
+    let cli_ended = CliEnded::default();
     let script = start_script(repo.home());
     let seen = Seen::default();
     let app = fake_app(
         repo.home(),
+        &cli_ended,
         Some(repo.home().join("started")),
         vec![writing_line()],
         Arc::clone(&seen),
@@ -277,6 +310,7 @@ fn open_of_a_pr_without_a_tour_starts_the_app_when_none_answers_and_hands_it_the
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["open", PR]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(repo.home().join("started").exists());
@@ -291,9 +325,11 @@ fn showing_settings_line() -> String {
 #[test]
 fn settings_asks_the_running_app_to_show_settings_and_says_so() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let seen = Seen::default();
     let app = fake_app(
         repo.home(),
+        &cli_ended,
         None,
         vec![showing_settings_line()],
         Arc::clone(&seen),
@@ -303,6 +339,7 @@ fn settings_asks_the_running_app_to_show_settings_and_says_so() {
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["settings"]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(run.stdout.contains("Settings"), "stdout: {}", run.stdout);
@@ -313,9 +350,11 @@ fn settings_asks_the_running_app_to_show_settings_and_says_so() {
 #[test]
 fn a_launch_with_no_command_asks_the_running_app_to_show_the_pr_switcher() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let seen = Seen::default();
     let app = fake_app(
         repo.home(),
+        &cli_ended,
         None,
         vec![answer_line(BUILD, r#""showing_switcher""#)],
         Arc::clone(&seen),
@@ -325,6 +364,7 @@ fn a_launch_with_no_command_asks_the_running_app_to_show_the_pr_switcher() {
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&[]);
 
+    cli_ended.mark();
     app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     assert!(run.stdout.contains("PR switcher"), "stdout: {}", run.stdout);
@@ -335,10 +375,12 @@ fn a_launch_with_no_command_asks_the_running_app_to_show_the_pr_switcher() {
 #[test]
 fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_in_a_new_one() {
     let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
     let script = start_script(repo.home());
     let seen = Seen::default();
     let old_app = fake_app(
         repo.home(),
+        &cli_ended,
         None,
         vec![answer_line(BUILD, r#""quitting""#)],
         Arc::clone(&seen),
@@ -346,11 +388,13 @@ fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_
     let new_app = {
         let home = repo.home().to_path_buf();
         let seen = Arc::clone(&seen);
+        let cli_ended = cli_ended.clone();
         std::thread::spawn(move || {
             old_app.join().unwrap();
             std::fs::remove_file(AppFolder::in_home(&home).socket()).unwrap();
             fake_app(
                 &home,
+                &cli_ended,
                 Some(home.join("started")),
                 vec![opening_line()],
                 seen,
@@ -365,6 +409,7 @@ fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_
         .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
         .run(&["restart", PR, "--at", "readme"]);
 
+    cli_ended.mark();
     new_app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
     let requests: Vec<serde_json::Value> = seen

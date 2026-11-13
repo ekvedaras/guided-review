@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -183,28 +183,42 @@ impl ClaudeRefreshWriter {
 }
 
 impl RefreshWriter for ClaudeRefreshWriter {
-    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
         let prompt = format!(
             "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh. \
              Only the listed tools are allowed and a command outside them is denied, never asked: \
              run each `guided-review` and `gh` command as its own Bash call with the PR url written out, \
              without shell variables, `&&`, `;` or `$(...)`."
         );
-        let output = Command::new(&self.binary)
+        let mut child = Command::new(&self.binary)
             .args(["-p", &prompt])
+            .args(["--output-format", "stream-json", "--verbose"])
             .args(["--permission-mode", "dontAsk"])
             .args(["--allowedTools", &refresh_writer_tools(&self.cwd)])
             .current_dir(&self.cwd)
             .stdin(Stdio::null())
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| format!("could not start `{}`", self.binary.display()))?;
-        if !output.status.success() {
-            bail!(
-                "claude stopped: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+        let mut stderr = child.stderr.take().context("no stderr on claude")?;
+        let said_on_stderr = std::thread::spawn(move || {
+            let mut said = String::new();
+            stderr.read_to_string(&mut said).map(|_| said)
+        });
+        for line in BufReader::new(child.stdout.take().context("no stdout on claude")?).lines() {
+            on_line(line?.trim_end());
         }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        let status = child.wait()?;
+        if !status.success() {
+            let said = said_on_stderr
+                .join()
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            bail!("claude stopped: {}", said.trim());
+        }
+        Ok(())
     }
 }
 
