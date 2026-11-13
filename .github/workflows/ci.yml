@@ -1,10 +1,21 @@
 name: CI
 
+# Prose, pictures, change notes and the other workflows are read by no build or test.
+# skills/ is not skipped: its SKILL.md is compiled in.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths: &rust_inputs
+      - "**"
+      - "!*.md"
+      - "!LICENSE"
+      - "!docs/**"
+      - "!changes/**"
+      - "!.github/workflows/change-notes.yml"
+      - "!.github/workflows/release*.yml"
   push:
     branches: [main]
+    paths: *rust_inputs
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
