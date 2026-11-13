@@ -10,6 +10,10 @@ use crate::local_git::{CloneProblem, LocalGit};
 use crate::pull_request::RepoName;
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 
+use super::chord::Chord;
+use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
+use super::shortcuts::Command;
+
 /// The reviewer's settings in `~/.guided-review/config.toml`, as the Settings panel shows and edits them.
 /// Save writes only the keys that changed, so the reviewer's comments and key order survive.
 pub struct Settings {
@@ -30,6 +34,7 @@ struct Values {
     ask_model_custom: String,
     summary_instructions: SummaryInstructionsChoice,
     clones: Vec<CloneRow>,
+    keys: KeyChanges,
 }
 
 impl Values {
@@ -61,6 +66,7 @@ impl Values {
                     Some(CloneRow::new(repo, PathBuf::from(folder.as_str()?)))
                 })
                 .collect(),
+            keys: key_changes_in(document),
         }
     }
 
@@ -129,6 +135,7 @@ pub enum SettingProblem {
     AskModelBlank,
     /// Custom is picked and no template is typed.
     IdeTemplateBlank,
+    Key(KeyProblem),
 }
 
 impl SettingProblem {
@@ -151,6 +158,7 @@ impl SettingProblem {
             Self::AskEffortUnknown(text) => {
                 format!("{text:?} is not an effort Claude accepts: low, medium, high, xhigh or max")
             }
+            Self::Key(problem) => problem.message(),
         }
     }
 }
@@ -192,6 +200,7 @@ const IDE: &str = "ide";
 const ASK_MODEL_CUSTOM: &str = "ask_model_custom";
 const IDE_CUSTOM: &str = "ide_custom";
 const CLONES: &str = "clones";
+const KEYS: &str = "keys";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
@@ -396,6 +405,7 @@ impl Settings {
                     problem,
                     SettingProblem::SummaryInstructionsUnreadable(_)
                         | SettingProblem::AskEffortUnknown(_)
+                        | SettingProblem::Key(_)
                 )
             })
             .collect()
@@ -435,6 +445,9 @@ impl Settings {
             ),
             _ => {}
         }
+        if let Err(key_problems) = self.edited.keys.keymap() {
+            problems.extend(key_problems.into_iter().map(SettingProblem::Key));
+        }
         problems
     }
 
@@ -452,6 +465,50 @@ impl Settings {
 
     fn in_home(&self, path: &Path) -> PathBuf {
         expand_home(path, &self.home)
+    }
+
+    /// The keys it answers to once saved; its defaults while its entry cannot be read.
+    pub fn key_chords(&self, command: Command) -> Vec<Chord> {
+        self.edited
+            .keys
+            .chords(command)
+            .unwrap_or_else(|| command.default_chords().to_vec())
+    }
+
+    /// What is wrong with the keys as edited, before any Save.
+    pub fn key_problems(&self) -> Vec<KeyProblem> {
+        self.edited.keys.resolve().problems
+    }
+
+    /// The keymap the app binds once these keys are saved.
+    pub fn keymap(&self) -> Keymap {
+        self.edited.keys.resolve().keymap
+    }
+
+    pub fn is_key_changed(&self, command: Command) -> bool {
+        self.edited.keys.chords(command).is_some()
+    }
+
+    /// The one chord it answers to from now on.
+    pub fn set_key(&mut self, command: Command, chord: Chord) {
+        self.edited.keys.set(command, &[chord]);
+    }
+
+    pub fn reset_key(&mut self, command: Command) {
+        self.edited.keys.reset(command);
+    }
+
+    /// The `[keys]` entries named for no command, which only removing fixes.
+    pub fn unknown_key_names(&self) -> Vec<String> {
+        self.edited
+            .keys
+            .unknown_names()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    pub fn remove_unknown_key(&mut self, name: &str) {
+        self.edited.keys.remove(name);
     }
 
     pub fn has_unsaved_changes(&self) -> bool {
@@ -492,6 +549,9 @@ impl Settings {
         }
         if saved.clones != edited.clones {
             write_clones(root, &saved.clones, &edited.clones)?;
+        }
+        if saved.keys != edited.keys {
+            write_keys(root, &saved.keys, &edited.keys)?;
         }
         self.write()?;
         self.saved = self.edited.clone();
@@ -534,6 +594,65 @@ fn write_clones(root: &mut Table, saved: &[CloneRow], edited: &[CloneRow]) -> an
         );
     }
     Ok(())
+}
+
+/// Touches only the entries that were added, removed or changed. One chord is written as its text.
+fn write_keys(root: &mut Table, saved: &KeyChanges, edited: &KeyChanges) -> anyhow::Result<()> {
+    let keys = root
+        .entry(KEYS)
+        .or_insert_with(|| Item::Table(Table::new()))
+        .as_table_like_mut()
+        .with_context(|| format!("{KEYS} is not a table"))?;
+    for (gone, _) in saved
+        .entries()
+        .filter(|(name, _)| edited.written(name).is_none())
+    {
+        keys.remove(gone);
+    }
+    for (name, written) in edited
+        .entries()
+        .filter(|(name, written)| saved.written(name) != Some(*written))
+    {
+        if let WrittenKeys::Texts(texts) = written {
+            let value = match texts.as_slice() {
+                [one] => Value::from(one.as_str()),
+                many => Value::Array(many.iter().map(String::as_str).collect()),
+            };
+            set_value(keys, name, Some(value));
+        }
+    }
+    Ok(())
+}
+
+fn key_changes_in(document: &DocumentMut) -> KeyChanges {
+    let entries = document
+        .get(KEYS)
+        .and_then(Item::as_table_like)
+        .into_iter()
+        .flat_map(TableLike::iter)
+        .map(|(name, item)| (name.to_owned(), written_keys(item)));
+    KeyChanges::new(entries)
+}
+
+fn written_keys(item: &Item) -> WrittenKeys {
+    let texts = match item.as_value() {
+        Some(Value::String(text)) => Some(vec![text.value().clone()]),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().map(str::to_owned))
+            .collect(),
+        _ => None,
+    };
+    texts.map_or_else(
+        || {
+            let written = item.as_value().map_or_else(
+                || item.to_string(),
+                |value| value.clone().decorated("", "").to_string(),
+            );
+            WrittenKeys::NotText(written.trim().to_owned())
+        },
+        WrittenKeys::Texts,
+    )
 }
 
 fn config_path(path: &Path) -> anyhow::Result<&str> {

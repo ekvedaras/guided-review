@@ -9,6 +9,7 @@ mod code_selection;
 pub mod components;
 mod dock_icon;
 mod frame_stats;
+pub mod keymap;
 mod layouts;
 mod page_rows;
 mod prose_selection;
@@ -44,9 +45,9 @@ use crate::open_review::{OpenedReview, open_review};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
-    Finished, HandOffId, KeyScope, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
+    Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
     RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
-    ShowSettings, ShowSwitcher, ShowWriting, TourAgents, TourFact, WriteDecision, keystroke,
+    ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, TourFact, WriteDecision,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -111,9 +112,13 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             } else {
                 dock_icon::stay_in_background();
             }
-            bind_keys(cx);
             quit_on_cmd_q(cx);
             components::toast_stack::Toaster::install(cx);
+            let configured = keymap::configured_keymap();
+            if let Some(notice) = configured.notice() {
+                components::toast_stack::post_toast(cx, ToastTone::Danger, notice);
+            }
+            apply_keymap(configured.keymap, cx);
             avatar_pictures::AvatarPictures::install(cx);
             prose_selection::ProseSelections::install(cx);
             updater::Updates::install(&home, cx);
@@ -720,8 +725,17 @@ fn turn_switcher_into_review(
     Ok(WindowHandle::new(window.window_id()))
 }
 
-/// Every shortcut comes from the one table the shortcuts sheet lists (`viewer::Command`).
-fn bind_keys(cx: &mut App) {
+/// Binds every key again, so keys saved in Settings work at once. The text boxes' own editing
+/// keys are not the reviewer's to change.
+pub fn apply_keymap(keymap: Keymap, cx: &mut App) {
+    cx.clear_key_bindings();
+    text_box::bind_keys(cx);
+    bind_keys(&keymap, cx);
+    keymap::set_keymap(keymap, cx);
+}
+
+/// Every shortcut comes from the keymap the shortcuts sheet lists.
+fn bind_keys(keymap: &Keymap, cx: &mut App) {
     let typing_is_not_navigation = format!(
         "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
@@ -734,7 +748,6 @@ fn bind_keys(cx: &mut App) {
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
-    text_box::bind_keys(cx);
     let bindings = Command::ALL.into_iter().flat_map(|command| {
         let context = match command.scope() {
             KeyScope::Page => Some(typing_is_not_navigation.clone()),
@@ -747,8 +760,8 @@ fn bind_keys(cx: &mut App) {
                 text_box::TYPING_CONTEXT
             )),
         };
-        command.chords().iter().map(move |chord| {
-            let keys = keystroke(chord);
+        keymap.chords(command).iter().map(move |chord| {
+            let keys = chord.keystroke();
             let context = context.as_deref();
             match command {
                 Command::NextScreen => KeyBinding::new(&keys, GoForward, context),

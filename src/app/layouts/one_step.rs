@@ -77,6 +77,7 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
+use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -1409,7 +1410,12 @@ impl OneStepLayout {
             ButtonSize::Regular,
             Icon::Keyboard,
         ))
-        .child(button_keys(colors, ButtonKind::Ghost, Command::Shortcuts))
+        .child(button_keys(
+            colors,
+            ButtonKind::Ghost,
+            Command::Shortcuts,
+            cx,
+        ))
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
@@ -1436,7 +1442,12 @@ impl OneStepLayout {
                     Icon::Settings,
                 ))
                 .child(div().flex_1().child("Settings"))
-                .child(button_keys(colors, ButtonKind::Ghost, Command::Settings))
+                .child(button_keys(
+                    colors,
+                    ButtonKind::Ghost,
+                    Command::Settings,
+                    cx,
+                ))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),
@@ -1469,7 +1480,7 @@ impl OneStepLayout {
             Icon::Search,
         ))
         .child("Jump")
-        .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump))
+        .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
         let github = button(
             &colors,
@@ -1488,6 +1499,7 @@ impl OneStepLayout {
             &colors,
             ButtonKind::Ghost,
             Command::OpenOnGitHub,
+            cx,
         ))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)));
         let switch_pr = div()
@@ -2200,7 +2212,13 @@ impl OneStepLayout {
         });
         let wrap = toolbar.wraps_lines.map(|is_on| {
             toolbar_toggle(&colors, "wrap-lines", is_on, Icon::WrapText, "Wrap lines")
-                .tooltip(tooltip(|_| "Wrap long lines (W)".into()))
+                .tooltip(tooltip(|cx| {
+                    match keymap(cx).first_chord(Command::WrapLines) {
+                        Some(chord) => format!("Wrap long lines ({})", chord.spelled()),
+                        None => "Wrap long lines".to_owned(),
+                    }
+                    .into()
+                }))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.change_review(cx, |review| {
                         review.display_options_mut().toggle_wrap_lines();
@@ -2507,6 +2525,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             &colors,
             ButtonKind::Ghost,
             Command::PreviousScreen,
+            cx,
         ))
     });
     let next_label = footer.next.as_ref().map(|next| match next {
@@ -2558,6 +2577,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
                 Onward::Goes => Command::NextScreen,
                 Onward::Stays => Command::ToggleRead,
             },
+            cx,
         ))
     });
     let up_next = next_label.map(|title| {
@@ -2838,7 +2858,7 @@ fn lead_button(
                 this.change_review(cx, move |review| review.go_to(&step));
             }))
             .child(label)
-            .child(button_keys(&colors, ButtonKind::Primary, command))
+            .child(button_keys(&colors, ButtonKind::Primary, command, cx))
             .into_any_element(),
     )
 }
@@ -3000,7 +3020,7 @@ fn tick_button(
             px(6.),
         ))
         .child(if is_ticked { "Read" } else { "Mark as read" })
-        .child(button_keys(&colors, kind, Command::ToggleRead).ml_2())
+        .child(button_keys(&colors, kind, Command::ToggleRead, cx).ml_2())
 }
 
 fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {

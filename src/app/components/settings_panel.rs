@@ -30,6 +30,8 @@ use super::text_input::Lines;
 use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
 use super::version_link::version_link;
 
+mod keys;
+
 /// The widest a sheet over a review grows on a wide window.
 const SHEET_WIDTH: f32 = 860.;
 /// The column the header, the sections and the action bar's contents line up in.
@@ -61,6 +63,7 @@ enum Slot {
     AskModel,
     AskEffort,
     Clone(usize),
+    Keys,
 }
 
 /// Which half of a clone row a problem is about, so that half wears the danger edge.
@@ -98,6 +101,7 @@ impl ShownProblem {
             SettingProblem::AskEffortUnknown(_) => Slot::AskEffort,
             SettingProblem::AskModelBlank => Slot::AskModel,
             SettingProblem::IdeTemplateBlank => Slot::Ide,
+            SettingProblem::Key(_) => Slot::Keys,
         };
         Self {
             slot,
@@ -242,6 +246,7 @@ pub struct SettingsPanel {
     /// What the panel's owner has to say that is not about a setting, such as a PR that failed to open.
     notice: Option<SharedString>,
     clone_focus: Vec<FocusHandle>,
+    recording: Option<keys::Recording>,
     scroll: ScrollHandle,
     /// Where this app's binary is, so the reviewer can tell which install runs.
     running_binary: SharedString,
@@ -265,6 +270,7 @@ impl SettingsPanel {
             placement,
             notice: None,
             clone_focus: Vec::new(),
+            recording: None,
             scroll: ScrollHandle::new(),
             running_binary: std::env::current_exe()
                 .map_or_else(|_| "unknown".into(), |exe| exe.display().to_string().into()),
@@ -301,6 +307,7 @@ impl SettingsPanel {
             Err(error) => Loaded::Failed(format!("{error:#}").into()),
         });
         self.presence.open(Instant::now());
+        self.recording = None;
         self.clone_focus.clear();
         window.focus(&self.focus, cx);
         cx.notify();
@@ -333,6 +340,7 @@ impl SettingsPanel {
         if !self.presence.is_open() {
             return;
         }
+        self.recording = None;
         match self.placement {
             Placement::SheetOverReview => close_presence(self, cx, |this| &mut this.presence),
             // The window goes with it, so there is nothing to leave to.
@@ -375,6 +383,7 @@ impl SettingsPanel {
                 return;
             }
             Ok(SaveOutcome::Written) => {
+                crate::app::apply_keymap(editing.settings.keymap(), cx);
                 editing.problems.clear();
                 editing.note = None;
                 cx.emit(SettingsEvent::Saved);
@@ -1426,12 +1435,36 @@ impl SettingsPanel {
         cx.notify();
     }
 
+    /// A made-up key change, one key waiting to be pressed and one clash, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_sample_keys(&mut self, cx: &mut Context<Self>) {
+        use crate::viewer::{Chord, Command};
+        self.edit(cx, |editing| {
+            for (command, text) in [(Command::WrapLines, "l"), (Command::Jump, "n")] {
+                if let Some(chord) = Chord::parse(text) {
+                    editing.settings.set_key(command, chord);
+                }
+            }
+        });
+        self.start_recording(Command::ToggleRead, cx);
+    }
+
+    /// Scrolls the form to the Keys section, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn scroll_to_keys(&self) {
+        self.scroll.scroll_to_item(KEYS_SECTION);
+    }
+
     /// Scrolls the form to its last section, for the pictures.
     #[cfg(feature = "snapshots")]
     pub fn scroll_to_end(&self) {
         self.scroll.scroll_to_item(SECTION_COUNT);
     }
 }
+
+/// Where the Keys section sits among the form's children, sections and rules alike.
+#[cfg(feature = "snapshots")]
+const KEYS_SECTION: usize = 8;
 
 /// The form's header and its four sections, which the scroll counts as items.
 #[cfg(feature = "snapshots")]
@@ -1703,7 +1736,7 @@ impl Render for SettingsPanel {
                             .child(
                                 div()
                                     .text_color(colors.muted_text)
-                                    .child("How tours are summarised, where code opens, how Ask thinks and where your clones live."),
+                                    .child("How tours are summarised, where code opens, how Ask thinks, where your clones live and which keys do what."),
                             ),
                     )
                     .child(close),
@@ -1730,6 +1763,7 @@ impl Render for SettingsPanel {
                 let ide = self.ide(editing, &colors, cx);
                 let ask = self.ask(editing, &colors, cx);
                 let clones = self.clones(editing, &colors, cx);
+                let keys = self.keys(editing, &colors, cx);
                 (
                     div()
                         .id("settings-form")
@@ -1768,6 +1802,13 @@ impl Render for SettingsPanel {
                             "Clones",
                             "Where each repo is cloned on this machine.",
                             clones,
+                        ))
+                        .child(Self::section_rule(&colors))
+                        .child(Self::section(
+                            &colors,
+                            "Keys",
+                            "What each key does. Change takes the next key you press; Esc leaves it as it was.",
+                            keys,
                         ))
                         .child(Self::section_rule(&colors))
                         .child(Self::section(

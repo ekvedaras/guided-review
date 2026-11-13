@@ -53,10 +53,11 @@ enum Scene {
     GitHubOutage,
     RefreshRunning,
     PinnedFileHeader,
+    SettingsKeys,
 }
 
 impl Scene {
-    const ALL: [Self; 25] = [
+    const ALL: [Self; 26] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -82,6 +83,7 @@ impl Scene {
         Self::GitHubOutage,
         Self::RefreshRunning,
         Self::PinnedFileHeader,
+        Self::SettingsKeys,
     ];
 
     fn file_name(self) -> &'static str {
@@ -111,6 +113,7 @@ impl Scene {
             Self::GitHubOutage => "44-github-outage",
             Self::RefreshRunning => "45-refresh-running",
             Self::PinnedFileHeader => "46-pinned-file-header",
+            Self::SettingsKeys => "47-settings-keys",
         }
     }
 }
@@ -360,6 +363,11 @@ impl OneStepLayout {
                 settings.stage_sample_edits(cx);
                 settings.scroll_to_end();
             }),
+            Scene::SettingsKeys => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_sample_keys(cx);
+                settings.scroll_to_keys();
+            }),
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.toggle(window, cx)),
@@ -447,7 +455,10 @@ impl OneStepLayout {
 
     fn unstage(&mut self, scene: Scene, window: &mut Window, cx: &mut Context<Self>) {
         match scene {
-            Scene::Settings | Scene::SettingsEdited | Scene::SettingsEditedEnd => self
+            Scene::Settings
+            | Scene::SettingsEdited
+            | Scene::SettingsEditedEnd
+            | Scene::SettingsKeys => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
             Scene::JumpPalette | Scene::JumpActions => self

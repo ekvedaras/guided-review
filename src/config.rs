@@ -8,6 +8,7 @@ use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
 use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice};
+use crate::viewer::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 
 /// `~/.guided-review/config.toml`
 #[derive(Default, Deserialize)]
@@ -24,6 +25,9 @@ pub struct Config {
     ide: Option<String>,
     #[serde(default)]
     summary_instructions: SummaryInstructionsChoice,
+    /// `wrap_lines = "l"` or `next_screen = ["right", "j"]`, by `Command::config_name`.
+    #[serde(default)]
+    keys: BTreeMap<String, toml::Value>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -189,6 +193,22 @@ impl Config {
         }
     }
 
+    pub fn keymap(&self) -> Result<Keymap, Vec<KeyProblem>> {
+        self.key_changes().keymap()
+    }
+
+    pub fn resolved_keymap(&self) -> ResolvedKeymap {
+        self.key_changes().resolve()
+    }
+
+    pub fn key_changes(&self) -> KeyChanges {
+        KeyChanges::new(
+            self.keys
+                .iter()
+                .map(|(name, value)| (name.clone(), written_keys(value))),
+        )
+    }
+
     pub fn clone_of(&self, repo: &RepoName) -> Option<PathBuf> {
         self.clones
             .iter()
@@ -198,6 +218,21 @@ impl Config {
             })
             .map(|(_, path)| expand_env_home(Path::new(path)))
     }
+}
+
+fn written_keys(value: &toml::Value) -> WrittenKeys {
+    let texts = match value {
+        toml::Value::String(text) => Some(vec![text.clone()]),
+        toml::Value::Array(items) => items
+            .iter()
+            .map(|item| item.as_str().map(str::to_owned))
+            .collect(),
+        _ => None,
+    };
+    texts.map_or_else(
+        || WrittenKeys::NotText(value.to_string()),
+        WrittenKeys::Texts,
+    )
 }
 
 fn expand_env_home(path: &Path) -> PathBuf {

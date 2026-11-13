@@ -22,6 +22,7 @@ use super::overlay::{
 use super::palette::Colors;
 use super::text_box::TextBox;
 use super::text_input::Lines;
+use crate::app::keymap::keymap;
 
 /// Rows of the list on show at once, headings included.
 const VISIBLE_ROWS: usize = 13;
@@ -247,7 +248,8 @@ impl JumpPalette {
         let keys = match &shown.entry {
             PaletteEntry::Action(action) => action
                 .command()
-                .map(|command| chord_caps(&colors, command.first_chord(), CapGround::Page)),
+                .and_then(|command| keymap(cx).first_chord(command))
+                .map(|chord| chord_caps(&colors, chord, CapGround::Page)),
             PaletteEntry::Place(_) => None,
         };
         picker_row(

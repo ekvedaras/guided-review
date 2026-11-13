@@ -46,6 +46,7 @@ mod ide;
 mod image_previews;
 mod intents;
 mod jump;
+mod keymap;
 mod line_number;
 mod markdown;
 mod new_commits;

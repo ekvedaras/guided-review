@@ -1,6 +1,6 @@
 use gpui::{Div, IntoElement, ParentElement, Styled, div, px};
 
-use crate::viewer::{Chord, KeyCap};
+use crate::viewer::{Chord, Key, KeyCap, Modifier};
 
 use super::button::ButtonKind;
 use super::icon::{Icon, sized_icon};
@@ -16,15 +16,16 @@ pub enum KeyLabel {
 impl KeyLabel {
     pub fn of(cap: KeyCap) -> Self {
         match cap {
-            KeyCap::Cmd => Self::Text("⌘"),
-            KeyCap::Shift => Self::Text("⇧"),
-            KeyCap::Left => Self::Icon(Icon::ArrowLeft),
-            KeyCap::Right => Self::Icon(Icon::ArrowRight),
-            KeyCap::Up => Self::Icon(Icon::ArrowUp),
-            KeyCap::Down => Self::Icon(Icon::ArrowDown),
-            KeyCap::Enter => Self::Icon(Icon::Enter),
-            KeyCap::Escape => Self::Text("esc"),
-            KeyCap::Key { face, .. } => Self::Text(face),
+            KeyCap::Modifier(Modifier::Cmd) => Self::Text("⌘"),
+            KeyCap::Modifier(Modifier::Ctrl) => Self::Text("⌃"),
+            KeyCap::Modifier(Modifier::Alt) => Self::Text("⌥"),
+            KeyCap::Modifier(Modifier::Shift) => Self::Text("⇧"),
+            KeyCap::Key(Key::Left) => Self::Icon(Icon::ArrowLeft),
+            KeyCap::Key(Key::Right) => Self::Icon(Icon::ArrowRight),
+            KeyCap::Key(Key::Up) => Self::Icon(Icon::ArrowUp),
+            KeyCap::Key(Key::Down) => Self::Icon(Icon::ArrowDown),
+            KeyCap::Key(Key::Enter) => Self::Icon(Icon::Enter),
+            KeyCap::Key(key) => Self::Text(key.face()),
         }
     }
 }
@@ -87,8 +88,8 @@ pub fn key_cap_on(colors: &Colors, key: KeyLabel, ground: CapGround) -> impl Int
 pub fn chord_caps(colors: &Colors, chord: Chord, ground: CapGround) -> Div {
     div().flex().flex_none().items_center().gap_0p5().children(
         chord
-            .iter()
-            .map(|cap| key_cap_on(colors, KeyLabel::of(*cap), ground)),
+            .caps()
+            .map(|cap| key_cap_on(colors, KeyLabel::of(cap), ground)),
     )
 }
 

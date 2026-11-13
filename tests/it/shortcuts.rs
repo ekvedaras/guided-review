@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use gpui::Keystroke;
-use guided_review::viewer::{Command, KeyScope, ShortcutGroup, in_group, keystroke};
+use guided_review::viewer::{Chord, Command, KeyScope, ShortcutGroup, in_group};
 
 #[test]
 fn every_command_is_listed_once_under_one_heading_of_the_sheet() {
@@ -28,10 +28,12 @@ fn every_heading_lists_something() {
 #[test]
 fn every_command_has_keys_gpui_can_bind() {
     for command in Command::ALL {
-        assert!(!command.chords().is_empty(), "{command:?} has no keys");
-        assert_eq!(command.first_chord(), command.chords()[0]);
-        for chord in command.chords() {
-            let keys = keystroke(chord);
+        assert!(
+            !command.default_chords().is_empty(),
+            "{command:?} has no keys"
+        );
+        for chord in command.default_chords() {
+            let keys = chord.keystroke();
             Keystroke::parse(&keys).unwrap_or_else(|_| panic!("{command:?}: {keys} is not a key"));
         }
     }
@@ -41,7 +43,7 @@ fn every_command_has_keys_gpui_can_bind() {
 fn no_two_commands_of_one_scope_share_a_key() {
     let mut taken = HashSet::new();
     for command in Command::ALL {
-        for chord in command.chords() {
+        for chord in command.default_chords() {
             let scope = match command.scope() {
                 KeyScope::Page => "page",
                 KeyScope::Window => "window",
@@ -50,9 +52,9 @@ fn no_two_commands_of_one_scope_share_a_key() {
                 KeyScope::App => "app",
             };
             assert!(
-                taken.insert((scope, keystroke(chord))),
+                taken.insert((scope, chord.keystroke())),
                 "{} is bound twice on the {scope}",
-                keystroke(chord)
+                chord.keystroke()
             );
         }
     }
@@ -60,22 +62,23 @@ fn no_two_commands_of_one_scope_share_a_key() {
 
 #[test]
 fn a_chord_is_written_as_gpui_reads_it() {
-    assert_eq!(keystroke(Command::Jump.first_chord()), "cmd-k");
+    assert_eq!(Command::Jump.default_chords()[0].keystroke(), "cmd-k");
     assert_eq!(
-        keystroke(Command::AskAgent.first_chord()),
+        Command::AskAgent.default_chords()[0].keystroke(),
         "cmd-shift-enter"
     );
-    assert_eq!(keystroke(Command::NextScreen.first_chord()), "right");
-    assert_eq!(keystroke(Command::Shortcuts.first_chord()), "?");
+    assert_eq!(Command::NextScreen.default_chords()[0].keystroke(), "right");
+    assert_eq!(Command::Shortcuts.default_chords()[0].keystroke(), "?");
 }
 
 #[test]
 fn the_keys_the_app_had_before_the_sheet_still_work() {
     let keys = |command: Command| -> Vec<String> {
         command
-            .chords()
+            .default_chords()
             .iter()
-            .map(|chord| keystroke(chord))
+            .copied()
+            .map(Chord::keystroke)
             .collect()
     };
 
@@ -96,20 +99,23 @@ fn copying_code_works_with_a_comment_box_open_but_not_while_typing_in_it() {
 
 #[test]
 fn cmd_w_closes_the_window_from_anywhere_in_it() {
-    assert_eq!(keystroke(Command::CloseWindow.first_chord()), "cmd-w");
+    assert_eq!(
+        Command::CloseWindow.default_chords()[0].keystroke(),
+        "cmd-w"
+    );
     assert_eq!(Command::CloseWindow.scope(), KeyScope::Window);
 }
 
 #[test]
 fn g_opens_the_pull_request_on_github_wherever_the_page_takes_keys() {
-    assert_eq!(keystroke(Command::OpenOnGitHub.first_chord()), "g");
+    assert_eq!(Command::OpenOnGitHub.default_chords()[0].keystroke(), "g");
     assert_eq!(Command::OpenOnGitHub.scope(), KeyScope::Page);
     assert_eq!(Command::OpenOnGitHub.group(), ShortcutGroup::App);
 }
 
 #[test]
 fn cmd_q_quits_from_any_window_of_the_app() {
-    assert_eq!(keystroke(Command::Quit.first_chord()), "cmd-q");
+    assert_eq!(Command::Quit.default_chords()[0].keystroke(), "cmd-q");
     assert_eq!(Command::Quit.scope(), KeyScope::App);
     assert_eq!(Command::Quit.group(), ShortcutGroup::App);
 }
@@ -119,18 +125,24 @@ fn a_key_of_the_app_scope_is_taken_in_no_other_scope() {
     let app_keys: Vec<String> = Command::ALL
         .into_iter()
         .filter(|command| command.scope() == KeyScope::App)
-        .flat_map(|command| command.chords().iter().map(|chord| keystroke(chord)))
+        .flat_map(|command| {
+            command
+                .default_chords()
+                .iter()
+                .copied()
+                .map(Chord::keystroke)
+        })
         .collect();
 
     for command in Command::ALL {
         if command.scope() == KeyScope::App {
             continue;
         }
-        for chord in command.chords() {
+        for chord in command.default_chords() {
             assert!(
-                !app_keys.contains(&keystroke(chord)),
+                !app_keys.contains(&chord.keystroke()),
                 "{} is also a key of the whole app",
-                keystroke(chord)
+                chord.keystroke()
             );
         }
     }
@@ -140,8 +152,12 @@ fn a_key_of_the_app_scope_is_taken_in_no_other_scope() {
 fn the_page_keys_are_all_single_keys_or_arrows_so_g_fits_them() {
     for command in Command::ALL {
         if command.scope() == KeyScope::Page {
-            for chord in command.chords() {
-                assert_eq!(chord.len(), 1, "{command:?} is a chord on the page");
+            for chord in command.default_chords() {
+                assert_eq!(
+                    chord.caps().count(),
+                    1,
+                    "{command:?} is a chord on the page"
+                );
             }
         }
     }
