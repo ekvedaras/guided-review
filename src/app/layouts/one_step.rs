@@ -62,7 +62,7 @@ use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
-    RowMark, check_flag, count_badge, row_note, sidebar_row, skim_chip,
+    RowMark, RowPlace, check_flag, count_badge, row_note, row_places, sidebar_row, skim_chip,
 };
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -1137,17 +1137,26 @@ impl OneStepLayout {
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
         let progress = sidebar.progress;
-        let summary_row = sidebar_row(
-            &colors,
-            "summary",
-            0,
-            sidebar.is_summary_current,
-            RowMark::Page,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.change_review(cx, |review| review.go_to_summary());
-        }))
-        .child("Summary");
+        let places = row_places(
+            &std::iter::once(sidebar.is_summary_current)
+                .chain(sidebar.steps.iter().map(|step| step.is_current))
+                .chain(
+                    sidebar
+                        .safety_net
+                        .iter()
+                        .map(|safety_net| safety_net.is_current),
+                )
+                .collect::<Vec<_>>(),
+        );
+        let mut places = places.into_iter();
+        let summary_place = places.next().unwrap_or(RowPlace::Apart);
+        let step_places: Vec<RowPlace> = places.by_ref().take(sidebar.steps.len()).collect();
+        let safety_net_place = places.next().unwrap_or(RowPlace::Apart);
+        let summary_row = sidebar_row(&colors, "summary", 0, summary_place, RowMark::Page)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, |review| review.go_to_summary());
+            }))
+            .child("Summary");
         let sync_notices = sidebar
             .sync_banner
             .clone()
@@ -1198,7 +1207,7 @@ impl OneStepLayout {
             self.on_finish_review(),
         )
         .opened_by(self.finish_form_request);
-        let step_rows = sidebar.steps.iter().map(|step| {
+        let step_rows = sidebar.steps.iter().zip(step_places).map(|(step, place)| {
             let id: StepId = step.id.clone();
             let mark = if step.is_gone {
                 RowMark::Gone
@@ -1211,7 +1220,7 @@ impl OneStepLayout {
                 &colors,
                 SharedString::from(format!("step-{id}")),
                 step.depth,
-                step.is_current,
+                place,
                 mark,
             )
             .when(step.is_skim && !step.is_current, |row| {
@@ -1229,25 +1238,19 @@ impl OneStepLayout {
             .children(count_badge(&colors, step.thread_count))
         });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
-            sidebar_row(
-                &colors,
-                "safety-net",
-                0,
-                safety_net.is_current,
-                RowMark::Page,
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to_safety_net());
-            }))
-            .child(div().flex_1().child(SafetyNetIntro::TITLE))
-            .child(row_note(
-                &colors,
-                match safety_net.pieces {
-                    1 => "1 piece".to_owned(),
-                    pieces => format!("{pieces} pieces"),
-                },
-            ))
-            .children(count_badge(&colors, safety_net.thread_count))
+            sidebar_row(&colors, "safety-net", 0, safety_net_place, RowMark::Page)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.change_review(cx, |review| review.go_to_safety_net());
+                }))
+                .child(div().flex_1().child(SafetyNetIntro::TITLE))
+                .child(row_note(
+                    &colors,
+                    match safety_net.pieces {
+                        1 => "1 piece".to_owned(),
+                        pieces => format!("{pieces} pieces"),
+                    },
+                ))
+                .children(count_badge(&colors, safety_net.thread_count))
         });
         let header = div()
             .flex_none()
