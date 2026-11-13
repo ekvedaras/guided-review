@@ -91,7 +91,7 @@ impl FileText {
         for piece in text.split_inclusive('\n') {
             let line = piece
                 .strip_suffix('\n')
-                .map_or(piece, |line| line.strip_suffix('\r').unwrap_or(line));
+                .map_or(piece, |line| line.trim_suffix('\r'));
             let (Ok(start), Ok(end)) = (u32::try_from(at), u32::try_from(at + line.len())) else {
                 break;
             };

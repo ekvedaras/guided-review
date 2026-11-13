@@ -85,7 +85,7 @@ impl DisplayOptions {
     }
 
     pub fn toggle_ignore_whitespace(&mut self) {
-        self.ignores_whitespace = !self.ignores_whitespace;
+        self.ignores_whitespace.toggle();
     }
 
     pub fn wraps_lines(&self) -> bool {
@@ -93,7 +93,7 @@ impl DisplayOptions {
     }
 
     pub fn toggle_wrap_lines(&mut self) {
-        self.wraps_lines = !self.wraps_lines;
+        self.wraps_lines.toggle();
     }
 
     pub fn image_preview(&self, path: &FilePath) -> Option<&ImagePreview> {
