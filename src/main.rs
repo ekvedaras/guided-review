@@ -21,7 +21,7 @@ use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{StepId, Tour};
 use guided_review::tour_check;
 use guided_review::update::{
-    AppVersion, BundlePlaced, IN_LOGIN_SHELL, ReleaseInstall, Version, relaunch_in_login_shell,
+    AppBundle, AppVersion, BundlePlaced, IN_LOGIN_SHELL, LAUNCHED_APP, ReleaseInstall, Version,
     write_bundle_template,
 };
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
@@ -357,10 +357,15 @@ fn settings() -> anyhow::Result<()> {
 /// A launch of Guided Review.app first runs itself again through the login shell, then shows the PR
 /// switcher; `guided-review` with no command shows it too.
 fn launch() -> anyhow::Result<()> {
-    let exe = std::env::current_exe().context("could not find the guided-review binary")?;
+    let home = home_folder()?;
+    let launched_app = std::env::var_os(LAUNCHED_APP);
     let shell = std::env::var_os("SHELL");
     let is_in_login_shell = std::env::var_os(IN_LOGIN_SHELL).is_some();
-    if let Some(relaunch) = relaunch_in_login_shell(&exe, shell.as_deref(), is_in_login_shell) {
+    if let Some(relaunch) = AppBundle::in_home(&home).relaunch_in_login_shell(
+        launched_app.as_deref(),
+        shell.as_deref(),
+        is_in_login_shell,
+    ) {
         let error = std::process::Command::new(&relaunch.program)
             .args(&relaunch.args)
             .env(IN_LOGIN_SHELL, "1")
@@ -372,7 +377,7 @@ fn launch() -> anyhow::Result<()> {
             )
         });
     }
-    let answer = hand_over(&AppFolder::in_home(&home_folder()?), &Request::ShowSwitcher)?;
+    let answer = hand_over(&AppFolder::in_home(&home), &Request::ShowSwitcher)?;
     match answer {
         Answer::ShowingSwitcher => {
             println!("{answer}");
