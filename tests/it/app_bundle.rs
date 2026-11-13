@@ -3,8 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use guided_review::update::{
-    AppBundle, BundlePlaced, Relaunch, Version, info_plist, relaunch_in_login_shell,
-    write_bundle_template,
+    AppBundle, BundlePlaced, Relaunch, Version, info_plist, write_bundle_template,
 };
 use tempfile::TempDir;
 
@@ -163,47 +162,81 @@ fn a_release_without_a_bundle_places_none() {
     assert!(!bundle_in(home.path()).exists());
 }
 
-const BUNDLED: &str = "/Users/you/Applications/Guided Review.app/Contents/MacOS/guided-review";
+const OUR_APP: &str = "io.github.ekvedaras.guided-review";
 
 #[test]
-fn a_launch_of_the_bundle_runs_again_through_the_login_shell_so_gh_claude_and_hc_are_found() {
-    let relaunch =
-        relaunch_in_login_shell(Path::new(BUNDLED), Some(OsStr::new("/bin/bash")), false);
+fn a_launch_of_the_app_runs_the_bundle_again_through_the_login_shell_so_gh_claude_and_hc_are_found()
+{
+    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+
+    let relaunch = bundle.relaunch_in_login_shell(
+        Some(OsStr::new(OUR_APP)),
+        Some(OsStr::new("/bin/bash")),
+        false,
+    );
 
     assert_eq!(
         relaunch,
         Some(Relaunch {
             program: PathBuf::from("/bin/bash"),
-            args: ["-l", "-i", "-c", "exec \"$0\"", BUNDLED]
-                .map(OsString::from)
-                .to_vec(),
+            args: [
+                "-l",
+                "-i",
+                "-c",
+                "exec \"$0\"",
+                "/Users/you/Applications/Guided Review.app/Contents/MacOS/guided-review",
+            ]
+            .map(OsString::from)
+            .to_vec(),
         })
     );
 }
 
 #[test]
 fn with_no_shell_named_the_launch_runs_through_zsh() {
-    let relaunch = relaunch_in_login_shell(Path::new(BUNDLED), None, false).unwrap();
+    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+
+    let relaunch = bundle
+        .relaunch_in_login_shell(Some(OsStr::new(OUR_APP)), None, false)
+        .unwrap();
 
     assert_eq!(relaunch.program, PathBuf::from("/bin/zsh"));
 }
 
 #[test]
 fn a_launch_already_in_the_login_shell_runs_as_it_is() {
+    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+
     assert_eq!(
-        relaunch_in_login_shell(Path::new(BUNDLED), Some(OsStr::new("/bin/zsh")), true),
+        bundle.relaunch_in_login_shell(
+            Some(OsStr::new(OUR_APP)),
+            Some(OsStr::new("/bin/zsh")),
+            true
+        ),
         None
     );
 }
 
 #[test]
-fn a_binary_outside_a_bundle_runs_as_it_is() {
+fn a_run_from_a_terminal_app_runs_as_it_is() {
+    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+
     assert_eq!(
-        relaunch_in_login_shell(
-            Path::new("/Users/you/.local/bin/guided-review"),
+        bundle.relaunch_in_login_shell(
+            Some(OsStr::new("com.mitchellh.ghostty")),
             Some(OsStr::new("/bin/zsh")),
             false
         ),
+        None
+    );
+}
+
+#[test]
+fn a_run_not_launched_as_any_app_runs_as_it_is() {
+    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+
+    assert_eq!(
+        bundle.relaunch_in_login_shell(None, Some(OsStr::new("/bin/zsh")), false),
         None
     );
 }

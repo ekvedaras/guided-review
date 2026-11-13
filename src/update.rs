@@ -8,7 +8,7 @@ use std::str::FromStr;
 use anyhow::Context;
 
 pub use app_bundle::{
-    AppBundle, BundlePlaced, IN_LOGIN_SHELL, Relaunch, info_plist, relaunch_in_login_shell,
+    AppBundle, BundlePlaced, IN_LOGIN_SHELL, LAUNCHED_APP, Relaunch, info_plist,
     write_bundle_template,
 };
 pub use release_install::{InTheWay, Installed, ReleaseInstall, SkillLink};

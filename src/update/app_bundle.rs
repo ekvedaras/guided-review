@@ -115,6 +115,10 @@ fn replace(path: &Path, make: impl FnOnce(&Path) -> std::io::Result<()>) -> anyh
     fs::rename(&next, path).with_context(|| format!("could not put {} in place", path.display()))
 }
 
+/// Launch Services names the app it launched here. The bundle's executable is a link to the bin link,
+/// which macOS follows before it runs it, so the binary's own path does not tell a launch of the app.
+pub const LAUNCHED_APP: &str = "__CFBundleIdentifier";
+
 /// Set on the run the login shell makes, so it does not relaunch again.
 pub const IN_LOGIN_SHELL: &str = "GUIDED_REVIEW_IN_LOGIN_SHELL";
 
@@ -125,35 +129,32 @@ pub struct Relaunch {
     pub args: Vec<OsString>,
 }
 
-/// A launch from the Dock, Spotlight or Raycast gets launchd's short `PATH`, without `gh`, `claude` or
-/// `hc`. So a binary started from inside a bundle runs itself again through the reviewer's login
-/// shell, which reads their profile as a terminal does, keeping the bundle's path so the Dock still
-/// names the app.
-pub fn relaunch_in_login_shell(
-    exe: &Path,
-    shell: Option<&OsStr>,
-    is_in_login_shell: bool,
-) -> Option<Relaunch> {
-    let is_bundled = exe
-        .parent()
-        .is_some_and(|folder| folder.ends_with("Contents/MacOS"))
-        && exe
-            .ancestors()
-            .nth(3)
-            .and_then(Path::extension)
-            .is_some_and(|extension| extension == "app");
-    if !is_bundled || is_in_login_shell {
-        return None;
+impl AppBundle {
+    /// A launch from the Dock, Spotlight or Raycast gets launchd's short `PATH`, without `gh`,
+    /// `claude` or `hc`. So a launch of the app runs the bundle's executable again through the
+    /// reviewer's login shell, which reads their profile as a terminal does. The bundle's path keeps
+    /// the Dock naming the app.
+    pub fn relaunch_in_login_shell(
+        &self,
+        launched_app: Option<&OsStr>,
+        shell: Option<&OsStr>,
+        is_in_login_shell: bool,
+    ) -> Option<Relaunch> {
+        let is_our_app = launched_app == Some(OsStr::new(BUNDLE_ID));
+        if !is_our_app || is_in_login_shell {
+            return None;
+        }
+        let executable = self.executable();
+        let args = [OsStr::new("-l"), OsStr::new("-i"), OsStr::new("-c")]
+            .into_iter()
+            .chain([OsStr::new("exec \"$0\""), executable.as_os_str()])
+            .map(OsStr::to_os_string)
+            .collect();
+        Some(Relaunch {
+            program: PathBuf::from(shell.unwrap_or_else(|| OsStr::new("/bin/zsh"))),
+            args,
+        })
     }
-    let args = [OsStr::new("-l"), OsStr::new("-i"), OsStr::new("-c")]
-        .into_iter()
-        .chain([OsStr::new("exec \"$0\""), exe.as_os_str()])
-        .map(OsStr::to_os_string)
-        .collect();
-    Some(Relaunch {
-        program: PathBuf::from(shell.unwrap_or_else(|| OsStr::new("/bin/zsh"))),
-        args,
-    })
 }
 
 /// What macOS reads to name the app, find its binary and icon, and tell its version.
