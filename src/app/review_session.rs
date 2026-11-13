@@ -3,7 +3,7 @@
 
 use crate::file_path::FilePath;
 use std::collections::{HashMap, HashSet};
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Range};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -302,6 +302,23 @@ impl ReviewSession {
         cx.notify();
     }
 
+    /// A click on a line focuses the change it is in.
+    pub fn focus_change_of(&mut self, at: &LineLocation, cx: &mut Context<Self>) {
+        let Some(row) = self.review.page().row_of_line(at) else {
+            return;
+        };
+        if self.review.focus_change_at_row(row) {
+            self.rebuild_rows(cx);
+        }
+    }
+
+    /// The focus follows the scroll: these rows of the page are in view.
+    pub fn follow_scroll(&mut self, visible: Range<usize>, cx: &mut Context<Self>) {
+        if self.review.follow_scroll(visible) {
+            self.rebuild_rows(cx);
+        }
+    }
+
     pub fn extend_selection(&mut self, at: LineLocation, cx: &mut Context<Self>) {
         if self.review.is_selecting() {
             self.review.extend_selection(at);
@@ -558,7 +575,7 @@ impl ReviewSession {
 
     /// GPUI's splice moves the view to the top of a replaced row; a reply box opening on a long thread
     /// would throw the reader to the thread's start. The view stays where it was in that row instead.
-    fn splice_keeping_place(&self, old: std::ops::Range<usize>, new_count: usize) {
+    fn splice_keeping_place(&self, old: Range<usize>, new_count: usize) {
         let top = self.screen_list.logical_scroll_top();
         self.screen_list.splice(old.clone(), new_count);
         if old.contains(&top.item_ix) && new_count > 0 {
