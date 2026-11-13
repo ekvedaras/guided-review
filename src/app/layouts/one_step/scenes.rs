@@ -55,10 +55,11 @@ enum Scene {
     PinnedFileHeader,
     SettingsKeys,
     FocusedChange,
+    SettingsMoreLines,
 }
 
 impl Scene {
-    const ALL: [Self; 27] = [
+    const ALL: [Self; 28] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -86,6 +87,7 @@ impl Scene {
         Self::PinnedFileHeader,
         Self::SettingsKeys,
         Self::FocusedChange,
+        Self::SettingsMoreLines,
     ];
 
     fn file_name(self) -> &'static str {
@@ -117,6 +119,7 @@ impl Scene {
             Self::PinnedFileHeader => "46-pinned-file-header",
             Self::SettingsKeys => "47-settings-keys",
             Self::FocusedChange => "48-focused-change",
+            Self::SettingsMoreLines => "49-settings-more-lines",
         }
     }
 }
@@ -371,6 +374,11 @@ impl OneStepLayout {
                 settings.stage_sample_keys(cx);
                 settings.scroll_to_keys();
             }),
+            Scene::SettingsMoreLines => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_sample_edits(cx);
+                settings.scroll_to_more_lines();
+            }),
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.toggle(window, cx)),
@@ -468,7 +476,8 @@ impl OneStepLayout {
             Scene::Settings
             | Scene::SettingsEdited
             | Scene::SettingsEditedEnd
-            | Scene::SettingsKeys => self
+            | Scene::SettingsKeys
+            | Scene::SettingsMoreLines => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
             Scene::JumpPalette | Scene::JumpActions => self

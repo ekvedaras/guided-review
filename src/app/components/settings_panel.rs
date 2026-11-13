@@ -1505,6 +1505,13 @@ impl SettingsPanel {
         self.scroll.scroll_to_item(KEYS_SECTION);
     }
 
+    /// Scrolls the form to the More lines section, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn scroll_to_more_lines(&self) {
+        self.scroll
+            .set_offset(gpui::point(px(0.), px(-MORE_LINES_OFFSET)));
+    }
+
     /// Scrolls the form to its last section, for the pictures.
     #[cfg(feature = "snapshots")]
     pub fn scroll_to_end(&self) {
@@ -1514,7 +1521,11 @@ impl SettingsPanel {
 
 /// Where the Keys section sits among the form's children, sections and rules alike.
 #[cfg(feature = "snapshots")]
-const KEYS_SECTION: usize = 8;
+const KEYS_SECTION: usize = 10;
+
+/// How far down the form the More lines section starts, in pixels.
+#[cfg(feature = "snapshots")]
+const MORE_LINES_OFFSET: f32 = 760.;
 
 /// The form's header and its four sections, which the scroll counts as items.
 #[cfg(feature = "snapshots")]
