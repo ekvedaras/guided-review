@@ -1,0 +1,31 @@
+name: Release published
+
+# The notes go once the release is published, not when its draft is made: until then the tag may still
+# move to a fix, and a tag moved past the deletion would find no notes.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-change-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          notes=$(scripts/change-notes-in "$(scripts/previous-release-tag "$TAG")" "$TAG")
+          [ -n "$notes" ] || exit 0
+          for note in $notes; do
+            if [ -f "$note" ]; then git rm -q "$note"; fi
+          done
+          git diff --cached --quiet && exit 0
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "changes: the notes released in $TAG are gone from changes/; they stay readable at the tag"
+          git push origin main

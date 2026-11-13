@@ -112,9 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          previous=$(git tag --list 'v*' --sort=-v:refname | { grep -vx "$TAG" || true; } | while read -r t; do
-            if git merge-base --is-ancestor "$t" "$TAG"; then echo "$t"; break; fi
-          done)
+          previous=$(scripts/previous-release-tag "$TAG")
           scripts/release-notes "$previous" "$TAG" > notes.md
           # A draft: the maintainer edits the notes on GitHub and publishes it.
           gh release create "$TAG" dist/* \

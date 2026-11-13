@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# The change notes a release holds: the files added to changes/ between two refs, one path per line.
+# Fails on a note whose name does not start with a kind.
+# Usage: scripts/change-notes-in <from-tag-or-empty> <to-ref>   (empty from = every note up to <to-ref>)
+set -euo pipefail
+
+from="${1-}"
+to="${2:?usage: scripts/change-notes-in <from-tag-or-empty> <to-ref>}"
+
+cd "$(dirname "$0")/.."
+
+kinds="added changed fixed removed"
+
+if [ -n "$from" ]; then
+    notes=$(git diff --name-only --diff-filter=A "$from" "$to" -- changes/)
+else
+    notes=$(git ls-tree -r --name-only "$to" -- changes/)
+fi
+
+for note in $notes; do
+    [ "$note" = changes/README.md ] && continue
+    kind=$(basename "$note" | cut -d- -f1)
+    case " $kinds " in
+        *" $kind "*) echo "$note" ;;
+        *) echo "$note: the name must start with one of: $kinds" >&2; exit 1 ;;
+    esac
+done
