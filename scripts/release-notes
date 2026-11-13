@@ -23,20 +23,7 @@ kind_heading() {
     esac
 }
 
-if [ -n "$from" ]; then
-    notes=$(git diff --name-only --diff-filter=A "$from" "$to" -- changes/)
-else
-    notes=$(git ls-tree -r --name-only "$to" -- changes/)
-fi
-notes=$(printf '%s\n' "$notes" | grep -v '^changes/README.md$' | grep . || true)
-
-for note in $notes; do
-    kind=$(basename "$note" | cut -d- -f1)
-    case " $kinds " in
-        *" $kind "*) ;;
-        *) echo "$note: the name must start with one of: $kinds" >&2; exit 1 ;;
-    esac
-done
+notes=$(scripts/change-notes-in "$from" "$to")
 
 printed_any=false
 for kind in $kinds; do

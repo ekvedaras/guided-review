@@ -33,7 +33,7 @@ Every change a user can see adds a note to `changes/`, in the same commit as the
 
 ## Releasing
 
-Bump the version in `Cargo.toml` and `Cargo.lock`, then push the tag `v<version>`. The release workflow builds the archives and creates a draft release whose notes are the change notes added to `changes/` since the previous `v*` tag, grouped by kind, with the commit subjects folded under them. Review the draft on GitHub and publish it. Preview the notes locally with `scripts/release-notes <from-tag-or-empty> <to-ref>`, e.g. `scripts/release-notes "" main`.
+Bump the version in `Cargo.toml` and `Cargo.lock`, then push the tag `v<version>`. The release workflow builds the archives and creates a draft release whose notes are the change notes added to `changes/` since the previous `v*` tag, grouped by kind, with the commit subjects folded under them, and then deletes those notes from `main` in a commit of its own, so pull before you work on. Review the draft on GitHub and publish it. Preview the notes locally with `scripts/release-notes <from-tag-or-empty> <to-ref>`, e.g. `scripts/release-notes "" main`.
 
 ## herdr
 
