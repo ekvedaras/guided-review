@@ -295,6 +295,44 @@ fn a_token_github_refuses_is_no_github_access() {
 }
 
 #[test]
+fn a_forbidden_answer_says_github_s_own_reason_and_no_missing_scope() {
+    let (url, _) = serve_graphql(vec![
+        r#"{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}],"data":null}"#.into(),
+    ]);
+
+    let error = GitHub::at(&url)
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
+        .unwrap_err();
+
+    let GitHubError::NoAccess(no_access) = error else {
+        panic!("expected no access, got {error:?}");
+    };
+    assert_eq!(
+        no_access.reason(),
+        "GitHub refused: Resource not accessible by integration"
+    );
+}
+
+#[test]
+fn an_insufficient_scopes_answer_names_the_repo_scope() {
+    let (url, _) = serve_graphql(vec![
+        r#"{"errors":[{"type":"INSUFFICIENT_SCOPES","message":"Your token has not been granted the required scopes"}],"data":null}"#.into(),
+    ]);
+
+    let error = GitHub::at(&url)
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
+        .unwrap_err();
+
+    let GitHubError::NoAccess(no_access) = error else {
+        panic!("expected no access, got {error:?}");
+    };
+    assert_eq!(
+        no_access.reason(),
+        "GitHub refused the token: it needs the `repo` scope"
+    );
+}
+
+#[test]
 fn comment_now_submits_the_review_the_thread_went_into() {
     let (url, asked) = serve_graphql(vec![
         PULL_ID.into(),

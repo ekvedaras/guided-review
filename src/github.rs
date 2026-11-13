@@ -216,26 +216,30 @@ impl GitHub {
                 .body_mut()
                 .read_json()
                 .map_err(anyhow::Error::from)?,
-            Err(ureq::Error::StatusCode(401 | 403)) => {
-                return Err(GitHubError::NoAccess(NoAccess::new(
-                    "GitHub refused the token: it needs the `repo` scope",
-                )));
+            Err(ureq::Error::StatusCode(status @ (401 | 403))) => {
+                return Err(GitHubError::NoAccess(NoAccess::new(format!(
+                    "GitHub refused the token (HTTP {status})"
+                ))));
             }
             Err(error) => return Err(anyhow::Error::from(error).into()),
         };
         if let Some(errors) = answer.get("errors") {
-            let refused = errors.as_array().is_some_and(|errors| {
-                errors.iter().any(|error| {
-                    matches!(
-                        error["type"].as_str(),
-                        Some("FORBIDDEN" | "INSUFFICIENT_SCOPES")
-                    )
-                })
-            });
-            if refused {
+            let listed = errors.as_array().map_or_default(Vec::as_slice);
+            let error_of_type = |wanted: &str| {
+                listed
+                    .iter()
+                    .find(|error| error["type"].as_str() == Some(wanted))
+            };
+            if error_of_type("INSUFFICIENT_SCOPES").is_some() {
                 return Err(GitHubError::NoAccess(NoAccess::new(
                     "GitHub refused the token: it needs the `repo` scope",
                 )));
+            }
+            if let Some(forbidden) = error_of_type("FORBIDDEN") {
+                let message = forbidden["message"].as_str().unwrap_or("no reason given");
+                return Err(GitHubError::NoAccess(NoAccess::new(format!(
+                    "GitHub refused: {message}"
+                ))));
             }
             return Err(anyhow::anyhow!("GitHub answered with errors: {errors}").into());
         }

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Fails when a change to what users get (src/, skills/) adds no note in changes/.
+# A PR whose body has a line "changelog: none" passes without one (CHANGELOG_NONE=1).
+# Usage: scripts/changes-check <base-ref> [head-ref]
+set -euo pipefail
+
+base="${1:?usage: scripts/changes-check <base-ref> [head-ref]}"
+head="${2:-HEAD}"
+
+cd "$(dirname "$0")/.."
+
+kinds="added changed fixed removed"
+
+added_notes=$(git diff --name-only --diff-filter=A "$base...$head" -- changes/ | grep -v '^changes/README.md$' || true)
+
+for note in $added_notes; do
+    kind=$(basename "$note" | cut -d- -f1)
+    case " $kinds " in
+        *" $kind "*) ;;
+        *) echo "$note: the name must start with one of: $kinds" >&2; exit 1 ;;
+    esac
+done
+
+[ -n "$added_notes" ] && exit 0
+[ "${CHANGELOG_NONE:-0}" = "1" ] && exit 0
+
+if git diff --quiet "$base...$head" -- src/ skills/; then
+    exit 0
+fi
+
+echo "This change touches src/ or skills/ but adds no note in changes/." >&2
+echo "Add changes/<added|changed|fixed|removed>-<slug>.md (see changes/README.md)," >&2
+echo "or put a line 'changelog: none' in the PR body if users see no difference." >&2
+exit 1
