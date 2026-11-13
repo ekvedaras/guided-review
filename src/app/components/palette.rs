@@ -280,6 +280,8 @@ pub struct Colors {
     pub added_word: Rgba,
     /// Links, marks, the focus ring and lines in the accent colour.
     pub accent: Rgba,
+    /// What a tour agent wrote: its name and the ground of its picture, in Claude's clay.
+    pub agent: Rgba,
     /// The fill of a primary button, top to bottom; `accent` reads too light under white text in the dark.
     pub accent_fill: Gradient,
     pub accent_fill_hover: Gradient,
@@ -398,6 +400,7 @@ impl Colors {
             removed_word: rgb(0xffc4bd),
             added_word: rgb(0xb4ebc2),
             accent: rgb(iris::S700),
+            agent: rgb(0xb5583a),
             accent_fill: Gradient::of(iris::S600, iris::S700),
             accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),
             accent_fill_pressed: rgb(iris::S700),
@@ -469,6 +472,7 @@ impl Colors {
             removed_word: rgb(0x5c2328),
             added_word: rgb(0x1f4c30),
             accent: rgb(iris::S400),
+            agent: rgb(0xd97757),
             accent_fill: Gradient::of(0x5652d8, 0x4640a8),
             accent_fill_hover: Gradient::of(iris::S600, iris::S700),
             accent_fill_pressed: rgb(0x403a9c),

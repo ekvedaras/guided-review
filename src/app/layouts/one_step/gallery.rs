@@ -140,7 +140,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
             comment(
                 "c2",
                 "you",
-                "Refused: Save says why under the setting.\n\n> each problem shown under its setting",
+                "🤖 Refused: Save says why under the setting.\n\n> each problem shown under its setting",
                 Vec::new(),
             ),
             comment("c4", "you", "Never mind, I see it now.", Vec::new()),
