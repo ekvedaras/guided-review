@@ -20,6 +20,9 @@ const MARK_SIZE: f32 = 14.;
 /// from the right. Text keeps `TEXT_END` more room at the right.
 const ROW_INSET: f32 = 3.;
 const TEXT_END: f32 = 5.;
+/// A pill in the corner, like `skim`, keeps the room beside it that its line leaves above it: a
+/// `text_xs` pill is 12 px times phi high in a `LINE_HEIGHT` line.
+const PILL_END: f32 = (LINE_HEIGHT - 12. * 1.618) / 2.;
 
 /// What the reader has done with the screen a row opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +142,7 @@ pub fn row_note(colors: &Colors, note: impl Into<SharedString>) -> impl IntoElem
 pub fn skim_chip(colors: &Colors) -> impl IntoElement {
     div()
         .flex_none()
-        .mr(px(TEXT_END))
+        .mr(px(PILL_END))
         .h(px(LINE_HEIGHT))
         .flex()
         .items_center()
