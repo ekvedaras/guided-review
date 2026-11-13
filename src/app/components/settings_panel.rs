@@ -12,7 +12,9 @@ use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
-use crate::viewer::{CloneRowProblem, Motion, Presence, SaveOutcome, SettingProblem, Settings};
+use crate::viewer::{
+    CloneRowProblem, MoreLines, Motion, Presence, SaveOutcome, SettingProblem, Settings,
+};
 
 use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
@@ -63,6 +65,7 @@ enum Slot {
     AskModel,
     AskEffort,
     Clone(usize),
+    MoreLines,
     Keys,
 }
 
@@ -101,6 +104,7 @@ impl ShownProblem {
             SettingProblem::AskEffortUnknown(_) => Slot::AskEffort,
             SettingProblem::AskModelBlank => Slot::AskModel,
             SettingProblem::IdeTemplateBlank => Slot::Ide,
+            SettingProblem::MoreLinesNotACount(_) => Slot::MoreLines,
             SettingProblem::Key(_) => Slot::Keys,
         };
         Self {
@@ -130,9 +134,12 @@ struct Editing {
     default_model_note: SharedString,
     default_effort_note: SharedString,
     default_effort_level: usize,
+    default_more_lines_note: SharedString,
     ide: CustomEntry,
     model: CustomEntry,
     skill: CustomEntry,
+    /// The text the reviewer typed for the number, kept as typed while it is not a number yet.
+    more_lines: CustomEntry,
     folder_labels: Vec<SharedString>,
     problems: Vec<ShownProblem>,
     /// Why the last Save or file creation went wrong, when it is not a problem of one setting.
@@ -166,6 +173,7 @@ impl Editing {
         );
         let skill_text = settings.summary_instructions().skill_text();
         let skill = entry(skill_text.is_some(), skill_text.unwrap_or_default());
+        let more_lines = entry(true, &settings.more_lines_text());
         let problems = settings
             .problems_on_open()
             .iter()
@@ -179,11 +187,19 @@ impl Editing {
             default_effort_level: effort_level(&AskEffortChoice::of(Some(
                 &AskSettings::default().effort,
             ))),
+            default_more_lines_note: format!(
+                "Default is {}; from {} to {}",
+                MoreLines::default().get(),
+                MoreLines::MIN,
+                MoreLines::MAX
+            )
+            .into(),
             settings,
             skills,
             ide,
             model,
             skill,
+            more_lines,
             folder_labels: Vec::new(),
             problems,
             note: None,
@@ -1098,6 +1114,38 @@ impl SettingsPanel {
             )
     }
 
+    fn more_lines(
+        &self,
+        editing: &Editing,
+        colors: &Colors,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let focus = editing.more_lines.focus.clone();
+        let note = div()
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(editing.default_more_lines_note.clone());
+        let input = focus.map(|focus| {
+            div().w(px(120.)).child(self.text_box(
+                "more-lines-count",
+                &focus,
+                &editing.more_lines.text,
+                editing.has_problem_under(Slot::MoreLines),
+                cx,
+                |editing, text| {
+                    editing.settings.set_more_lines_text(&text);
+                    editing.more_lines.text = text;
+                },
+            ))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(setting_row("Lines per step", note, div().children(input)))
+            .child(Self::problem_lines(editing, Slot::MoreLines, colors))
+    }
+
     fn clones(&self, editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let add_clone = |kind: ButtonKind, size: ButtonSize| {
             icon_label_button(colors, "clone-add", kind, size, Icon::Plus, "Add clone").on_click(
@@ -1412,6 +1460,8 @@ impl SettingsPanel {
                 .set_ide(&IdeChoice::Custom(IdeTemplate::new(TEMPLATE.to_owned())));
             editing.settings.set_ask_model(&AskModelChoice::Sonnet);
             editing.settings.set_ask_effort(&AskEffortChoice::High);
+            "30".clone_into(&mut editing.more_lines.text);
+            editing.settings.set_more_lines_text("30");
             for (repo, folder) in [
                 ("acme/widgets", "~/code/widgets"),
                 ("acme/billing-service", "~/code/archive/billing-service"),
@@ -1455,6 +1505,13 @@ impl SettingsPanel {
         self.scroll.scroll_to_item(KEYS_SECTION);
     }
 
+    /// Scrolls the form to the More lines section, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn scroll_to_more_lines(&self) {
+        self.scroll
+            .set_offset(gpui::point(px(0.), px(-MORE_LINES_OFFSET)));
+    }
+
     /// Scrolls the form to its last section, for the pictures.
     #[cfg(feature = "snapshots")]
     pub fn scroll_to_end(&self) {
@@ -1464,7 +1521,11 @@ impl SettingsPanel {
 
 /// Where the Keys section sits among the form's children, sections and rules alike.
 #[cfg(feature = "snapshots")]
-const KEYS_SECTION: usize = 8;
+const KEYS_SECTION: usize = 10;
+
+/// How far down the form the More lines section starts, in pixels.
+#[cfg(feature = "snapshots")]
+const MORE_LINES_OFFSET: f32 = 760.;
 
 /// The form's header and its four sections, which the scroll counts as items.
 #[cfg(feature = "snapshots")]
@@ -1762,6 +1823,7 @@ impl Render for SettingsPanel {
                 let summary = self.summary_instructions(editing, &colors, cx);
                 let ide = self.ide(editing, &colors, cx);
                 let ask = self.ask(editing, &colors, cx);
+                let more_lines = self.more_lines(editing, &colors, cx);
                 let clones = self.clones(editing, &colors, cx);
                 let keys = self.keys(editing, &colors, cx);
                 (
@@ -1795,6 +1857,13 @@ impl Render for SettingsPanel {
                             "Ask",
                             "The model and effort Ask uses.",
                             ask,
+                        ))
+                        .child(Self::section_rule(&colors))
+                        .child(Self::section(
+                            &colors,
+                            "More lines",
+                            "How many lines the arrows on a gap and the [ and ] keys show at a time.",
+                            more_lines,
                         ))
                         .child(Self::section_rule(&colors))
                         .child(Self::section(

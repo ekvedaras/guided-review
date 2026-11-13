@@ -8,7 +8,7 @@ use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
 use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice};
-use crate::viewer::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
+use crate::viewer::{KeyChanges, KeyProblem, Keymap, MoreLines, ResolvedKeymap, WrittenKeys};
 
 /// `~/.guided-review/config.toml`
 #[derive(Default, Deserialize)]
@@ -28,6 +28,9 @@ pub struct Config {
     /// `wrap_lines = "l"` or `next_screen = ["right", "j"]`, by `Command::config_name`.
     #[serde(default)]
     keys: BTreeMap<String, toml::Value>,
+    /// How many lines one "more lines" step shows. Any value is read, so a wrong one cannot stop the app opening.
+    #[serde(default)]
+    more_lines: Option<toml::Value>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -191,6 +194,15 @@ impl Config {
             model: self.ask_model.clone().unwrap_or(default.model),
             effort: self.ask_effort.clone().unwrap_or(default.effort),
         }
+    }
+
+    /// What the config says, or twenty when it says nothing or something that is not a number of lines.
+    pub fn more_lines(&self) -> MoreLines {
+        self.more_lines
+            .as_ref()
+            .and_then(toml::Value::as_integer)
+            .and_then(MoreLines::new)
+            .unwrap_or_default()
     }
 
     pub fn keymap(&self) -> Result<Keymap, Vec<KeyProblem>> {

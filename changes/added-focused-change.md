@@ -1,0 +1,1 @@
+One change on the screen is now focused, marked by a thin accent bar. `Tab` and `Shift+Tab` move between changes, `Down` and `Up` scroll through a long change and then move on, and a click focuses the change it is in. `[` and `]` show 20 more lines above or below it, like the gap buttons. All six keys can be changed in Settings.

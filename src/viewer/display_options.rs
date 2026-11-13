@@ -4,9 +4,10 @@ use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
-use super::diff_display::{DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
+use super::diff_display::{ChangeId, DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
+use super::more_lines::MoreLines;
 use super::rendered_view::{FileView, FileViews, RenderedBlock, Rendering};
 use crate::pieces::ChangedFile;
 use std::sync::Arc;
@@ -20,10 +21,12 @@ pub struct DisplayOptions {
     highlights: Highlights,
     files_at_head: FilesAtHead,
     more_context: HashMap<MoreContext, usize>,
+    more_lines: MoreLines,
     ignores_whitespace: bool,
     wraps_lines: bool,
     image_previews: HashMap<FilePath, ImagePreview>,
     file_views: FileViews,
+    focused_change: Option<ChangeId>,
 }
 
 impl DisplayOptions {
@@ -34,10 +37,12 @@ impl DisplayOptions {
             highlights: Highlights::default(),
             files_at_head: FilesAtHead::default(),
             more_context: HashMap::new(),
+            more_lines: MoreLines::default(),
             ignores_whitespace: false,
             wraps_lines: false,
             image_previews: HashMap::new(),
             file_views: FileViews::default(),
+            focused_change: None,
         }
     }
 
@@ -63,8 +68,16 @@ impl DisplayOptions {
         true
     }
 
+    pub fn more_lines(&self) -> MoreLines {
+        self.more_lines
+    }
+
+    pub fn use_more_lines(&mut self, more_lines: MoreLines) {
+        self.more_lines = more_lines;
+    }
+
     pub fn show_more_context(&mut self, more: &MoreContext) {
-        DiffDisplay::more_lines(&mut self.more_context, more);
+        *self.more_context.entry(more.clone()).or_default() += self.more_lines.get();
     }
 
     /// Every line of the gap, from the side it can be shown from; a gap that does not say how many
@@ -78,6 +91,15 @@ impl DisplayOptions {
             (Some(more), None) => self.show_more_context(more),
             (None, _) => {}
         }
+    }
+
+    /// The change the change keys act on, when it is on the screen shown.
+    pub fn focused_change(&self) -> Option<&ChangeId> {
+        self.focused_change.as_ref()
+    }
+
+    pub(super) fn focus_change(&mut self, change: ChangeId) {
+        self.focused_change = Some(change);
     }
 
     pub fn ignores_whitespace(&self) -> bool {

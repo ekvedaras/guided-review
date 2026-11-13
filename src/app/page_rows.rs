@@ -196,6 +196,24 @@ impl PageRows {
         self.page.as_deref()?.pinned_header(top_row)
     }
 
+    /// The rows of the focused change, when the screen has one.
+    pub fn focused_change_rows(&self) -> Option<Range<usize>> {
+        Some(self.page.as_deref()?.focused_change()?.rows())
+    }
+
+    pub fn is_in_focused_change(&self, row: usize) -> bool {
+        self.page
+            .as_deref()
+            .is_some_and(|page| page.is_in_focused_change(row))
+    }
+
+    /// Whether the focus is to move to a change in view: it is not in view itself.
+    pub fn focus_follows(&self, visible: &Range<usize>) -> bool {
+        self.page
+            .as_deref()
+            .is_some_and(|page| page.change_to_focus_for_view(visible).is_some())
+    }
+
     /// The footer of the screen as it is once every step is read, and its heading ticked.
     #[cfg(feature = "snapshots")]
     pub fn stage_all_read(&mut self, steps: usize, open_details: &OpenDetails) {

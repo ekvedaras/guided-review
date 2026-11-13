@@ -80,6 +80,8 @@
 
 **Gap row**: The one row of a file box that stands for unchanged lines it does not show, between two changes or at either end, with how many and the buttons that show them.
 
+**Change**: The changed lines of a file box with the unchanged lines around them, as a file box shows them between its gap rows (GitHub's hunk). One change of the screen can be focused: a thin accent bar marks it and the change keys act on it. The viewer keeps the focus as a display option, not saved and not part of the tour, named by the piece and the number of the change, the same name a request for more lines uses. Tab and Shift+Tab move it, a click sets it, and it moves to the first change in view when the focused one scrolls away; a screen with no code has none. Avoid: hunk (in text the reviewer reads), section, block.
+
 **Release install**: The app as the README installs a release: each version in its own folder under `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` (and usually `~/.claude/skills/tour`) linked into the newest. Only a release install updates itself. Avoid: managed install.
 
 **App bundle**: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Launched with no PR, it shows the PR switcher alone in the window. Avoid: launcher, wrapper.

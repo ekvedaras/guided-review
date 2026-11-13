@@ -19,7 +19,7 @@ use crate::viewer::{
     Place, QueuedComment, SafetyNetPage, StepId, StepPage, ThreadView, TourLead,
     hidden_lines_after, hidden_lines_before,
 };
-use crate::viewer::{FileView, Rendering, ViewSwitch};
+use crate::viewer::{FileView, PageChange, Rendering, ViewSwitch};
 
 /// The rows of a screen, the file blocks they show, and the diagram of a step.
 pub(super) struct Laid {
@@ -28,6 +28,7 @@ pub(super) struct Laid {
     pub diagram: Option<Arc<str>>,
     /// The files whose box shows them rendered, so none of their lines is on the page.
     pub rendered: Vec<FilePath>,
+    pub changes: Vec<PageChange>,
 }
 
 pub(super) fn summary(review: &ReviewCore) -> Laid {
@@ -60,6 +61,7 @@ struct Builder<'a> {
     rows: Vec<PageRow>,
     blocks: Vec<FileBlock>,
     rendered: Vec<FilePath>,
+    changes: Vec<PageChange>,
     /// Taken out as their row is placed; what no row takes is dropped.
     under_lines: UnderLines,
 }
@@ -71,6 +73,7 @@ impl<'a> Builder<'a> {
             rows: Vec::new(),
             blocks: Vec::new(),
             rendered: Vec::new(),
+            changes: Vec::new(),
             under_lines: UnderLines::default(),
         }
     }
@@ -81,6 +84,7 @@ impl<'a> Builder<'a> {
             blocks: self.blocks,
             diagram,
             rendered: self.rendered,
+            changes: self.changes,
         }
     }
 
@@ -358,6 +362,7 @@ impl<'a> Builder<'a> {
                     gap,
                 ))));
             }
+            let first_row = self.rows.len();
             for line in &hunk.rows {
                 if shows_markers
                     && let Some((piece, is_resumed)) = block.piece_starting_at(&line.location)
@@ -379,6 +384,12 @@ impl<'a> Builder<'a> {
                     .push(PageRow::Line(Arc::new(ShownLine::of(line, wraps))));
                 self.hang(here);
             }
+            self.changes.push(PageChange {
+                ids: hunk.changes.clone(),
+                rows: first_row..self.rows.len(),
+                more_above: hunk.more_above.clone(),
+                more_below: hunk.more_below.clone(),
+            });
         }
         if let Some(gap) = hidden_lines_after(hunks) {
             self.rows.push(PageRow::HunkGap(Arc::new(HunkGapRow::new(

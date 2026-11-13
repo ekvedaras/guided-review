@@ -153,12 +153,42 @@ fn the_page_keys_are_all_single_keys_or_arrows_so_g_fits_them() {
     for command in Command::ALL {
         if command.scope() == KeyScope::Page {
             for chord in command.default_chords() {
+                let shifted = chord.keystroke().starts_with("shift-");
                 assert_eq!(
                     chord.caps().count(),
-                    1,
+                    if shifted { 2 } else { 1 },
                     "{command:?} is a chord on the page"
                 );
             }
         }
+    }
+}
+
+#[test]
+fn the_keys_of_the_focused_change_are_on_the_page_with_defaults() {
+    let keys = |command: Command| -> Vec<String> {
+        command
+            .default_chords()
+            .iter()
+            .copied()
+            .map(Chord::keystroke)
+            .collect()
+    };
+
+    assert_eq!(keys(Command::NextChange), ["tab"]);
+    assert_eq!(keys(Command::PreviousChange), ["shift-tab"]);
+    assert_eq!(keys(Command::ReadDown), ["down"]);
+    assert_eq!(keys(Command::ReadUp), ["up"]);
+    assert_eq!(keys(Command::MoreAbove), ["["]);
+    assert_eq!(keys(Command::MoreBelow), ["]"]);
+    for command in [
+        Command::NextChange,
+        Command::PreviousChange,
+        Command::ReadDown,
+        Command::ReadUp,
+        Command::MoreAbove,
+        Command::MoreBelow,
+    ] {
+        assert_eq!(command.scope(), KeyScope::Page, "{command:?}");
     }
 }

@@ -35,6 +35,7 @@ mod fake_app;
 mod file_path;
 mod file_reads;
 mod finish_review;
+mod focused_change;
 mod github_outage;
 mod github_releases;
 mod github_threads;

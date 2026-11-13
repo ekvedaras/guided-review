@@ -74,6 +74,9 @@ pub fn open_review(
 
     let clone = code.source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(home)?;
+    review
+        .display_options_mut()
+        .use_more_lines(config.more_lines());
     let pick_code_source = opened.code_source_picker();
 
     let agent_folder = clone.clone().unwrap_or_else(|| home.to_path_buf());

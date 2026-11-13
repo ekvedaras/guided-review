@@ -20,6 +20,7 @@ mod diff_fence;
 mod display_options;
 mod file_block;
 mod finish_review;
+mod focused_change;
 mod github_outage;
 mod hand_offs;
 mod highlight;
@@ -28,6 +29,7 @@ mod intent;
 mod jump;
 mod keymap;
 mod markdown;
+mod more_lines;
 mod new_commits;
 mod outdated_lines;
 mod page;
@@ -86,8 +88,8 @@ pub use comments::{
     CommentResult, QueuedComment, SendMode,
 };
 pub use diff_display::{
-    DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext, hidden_lines_after,
-    hidden_lines_before,
+    ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,
+    hidden_lines_after, hidden_lines_before,
 };
 pub use diff_fence::{FenceLine, fence_lines};
 pub use display_options::DisplayOptions;
@@ -96,6 +98,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
+pub use focused_change::{ChangeInView, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
@@ -114,6 +117,7 @@ pub use jump::{
 };
 pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
+pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use page::{

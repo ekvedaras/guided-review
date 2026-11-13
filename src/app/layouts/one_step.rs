@@ -8,6 +8,7 @@ use gpui::{
 use std::os::unix::process::CommandExt;
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -87,14 +88,14 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, CodeLink, Command, CommentBox,
+    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CodeLink, Command, CommentBox,
     CommentGesture, CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight,
     Intent, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place,
-    QueuedComment, ReadProgress, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
-    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
-    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
-    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
-    Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
+    QueuedComment, ReadProgress, ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs,
+    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
+    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
+    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
+    ToastTone, Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -112,6 +113,12 @@ actions!(
         ToggleWrapLines,
         ToggleSettings,
         GoToNextUnread,
+        FocusNextChange,
+        FocusPreviousChange,
+        ReadDown,
+        ReadUp,
+        ShowMoreAbove,
+        ShowMoreBelow,
         ToggleRead,
         ToggleShortcuts,
         OpenPrOnGitHub,
@@ -483,7 +490,10 @@ impl OneStepLayout {
             self.selection_notice = None;
         }
         self.session.update(cx, |session, cx| match gesture {
-            RowGesture::Press => session.select_from(at.clone(), cx),
+            RowGesture::Press => {
+                session.focus_change_of(at, cx);
+                session.select_from(at.clone(), cx);
+            }
             RowGesture::Over => session.extend_selection(at.clone(), cx),
         });
     }
@@ -1776,6 +1786,117 @@ impl OneStepLayout {
         row
     }
 
+    /// What the sticky step bar and the pinned file header hide at the top of the view once the
+    /// page has scrolled.
+    fn covered_at_top(&self) -> Pixels {
+        if self.screen_list.logical_scroll_top().item_ix > 0 {
+            STICKY_STEP_BAR_HEIGHT + PIECE_HEADER_HEIGHT
+        } else {
+            Pixels::ZERO
+        }
+    }
+
+    /// The rows the reader sees: from the first that is not under the bars at the top to the last
+    /// that starts above the bottom edge. Rows the list has not measured end it.
+    fn visible_rows(&self) -> Range<usize> {
+        let viewport = self.screen_list.viewport_bounds();
+        let first = self.row_at(viewport.top() + self.covered_at_top());
+        let mut end = first;
+        while self
+            .screen_list
+            .bounds_for_item(end)
+            .is_some_and(|bounds| bounds.top() + PAGE_TOP < viewport.bottom())
+        {
+            end += 1;
+        }
+        first..end
+    }
+
+    /// Where the rows are in the part of the view the bars leave free. A row the list has not laid
+    /// out is far off: above the view when it is before the first row the list shows, else below.
+    fn change_in_view(&self, rows: &Range<usize>) -> ChangeInView {
+        let viewport = self.screen_list.viewport_bounds();
+        let covered = self.covered_at_top();
+        let from_free_top =
+            |pixels: Pixels| f32::from(pixels + PAGE_TOP - viewport.top() - covered);
+        let first_shown = self.screen_list.logical_scroll_top().item_ix;
+        let top = match self.screen_list.bounds_for_item(rows.start) {
+            Some(bounds) => from_free_top(bounds.top()),
+            None if rows.start < first_shown => f32::NEG_INFINITY,
+            None => f32::INFINITY,
+        };
+        let bottom = match rows
+            .end
+            .checked_sub(1)
+            .and_then(|last| self.screen_list.bounds_for_item(last))
+        {
+            Some(bounds) => from_free_top(bounds.bottom()),
+            None => f32::INFINITY,
+        };
+        ChangeInView {
+            view_height: f32::from(viewport.size.height - covered),
+            top,
+            bottom,
+        }
+    }
+
+    /// Shows the focused change, scrolling only when it is not all in view already: its top goes
+    /// just under the bars.
+    fn reveal_focused_change(&mut self, cx: &mut Context<Self>) {
+        let Some(rows) = self.session.read(cx).rows().focused_change_rows() else {
+            return;
+        };
+        let view = self.change_in_view(&rows);
+        if view.top >= 0.0 && view.bottom <= view.view_height {
+            return;
+        }
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: rows.start,
+            offset_in_item: Pixels::ZERO,
+        });
+        self.screen_list
+            .scroll_by(-(STICKY_STEP_BAR_HEIGHT + PIECE_HEADER_HEIGHT));
+    }
+
+    fn focus_change_by(
+        &mut self,
+        step: impl FnOnce(&mut Review) -> Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.change_review(cx, step);
+        self.reveal_focused_change(cx);
+        cx.notify();
+    }
+
+    fn read_toward(
+        &mut self,
+        step: impl FnOnce(&mut Review, Option<ChangeInView>) -> ReadStep,
+        cx: &mut Context<Self>,
+    ) {
+        let focused = self
+            .session
+            .read(cx)
+            .rows()
+            .focused_change_rows()
+            .map(|rows| self.change_in_view(&rows));
+        match self.change_review(cx, |review| step(review, focused)) {
+            ReadStep::Scroll(pixels) => self.screen_list.scroll_by(px(pixels)),
+            ReadStep::Focused(_) => self.reveal_focused_change(cx),
+            ReadStep::Nothing => {}
+        }
+        cx.notify();
+    }
+
+    /// The focus goes to a change in view when the one it was on scrolled away.
+    fn follow_focus_to_scroll(&mut self, cx: &mut Context<Self>) {
+        let visible = self.visible_rows();
+        if visible.is_empty() || !self.session.read(cx).rows().focus_follows(&visible) {
+            return;
+        }
+        self.session
+            .update(cx, |session, cx| session.follow_scroll(visible, cx));
+    }
+
     /// Strips of a diagram scrolled out of the list get no layout, so they are let go here.
     fn show_diagram(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let screen_list = &self.screen_list;
@@ -2336,6 +2457,9 @@ const PAGE_WASH_HEIGHT: Pixels = px(184.);
 /// The list's top padding, which the wash reaches up through to the column's top edge.
 const PAGE_TOP: Pixels = px(24.);
 const STICKY_STEP_BAR_HEIGHT: Pixels = px(44.);
+/// The accent bar of the focused change sits in the page's side margin, against the file box's edge.
+const FOCUS_BAR_WIDTH: Pixels = px(3.);
+const FOCUS_BAR_LEFT: Pixels = px(15.);
 
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
@@ -2355,8 +2479,26 @@ fn change_box(
     }
 }
 
-fn page_column_row(colors: &Colors, index: usize, row: AnyElement) -> AnyElement {
-    let column = div().relative().px_6();
+fn page_column_row(
+    colors: &Colors,
+    index: usize,
+    row: AnyElement,
+    is_in_focused_change: bool,
+) -> AnyElement {
+    let column = div()
+        .relative()
+        .px_6()
+        .when(is_in_focused_change, |column| {
+            column.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(FOCUS_BAR_LEFT)
+                    .w(FOCUS_BAR_WIDTH)
+                    .bg(colors.accent),
+            )
+        });
     if index == 0 {
         column
             .child(
@@ -3115,6 +3257,7 @@ impl Render for OneStepLayout {
             .map(SwitchingVeil::to);
         self.run_scroll_script(window, cx);
         self.note_seen_end(cx);
+        self.follow_focus_to_scroll(cx);
         self.show_diagram(window, cx);
         let session = self.session.read(cx);
         let selected = Rc::new(
@@ -3147,7 +3290,8 @@ impl Render for OneStepLayout {
                 self.screen_list.clone(),
                 cx.processor(move |this, index, _window, cx| {
                     let row = this.render_row(index, selected.as_ref().as_ref(), cx);
-                    page_column_row(&Colors::active(cx), index, row)
+                    let is_focused = this.session.read(cx).rows().is_in_focused_change(index);
+                    page_column_row(&Colors::active(cx), index, row, is_focused)
                 }),
             )
             .pt(PAGE_TOP)
@@ -3225,6 +3369,24 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| {
                 this.act(Intent::PreviousScreen, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusNextChange, _, cx| {
+                this.focus_change_by(Review::focus_next_change, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusPreviousChange, _, cx| {
+                this.focus_change_by(Review::focus_previous_change, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ReadDown, _, cx| {
+                this.read_toward(Review::read_down, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ReadUp, _, cx| {
+                this.read_toward(Review::read_up, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowMoreAbove, _, cx| {
+                this.change_review(cx, Review::show_more_above);
+            }))
+            .on_action(cx.listener(|this, _: &ShowMoreBelow, _, cx| {
+                this.change_review(cx, Review::show_more_below);
             }))
             .on_action(cx.listener(|this, _: &ToggleWrapLines, window, cx| {
                 this.act(Intent::ToggleWrapLines, window, cx);

@@ -54,10 +54,12 @@ enum Scene {
     RefreshRunning,
     PinnedFileHeader,
     SettingsKeys,
+    FocusedChange,
+    SettingsMoreLines,
 }
 
 impl Scene {
-    const ALL: [Self; 26] = [
+    const ALL: [Self; 28] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -84,6 +86,8 @@ impl Scene {
         Self::RefreshRunning,
         Self::PinnedFileHeader,
         Self::SettingsKeys,
+        Self::FocusedChange,
+        Self::SettingsMoreLines,
     ];
 
     fn file_name(self) -> &'static str {
@@ -114,6 +118,8 @@ impl Scene {
             Self::RefreshRunning => "45-refresh-running",
             Self::PinnedFileHeader => "46-pinned-file-header",
             Self::SettingsKeys => "47-settings-keys",
+            Self::FocusedChange => "48-focused-change",
+            Self::SettingsMoreLines => "49-settings-more-lines",
         }
     }
 }
@@ -368,6 +374,11 @@ impl OneStepLayout {
                 settings.stage_sample_keys(cx);
                 settings.scroll_to_keys();
             }),
+            Scene::SettingsMoreLines => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_sample_edits(cx);
+                settings.scroll_to_more_lines();
+            }),
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.toggle(window, cx)),
@@ -380,6 +391,13 @@ impl OneStepLayout {
                     .first_marker_over_code(cx)
                     .unwrap_or_else(|| self.screen_list.item_count() / 2);
                 self.scroll_to_row(row);
+            }
+            Scene::FocusedChange => {
+                let row = self.change_review(cx, |review| {
+                    review.focus_next_change();
+                    review.focus_next_change()
+                });
+                self.scroll_to_row(row.map_or(0, |row| row.saturating_sub(6)));
             }
             Scene::Toasts => {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
@@ -458,7 +476,8 @@ impl OneStepLayout {
             Scene::Settings
             | Scene::SettingsEdited
             | Scene::SettingsEditedEnd
-            | Scene::SettingsKeys => self
+            | Scene::SettingsKeys
+            | Scene::SettingsMoreLines => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
             Scene::JumpPalette | Scene::JumpActions => self
@@ -499,7 +518,9 @@ impl OneStepLayout {
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.close(window, cx)),
-            Scene::StickyStepBar | Scene::PinnedFileHeader => self.scroll_to_row(0),
+            Scene::StickyStepBar | Scene::PinnedFileHeader | Scene::FocusedChange => {
+                self.scroll_to_row(0);
+            }
             Scene::Toasts => {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);

@@ -1,5 +1,5 @@
 use crate::support::FixtureRepo;
-use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings};
+use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use guided_review::viewer::{
@@ -824,8 +824,7 @@ fn chord(text: &str) -> Chord {
     Chord::parse(text).unwrap()
 }
 
-const KEYED_CONFIG: &str =
-    "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"down\", \"j\"] # like a pager\n";
+const KEYED_CONFIG: &str = "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\n";
 
 #[test]
 fn keys_in_the_config_load_as_each_command_s_keys_and_save_untouched() {
@@ -833,7 +832,7 @@ fn keys_in_the_config_load_as_each_command_s_keys_and_save_untouched() {
 
     assert_eq!(
         settings.key_chords(Command::NextScreen),
-        [chord("down"), chord("j")]
+        [chord("space"), chord("j")]
     );
     assert!(settings.is_key_changed(Command::NextScreen));
     assert_eq!(settings.key_chords(Command::WrapLines), [chord("w")]);
@@ -852,7 +851,7 @@ fn a_new_key_is_written_under_keys_as_its_one_text_and_the_rest_keeps_its_commen
 
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"down\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
+        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
     );
 }
 
@@ -928,7 +927,7 @@ fn the_keymap_of_settings_is_the_keys_as_edited() {
     );
     assert_eq!(
         settings.keymap().chords(Command::NextScreen),
-        [chord("down"), chord("j")]
+        [chord("space"), chord("j")]
     );
 }
 
@@ -948,4 +947,93 @@ fn key_problems_follow_each_edit_before_any_save() {
 
     settings.reset_key(Command::WrapLines);
     assert_eq!(settings.key_problems(), []);
+}
+
+#[test]
+fn with_no_more_lines_key_a_step_shows_twenty_lines() {
+    let (_home, settings) = loaded_from("");
+
+    assert_eq!(settings.more_lines_text(), "20");
+    assert!(!settings.has_unsaved_changes());
+    assert_eq!(Config::from_text("").unwrap().more_lines().get(), 20);
+}
+
+#[test]
+fn a_set_number_is_written_as_a_plain_integer_beside_the_rest() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+
+    settings.set_more_lines_text("35");
+    let outcome = settings.save().unwrap();
+
+    assert_eq!(outcome, SaveOutcome::Written);
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\" # quick\nmore_lines = 35\n"
+    );
+    let config = Config::from_text(&config_text(home.path())).unwrap();
+    assert_eq!(config.more_lines().get(), 35);
+}
+
+#[test]
+fn the_number_set_back_to_twenty_or_blank_leaves_no_line() {
+    for text in ["20", "", "  "] {
+        let (home, mut settings) = loaded_from("more_lines = 35 # mine\nide = \"zed\"\n");
+        assert_eq!(settings.more_lines_text(), "35");
+
+        settings.set_more_lines_text(text);
+        settings.save().unwrap();
+
+        assert_eq!(config_text(home.path()), "ide = \"zed\"\n");
+    }
+}
+
+#[test]
+fn a_number_outside_one_to_two_hundred_or_not_whole_blocks_the_save_and_writes_nothing() {
+    for text in ["0", "201", "-5", "2.5", "many", "1e2"] {
+        let (home, mut settings) = loaded_from("ide = \"zed\"\n");
+
+        settings.set_more_lines_text(text);
+
+        let problem = SettingProblem::MoreLinesNotACount(text.to_owned());
+        assert_eq!(settings.check(), vec![problem.clone()], "{text}");
+        assert_eq!(
+            settings.save().unwrap(),
+            SaveOutcome::Refused(vec![problem])
+        );
+        assert_eq!(config_text(home.path()), "ide = \"zed\"\n");
+    }
+}
+
+#[test]
+fn the_edges_of_the_range_are_fine() {
+    for text in ["1", "200"] {
+        let (_home, mut settings) = loaded_from("");
+
+        settings.set_more_lines_text(text);
+
+        assert_eq!(settings.check(), []);
+        assert_eq!(settings.more_lines_text(), text);
+    }
+}
+
+#[test]
+fn a_more_lines_the_config_holds_wrongly_is_a_problem_on_open_and_the_app_still_uses_twenty() {
+    for written in ["\"many\"", "0", "500", "2.5", "[3]"] {
+        let text = format!("more_lines = {written}\n");
+        let (_home, settings) = loaded_from(&text);
+
+        assert_eq!(
+            settings.problems_on_open(),
+            [SettingProblem::MoreLinesNotACount(written.to_owned())],
+            "{written}"
+        );
+        assert_eq!(Config::from_text(&text).unwrap().more_lines().get(), 20);
+    }
+}
+
+#[test]
+fn the_problem_says_which_numbers_are_allowed() {
+    let message = SettingProblem::MoreLinesNotACount("many".to_owned()).message();
+
+    assert_eq!(message, "many is not a whole number from 1 to 200");
 }

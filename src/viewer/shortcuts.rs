@@ -19,6 +19,12 @@ const M: Chord = key('m');
 const W: Chord = key('w');
 const G: Chord = key('g');
 const QUESTION: Chord = key('?');
+const OPEN_BRACKET: Chord = key('[');
+const CLOSE_BRACKET: Chord = key(']');
+const TAB: Chord = Chord::key(Key::Tab);
+const SHIFT_TAB: Chord = TAB.with(Modifier::Shift);
+const UP: Chord = Chord::key(Key::Up);
+const DOWN: Chord = Chord::key(Key::Down);
 const LEFT: Chord = Chord::key(Key::Left);
 const RIGHT: Chord = Chord::key(Key::Right);
 const CMD_ENTER: Chord = Chord::key(Key::Enter).with(Modifier::Cmd);
@@ -96,6 +102,10 @@ pub enum Command {
     NextScreen,
     PreviousScreen,
     NextUnreadStep,
+    NextChange,
+    PreviousChange,
+    ReadDown,
+    ReadUp,
     Jump,
     ToggleRead,
     CopyCode,
@@ -103,6 +113,8 @@ pub enum Command {
     AskAgent,
     CloseBox,
     WrapLines,
+    MoreAbove,
+    MoreBelow,
     Settings,
     Shortcuts,
     OpenOnGitHub,
@@ -111,10 +123,14 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 21] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
+        Self::NextChange,
+        Self::PreviousChange,
+        Self::ReadDown,
+        Self::ReadUp,
         Self::Jump,
         Self::ToggleRead,
         Self::CopyCode,
@@ -122,6 +138,8 @@ impl Command {
         Self::AskAgent,
         Self::CloseBox,
         Self::WrapLines,
+        Self::MoreAbove,
+        Self::MoreBelow,
         Self::Settings,
         Self::Shortcuts,
         Self::OpenOnGitHub,
@@ -135,6 +153,12 @@ impl Command {
             Self::NextScreen => &[RIGHT, J],
             Self::PreviousScreen => &[LEFT, K],
             Self::NextUnreadStep => &[N],
+            Self::NextChange => &[TAB],
+            Self::PreviousChange => &[SHIFT_TAB],
+            Self::ReadDown => &[DOWN],
+            Self::ReadUp => &[UP],
+            Self::MoreAbove => &[OPEN_BRACKET],
+            Self::MoreBelow => &[CLOSE_BRACKET],
             Self::Jump => &[CMD_K],
             Self::ToggleRead => &[M],
             Self::CopyCode => &[CMD_C],
@@ -156,6 +180,10 @@ impl Command {
             Self::NextScreen => "next_screen",
             Self::PreviousScreen => "previous_screen",
             Self::NextUnreadStep => "next_unread_step",
+            Self::NextChange => "next_change",
+            Self::PreviousChange => "previous_change",
+            Self::ReadDown => "read_down",
+            Self::ReadUp => "read_up",
             Self::Jump => "jump",
             Self::ToggleRead => "toggle_read",
             Self::CopyCode => "copy_code",
@@ -163,6 +191,8 @@ impl Command {
             Self::AskAgent => "ask_agent",
             Self::CloseBox => "close_box",
             Self::WrapLines => "wrap_lines",
+            Self::MoreAbove => "more_above",
+            Self::MoreBelow => "more_below",
             Self::Settings => "settings",
             Self::Shortcuts => "shortcuts",
             Self::OpenOnGitHub => "open_on_github",
@@ -182,8 +212,14 @@ impl Command {
             Self::NextScreen
             | Self::PreviousScreen
             | Self::NextUnreadStep
+            | Self::NextChange
+            | Self::PreviousChange
+            | Self::ReadDown
+            | Self::ReadUp
             | Self::ToggleRead
             | Self::WrapLines
+            | Self::MoreAbove
+            | Self::MoreBelow
             | Self::Shortcuts
             | Self::OpenOnGitHub => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
@@ -195,12 +231,17 @@ impl Command {
 
     pub fn group(self) -> ShortcutGroup {
         match self {
-            Self::NextScreen | Self::PreviousScreen | Self::NextUnreadStep | Self::Jump => {
-                ShortcutGroup::Navigate
-            }
+            Self::NextScreen
+            | Self::PreviousScreen
+            | Self::NextUnreadStep
+            | Self::NextChange
+            | Self::PreviousChange
+            | Self::ReadDown
+            | Self::ReadUp
+            | Self::Jump => ShortcutGroup::Navigate,
             Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => ShortcutGroup::Comment,
-            Self::WrapLines => ShortcutGroup::View,
+            Self::WrapLines | Self::MoreAbove | Self::MoreBelow => ShortcutGroup::View,
             Self::Settings
             | Self::Shortcuts
             | Self::OpenOnGitHub
@@ -215,6 +256,10 @@ impl Command {
             Self::NextScreen => "Next screen; marks the step read once you saw its end",
             Self::PreviousScreen => "Previous screen",
             Self::NextUnreadStep => "Next unread step",
+            Self::NextChange => "Focus the next change",
+            Self::PreviousChange => "Focus the previous change",
+            Self::ReadDown => "Scroll down through the focused change, then focus the next",
+            Self::ReadUp => "Scroll up through the focused change, then focus the previous",
             Self::Jump => "Jump to a step, file, symbol or action",
             Self::ToggleRead => "Mark the step as read, or unread",
             Self::CopyCode => "Copy the selected code",
@@ -222,6 +267,8 @@ impl Command {
             Self::AskAgent => "Add it and ask your agent",
             Self::CloseBox => "Leave the box you are typing in",
             Self::WrapLines => "Wrap long lines",
+            Self::MoreAbove => "Show more lines above the focused change",
+            Self::MoreBelow => "Show more lines below the focused change",
             Self::Settings => "Settings",
             Self::Shortcuts => "This list of shortcuts",
             Self::OpenOnGitHub => "Open the pull request on GitHub",
