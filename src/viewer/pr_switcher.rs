@@ -3,6 +3,7 @@ use std::path::Path;
 use super::active_pr::ActivePr;
 use super::ports::GitHubError;
 use super::relevant_prs::{RelevantPullRequest, RelevantPullRequests};
+use super::remembered_prs::RememberedPullRequestsFile;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
 
@@ -21,6 +22,22 @@ pub struct PrSwitcher {
     is_refreshing: bool,
     /// Whether tour agents can be reached, so a PR with no tour can be written; the reason when not.
     agent_link: Result<(), String>,
+    /// The row under the pointer, counted from the top of the rows on screen, as the pointer stays
+    /// where it is when the wheel moves the rows.
+    hovered_screen_row: Option<usize>,
+    memory: Option<RememberedPullRequestsFile>,
+    /// The list from last time could not be read, or this one could not be kept for next time.
+    memory_problem: Option<String>,
+}
+
+/// Where the reviewer is in the list, kept across a new list from GitHub so rows do not jump under
+/// the pointer: the selected PR stays selected, and the hovered PR, or the selected one when none
+/// is, stays on its row of the screen.
+struct Place {
+    selected: Option<PullRequestUrl>,
+    /// The PR to keep on screen, and its row counted from the top of the screen.
+    pinned: Option<(PullRequestUrl, usize)>,
+    first_shown: usize,
 }
 
 enum LoadState {
@@ -80,12 +97,52 @@ impl Default for PrSwitcher {
             state: LoadState::Loading,
             is_refreshing: true,
             agent_link: Ok(()),
+            hovered_screen_row: None,
+            memory: None,
+            memory_problem: None,
         }
     }
 }
 
 impl PrSwitcher {
     pub const ROWS_SHOWN: usize = 10;
+
+    /// Starts on the list GitHub gave last time, when there is one, and keeps each new one for next time.
+    pub fn remembering_in(memory: RememberedPullRequestsFile, home: &Path) -> Self {
+        let mut switcher = Self::default();
+        match memory.load() {
+            Ok(remembered) if remembered.is_empty() => {}
+            Ok(remembered) => {
+                switcher.rows = remembered
+                    .into_iter()
+                    .map(|pull_request| SwitcherRow::new(pull_request, home))
+                    .collect();
+                switcher.state = LoadState::Loaded {
+                    teams_left_out: Vec::new(),
+                };
+                switcher.apply_filter();
+            }
+            Err(error) => {
+                switcher.memory_problem =
+                    Some(format!("Could not show the list from last time: {error:#}"));
+            }
+        }
+        switcher.memory = Some(memory);
+        switcher
+    }
+
+    /// The pointer is over the `nth` visible row.
+    pub fn hover(&mut self, nth: usize) {
+        self.hovered_screen_row = nth.checked_sub(self.first_shown);
+    }
+
+    /// The pointer left the `nth` visible row. Rows report leaving and entering in no set order, so
+    /// leaving a row the pointer is no longer over changes nothing.
+    pub fn unhover(&mut self, nth: usize) {
+        if self.hovered_screen_row == nth.checked_sub(self.first_shown) {
+            self.hovered_screen_row = None;
+        }
+    }
 
     /// A read of the list starts; the rows listed so far stay until its answer.
     pub fn refreshing(&mut self) {
@@ -101,6 +158,12 @@ impl PrSwitcher {
         self.is_refreshing = false;
         match answer {
             Ok(relevant) => {
+                if let Some(memory) = &self.memory {
+                    self.memory_problem = memory.save(&relevant.pull_requests).err().map(|error| {
+                        format!("Could not keep this list for the next start: {error:#}")
+                    });
+                }
+                let place = self.place();
                 self.rows = relevant
                     .pull_requests
                     .into_iter()
@@ -109,14 +172,53 @@ impl PrSwitcher {
                 self.state = LoadState::Loaded {
                     teams_left_out: relevant.teams_left_out,
                 };
+                self.apply_filter();
+                self.keep(place);
             }
             Err(error) => {
                 self.state = LoadState::Failed(format!(
                     "Could not list your pull requests from GitHub: {error}"
                 ));
+                self.apply_filter();
             }
         }
-        self.apply_filter();
+    }
+
+    fn place(&self) -> Place {
+        let url_of = |nth: usize| {
+            self.visible()
+                .nth(nth)
+                .map(|row| row.pull_request.url.clone())
+        };
+        let selected_screen_row = self
+            .selected
+            .checked_sub(self.first_shown)
+            .filter(|&row| row < Self::ROWS_SHOWN);
+        let pinned_screen_row = self.hovered_screen_row.or(selected_screen_row);
+        Place {
+            selected: url_of(self.selected),
+            pinned: pinned_screen_row.and_then(|screen_row| {
+                url_of(self.first_shown + screen_row).map(|url| (url, screen_row))
+            }),
+            first_shown: self.first_shown,
+        }
+    }
+
+    /// A pinned PR that left the list leaves the rows where they were.
+    fn keep(&mut self, place: Place) {
+        let nth_of =
+            |url: &PullRequestUrl| self.visible().position(|row| &row.pull_request.url == url);
+        let selected = place.selected.and_then(|url| nth_of(&url));
+        let pinned_first_shown = place
+            .pinned
+            .and_then(|(url, screen_row)| nth_of(&url).map(|nth| nth.saturating_sub(screen_row)));
+        if let Some(nth) = selected {
+            self.selected = nth;
+        }
+        let last_first = self.visible.len().saturating_sub(Self::ROWS_SHOWN);
+        self.first_shown = pinned_first_shown
+            .unwrap_or(place.first_shown)
+            .min(last_first);
     }
 
     /// Looks for tours again, as one may have been written since the list loaded, and takes what the
@@ -202,9 +304,11 @@ impl PrSwitcher {
     /// teams were not searched.
     pub fn notice(&self) -> Option<String> {
         match &self.state {
-            LoadState::Loading => None,
+            LoadState::Loading => self.memory_problem.clone(),
             LoadState::Failed(reason) => Some(reason.clone()),
-            LoadState::Loaded { teams_left_out } if teams_left_out.is_empty() => None,
+            LoadState::Loaded { teams_left_out } if teams_left_out.is_empty() => {
+                self.memory_problem.clone()
+            }
             LoadState::Loaded { teams_left_out } => Some(format!(
                 "Review requests to these teams are not listed, only 10 teams are searched: {}",
                 teams_left_out.join(", ")

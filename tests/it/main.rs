@@ -62,6 +62,7 @@ mod piece_id;
 mod pr_description;
 mod pr_notes;
 mod pr_switcher;
+mod pr_switcher_memory;
 mod presence;
 mod problems;
 mod read_ticks;
