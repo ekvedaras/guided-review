@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# The newest v* tag before <tag> in its history, or nothing for the first release.
+# Usage: scripts/previous-release-tag <tag>
+set -euo pipefail
+
+tag="${1:?usage: scripts/previous-release-tag <tag>}"
+
+cd "$(dirname "$0")/.."
+
+git tag --list 'v*' --sort=-v:refname | { grep -vx "$tag" || true; } | while read -r candidate; do
+    if git merge-base --is-ancestor "$candidate" "$tag"; then
+        echo "$candidate"
+        break
+    fi
+done

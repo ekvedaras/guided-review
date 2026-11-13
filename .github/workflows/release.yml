@@ -112,9 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          previous=$(git tag --list 'v*' --sort=-v:refname | { grep -vx "$TAG" || true; } | while read -r t; do
-            if git merge-base --is-ancestor "$t" "$TAG"; then echo "$t"; break; fi
-          done)
+          previous=$(scripts/previous-release-tag "$TAG")
           scripts/release-notes "$previous" "$TAG" > notes.md
           # A draft: the maintainer edits the notes on GitHub and publishes it.
           gh release create "$TAG" dist/* \
@@ -123,21 +121,3 @@ jobs:
             --notes-file notes.md \
             --draft \
             --verify-tag
-          echo "$previous" > previous-tag
-      - name: Delete the notes this release used
-        # Safe once the tag exists: the next release reads the notes added after this tag, and the
-        # notes of this one stay readable at the tag.
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          notes=$(scripts/change-notes-in "$(cat previous-tag)" "$TAG")
-          [ -n "$notes" ] || exit 0
-          git fetch origin main
-          git switch -C main origin/main
-          for note in $notes; do
-            if [ -f "$note" ]; then git rm -q "$note"; fi
-          done
-          git diff --cached --quiet && exit 0
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -qm "changes: the notes released in $TAG are gone from changes/; they stay readable at the tag"
-          git push origin main
