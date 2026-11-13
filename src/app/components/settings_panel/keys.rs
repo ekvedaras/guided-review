@@ -229,7 +229,7 @@ impl SettingsPanel {
             .child(div().w(px(190.)).flex_none().child(keys))
             .child(
                 div()
-                    .w(px(140.))
+                    .w(px(176.))
                     .flex()
                     .flex_none()
                     .justify_end()
