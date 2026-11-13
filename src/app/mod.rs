@@ -11,6 +11,7 @@ mod dock_icon;
 mod frame_stats;
 mod layouts;
 mod page_rows;
+mod prose_selection;
 mod review_session;
 mod settings_window;
 mod sidebar_rows;
@@ -110,6 +111,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             quit_on_cmd_q(cx);
             components::toast_stack::Toaster::install(cx);
             avatar_pictures::AvatarPictures::install(cx);
+            prose_selection::ProseSelections::install(cx);
             updater::Updates::install(&home, cx);
             word_keys::take_before_macos(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)

@@ -17,7 +17,7 @@ use crate::app::active_session::use_active_session;
 use crate::app::code_links::{
     open_code, open_code_hint, open_code_icon, open_code_label, open_link, use_code_opener,
 };
-use crate::app::code_selection::{CodeSelection, CodeSpot};
+use crate::app::code_selection::{CodeSelection, TextSpot};
 use crate::app::components::ask_panel::{
     AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
 };
@@ -76,6 +76,7 @@ use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
+use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::SidebarTourAgent;
 use crate::app::updater::{UpdateInstalled, Updater, Updates};
@@ -117,7 +118,7 @@ actions!(
 
 use crate::app::Quit;
 
-type OnCodeSpot = Rc<dyn Fn(CodeGesture, CodeSpot, &mut Window, &mut App)>;
+type OnTextSpot = Rc<dyn Fn(CodeGesture, TextSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
@@ -143,7 +144,7 @@ pub struct OneStepLayout {
     composer_focus: FocusHandle,
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
-    on_code_gesture: OnCodeSpot,
+    on_code_gesture: OnTextSpot,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
@@ -308,7 +309,7 @@ impl OneStepLayout {
                 .ok();
         });
         let layout_handle = cx.weak_entity();
-        let on_code_gesture: OnCodeSpot = Rc::new(move |gesture, at, window, cx| {
+        let on_code_gesture: OnTextSpot = Rc::new(move |gesture, at, window, cx| {
             layout_handle
                 .update(cx, |this, cx| {
                     if gesture != CodeGesture::Over {
@@ -474,7 +475,7 @@ impl OneStepLayout {
         });
     }
 
-    fn on_code_gesture(&mut self, gesture: CodeGesture, at: CodeSpot, cx: &mut Context<Self>) {
+    fn on_code_gesture(&mut self, gesture: CodeGesture, at: TextSpot, cx: &mut Context<Self>) {
         match gesture {
             CodeGesture::Press => {
                 let screen = self.session.read(cx).review().screen().clone();
@@ -497,6 +498,11 @@ impl OneStepLayout {
     }
 
     fn copy_selection(&mut self, _: &CopySelection, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = ProseSelections::text(cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            post_toast(cx, ToastTone::Neutral, "Copied".to_owned());
+            return;
+        }
         let session = self.session.read(cx);
         let Some(selection) = self
             .code_selection
@@ -1763,7 +1769,7 @@ impl OneStepLayout {
                     .with_code_selection(CodeSelectionHooks {
                         selected: code_selection,
                         on_gesture: Rc::new(move |gesture, byte, window, cx| {
-                            on_code_gesture(gesture, CodeSpot { row: index, byte }, window, cx);
+                            on_code_gesture(gesture, TextSpot { row: index, byte }, window, cx);
                         }),
                     })
                     .with_gestures(Rc::clone(&self.on_row_gesture))
@@ -2910,6 +2916,9 @@ impl Render for OneStepLayout {
             // Before the press reaches what is under the pointer, so a double click's word, chosen
             // there, is not the selection cleared here.
             .capture_any_mouse_down(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                if event.button == MouseButton::Left && ProseSelections::clear_unless_dragging(cx) {
+                    cx.notify();
+                }
                 if event.button == MouseButton::Left
                     && this
                         .code_selection

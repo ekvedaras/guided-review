@@ -293,14 +293,14 @@ impl RenderOnce for DiffRow {
     }
 }
 
-fn byte_at(layout: &TextLayout, position: gpui::Point<Pixels>) -> usize {
+pub(super) fn byte_at(layout: &TextLayout, position: gpui::Point<Pixels>) -> usize {
     layout
         .index_for_position(position)
         .unwrap_or_else(|closest| closest)
 }
 
 /// Lays the selection's background over the syntax colours, which must stay sorted and apart.
-fn with_selection(
+pub(super) fn with_selection(
     highlights: &[(Range<usize>, HighlightStyle)],
     selected: Range<usize>,
     background: Rgba,
