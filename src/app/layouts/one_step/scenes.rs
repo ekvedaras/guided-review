@@ -294,6 +294,19 @@ impl OneStepLayout {
 
     /// The first file box with piece labels shows them or not, and the page goes to its header.
     fn stage_piece_labels(&mut self, labels: PieceLabels, cx: &mut Context<Self>) {
+        self.open_every_box(cx);
+        if self.first_box_with_labels(cx).is_none() {
+            self.change_review(cx, |review| review.go_to_summary());
+            for _ in 0..MAX_SCREENS {
+                if !self.change_review(cx, |review| review.go_forward()) {
+                    break;
+                }
+                self.open_every_box(cx);
+                if self.first_box_with_labels(cx).is_some() {
+                    break;
+                }
+            }
+        }
         let Some((_, path)) = self.first_box_with_labels(cx) else {
             eprintln!("no file box with piece labels on this screen");
             return;
@@ -304,7 +317,24 @@ impl OneStepLayout {
                 .show_piece_labels(&path, labels);
         });
         if let Some((row, _)) = self.first_box_with_labels(cx) {
-            self.scroll_to_row(row);
+            self.scroll_to_row(row.saturating_sub(1));
+        }
+    }
+
+    /// A read or skim step folds its boxes, and a folded box has no labels to toggle.
+    fn open_every_box(&mut self, cx: &mut Context<Self>) {
+        let folded: Vec<_> = {
+            let rows = self.session.read(cx).rows();
+            (0..rows.len())
+                .filter_map(|index| match rows.row(index)? {
+                    PageRow::PieceHeader(heading) => heading.fold.clone(),
+                    _ => None,
+                })
+                .filter(|fold| fold.is_folded)
+                .collect()
+        };
+        for fold in folded {
+            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
         }
     }
 
@@ -554,13 +584,10 @@ impl OneStepLayout {
             Scene::Shortcuts => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.close(window, cx)),
-            Scene::StickyStepBar
-            | Scene::PinnedFileHeader
-            | Scene::FocusedChange
-            | Scene::PieceLabelsShown
-            | Scene::PieceLabelsHidden => {
+            Scene::StickyStepBar | Scene::PinnedFileHeader | Scene::FocusedChange => {
                 self.scroll_to_row(0);
             }
+            Scene::PieceLabelsShown | Scene::PieceLabelsHidden => self.go_to_first_open_code(cx),
             Scene::Toasts => {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);
