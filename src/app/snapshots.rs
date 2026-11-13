@@ -22,6 +22,7 @@ use crate::viewer::{
 
 const FOLDER_ENV: &str = "GUIDED_REVIEW_SNAPSHOTS";
 const APPEARANCE_ENV: &str = "GUIDED_REVIEW_SNAPSHOT_APPEARANCE";
+const RELEASE_LOOK_ENV: &str = "GUIDED_REVIEW_SNAPSHOT_RELEASE_LOOK";
 const TICK: Duration = Duration::from_millis(50);
 const MIN_SETTLE: Duration = Duration::from_millis(400);
 /// A scene is done once its picture stops changing for this long: code loaded, highlights and
@@ -51,6 +52,11 @@ pub fn appearance() -> Option<Appearance> {
         "dark" => Some(Appearance::Dark),
         _ => None,
     }
+}
+
+/// Pictures for the README look like the release install, with no `TEST` badge.
+pub fn hides_build_badge() -> bool {
+    is_on() && std::env::var(RELEASE_LOOK_ENV).is_ok_and(|value| value == "1")
 }
 
 pub struct Camera {
