@@ -201,7 +201,7 @@ impl Render for LoadingScreen {
                     .w(px(SIDEBAR_WIDTH))
                     .flex_none()
                     .h_full()
-                    .bg(colors.sidebar_ground()),
+                    .bg(colors.background),
             )
             .child(page);
         fade_in(screen, "loading-screen", OVERLAY).into_any_element()

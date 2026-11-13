@@ -1,1 +1,1 @@
-The screen shown while a tour is being written is now a plain page: no scroll-like line under the title bar, no edges or shadows around the page and the title bar, and no frame around the agent's lines.
+The screen shown while a tour is being written is now one plain page: the same ground behind the sidebar, the title bar and the page, no scroll-like line, edges or shadows around the page and under the title bar, and no frame around the agent's lines.

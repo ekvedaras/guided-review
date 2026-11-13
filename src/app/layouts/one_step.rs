@@ -3166,10 +3166,12 @@ impl Render for OneStepLayout {
             .relative()
             .flex_1()
             .min_h_0()
-            .child(screen)
-            .children(pinned_header)
-            .children(sticky_bar)
-            .children(self.page_scrollbar(cx));
+            .when(!is_writing_tour, |area| {
+                area.child(screen)
+                    .children(pinned_header)
+                    .children(sticky_bar)
+                    .children(self.page_scrollbar(cx))
+            });
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
@@ -3248,7 +3250,11 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(Self::copy_selection))
             .size_full()
             .flex()
-            .bg(colors.sidebar_ground())
+            .bg(if is_writing_tour {
+                gpui::Background::from(colors.background)
+            } else {
+                colors.sidebar_ground()
+            })
             .font_family(TEXT_FONT)
             .text_color(colors.text)
             .child(self.sidebar(cx))

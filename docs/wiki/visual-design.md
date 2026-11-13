@@ -29,6 +29,8 @@ One edge per level. A thing gets a border or a change of ground, rarely both, an
 - Bands under the title bar (`notice_band`) are a tone's ground with an edge below, across the page column.
 - A control that can be pushed (`Secondary` button, segment thumb) is raised: `raised` gradient, `border`, `control_shadow`. A `Ghost` button has no edge until hovered.
 
+2026-11-13: the maintainer asked the "Writing the tour" screen to read as one page: the sidebar column, the title bar and the page all on the page's `background` token (the review window's root ground is `background` instead of `sidebar_ground` while a tour is written), and no shadow under the header bar. That shadow was the review page underneath bleeding up into the title bar, so the page content is not built while the loading screen is up (commit SHA_HERE).
+
 ## Accent
 
 Iris is for what the reader acts on and where they are: the one `Primary` button of a screen (the way on), links, the focus ring, the current row, a toggle that is on, Ask. It is not for labels, headings or decoration. The trail gradient (iris to azure, green once done) is for progress only: the meter, the current step's dot, the busy sweep, the page line under the title bar. Green, red and amber are states (`Tone`): success, danger, warning; on this app's pages green also means added lines, so nothing else is green for looks. Inline code in prose is outlined in the text's own colour (0028f62).
