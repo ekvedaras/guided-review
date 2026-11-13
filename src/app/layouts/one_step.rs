@@ -51,6 +51,7 @@ use crate::app::components::motion::{
     pop_in, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
+use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
 };
@@ -156,6 +157,8 @@ pub struct OneStepLayout {
     code_scroll_x: CodeScrollX,
     /// Why the last drag opened no comment box.
     selection_notice: Option<String>,
+    /// While the page's scrollbar is dragged: how far below the thumb's top the pointer holds it.
+    scrollbar_grab: Option<Pixels>,
     /// The rows of the last drag, to ask the AI about.
     frame_stats: FrameStatsHook,
     #[cfg(feature = "snapshots")]
@@ -353,6 +356,7 @@ impl OneStepLayout {
             hovered_touching_row: None,
             on_code_gesture,
             selection_notice: None,
+            scrollbar_grab: None,
             frame_stats,
             #[cfg(feature = "snapshots")]
             _snapshots: scenes::start(window, cx),
@@ -1613,6 +1617,86 @@ impl OneStepLayout {
                 .bg(colors.background)
                 .child(PieceHeader::new(label, pinned.header.repin_label, Vec::new()).pinned()),
         )
+    }
+
+    /// Where the view is on the page, as a thumb on its right edge that drags the page. A press on
+    /// the track off the thumb takes the thumb's middle there.
+    fn page_scrollbar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let thumb = self.scroll_thumb()?;
+        let colors = Colors::active(cx);
+        let is_dragging = self.scrollbar_grab.is_some();
+        Some(
+            div()
+                .id("page-scrollbar")
+                .group("page-scrollbar")
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                .w(px(12.))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let on_track = event.position.y - this.screen_list.viewport_bounds().top();
+                        let is_on_thumb =
+                            on_track >= thumb.top && on_track <= thumb.top + thumb.height;
+                        this.scrollbar_grab = Some(if is_on_thumb {
+                            on_track - thumb.top
+                        } else {
+                            thumb.height / 2.
+                        });
+                        this.screen_list.scrollbar_drag_started();
+                        this.drag_scrollbar_to(event.position.y, cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(thumb.top)
+                        .right(px(3.))
+                        .w(px(6.))
+                        .h(thumb.height)
+                        .rounded_full()
+                        .bg(colors
+                            .muted_text
+                            .opacity(if is_dragging { 0.6 } else { 0.3 }))
+                        .group_hover("page-scrollbar", |thumb| {
+                            thumb.bg(colors.muted_text.opacity(0.6))
+                        }),
+                ),
+        )
+    }
+
+    fn scroll_thumb(&self) -> Option<ScrollThumb> {
+        ScrollThumb::of(
+            self.screen_list.viewport_bounds().size.height,
+            -self.screen_list.scroll_px_offset_for_scrollbar().y,
+            self.screen_list.max_offset_for_scrollbar().y,
+        )
+    }
+
+    /// `pointer_y` is in window pixels.
+    fn drag_scrollbar_to(&mut self, pointer_y: Pixels, cx: &mut Context<Self>) {
+        let (Some(grab), Some(thumb)) = (self.scrollbar_grab, self.scroll_thumb()) else {
+            return;
+        };
+        let viewport = self.screen_list.viewport_bounds();
+        let scrolled = thumb.scrolled_at(
+            pointer_y - viewport.top() - grab,
+            viewport.size.height,
+            self.screen_list.max_offset_for_scrollbar().y,
+        );
+        self.screen_list
+            .set_offset_from_scrollbar(gpui::point(Pixels::ZERO, -scrolled));
+        cx.notify();
+    }
+
+    fn end_scrollbar_drag(&mut self, cx: &mut Context<Self>) {
+        if self.scrollbar_grab.take().is_some() {
+            self.screen_list.scrollbar_drag_ended();
+            cx.notify();
+        }
     }
 
     /// The first row of the screen whose bottom is below `y`, in window pixels.
@@ -3048,10 +3132,24 @@ impl Render for OneStepLayout {
             .min_h_0()
             .child(screen)
             .children(pinned_header)
-            .children(sticky_bar);
+            .children(sticky_bar)
+            .children(self.page_scrollbar(cx));
         div()
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
+            .when(self.scrollbar_grab.is_some(), |root| {
+                root.on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                    if event.pressed_button == Some(MouseButton::Left) {
+                        this.drag_scrollbar_to(event.position.y, cx);
+                    } else {
+                        this.end_scrollbar_drag(cx);
+                    }
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.end_scrollbar_drag(cx)),
+                )
+            })
             // Before the press reaches what is under the pointer, so a double click's word, chosen
             // there, is not the selection cleared here.
             .capture_any_mouse_down(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {

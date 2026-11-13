@@ -16,6 +16,7 @@ pub mod markdown_view;
 pub mod motion;
 pub mod new_commits_banner;
 pub mod overlay;
+pub mod page_scrollbar;
 pub mod palette;
 pub mod picture_zoom;
 pub mod pr_switcher;
