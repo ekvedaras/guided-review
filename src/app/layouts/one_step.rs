@@ -144,6 +144,8 @@ pub struct OneStepLayout {
     composer_focus: FocusHandle,
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
+    /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
+    hovered_touching_row: Option<(usize, RowPlace)>,
     on_code_gesture: OnTextSpot,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
@@ -343,6 +345,7 @@ impl OneStepLayout {
             composer_focus: cx.focus_handle(),
             ask,
             code_selection: None,
+            hovered_touching_row: None,
             on_code_gesture,
             selection_notice: None,
             frame_stats,
@@ -1132,6 +1135,29 @@ impl OneStepLayout {
         )
     }
 
+    /// A row touching the current one tells the layout while the mouse is on it.
+    fn touching_hover(
+        &self,
+        row: Stateful<Div>,
+        index: usize,
+        place: RowPlace,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        if !matches!(
+            place,
+            RowPlace::JustAboveCurrent | RowPlace::JustBelowCurrent
+        ) {
+            return row;
+        }
+        row.on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            let hovered = is_hovered.then_some((index, place));
+            if this.hovered_touching_row != hovered {
+                this.hovered_touching_row = hovered;
+                cx.notify();
+            }
+        }))
+    }
+
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let session = self.session.read(cx);
@@ -1148,11 +1174,30 @@ impl OneStepLayout {
                 )
                 .collect::<Vec<_>>(),
         );
+        // By its index and place then: once the current row moves, a row kept from before no longer counts.
+        let hovered_touching = self
+            .hovered_touching_row
+            .filter(|(index, place)| places.get(*index) == Some(place))
+            .map(|(_, place)| place);
+        let last_index = places.len().saturating_sub(1);
         let mut places = places.into_iter();
         let summary_place = places.next().unwrap_or(RowPlace::Apart);
         let step_places: Vec<RowPlace> = places.by_ref().take(sidebar.steps.len()).collect();
         let safety_net_place = places.next().unwrap_or(RowPlace::Apart);
-        let summary_row = sidebar_row(&colors, "summary", 0, summary_place, RowMark::Page)
+        let summary_row = self
+            .touching_hover(
+                sidebar_row(
+                    &colors,
+                    "summary",
+                    0,
+                    summary_place,
+                    RowMark::Page,
+                    hovered_touching,
+                ),
+                0,
+                summary_place,
+                cx,
+            )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, |review| review.go_to_summary());
             }))
@@ -1207,50 +1252,72 @@ impl OneStepLayout {
             self.on_finish_review(),
         )
         .opened_by(self.finish_form_request);
-        let step_rows = sidebar.steps.iter().zip(step_places).map(|(step, place)| {
-            let id: StepId = step.id.clone();
-            let mark = if step.is_gone {
-                RowMark::Gone
-            } else if step.is_ticked {
-                RowMark::Read
-            } else {
-                RowMark::Unread
-            };
-            sidebar_row(
-                &colors,
-                SharedString::from(format!("step-{id}")),
-                step.depth,
-                place,
-                mark,
-            )
-            .when(step.is_skim && !step.is_current, |row| {
-                row.text_color(colors.muted_text)
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to(&id));
-            }))
-            .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
-                format!("sidebar-{}", step.id),
-                &step.label,
-            )))
-            .children(step.has_check.then(|| check_flag(&colors)))
-            .children(step.is_skim.then(|| skim_chip(&colors)))
-            .children(count_badge(&colors, step.thread_count))
-        });
-        let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
-            sidebar_row(&colors, "safety-net", 0, safety_net_place, RowMark::Page)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.change_review(cx, |review| review.go_to_safety_net());
+        let step_rows = sidebar
+            .steps
+            .iter()
+            .zip(step_places.into_iter().enumerate())
+            .map(|(step, (offset, place))| {
+                let id: StepId = step.id.clone();
+                let mark = if step.is_gone {
+                    RowMark::Gone
+                } else if step.is_ticked {
+                    RowMark::Read
+                } else {
+                    RowMark::Unread
+                };
+                self.touching_hover(
+                    sidebar_row(
+                        &colors,
+                        SharedString::from(format!("step-{id}")),
+                        step.depth,
+                        place,
+                        mark,
+                        hovered_touching,
+                    ),
+                    offset + 1,
+                    place,
+                    cx,
+                )
+                .when(step.is_skim && !step.is_current, |row| {
+                    row.text_color(colors.muted_text)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| review.go_to(&id));
                 }))
-                .child(div().flex_1().child(SafetyNetIntro::TITLE))
-                .child(row_note(
+                .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
+                    format!("sidebar-{}", step.id),
+                    &step.label,
+                )))
+                .children(step.has_check.then(|| check_flag(&colors)))
+                .children(step.is_skim.then(|| skim_chip(&colors)))
+                .children(count_badge(&colors, step.thread_count))
+            });
+        let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
+            self.touching_hover(
+                sidebar_row(
                     &colors,
-                    match safety_net.pieces {
-                        1 => "1 piece".to_owned(),
-                        pieces => format!("{pieces} pieces"),
-                    },
-                ))
-                .children(count_badge(&colors, safety_net.thread_count))
+                    "safety-net",
+                    0,
+                    safety_net_place,
+                    RowMark::Page,
+                    hovered_touching,
+                ),
+                last_index,
+                safety_net_place,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, |review| review.go_to_safety_net());
+            }))
+            .child(div().flex_1().child(SafetyNetIntro::TITLE))
+            .child(row_note(
+                &colors,
+                match safety_net.pieces {
+                    1 => "1 piece".to_owned(),
+                    pieces => format!("{pieces} pieces"),
+                },
+            ))
+            .children(count_badge(&colors, safety_net.thread_count))
         });
         let header = div()
             .flex_none()

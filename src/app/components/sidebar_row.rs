@@ -16,9 +16,6 @@ const INDENT_PER_DEPTH: f32 = 16.;
 /// on its first line even when it wraps.
 const LINE_HEIGHT: f32 = 22.;
 const MARK_SIZE: f32 = 14.;
-/// The hover groups of the rows touching the current one, which the current row squares its corners for.
-const JUST_ABOVE_CURRENT: &str = "sidebar-row-just-above-current";
-const JUST_BELOW_CURRENT: &str = "sidebar-row-just-below-current";
 
 /// What the reader has done with the screen a row opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,13 +28,15 @@ pub enum RowMark {
     Page,
 }
 
-/// The look every clickable row of the sidebar shares: a mark, then the caller's label.
+/// The look every clickable row of the sidebar shares: a mark, then the caller's label. The current row squares
+/// the corners it shares with `hovered_touching`, the touching row under the mouse.
 pub fn sidebar_row(
     colors: &Colors,
     id: impl Into<ElementId>,
     depth: usize,
     place: RowPlace,
     mark: RowMark,
+    hovered_touching: Option<RowPlace>,
 ) -> Stateful<Div> {
     let is_current = place == RowPlace::Current;
     div()
@@ -64,17 +63,20 @@ pub fn sidebar_row(
                 row.bg(colors.current)
                     .border_color(colors.current_border)
                     .font_weight(FontWeight::MEDIUM)
-                    .group_hover(JUST_ABOVE_CURRENT, |row| row.rounded_t(px(0.)))
-                    .group_hover(JUST_BELOW_CURRENT, |row| row.rounded_b(px(0.)))
+                    .map(|row| match hovered_touching {
+                        Some(RowPlace::JustAboveCurrent) => row.rounded_t(px(0.)),
+                        Some(RowPlace::JustBelowCurrent) => row.rounded_b(px(0.)),
+                        _ => row,
+                    })
             } else {
                 row.border_color(gpui::transparent_black())
                     .map(|row| match place {
-                        RowPlace::JustAboveCurrent => row
-                            .group(JUST_ABOVE_CURRENT)
-                            .hover(|row| row.bg(colors.hover).rounded_b(px(0.))),
-                        RowPlace::JustBelowCurrent => row
-                            .group(JUST_BELOW_CURRENT)
-                            .hover(|row| row.bg(colors.hover).rounded_t(px(0.))),
+                        RowPlace::JustAboveCurrent => {
+                            row.hover(|row| row.bg(colors.hover).rounded_b(px(0.)))
+                        }
+                        RowPlace::JustBelowCurrent => {
+                            row.hover(|row| row.bg(colors.hover).rounded_t(px(0.)))
+                        }
                         RowPlace::Current | RowPlace::Apart => {
                             row.hover(|row| row.bg(colors.hover))
                         }

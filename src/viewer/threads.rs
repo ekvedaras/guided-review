@@ -104,10 +104,10 @@ impl ThreadComment {
         self.body.starts_with(AGENT_MARK)
     }
 
-    /// `<login>'s claude` for an agent's comment.
+    /// `<login>'s agent` for an agent's comment.
     pub fn shown_author(&self) -> String {
         if self.is_by_agent() {
-            format!("{}'s claude", self.author)
+            format!("{}'s agent", self.author)
         } else {
             self.author.clone()
         }

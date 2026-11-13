@@ -379,7 +379,7 @@ fn a_comment_starting_with_the_robot_is_shown_as_its_authors_agent_without_the_r
     let by_agent = comment("ekvedaras", false, "🤖 One variadic method: not as-is.");
 
     assert!(by_agent.is_by_agent());
-    assert_eq!(by_agent.shown_author(), "ekvedaras's claude");
+    assert_eq!(by_agent.shown_author(), "ekvedaras's agent");
     assert_eq!(by_agent.shown_body(), "One variadic method: not as-is.");
 }
 

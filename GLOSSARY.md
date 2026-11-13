@@ -66,7 +66,7 @@
 
 **Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, working on it (the agent posted "Working on it…" and its answer will replace that comment), answered, ended without an answer, or failed. It holds the id of its GitHub thread and of the reviewer's comment.
 
-**Agent comment**: A comment whose text starts with 🤖, which a tour agent posted under its person's account. The app names it `<login>'s claude` in the agent's colour, with the agent's mark as its picture and the person's picture small at its corner, and shows the text without the 🤖. On GitHub it stays as posted.
+**Agent comment**: A comment whose text starts with 🤖, which a tour agent posted under its person's account. The app names it `<login>'s agent` in the accent colour, with the agent's mark as its picture and the person's picture small at its corner, and shows the text without the 🤖. On GitHub it stays as posted.
 
 **Seen mark**: The 👀 the viewer puts on the reviewer's comment on GitHub when its hand-off is delivered to the tour agent. The agent's first reply takes it off; so does the viewer when the agent ends without answering. When GitHub refuses either, the line under the thread says so.
 

@@ -825,7 +825,7 @@ fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement 
         .flex()
         .items_center()
         .justify_center()
-        .bg(colors.agent)
+        .bg(colors.primary_fill())
         .child(sized_icon(Icon::Sparkles, gpui::rgb(0xffffff), px(12.)));
     let person = div()
         .absolute()
@@ -992,7 +992,7 @@ impl RenderOnce for ThreadElement {
                                     .text_sm()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .when(comment.is_by_agent(), |name| {
-                                        name.text_color(colors.agent)
+                                        name.text_color(colors.accent)
                                     })
                                     .child(comment.shown_author()),
                             )
