@@ -51,10 +51,11 @@ enum Scene {
     RenderedMarkdown,
     AgentLinkOff,
     GitHubOutage,
+    RefreshRunning,
 }
 
 impl Scene {
-    const ALL: [Self; 23] = [
+    const ALL: [Self; 24] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -78,6 +79,7 @@ impl Scene {
         Self::RenderedMarkdown,
         Self::AgentLinkOff,
         Self::GitHubOutage,
+        Self::RefreshRunning,
     ];
 
     fn file_name(self) -> &'static str {
@@ -105,6 +107,7 @@ impl Scene {
             Self::RenderedMarkdown => "41-rendered-markdown",
             Self::AgentLinkOff => "42-agent-link-off",
             Self::GitHubOutage => "44-github-outage",
+            Self::RefreshRunning => "45-refresh-running",
         }
     }
 }
@@ -403,6 +406,11 @@ impl OneStepLayout {
             }
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
+            Scene::RefreshRunning => {
+                self.scroll_to_row(0);
+                self.session
+                    .update(cx, ReviewSession::stage_refresh_running);
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self
@@ -498,6 +506,9 @@ impl OneStepLayout {
             Scene::AgentLinkOff => self
                 .session
                 .update(cx, ReviewSession::unstage_agent_link_off),
+            Scene::RefreshRunning => self
+                .session
+                .update(cx, ReviewSession::unstage_refresh_running),
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.markdown_box(cx) {
                     self.change_review(cx, |review| {

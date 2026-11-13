@@ -642,6 +642,31 @@ impl ReviewSession {
         self.rebuild_rows(cx);
     }
 
+    /// A refresh under way on a tour with many new pieces, as the banner shows it mid-run.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_refresh_running(&mut self, cx: &mut Context<Self>) {
+        self.refresh_brief = RefreshBrief {
+            stale_steps: vec![crate::viewer::StaleStep {
+                id: "staged".into(),
+                title: "Staged step".to_owned(),
+            }],
+            unplaced_new_pieces: Vec::new(),
+            new_or_changed_pieces: 48,
+            pieces: 157,
+        };
+        self.refresh_progress = RefreshProgress::Running {
+            activity: Some("Read app/Pricing.php".to_owned()),
+        };
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_refresh_running(&mut self, cx: &mut Context<Self>) {
+        self.refresh_brief = self.review.refresh_brief();
+        self.refresh_progress = RefreshProgress::Idle;
+        cx.notify();
+    }
+
     /// Shows herdr running but failing in the sidebar, as it did when its registry writer stopped.
     #[cfg(feature = "snapshots")]
     pub fn stage_agent_link_off(&mut self, cx: &mut Context<Self>) {
