@@ -7,7 +7,7 @@ use gpui::{
 use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::icon::Icon;
 use super::motion::{OVERLAY, busy_dot, busy_sweep, fade_in};
-use super::palette::{CARD_RADIUS, CODE_FONT, Colors, TEXT_FONT};
+use super::palette::{CARD_RADIUS, CODE_FONT, Colors, SIDEBAR_WIDTH, TEXT_FONT};
 use super::title_bar::TITLE_BAR_HEIGHT;
 use crate::app::tour_writer;
 use crate::pull_request::PullRequestUrl;
@@ -130,19 +130,20 @@ impl Render for LoadingScreen {
                 status.child(busy_dot(&colors, "loading-dot"))
             })
             .child(shown.status.clone());
-        let screen = div()
-            .absolute()
-            .top(px(TITLE_BAR_HEIGHT))
-            .left_0()
-            .right_0()
-            .bottom_0()
+        let page = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .flex()
             .flex_col()
             .items_center()
             .pt(px(80.))
+            .px_6()
             .gap_4()
             .bg(colors.background)
-            .occlude()
+            .border_l_1()
+            .border_color(colors.subtle_border)
+            .shadow(colors.page_shadow())
             .font_family(TEXT_FONT)
             .text_color(colors.text)
             .child(
@@ -157,7 +158,8 @@ impl Render for LoadingScreen {
             }))
             .children(shown.failure.clone().map(|failure| {
                 div()
-                    .w(px(860.))
+                    .w_full()
+                    .max_w(px(860.))
                     .px_4()
                     .py_2()
                     .rounded(px(CARD_RADIUS))
@@ -171,7 +173,8 @@ impl Render for LoadingScreen {
             .child(
                 div()
                     .id("loading-screen-lines")
-                    .w(px(860.))
+                    .w_full()
+                    .max_w(px(860.))
                     .h(px(360.))
                     .overflow_y_scroll()
                     .p_3()
@@ -191,6 +194,22 @@ impl Render for LoadingScreen {
                     ),
             )
             .child(actions);
+        let screen = div()
+            .absolute()
+            .top(px(TITLE_BAR_HEIGHT))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .occlude()
+            .child(
+                div()
+                    .w(px(SIDEBAR_WIDTH))
+                    .flex_none()
+                    .h_full()
+                    .bg(colors.sidebar_ground()),
+            )
+            .child(page);
         fade_in(screen, "loading-screen", OVERLAY).into_any_element()
     }
 }

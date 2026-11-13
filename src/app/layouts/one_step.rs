@@ -52,7 +52,7 @@ use crate::app::components::motion::{
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{
-    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, TrailStage,
+    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
 use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching, SwitcherPlace};
@@ -1258,7 +1258,7 @@ impl OneStepLayout {
             .children(problems)
             .children(sync_notices);
         div()
-            .w(px(300.))
+            .w(px(SIDEBAR_WIDTH))
             .flex_none()
             .h_full()
             .flex()
