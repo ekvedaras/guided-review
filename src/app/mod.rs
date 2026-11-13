@@ -106,7 +106,11 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             switching.refresh(cx);
             cx.set_global(switching);
             tour_writer::resume(cx);
-            dock_icon::show();
+            if takes_focus() {
+                dock_icon::show();
+            } else {
+                dock_icon::stay_in_background();
+            }
             bind_keys(cx);
             quit_on_cmd_q(cx);
             components::toast_stack::Toaster::install(cx);
@@ -309,16 +313,16 @@ async fn answer_requests(
 fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answer {
     let window = screen.borrow().window;
     let shown = cx.update(|cx| {
-        cx.activate(true);
+        bring_app_to_front(cx);
         match window.show_settings() {
             ShowSettings::OverReview(window) => window
                 .update(cx, |layout, window, cx| {
                     layout.show_settings(window, cx);
-                    window.activate_window();
+                    raise(window);
                 })
                 .map(|()| AppWindow::Review(window)),
             ShowSettings::Raise(window) => window
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| raise(window))
                 .map(|()| AppWindow::SettingsOnly(window)),
             ShowSettings::OpenSettingsOnly => {
                 open_settings_window(home, cx).map(AppWindow::SettingsOnly)
@@ -351,22 +355,22 @@ fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answe
 fn show_switcher(screen: &SharedScreen, cx: &mut AsyncApp) -> Answer {
     let window = screen.borrow().window;
     let shown = cx.update(|cx| {
-        cx.activate(true);
+        bring_app_to_front(cx);
         match window.show_switcher() {
             ShowSwitcher::OverReview(window) => window
                 .update(cx, |layout, window, cx| {
                     layout.show_pr_switcher(window, cx);
-                    window.activate_window();
+                    raise(window);
                 })
                 .map(|()| AppWindow::Review(window)),
             ShowSwitcher::Raise(window) => window
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| raise(window))
                 .map(|()| AppWindow::SwitcherOnly(window)),
             ShowSwitcher::RaiseSettings(window) => window
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| raise(window))
                 .map(|()| AppWindow::SettingsOnly(window)),
             ShowSwitcher::RaiseWriting(window) => window
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| raise(window))
                 .map(|()| AppWindow::WritingOnly(window)),
             ShowSwitcher::OpenSwitcherOnly => open_switcher_window(cx).map(AppWindow::SwitcherOnly),
         }
@@ -482,10 +486,10 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
         window
             .update(cx, |layout, window, cx| {
                 layout.reload_tour(cx);
-                window.activate_window();
+                raise(window);
             })
             .ok();
-        cx.activate(true);
+        bring_app_to_front(cx);
     });
 }
 
@@ -563,7 +567,7 @@ async fn build_and_show(
                     }
                     ShowReview::OpenWindow => open_window(opened, &pr, cx),
                 };
-                cx.activate(true);
+                bring_app_to_front(cx);
                 shown
             });
             match shown {
@@ -636,16 +640,16 @@ fn turn_into_review(
 fn show_writing(screen: &SharedScreen, active: &Entity<ActivePr>, cx: &mut AsyncApp) {
     let window = screen.borrow().window;
     let shown = cx.update(|cx| {
-        cx.activate(true);
+        bring_app_to_front(cx);
         match window.show_writing() {
             ShowWriting::OpenWindow => {
                 open_writing_window(active, cx).map(|window| Some(AppWindow::WritingOnly(window)))
             }
             ShowWriting::Raise(window) => window
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| raise(window))
                 .map(|()| None),
             ShowWriting::OverReview(window) => window
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| raise(window))
                 .map(|()| None),
             ShowWriting::LeaveSettings => Ok(None),
             ShowWriting::ReplaceSwitcher(window) => {
@@ -671,7 +675,7 @@ fn replace_switcher_with_writing(
     window.update(cx, |_, window, cx| {
         window.set_window_title(&marked_if_dev("Writing a tour".to_owned()));
         window.replace_root(cx, |window, cx| WritingWindow::new(active, window, cx));
-        window.activate_window();
+        raise(window);
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -809,9 +813,31 @@ fn open_writing_window(
     })
 }
 
+/// A snapshot run draws behind the reviewer's work and never takes their focus.
+fn takes_focus() -> bool {
+    #[cfg(feature = "snapshots")]
+    if snapshots::is_on() {
+        return false;
+    }
+    true
+}
+
+fn bring_app_to_front(cx: &mut App) {
+    if takes_focus() {
+        cx.activate(true);
+    }
+}
+
+fn raise(window: &mut Window) {
+    if takes_focus() {
+        window.activate_window();
+    }
+}
+
 fn window_options(title: String, cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
     WindowOptions {
+        focus: takes_focus(),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
             title: Some(marked_if_dev(title).into()),
