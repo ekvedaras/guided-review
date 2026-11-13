@@ -304,7 +304,7 @@ impl RenderOnce for FinishReviewDialog {
                         .hover(|toggle| toggle.text_color(colors.text))
                         .on_click(move |_, _, cx| {
                             update(&ui, cx, |ui| {
-                                ui.is_last_review_body_open = !ui.is_last_review_body_open;
+                                ui.is_last_review_body_open.toggle();
                             });
                         })
                         .child(turn_to(

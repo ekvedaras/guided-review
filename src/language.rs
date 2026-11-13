@@ -119,7 +119,7 @@ fn typescript_imports(text: &str) -> Vec<String> {
             .trim_matches(['"', '\'']);
         names.push(module_stem(module).to_owned());
         let clause = clause.trim_start().trim_start_matches("import").trim();
-        let clause = clause.strip_prefix("type ").unwrap_or(clause);
+        let clause = clause.trim_prefix("type ");
         for part in clause.split([',', '{', '}']) {
             let imported = part.split(" as ").next().unwrap_or(part).trim();
             if !imported.is_empty() && !imported.starts_with('*') {

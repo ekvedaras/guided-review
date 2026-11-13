@@ -4,7 +4,7 @@ version = "0.8.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/ekvedaras/guided-review"
-rust-version = "1.99"
+rust-version = "1.100"
 publish = false
 description = "Turn a PR diff into a top-down guided review"
 
@@ -61,6 +61,9 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+[lints.cargo]
+unused_dependencies = "deny"
 
 [lints.rust]
 unsafe_code = "deny"

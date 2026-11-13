@@ -373,7 +373,7 @@ fn headings_outside_code<'a>(lines: &[&'a str]) -> Vec<(usize, usize, &'a str)> 
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            in_code = !in_code;
+            in_code.toggle();
             continue;
         }
         if in_code {

@@ -290,7 +290,7 @@ fn is_directive(name: &str) -> bool {
         "while",
         "yield",
     ];
-    let name = name.strip_prefix("end").unwrap_or(name);
+    let name = name.trim_prefix("end");
     DIRECTIVES
         .iter()
         .any(|known| known.eq_ignore_ascii_case(name))
