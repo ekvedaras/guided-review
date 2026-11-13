@@ -2,7 +2,9 @@ use crate::support::FixtureRepo;
 use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
-use guided_review::viewer::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
+use guided_review::viewer::{
+    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, SaveOutcome, SettingProblem, Settings,
+};
 use std::path::{Path, PathBuf};
 
 fn commented_config(shop: &FixtureRepo) -> String {
@@ -816,4 +818,116 @@ fn a_preset_shows_the_template_it_uses() {
         Some("claude --model sonnet".to_owned())
     );
     assert_eq!(AskModelChoice::AppDefault.shown_command(), None);
+}
+
+fn chord(text: &str) -> Chord {
+    Chord::parse(text).unwrap()
+}
+
+const KEYED_CONFIG: &str =
+    "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"down\", \"j\"] # like a pager\n";
+
+#[test]
+fn keys_in_the_config_load_as_each_command_s_keys_and_save_untouched() {
+    let (home, mut settings) = loaded_from(KEYED_CONFIG);
+
+    assert_eq!(
+        settings.key_chords(Command::NextScreen),
+        [chord("down"), chord("j")]
+    );
+    assert!(settings.is_key_changed(Command::NextScreen));
+    assert_eq!(settings.key_chords(Command::WrapLines), [chord("w")]);
+    assert!(!settings.is_key_changed(Command::WrapLines));
+    assert_eq!(settings.save().unwrap(), SaveOutcome::NothingChanged);
+    assert_eq!(config_text(home.path()), KEYED_CONFIG);
+}
+
+#[test]
+fn a_new_key_is_written_under_keys_as_its_one_text_and_the_rest_keeps_its_comments() {
+    let (home, mut settings) = loaded_from(KEYED_CONFIG);
+
+    settings.set_key(Command::WrapLines, chord("shift-w"));
+    assert_eq!(settings.key_chords(Command::WrapLines), [chord("shift-w")]);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
+
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"down\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
+    );
+}
+
+#[test]
+fn a_key_set_back_to_its_default_or_reset_leaves_no_line() {
+    let (home, mut settings) = loaded_from(KEYED_CONFIG);
+
+    settings.set_key(Command::Jump, chord("cmd-k"));
+    assert!(!settings.has_unsaved_changes());
+    settings.reset_key(Command::NextScreen);
+    assert_eq!(
+        settings.key_chords(Command::NextScreen),
+        [chord("right"), chord("j")]
+    );
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\n"
+    );
+}
+
+#[test]
+fn a_key_another_command_answers_blocks_the_save_and_names_both() {
+    let shop = FixtureRepo::cloned_from("acme/shop");
+    write_config(shop.home(), KEYED_CONFIG);
+    let mut settings = Settings::load(shop.home()).unwrap();
+
+    settings.set_key(Command::WrapLines, chord("m"));
+
+    assert_eq!(
+        refused(&mut settings, &shop, KEYED_CONFIG),
+        [SettingProblem::Key(KeyProblem::Clash {
+            chord: chord("m"),
+            commands: [Command::ToggleRead, Command::WrapLines],
+        })]
+    );
+}
+
+#[test]
+fn keys_the_config_holds_wrongly_are_problems_on_open_until_reset_or_removed() {
+    let (home, mut settings) = loaded_from("[keys]\nwrap = \"l\"\njump = \"cmd-\"\n");
+
+    assert_eq!(
+        settings.problems_on_open(),
+        [
+            SettingProblem::Key(KeyProblem::NotAKey {
+                command: Command::Jump,
+                written: "cmd-".to_owned()
+            }),
+            SettingProblem::Key(KeyProblem::UnknownCommand("wrap".to_owned())),
+        ]
+    );
+    assert_eq!(settings.key_chords(Command::Jump), [chord("cmd-k")]);
+    assert_eq!(settings.unknown_key_names(), ["wrap"]);
+
+    settings.reset_key(Command::Jump);
+    settings.remove_unknown_key("wrap");
+    assert_eq!(settings.check(), []);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
+    assert_eq!(config_text(home.path()), "[keys]\n");
+}
+
+#[test]
+fn the_keymap_of_settings_is_the_keys_as_edited() {
+    let (_home, mut settings) = loaded_from(KEYED_CONFIG);
+
+    settings.set_key(Command::WrapLines, chord("shift-w"));
+
+    assert_eq!(
+        settings.keymap().chords(Command::WrapLines),
+        [chord("shift-w")]
+    );
+    assert_eq!(
+        settings.keymap().chords(Command::NextScreen),
+        [chord("down"), chord("j")]
+    );
 }

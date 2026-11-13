@@ -61,6 +61,7 @@ enum Slot {
     AskModel,
     AskEffort,
     Clone(usize),
+    Keys,
 }
 
 /// Which half of a clone row a problem is about, so that half wears the danger edge.
@@ -98,6 +99,7 @@ impl ShownProblem {
             SettingProblem::AskEffortUnknown(_) => Slot::AskEffort,
             SettingProblem::AskModelBlank => Slot::AskModel,
             SettingProblem::IdeTemplateBlank => Slot::Ide,
+            SettingProblem::Key(_) => Slot::Keys,
         };
         Self {
             slot,
@@ -375,6 +377,7 @@ impl SettingsPanel {
                 return;
             }
             Ok(SaveOutcome::Written) => {
+                crate::app::apply_keymap(editing.settings.keymap(), cx);
                 editing.problems.clear();
                 editing.note = None;
                 cx.emit(SettingsEvent::Saved);

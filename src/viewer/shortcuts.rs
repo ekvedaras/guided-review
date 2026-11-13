@@ -1,42 +1,34 @@
-//! Every key the app answers, in one table: what it does, which keys, and where the shortcuts sheet
-//! lists it. The app binds its keys from here and the sheet reads the same table, so the two cannot
-//! drift apart.
+//! Every command the app answers to a key, in one table: what it does, its default keys, where the
+//! keys work and where the shortcuts sheet lists it. The reviewer's `[keys]` change only the keys
+//! (`Keymap`); the app binds from the keymap and the sheet reads it, so the two cannot drift apart.
 
-/// One key of a chord as the reader presses it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyCap {
-    Cmd,
-    Shift,
-    Left,
-    Right,
-    Up,
-    Down,
-    Enter,
-    Escape,
-    /// A key with a printed face: what gpui calls it, and what its cap shows.
-    Key {
-        name: &'static str,
-        face: &'static str,
-    },
+use super::chord::{Chord, Key, Modifier};
+
+const fn key(face: char) -> Chord {
+    Chord::key(Key::Printed(face))
 }
 
-const fn key(name: &'static str, face: &'static str) -> KeyCap {
-    KeyCap::Key { name, face }
+const fn cmd(face: char) -> Chord {
+    key(face).with(Modifier::Cmd)
 }
 
-const J: KeyCap = key("j", "J");
-const K: KeyCap = key("k", "K");
-const N: KeyCap = key("n", "N");
-const M: KeyCap = key("m", "M");
-const C: KeyCap = key("c", "C");
-const W: KeyCap = key("w", "W");
-const G: KeyCap = key("g", "G");
-const Q: KeyCap = key("q", "Q");
-const COMMA: KeyCap = key(",", ",");
-const QUESTION: KeyCap = key("?", "?");
-
-/// Keys pressed together.
-pub type Chord = &'static [KeyCap];
+const J: Chord = key('j');
+const K: Chord = key('k');
+const N: Chord = key('n');
+const M: Chord = key('m');
+const W: Chord = key('w');
+const G: Chord = key('g');
+const QUESTION: Chord = key('?');
+const LEFT: Chord = Chord::key(Key::Left);
+const RIGHT: Chord = Chord::key(Key::Right);
+const CMD_ENTER: Chord = Chord::key(Key::Enter).with(Modifier::Cmd);
+const CMD_SHIFT_ENTER: Chord = CMD_ENTER.with(Modifier::Shift);
+const ESCAPE: Chord = Chord::key(Key::Escape);
+const CMD_K: Chord = cmd('k');
+const CMD_C: Chord = cmd('c');
+const CMD_COMMA: Chord = cmd(',');
+const CMD_W: Chord = cmd('w');
+const CMD_Q: Chord = cmd('q');
 
 /// Where a command's keys work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +44,20 @@ pub enum KeyScope {
     /// Anywhere in the review's window but a box that takes typing, which has its own: a comment
     /// box left open elsewhere on the page does not stop it.
     NotTyping,
+}
+
+impl KeyScope {
+    /// Whether one key press can reach both, so one key cannot do two things there.
+    pub fn overlaps(self, other: Self) -> bool {
+        use KeyScope::{App, NotTyping, Page, TextBox, Window};
+        match (self, other) {
+            (App | Window, _)
+            | (_, App | Window)
+            | (TextBox, TextBox)
+            | (Page | NotTyping, Page | NotTyping) => true,
+            (TextBox, Page | NotTyping) | (Page | NotTyping, TextBox) => false,
+        }
+    }
 }
 
 /// The sheet's headings, in the order it shows them.
@@ -123,26 +129,52 @@ impl Command {
         Self::Quit,
     ];
 
-    /// Every way to press it; the first is the one a button shows.
-    pub fn chords(self) -> &'static [Chord] {
-        use KeyCap::{Cmd, Enter, Escape, Left, Right, Shift};
+    /// Every way to press it unless the reviewer set other keys; the first is the one a button shows.
+    pub fn default_chords(self) -> &'static [Chord] {
         match self {
-            Self::NextScreen => &[&[Right], &[J]],
-            Self::PreviousScreen => &[&[Left], &[K]],
-            Self::NextUnreadStep => &[&[N]],
-            Self::Jump => &[&[Cmd, K]],
-            Self::ToggleRead => &[&[M]],
-            Self::CopyCode => &[&[Cmd, C]],
-            Self::AddToReview => &[&[Cmd, Enter]],
-            Self::AskAgent => &[&[Cmd, Shift, Enter]],
-            Self::CloseBox => &[&[Escape]],
-            Self::WrapLines => &[&[W]],
-            Self::Settings => &[&[Cmd, COMMA]],
-            Self::Shortcuts => &[&[QUESTION]],
-            Self::OpenOnGitHub => &[&[G]],
-            Self::CloseWindow => &[&[Cmd, W]],
-            Self::Quit => &[&[Cmd, Q]],
+            Self::NextScreen => &[RIGHT, J],
+            Self::PreviousScreen => &[LEFT, K],
+            Self::NextUnreadStep => &[N],
+            Self::Jump => &[CMD_K],
+            Self::ToggleRead => &[M],
+            Self::CopyCode => &[CMD_C],
+            Self::AddToReview => &[CMD_ENTER],
+            Self::AskAgent => &[CMD_SHIFT_ENTER],
+            Self::CloseBox => &[ESCAPE],
+            Self::WrapLines => &[W],
+            Self::Settings => &[CMD_COMMA],
+            Self::Shortcuts => &[QUESTION],
+            Self::OpenOnGitHub => &[G],
+            Self::CloseWindow => &[CMD_W],
+            Self::Quit => &[CMD_Q],
         }
+    }
+
+    /// Its key in the `[keys]` table of `config.toml`.
+    pub fn config_name(self) -> &'static str {
+        match self {
+            Self::NextScreen => "next_screen",
+            Self::PreviousScreen => "previous_screen",
+            Self::NextUnreadStep => "next_unread_step",
+            Self::Jump => "jump",
+            Self::ToggleRead => "toggle_read",
+            Self::CopyCode => "copy_code",
+            Self::AddToReview => "add_to_review",
+            Self::AskAgent => "ask_agent",
+            Self::CloseBox => "close_box",
+            Self::WrapLines => "wrap_lines",
+            Self::Settings => "settings",
+            Self::Shortcuts => "shortcuts",
+            Self::OpenOnGitHub => "open_on_github",
+            Self::CloseWindow => "close_window",
+            Self::Quit => "quit",
+        }
+    }
+
+    pub fn of_config_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|command| command.config_name() == name)
     }
 
     pub fn scope(self) -> KeyScope {
@@ -197,11 +229,6 @@ impl Command {
             Self::Quit => "Quit",
         }
     }
-
-    /// The chord a button that does this shows.
-    pub fn first_chord(self) -> Chord {
-        self.chords().first().copied().unwrap_or_default()
-    }
 }
 
 /// The sheet's commands under one heading, in table order.
@@ -209,23 +236,4 @@ pub fn in_group(group: ShortcutGroup) -> impl Iterator<Item = Command> {
     Command::ALL
         .into_iter()
         .filter(move |command| command.group() == group)
-}
-
-/// A chord in gpui's keystroke syntax, such as `cmd-shift-enter`.
-pub fn keystroke(chord: Chord) -> String {
-    chord
-        .iter()
-        .map(|cap| match cap {
-            KeyCap::Cmd => "cmd",
-            KeyCap::Shift => "shift",
-            KeyCap::Left => "left",
-            KeyCap::Right => "right",
-            KeyCap::Up => "up",
-            KeyCap::Down => "down",
-            KeyCap::Enter => "enter",
-            KeyCap::Escape => "escape",
-            KeyCap::Key { name, .. } => name,
-        })
-        .collect::<Vec<_>>()
-        .join("-")
 }

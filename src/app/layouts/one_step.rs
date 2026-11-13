@@ -1409,7 +1409,12 @@ impl OneStepLayout {
             ButtonSize::Regular,
             Icon::Keyboard,
         ))
-        .child(button_keys(colors, ButtonKind::Ghost, Command::Shortcuts))
+        .child(button_keys(
+            colors,
+            ButtonKind::Ghost,
+            Command::Shortcuts,
+            cx,
+        ))
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
@@ -1436,7 +1441,12 @@ impl OneStepLayout {
                     Icon::Settings,
                 ))
                 .child(div().flex_1().child("Settings"))
-                .child(button_keys(colors, ButtonKind::Ghost, Command::Settings))
+                .child(button_keys(
+                    colors,
+                    ButtonKind::Ghost,
+                    Command::Settings,
+                    cx,
+                ))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),
@@ -1469,7 +1479,7 @@ impl OneStepLayout {
             Icon::Search,
         ))
         .child("Jump")
-        .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump))
+        .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
         let github = button(
             &colors,
@@ -1488,6 +1498,7 @@ impl OneStepLayout {
             &colors,
             ButtonKind::Ghost,
             Command::OpenOnGitHub,
+            cx,
         ))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)));
         let switch_pr = div()
@@ -2507,6 +2518,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             &colors,
             ButtonKind::Ghost,
             Command::PreviousScreen,
+            cx,
         ))
     });
     let next_label = footer.next.as_ref().map(|next| match next {
@@ -2558,6 +2570,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
                 Onward::Goes => Command::NextScreen,
                 Onward::Stays => Command::ToggleRead,
             },
+            cx,
         ))
     });
     let up_next = next_label.map(|title| {
@@ -2838,7 +2851,7 @@ fn lead_button(
                 this.change_review(cx, move |review| review.go_to(&step));
             }))
             .child(label)
-            .child(button_keys(&colors, ButtonKind::Primary, command))
+            .child(button_keys(&colors, ButtonKind::Primary, command, cx))
             .into_any_element(),
     )
 }
@@ -3000,7 +3013,7 @@ fn tick_button(
             px(6.),
         ))
         .child(if is_ticked { "Read" } else { "Mark as read" })
-        .child(button_keys(&colors, kind, Command::ToggleRead).ml_2())
+        .child(button_keys(&colors, kind, Command::ToggleRead, cx).ml_2())
 }
 
 fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {

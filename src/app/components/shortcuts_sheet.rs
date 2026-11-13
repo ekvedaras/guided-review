@@ -6,7 +6,8 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{Command, Presence, ShortcutGroup, in_group};
+use crate::app::keymap::{chord_of, keymap, shared_keymap};
+use crate::viewer::{Command, Keymap, Presence, ShortcutGroup, in_group};
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::icon::{Icon, sized_icon};
@@ -59,16 +60,21 @@ impl ShortcutsSheet {
 
     /// Esc closes it, and so does the key that opened it.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let is_question_mark = event.keystroke.key_char.as_deref() == Some("?");
-        if event.keystroke.key == "escape" || is_question_mark {
+        let opens_the_sheet = chord_of(&event.keystroke)
+            .is_some_and(|chord| keymap(cx).chords(Command::Shortcuts).contains(&chord));
+        if event.keystroke.key == "escape" || opens_the_sheet {
             cx.stop_propagation();
             self.close(window, cx);
         }
     }
 }
 
-fn shortcut_row(colors: &Colors, command: Command) -> impl IntoElement {
-    let chords = command.chords();
+fn shortcut_row<'a>(
+    colors: &'a Colors,
+    keymap: &Keymap,
+    command: Command,
+) -> impl IntoElement + 'a {
+    let chords = keymap.chords(command).to_vec();
     let last = chords.len().saturating_sub(1);
     div()
         .min_h(px(28.))
@@ -83,7 +89,7 @@ fn shortcut_row(colors: &Colors, command: Command) -> impl IntoElement {
                 .child(command.label()),
         )
         .child(div().flex().flex_none().items_center().gap_1p5().children(
-            chords.iter().enumerate().map(move |(index, chord)| {
+            chords.into_iter().enumerate().map(move |(index, chord)| {
                 div()
                     .flex()
                     .items_center()
@@ -96,7 +102,11 @@ fn shortcut_row(colors: &Colors, command: Command) -> impl IntoElement {
         ))
 }
 
-fn group_block(colors: &Colors, group: ShortcutGroup) -> impl IntoElement {
+fn group_block<'a>(
+    colors: &'a Colors,
+    keymap: &'a Keymap,
+    group: ShortcutGroup,
+) -> impl IntoElement + 'a {
     div()
         .flex()
         .flex_col()
@@ -106,7 +116,7 @@ fn group_block(colors: &Colors, group: ShortcutGroup) -> impl IntoElement {
                 .pb_1()
                 .text_color(colors.muted_text),
         )
-        .children(in_group(group).map(|command| shortcut_row(colors, command)))
+        .children(in_group(group).map(|command| shortcut_row(colors, keymap, command)))
 }
 
 impl Render for ShortcutsSheet {
@@ -115,14 +125,13 @@ impl Render for ShortcutsSheet {
             return div().into_any_element();
         }
         let colors = Colors::active(cx);
+        let keymap = shared_keymap(cx);
         let column = |groups: &[ShortcutGroup]| {
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap_5()
-                .children(groups.iter().map(|group| group_block(&colors, *group)))
+            div().flex_1().min_w_0().flex().flex_col().gap_5().children(
+                groups
+                    .iter()
+                    .map(|group| group_block(&colors, &keymap, *group)),
+            )
         };
         let header = div()
             .px_5()

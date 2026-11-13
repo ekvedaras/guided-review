@@ -1,6 +1,6 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Rgba,
+    App, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Rgba,
     Stateful, StatefulInteractiveElement, Styled, Svg, div, px,
 };
 
@@ -8,6 +8,7 @@ use super::icon::{Icon, sized_icon};
 use super::key_cap::{CapGround, chord_caps};
 use super::palette::{CONTROL_RADIUS, Colors};
 use super::tooltip::tooltip;
+use crate::app::keymap::keymap;
 use crate::viewer::Command;
 
 /// How loud a button is. A screen has one `Primary`: the step the reader takes next.
@@ -287,6 +288,9 @@ pub fn toggle_button(
 }
 
 /// The keys that do what the button does, at its trailing end, on the button's own ground.
-pub fn button_keys(colors: &Colors, kind: ButtonKind, command: Command) -> Div {
-    chord_caps(colors, command.first_chord(), CapGround::of(kind)).ml_1()
+pub fn button_keys(colors: &Colors, kind: ButtonKind, command: Command, cx: &App) -> Div {
+    let caps = keymap(cx)
+        .first_chord(command)
+        .map(|chord| chord_caps(colors, chord, CapGround::of(kind)));
+    div().flex_none().ml_1().children(caps)
 }

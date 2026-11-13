@@ -11,6 +11,7 @@ mod ask_context;
 mod ask_desk;
 mod ask_target;
 mod avatars;
+mod chord;
 mod code_link;
 mod comment_desk;
 mod comments;
@@ -25,6 +26,7 @@ mod highlight;
 mod image_preview;
 mod intent;
 mod jump;
+mod keymap;
 mod markdown;
 mod new_commits;
 mod outdated_lines;
@@ -75,6 +77,7 @@ pub use ask_desk::{
 };
 pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
+pub use chord::{Chord, Key, KeyCap, Modifier, Modifiers};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, TourFreshness};
@@ -109,6 +112,7 @@ pub use intent::{
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };
+pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
@@ -147,7 +151,7 @@ pub use row_selection::{RowSelection, SelectedLines};
 pub use saved_state::RepinRunning;
 pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
-pub use shortcuts::{Chord, Command, KeyCap, KeyScope, ShortcutGroup, in_group, keystroke};
+pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};
 pub use step_page::{
     DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
 };
