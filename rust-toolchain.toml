@@ -1,0 +1,4 @@
+# One Rust for this machine and CI, so a new stable's lints never turn CI red unseen. Raise it on purpose.
+[toolchain]
+channel = "1.100"
+components = ["clippy", "rustfmt"]
