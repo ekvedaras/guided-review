@@ -29,6 +29,13 @@ impl AgentEvent {
             _ => Vec::new(),
         }
     }
+
+    /// The text of the AI's final answer, when `line` is the `result` line that ends its run.
+    pub fn final_answer(line: &str) -> Option<String> {
+        let json = serde_json::from_str::<Value>(line).ok()?;
+        (at(&json, "/type") == "result")
+            .then(|| at(&json, "/result").as_str().unwrap_or_default().to_owned())
+    }
 }
 
 fn text_delta(json: &Value) -> Option<AgentEvent> {

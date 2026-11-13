@@ -319,6 +319,7 @@ pub trait TurnStopper: Send + Sync {
 
 /// Starts the local AI on the tour skill to Refresh the tour of a PR. Blocks until it is done.
 pub trait RefreshWriter: Send + Sync {
-    /// What the AI said last. It may end without an error and still not have refreshed the tour.
-    fn refresh(&self, pr: &PullRequestUrl) -> anyhow::Result<String>;
+    /// Passes every stream line of the AI to `on_line` as it arrives. The core reads them, so adapters stay
+    /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
+    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
 }

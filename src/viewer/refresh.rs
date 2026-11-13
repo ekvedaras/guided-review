@@ -8,6 +8,7 @@ use crate::pull_request::{PullRequestTips, PullRequestUrl};
 use crate::repin::RepinStatus;
 use crate::tour::Tour;
 
+use super::agent_event::AgentEvent;
 use super::new_commits::{PickCodeSource, RepinnedTour};
 use super::ports::RefreshWriter;
 use super::review::{Review, StepId};
@@ -122,9 +123,25 @@ pub struct TourRefresher {
 }
 
 impl TourRefresher {
-    /// Blocks until the AI is done; the app runs it off the main thread.
-    pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let said = self.writer.refresh(&self.pr)?;
+    /// Blocks until the AI is done; the app runs it off the main thread. `on_activity` hears each tool the AI uses.
+    pub fn run(&self, on_activity: &mut dyn FnMut(String)) -> anyhow::Result<RepinnedTour> {
+        let mut said = String::new();
+        let mut failure = None;
+        self.writer.refresh(&self.pr, &mut |line| {
+            for event in AgentEvent::from_line(line) {
+                match event {
+                    AgentEvent::ToolUse { summary } => on_activity(summary),
+                    AgentEvent::Error(reason) => failure = Some(reason),
+                    AgentEvent::TextDelta(_) | AgentEvent::Done { .. } => {}
+                }
+            }
+            if let Some(answer) = AgentEvent::final_answer(line) {
+                said = answer;
+            }
+        })?;
+        if let Some(reason) = failure {
+            anyhow::bail!("claude stopped: {reason}");
+        }
         let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
         let pinned = PullRequestTips {
             base_branch_tip: tour.base.clone(),
