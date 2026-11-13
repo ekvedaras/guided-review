@@ -1702,10 +1702,11 @@ impl OneStepLayout {
     /// The first row of the screen whose bottom is below `y`, in window pixels.
     fn row_at(&self, y: Pixels) -> usize {
         let mut row = self.screen_list.logical_scroll_top().item_ix;
+        // gpui reports a row's bounds without the list's top padding, which it paints rows below.
         while self
             .screen_list
             .bounds_for_item(row)
-            .is_some_and(|bounds| bounds.bottom() <= y)
+            .is_some_and(|bounds| bounds.bottom() + PAGE_TOP <= y)
         {
             row += 1;
         }
