@@ -1611,11 +1611,7 @@ impl OneStepLayout {
                 .right_0()
                 .px_6()
                 .bg(colors.background)
-                .child(PieceHeader::new(
-                    label,
-                    pinned.header.repin_label,
-                    Vec::new(),
-                )),
+                .child(PieceHeader::new(label, pinned.header.repin_label, Vec::new()).pinned()),
         )
     }
 

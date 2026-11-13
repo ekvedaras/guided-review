@@ -393,6 +393,7 @@ pub struct PieceHeader {
     buttons: Vec<Stateful<Div>>,
     fold_toggle: Option<Stateful<Div>>,
     closes_box: bool,
+    is_pinned: bool,
 }
 
 impl PieceHeader {
@@ -407,12 +408,19 @@ impl PieceHeader {
             buttons,
             fold_toggle: None,
             closes_box: false,
+            is_pinned: false,
         }
     }
 
     /// Nothing follows it in its box: it rounds the box's bottom corners too.
     pub fn closing_its_box(mut self, closes_box: bool) -> Self {
         self.closes_box = closes_box;
+        self
+    }
+
+    /// Kept at the top of the view over its scrolled code: square, flush with the bar above it.
+    pub fn pinned(mut self) -> Self {
+        self.is_pinned = true;
         self
     }
 
@@ -442,7 +450,7 @@ impl RenderOnce for PieceHeader {
             .gap_2()
             .bg(colors.header_band())
             .border_1()
-            .rounded_t(px(CARD_RADIUS))
+            .when(!self.is_pinned, |header| header.rounded_t(px(CARD_RADIUS)))
             .when(self.closes_box, |header| {
                 header
                     .rounded_b(px(CARD_RADIUS))
