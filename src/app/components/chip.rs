@@ -1,4 +1,5 @@
 use crate::app::updater::running_build;
+use crate::update::Build;
 use gpui::{AnimationElement, Div, ElementId, ParentElement, Styled, div, phi, px};
 
 use super::motion::{BANNER_DROP, Edge, STATE, slide_in};
@@ -24,8 +25,13 @@ pub fn chip(colors: &Colors, tone: Tone) -> Div {
 
 /// Marks a window not of the release install, `DEV` or `TEST`, so it is not taken for the app that updates.
 pub fn build_chip(colors: &Colors) -> Option<Div> {
-    running_build().badge().map(|badge| {
-        chip(colors, Tone::Warning)
+    let build = running_build();
+    build.badge().map(|badge| {
+        let tone = match build {
+            Build::Test => Tone::Neutral,
+            Build::Local | Build::Release => Tone::Warning,
+        };
+        chip(colors, tone)
             .font_weight(gpui::FontWeight::BOLD)
             .child(badge)
     })
