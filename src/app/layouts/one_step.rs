@@ -1451,7 +1451,7 @@ impl OneStepLayout {
     }
 
     /// The PR this review is of, and the window-wide actions.
-    fn title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn title_bar(&self, is_writing_tour: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let review = self.session.read(cx).review();
         let pr = review.pr().clone();
@@ -1541,7 +1541,9 @@ impl OneStepLayout {
                     .child(jump)
                     .child(github),
             )
-            .child(page_hairline(&colors, page_share))
+            .when(!is_writing_tour, |bar| {
+                bar.child(page_hairline(&colors, page_share))
+            })
     }
 
     /// Once the step's heading has scrolled away, a slim bar under the title bar keeps where the
@@ -3093,6 +3095,12 @@ impl Render for OneStepLayout {
             .read(cx)
             .switching_to()
             .map(SwitchingVeil::to);
+        let is_writing_tour = cx
+            .global::<PrSwitching>()
+            .active
+            .read(cx)
+            .loading()
+            .is_some();
         self.run_scroll_script(window, cx);
         self.note_seen_end(cx);
         self.show_diagram(window, cx);
@@ -3253,10 +3261,12 @@ impl Render for OneStepLayout {
                     .flex_col()
                     .bg(colors.background)
                     .rounded_l(px(CARD_RADIUS))
-                    .border_l_1()
-                    .border_color(colors.subtle_border)
-                    .shadow(colors.page_shadow())
-                    .child(self.title_bar(cx))
+                    .when(!is_writing_tour, |page| {
+                        page.border_l_1()
+                            .border_color(colors.subtle_border)
+                            .shadow(colors.page_shadow())
+                    })
+                    .child(self.title_bar(is_writing_tour, cx))
                     .children(old_head.clone().map(|old_head| {
                         NewCommitsBanner::new(
                             old_head,
