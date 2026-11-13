@@ -2,3 +2,5 @@
 [toolchain]
 channel = "1.100"
 components = ["clippy", "rustfmt"]
+# The release builds both Macs. A target added by the workflow goes to its own toolchain, not this one.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
