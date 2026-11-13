@@ -72,12 +72,12 @@ fn every_chord_the_app_can_read_is_one_gpui_can_bind() {
 #[test]
 fn a_command_named_in_the_keys_table_takes_only_its_new_keys() {
     let keymap = keymap_of(
-        "[keys]\nwrap_lines = \"l\"\nnext_screen = [\"down\", \"n\"]\nnext_unread_step = \"u\"",
+        "[keys]\nwrap_lines = \"l\"\nnext_screen = [\"space\", \"n\"]\nnext_unread_step = \"u\"",
     )
     .unwrap();
 
     assert_eq!(keys(&keymap, Command::WrapLines), ["l"]);
-    assert_eq!(keys(&keymap, Command::NextScreen), ["down", "n"]);
+    assert_eq!(keys(&keymap, Command::NextScreen), ["space", "n"]);
     assert!(keymap.is_changed(Command::WrapLines));
     assert_eq!(keys(&keymap, Command::Jump), ["cmd-k"]);
     assert!(!keymap.is_changed(Command::Jump));

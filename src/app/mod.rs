@@ -60,8 +60,9 @@ use components::settings_panel::SettingsPanel;
 use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    CloseWindow, Collaborators, CopySelection, GoBack, GoForward, GoToNextUnread, OneStepLayout,
-    OpenPrOnGitHub, ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
+    CloseWindow, Collaborators, CopySelection, FocusNextChange, FocusPreviousChange, GoBack,
+    GoForward, GoToNextUnread, OneStepLayout, OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove,
+    ShowMoreBelow, ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -767,6 +768,12 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::NextScreen => KeyBinding::new(&keys, GoForward, context),
                 Command::PreviousScreen => KeyBinding::new(&keys, GoBack, context),
                 Command::NextUnreadStep => KeyBinding::new(&keys, GoToNextUnread, context),
+                Command::NextChange => KeyBinding::new(&keys, FocusNextChange, context),
+                Command::PreviousChange => KeyBinding::new(&keys, FocusPreviousChange, context),
+                Command::ReadDown => KeyBinding::new(&keys, ReadDown, context),
+                Command::ReadUp => KeyBinding::new(&keys, ReadUp, context),
+                Command::MoreAbove => KeyBinding::new(&keys, ShowMoreAbove, context),
+                Command::MoreBelow => KeyBinding::new(&keys, ShowMoreBelow, context),
                 Command::Jump => KeyBinding::new(&keys, ToggleJump, context),
                 Command::ToggleRead => KeyBinding::new(&keys, ToggleRead, context),
                 Command::CopyCode => KeyBinding::new(&keys, CopySelection, context),

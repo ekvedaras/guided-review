@@ -824,8 +824,7 @@ fn chord(text: &str) -> Chord {
     Chord::parse(text).unwrap()
 }
 
-const KEYED_CONFIG: &str =
-    "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"down\", \"j\"] # like a pager\n";
+const KEYED_CONFIG: &str = "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\n";
 
 #[test]
 fn keys_in_the_config_load_as_each_command_s_keys_and_save_untouched() {
@@ -833,7 +832,7 @@ fn keys_in_the_config_load_as_each_command_s_keys_and_save_untouched() {
 
     assert_eq!(
         settings.key_chords(Command::NextScreen),
-        [chord("down"), chord("j")]
+        [chord("space"), chord("j")]
     );
     assert!(settings.is_key_changed(Command::NextScreen));
     assert_eq!(settings.key_chords(Command::WrapLines), [chord("w")]);
@@ -852,7 +851,7 @@ fn a_new_key_is_written_under_keys_as_its_one_text_and_the_rest_keeps_its_commen
 
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"down\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
+        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
     );
 }
 
@@ -928,7 +927,7 @@ fn the_keymap_of_settings_is_the_keys_as_edited() {
     );
     assert_eq!(
         settings.keymap().chords(Command::NextScreen),
-        [chord("down"), chord("j")]
+        [chord("space"), chord("j")]
     );
 }
 
