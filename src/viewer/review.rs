@@ -1412,13 +1412,27 @@ impl ReviewCore {
     }
 
     /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
-    pub fn palette(&self, query: &str, build: Build) -> Vec<PaletteGroup> {
-        jump::palette(self.jump_targets(""), &self.palette_actions(build), query)
+    pub(super) fn palette_with(
+        &self,
+        query: &str,
+        build: Build,
+        file_toggles: Vec<PaletteAction>,
+    ) -> Vec<PaletteGroup> {
+        jump::palette(
+            self.jump_targets(""),
+            &self.palette_actions_with(build, file_toggles),
+            query,
+        )
     }
 
     /// What the palette can do on the open screen.
     /// Checking for updates only where the build takes them.
-    pub fn palette_actions(&self, build: Build) -> Vec<PaletteAction> {
+    /// `file_toggles` are the actions on the focused change's file, which only the page knows.
+    pub(super) fn palette_actions_with(
+        &self,
+        build: Build,
+        file_toggles: Vec<PaletteAction>,
+    ) -> Vec<PaletteAction> {
         let step = match &self.screen {
             Screen::Step(id) => Some(id),
             Screen::Summary | Screen::SafetyNet => None,
@@ -1455,6 +1469,7 @@ impl ReviewCore {
             .chain(tick)
             .chain(ask)
             .chain([wrap, whitespace])
+            .chain(file_toggles)
             .chain(finish)
             .chain([
                 PaletteAction::OpenOnGitHub,

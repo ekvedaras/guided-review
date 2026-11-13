@@ -61,6 +61,7 @@ mod outline_symbols;
 mod page;
 mod pick_code_source;
 mod piece_id;
+mod piece_labels;
 mod pr_description;
 mod pr_notes;
 mod pr_switcher;

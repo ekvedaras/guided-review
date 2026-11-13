@@ -1490,7 +1490,7 @@ impl SettingsPanel {
     pub fn stage_sample_keys(&mut self, cx: &mut Context<Self>) {
         use crate::viewer::{Chord, Command};
         self.edit(cx, |editing| {
-            for (command, text) in [(Command::WrapLines, "l"), (Command::Jump, "n")] {
+            for (command, text) in [(Command::WrapLines, "y"), (Command::Jump, "n")] {
                 if let Some(chord) = Chord::parse(text) {
                     editing.settings.set_key(command, chord);
                 }

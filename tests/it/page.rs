@@ -7,8 +7,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, Review,
-    ReviewStateFile, ReviewThread, Side, ThreadComment, ThreadId, ThreadRowPlace,
+    BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, PieceLabels,
+    Review, ReviewStateFile, ReviewThread, Side, ThreadComment, ThreadId, ThreadRowPlace,
 };
 use serde_json::{Value, json};
 
@@ -441,7 +441,10 @@ fn a_file_header_is_pinned_only_once_it_has_scrolled_away() {
 
 #[test]
 fn a_pinned_header_names_the_symbol_the_top_row_is_in() {
-    let review = Pull::cart().open(cart_step());
+    let mut review = Pull::cart().open(cart_step());
+    review
+        .display_options_mut()
+        .show_piece_labels(&file_path("app/Cart.php"), PieceLabels::Shown);
     let page = review.page();
     let in_cart = page.row_of_line(&at_head("app/Cart.php", 5)).unwrap();
     let in_total = page.row_of_line(&at_head("app/Cart.php", 11)).unwrap();

@@ -89,13 +89,13 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CodeLink, Command, CommentBox,
-    CommentGesture, CommentPlace, Departure, Effect, FileView, GitHubPort, HandOffId, InFlight,
-    Intent, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, PageRow, Place,
-    QueuedComment, ReadProgress, ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs,
-    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
-    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
-    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
-    ToastTone, Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
+    CommentGesture, CommentPlace, Departure, Effect, FileToggle, FileView, GitHubPort, HandOffId,
+    InFlight, Intent, LabelSwitch, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay,
+    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, Reopen, ReopenAfterSave,
+    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
+    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
+    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
+    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -119,6 +119,8 @@ actions!(
         ReadUp,
         ShowMoreAbove,
         ShowMoreBelow,
+        ToggleRenderedView,
+        TogglePieceLabels,
         ToggleRead,
         ToggleShortcuts,
         OpenPrOnGitHub,
@@ -589,6 +591,34 @@ impl OneStepLayout {
         cx.notify();
     }
 
+    /// Shows or hides the piece labels of one file box; the key `L` does the same on the focused change's file.
+    fn labels_toggle(&self, switch: &LabelSwitch, cx: &mut Context<Self>) -> Stateful<Div> {
+        let colors = Colors::active(cx);
+        let path = switch.path.clone();
+        let labels = switch.labels;
+        toggle_button(
+            &colors,
+            format!("piece-labels-{path}"),
+            labels == PieceLabels::Shown,
+            ButtonSize::Small,
+        )
+        .tooltip(tooltip(|cx| {
+            match keymap(cx).first_chord(Command::TogglePieceLabels) {
+                Some(chord) => format!("Piece labels ({})", chord.spelled()),
+                None => "Piece labels".to_owned(),
+            }
+            .into()
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.change_review(cx, |review| {
+                review
+                    .display_options_mut()
+                    .show_piece_labels(&path, labels.flipped());
+            });
+        }))
+        .child("Labels")
+    }
+
     /// The comments on the whole file are rows under it, not part of it.
     fn view_switch(&self, switch: &ViewSwitch, cx: &mut Context<Self>) -> Stateful<Div> {
         let segment = |view: FileView, label: &'static str, cx: &mut Context<Self>| {
@@ -1023,6 +1053,12 @@ impl OneStepLayout {
             Effect::Change(change) => self
                 .session
                 .update(cx, |session, cx| session.apply(change, cx)),
+            Effect::ToggleFocusedFile(FileToggle::RenderedView) => {
+                self.change_review(cx, Review::toggle_focused_file_view);
+            }
+            Effect::ToggleFocusedFile(FileToggle::PieceLabels) => {
+                self.change_review(cx, Review::toggle_focused_piece_labels);
+            }
             Effect::Toggle(Overlay::Jump) => {
                 let groups = self.session.read(cx).review().palette("", running_build());
                 self.jump.update(cx, |palette, cx| {
@@ -2048,11 +2084,16 @@ impl OneStepLayout {
                     .view
                     .as_ref()
                     .map(|switch| self.view_switch(switch, cx));
+                let labels_toggle = heading
+                    .labels
+                    .as_ref()
+                    .map(|switch| self.labels_toggle(switch, cx));
                 let header = PieceHeader::new(
                     heading.label.clone(),
                     heading.repin_label,
-                    view_switch
+                    labels_toggle
                         .into_iter()
+                        .chain(view_switch)
                         .chain(open_code)
                         .chain(ask)
                         .collect(),
@@ -3397,6 +3438,12 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &ShowMoreBelow, _, cx| {
                 this.change_review(cx, Review::show_more_below);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleRenderedView, window, cx| {
+                this.act(Intent::ToggleRenderedView, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TogglePieceLabels, window, cx| {
+                this.act(Intent::TogglePieceLabels, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleWrapLines, window, cx| {
                 this.act(Intent::ToggleWrapLines, window, cx);

@@ -10,9 +10,9 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::tour::Step;
 use crate::viewer::{
-    Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LineKind, LineLocation,
-    Markdown, NextScreen, NotesButton, Place, QueuedComment, RenderedBlock, StepId, SummaryStats,
-    ThreadView, TourLead, ViewSwitch,
+    Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LabelSwitch, LineKind,
+    LineLocation, Markdown, NextScreen, NotesButton, Place, QueuedComment, RenderedBlock, StepId,
+    SummaryStats, ThreadView, TourLead, ViewSwitch,
 };
 
 #[derive(Clone)]
@@ -206,6 +206,8 @@ pub struct PieceHeading {
     pub code_link: Option<CodeLink>,
     /// Set on the header of a box whose file can be rendered.
     pub view: Option<ViewSwitch>,
+    /// Set on the header of a code box of several pieces.
+    pub labels: Option<LabelSwitch>,
 }
 
 /// A piece's name cut into what is shown, once, so drawing shares the text instead of copying it.

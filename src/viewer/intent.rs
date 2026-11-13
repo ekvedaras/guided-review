@@ -21,6 +21,10 @@ pub enum Intent {
     ToggleRead,
     ToggleWrapLines,
     ToggleWhitespace,
+    /// `R`, on the focused change's file.
+    ToggleRenderedView,
+    /// `L`, on the focused change's file.
+    TogglePieceLabels,
     ToggleJump,
     TogglePrSwitcher,
     /// The PR switcher asked for from outside the window, by a launch of Guided Review.app.
@@ -44,6 +48,10 @@ impl From<PaletteAction> for Intent {
             PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => Self::ToggleRead,
             PaletteAction::WrapLines | PaletteAction::StopWrappingLines => Self::ToggleWrapLines,
             PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => Self::ToggleWhitespace,
+            PaletteAction::ShowPieceLabels | PaletteAction::HidePieceLabels => {
+                Self::TogglePieceLabels
+            }
+            PaletteAction::ShowRendered | PaletteAction::ShowCode => Self::ToggleRenderedView,
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
@@ -60,6 +68,8 @@ impl From<PaletteAction> for Intent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     Change(ReviewChange),
+    /// Switches the focused change's file; does nothing when there is none or it has no such switch.
+    ToggleFocusedFile(FileToggle),
     /// Opens the overlay, or closes it when open.
     Toggle(Overlay),
     /// Opens Settings, which is closed.
@@ -85,6 +95,13 @@ pub enum ReviewChange {
     ToggleTick(StepId),
     ToggleWrapLines,
     ToggleWhitespace,
+}
+
+/// What `R` and `L` switch on the focused change's file, which only the page can say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileToggle {
+    RenderedView,
+    PieceLabels,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +168,8 @@ impl Intent {
             | Self::NextUnreadStep
             | Self::ToggleRead
             | Self::ToggleWrapLines
+            | Self::ToggleRenderedView
+            | Self::TogglePieceLabels
             | Self::ToggleJump
             | Self::ToggleSettings
             | Self::ShowSettings
@@ -201,6 +220,8 @@ impl ReviewCore {
             },
             Intent::ToggleWrapLines => Effect::Change(ReviewChange::ToggleWrapLines),
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
+            Intent::ToggleRenderedView => Effect::ToggleFocusedFile(FileToggle::RenderedView),
+            Intent::TogglePieceLabels => Effect::ToggleFocusedFile(FileToggle::PieceLabels),
             Intent::ToggleJump => Effect::Toggle(Overlay::Jump),
             Intent::TogglePrSwitcher => Effect::Toggle(Overlay::PrSwitcher),
             Intent::ShowPrSwitcher => Effect::OpenPrSwitcher,

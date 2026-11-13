@@ -8,7 +8,9 @@ use super::diff_display::{ChangeId, DiffDisplay, FilesAtHead, HiddenLines, MoreC
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
 use super::more_lines::MoreLines;
+use super::piece_labels::{FileLabels, PieceLabels};
 use super::rendered_view::{FileView, FileViews, RenderedBlock, Rendering};
+use super::step_page::PieceDiff;
 use crate::pieces::ChangedFile;
 use std::sync::Arc;
 
@@ -26,6 +28,7 @@ pub struct DisplayOptions {
     wraps_lines: bool,
     image_previews: HashMap<FilePath, ImagePreview>,
     file_views: FileViews,
+    piece_labels: FileLabels,
     focused_change: Option<ChangeId>,
 }
 
@@ -42,6 +45,7 @@ impl DisplayOptions {
             wraps_lines: false,
             image_previews: HashMap::new(),
             file_views: FileViews::default(),
+            piece_labels: FileLabels::default(),
             focused_change: None,
         }
     }
@@ -138,6 +142,16 @@ impl DisplayOptions {
 
     pub fn show_file_as(&mut self, path: &FilePath, view: FileView) {
         self.file_views.show_as(path, view);
+    }
+
+    /// Whether a file box of several pieces shows its piece labels: the reviewer's choice, else the
+    /// starting rule over the pieces the box shows.
+    pub fn piece_labels(&self, path: &FilePath, pieces: &[PieceDiff]) -> PieceLabels {
+        self.piece_labels.of(path, pieces)
+    }
+
+    pub fn show_piece_labels(&mut self, path: &FilePath, labels: PieceLabels) {
+        self.piece_labels.show_as(path, labels);
     }
 
     /// The blocks of a Markdown file as its rendered view shows them; `None` until its text is read.

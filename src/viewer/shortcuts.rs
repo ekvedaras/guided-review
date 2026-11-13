@@ -17,6 +17,8 @@ const K: Chord = key('k');
 const N: Chord = key('n');
 const M: Chord = key('m');
 const W: Chord = key('w');
+const R: Chord = key('r');
+const L: Chord = key('l');
 const G: Chord = key('g');
 const QUESTION: Chord = key('?');
 const OPEN_BRACKET: Chord = key('[');
@@ -115,6 +117,8 @@ pub enum Command {
     WrapLines,
     MoreAbove,
     MoreBelow,
+    ToggleRenderedView,
+    TogglePieceLabels,
     Settings,
     Shortcuts,
     OpenOnGitHub,
@@ -123,7 +127,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -140,6 +144,8 @@ impl Command {
         Self::WrapLines,
         Self::MoreAbove,
         Self::MoreBelow,
+        Self::ToggleRenderedView,
+        Self::TogglePieceLabels,
         Self::Settings,
         Self::Shortcuts,
         Self::OpenOnGitHub,
@@ -159,6 +165,8 @@ impl Command {
             Self::ReadUp => &[UP],
             Self::MoreAbove => &[OPEN_BRACKET],
             Self::MoreBelow => &[CLOSE_BRACKET],
+            Self::ToggleRenderedView => &[R],
+            Self::TogglePieceLabels => &[L],
             Self::Jump => &[CMD_K],
             Self::ToggleRead => &[M],
             Self::CopyCode => &[CMD_C],
@@ -193,6 +201,8 @@ impl Command {
             Self::WrapLines => "wrap_lines",
             Self::MoreAbove => "more_above",
             Self::MoreBelow => "more_below",
+            Self::ToggleRenderedView => "toggle_rendered_view",
+            Self::TogglePieceLabels => "toggle_piece_labels",
             Self::Settings => "settings",
             Self::Shortcuts => "shortcuts",
             Self::OpenOnGitHub => "open_on_github",
@@ -220,6 +230,8 @@ impl Command {
             | Self::WrapLines
             | Self::MoreAbove
             | Self::MoreBelow
+            | Self::ToggleRenderedView
+            | Self::TogglePieceLabels
             | Self::Shortcuts
             | Self::OpenOnGitHub => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
@@ -241,7 +253,11 @@ impl Command {
             | Self::Jump => ShortcutGroup::Navigate,
             Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => ShortcutGroup::Comment,
-            Self::WrapLines | Self::MoreAbove | Self::MoreBelow => ShortcutGroup::View,
+            Self::WrapLines
+            | Self::MoreAbove
+            | Self::MoreBelow
+            | Self::ToggleRenderedView
+            | Self::TogglePieceLabels => ShortcutGroup::View,
             Self::Settings
             | Self::Shortcuts
             | Self::OpenOnGitHub
@@ -269,6 +285,8 @@ impl Command {
             Self::WrapLines => "Wrap long lines",
             Self::MoreAbove => "Show more lines above the focused change",
             Self::MoreBelow => "Show more lines below the focused change",
+            Self::ToggleRenderedView => "Show the focused change's file rendered, or as code",
+            Self::TogglePieceLabels => "Show or hide the piece labels in the focused change's file",
             Self::Settings => "Settings",
             Self::Shortcuts => "This list of shortcuts",
             Self::OpenOnGitHub => "Open the pull request on GitHub",
