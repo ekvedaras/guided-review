@@ -19,7 +19,7 @@ Rust 2024 gpui app.
 
 ## Install
 
-The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`). Once the gate is green, run `cargo install --path . --locked` and check that `guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit.
+The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`), run by its full path: a plain `guided-review` is the release install in `~/.local/bin`, which comes first on PATH, so `/tour` and normal use never run a trial build. Once the gate is green, run `cargo install --path . --locked` and check that `~/.cargo/bin/guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit.
 
 ## Seeing the app
 
