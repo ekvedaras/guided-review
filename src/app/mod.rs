@@ -814,11 +814,13 @@ fn open_writing_window(
 }
 
 /// A snapshot run draws behind the reviewer's work and never takes their focus.
+#[cfg(feature = "snapshots")]
 fn takes_focus() -> bool {
-    #[cfg(feature = "snapshots")]
-    if snapshots::is_on() {
-        return false;
-    }
+    !snapshots::is_on()
+}
+
+#[cfg(not(feature = "snapshots"))]
+fn takes_focus() -> bool {
     true
 }
 

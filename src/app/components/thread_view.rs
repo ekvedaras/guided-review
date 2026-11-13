@@ -871,8 +871,7 @@ fn person_avatar(colors: &Colors, comment: &ThreadComment, size: f32, cx: &mut A
                     .author
                     .chars()
                     .next()
-                    .map(|first| first.to_uppercase().collect::<String>())
-                    .unwrap_or_default(),
+                    .map_or_default(|first| first.to_uppercase().collect::<String>()),
             )
             .into_any_element(),
     }
