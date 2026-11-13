@@ -192,3 +192,17 @@ fn the_keys_of_the_focused_change_are_on_the_page_with_defaults() {
         assert_eq!(command.scope(), KeyScope::Page, "{command:?}");
     }
 }
+
+#[test]
+fn s_hides_whitespace_and_a_asks_about_the_step_wherever_the_page_takes_keys() {
+    let keys = |command: Command| command.default_chords()[0].keystroke();
+
+    assert_eq!(keys(Command::HideWhitespace), "s");
+    assert_eq!(Command::HideWhitespace.scope(), KeyScope::Page);
+    assert_eq!(Command::HideWhitespace.group(), ShortcutGroup::View);
+    assert_eq!(Command::HideWhitespace.config_name(), "hide_whitespace");
+    assert_eq!(keys(Command::AskAboutStep), "a");
+    assert_eq!(Command::AskAboutStep.scope(), KeyScope::Page);
+    assert_eq!(Command::AskAboutStep.group(), ShortcutGroup::Read);
+    assert_eq!(Command::AskAboutStep.config_name(), "ask_about_step");
+}

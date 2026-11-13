@@ -78,7 +78,6 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
-use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -111,6 +110,8 @@ actions!(
         ToggleJump,
         CopySelection,
         ToggleWrapLines,
+        ToggleWhitespace,
+        AskAboutStep,
         ToggleSettings,
         GoToNextUnread,
         FocusNextChange,
@@ -2367,6 +2368,8 @@ impl OneStepLayout {
                 is_on,
                 Icon::Space,
                 "Hide whitespace",
+                Command::HideWhitespace,
+                cx,
             )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, |review| {
@@ -2375,26 +2378,31 @@ impl OneStepLayout {
             }))
         });
         let wrap = toolbar.wraps_lines.map(|is_on| {
-            toolbar_toggle(&colors, "wrap-lines", is_on, Icon::WrapText, "Wrap lines")
-                .tooltip(tooltip(|cx| {
-                    match keymap(cx).first_chord(Command::WrapLines) {
-                        Some(chord) => format!("Wrap long lines ({})", chord.spelled()),
-                        None => "Wrap long lines".to_owned(),
-                    }
-                    .into()
-                }))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.change_review(cx, |review| {
-                        review.display_options_mut().toggle_wrap_lines();
-                    });
-                }))
+            toolbar_toggle(
+                &colors,
+                "wrap-lines",
+                is_on,
+                Icon::WrapText,
+                "Wrap lines",
+                Command::WrapLines,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.change_review(cx, |review| {
+                    review.display_options_mut().toggle_wrap_lines();
+                });
+            }))
         });
         let toggles: Vec<Stateful<Div>> = whitespace.into_iter().chain(wrap).collect();
         let toggles = (!toggles.is_empty()).then(|| joined(&colors, toggles));
-        let ask = toolbar
-            .ask
-            .as_ref()
-            .map(|ask| self.ask_at(ask, ButtonKind::Tinted, cx));
+        let ask = toolbar.ask.as_ref().map(|ask| {
+            self.ask_at(ask, ButtonKind::Tinted, cx).child(button_keys(
+                &colors,
+                ButtonKind::Tinted,
+                Command::AskAboutStep,
+                cx,
+            ))
+        });
         div()
             .w_full()
             .pb_3()
@@ -3171,15 +3179,19 @@ fn toolbar_toggle(
     is_on: bool,
     icon: Icon,
     label: &'static str,
+    command: Command,
+    cx: &App,
 ) -> Stateful<Div> {
     let kind = if is_on {
         ButtonKind::JoinedOn
     } else {
         ButtonKind::Joined
     };
-    icon_label_button(colors, id, kind, ButtonSize::Small, icon, label).when(is_on, |toggle| {
-        toggle.child(sized_icon(Icon::Check, colors.accent, px(12.)))
-    })
+    icon_label_button(colors, id, kind, ButtonSize::Small, icon, label)
+        .child(button_keys(colors, kind, command, cx))
+        .when(is_on, |toggle| {
+            toggle.child(sized_icon(Icon::Check, colors.accent, px(12.)))
+        })
 }
 
 fn tick_button(
@@ -3447,6 +3459,14 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &ToggleWrapLines, window, cx| {
                 this.act(Intent::ToggleWrapLines, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleWhitespace, window, cx| {
+                if this.session.read(cx).rows().offers_hiding_whitespace() {
+                    this.act(Intent::ToggleWhitespace, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &AskAboutStep, window, cx| {
+                this.act(Intent::AskAboutScreen, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleJump, window, cx| {
                 this.act(Intent::ToggleJump, window, cx);

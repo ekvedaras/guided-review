@@ -220,10 +220,9 @@ impl PaletteAction {
             Self::ShowRendered | Self::ShowCode => Some(Command::ToggleRenderedView),
             Self::Settings => Some(Command::Settings),
             Self::Shortcuts => Some(Command::Shortcuts),
-            Self::HideWhitespace
-            | Self::ShowWhitespace
-            | Self::AskAboutStep
-            | Self::FinishReview
+            Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
+            Self::AskAboutStep => Some(Command::AskAboutStep),
+            Self::FinishReview
             | Self::OpenOnGitHub
             | Self::SwitchPr
             | Self::CheckForUpdates

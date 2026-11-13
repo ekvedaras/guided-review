@@ -360,6 +360,19 @@ fn a_step_whose_pieces_fold_offers_the_fold_only_when_it_has_pieces() {
 }
 
 #[test]
+fn a_screen_offers_hiding_whitespace_only_where_it_shows_code() {
+    let pull = Pull::new();
+    let with_code = pull.open(two_steps());
+    let diagram_only = pull.open(
+        json!([{"id": "skim", "title": "Skim", "why": "because", "skim": true,
+        "diagram": "graph TD; A-->B", "pieces": [], "children": []}]),
+    );
+
+    assert!(with_code.page().offers_hiding_whitespace());
+    assert!(!diagram_only.page().offers_hiding_whitespace());
+}
+
+#[test]
 fn the_row_of_a_line_is_where_the_page_shows_it() {
     let review = Pull::new().open(two_steps());
     let page = review.page();
