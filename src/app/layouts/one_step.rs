@@ -26,7 +26,7 @@ use crate::app::components::button::{
     toggle_button,
 };
 use crate::app::components::card::card;
-use crate::app::components::chip::{callout, chip, dev_build_chip, dropping_in, notice_band};
+use crate::app::components::chip::{build_chip, callout, chip, dropping_in, notice_band};
 use crate::app::components::comment_composer::{
     CommentCapabilities, CommentComposer, ComposerActions, OnCompose, QueuedCommentNote,
 };
@@ -79,7 +79,7 @@ use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::SidebarTourAgent;
-use crate::app::updater::{UpdateInstalled, Updater, Updates};
+use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
@@ -254,7 +254,11 @@ impl OneStepLayout {
             window,
             |this, palette, event: &JumpEvent, window, cx| match event {
                 JumpEvent::QueryChanged(query) => {
-                    let groups = this.session.read(cx).review().palette(query);
+                    let groups = this
+                        .session
+                        .read(cx)
+                        .review()
+                        .palette(query, running_build());
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
                 JumpEvent::Act(action) => this.act((*action).into(), window, cx),
@@ -1004,7 +1008,7 @@ impl OneStepLayout {
                 .session
                 .update(cx, |session, cx| session.apply(change, cx)),
             Effect::Toggle(Overlay::Jump) => {
-                let groups = self.session.read(cx).review().palette("");
+                let groups = self.session.read(cx).review().palette("", running_build());
                 self.jump.update(cx, |palette, cx| {
                     if palette.is_open() {
                         palette.close(window, cx);
@@ -1044,6 +1048,14 @@ impl OneStepLayout {
                 Err(error) => {
                     post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));
                 }
+            },
+            Effect::CheckForUpdates => match cx.try_global::<Updates>().cloned() {
+                Some(Updates(updater)) => updater.update(cx, Updater::check_now),
+                None => post_toast(
+                    cx,
+                    ToastTone::Neutral,
+                    "This build does not take updates".to_owned(),
+                ),
             },
             Effect::Nothing | Effect::Refused(_) => {}
         }
@@ -1352,7 +1364,7 @@ impl OneStepLayout {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(colors.muted_text)
                             .child("Guided review")
-                            .children(dev_build_chip(&colors)),
+                            .children(build_chip(&colors)),
                     ),
             )
             .child(header)

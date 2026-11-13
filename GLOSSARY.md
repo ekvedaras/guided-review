@@ -84,7 +84,9 @@
 
 **App bundle**: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Launched with no PR, it shows the PR switcher alone in the window. Avoid: launcher, wrapper.
 
-**In the way**: Of the release install: another `guided-review` that the app runs instead of it, or that comes before its bin link on `PATH`, so updates never reach the reviewer. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary to remove. Avoid: shadowing.
+**In the way**: Of the release install, while it runs: another `guided-review` that comes before its bin link on `PATH`, so the tour skill and a terminal run that one and miss updates. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary. Avoid: shadowing.
+
+**Build**: Which app runs: the release install (no badge; it alone checks for updates, also from the palette's Check for updates), a local build such as `cargo install` (badge `DEV`), or the snapshot build (badge `TEST`). A local build running is not a problem; its badge says it. Avoid: dev mode.
 
 **Update**: A published release newer than the running app, built for this Mac, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
 

@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use guided_review::update::{
-    BundlePlaced, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
-    info_plist,
+    Build, BundlePlaced, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update,
+    Version, info_plist,
 };
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -233,18 +233,20 @@ fn the_release_install_running_and_first_on_path_has_nothing_in_its_way() {
 }
 
 #[test]
-fn a_source_build_running_while_a_release_is_installed_is_in_its_way() {
+fn a_source_build_running_is_a_local_build_with_nothing_in_its_way() {
     let home = Home::with_release_installed();
     let cargo_bin = home.source_build();
     let path = path_of(&[home.cargo_bin_folder(), home.bin_folder()]);
 
-    assert_eq!(
-        home.install().in_the_way(&cargo_bin, &path),
-        Some(InTheWay::Runs {
-            binary: cargo_bin,
-            release_install: home.bin_link(),
-        })
-    );
+    assert_eq!(home.install().in_the_way(&cargo_bin, &path), None);
+    assert_eq!(home.install().build_of(&cargo_bin), Build::Local);
+}
+
+#[test]
+fn the_binary_the_bin_link_points_at_is_the_release_build() {
+    let home = Home::with_release_installed();
+
+    assert_eq!(home.install().build_of(&home.bin_link()), Build::Release);
 }
 
 #[test]

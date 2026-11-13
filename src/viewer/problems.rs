@@ -287,25 +287,10 @@ impl fmt::Display for Problem {
                 formatter,
                 "The 👀 on the PR may tell its author the wrong thing; trying again when the window comes to the front: {reason}"
             ),
-            Self::ReleaseInstallInTheWay(InTheWay::Runs {
-                binary,
-                release_install,
-            }) => write!(
+            Self::ReleaseInstallInTheWay(InTheWay::FirstOnPath { binary, .. }) => write!(
                 formatter,
-                "Updates do not reach this app: it runs {binary}, not the release install \
-                 {release_install}. Remove {binary} and start guided-review again.",
-                binary = binary.display(),
-                release_install = release_install.display(),
-            ),
-            Self::ReleaseInstallInTheWay(InTheWay::FirstOnPath {
-                binary,
-                release_install,
-            }) => write!(
-                formatter,
-                "Updates do not reach guided-review in a terminal or the tour skill: {binary} comes \
-                 before the release install {release_install} on PATH. Remove {binary}.",
-                binary = binary.display(),
-                release_install = release_install.display(),
+                "{} comes first on PATH, so the tour skill misses updates",
+                binary.display()
             ),
         }
     }

@@ -17,7 +17,7 @@ use crate::viewer::{CloneRowProblem, Motion, Presence, SaveOutcome, SettingProbl
 use super::button::{
     ButtonKind, ButtonSize, button, icon_button, icon_label_button, toggle_button,
 };
-use super::chip::{chip, dev_build_chip, dropping_in, notice_band};
+use super::chip::{build_chip, chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, slide_in};
 use super::overlay::{close_presence, rise_for, scrim_fade};
@@ -1806,7 +1806,7 @@ impl Render for SettingsPanel {
                     .occlude()
                     .child(
                         TitleBarArea::new("settings-title-bar", colors.background).children(
-                            dev_build_chip(&colors)
+                            build_chip(&colors)
                                 .map(|chip| div().pl(px(TRAFFIC_LIGHTS_WIDTH)).child(chip)),
                         ),
                     )

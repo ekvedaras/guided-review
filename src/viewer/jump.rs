@@ -174,6 +174,8 @@ pub enum PaletteAction {
     SwitchPr,
     Settings,
     Shortcuts,
+    /// Asks GitHub for a newer release now, not when the next timed check comes.
+    CheckForUpdates,
     /// Quits and opens this PR on this screen in a new app, as after an install.
     RestartApp,
 }
@@ -194,6 +196,7 @@ impl PaletteAction {
             Self::SwitchPr => "Switch pull request",
             Self::Settings => "Settings",
             Self::Shortcuts => "Keyboard shortcuts",
+            Self::CheckForUpdates => "Check for updates",
             Self::RestartApp => "Restart app here",
         }
     }
@@ -212,6 +215,7 @@ impl PaletteAction {
             | Self::FinishReview
             | Self::OpenOnGitHub
             | Self::SwitchPr
+            | Self::CheckForUpdates
             | Self::RestartApp => None,
         }
     }

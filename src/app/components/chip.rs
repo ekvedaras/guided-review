@@ -1,3 +1,4 @@
+use crate::app::updater::running_build;
 use gpui::{AnimationElement, Div, ElementId, ParentElement, Styled, div, phi, px};
 
 use super::motion::{BANNER_DROP, Edge, STATE, slide_in};
@@ -21,12 +22,12 @@ pub fn chip(colors: &Colors, tone: Tone) -> Div {
         .line_height(phi())
 }
 
-/// Marks a debug build's window, so a `cargo run` or snapshot window is not taken for the installed app.
-pub fn dev_build_chip(colors: &Colors) -> Option<Div> {
-    cfg!(debug_assertions).then(|| {
+/// Marks a window not of the release install, `DEV` or `TEST`, so it is not taken for the app that updates.
+pub fn build_chip(colors: &Colors) -> Option<Div> {
+    running_build().badge().map(|badge| {
         chip(colors, Tone::Warning)
             .font_weight(gpui::FontWeight::BOLD)
-            .child("DEV")
+            .child(badge)
     })
 }
 

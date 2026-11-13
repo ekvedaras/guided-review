@@ -61,6 +61,7 @@ use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
+use crate::update::Build;
 
 pub use crate::tour::StepId;
 pub use kept::Review;
@@ -1403,12 +1404,13 @@ impl ReviewCore {
     }
 
     /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
-    pub fn palette(&self, query: &str) -> Vec<PaletteGroup> {
-        jump::palette(self.jump_targets(""), &self.palette_actions(), query)
+    pub fn palette(&self, query: &str, build: Build) -> Vec<PaletteGroup> {
+        jump::palette(self.jump_targets(""), &self.palette_actions(build), query)
     }
 
     /// What the palette can do on the open screen.
-    pub fn palette_actions(&self) -> Vec<PaletteAction> {
+    /// Checking for updates only where the build takes them.
+    pub fn palette_actions(&self, build: Build) -> Vec<PaletteAction> {
         let step = match &self.screen {
             Screen::Step(id) => Some(id),
             Screen::Summary | Screen::SafetyNet => None,
@@ -1437,6 +1439,9 @@ impl ReviewCore {
         let finish = self
             .can_finish_review()
             .then_some(PaletteAction::FinishReview);
+        let check_for_updates = build
+            .takes_updates()
+            .then_some(PaletteAction::CheckForUpdates);
         next_unread
             .into_iter()
             .chain(tick)
@@ -1448,8 +1453,9 @@ impl ReviewCore {
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,
                 PaletteAction::Shortcuts,
-                PaletteAction::RestartApp,
             ])
+            .chain(check_for_updates)
+            .chain([PaletteAction::RestartApp])
             .collect()
     }
 
