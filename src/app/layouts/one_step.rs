@@ -62,7 +62,8 @@ use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
-    RowMark, RowPlace, check_flag, count_badge, row_note, row_places, sidebar_row, skim_chip,
+    RowMark, RowPlace, check_flag, count_badge, row_label, row_note, row_places, sidebar_row,
+    skim_chip,
 };
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -1213,7 +1214,7 @@ impl OneStepLayout {
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, |review| review.go_to_summary());
             }))
-            .child("Summary");
+            .child(row_label("Summary"));
         let sync_notices = sidebar
             .sync_banner
             .clone()
@@ -1296,7 +1297,7 @@ impl OneStepLayout {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.go_to(&id));
                 }))
-                .child(div().flex_1().min_w_0().child(InlineMarkdown::new(
+                .child(row_label(InlineMarkdown::new(
                     format!("sidebar-{}", step.id),
                     &step.label,
                 )))

@@ -16,6 +16,10 @@ const INDENT_PER_DEPTH: f32 = 16.;
 /// on its first line even when it wraps.
 const LINE_HEIGHT: f32 = 22.;
 const MARK_SIZE: f32 = 14.;
+/// The row's inset at top, bottom and right, so a mark in its corner is as far from the top edge as
+/// from the right. Text keeps `TEXT_END` more room at the right.
+const ROW_INSET: f32 = 3.;
+const TEXT_END: f32 = 5.;
 
 /// What the reader has done with the screen a row opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,8 +49,8 @@ pub fn sidebar_row(
         .line_height(px(LINE_HEIGHT))
         .mx_2()
         .pl(indent(depth))
-        .pr_2()
-        .py(px(3.))
+        .pr(px(ROW_INSET))
+        .py(px(ROW_INSET))
         .flex()
         .items_start()
         .gap_2()
@@ -105,17 +109,24 @@ pub fn check_flag(colors: &Colors) -> impl IntoElement {
     div()
         .id("check-flag")
         .flex_none()
-        .h(px(LINE_HEIGHT))
+        .size(px(LINE_HEIGHT))
         .flex()
         .items_center()
+        .justify_center()
         .tooltip(tooltip(|_| "Has something to check".into()))
         .child(sized_icon(Icon::Flag, colors.warning, px(12.)))
+}
+
+/// A row's label: it takes the room left and keeps clear of the row's right edge.
+pub fn row_label(label: impl IntoElement) -> Div {
+    div().flex_1().min_w_0().pr(px(TEXT_END)).child(label)
 }
 
 /// Small text after a row's label, centred on the label's first line like the badges.
 pub fn row_note(colors: &Colors, note: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex_none()
+        .mr(px(TEXT_END))
         .h(px(LINE_HEIGHT))
         .flex()
         .items_center()
@@ -128,6 +139,7 @@ pub fn row_note(colors: &Colors, note: impl Into<SharedString>) -> impl IntoElem
 pub fn skim_chip(colors: &Colors) -> impl IntoElement {
     div()
         .flex_none()
+        .mr(px(TEXT_END))
         .h(px(LINE_HEIGHT))
         .flex()
         .items_center()
@@ -204,9 +216,11 @@ pub fn count_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
     (count > 0).then(|| {
         div()
             .flex_none()
+            .min_w(px(LINE_HEIGHT))
             .h(px(LINE_HEIGHT))
             .flex()
             .items_center()
+            .justify_center()
             .child(
                 div()
                     .px_1p5()
