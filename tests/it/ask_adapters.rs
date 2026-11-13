@@ -178,19 +178,14 @@ fn stopping_a_turn_asks_claude_to_interrupt_over_its_input_and_keeps_the_process
     let dir = TempDir::new().unwrap();
     let clone = TempDir::new().unwrap();
     let launcher = ClaudeCli::with_binary(fake_claude(dir.path()));
-    let agent = launcher.start(&launch(clone.path(), None)).unwrap();
+    let mut agent = launcher.start(&launch(clone.path(), None)).unwrap();
 
     agent.turn_stopper().stop_turn().unwrap();
+    agent
+        .ask("still there?", &mut |_| {})
+        .expect("the process outlives the stopped turn");
 
-    let received = dir.path().join("received");
-    let mut lines = String::new();
-    for _ in 0..100 {
-        lines = std::fs::read_to_string(&received).unwrap_or_default();
-        if !lines.is_empty() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    let lines = std::fs::read_to_string(dir.path().join("received")).unwrap();
     let sent: Value = serde_json::from_str(lines.lines().next().unwrap()).unwrap();
     assert_eq!(sent["type"], "control_request");
     assert_eq!(sent["request"]["subtype"], "interrupt");
