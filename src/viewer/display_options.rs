@@ -4,11 +4,14 @@ use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
-use super::diff_display::{ChangeId, DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
+use super::diff_display::{DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
+use super::focused_change::Focus;
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
 use super::more_lines::MoreLines;
+use super::piece_labels::{FileLabels, PieceLabels};
 use super::rendered_view::{FileView, FileViews, RenderedBlock, Rendering};
+use super::step_page::PieceDiff;
 use crate::pieces::ChangedFile;
 use std::sync::Arc;
 
@@ -26,7 +29,8 @@ pub struct DisplayOptions {
     wraps_lines: bool,
     image_previews: HashMap<FilePath, ImagePreview>,
     file_views: FileViews,
-    focused_change: Option<ChangeId>,
+    piece_labels: FileLabels,
+    focused_change: Option<Focus>,
 }
 
 impl DisplayOptions {
@@ -42,6 +46,7 @@ impl DisplayOptions {
             wraps_lines: false,
             image_previews: HashMap::new(),
             file_views: FileViews::default(),
+            piece_labels: FileLabels::default(),
             focused_change: None,
         }
     }
@@ -94,11 +99,11 @@ impl DisplayOptions {
     }
 
     /// The change the change keys act on, when it is on the screen shown.
-    pub fn focused_change(&self) -> Option<&ChangeId> {
+    pub fn focused_change(&self) -> Option<&Focus> {
         self.focused_change.as_ref()
     }
 
-    pub(super) fn focus_change(&mut self, change: ChangeId) {
+    pub(super) fn focus_change(&mut self, change: Focus) {
         self.focused_change = Some(change);
     }
 
@@ -138,6 +143,16 @@ impl DisplayOptions {
 
     pub fn show_file_as(&mut self, path: &FilePath, view: FileView) {
         self.file_views.show_as(path, view);
+    }
+
+    /// Whether a file box of several pieces shows its piece labels: the reviewer's choice, else the
+    /// starting rule over the pieces the box shows.
+    pub fn piece_labels(&self, path: &FilePath, pieces: &[PieceDiff]) -> PieceLabels {
+        self.piece_labels.of(path, pieces)
+    }
+
+    pub fn show_piece_labels(&mut self, path: &FilePath, labels: PieceLabels) {
+        self.piece_labels.show_as(path, labels);
     }
 
     /// The blocks of a Markdown file as its rendered view shows them; `None` until its text is read.

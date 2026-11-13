@@ -18,8 +18,8 @@ use crate::app::updater::{Updates, running_build};
 use crate::file_path::FilePath;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
-    AgentStatus, FileView, LineKind, LineLocation, PageRow, Problem, ProblemKind, TerminalId,
-    TextBox,
+    AgentStatus, FileView, LineKind, LineLocation, PageRow, PieceLabels, Problem, ProblemKind,
+    TerminalId, TextBox,
 };
 
 const MAX_SCREENS: usize = 16;
@@ -56,10 +56,12 @@ enum Scene {
     SettingsKeys,
     FocusedChange,
     SettingsMoreLines,
+    PieceLabelsShown,
+    PieceLabelsHidden,
 }
 
 impl Scene {
-    const ALL: [Self; 28] = [
+    const ALL: [Self; 30] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -88,6 +90,8 @@ impl Scene {
         Self::SettingsKeys,
         Self::FocusedChange,
         Self::SettingsMoreLines,
+        Self::PieceLabelsShown,
+        Self::PieceLabelsHidden,
     ];
 
     fn file_name(self) -> &'static str {
@@ -120,6 +124,8 @@ impl Scene {
             Self::SettingsKeys => "47-settings-keys",
             Self::FocusedChange => "48-focused-change",
             Self::SettingsMoreLines => "49-settings-more-lines",
+            Self::PieceLabelsShown => "50-piece-labels",
+            Self::PieceLabelsHidden => "51-piece-labels-hidden",
         }
     }
 }
@@ -286,6 +292,63 @@ impl OneStepLayout {
         }
     }
 
+    /// The first file box with piece labels shows them or not, and the page goes to its header.
+    fn stage_piece_labels(&mut self, labels: PieceLabels, cx: &mut Context<Self>) {
+        self.open_every_box(cx);
+        if self.first_box_with_labels(cx).is_none() {
+            self.change_review(cx, |review| review.go_to_summary());
+            for _ in 0..MAX_SCREENS {
+                if !self.change_review(cx, |review| review.go_forward()) {
+                    break;
+                }
+                self.open_every_box(cx);
+                if self.first_box_with_labels(cx).is_some() {
+                    break;
+                }
+            }
+        }
+        let Some((_, path)) = self.first_box_with_labels(cx) else {
+            eprintln!("no file box with piece labels on this screen");
+            return;
+        };
+        self.change_review(cx, |review| {
+            review
+                .display_options_mut()
+                .show_piece_labels(&path, labels);
+        });
+        if let Some((row, _)) = self.first_box_with_labels(cx) {
+            self.scroll_to_row(row.saturating_sub(1));
+        }
+    }
+
+    /// A read or skim step folds its boxes, and a folded box has no labels to toggle.
+    fn open_every_box(&mut self, cx: &mut Context<Self>) {
+        let folded: Vec<_> = {
+            let rows = self.session.read(cx).rows();
+            (0..rows.len())
+                .filter_map(|index| match rows.row(index)? {
+                    PageRow::PieceHeader(heading) => heading.fold.clone(),
+                    _ => None,
+                })
+                .filter(|fold| fold.is_folded)
+                .collect()
+        };
+        for fold in folded {
+            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
+        }
+    }
+
+    fn first_box_with_labels(&self, cx: &App) -> Option<(usize, FilePath)> {
+        let rows = self.session.read(cx).rows();
+        (0..rows.len()).find_map(|index| match rows.row(index)? {
+            PageRow::PieceHeader(heading) => heading
+                .labels
+                .as_ref()
+                .map(|switch| (index, switch.path.clone())),
+            _ => None,
+        })
+    }
+
     /// A symbol's label with code under it, so the pinned header has a symbol to name.
     fn first_marker_over_code(&self, cx: &App) -> Option<usize> {
         let rows = self.session.read(cx).rows();
@@ -386,7 +449,10 @@ impl OneStepLayout {
                 let rows = self.screen_list.item_count();
                 self.scroll_to_row(rows / 2);
             }
+            Scene::PieceLabelsShown => self.stage_piece_labels(PieceLabels::Shown, cx),
+            Scene::PieceLabelsHidden => self.stage_piece_labels(PieceLabels::Hidden, cx),
             Scene::PinnedFileHeader => {
+                self.stage_piece_labels(PieceLabels::Shown, cx);
                 let row = self
                     .first_marker_over_code(cx)
                     .unwrap_or_else(|| self.screen_list.item_count() / 2);
@@ -521,6 +587,7 @@ impl OneStepLayout {
             Scene::StickyStepBar | Scene::PinnedFileHeader | Scene::FocusedChange => {
                 self.scroll_to_row(0);
             }
+            Scene::PieceLabelsShown | Scene::PieceLabelsHidden => self.go_to_first_open_code(cx),
             Scene::Toasts => {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);

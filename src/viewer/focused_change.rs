@@ -6,12 +6,22 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::diff_display::{ChangeId, MoreContext};
+use super::jump::{PaletteAction, PaletteGroup};
+use super::piece_labels::{LabelSwitch, PieceLabels};
+use super::rendered_view::{FileView, ViewSwitch};
 use super::review::Review;
+use crate::file_path::FilePath;
+use crate::update::Build;
 
 /// One change of the screen as the page shows it: the changed lines with the unchanged lines around
 /// them, and what hangs under them.
 #[derive(Debug, Clone)]
 pub struct PageChange {
+    path: FilePath,
+    /// A rendered file box is one change with no changed hunk of its own.
+    is_rendered_file: bool,
+    view: Option<ViewSwitch>,
+    labels: Option<LabelSwitch>,
     pub(super) ids: Vec<ChangeId>,
     pub(super) rows: Range<usize>,
     pub(super) more_above: Option<MoreContext>,
@@ -19,6 +29,34 @@ pub struct PageChange {
 }
 
 impl PageChange {
+    pub(super) fn new(
+        file: ChangeFile,
+        ids: Vec<ChangeId>,
+        rows: Range<usize>,
+        more: (Option<MoreContext>, Option<MoreContext>),
+    ) -> Self {
+        Self {
+            is_rendered_file: ids.is_empty(),
+            path: file.path,
+            view: file.view,
+            labels: file.labels,
+            ids,
+            rows,
+            more_above: more.0,
+            more_below: more.1,
+        }
+    }
+
+    /// The Code / Rendered switch of the change's file box, when it has one.
+    pub fn view(&self) -> Option<&ViewSwitch> {
+        self.view.as_ref()
+    }
+
+    /// The file the change is in.
+    pub fn path(&self) -> &FilePath {
+        &self.path
+    }
+
     /// The page rows it spans, first to last.
     pub fn rows(&self) -> Range<usize> {
         self.rows.clone()
@@ -28,13 +66,38 @@ impl PageChange {
         self.rows.start
     }
 
-    pub(super) fn holds(&self, id: &ChangeId) -> bool {
-        self.ids.contains(id)
+    pub(super) fn holds(&self, focus: &Focus) -> bool {
+        match focus {
+            Focus::Change(id) => self.ids.contains(id),
+            Focus::RenderedFile(path) => self.is_rendered_file && self.path == *path,
+        }
+    }
+
+    fn focus_target(&self) -> Focus {
+        match self.ids.first() {
+            Some(id) => Focus::Change(id.clone()),
+            None => Focus::RenderedFile(self.path.clone()),
+        }
     }
 
     pub(super) fn is_in_view(&self, visible: &Range<usize>) -> bool {
         self.rows.start < visible.end && visible.start < self.rows.end
     }
+}
+
+/// What has the focus: a changed hunk, or a file box shown rendered, which has no hunks but must
+/// keep the focus so the key that rendered it can switch it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Focus {
+    Change(ChangeId),
+    RenderedFile(FilePath),
+}
+
+/// What the box of a change's file offers: the Code / Rendered switch and the piece labels' toggle.
+pub(super) struct ChangeFile {
+    pub path: FilePath,
+    pub view: Option<ViewSwitch>,
+    pub labels: Option<LabelSwitch>,
 }
 
 /// Where the focused change is in the window, in pixels from the top of the view: what `Down` and
@@ -120,9 +183,10 @@ impl Review {
         if page.focused_index() == Some(at) {
             return false;
         }
-        page.changes()
-            .get(at)
-            .is_some_and(|change| self.focus(change).is_some())
+        page.changes().get(at).is_some_and(|change| {
+            self.focus(change);
+            true
+        })
     }
 
     /// The window shows these rows of the page. A focus that is not among them goes to the first
@@ -130,7 +194,10 @@ impl Review {
     pub fn follow_scroll(&mut self, visible: Range<usize>) -> bool {
         let page = Arc::clone(self.page());
         page.change_to_focus_for_view(&visible)
-            .is_some_and(|change| self.focus(change).is_some())
+            .is_some_and(|change| {
+                self.focus(change);
+                true
+            })
     }
 
     /// `Down`: scrolls through a focused change taller than the view until its end shows, then
@@ -160,8 +227,74 @@ impl Review {
         };
         target
             .and_then(|target| page.changes().get(target))
-            .and_then(|change| self.focus(change))
+            .map(|change| self.focus(change))
             .map_or(ReadStep::Nothing, ReadStep::Focused)
+    }
+
+    /// What the palette can do on the open screen, with the toggles of the focused change's file.
+    pub fn palette_actions(&self, build: Build) -> Vec<PaletteAction> {
+        self.palette_actions_with(build, self.file_toggle_actions())
+    }
+
+    /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
+    pub fn palette(&self, query: &str, build: Build) -> Vec<PaletteGroup> {
+        self.palette_with(query, build, self.file_toggle_actions())
+    }
+
+    fn file_toggle_actions(&self) -> Vec<PaletteAction> {
+        let Some(change) = self.page().focused_change() else {
+            return Vec::new();
+        };
+        let view = change.view.as_ref().map(|switch| match switch.view {
+            FileView::Code => PaletteAction::ShowRendered,
+            FileView::Rendered => PaletteAction::ShowCode,
+        });
+        let labels = change.labels.as_ref().map(|switch| match switch.labels {
+            PieceLabels::Shown => PaletteAction::HidePieceLabels,
+            PieceLabels::Hidden => PaletteAction::ShowPieceLabels,
+        });
+        labels.into_iter().chain(view).collect()
+    }
+
+    /// `L`: shows or hides the piece labels of the focused change's file. Says whether it did: not
+    /// with no focused change, nor in a file whose box has no labels.
+    pub fn toggle_focused_piece_labels(&mut self) -> bool {
+        let Some(switch) = self
+            .page()
+            .focused_change()
+            .and_then(|change| change.labels.clone())
+        else {
+            return false;
+        };
+        self.display_options_mut()
+            .show_piece_labels(&switch.path, switch.labels.flipped());
+        true
+    }
+
+    /// `R`: switches the focused change's file between Code and Rendered. Says whether it did: not
+    /// with no focused change, nor in a file with no Rendered view.
+    pub fn toggle_focused_file_view(&mut self) -> bool {
+        let Some(switch) = self
+            .page()
+            .focused_change()
+            .and_then(|change| change.view.clone())
+        else {
+            return false;
+        };
+        let view = match switch.view {
+            FileView::Code => FileView::Rendered,
+            FileView::Rendered => FileView::Code,
+        };
+        self.display_options_mut().show_file_as(&switch.path, view);
+        let page = Arc::clone(self.page());
+        if let Some(change) = page
+            .changes()
+            .iter()
+            .find(|change| *change.path() == switch.path)
+        {
+            self.focus(change);
+        }
+        true
     }
 
     fn show_more(&mut self, edge: impl FnOnce(&PageChange) -> Option<MoreContext>) -> bool {
@@ -183,12 +316,12 @@ impl Review {
             }
             (Way::Previous, None) => count.checked_sub(1)?,
         };
-        self.focus(page.changes().get(target)?)
+        Some(self.focus(page.changes().get(target)?))
     }
 
-    fn focus(&mut self, change: &PageChange) -> Option<usize> {
-        let id = change.ids.first()?.clone();
-        self.display_options_mut().focus_change(id);
-        Some(change.first_row())
+    fn focus(&mut self, change: &PageChange) -> usize {
+        self.display_options_mut()
+            .focus_change(change.focus_target());
+        change.first_row()
     }
 }

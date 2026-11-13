@@ -216,12 +216,17 @@ impl Page {
         self.line_rows.get(line).copied()
     }
 
-    /// The row a jump lands on: a file's first piece, a symbol's piece, else the top.
+    /// The row a jump lands on: a file's first piece, a symbol's piece (its file's header while the
+    /// file's piece labels are hidden), else the top.
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
         let piece = match &target.place {
             JumpPlace::StepTop => None,
             JumpPlace::File(path) => self.pieces.iter().find(|piece| piece.path == *path),
-            JumpPlace::Piece(id) => self.pieces.iter().find(|piece| piece.id == *id),
+            JumpPlace::Piece(id) => self
+                .pieces
+                .iter()
+                .find(|piece| piece.id == *id)
+                .or_else(|| self.pieces.iter().find(|piece| piece.path == *id.path())),
         };
         piece.map_or(0, |piece| piece.row)
     }

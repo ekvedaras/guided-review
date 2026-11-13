@@ -72,11 +72,11 @@ fn every_chord_the_app_can_read_is_one_gpui_can_bind() {
 #[test]
 fn a_command_named_in_the_keys_table_takes_only_its_new_keys() {
     let keymap = keymap_of(
-        "[keys]\nwrap_lines = \"l\"\nnext_screen = [\"space\", \"n\"]\nnext_unread_step = \"u\"",
+        "[keys]\nwrap_lines = \"y\"\nnext_screen = [\"space\", \"n\"]\nnext_unread_step = \"u\"",
     )
     .unwrap();
 
-    assert_eq!(keys(&keymap, Command::WrapLines), ["l"]);
+    assert_eq!(keys(&keymap, Command::WrapLines), ["y"]);
     assert_eq!(keys(&keymap, Command::NextScreen), ["space", "n"]);
     assert!(keymap.is_changed(Command::WrapLines));
     assert_eq!(keys(&keymap, Command::Jump), ["cmd-k"]);
@@ -226,15 +226,15 @@ fn going_back_to_a_default_cannot_leave_a_new_clash() {
 
 #[test]
 fn a_config_with_no_problem_resolves_to_its_keymap() {
-    let (keymap, problems) = resolved("[keys]\nwrap_lines = \"l\"");
+    let (keymap, problems) = resolved("[keys]\nwrap_lines = \"y\"");
 
-    assert_eq!(keys(&keymap, Command::WrapLines), ["l"]);
+    assert_eq!(keys(&keymap, Command::WrapLines), ["y"]);
     assert_eq!(problems.len(), 0);
 }
 
 #[test]
 fn the_notice_at_start_counts_the_problems_and_points_to_settings() {
-    let (_, none) = resolved("[keys]\nwrap_lines = \"l\"");
+    let (_, none) = resolved("[keys]\nwrap_lines = \"y\"");
     assert_eq!(none.len(), 0);
     let one = Config::from_text("[keys]\njump = \"cmd-\"")
         .unwrap()

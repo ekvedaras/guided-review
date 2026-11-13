@@ -13,13 +13,14 @@ use super::rows::{
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
+use crate::viewer::focused_change::ChangeFile;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
     BoxState, CommentPlace, FileBlock, LineLocation, Markdown, NoteSubject, NotesButton, PieceDiff,
     Place, QueuedComment, SafetyNetPage, StepId, StepPage, ThreadView, TourLead,
     hidden_lines_after, hidden_lines_before,
 };
-use crate::viewer::{FileView, PageChange, Rendering, ViewSwitch};
+use crate::viewer::{FileView, LabelSwitch, PageChange, PieceLabels, Rendering, ViewSwitch};
 
 /// The rows of a screen, the file blocks they show, and the diagram of a step.
 pub(super) struct Laid {
@@ -306,6 +307,10 @@ impl<'a> Builder<'a> {
                 && piece.binary_file.is_none()
         };
         let wraps = self.review.display_options().wraps_lines();
+        let labels = self.label_switch(&block);
+        let shows_labels = labels
+            .as_ref()
+            .is_some_and(|switch| switch.labels == PieceLabels::Shown);
         let row_id = if let [piece] = block.pieces.as_slice() {
             self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
                 fold,
@@ -338,12 +343,15 @@ impl<'a> Builder<'a> {
             piece.id.to_string()
         } else {
             self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
-                view: switch,
+                view: switch.clone(),
+                labels: labels.clone(),
                 ..whole_file_heading(&block, fold)
             })));
             for piece in block.without_rows() {
-                self.rows
-                    .push(PageRow::PieceMarker(Arc::new(heading(piece))));
+                if shows_labels {
+                    self.rows
+                        .push(PageRow::PieceMarker(Arc::new(heading(piece))));
+                }
                 if has_no_change_since_read(piece) {
                     self.rows.push(PageRow::NoChangeSinceRead);
                 }
@@ -353,7 +361,7 @@ impl<'a> Builder<'a> {
             }
             block.path.to_string()
         };
-        let shows_markers = !block.has_one_piece();
+        let shows_markers = shows_labels;
         let hunks = block.hunks();
         for (index, hunk) in hunks.iter().enumerate() {
             if let Some(gap) = hidden_lines_before(hunks, index) {
@@ -384,12 +392,16 @@ impl<'a> Builder<'a> {
                     .push(PageRow::Line(Arc::new(ShownLine::of(line, wraps))));
                 self.hang(here);
             }
-            self.changes.push(PageChange {
-                ids: hunk.changes.clone(),
-                rows: first_row..self.rows.len(),
-                more_above: hunk.more_above.clone(),
-                more_below: hunk.more_below.clone(),
-            });
+            self.changes.push(PageChange::new(
+                ChangeFile {
+                    path: block.path.clone(),
+                    view: switch.clone(),
+                    labels: labels.clone(),
+                },
+                hunk.changes.clone(),
+                first_row..self.rows.len(),
+                (hunk.more_above.clone(), hunk.more_below.clone()),
+            ));
         }
         if let Some(gap) = hidden_lines_after(hunks) {
             self.rows.push(PageRow::HunkGap(Arc::new(HunkGapRow::new(
@@ -399,6 +411,20 @@ impl<'a> Builder<'a> {
         }
         self.rows.push(PageRow::PieceEnd);
         self.blocks.push(block);
+    }
+
+    /// The piece labels' toggle of a code box of several pieces, set to what the box shows.
+    fn label_switch(&self, block: &FileBlock) -> Option<LabelSwitch> {
+        if block.has_one_piece() {
+            return None;
+        }
+        Some(LabelSwitch {
+            path: block.path.clone(),
+            labels: self
+                .review
+                .display_options()
+                .piece_labels(&block.path, &block.pieces),
+        })
     }
 
     /// The Code / Rendered switch of a box whose file can be rendered, set to the view it shows.
@@ -426,14 +452,15 @@ impl<'a> Builder<'a> {
         let header = match block.pieces.as_slice() {
             [piece] => PieceHeading {
                 fold,
-                view: Some(switch),
+                view: Some(switch.clone()),
                 ..heading_of(piece, ask_of)
             },
             _ => PieceHeading {
-                view: Some(switch),
+                view: Some(switch.clone()),
                 ..whole_file_heading(&block, fold)
             },
         };
+        let header_row = self.rows.len();
         self.rows.push(PageRow::PieceHeader(Arc::new(header)));
         let path = block.path.clone();
         let display_options = self.review.display_options();
@@ -455,6 +482,16 @@ impl<'a> Builder<'a> {
             here.extend(self.under_lines.take_at(&line.location));
         }
         self.hang(here);
+        self.changes.push(PageChange::new(
+            ChangeFile {
+                path: path.clone(),
+                view: Some(switch),
+                labels: None,
+            },
+            Vec::new(),
+            header_row..self.rows.len(),
+            (None, None),
+        ));
         self.rows.push(PageRow::PieceEnd);
         self.rendered.push(path);
         self.blocks.push(block);
@@ -505,6 +542,7 @@ fn heading_of(piece: &PieceDiff, ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>) -
         repin_label: piece.repin_status.and_then(repin_label),
         code_link: piece.code_link().cloned(),
         view: None,
+        labels: None,
     }
 }
 
@@ -520,6 +558,7 @@ fn whole_file_heading(block: &FileBlock, fold: Option<BoxFold>) -> PieceHeading 
         repin_label: None,
         code_link: block.lines().next().map(|line| line.code_link.clone()),
         view: None,
+        labels: None,
     }
 }
 

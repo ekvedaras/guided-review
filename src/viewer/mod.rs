@@ -33,6 +33,7 @@ mod more_lines;
 mod new_commits;
 mod outdated_lines;
 mod page;
+mod piece_labels;
 mod ports;
 mod pr_notes;
 mod pr_switcher;
@@ -98,7 +99,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
-pub use focused_change::{ChangeInView, PageChange, ReadStep};
+pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
@@ -109,8 +110,8 @@ pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
 pub use intent::{
-    Effect, Intent, Overlay, Refusal, Reopening, RestartArgs, ReviewChange, SettingsSheet,
-    WindowMoment,
+    Effect, FileToggle, Intent, Overlay, Refusal, Reopening, RestartArgs, ReviewChange,
+    SettingsSheet, WindowMoment,
 };
 pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
@@ -126,6 +127,7 @@ pub use page::{
     ScreenFooter, SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
     SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
 };
+pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
     PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, RefreshWriter,

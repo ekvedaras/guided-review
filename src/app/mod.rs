@@ -62,7 +62,8 @@ use components::text_box;
 use layouts::one_step::{
     CloseWindow, Collaborators, CopySelection, FocusNextChange, FocusPreviousChange, GoBack,
     GoForward, GoToNextUnread, OneStepLayout, OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove,
-    ShowMoreBelow, ToggleJump, ToggleRead, ToggleSettings, ToggleShortcuts, ToggleWrapLines,
+    ShowMoreBelow, ToggleJump, TogglePieceLabels, ToggleRead, ToggleRenderedView, ToggleSettings,
+    ToggleShortcuts, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -774,6 +775,8 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::ReadUp => KeyBinding::new(&keys, ReadUp, context),
                 Command::MoreAbove => KeyBinding::new(&keys, ShowMoreAbove, context),
                 Command::MoreBelow => KeyBinding::new(&keys, ShowMoreBelow, context),
+                Command::ToggleRenderedView => KeyBinding::new(&keys, ToggleRenderedView, context),
+                Command::TogglePieceLabels => KeyBinding::new(&keys, TogglePieceLabels, context),
                 Command::Jump => KeyBinding::new(&keys, ToggleJump, context),
                 Command::ToggleRead => KeyBinding::new(&keys, ToggleRead, context),
                 Command::CopyCode => KeyBinding::new(&keys, CopySelection, context),

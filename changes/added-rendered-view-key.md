@@ -1,0 +1,1 @@
+`R` switches the focused change's file between Code and Rendered, the same as the switch in its header. Both `R` and `L` can be changed in Settings and are in the shortcuts list and the command palette.

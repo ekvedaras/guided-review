@@ -1,0 +1,1 @@
+A file box that shows several parts of one file has a Labels button in its header and an `L` key (on the focused change's file) that hides or shows the thin `Class::method` lines marking where each part starts. A file whose parts are mostly one or two changed lines, like an interface, now opens with the labels hidden.
