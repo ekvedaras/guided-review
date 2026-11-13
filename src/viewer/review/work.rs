@@ -178,13 +178,20 @@ impl ReviewCore {
     }
 
     /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the
-    /// pending review are read again so the reply shows under the asked comment.
+    /// pending review are read again so the reply shows under the asked comment. While a re-pin runs it
+    /// is kept for the re-pinned review, which saves it: the agent's reply is on GitHub either way.
     pub fn hand_off_replied(
         &mut self,
         id: HandOffId,
         replied: &AgentReplied,
     ) -> anyhow::Result<()> {
-        self.record_hand_offs(|hand_offs| hand_offs.replied(id, replied))??;
+        if self.state.is_repinning() {
+            self.state
+                .keep_until_repinned(|state| state.hand_offs_mut().replied(id, replied))?;
+            self.replies_after_repin.push((id, replied.clone()));
+        } else {
+            self.record_hand_offs(|hand_offs| hand_offs.replied(id, replied))??;
+        }
         self.work.want(WorkKind::PullThreads);
         self.work.want(WorkKind::PullPendingReview);
         Ok(())

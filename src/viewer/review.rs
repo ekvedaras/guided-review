@@ -34,7 +34,7 @@ use super::finish_review::{
     SubmittedReview,
 };
 use super::github_outage::{Affected, OutageCause};
-use super::hand_offs::{Audience, HandOffState, HandOffs};
+use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
@@ -234,6 +234,8 @@ pub struct ReviewCore {
     ask_desk: AskDesk,
     work: WorkAgenda,
     reviewing_mark: ReviewingMark,
+    /// Agent replies taken while a re-pin ran, which the re-pinned review applies and saves.
+    replies_after_repin: Vec<(HandOffId, AgentReplied)>,
     /// The last news of the tour agent said tour agents cannot be reached. Not saved.
     agent_link_is_off: bool,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
@@ -315,6 +317,11 @@ impl Review {
         self.seen_end_of = replaced.seen_end_of;
         self.ask_desk = replaced.ask_desk;
         self.check_asks_for_code_changes();
+        for (id, replied) in replaced.replies_after_repin {
+            if let Err(error) = self.hand_off_replied(id, &replied) {
+                eprintln!("could not carry the reply to {id} into the re-pinned review: {error:#}");
+            }
+        }
     }
 
     /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
@@ -417,6 +424,7 @@ impl ReviewCore {
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
             reviewing_mark,
+            replies_after_repin: Vec::new(),
             agent_link_is_off: false,
             seen_end_of: None,
             tour_files,

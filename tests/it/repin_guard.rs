@@ -204,12 +204,12 @@ fn while_a_re_pin_runs_what_the_tour_agent_did_is_kept_in_memory_but_not_saved()
     let hand_off = pull.hand_off(&mut review);
 
     review.start_repin();
-    let recorded = review.hand_off_replied(hand_off, &AgentReplied::default());
+    review
+        .hand_off_replied(hand_off, &AgentReplied::default())
+        .unwrap();
 
-    assert!(recorded.is_err());
     assert_eq!(hand_off_states(&review), [HandOffState::Answered]);
     assert_eq!(pull.saved_hand_off_states(), [HandOffState::Queued]);
-    assert_eq!(review.problems(), [Problem::ChangeNotKeptWhileRepinning]);
 }
 
 #[test]
@@ -228,5 +228,25 @@ fn once_a_re_pin_failed_changes_are_saved_again_and_nothing_is_named_as_not_kept
 
     assert_eq!(review.problems(), []);
     assert!(pull.open().is_ticked(&notes()));
+    assert_eq!(pull.saved_hand_off_states(), [HandOffState::Answered]);
+}
+
+#[test]
+fn a_tour_agent_reply_during_a_re_pin_is_taken_and_carried_into_the_re_pinned_review() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let hand_off = pull.hand_off(&mut review);
+
+    review.start_repin();
+    review
+        .hand_off_replied(hand_off, &AgentReplied::default())
+        .unwrap();
+    assert_eq!(hand_off_states(&review), [HandOffState::Answered]);
+    assert_eq!(review.problems(), [], "it is not lost, so nothing is named");
+
+    let mut re_pinned = pull.open();
+    re_pinned.carry_on_from(review);
+
+    assert_eq!(hand_off_states(&re_pinned), [HandOffState::Answered]);
     assert_eq!(pull.saved_hand_off_states(), [HandOffState::Answered]);
 }
