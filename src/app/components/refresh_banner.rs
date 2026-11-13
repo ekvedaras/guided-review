@@ -101,7 +101,7 @@ impl RenderOnce for RefreshBanner {
             )
             .on_click(self.on_refresh)
         });
-        let redo_hint = self.brief.redo_hint().map(|hint| {
+        let redo_hint = self.brief.redo_hint().filter(|_| !is_running).map(|hint| {
             div().child(SharedString::from(format!(
                 "{hint}. A full redo may read better: `/tour --redo` in claude."
             )))
