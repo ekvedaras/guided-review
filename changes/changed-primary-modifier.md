@@ -1,1 +1,1 @@
-Keys you change in Settings are now saved as `primary-k` instead of `cmd-k`, so the same `config.toml` works on macOS (Cmd) and Linux (Ctrl); keys saved as `cmd-` before still work.
+Changed keys are saved as `primary-k`, so one `config.toml` works with Cmd on macOS and Ctrl on Linux.
