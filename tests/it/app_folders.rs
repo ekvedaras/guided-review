@@ -260,7 +260,7 @@ fn a_move_cut_short_is_finished_by_the_next_start() {
 }
 
 #[test]
-fn an_old_binary_writing_the_old_folder_after_the_move_is_a_problem_and_nothing_is_merged() {
+fn a_file_an_old_binary_writes_again_after_the_move_stays_beside_the_one_read_and_is_named() {
     let (_home, old, xdg) = old_install();
     AppFolders::move_once(xdg.clone());
     let written_again = path_of(&old, "state");
@@ -350,6 +350,42 @@ fn a_move_stuck_after_a_put_back_that_failed_never_fails_a_start_and_says_what_i
         vec![NotRead {
             file: xdg.config_file(),
             read_instead: old.config_file(),
+        }]
+    );
+}
+
+#[test]
+fn xdg_folders_already_holding_files_take_each_old_file_they_lack_and_leave_those_they_hold() {
+    let (_home, old, xdg) = old_install();
+    // A config written by hand, and a tour a newer build wrote, before the move ran.
+    fs::create_dir_all(xdg.config_file().parent().unwrap()).unwrap();
+    fs::write(xdg.config_file(), "ask_model = \"opus\"\n").unwrap();
+    let newer_tour = xdg.tours().join("acme/shop/8.json");
+    fs::create_dir_all(newer_tour.parent().unwrap()).unwrap();
+    fs::write(&newer_tour, "{\"title\":\"Another\"}").unwrap();
+
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+
+    for (name, text) in WRITTEN.iter().filter(|(name, _)| *name != "config") {
+        assert_eq!(fs::read_to_string(path_of(&xdg, name)).unwrap(), *text);
+    }
+    assert_eq!(
+        fs::read_to_string(&newer_tour).unwrap(),
+        "{\"title\":\"Another\"}"
+    );
+    assert_eq!(
+        fs::read_to_string(xdg.config_file()).unwrap(),
+        "ask_model = \"opus\"\n"
+    );
+    assert_eq!(
+        fs::read_to_string(old.config_file()).unwrap(),
+        "ask_model = \"sonnet\"\n"
+    );
+    assert_eq!(
+        xdg.files_not_read(&xdg),
+        vec![NotRead {
+            file: old.config_file(),
+            read_instead: xdg.config_file(),
         }]
     );
 }

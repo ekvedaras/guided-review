@@ -62,46 +62,35 @@ impl AppFolders {
         Ok(platform::app_folders(&home, |name| std::env::var_os(name)))
     }
 
-    /// The folders a start uses: `xdg`, after what `~/.guided-review` holds is moved into it, or the
-    /// old folder while that cannot be done: an app of an earlier version holds its lock, or a step
-    /// failed and what moved was put back. A move never fails the start: what could not be put back
-    /// stays where it is, `files_not_read` names it, and the next start tries the move again. Once the
-    /// XDG folders hold files, the old folder is not read again, even if an older binary writes it.
+    /// The folders a start uses: `xdg`, after each file `~/.guided-review` holds that `xdg` lacks is
+    /// moved into it, or the old folder while that cannot be done: an app of an earlier version holds
+    /// its lock, or a step failed and what moved was put back. A file both hold stays in each, and
+    /// `files_not_read` names it. A move never fails the start: what could not be put back stays where
+    /// it is, `files_not_read` names that too, and the next start tries the move again.
     pub fn move_once(xdg: Self) -> Self {
         let old = Self::before_xdg(&xdg.home);
-        let mark = old.state.join(MOVING_MARK);
         let moves: Vec<(PathBuf, PathBuf)> = MOVED
             .iter()
             .map(|place| (place(&old), place(&xdg)))
             .collect();
-        if !exists(&mark) && !moves.iter().any(|(from, _)| exists(from)) {
+        if !moves.iter().any(|(from, to)| left_to_move(from, to)) {
             return xdg;
         }
-        let moved_before = |xdg: &Self| !exists(&mark) && xdg.holds_files();
+        let not_moved = |xdg: Self| if xdg.holds_state() { xdg } else { old.clone() };
         let _lock = match take_lock(&old.lock()) {
             Ok(OldLock::Taken(lock)) => lock,
-            Ok(OldLock::HeldByAnotherApp) => {
-                return if moved_before(&xdg) { xdg } else { old };
-            }
+            Ok(OldLock::HeldByAnotherApp) => return not_moved(xdg),
             Ok(OldLock::FolderGone) => return xdg,
             Err(error) => {
                 eprintln!("warning: {error:#}; nothing was moved");
-                return if moved_before(&xdg) { xdg } else { old };
+                return not_moved(xdg);
             }
         };
-        if moved_before(&xdg) {
-            // Another start moved it while this one waited, and opening the lock made the folder again.
-            old.tidy_after_move();
-            return xdg;
-        }
-        if let Err(error) = std::fs::write(&mark, "") {
-            eprintln!(
-                "warning: could not start moving {} into the XDG folders, so it stays in use: {error}",
-                old.state.display()
-            );
-            return old;
-        }
-        match moves.iter().try_for_each(|(from, to)| relocate(from, to)) {
+        let mut moved = Vec::new();
+        match moves
+            .iter()
+            .try_for_each(|(from, to)| merge(from, to, &mut moved))
+        {
             Ok(()) => {
                 old.tidy_after_move();
                 xdg
@@ -111,10 +100,8 @@ impl AppFolders {
                     "warning: could not move {} into the XDG folders, so it stays in use: {error:#}",
                     old.state.display()
                 );
-                let mut all_put_back = true;
-                for (from, to) in moves.iter().rev() {
-                    if let Err(error) = relocate(to, from) {
-                        all_put_back = false;
+                for (from, to) in moved.iter().rev() {
+                    if let Err(error) = merge(to, from, &mut Vec::new()) {
                         eprintln!(
                             "warning: could not put {} back after a failed move, so it stays in {}; the next start tries the move again: {error:#}",
                             from.display(),
@@ -122,12 +109,7 @@ impl AppFolders {
                         );
                     }
                 }
-                if all_put_back {
-                    if let Err(error) = discard(&mark) {
-                        eprintln!("warning: {error:#}");
-                    }
-                    xdg.remove_if_empty();
-                }
+                xdg.remove_if_empty();
                 old
             }
         }
@@ -156,17 +138,18 @@ impl AppFolders {
             .collect()
     }
 
-    fn holds_files(&self) -> bool {
-        [&self.config, &self.state].into_iter().any(|folder| {
-            std::fs::read_dir(folder).is_ok_and(|mut entries| entries.next().is_some())
-        })
+    /// Whether a move put what the app wrote here: a config alone may be written by hand.
+    fn holds_state(&self) -> bool {
+        [Self::tours, Self::state_files, Self::evals, Self::log]
+            .iter()
+            .any(|place| !files_under(&place(self)).is_empty())
     }
 
     /// Best effort: what is left is a lock and socket of no running app and a cache that fills again,
     /// and a folder that cannot be removed only stays as it is.
     fn tidy_after_move(&self) {
         for leftover in [
-            self.state.join(MOVING_MARK),
+            self.state.join(MOVING_MARK_OF_EARLIER_BUILDS),
             self.lock(),
             self.socket(),
             self.cache.clone(),
@@ -257,9 +240,9 @@ const MOVED: [fn(&AppFolders) -> PathBuf; 6] = [
     AppFolders::log,
 ];
 
-/// In the old folder while a move runs, so a start after a crash finishes it rather than taking the
-/// half-filled XDG folders as moved.
-const MOVING_MARK: &str = ".moving";
+/// Left in the old folder by a move of a build before each file was moved on its own; a move now
+/// finishes whatever is left, so it is only tidied away.
+const MOVING_MARK_OF_EARLIER_BUILDS: &str = ".moving";
 
 /// A move takes milliseconds; an app of an earlier version holds the lock for as long as it runs.
 const LOCK_WAIT: Duration = Duration::from_secs(1);
@@ -299,6 +282,44 @@ fn take_lock(path: &Path) -> anyhow::Result<OldLock> {
             }
         }
     }
+}
+
+/// Whether `from` holds a file a move would still take: one `to` lacks, or holds the same of.
+fn left_to_move(from: &Path, to: &Path) -> bool {
+    if !exists(from) {
+        return false;
+    }
+    if !exists(to) {
+        return true;
+    }
+    if is_dir(from) && is_dir(to) {
+        return names_in(from).is_ok_and(|names| {
+            names
+                .iter()
+                .any(|name| left_to_move(&from.join(name), &to.join(name)))
+        });
+    }
+    same(from, to).unwrap_or(false)
+}
+
+/// Moves what `from` holds into `to` one file or folder `to` lacks at a time, and notes each in
+/// `moved`, so a failed move can put exactly those back. What `to` already holds is never written
+/// over: a file in both stays in both, unless the two are the same.
+fn merge(from: &Path, to: &Path, moved: &mut Vec<(PathBuf, PathBuf)>) -> anyhow::Result<()> {
+    if is_dir(from) && is_dir(to) {
+        for name in names_in(from)? {
+            merge(&from.join(&name), &to.join(&name), moved)?;
+        }
+        // Stays when a file in both is left in it.
+        std::fs::remove_dir(from).ok();
+        return Ok(());
+    }
+    if !exists(from) || (exists(to) && !same(from, to)?) {
+        return Ok(());
+    }
+    relocate(from, to)?;
+    moved.push((from.to_path_buf(), to.to_path_buf()));
+    Ok(())
 }
 
 /// Moves a file or folder with a rename, so it is never in two halves. Across disks it copies, checks
@@ -376,13 +397,8 @@ fn same(left: &Path, right: &Path) -> anyhow::Result<bool> {
     };
     let (left_kind, right_kind) = (read(left)?, read(right)?);
     if left_kind.is_dir() && right_kind.is_dir() {
-        let names = |path: &Path| -> anyhow::Result<BTreeSet<OsString>> {
-            std::fs::read_dir(path)
-                .and_then(|entries| entries.map(|entry| entry.map(|e| e.file_name())).collect())
-                .with_context(|| format!("could not read {}", path.display()))
-        };
-        let left_names = names(left)?;
-        if left_names != names(right)? {
+        let left_names = names_in(left)?;
+        if left_names != names_in(right)? {
             return Ok(false);
         }
         for name in left_names {
@@ -403,26 +419,34 @@ fn same(left: &Path, right: &Path) -> anyhow::Result<bool> {
     }
 }
 
+fn names_in(folder: &Path) -> anyhow::Result<BTreeSet<OsString>> {
+    std::fs::read_dir(folder)
+        .and_then(|entries| entries.map(|entry| entry.map(|e| e.file_name())).collect())
+        .with_context(|| format!("could not read {}", folder.display()))
+}
+
 /// The files at `path` and in the folders under it; none when nothing is there.
 fn files_under(path: &Path) -> Vec<PathBuf> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => {
-            let mut names: Vec<OsString> = std::fs::read_dir(path)
-                .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
-                .unwrap_or_default();
-            names.sort();
-            names
-                .iter()
-                .flat_map(|name| files_under(&path.join(name)))
-                .collect()
-        }
-        Ok(_) => vec![path.to_path_buf()],
-        Err(_) => Vec::new(),
+    if !is_dir(path) {
+        return if exists(path) {
+            vec![path.to_path_buf()]
+        } else {
+            Vec::new()
+        };
     }
+    names_in(path)
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|name| files_under(&path.join(name)))
+        .collect()
 }
 
 fn exists(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok()
+}
+
+fn is_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
 }
 
 fn discard(path: &Path) -> anyhow::Result<()> {
