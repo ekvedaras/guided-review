@@ -51,8 +51,14 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **One platform call at app start** (`platform::start(takes_focus, quit, cx)`) gives the OS what it gets from the app: on macOS the Dock icon (or, when the app must not take the focus, no Dock icon and no turn at the front), the Option-arrow monitor and the app menu. Linux gets none of them. The app start no longer names the Dock or macOS; it still decides whether the app takes the focus and owns the Quit action and its handler.
 - **The app menu is plain data per OS** (`Os::app_menus(quit)`): macOS one `guided-review` menu with Quit, which macOS shows beside its key; Linux none, as Linux desktops have no app menu bar. Quit on Linux is the Quit key only, bound from the keymap as on every OS.
 
+## Decisions, 2026-11-14 (#76, dev scripts)
+
+- **The snapshot scripts stop early off macOS** with a message saying why, and exit 1. `scripts/snapshot` needs gpui's `render_to_image`, which this gpui rev has only on macOS. `scripts/snapshot-compare` is now a shell wrapper around `snapshot-compare.swift`, since a Swift file cannot check the OS before `import AppKit` fails. They check `uname`, not the platform module: they are shell, outside the app.
+- **`scripts/check` takes rustup's cargo first** (`~/.cargo/bin`), before whatever cargo is on PATH: Arch's `rust` package puts an older cargo in `/usr/bin` that cannot build the pinned toolchain's code. The `stable-aarch64-apple-darwin` path is gone; with no rustup proxies, any `stable-*` toolchain under `~/.rustup` is the last resort.
+
 ## Known open
 
 - The Linux release archive must copy `icons/` from the template beside the binary, or `install-app` says the release carries no entry.
-- App folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
+- App folders, and the Linux release and CI are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
+- Snapshots on Linux wait for a gpui with `render_to_image` there.
