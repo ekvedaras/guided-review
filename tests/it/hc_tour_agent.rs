@@ -77,7 +77,7 @@ fn adapter(dir: &Path) -> HcTourAgents {
 }
 
 fn adapter_on(dir: &Path, os: Os) -> HcTourAgents {
-    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir))
+    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir), dir.join("tours"))
         .raising_herdr_with(os, fake_raise(dir))
 }
 
@@ -277,7 +277,11 @@ fn a_command_that_fails_while_the_server_answers_is_the_reason_without_the_comma
 #[test]
 fn the_link_is_off_when_hc_is_not_installed() {
     let dir = TempDir::new().unwrap();
-    let agents = HcTourAgents::with_binaries(dir.path().join("no-hc"), dir.path().join("no-app"));
+    let agents = HcTourAgents::with_binaries(
+        dir.path().join("no-hc"),
+        dir.path().join("no-app"),
+        dir.path().join("tours"),
+    );
 
     assert_eq!(agents.link(), Err(AgentLinkOff::HcMissing));
 }
@@ -556,6 +560,21 @@ fn tools_of_started_agent(summary_skill: Option<&str>) -> Vec<String> {
 }
 
 #[test]
+fn a_started_tour_agent_may_write_tours_in_the_tours_folder_it_was_given() {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+
+    start_shop_agent(&adapter(dir.path())).unwrap();
+
+    let calls = calls(dir.path(), "calls");
+    let tours_rule = format!("Write(/{}/tours/**)", dir.path().display());
+    assert!(
+        calls[0].contains(&tours_rule),
+        "{tours_rule} not in {calls:?}"
+    );
+}
+
+#[test]
 fn a_tour_agent_may_run_the_summary_skill_the_reviewer_named_and_only_then() {
     let with = tools_of_started_agent(Some("recap"));
     let without = tools_of_started_agent(None);
@@ -781,7 +800,7 @@ fn on_linux_an_agent_is_shown_even_without_hyprctl() {
     let dir = TempDir::new().unwrap();
     an_agent_of_the_pr(dir.path());
 
-    HcTourAgents::with_binaries(fake_hc(dir.path()), fake_herdr_app(dir.path()))
+    adapter(dir.path())
         .raising_herdr_with(Os::Linux, dir.path().join("no-hyprctl"))
         .show(&TerminalId::new("t7"))
         .unwrap();

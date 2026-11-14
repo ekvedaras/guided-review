@@ -42,6 +42,7 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::platform::{self, Os};
 use crate::pull_request::PullRequestUrl;
+use crate::tour::Tour;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
@@ -144,7 +145,7 @@ fn pr_switching(
         relevant: relevant_pull_requests(),
         folders: folders.clone(),
         active,
-        agents: Arc::new(HcTourAgents::new()),
+        agents: Arc::new(HcTourAgents::new(Tour::tours_dir(folders))),
         list: cx.new(|_| {
             PrSwitcher::remembering_in(RememberedPullRequestsFile::in_folders(folders), folders)
         }),
@@ -268,8 +269,8 @@ async fn answer_requests(
                         .ok();
                     continue;
                 };
-                claim_terminal(&pr, &open, cx);
-                let origin = origin_of(&open, cx).await;
+                claim_terminal(&pr, &open, &folders, cx);
+                let origin = origin_of(&open, &folders, cx).await;
                 let active = screen.borrow().active.clone();
                 let tour = TourFact::of(&pr, &folders);
                 let outcome = active.update(cx, |active, cx| {
@@ -467,11 +468,17 @@ fn mark_replied(
 
 /// The terminal an `open` came from becomes the PR's tour agent, whatever the request then does. Slow
 /// (it runs `hc`), so it runs off the UI thread; a failure is for the app's log, as the window may stay.
-fn claim_terminal(pr: &PullRequestUrl, open: &OpenRequest, cx: &mut AsyncApp) {
+fn claim_terminal(
+    pr: &PullRequestUrl,
+    open: &OpenRequest,
+    folders: &AppFolders,
+    cx: &mut AsyncApp,
+) {
     let (pr, terminal) = (pr.clone(), open.terminal.clone());
+    let tours = Tour::tours_dir(folders);
     cx.background_executor()
         .spawn(async move {
-            let agents = TourAgents::new(Arc::new(HcTourAgents::new()));
+            let agents = TourAgents::new(Arc::new(HcTourAgents::new(tours)));
             if let Err(error) = agents.claim_for_open(&pr, terminal.as_deref()) {
                 eprintln!("could not claim the terminal for {pr}: {error:#}");
             }
@@ -480,13 +487,14 @@ fn claim_terminal(pr: &PullRequestUrl, open: &OpenRequest, cx: &mut AsyncApp) {
 }
 
 /// Asks herdr whether the open came from a tour agent the app started; off the UI thread, as it runs `hc`.
-async fn origin_of(open: &OpenRequest, cx: &mut AsyncApp) -> OpenOrigin {
+async fn origin_of(open: &OpenRequest, folders: &AppFolders, cx: &mut AsyncApp) -> OpenOrigin {
     let Some(terminal) = open.terminal.clone() else {
         return OpenOrigin::Reviewer;
     };
+    let tours = Tour::tours_dir(folders);
     cx.background_executor()
         .spawn(async move {
-            TourAgents::new(Arc::new(HcTourAgents::new())).origin_of(Some(&terminal))
+            TourAgents::new(Arc::new(HcTourAgents::new(tours))).origin_of(Some(&terminal))
         })
         .await
 }

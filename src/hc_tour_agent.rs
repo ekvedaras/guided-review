@@ -10,12 +10,10 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde_json::Value;
 
-use crate::app_folders::AppFolders;
 use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
 use crate::platform::{HerdrRaise, Os, RaiseFailed};
 use crate::pull_request::PullRequestUrl;
-use crate::tour::Tour;
 use crate::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
     TourAgentPort, TourAgentStart,
@@ -40,6 +38,8 @@ const ADOPTION_WAIT: Duration = Duration::from_millis(100);
 pub struct HcTourAgents {
     hc: PathBuf,
     herdr_app: PathBuf,
+    /// Where the agents the app starts may write tours.
+    tours: PathBuf,
     herdr_raise: HerdrRaise,
     /// Where the raise program is looked up; a stand-in in tests.
     herdr_raise_program: PathBuf,
@@ -48,20 +48,22 @@ pub struct HcTourAgents {
 }
 
 impl HcTourAgents {
-    pub fn new() -> Self {
+    /// Agents that write their tours in `tours`.
+    pub fn new(tours: PathBuf) -> Self {
         let agents_path = std::env::current_exe().map_or_else(
             |_| std::env::var("PATH").unwrap_or_default(),
             |own| Self::path_for_agents(&own, std::env::var_os("PATH").as_deref()),
         );
-        Self::with_binaries(PathBuf::from("hc"), PathBuf::from("herdr-app"))
+        Self::with_binaries(PathBuf::from("hc"), PathBuf::from("herdr-app"), tours)
             .giving_agents_path(&agents_path)
     }
 
-    pub fn with_binaries(hc: PathBuf, herdr_app: PathBuf) -> Self {
+    pub fn with_binaries(hc: PathBuf, herdr_app: PathBuf, tours: PathBuf) -> Self {
         let herdr_raise = Os::RUNNING.herdr_raise();
         Self {
             hc,
             herdr_app,
+            tours,
             herdr_raise,
             herdr_raise_program: PathBuf::from(herdr_raise.program),
             agents_path: String::new(),
@@ -116,12 +118,6 @@ impl HcTourAgents {
         }
         serde_json::from_slice(&output.stdout)
             .with_context(|| format!("`hc {}` did not answer JSON", args.join(" ")))
-    }
-}
-
-impl Default for HcTourAgents {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -328,7 +324,6 @@ impl TourAgentPort for HcTourAgents {
         let folder = start.folder.display().to_string();
         let pr_label = label_of(&start.pr);
         let path = format!("PATH={}", self.agents_path);
-        let tours = Tour::tours_dir(&AppFolders::running()?);
         let tab = &start.name;
         let space_label = format!("herdr.space={AGENTS_SPACE}");
         let tab_label = format!("herdr.tab={tab}");
@@ -360,7 +355,7 @@ impl TourAgentPort for HcTourAgents {
             "--permission-mode",
             "auto",
             "--allowedTools",
-            &tour_agent_tools(&start.folder, &tours, start.summary_skill.as_deref()),
+            &tour_agent_tools(&start.folder, &self.tours, start.summary_skill.as_deref()),
         ];
         let started = self.hc(&args)?;
         let address = at(&started, "/address")

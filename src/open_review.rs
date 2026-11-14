@@ -120,7 +120,7 @@ pub fn open_review(
         repinner,
         refresher,
         reloader,
-        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new()))
+        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
             .starting_in(agent_folder)
             .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
     })
