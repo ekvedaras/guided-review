@@ -21,6 +21,15 @@ if grep -rn 'target_os' --include='*.rs' src tests build.rs | grep -vE '^src/pla
     echo "check the OS in src/platform, not here (docs/wiki/platform.md)" >&2
     exit 1
 fi
+echo "== tests write a fake executable only through support::write_executable"
+# Allowed: read_ticks locks and unlocks a folder; release_install sets a mode inside a tar archive it builds in memory.
+if grep -rnE 'set_mode\(|from_mode\(|set_permissions\(|OpenOptionsExt' --include='*.rs' tests \
+    | grep -vE '^tests/it/support/' \
+    | grep -vE '^tests/it/read_ticks\.rs:[0-9]+:\s*std::fs::set_permissions\(&folder, ' \
+    | grep -vE '^tests/it/release_install\.rs:[0-9]+:\s*header\.set_mode\(mode\);'; then
+    echo "write a fake executable with support::write_executable, it never holds the file open for writing (Text file busy)" >&2
+    exit 1
+fi
 echo "== fmt"
 cargo fmt --all -- --check
 echo "== clippy, default features (what cargo install builds)"
