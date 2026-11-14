@@ -15,6 +15,7 @@ mod active_pr;
 mod agent_link;
 mod agent_reply;
 mod app_bundle;
+mod app_folders;
 mod app_link;
 mod app_start;
 mod app_state;

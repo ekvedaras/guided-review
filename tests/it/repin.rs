@@ -55,7 +55,7 @@ impl Shop {
     fn tour_path(&self) -> std::path::PathBuf {
         self.repo
             .home()
-            .join(".guided-review/tours/acme/shop/7.json")
+            .join(".local/state/guided-review/tours/acme/shop/7.json")
     }
 
     fn write_tour(&self, tour: Value) {
@@ -202,7 +202,7 @@ fn repin_stores_the_piece_statuses_in_the_review_state_for_the_app() {
     let state_path = shop
         .repo
         .home()
-        .join(".guided-review/state/acme/shop/7.json");
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     let state: Value = serde_json::from_str(&std::fs::read_to_string(state_path).unwrap()).unwrap();
     let record = &state["last_repin"];
     assert_eq!(record["from_head"], shop.head.as_str());

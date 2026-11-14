@@ -19,7 +19,7 @@ fn open_review(repo: &FixtureRepo, base: &str, head: &str) -> (Review, LocalGit)
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_pr(
-        repo.home(),
+        &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     let mut review = Review::open(tour, &source, state_file).unwrap();

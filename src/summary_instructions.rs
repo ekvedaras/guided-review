@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 
+use crate::app_folders::AppFolders;
 use crate::home::expand_home;
 
 /// What tells the tour writer how to write the reviewer summary, as far as it could be read.
@@ -16,7 +17,7 @@ pub struct SummaryInstructions {
 /// How `summary_instructions` is set in the config, before it is resolved to the instructions themselves.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SummaryInstructionsChoice {
-    /// No key: `~/.guided-review/summary.md`, when it exists.
+    /// No key: `summary.md` in the config folder, when it exists.
     #[default]
     DefaultFile,
     /// A path as written, which may start with `~/`.
@@ -37,11 +38,6 @@ impl SummaryInstructionsChoice {
 
     pub const OFF: &'static str = "off";
     pub const SKILL_KEY: &'static str = "skill";
-    const DEFAULT_FILE: &'static str = ".guided-review/summary.md";
-
-    pub fn default_file_in(home: &Path) -> PathBuf {
-        home.join(Self::DEFAULT_FILE)
-    }
 
     /// A typed skill name is a choice only when outline would accept it.
     pub fn skill_named(name: &str) -> Self {
@@ -62,14 +58,14 @@ impl SummaryInstructionsChoice {
         }
     }
 
-    pub fn resolve(&self, home: &Path) -> SummaryInstructions {
+    pub fn resolve(&self, folders: &AppFolders) -> SummaryInstructions {
         match self {
             Self::Off => SummaryInstructions::none(),
-            Self::OtherFile(path) => read_file(&expand_home(path, home)),
+            Self::OtherFile(path) => read_file(&expand_home(path, folders.home())),
             Self::Skill(name) => SummaryInstructions::of_skill(name),
             Self::Unreadable(written) => SummaryInstructions::unreadable(written),
             Self::DefaultFile => {
-                let default = Self::default_file_in(home);
+                let default = folders.summary_file();
                 if default.is_file() {
                     read_file(&default)
                 } else {
@@ -166,9 +162,9 @@ impl SummaryInstructions {
     }
 
     /// What a launch of the tour agent goes by: a config that cannot be read is no instructions and a warning.
-    pub fn of_home(home: &Path) -> Self {
-        match crate::config::Config::load_from(home) {
-            Ok(config) => config.summary_instructions(home),
+    pub fn of(folders: &AppFolders) -> Self {
+        match crate::config::Config::load_from(folders) {
+            Ok(config) => config.summary_instructions(folders),
             Err(error) => Self {
                 warning: Some(format!("summary instructions not read: {error:#}")),
                 ..Self::none()
@@ -177,8 +173,8 @@ impl SummaryInstructions {
     }
 
     /// The skill a launch of the tour agent runs for the reviewer summary, after saying what could not be read.
-    pub fn skill_for_launch(home: &Path) -> Option<String> {
-        let instructions = Self::of_home(home);
+    pub fn skill_for_launch(folders: &AppFolders) -> Option<String> {
+        let instructions = Self::of(folders);
         if let Some(warning) = instructions.warning() {
             eprintln!("warning: {warning}");
         }

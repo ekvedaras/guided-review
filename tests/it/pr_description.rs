@@ -45,7 +45,7 @@ impl Shop {
             .unwrap()
             .unwrap();
         let state_file =
-            ReviewStateFile::for_pr(self.repo.home(), &PR.parse::<PullRequestUrl>().unwrap());
+            ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap());
         Review::open(tour, &source, state_file).unwrap()
     }
 }

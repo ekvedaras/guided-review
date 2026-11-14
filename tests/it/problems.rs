@@ -25,7 +25,7 @@ fn open_review() -> (FixtureRepo, Review) {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let state_file = ReviewStateFile::for_pr(repo.home(), &PR.parse().unwrap());
+    let state_file = ReviewStateFile::for_pr(&repo.folders(), &PR.parse().unwrap());
     let review = Review::open(tour, &source, state_file).unwrap();
     (repo, review)
 }
@@ -124,6 +124,21 @@ fn a_guided_review_before_the_release_install_on_path_names_the_binary_to_remove
     assert_eq!(
         problem.to_string(),
         "/Users/me/.cargo/bin/guided-review comes first on PATH, so the tour skill misses updates"
+    );
+}
+
+#[test]
+fn an_old_folder_written_again_after_the_move_says_its_files_are_not_read() {
+    let (_repo, mut review) = open_review();
+
+    review.raise_problem(Problem::OldFolderWrittenAgain(
+        "/home/me/.guided-review".into(),
+    ));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(
+        problem.to_string(),
+        "/home/me/.guided-review was written again after it moved to the XDG folders, likely by an older guided-review. Its files are not read: move what you need by hand, then delete it"
     );
 }
 

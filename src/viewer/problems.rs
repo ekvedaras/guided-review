@@ -44,6 +44,8 @@ pub enum Problem {
     ReviewingMarkNotChanged(String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
     ReleaseInstallInTheWay(InTheWay),
+    /// After `~/.guided-review` moved to the XDG folders, an older binary wrote it again. Not merged.
+    OldFolderWrittenAgain(PathBuf),
 }
 
 /// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
@@ -82,6 +84,8 @@ pub enum ProblemKind {
     ReviewingMarkNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
     ReleaseInstallInTheWay,
+    /// Raised when the review opens; a review opened once the folder is gone has none.
+    OldFolderWrittenAgain,
 }
 
 impl Problem {
@@ -103,6 +107,7 @@ impl Problem {
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
+            Self::OldFolderWrittenAgain(_) => ProblemKind::OldFolderWrittenAgain,
         }
     }
 }
@@ -291,6 +296,11 @@ impl fmt::Display for Problem {
                 formatter,
                 "{} comes first on PATH, so the tour skill misses updates",
                 binary.display()
+            ),
+            Self::OldFolderWrittenAgain(folder) => write!(
+                formatter,
+                "{} was written again after it moved to the XDG folders, likely by an older guided-review. Its files are not read: move what you need by hand, then delete it",
+                folder.display()
             ),
         }
     }

@@ -44,7 +44,7 @@ impl Pull {
 
     fn state_file(&self) -> ReviewStateFile {
         let pr: PullRequestUrl = PR.parse().unwrap();
-        ReviewStateFile::for_pr(self.repo.home(), &pr)
+        ReviewStateFile::for_pr(&self.repo.folders(), &pr)
     }
 
     fn open(&self) -> Review {

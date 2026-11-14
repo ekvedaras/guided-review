@@ -31,7 +31,7 @@ impl Shop {
     fn state_path(&self) -> PathBuf {
         self.repo
             .home()
-            .join(".guided-review/state/acme/shop/7.json")
+            .join(".local/state/guided-review/state/acme/shop/7.json")
     }
 
     fn files_in_state_folder(&self) -> Vec<String> {
@@ -44,7 +44,7 @@ impl Shop {
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(self.repo.home(), &PR.parse::<PullRequestUrl>().unwrap())
+        ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap())
     }
 
     fn open(&self) -> Review {

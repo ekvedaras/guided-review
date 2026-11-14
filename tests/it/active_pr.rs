@@ -33,7 +33,7 @@ fn shop_with_tours_of_a_and_b() -> FixtureRepo {
             "summary": [],
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
         });
-        let path = Tour::path_for(repo.home(), &pr(url));
+        let path = Tour::path_for(&repo.folders(), &pr(url));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, tour.to_string()).unwrap();
     }
@@ -60,7 +60,7 @@ impl<'a> Window<'a> {
         let OpenDecision::Build(ticket) = self.active.request(pr(url), OpenOrigin::Reviewer) else {
             return None;
         };
-        let built = open_review(&pr(url), self.repo.path(), self.repo.home());
+        let built = open_review(&pr(url), self.repo.path(), &self.repo.folders());
         match self.active.finished(ticket, built) {
             Finished::Switch(opened) => {
                 self.shown = Some(opened);
@@ -227,9 +227,9 @@ fn the_code_source_of_the_pr_left_is_dropped_after_the_switch() {
 #[test]
 fn the_folder_a_pr_was_opened_from_is_remembered_for_a_later_switch() {
     let repo = shop_with_tours_of_a_and_b();
-    open_review(&pr(A), repo.path(), repo.home()).unwrap();
+    open_review(&pr(A), repo.path(), &repo.folders()).unwrap();
 
-    let file = ReviewStateFile::for_pr(repo.home(), &pr(A));
+    let file = ReviewStateFile::for_pr(&repo.folders(), &pr(A));
 
     assert_eq!(file.opened_from().unwrap().as_deref(), Some(repo.path()));
 }

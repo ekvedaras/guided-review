@@ -15,7 +15,7 @@ fn pr(url: &str) -> PullRequestUrl {
 }
 
 fn restarted(repo: &FixtureRepo) -> ActivePr {
-    ActivePr::remembering_in(AppStateFile::in_home(repo.home()))
+    ActivePr::remembering_in(AppStateFile::in_folders(&repo.folders()))
 }
 
 #[test]

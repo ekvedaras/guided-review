@@ -49,7 +49,11 @@ fn a_tour_agent_may_run_every_command_the_tour_skill_asks_for() {
     let commands = commands_in(SKILL);
     assert!(commands.len() > 10, "{commands:?}");
 
-    let tools = tour_agent_tools(Path::new("/clones/shop"), None);
+    let tools = tour_agent_tools(
+        Path::new("/clones/shop"),
+        Path::new("/home/me/.local/state/guided-review/tours"),
+        None,
+    );
     assert_eq!(denied_by(&tools, commands), Vec::<&str>::new(), "{tools}");
 }
 
@@ -58,13 +62,19 @@ fn the_refresh_writer_may_run_every_command_the_refresh_section_asks_for() {
     let commands = commands_in(refresh_section());
     assert!(commands.len() >= 6, "{commands:?}");
 
-    let tools = refresh_writer_tools(Path::new("/clones/shop"));
+    let tools = refresh_writer_tools(
+        Path::new("/clones/shop"),
+        Path::new("/home/me/.local/state/guided-review/tours"),
+    );
     assert_eq!(denied_by(&tools, commands), Vec::<&str>::new(), "{tools}");
 }
 
 #[test]
 fn the_refresh_writer_may_read_grep_and_glob_but_reads_only_its_clone_and_the_tours_folder() {
-    let tools = refresh_writer_tools(Path::new("/clones/shop"));
+    let tools = refresh_writer_tools(
+        Path::new("/clones/shop"),
+        Path::new("/home/me/.local/state/guided-review/tours"),
+    );
     let listed: Vec<&str> = tools.split(',').collect();
 
     assert!(listed.contains(&"Grep"), "{tools}");
@@ -72,7 +82,7 @@ fn the_refresh_writer_may_read_grep_and_glob_but_reads_only_its_clone_and_the_to
     assert!(!listed.contains(&"Read"), "{tools}");
     assert!(listed.contains(&"Read(//clones/shop/**)"), "{tools}");
     assert!(
-        listed.contains(&"Read(~/.guided-review/tours/**)"),
+        listed.contains(&"Read(//home/me/.local/state/guided-review/tours/**)"),
         "{tools}"
     );
 }

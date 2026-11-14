@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
 
-/// The `ide` line of `~/.guided-review/config.toml`, with `{path}` and `{line}` to fill in.
+/// The `ide` line of `config.toml`, with `{path}` and `{line}` to fill in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdeTemplate(String);
 

@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use crate::app_folders::AppFolders;
 use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
@@ -149,8 +151,8 @@ struct Editing {
 }
 
 impl Editing {
-    fn load(home: &Path, cx: &mut Context<SettingsPanel>) -> anyhow::Result<Self> {
-        let settings = Settings::load(home)?;
+    fn load(folders: &AppFolders, cx: &mut Context<SettingsPanel>) -> anyhow::Result<Self> {
+        let settings = Settings::load(folders)?;
         let skills = settings
             .skills()
             .into_iter()
@@ -253,7 +255,7 @@ enum Loaded {
 /// The Settings panel: it covers what its `Placement` says. It draws a `Settings`
 /// model and passes clicks on to it; what is allowed, wrong or written is the model's.
 pub struct SettingsPanel {
-    home: PathBuf,
+    folders: AppFolders,
     /// What was loaded stays while the sheet leaves, so it is drawn until it is gone.
     loaded: Option<Loaded>,
     presence: Presence,
@@ -273,13 +275,13 @@ impl SettingsPanel {
     pub const KEY_CONTEXT: &str = "SettingsPanel";
 
     pub fn new(
-        home: PathBuf,
+        folders: AppFolders,
         owner_focus: FocusHandle,
         placement: Placement,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
-            home,
+            folders,
             loaded: None,
             presence: Presence::lasting(OVERLAY),
             focus: cx.focus_handle(),
@@ -319,7 +321,7 @@ impl SettingsPanel {
 
     /// Reads the config again, so the panel never shows what an earlier opening left.
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.loaded = Some(match Editing::load(&self.home, cx) {
+        self.loaded = Some(match Editing::load(&self.folders, cx) {
             Ok(editing) => Loaded::Ready(Box::new(editing)),
             Err(error) => Loaded::Failed(format!("{error:#}").into()),
         });

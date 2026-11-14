@@ -69,7 +69,7 @@ impl Pull {
                 "children": []}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &PR.parse().unwrap());
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse().unwrap());
         let source = self.source();
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
@@ -81,7 +81,7 @@ impl Pull {
     fn load_pictures(&self, review: &mut Review) {
         let source = self.source();
         for request in review.image_preview_requests() {
-            let preview = request.load(&source, &ImageCache::under(self.repo.home()));
+            let preview = request.load(&source, &ImageCache::in_folders(&self.repo.folders()));
             review.display_options_mut().set_image_preview(preview);
         }
     }

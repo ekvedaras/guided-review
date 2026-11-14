@@ -50,7 +50,7 @@ impl Pull {
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_pr(
-            self.repo.home(),
+            &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7".parse().unwrap(),
         );
         let mut review = Review::open(tour, &source, state_file).unwrap();

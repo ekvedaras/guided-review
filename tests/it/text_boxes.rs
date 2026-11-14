@@ -70,7 +70,7 @@ impl Pull {
         let mut review = Review::open(
             tour,
             &source,
-            ReviewStateFile::for_pr(self.repo.home(), &pr),
+            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
         )
         .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);

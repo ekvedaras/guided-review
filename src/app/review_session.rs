@@ -16,6 +16,7 @@ use gpui::{
 use crate::app::components::image_row::ImagePictures;
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::new_commits_banner::RepinProgress;
+use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::refresh_banner::RefreshProgress;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
@@ -118,6 +119,10 @@ impl ReviewSession {
         if let Some(in_the_way) = release_install_in_the_way() {
             review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
         }
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        if let Some(old) = folders.old_folder_written_again() {
+            review.raise_problem(Problem::OldFolderWrittenAgain(old));
+        }
         let SessionWiring {
             source,
             github,
@@ -155,7 +160,7 @@ impl ReviewSession {
             tour_work,
             repin_progress: RepinProgress::Idle,
             refresh_progress: RefreshProgress::Idle,
-            image_cache: ImageCache::under(&std::env::home_dir().unwrap_or_default()),
+            image_cache: ImageCache::in_folders(&folders),
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
             reload: None,

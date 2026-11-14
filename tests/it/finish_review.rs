@@ -63,7 +63,7 @@ impl Pull {
         Review::open(
             tour,
             &source,
-            ReviewStateFile::for_pr(self.repo.home(), &pr),
+            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
         )
         .unwrap()
     }
@@ -99,7 +99,7 @@ fn nothing_unread_means_no_warning() {
     let mut review = Review::open(
         tour,
         &source,
-        ReviewStateFile::for_pr(pull.repo.home(), &pr),
+        ReviewStateFile::for_pr(&pull.repo.folders(), &pr),
     )
     .unwrap();
     review.tick(&"all".into()).unwrap();

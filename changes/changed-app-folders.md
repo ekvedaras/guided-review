@@ -1,0 +1,1 @@
+Guided review now keeps its config in `~/.config/guided-review`, tours, review state, Asks and evals in `~/.local/state/guided-review`, and image previews in `~/.cache/guided-review` (the XDG variables move them). The first start moves everything from `~/.guided-review` there once; while an older app still runs from it, it stays in use until a later start.

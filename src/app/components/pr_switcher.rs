@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use crate::app_folders::AppFolders;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -35,7 +35,7 @@ const MIN_THUMB_HEIGHT: Pixels = px(20.);
 #[derive(Clone)]
 pub struct PrSwitching {
     pub relevant: Arc<dyn RelevantPullRequestsPort>,
-    pub home: PathBuf,
+    pub folders: AppFolders,
     pub show: Arc<dyn Fn(PullRequestUrl) + Send + Sync>,
     /// Asks the app to open the PR on screen again, after a save of the settings.
     pub reopen: Arc<dyn Fn() + Send + Sync>,
@@ -55,16 +55,17 @@ impl PrSwitching {
     pub fn refresh(&self, cx: &mut App) {
         self.list.update(cx, |list, _| list.refreshing());
         let (relevant, agents) = (Arc::clone(&self.relevant), Arc::clone(&self.agents));
-        let (list, active, home) = (self.list.clone(), self.active.clone(), self.home.clone());
+        let (list, active, folders) =
+            (self.list.clone(), self.active.clone(), self.folders.clone());
         cx.spawn(async move |cx| {
             let (answer, link) = cx
                 .background_executor()
                 .spawn(async move { (relevant.relevant_pull_requests(), agents.link()) })
                 .await;
             list.update(cx, |list, cx| {
-                list.loaded(answer, &home);
+                list.loaded(answer, &folders);
                 list.agent_link(link.map_err(|off| off.to_string()));
-                list.check_tours(&home, active.read(cx));
+                list.check_tours(&folders, active.read(cx));
                 cx.notify();
             });
         })
@@ -177,10 +178,13 @@ impl PrSwitcherView {
         self.presence.open(Instant::now());
         self.query.clear();
         self.refusal = None;
-        let (home, active) = (self.switching.home.clone(), self.switching.active.clone());
+        let (folders, active) = (
+            self.switching.folders.clone(),
+            self.switching.active.clone(),
+        );
         self.switching.list.update(cx, |list, cx| {
             list.filter("");
-            list.check_tours(&home, active.read(cx));
+            list.check_tours(&folders, active.read(cx));
             list.select_active();
         });
         self.refresh_shown(cx);
@@ -220,9 +224,12 @@ impl PrSwitcherView {
         match self.place {
             SwitcherPlace::OverReview => self.close(window, cx),
             SwitcherPlace::WholeWindow => {
-                let (home, active) = (self.switching.home.clone(), self.switching.active.clone());
+                let (folders, active) = (
+                    self.switching.folders.clone(),
+                    self.switching.active.clone(),
+                );
                 self.switching.list.update(cx, |list, cx| {
-                    list.check_tours(&home, active.read(cx));
+                    list.check_tours(&folders, active.read(cx));
                 });
                 self.refresh_shown(cx);
                 cx.notify();

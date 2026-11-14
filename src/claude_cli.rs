@@ -15,30 +15,33 @@ use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnSt
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
-const TOURS_FOLDER_RULE: &str = "~/.guided-review/tours/**";
-
-/// Reads, searches and writes only what the tour skill needs: its own CLI, `gh pr view`, the tour files, and
-/// the code in `clone`. `Read` is limited to those two folders. `Grep` and `Glob` are bare, because under
-/// `dontAsk` a `Grep(path)` or `Glob(path)` rule is accepted but never applies, so listing only those is a
-/// silent denial (tried live, 2026-11-06). The agent runs with `clone` as its cwd, which is where its
-/// searches start.
-pub fn refresh_writer_tools(clone: &Path) -> String {
-    let clone_rule = format!(
-        "//{}/**",
-        clone.display().to_string().trim_start_matches('/')
-    );
+/// A permission rule's path for everything under `folder`: `//` starts an absolute path.
+fn under(folder: &Path) -> String {
     format!(
-        "Skill(tour),Read({clone_rule}),Read({TOURS_FOLDER_RULE}),Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({TOURS_FOLDER_RULE}),Edit({TOURS_FOLDER_RULE})"
+        "//{}/**",
+        folder.display().to_string().trim_start_matches('/')
+    )
+}
+
+/// Reads, searches and writes only what the tour skill needs: its own CLI, `gh pr view`, the tour files in
+/// `tours`, and the code in `clone`. `Read` is limited to those two folders. `Grep` and `Glob` are bare,
+/// because under `dontAsk` a `Grep(path)` or `Glob(path)` rule is accepted but never applies, so listing only
+/// those is a silent denial (tried live, 2026-11-06). The agent runs with `clone` as its cwd, which is where
+/// its searches start.
+pub fn refresh_writer_tools(clone: &Path, tours: &Path) -> String {
+    let (clone_rule, tours_rule) = (under(clone), under(tours));
+    format!(
+        "Skill(tour),Read({clone_rule}),Read({tours_rule}),Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({tours_rule}),Edit({tours_rule})"
     )
 }
 
 /// What a tour agent the app starts may do without the auto mode classifier: the refresh writer's tools, plus
 /// answering, plus the reviewer's summary skill. It runs in auto mode, because a comment may ask it to change
 /// the PR's code (decided 2026-11-10).
-pub fn tour_agent_tools(clone: &Path, summary_skill: Option<&str>) -> String {
+pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>) -> String {
     let tools = format!(
         "{},Bash(guided-review agent-reply:*)",
-        refresh_writer_tools(clone)
+        refresh_writer_tools(clone, tours)
     );
     match summary_skill {
         Some(skill) => format!("{tools},Skill({skill})"),
@@ -169,16 +172,18 @@ impl Drop for ClaudeConversation {
 pub struct ClaudeRefreshWriter {
     binary: PathBuf,
     cwd: PathBuf,
+    tours: PathBuf,
 }
 
 impl ClaudeRefreshWriter {
-    /// `cwd` is where the skill may read code: the repo clone when there is one.
-    pub fn new(cwd: PathBuf) -> Self {
-        Self::with_binary(PathBuf::from("claude"), cwd)
+    /// `cwd` is where the skill may read code: the repo clone when there is one. `tours` is where it may
+    /// write.
+    pub fn new(cwd: PathBuf, tours: PathBuf) -> Self {
+        Self::with_binary(PathBuf::from("claude"), cwd, tours)
     }
 
-    pub fn with_binary(binary: PathBuf, cwd: PathBuf) -> Self {
-        Self { binary, cwd }
+    pub fn with_binary(binary: PathBuf, cwd: PathBuf, tours: PathBuf) -> Self {
+        Self { binary, cwd, tours }
     }
 }
 
@@ -194,7 +199,10 @@ impl RefreshWriter for ClaudeRefreshWriter {
             .args(["-p", &prompt])
             .args(["--output-format", "stream-json", "--verbose"])
             .args(["--permission-mode", "dontAsk"])
-            .args(["--allowedTools", &refresh_writer_tools(&self.cwd)])
+            .args([
+                "--allowedTools",
+                &refresh_writer_tools(&self.cwd, &self.tours),
+            ])
             .current_dir(&self.cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -230,8 +238,13 @@ fn eval_writer_tools(tours_dir: &Path) -> String {
     )
 }
 
-/// Reviewer notes live here; the writer must not read them.
-const EVAL_WRITER_BLOCKED: &str = "Read(~/.guided-review/evals/notes/**),Grep(~/.guided-review/evals/notes/**),Glob(~/.guided-review/evals/notes/**),Read(~/.guided-review/evals/results/**),Grep(~/.guided-review/evals/results/**),Glob(~/.guided-review/evals/results/**)";
+/// Reviewer notes and run results live in `evals`; the writer must not read them.
+fn eval_writer_blocked(evals: &Path) -> String {
+    let (notes, results) = (under(&evals.join("notes")), under(&evals.join("results")));
+    format!(
+        "Read({notes}),Grep({notes}),Glob({notes}),Read({results}),Grep({results}),Glob({results})"
+    )
+}
 
 /// Writes a fresh tour from the skill text in the brief, sandboxed away from the reviewer notes. Unlike the refresh writer it does not rely on the installed skill, so every eval run uses the skill under test.
 pub struct ClaudeEvalWriter {
@@ -261,7 +274,7 @@ impl EvalWriter for ClaudeEvalWriter {
             .args(["-p", "--output-format", "json"])
             .args(["--permission-mode", "dontAsk"])
             .args(["--allowedTools", &eval_writer_tools(brief.tours_dir)])
-            .args(["--disallowedTools", EVAL_WRITER_BLOCKED])
+            .args(["--disallowedTools", &eval_writer_blocked(brief.evals)])
             .args(["--append-system-prompt", brief.skill])
             .env(Tour::TOURS_DIR_ENV, brief.tours_dir)
             .env(Config::SUMMARY_INSTRUCTIONS_OFF_ENV, "1")

@@ -6,6 +6,7 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::app_folders::AppFolders;
 use crate::hex;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
@@ -129,6 +130,8 @@ pub struct WriterBrief<'a> {
     pub skill: &'a str,
     /// The only tours folder the writer may use; never the reviewer's own.
     pub tours_dir: &'a Path,
+    /// The reviewer's evals folder, whose notes and results the writer must not read.
+    pub evals: &'a Path,
 }
 
 pub struct JudgeInput<'a> {
@@ -150,7 +153,7 @@ pub enum TourSource {
     ExistingTours,
 }
 
-/// `~/.guided-review/evals/`: reviewer notes (the test set) and run results. Private, never in the repo.
+/// `evals/` in the state folder: reviewer notes (the test set) and run results. Private, never in the repo.
 pub struct EvalStore {
     root: PathBuf,
 }
@@ -168,9 +171,9 @@ struct TestPr {
 }
 
 impl EvalStore {
-    pub fn in_home(home: &Path) -> Self {
+    pub fn in_folders(folders: &AppFolders) -> Self {
         Self {
-            root: home.join(".guided-review/evals"),
+            root: folders.evals(),
         }
     }
 
@@ -249,7 +252,7 @@ fn sorted_entries(folder: &Path) -> anyhow::Result<Vec<PathBuf>> {
 
 pub struct Eval<'a> {
     pub store: &'a EvalStore,
-    pub home: &'a Path,
+    pub folders: &'a AppFolders,
     pub writer: &'a dyn EvalWriter,
     pub judge: &'a dyn TourJudge,
     pub skill: &'a Skill,
@@ -297,13 +300,14 @@ impl Eval<'_> {
         date: &str,
     ) -> anyhow::Result<Verdicts> {
         match source {
-            TourSource::ExistingTours => self.judge_tour(&Tour::path_for(self.home, pr), note),
+            TourSource::ExistingTours => self.judge_tour(&Tour::path_for(self.folders, pr), note),
             TourSource::WriteNew => {
                 let tours_dir = self.store.run_tours_dir(date);
                 self.writer.write_tour(&WriterBrief {
                     pr,
                     skill: self.skill.text(),
                     tours_dir: &tours_dir,
+                    evals: &self.folders.evals(),
                 })?;
                 let tour_path = Tour::path_in(&tours_dir, pr);
                 if !tour_path.exists() {

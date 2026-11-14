@@ -23,7 +23,6 @@ mod updater;
 mod writing_window;
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,6 +35,7 @@ use gpui::{
 };
 use gpui_platform::application;
 
+use crate::app_folders::AppFolders;
 use crate::app_link::{Answer, AppListener, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
@@ -79,7 +79,7 @@ enum Asked {
 /// wait for (`AppWindow::closed`). The window opens
 /// when the first `open` request has built its review, or earlier holding only Settings when they are
 /// asked for.
-pub fn serve(listener: AppListener, home: PathBuf) {
+pub fn serve(listener: AppListener, folders: AppFolders) {
     let (requests, asked) = unbounded::<Asked>();
     let requests_to_self = requests.clone();
     listener.serve(move |request| {
@@ -102,9 +102,9 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             if snapshots::is_on() {
                 cx.set_reduce_motion(true);
             }
-            let remembered = AppStateFile::in_home(&home);
+            let remembered = AppStateFile::in_folders(&folders);
             let active = cx.new(|_| ActivePr::remembering_in(remembered));
-            let switching = pr_switching(&requests_to_self, &home, active.clone(), cx);
+            let switching = pr_switching(&requests_to_self, &folders, active.clone(), cx);
             switching.refresh(cx);
             cx.set_global(switching);
             tour_writer::resume(cx);
@@ -118,8 +118,8 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             apply_keymap(configured.keymap, cx);
             avatar_pictures::AvatarPictures::install(cx);
             prose_selection::ProseSelections::install(cx);
-            updater::Updates::install(&home, cx);
-            cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
+            updater::Updates::install(folders.home(), cx);
+            cx.spawn(async move |cx| answer_requests(asked, active, folders, cx).await)
                 .detach();
         });
 }
@@ -128,23 +128,24 @@ pub fn serve(listener: AppListener, home: PathBuf) {
 /// as one from the command line. No one waits for its answer; a failed build shows in the window.
 fn pr_switching(
     requests: &UnboundedSender<Asked>,
-    home: &Path,
+    folders: &AppFolders,
     active: Entity<ActivePr>,
     cx: &mut App,
 ) -> PrSwitching {
     let requests = requests.clone();
     let reopen_requests = requests.clone();
-    let home_folder = home.to_path_buf();
+    let all_folders = folders.clone();
     PrSwitching {
         relevant: relevant_pull_requests(),
-        home: home.to_path_buf(),
+        folders: folders.clone(),
         active,
         agents: Arc::new(HcTourAgents::new()),
-        list: cx
-            .new(|_| PrSwitcher::remembering_in(RememberedPullRequestsFile::in_home(home), home)),
+        list: cx.new(|_| {
+            PrSwitcher::remembering_in(RememberedPullRequestsFile::in_folders(folders), folders)
+        }),
         show: Arc::new(move |pr| {
             let (reply, _) = std::sync::mpsc::channel();
-            let open = open_request_of(&home_folder, &pr);
+            let open = open_request_of(&all_folders, &pr);
             if requests
                 .unbounded_send(Asked::Request(Request::Open(open), reply))
                 .is_err()
@@ -170,12 +171,12 @@ fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
 
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
 /// state file only loses the remembered clone folder.
-fn open_request_of(home: &Path, pr: &PullRequestUrl) -> OpenRequest {
-    let folder = ReviewStateFile::for_pr(home, pr)
+fn open_request_of(folders: &AppFolders, pr: &PullRequestUrl) -> OpenRequest {
+    let folder = ReviewStateFile::for_pr(folders, pr)
         .opened_from()
         .ok()
         .flatten()
-        .unwrap_or_else(|| home.to_path_buf());
+        .unwrap_or_else(|| folders.home().to_path_buf());
     OpenRequest {
         pr: pr.to_string(),
         folder,
@@ -208,7 +209,7 @@ type SharedScreen = Rc<RefCell<Screen>>;
 async fn answer_requests(
     mut asked: UnboundedReceiver<Asked>,
     active: Entity<ActivePr>,
-    home: PathBuf,
+    folders: AppFolders,
     cx: &mut AsyncApp,
 ) {
     let screen: SharedScreen = Rc::new(RefCell::new(Screen {
@@ -230,7 +231,7 @@ async fn answer_requests(
         let (request, reply) = match asked {
             Asked::Request(request, reply) => (request, reply),
             Asked::ReopenShown => {
-                reopen_shown(&screen, &home, cx);
+                reopen_shown(&screen, &folders, cx);
                 continue;
             }
         };
@@ -240,7 +241,7 @@ async fn answer_requests(
                 cx.update(|cx| cx.quit());
             }
             Request::ShowSettings => {
-                let answer = show_settings(&screen, &home, cx);
+                let answer = show_settings(&screen, &folders, cx);
                 reply.send(answer).ok();
             }
             Request::ShowSwitcher => {
@@ -265,7 +266,7 @@ async fn answer_requests(
                 claim_terminal(&pr, &open, cx);
                 let origin = origin_of(&open, cx).await;
                 let active = screen.borrow().active.clone();
-                let tour = TourFact::of(&pr, &home);
+                let tour = TourFact::of(&pr, &folders);
                 let outcome = active.update(cx, |active, cx| {
                     let outcome = active.open(pr.clone(), origin, tour);
                     cx.notify();
@@ -299,9 +300,9 @@ async fn answer_requests(
                                 pr: open.pr.clone(),
                             })
                             .ok();
-                        let (screen, home) = (Rc::clone(&screen), home.clone());
+                        let (screen, folders) = (Rc::clone(&screen), folders.clone());
                         cx.spawn(async move |cx| {
-                            build_and_show(screen, ticket, pr, open, home, cx).await;
+                            build_and_show(screen, ticket, pr, open, folders, cx).await;
                         })
                         .detach();
                     }
@@ -312,7 +313,7 @@ async fn answer_requests(
 }
 
 /// Settings over the PR on screen, or with no PR open, in the one window holding only Settings.
-fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answer {
+fn show_settings(screen: &SharedScreen, folders: &AppFolders, cx: &mut AsyncApp) -> Answer {
     let window = screen.borrow().window;
     let shown = cx.update(|cx| {
         bring_app_to_front(cx);
@@ -327,14 +328,16 @@ fn show_settings(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) -> Answe
                 .update(cx, |_, window, _| raise(window))
                 .map(|()| AppWindow::SettingsOnly(window)),
             ShowSettings::OpenSettingsOnly => {
-                open_settings_window(home, cx).map(AppWindow::SettingsOnly)
+                open_settings_window(folders, cx).map(AppWindow::SettingsOnly)
             }
             ShowSettings::ReplaceSwitcher(window) => {
-                let home = home.to_path_buf();
+                let folders = folders.clone();
                 window
                     .update(cx, |_, window, cx| {
                         window.set_window_title(&marked_if_dev("Settings".to_owned()));
-                        window.replace_root(cx, |window, cx| SettingsWindow::new(home, window, cx));
+                        window.replace_root(cx, |window, cx| {
+                            SettingsWindow::new(folders, window, cx)
+                        });
                     })
                     .map(|()| AppWindow::SettingsOnly(WindowHandle::new(window.window_id())))
             }
@@ -389,7 +392,7 @@ fn show_switcher(screen: &SharedScreen, cx: &mut AsyncApp) -> Answer {
 /// The save of the settings asks for the PR on screen to be built again. The window is held first (typing
 /// saved, focus out of the boxes) so the build reads the state file the old session no longer changes;
 /// `reopen` then raises the Opening veil and gives the ticket, and the build takes the path of any switch.
-fn reopen_shown(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) {
+fn reopen_shown(screen: &SharedScreen, folders: &AppFolders, cx: &mut AsyncApp) {
     let (active, window) = {
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
@@ -407,9 +410,9 @@ fn reopen_shown(screen: &SharedScreen, home: &Path, cx: &mut AsyncApp) {
     let Some((ticket, pr)) = reopening else {
         return;
     };
-    let open = open_request_of(home, &pr);
-    let (screen, home) = (Rc::clone(screen), home.to_path_buf());
-    cx.spawn(async move |cx| build_and_show(screen, ticket, pr, open, home, cx).await)
+    let open = open_request_of(folders, &pr);
+    let (screen, folders) = (Rc::clone(screen), folders.clone());
+    cx.spawn(async move |cx| build_and_show(screen, ticket, pr, open, folders, cx).await)
         .detach();
 }
 
@@ -503,14 +506,14 @@ async fn build_and_show(
     ticket: BuildTicket,
     pr: PullRequestUrl,
     open: OpenRequest,
-    home: PathBuf,
+    folders: AppFolders,
     cx: &mut AsyncApp,
 ) {
     let (build_pr, folder, at_step) = (pr.clone(), open.folder.clone(), open.at_step.clone());
     let built = cx
         .background_executor()
         .spawn(async move {
-            open_review(&build_pr, &folder, &home).map(|mut opened| {
+            open_review(&build_pr, &folder, &folders).map(|mut opened| {
                 if let Some(step) = &at_step {
                     opened.review.go_to(step);
                 }
@@ -794,12 +797,15 @@ fn open_window(
     })
 }
 
-fn open_settings_window(home: &Path, cx: &mut App) -> anyhow::Result<WindowHandle<SettingsWindow>> {
+fn open_settings_window(
+    folders: &AppFolders,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<SettingsWindow>> {
     let options = window_options("Settings".to_owned(), cx);
-    let home = home.to_path_buf();
+    let folders = folders.clone();
     cx.open_window(options, |window, cx| {
         cx.set_global(Appearance::of(window));
-        cx.new(|cx| SettingsWindow::new(home, window, cx))
+        cx.new(|cx| SettingsWindow::new(folders, window, cx))
     })
 }
 

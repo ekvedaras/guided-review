@@ -61,7 +61,7 @@ impl Shop {
         }))
         .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &pr);
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr);
         let source = self.source();
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);

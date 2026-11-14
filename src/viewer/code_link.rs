@@ -37,9 +37,9 @@ pub enum NotInIde {
 impl fmt::Display for NotInIde {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoIdeTemplate => f.write_str("no ide template in ~/.guided-review/config.toml"),
+            Self::NoIdeTemplate => f.write_str("no ide template in config.toml"),
             Self::NoClone(repo) => {
-                write!(f, "no clone set for {repo} in ~/.guided-review/config.toml")
+                write!(f, "no clone set for {repo} in config.toml")
             }
             Self::NotInWorkingCopy => f.write_str("the clone's working copy has no such file"),
             Self::RemovedLine => f.write_str("removed lines exist only at the PR's base"),

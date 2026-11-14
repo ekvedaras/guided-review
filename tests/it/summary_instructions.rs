@@ -24,7 +24,7 @@ impl Shop {
     }
 
     fn guided_review_file(&self, name: &str, text: &str) {
-        let path = self.repo.home().join(".guided-review").join(name);
+        let path = self.repo.home().join(".config/guided-review").join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
     }
@@ -36,7 +36,7 @@ impl Shop {
     fn tour_path(&self) -> std::path::PathBuf {
         self.repo
             .home()
-            .join(".guided-review/tours/acme/shop/7.json")
+            .join(".local/state/guided-review/tours/acme/shop/7.json")
     }
 
     fn outline(&self) -> Run {
@@ -52,7 +52,9 @@ impl Shop {
         tour.as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
-        self.guided_review_file("tours/acme/shop/7.json", &tour.to_string());
+        let path = self.tour_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, tour.to_string()).unwrap();
     }
 
     fn check(&self) -> Run {
@@ -131,7 +133,7 @@ fn outline_reads_the_file_the_config_names_over_the_default_one() {
 fn a_configured_path_may_start_with_the_home_folder_mark() {
     let shop = Shop::with_pull();
     shop.guided_review_file("elsewhere.md", "from home\n");
-    shop.config("summary_instructions = \"~/.guided-review/elsewhere.md\"\n");
+    shop.config("summary_instructions = \"~/.config/guided-review/elsewhere.md\"\n");
 
     let run = shop.outline();
 
@@ -288,7 +290,8 @@ fn the_reviewer_summary_survives_a_read_and_write_of_the_tour_file() {
 fn a_wrongly_typed_summary_instructions_is_a_warning_and_the_rest_of_the_config_still_loads() {
     let config = Config::from_text("ide = \"zed {path}\"\nsummary_instructions = 5\n").unwrap();
 
-    let instructions = config.summary_instructions(Path::new("/nowhere"));
+    let instructions =
+        config.summary_instructions(&crate::support::folders_in(Path::new("/nowhere")));
 
     assert!(!instructions.are_set());
     assert!(
@@ -371,7 +374,7 @@ fn a_launch_runs_the_skill_the_config_asks_for() {
     let shop = Shop::with_pull();
     shop.config("summary_instructions = { skill = \"recap\" }\n");
 
-    let instructions = SummaryInstructions::of_home(shop.repo.home());
+    let instructions = SummaryInstructions::of(&shop.repo.folders());
 
     assert_eq!(instructions.skill(), Some("recap"));
     assert_eq!(instructions.warning(), None);
@@ -381,7 +384,7 @@ fn a_launch_runs_the_skill_the_config_asks_for() {
 fn a_launch_runs_no_skill_when_the_config_names_none() {
     let shop = Shop::with_pull();
 
-    let instructions = SummaryInstructions::of_home(shop.repo.home());
+    let instructions = SummaryInstructions::of(&shop.repo.folders());
 
     assert_eq!(instructions.skill(), None);
     assert_eq!(instructions.warning(), None);
@@ -392,7 +395,7 @@ fn a_launch_with_an_unreadable_config_runs_no_skill_and_says_why() {
     let shop = Shop::with_pull();
     shop.config("this is not toml");
 
-    let instructions = SummaryInstructions::of_home(shop.repo.home());
+    let instructions = SummaryInstructions::of(&shop.repo.folders());
 
     assert_eq!(instructions.skill(), None);
     assert!(
@@ -408,7 +411,8 @@ fn a_launch_with_an_unreadable_config_runs_no_skill_and_says_why() {
 fn an_empty_skill_name_is_a_warning_as_it_is_in_settings() {
     let config = Config::from_text("summary_instructions = { skill = \"\" }\n").unwrap();
 
-    let instructions = config.summary_instructions(Path::new("/nowhere"));
+    let instructions =
+        config.summary_instructions(&crate::support::folders_in(Path::new("/nowhere")));
 
     assert!(!instructions.are_set());
     assert!(instructions.warning().is_some());

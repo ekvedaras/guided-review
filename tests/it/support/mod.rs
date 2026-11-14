@@ -23,6 +23,7 @@ use std::process::Command;
 use std::thread;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use guided_review::app_folders::AppFolders;
 use guided_review::ide::NoIde;
 use guided_review::viewer::{CodeLink, CommentDraft, Destination, Review};
 use tempfile::TempDir;
@@ -33,6 +34,11 @@ pub fn file_path(path: &str) -> guided_review::file_path::FilePath {
 
 pub fn line(number: usize) -> guided_review::line_number::LineNumber {
     guided_review::line_number::LineNumber::try_from(number).unwrap()
+}
+
+/// The app folders of a throwaway home: the XDG defaults, whatever XDG variables the test runs with.
+pub fn folders_in(home: &Path) -> AppFolders {
+    guided_review::platform::app_folders(home, |_| None)
 }
 
 pub struct FixtureRepo {
@@ -62,6 +68,10 @@ impl FixtureRepo {
 
     pub fn home(&self) -> &Path {
         self.home.path()
+    }
+
+    pub fn folders(&self) -> AppFolders {
+        folders_in(self.home())
     }
 
     pub fn write(&self, path: &str, content: &str) {
@@ -153,6 +163,10 @@ impl<'a> GuidedReview<'a> {
             .args(args)
             .current_dir(&self.current_dir)
             .env("HOME", self.repo.home())
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .env_remove("XDG_CACHE_HOME")
+            .env_remove("XDG_RUNTIME_DIR")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GH_CONFIG_DIR", empty_gh_config)

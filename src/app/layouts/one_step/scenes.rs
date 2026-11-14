@@ -490,9 +490,9 @@ impl OneStepLayout {
                 }
             }
             Scene::UpdateOffered => {
-                let home = cx.global::<PrSwitching>().home.clone();
+                let folders = cx.global::<PrSwitching>().folders.clone();
                 if let Some(update) = sample_update() {
-                    Updates::stage(&home, UpdateOffer::Available(update), cx);
+                    Updates::stage(folders.home(), UpdateOffer::Available(update), cx);
                 }
             }
             Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {

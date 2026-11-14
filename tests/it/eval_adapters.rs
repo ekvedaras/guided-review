@@ -36,6 +36,7 @@ fn the_writer_runs_with_narrow_tools_and_gets_the_skill_but_no_note() {
             pr: &pr,
             skill: "SKILL TEXT",
             tours_dir: Path::new("/runs/one"),
+            evals: Path::new("/home/me/.local/state/guided-review/evals"),
         })
         .unwrap();
 
@@ -45,7 +46,12 @@ fn the_writer_runs_with_narrow_tools_and_gets_the_skill_but_no_note() {
     assert!(args.contains("--allowedTools"), "{args}");
     assert!(args.contains("Bash(guided-review check:*)"), "{args}");
     assert!(args.contains("--append-system-prompt SKILL TEXT"), "{args}");
-    assert!(args.contains("--disallowedTools"), "{args}");
+    assert!(
+        args.contains(
+            "--disallowedTools Read(//home/me/.local/state/guided-review/evals/notes/**)"
+        ),
+        "{args}"
+    );
     assert!(args.contains("Write(/runs/one/**)"), "{args}");
     assert!(!args.contains("Write(~/.guided-review/tours"), "{args}");
     let tours_dir = std::fs::read_to_string(dir.path().join("tours_dir")).unwrap();
@@ -75,6 +81,7 @@ fn the_writer_runs_with_the_reviewers_summary_instructions_off() {
             pr: &pr,
             skill: "SKILL TEXT",
             tours_dir: Path::new("/runs/one"),
+            evals: Path::new("/home/me/.local/state/guided-review/evals"),
         })
         .unwrap();
 
@@ -96,6 +103,7 @@ fn the_writer_failing_is_an_error() {
             pr: &pr,
             skill: "s",
             tours_dir: Path::new("/runs/one"),
+            evals: Path::new("/home/me/.local/state/guided-review/evals"),
         })
         .unwrap_err();
 

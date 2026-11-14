@@ -29,7 +29,7 @@ fn three_step_review(repo: &FixtureRepo) -> Review {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_pr(
-        repo.home(),
+        &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     Review::open(tour, &source, state_file).unwrap()

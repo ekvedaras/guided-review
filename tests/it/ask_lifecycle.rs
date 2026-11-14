@@ -73,11 +73,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(self.repo.home(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &self.pr())
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(self.repo.home(), &self.pr())
+        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
     }
 
     fn source(&self) -> LocalGit {

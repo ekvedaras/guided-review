@@ -120,7 +120,7 @@ impl Pull {
         }))
         .unwrap();
         let source = self.source();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &self.pr());
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &self.pr());
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -582,7 +582,7 @@ fn a_state_file_written_before_comment_places_were_kinds_loads_the_same_drafts_a
     let state_path = pull
         .repo
         .home()
-        .join(".guided-review/state/acme/shop/7.json");
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     let location = |line: u32| json!({"path": "notes.txt", "side": "Head", "line": line});
     let written = json!({
         "comment_drafts": [
@@ -687,7 +687,7 @@ fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_o
     drop(review);
 
     outcome
-        .land_in(&ReviewStateFile::for_pr(pull.repo.home(), &pull.pr()))
+        .land_in(&ReviewStateFile::for_pr(&pull.repo.folders(), &pull.pr()))
         .unwrap();
 
     assert_eq!(drafts(&pull.open()), []);
@@ -708,7 +708,7 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
     drop(review);
 
     outcome
-        .land_in(&ReviewStateFile::for_pr(pull.repo.home(), &pull.pr()))
+        .land_in(&ReviewStateFile::for_pr(&pull.repo.folders(), &pull.pr()))
         .unwrap();
 
     let reopened = pull.open();

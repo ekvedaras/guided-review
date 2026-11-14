@@ -63,7 +63,7 @@ impl Pull {
         Review::open(
             tour,
             &self.source(),
-            ReviewStateFile::for_pr(self.repo.home(), &pr),
+            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
         )
         .unwrap()
     }

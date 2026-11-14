@@ -250,8 +250,8 @@ impl OneStepLayout {
             });
             settings
         } else {
-            let home = switching.home.clone();
-            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::SheetOverReview, cx))
+            let folders = switching.folders.clone();
+            cx.new(|cx| SettingsPanel::new(folders, focus.clone(), Placement::SheetOverReview, cx))
         };
         cx.subscribe_in(
             &settings,

@@ -47,7 +47,7 @@ impl Shop {
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_pr(
-            self.repo.home(),
+            &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7"
                 .parse::<PullRequestUrl>()
                 .unwrap(),
@@ -331,10 +331,10 @@ fn a_shell_ide_launch_and_a_url_launch_are_both_ide_destinations() {
 fn a_github_destination_says_why_in_words() {
     assert_eq!(
         NotInIde::NoClone(RepoName::new("acme", "shop")).to_string(),
-        "no clone set for acme/shop in ~/.guided-review/config.toml"
+        "no clone set for acme/shop in config.toml"
     );
     assert_eq!(
         NotInIde::NoIdeTemplate.to_string(),
-        "no ide template in ~/.guided-review/config.toml"
+        "no ide template in config.toml"
     );
 }

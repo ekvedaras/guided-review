@@ -5,6 +5,11 @@
 //! check both adapters wherever they run. `Os::RUNNING` is the one place that picks the adapter;
 //! only code that needs one OS's libraries is behind `cfg` instead.
 
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use crate::app_folders::AppFolders;
+
 mod desktop_entry;
 mod linux;
 mod macos;
@@ -122,6 +127,26 @@ impl Os {
             Self::Linux => linux::HERDR_RAISE,
         }
     }
+}
+
+/// The XDG folders, on every OS so far: the variables when set to an absolute path, the XDG
+/// defaults under home otherwise. The socket falls back to the state folder with no runtime folder.
+/// A Windows adapter would pick its own here.
+pub fn app_folders(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> AppFolders {
+    let base = |name: &str| {
+        env(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    let ours = |folder: PathBuf| folder.join("guided-review");
+    let state = ours(base("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")));
+    AppFolders::new(
+        home,
+        ours(base("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))),
+        state.clone(),
+        ours(base("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache"))),
+        base("XDG_RUNTIME_DIR").map_or(state, ours),
+    )
 }
 
 /// The OS's close, minimise and zoom buttons, drawn on the app's own title bar.

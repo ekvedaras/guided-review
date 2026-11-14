@@ -10,10 +10,12 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde_json::Value;
 
+use crate::app_folders::AppFolders;
 use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
 use crate::platform::{HerdrRaise, Os};
 use crate::pull_request::PullRequestUrl;
+use crate::tour::Tour;
 use crate::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
     TourAgentPort, TourAgentStart,
@@ -326,6 +328,7 @@ impl TourAgentPort for HcTourAgents {
         let folder = start.folder.display().to_string();
         let pr_label = label_of(&start.pr);
         let path = format!("PATH={}", self.agents_path);
+        let tours = Tour::tours_dir(&AppFolders::running()?);
         let tab = &start.name;
         let space_label = format!("herdr.space={AGENTS_SPACE}");
         let tab_label = format!("herdr.tab={tab}");
@@ -357,7 +360,7 @@ impl TourAgentPort for HcTourAgents {
             "--permission-mode",
             "auto",
             "--allowedTools",
-            &tour_agent_tools(&start.folder, start.summary_skill.as_deref()),
+            &tour_agent_tools(&start.folder, &tours, start.summary_skill.as_deref()),
         ];
         let started = self.hc(&args)?;
         let address = at(&started, "/address")

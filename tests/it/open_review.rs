@@ -26,7 +26,7 @@ fn shop_with_a_tour() -> FixtureRepo {
         "summary": [],
         "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
     });
-    let path = Tour::path_for(repo.home(), &pr());
+    let path = Tour::path_for(&repo.folders(), &pr());
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, tour.to_string()).unwrap();
     repo
@@ -35,7 +35,7 @@ fn shop_with_a_tour() -> FixtureRepo {
 #[test]
 fn a_dropped_review_frees_its_code_source() {
     let repo = shop_with_a_tour();
-    let opened = open_review(&pr(), repo.path(), repo.home()).unwrap();
+    let opened = open_review(&pr(), repo.path(), &repo.folders()).unwrap();
     let source = Arc::downgrade(&opened.source);
 
     drop(opened);
@@ -46,9 +46,9 @@ fn a_dropped_review_frees_its_code_source() {
 #[test]
 fn the_reloader_reads_the_tour_file_again() {
     let repo = shop_with_a_tour();
-    let opened = open_review(&pr(), repo.path(), repo.home()).unwrap();
+    let opened = open_review(&pr(), repo.path(), &repo.folders()).unwrap();
     assert_eq!(opened.review.title(), "Hello world");
-    let path = Tour::path_for(repo.home(), &pr());
+    let path = Tour::path_for(&repo.folders(), &pr());
     let rewritten = std::fs::read_to_string(&path)
         .unwrap()
         .replace("Hello world", "Hello again");
@@ -68,11 +68,11 @@ fn an_opened_review_can_be_built_off_the_ui_thread() {
 #[test]
 fn the_review_shows_as_many_more_lines_as_the_config_says() {
     let repo = shop_with_a_tour();
-    let config = repo.home().join(".guided-review/config.toml");
+    let config = repo.home().join(".config/guided-review/config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(config, "more_lines = 5\n").unwrap();
 
-    let opened = open_review(&pr(), repo.path(), repo.home()).unwrap();
+    let opened = open_review(&pr(), repo.path(), &repo.folders()).unwrap();
 
     assert_eq!(opened.review.display_options().more_lines().get(), 5);
 }
@@ -81,7 +81,9 @@ fn the_review_shows_as_many_more_lines_as_the_config_says() {
 fn a_pr_without_a_tour_is_refused_with_the_command_that_writes_one() {
     let repo = FixtureRepo::cloned_from("acme/shop");
 
-    let error = open_review(&pr(), repo.path(), repo.home()).err().unwrap();
+    let error = open_review(&pr(), repo.path(), &repo.folders())
+        .err()
+        .unwrap();
 
     assert_eq!(
         error.to_string(),

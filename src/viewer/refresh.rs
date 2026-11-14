@@ -1,7 +1,7 @@
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::app_folders::AppFolders;
 use crate::coverage;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
@@ -116,7 +116,7 @@ impl fmt::Display for RefreshBrief {
 
 /// The Refresh button's work: the local AI rewrites the marked steps, then a fresh `Review` opens on the result.
 pub struct TourRefresher {
-    pub home: PathBuf,
+    pub folders: AppFolders,
     pub pr: PullRequestUrl,
     pub pick_code_source: PickCodeSource,
     pub writer: Arc<dyn RefreshWriter>,
@@ -142,7 +142,7 @@ impl TourRefresher {
         if let Some(reason) = failure {
             anyhow::bail!("claude stopped: {reason}");
         }
-        let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
+        let tour = Tour::load(&Tour::path_for(&self.folders, &self.pr))?;
         let pinned = PullRequestTips {
             base_branch_tip: tour.base.clone(),
             head: tour.head.clone(),
@@ -151,7 +151,7 @@ impl TourRefresher {
         let review = Review::open(
             tour,
             source.as_ref(),
-            ReviewStateFile::for_pr(&self.home, &self.pr),
+            ReviewStateFile::for_pr(&self.folders, &self.pr),
         )?;
         if !review.refresh_brief().is_empty() {
             anyhow::bail!("claude ended without refreshing the tour: {said}");

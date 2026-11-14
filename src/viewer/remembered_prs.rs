@@ -1,11 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Context;
+
+use crate::app_folders::AppFolders;
 use serde::{Deserialize, Serialize};
 
 use super::relevant_prs::{RelevantPullRequest, WhyListed};
 
-/// `~/.guided-review/state/pull-requests.json`: the switcher's last list from GitHub, shown at once
+/// `pull-requests.json` in the state files folder: the switcher's last list from GitHub, shown at once
 /// on the next start while GitHub is read again.
 #[derive(Clone)]
 pub struct RememberedPullRequestsFile {
@@ -31,9 +33,9 @@ enum RememberedWhy {
 }
 
 impl RememberedPullRequestsFile {
-    pub fn in_home(home: &Path) -> Self {
+    pub fn in_folders(folders: &AppFolders) -> Self {
         Self {
-            path: home.join(".guided-review/state/pull-requests.json"),
+            path: folders.state_files().join("pull-requests.json"),
         }
     }
 

@@ -45,7 +45,7 @@ impl LocalGit {
         match Self::configured_clone(repo, &configured) {
             Ok(clone) => Ok(Some(clone)),
             Err(problem) => bail!(
-                "~/.guided-review/config.toml says {} is a clone of {repo}, but {problem}",
+                "config.toml says {} is a clone of {repo}, but {problem}",
                 configured.display()
             ),
         }

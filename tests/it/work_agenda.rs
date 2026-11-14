@@ -51,7 +51,7 @@ impl Pull {
             "steps": [{"id": "a", "title": "A", "pieces": [{"file": "a.txt"}]}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &PR.parse().unwrap());
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse().unwrap());
         Review::open(tour, &self.source(), state_file).unwrap()
     }
 
