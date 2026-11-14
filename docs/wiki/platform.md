@@ -38,9 +38,18 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **On Linux the raise is best effort.** Only the desktop raises windows on Wayland and only Hyprland is asked, so a missing `hyprctl`, another desktop or a failed dispatch leaves Herdr behind and showing the agent still succeeds. On macOS a failed `open` still fails it, as before.
 - Tests run both adapters' commands through one stand-in (`HcTourAgents::raising_herdr_with(os, program)`).
 
+## Decisions, 2026-11-14 (#71)
+
+- **The Desktop entry is one interface** (`6eed83c`): `Os::desktop_entry(home)` puts the entry in place from a release folder, names the variable that marks a launch from it, gives the launcher to start the app with and the relaunch through the login shell. The App bundle moved to `src/platform/macos/app_bundle.rs` unchanged in what it writes; the Linux form is `src/platform/linux/desktop_file.rs`. Both are plain files, so both are tested on any host.
+- **On Linux the release carries only the icons** (`icons/hicolor/{256x256,512x512}/apps/io.github.ekvedaras.guided-review.png`, at the path they take under `~/.local/share`); the desktop file is written at install. Its Exec names the bin link by full path, as desktop files expand no `~`, so no release could carry it ready.
+- **The Exec line marks the launch itself**: `env GUIDED_REVIEW_LAUNCHED_APP=<app id> <bin link>`, the Linux stand-in for macOS's `__CFBundleIdentifier`, as Linux launchers name no app they start (GIO's `GIO_LAUNCHED_DESKTOP_FILE` is set by GTK launchers only). The relaunch is the macOS one with bash in place of zsh when `$SHELL` is unset. On the maintainer's machine a bash login shell with a launcher's short `PATH` found `gh` only through mise's shims, which is why the relaunch matters on Linux too.
+- **One app id, `io.github.ekvedaras.guided-review`**: the bundle id, the desktop file's name, its `StartupWMClass` and the window's app id (`64ead33`), which Wayland compositors match to the desktop file for the window's icon.
+- **`bundle-template` became `desktop-entry-template`** and writes every OS's entry files; the macOS release job packs only the bundle from it.
+
 ## Known open
 
 - The Dock icon, background and word-key calls are three platform functions the app start calls in turn; one start call is a later ticket.
 - The app menu still holds the only Quit item; it is the App start hooks ticket's.
-- The Desktop entry, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
+- The Linux release archive must copy `icons/` from the template beside the binary, or `install-app` says the release carries no entry.
+- App folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
