@@ -46,10 +46,13 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **One app id, `io.github.ekvedaras.guided-review`**: the bundle id, the desktop file's name, its `StartupWMClass` and the window's app id (`64ead33`), which Wayland compositors match to the desktop file for the window's icon.
 - **`bundle-template` became `desktop-entry-template`** and writes every OS's entry files; the macOS release job packs only the bundle from it.
 
+## Decisions, 2026-11-14 (#73, app start hooks)
+
+- **One platform call at app start** (`platform::start(takes_focus, quit, cx)`) gives the OS what it gets from the app: on macOS the Dock icon (or, when the app must not take the focus, no Dock icon and no turn at the front), the Option-arrow monitor and the app menu. Linux gets none of them. The app start no longer names the Dock or macOS; it still decides whether the app takes the focus and owns the Quit action and its handler.
+- **The app menu is plain data per OS** (`Os::app_menus(quit)`): macOS one `guided-review` menu with Quit, which macOS shows beside its key; Linux none, as Linux desktops have no app menu bar. Quit on Linux is the Quit key only, bound from the keymap as on every OS.
+
 ## Known open
 
-- The Dock icon, background and word-key calls are three platform functions the app start calls in turn; one start call is a later ticket.
-- The app menu still holds the only Quit item; it is the App start hooks ticket's.
 - The Linux release archive must copy `icons/` from the template beside the binary, or `install-app` says the release carries no entry.
 - App folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
