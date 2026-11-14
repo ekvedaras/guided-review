@@ -1,0 +1,1 @@
+Guided Review now runs on Linux: each release has an `x86_64-unknown-linux-gnu` archive, `guided-review install-app` puts it in your app launcher, and the app updates itself as on macOS. See the README for the install steps.

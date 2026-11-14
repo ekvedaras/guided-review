@@ -66,9 +66,14 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **`open` tries the move again after quitting an app of an earlier build** (`app_link::start_and_hand`), so the CLI and the app it starts agree on the socket.
 - **Agent permission rules name the real tours and evals folders** as `//<abs>/**`, not `~/.guided-review/...`; the /tour skill already finds tours through `guided-review tour-path`.
 
+## Decisions, 2026-11-14 (#77): Linux release and CI
+
+- **CI runs the gate on `ubuntu-latest` beside `macos-latest`**, a matrix of the one `test` job. No branch rule names the check, so its rename to `test (<os>)` blocks nothing.
+- **`scripts/linux-build-packages` is the one list of apt packages** CI, the release and the README's build from source use. Taken from what the binary links (`ldd`: libxcb, libxkbcommon, libxkbcommon-x11) and what gpui's crates build or load (fontconfig, wayland-client, the Vulkan loader), checked against `script/linux` of the pinned zed rev. Not taken from that script: ALSA, libgit2, OpenSSL, sqlite, clang and the rest Zed itself needs. DejaVu is installed so the fonts' last choice is there.
+- **The Linux archive is built on `ubuntu-24.04`**, so it needs glibc 2.39 or newer. Its job runs `scripts/check` itself, as `verify` gates only the macOS run, and packs the binary, skills, LICENSE, README and the `icons/` of the macOS-built Desktop entry template; the checksum is `sha256sum`'s line, which reads like `shasum -a 256`'s. aarch64 Linux is not built.
+- **The updater's Linux path is tested with GitHub's answer for v0.9.0** with a Linux archive added (`tests/fixtures/github/latest_release_with_linux.json`): find the archive, download, install, desktop entry placed.
+
 ## Known open
 
-- The Linux release archive must copy `icons/` from the template beside the binary, or `install-app` says the release carries no entry.
-- The Linux release and CI are their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
 - Snapshots on Linux wait for a gpui with `render_to_image` there.
