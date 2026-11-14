@@ -1,4 +1,4 @@
-use super::{KeySpelling, PrimaryKey, TextEdit, WindowButtons};
+use super::{HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
 
 pub const TRIPLE_SYSTEM: &str = "unknown-linux-gnu";
 
@@ -45,3 +45,10 @@ pub const TEXT_KEYS: &[(&str, TextEdit)] = &[
 
 /// The window manager draws them, or none, as Hyprland does.
 pub const WINDOW_BUTTONS: Option<WindowButtons> = None;
+
+/// Hyprland's; other desktops have no such command, so Herdr stays where it is there.
+pub const HERDR_RAISE: HerdrRaise = HerdrRaise {
+    program: "hyprctl",
+    args: &["dispatch", "focuswindow", "class:herdr-app"],
+    best_effort: true,
+};

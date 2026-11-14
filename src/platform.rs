@@ -100,6 +100,14 @@ impl Os {
             Self::Linux => linux::WINDOW_BUTTONS,
         }
     }
+
+    /// What brings the Herdr window to the front once a terminal in it is focused.
+    pub fn herdr_raise(self) -> HerdrRaise {
+        match self {
+            Self::MacOs => macos::HERDR_RAISE,
+            Self::Linux => linux::HERDR_RAISE,
+        }
+    }
 }
 
 /// The OS's close, minimise and zoom buttons, drawn on the app's own title bar.
@@ -136,6 +144,16 @@ pub struct KeySpelling {
     pub alt: &'static str,
     pub shift: &'static str,
     pub joiner: &'static str,
+}
+
+/// A command that brings the Herdr window to the front.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HerdrRaise {
+    pub program: &'static str,
+    pub args: &'static [&'static str],
+    /// Only the desktop can raise a window on Linux, and not every one lets a program ask; there
+    /// a raise that cannot run or fails leaves Herdr behind instead of failing the hand-off.
+    pub best_effort: bool,
 }
 
 /// An edit or caret move a text box key does.

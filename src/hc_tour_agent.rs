@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
+use crate::platform::{HerdrRaise, Os};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
@@ -28,8 +29,6 @@ const AGENTS_SPACE: &str = "guided-review";
 /// Not plain "guided-review": a space nobody named is called after its repo, and the maintainer's own
 /// space of this repo already is.
 const AGENTS_SPACE_NAME: &str = "guided-review agents";
-/// The macOS app `herdr-app` drives.
-const HERDR_APP_NAME: &str = "Herdr";
 
 /// Herdr-app takes up a newly labelled terminal a moment after `hc run` returns; until then it knows
 /// no space or tab to name.
@@ -39,7 +38,9 @@ const ADOPTION_WAIT: Duration = Duration::from_millis(100);
 pub struct HcTourAgents {
     hc: PathBuf,
     herdr_app: PathBuf,
-    open: PathBuf,
+    herdr_raise: HerdrRaise,
+    /// Where the raise program is looked up; a stand-in in tests.
+    herdr_raise_program: PathBuf,
     /// The `PATH` an agent the app starts runs with.
     agents_path: String,
 }
@@ -55,17 +56,20 @@ impl HcTourAgents {
     }
 
     pub fn with_binaries(hc: PathBuf, herdr_app: PathBuf) -> Self {
+        let herdr_raise = Os::RUNNING.herdr_raise();
         Self {
             hc,
             herdr_app,
-            open: PathBuf::from("/usr/bin/open"),
+            herdr_raise,
+            herdr_raise_program: PathBuf::from(herdr_raise.program),
             agents_path: String::new(),
         }
     }
 
-    /// What brings an app to the front: macOS `open`, or a stand-in in tests.
-    pub fn opening_apps_with(mut self, open: PathBuf) -> Self {
-        self.open = open;
+    /// Raises Herdr as `os` does, running `program` in place of that OS's raise program.
+    pub fn raising_herdr_with(mut self, os: Os, program: PathBuf) -> Self {
+        self.herdr_raise = os.herdr_raise();
+        self.herdr_raise_program = program;
         self
     }
 
@@ -424,14 +428,23 @@ enum Naming {
 impl HcTourAgents {
     /// `agent.focus` switches the Herdr window to the terminal but leaves the window behind ours.
     fn bring_herdr_to_the_front(&self) -> anyhow::Result<()> {
-        let output = Command::new(&self.open)
-            .args(["-a", HERDR_APP_NAME])
+        let raised = self.raise_herdr();
+        if self.herdr_raise.best_effort {
+            return Ok(());
+        }
+        raised
+    }
+
+    fn raise_herdr(&self) -> anyhow::Result<()> {
+        let program = self.herdr_raise_program.display();
+        let output = Command::new(&self.herdr_raise_program)
+            .args(self.herdr_raise.args)
             .stdin(Stdio::null())
             .output()
-            .with_context(|| format!("could not run `{}`", self.open.display()))?;
+            .with_context(|| format!("could not run `{program}`"))?;
         if !output.status.success() {
             bail!(
-                "could not bring {HERDR_APP_NAME} to the front: {}",
+                "could not bring Herdr to the front with `{program}`: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }

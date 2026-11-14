@@ -3,6 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
+use guided_review::platform::Os;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
@@ -75,17 +76,29 @@ fi
 }
 
 fn adapter(dir: &Path) -> HcTourAgents {
-    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir)).opening_apps_with(fake_open(dir))
+    adapter_on(dir, Os::MacOs)
 }
 
-/// A stand-in for macOS `open` that logs each call.
-fn fake_open(dir: &Path) -> PathBuf {
-    let script = dir.join("open");
+fn adapter_on(dir: &Path, os: Os) -> HcTourAgents {
+    HcTourAgents::with_binaries(fake_hc(dir), fake_herdr_app(dir))
+        .raising_herdr_with(os, fake_raise(dir))
+}
+
+/// A stand-in for what brings Herdr to the front (`open`, `hyprctl`) that logs each call;
+/// `<dir>/raise-fails` makes it fail.
+fn fake_raise(dir: &Path) -> PathBuf {
+    let script = dir.join("raise");
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\necho \"$@\" >> \"{}/open-calls\"\n",
-            dir.display()
+            r#"#!/bin/sh
+echo "$@" >> "{dir}/raise-calls"
+if [ -f "{dir}/raise-fails" ]; then
+  echo "no such window" >&2
+  exit 1
+fi
+"#,
+            dir = dir.display()
         ),
     )
     .unwrap();
@@ -723,15 +736,69 @@ fn the_app_started_agents_are_listed_with_their_pr_status_and_when_it_changed() 
 }
 
 #[test]
-fn showing_an_agent_brings_the_herdr_window_to_the_front_after_focusing_its_terminal() {
+fn on_macos_showing_an_agent_opens_herdr_after_focusing_its_terminal() {
     let dir = TempDir::new().unwrap();
+    an_agent_of_the_pr(dir.path());
+
+    adapter_on(dir.path(), Os::MacOs)
+        .show(&TerminalId::new("t7"))
+        .unwrap();
+
+    assert_eq!(calls(dir.path(), "raise-calls"), ["-a Herdr"]);
+}
+
+fn an_agent_of_the_pr(dir: &Path) {
     answer(
-        dir.path(),
+        dir,
         "get",
         &format!(r#"{{"address":"t7","labels":{{"app":"guided-review","gr.pr":"{PR}"}}}}"#),
     );
+}
 
-    adapter(dir.path()).show(&TerminalId::new("t7")).unwrap();
+#[test]
+fn on_linux_showing_an_agent_focuses_the_herdr_window_through_hyprland() {
+    let dir = TempDir::new().unwrap();
+    an_agent_of_the_pr(dir.path());
 
-    assert_eq!(calls(dir.path(), "open-calls"), ["-a Herdr"]);
+    adapter_on(dir.path(), Os::Linux)
+        .show(&TerminalId::new("t7"))
+        .unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "raise-calls"),
+        ["dispatch focuswindow class:herdr-app"]
+    );
+}
+
+#[test]
+fn on_linux_an_agent_is_shown_even_when_herdr_cannot_be_brought_to_the_front() {
+    let dir = TempDir::new().unwrap();
+    an_agent_of_the_pr(dir.path());
+    std::fs::write(dir.path().join("raise-fails"), "").unwrap();
+
+    adapter_on(dir.path(), Os::Linux)
+        .show(&TerminalId::new("t7"))
+        .unwrap();
+}
+
+#[test]
+fn on_linux_an_agent_is_shown_even_without_hyprctl() {
+    let dir = TempDir::new().unwrap();
+    an_agent_of_the_pr(dir.path());
+
+    HcTourAgents::with_binaries(fake_hc(dir.path()), fake_herdr_app(dir.path()))
+        .raising_herdr_with(Os::Linux, dir.path().join("no-hyprctl"))
+        .show(&TerminalId::new("t7"))
+        .unwrap();
+}
+
+#[test]
+fn on_macos_showing_an_agent_fails_when_herdr_cannot_be_brought_to_the_front() {
+    let dir = TempDir::new().unwrap();
+    an_agent_of_the_pr(dir.path());
+    std::fs::write(dir.path().join("raise-fails"), "").unwrap();
+
+    let shown = adapter_on(dir.path(), Os::MacOs).show(&TerminalId::new("t7"));
+
+    assert!(shown.is_err());
 }

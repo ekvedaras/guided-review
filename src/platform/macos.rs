@@ -3,7 +3,7 @@ pub mod dock_icon;
 #[cfg(target_os = "macos")]
 pub mod word_keys;
 
-use super::{KeySpelling, PrimaryKey, TextEdit, WindowButtons};
+use super::{HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
 
 pub const TRIPLE_SYSTEM: &str = "apple-darwin";
 
@@ -46,3 +46,9 @@ pub const WINDOW_BUTTONS: Option<WindowButtons> = Some(WindowButtons {
     corner: 14.,
     inset: 80.,
 });
+
+pub const HERDR_RAISE: HerdrRaise = HerdrRaise {
+    program: "/usr/bin/open",
+    args: &["-a", "Herdr"],
+    best_effort: false,
+};
