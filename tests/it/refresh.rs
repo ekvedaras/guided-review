@@ -1,8 +1,7 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, write_executable};
 use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
@@ -376,15 +375,13 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
 
 fn fake_claude(dir: &Path, exit_code: u8) -> PathBuf {
     let script = dir.join("claude");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\npwd > \"{dir}/cwd\"\necho '{{\"type\":\"assistant\",\"message\":{{\"content\":[]}}}}'\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Refreshed the tour.\"}}'\necho 'no login' >&2\nexit {exit_code}\n",
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 

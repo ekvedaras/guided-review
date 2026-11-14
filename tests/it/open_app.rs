@@ -9,7 +9,7 @@ use guided_review::app_link::AppFolder;
 const BUILD: &str = "test-build";
 
 use crate::support::fake_app::{CliEnded, accept_before};
-use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, folders_in};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, folders_in, write_executable};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -28,12 +28,7 @@ fn shop_with_a_tour_file() -> (FixtureRepo, FakeGitHub) {
 /// A script that stands for the app binary: it only records that it was started.
 fn start_script(home: &Path) -> PathBuf {
     let script = home.join("fake-app");
-    std::fs::write(&script, "#!/bin/sh\necho \"$@\" > \"$HOME/started\"\n").unwrap();
-    std::process::Command::new("chmod")
-        .arg("+x")
-        .arg(&script)
-        .status()
-        .unwrap();
+    write_executable(&script, "#!/bin/sh\necho \"$@\" > \"$HOME/started\"\n");
     script
 }
 

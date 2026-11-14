@@ -1,5 +1,4 @@
 use crate::support::folders_in;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,13 +11,15 @@ use guided_review::viewer::{AgentLaunch, AgentLauncher, Asks, Place, ReviewState
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use crate::support::write_executable;
+
 const SESSION: &str = "7f2cd173-4eda-4770-aeb2-c82977b1b673";
 
 /// A stand-in `claude` that logs how it was started and what it was sent,
 /// and answers every line of input with one text delta and a result.
 fn fake_claude(dir: &Path) -> PathBuf {
     let script = dir.join("claude");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             r#"#!/bin/sh
@@ -32,9 +33,7 @@ done
 "#,
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 

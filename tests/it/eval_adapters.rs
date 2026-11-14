@@ -1,4 +1,3 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
@@ -7,18 +6,18 @@ use guided_review::eval::{EvalWriter, JudgeInput, Rule, Score, TourJudge, Writer
 use guided_review::pull_request::PullRequestUrl;
 use tempfile::TempDir;
 
+use crate::support::write_executable;
+
 /// A stand-in `claude -p` that logs its arguments and input, then prints `answer` as a JSON result.
 fn fake_claude(dir: &Path, answer: &str) -> PathBuf {
     let script = dir.join("claude");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\necho \"$GUIDED_REVIEW_TOURS_DIR\" > \"{dir}/tours_dir\"\ncat > \"{dir}/stdin\"\ncat <<'JSON'\n{answer}\nJSON\n",
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 
@@ -64,16 +63,14 @@ fn the_writer_runs_with_narrow_tools_and_gets_the_skill_but_no_note() {
 fn the_writer_runs_with_the_reviewers_summary_instructions_off() {
     let dir = TempDir::new().unwrap();
     let script = dir.path().join("claude");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             "#!/bin/sh\necho \"${}\" > \"{}/off\"\ncat > /dev/null\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"done\"}}'\n",
             Config::SUMMARY_INSTRUCTIONS_OFF_ENV,
             dir.path().display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let pr: PullRequestUrl = "https://github.com/acme/shop/pull/7".parse().unwrap();
 
     ClaudeEvalWriter::with_binary(script)
