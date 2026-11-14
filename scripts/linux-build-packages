@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Installs, with apt, what a Linux build and test run needs besides Rust: the libraries gpui's
+# Wayland and X11 backends build against, the Vulkan loader it draws with, and a font the app falls
+# back to. CI and the release workflow run it on Ubuntu.
+# Usage: scripts/linux-build-packages
+set -euo pipefail
+
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+    pkg-config \
+    libfontconfig-dev \
+    libwayland-dev \
+    libxkbcommon-x11-dev \
+    libx11-xcb-dev \
+    libvulkan1 \
+    fonts-dejavu-core

@@ -93,10 +93,54 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  build-linux:
+    needs: verify
+    # The binary needs the glibc of the Ubuntu it is built on, or newer.
+    runs-on: ubuntu-24.04
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/linux-build-packages
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.TARGET }}
+      # verify gated the macOS run; this gates the Linux one.
+      - run: scripts/check
+      - run: cargo build --release --locked --target "$TARGET"
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-bundle
+          path: bundle
+      - name: Package
+        # The desktop file is written at install (src/platform/linux/desktop_file.rs); the archive
+        # carries its icons.
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          name="guided-review-$VERSION-$TARGET"
+          mkdir -p "dist/$name"
+          cp "target/$TARGET/release/guided-review" LICENSE README.md "dist/$name/"
+          mkdir -p "dist/$name/skills"
+          cp -R skills/tour "dist/$name/skills/tour"
+          cp -R bundle/icons "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guided-review-${{ env.TARGET }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
   release:
     # A workflow_dispatch run stops after build: the archives stay on the run as artifacts.
     if: github.ref_type == 'tag'
-    needs: build
+    needs: [build, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
