@@ -94,6 +94,8 @@
 
 **App bundle**: The Desktop entry on macOS: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Avoid: launcher, wrapper.
 
+**App folders**: Where the app keeps what it writes for the reviewer, by the XDG layout on every OS: the config folder (`config.toml`, `summary.md`; `~/.config/guided-review`), the state folder (tours, state files, Asks, evals, the app lock and log; `~/.local/state/guided-review`), the cache folder (image previews; `~/.cache/guided-review`) and the runtime folder (the app socket; the state folder when there is no `XDG_RUNTIME_DIR`). Until 2026-11-14 all were `~/.guided-review`, which the first start moves into them once. The release install's folders are not app folders. Avoid: guided-review home, data dir.
+
 **In the way**: Of the release install, while it runs: another `guided-review` that comes before its bin link on `PATH`, so the tour skill and a terminal run that one and miss updates. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary. Avoid: shadowing.
 
 **Build**: Which app runs: the release install (no badge; it alone checks for updates, also from the palette's Check for updates), a local build such as `cargo install` (badge `DEV`), or the snapshot build (badge `TEST`). A local build running is not a problem; its badge says it. Avoid: dev mode.

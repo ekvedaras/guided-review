@@ -56,9 +56,19 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **The snapshot scripts stop early off macOS** with a message saying why, and exit 1. `scripts/snapshot` needs gpui's `render_to_image`, which this gpui rev has only on macOS. `scripts/snapshot-compare` is now a shell wrapper around `snapshot-compare.swift`, since a Swift file cannot check the OS before `import AppKit` fails. They check `uname`, not the platform module: they are shell, outside the app.
 - **`scripts/check` takes rustup's cargo first** (`~/.cargo/bin`), before whatever cargo is on PATH: Arch's `rust` package puts an older cargo in `/usr/bin` that cannot build the pinned toolchain's code. The `stable-aarch64-apple-darwin` path is gone; with no rustup proxies, any `stable-*` toolchain under `~/.rustup` is the last resort.
 
+## Decisions, 2026-11-14 (#75): app folders
+
+- **XDG on every OS** (`b18bdbf`). `platform::app_folders(home, env)` gives the config, state, cache and runtime folders from the XDG variables (an empty or relative one is ignored, as the XDG spec says) and the XDG defaults under home, also on macOS, so a Windows adapter is one more layout there. The rest of the app gets an `AppFolders` value, never a bare home: `home()` stays on it for `~/` in settings, the skills folder, the release install and the Desktop entry, whose folders do not change. Inside the state folder the old names stay (`tours/`, `state/`, `evals/`), so the move is a rename per entry.
+- **Tests never read the reviewer's environment for folders.** In-process tests build `support::folders_in(home)` (XDG defaults, no variables); the CLI runner and `scripts/snapshot` clear the four XDG variables beside their throwaway HOME.
+- **The move runs once per process, from `main`** (`AppFolders::settle`), never from `AppFolders::running()`: a library call made in a test must not move the developer's own `~/.guided-review`.
+- **Never half and half.** The move holds the old folder's `app.lock` (waits up to 1 s): while an app of an earlier version runs, nothing moves and that start keeps using `~/.guided-review` whole. Each of config.toml, summary.md, tours, state, evals and app.log is renamed; across disks it is copied to `<name>.partial`, compared, renamed into place, and only then the original deleted. A `.moving` mark in the old folder lets a start after a crash finish the move instead of taking half-filled XDG folders as done. A step that fails puts every entry back and the start uses the old folder. The cache is not moved: it fills again.
+- **The XDG folders win once they hold files.** An older binary that writes `~/.guided-review` afterwards (say a source build in the way) is not merged: each review opened shows the problem `OldFolderWrittenAgain`, which names the folder. Files the reviewer put in `~/.guided-review` themselves stay there and are no problem.
+- **`open` tries the move again after quitting an app of an earlier build** (`app_link::start_and_hand`), so the CLI and the app it starts agree on the socket.
+- **Agent permission rules name the real tours and evals folders** as `//<abs>/**`, not `~/.guided-review/...`; the /tour skill already finds tours through `guided-review tour-path`.
+
 ## Known open
 
 - The Linux release archive must copy `icons/` from the template beside the binary, or `install-app` says the release carries no entry.
-- App folders, and the Linux release and CI are each their own ticket under #67.
+- The Linux release and CI are their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
 - Snapshots on Linux wait for a gpui with `render_to_image` there.

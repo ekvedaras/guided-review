@@ -123,7 +123,7 @@ A PR with no tour yet gets one written, as when you pick it in the PR switcher: 
 
 In the app, `→` or `J` (the Next button) goes on to the next step not read yet, `N` jumps to the next unread step from anywhere, `M` marks a step read, `⌘K` jumps to a step, file or action (Settings, Finish review, Restart app here, which `guided-review restart` also does), `G` opens the PR on GitHub, `?` lists every shortcut and `⌘W` or `⌘Q` quits the app. With summary instructions set in Settings, the tour can also carry a reviewer summary; pictures it shows sit in the tour's own folder.
 
-Tours and app state live under `~/.guided-review/`. `guided-review --help` lists the other commands (`outline`, `tour-path`, `show`, `check`, `repin`, `refresh`, `settings`, `restart`, `install-app`, `agent-reply`, `eval`).
+The config (`config.toml`, `summary.md`) lives in `~/.config/guided-review/`; tours, review state, Asks, evals and the app log in `~/.local/state/guided-review/`; image previews in `~/.cache/guided-review/`. `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` move them, the app socket goes in `XDG_RUNTIME_DIR` when set, and `GUIDED_REVIEW_TOURS_DIR` moves the tours alone (`guided-review tour-path <pr-url>` prints where a tour is). An earlier version's `~/.guided-review/` is moved there on the first start. `guided-review --help` lists the other commands (`outline`, `tour-path`, `show`, `check`, `repin`, `refresh`, `settings`, `restart`, `install-app`, `agent-reply`, `eval`).
 
 ## How it works
 
