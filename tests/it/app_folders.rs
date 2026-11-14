@@ -40,7 +40,7 @@ fn with_no_xdg_variables_the_folders_are_the_xdg_defaults_under_home() {
 }
 
 #[test]
-fn xdg_variables_name_the_folders() {
+fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_the_runtime_folder() {
     let folders = platform::app_folders(
         Path::new("/home/me"),
         env(&[
@@ -67,7 +67,7 @@ fn xdg_variables_name_the_folders() {
     assert_eq!(folders.images(), Path::new("/ca/guided-review/images"));
     assert_eq!(
         folders.socket(),
-        Path::new("/run/user/1000/guided-review/app.sock")
+        Path::new("/st/guided-review/app.sock")
     );
 }
 

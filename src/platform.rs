@@ -142,7 +142,7 @@ struct AppMenu {
 }
 
 /// The XDG folders, on every OS so far: the variables when set to an absolute path, the XDG
-/// defaults under home otherwise. The socket falls back to the state folder with no runtime folder.
+/// defaults under home otherwise.
 /// A Windows adapter would pick its own here.
 pub fn app_folders(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> AppFolders {
     let base = |name: &str| {
@@ -151,13 +151,11 @@ pub fn app_folders(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> AppFo
             .filter(|path| path.is_absolute())
     };
     let ours = |folder: PathBuf| folder.join("guided-review");
-    let state = ours(base("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")));
     AppFolders::new(
         home,
         ours(base("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))),
-        state.clone(),
+        ours(base("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state"))),
         ours(base("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache"))),
-        base("XDG_RUNTIME_DIR").map_or(state, ours),
     )
 }
 

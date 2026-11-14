@@ -1,4 +1,4 @@
-//! How `guided-review open` and the one running app talk: a Unix socket in the runtime folder, one JSON
+//! How `guided-review open` and the one running app talk: a Unix socket in the state folder, one JSON
 //! line per request and per answer, each carrying the version of the binary that wrote it.
 
 use std::fs::{File, OpenOptions, TryLockError};

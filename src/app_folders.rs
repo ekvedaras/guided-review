@@ -1,4 +1,4 @@
-//! Where the app keeps what it writes for one reviewer: config, state, cache and runtime folders.
+//! Where the app keeps what it writes for one reviewer: config, state and cache folders.
 //! The platform gives their layout; before XDG they were all `~/.guided-review`.
 
 use std::collections::BTreeSet;
@@ -19,23 +19,15 @@ pub struct AppFolders {
     config: PathBuf,
     state: PathBuf,
     cache: PathBuf,
-    runtime: PathBuf,
 }
 
 impl AppFolders {
-    pub fn new(
-        home: &Path,
-        config: PathBuf,
-        state: PathBuf,
-        cache: PathBuf,
-        runtime: PathBuf,
-    ) -> Self {
+    pub fn new(home: &Path, config: PathBuf, state: PathBuf, cache: PathBuf) -> Self {
         Self {
             home: home.to_path_buf(),
             config,
             state,
             cache,
-            runtime,
         }
     }
 
@@ -170,7 +162,7 @@ impl AppFolders {
 
     pub fn before_xdg(home: &Path) -> Self {
         let old = home.join(".guided-review");
-        Self::new(home, old.clone(), old.clone(), old.join("cache"), old)
+        Self::new(home, old.clone(), old.clone(), old.join("cache"))
     }
 
     /// For `~/` in settings, and for what lives under home whatever the folders are.
@@ -212,8 +204,10 @@ impl AppFolders {
         self.cache.join("images")
     }
 
+    /// Beside the lock, not in the runtime folder: a CLI started with another environment (an agent,
+    /// ssh) must find the socket of the running app.
     pub fn socket(&self) -> PathBuf {
-        self.runtime.join("app.sock")
+        self.state.join("app.sock")
     }
 }
 
