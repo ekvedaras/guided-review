@@ -5,60 +5,53 @@ pub mod dock_icon;
 #[cfg(target_os = "macos")]
 pub mod word_keys;
 
-use super::{HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
+use super::{Adapter, AppMenu, HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
 
-pub const TRIPLE_SYSTEM: &str = "apple-darwin";
-
-/// Both come with macOS.
-pub const TEXT_FONTS: &[&str] = &["Helvetica Neue"];
-pub const CODE_FONTS: &[&str] = &["Menlo"];
-
-pub const PRIMARY_KEY: PrimaryKey = PrimaryKey::Command;
-
-pub const KEY_SPELLING: KeySpelling = KeySpelling {
-    primary: "⌘",
-    ctrl: "⌃",
-    alt: "⌥",
-    shift: "⇧",
-    joiner: "",
+pub(super) const ADAPTER: Adapter = Adapter {
+    triple_system: "apple-darwin",
+    // Both come with macOS.
+    text_fonts: &["Helvetica Neue"],
+    code_fonts: &["Menlo"],
+    primary_key: PrimaryKey::Command,
+    key_spelling: KeySpelling {
+        primary: "⌘",
+        ctrl: "⌃",
+        alt: "⌥",
+        shift: "⇧",
+        joiner: "",
+    },
+    text_keys: &[
+        ("alt-backspace", TextEdit::BackspaceWord),
+        ("cmd-backspace", TextEdit::BackspaceLine),
+        ("alt-delete", TextEdit::DeleteWord),
+        ("alt-left", TextEdit::WordLeft),
+        ("alt-right", TextEdit::WordRight),
+        ("cmd-left", TextEdit::LineStart),
+        ("cmd-right", TextEdit::LineEnd),
+        ("cmd-up", TextEdit::TextStart),
+        ("cmd-down", TextEdit::TextEnd),
+        ("alt-shift-left", TextEdit::SelectWordLeft),
+        ("alt-shift-right", TextEdit::SelectWordRight),
+        ("cmd-shift-left", TextEdit::SelectLineStart),
+        ("cmd-shift-right", TextEdit::SelectLineEnd),
+        ("cmd-a", TextEdit::SelectAll),
+        ("cmd-c", TextEdit::Copy),
+        ("cmd-x", TextEdit::Cut),
+        ("cmd-v", TextEdit::Paste),
+    ],
+    // The traffic lights.
+    window_buttons: Some(WindowButtons {
+        corner: 14.,
+        inset: 80.,
+    }),
+    // macOS shows Quit's key beside it.
+    app_menu: Some(AppMenu {
+        name: "guided-review",
+        quit: "Quit guided-review",
+    }),
+    herdr_raise: HerdrRaise {
+        program: "/usr/bin/open",
+        args: &["-a", "Herdr"],
+        best_effort: false,
+    },
 };
-
-pub const TEXT_KEYS: &[(&str, TextEdit)] = &[
-    ("alt-backspace", TextEdit::BackspaceWord),
-    ("cmd-backspace", TextEdit::BackspaceLine),
-    ("alt-delete", TextEdit::DeleteWord),
-    ("alt-left", TextEdit::WordLeft),
-    ("alt-right", TextEdit::WordRight),
-    ("cmd-left", TextEdit::LineStart),
-    ("cmd-right", TextEdit::LineEnd),
-    ("cmd-up", TextEdit::TextStart),
-    ("cmd-down", TextEdit::TextEnd),
-    ("alt-shift-left", TextEdit::SelectWordLeft),
-    ("alt-shift-right", TextEdit::SelectWordRight),
-    ("cmd-shift-left", TextEdit::SelectLineStart),
-    ("cmd-shift-right", TextEdit::SelectLineEnd),
-    ("cmd-a", TextEdit::SelectAll),
-    ("cmd-c", TextEdit::Copy),
-    ("cmd-x", TextEdit::Cut),
-    ("cmd-v", TextEdit::Paste),
-];
-
-/// The traffic lights.
-pub const WINDOW_BUTTONS: Option<WindowButtons> = Some(WindowButtons {
-    corner: 14.,
-    inset: 80.,
-});
-
-pub const HERDR_RAISE: HerdrRaise = HerdrRaise {
-    program: "/usr/bin/open",
-    args: &["-a", "Herdr"],
-    best_effort: false,
-};
-
-pub fn app_menus(quit: impl gpui::Action) -> Vec<gpui::Menu> {
-    vec![gpui::Menu {
-        name: "guided-review".into(),
-        items: vec![gpui::MenuItem::action("Quit guided-review", quit)],
-        disabled: false,
-    }]
-}

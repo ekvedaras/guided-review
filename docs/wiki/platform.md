@@ -73,6 +73,10 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **The Linux archive is built on `ubuntu-24.04`**, so it needs glibc 2.39 or newer. Its job runs `scripts/check` itself, as `verify` gates only the macOS run, and packs the binary, skills, LICENSE, README and the `icons/` of the macOS-built Desktop entry template; the checksum is `sha256sum`'s line, which reads like `shasum -a 256`'s. aarch64 Linux is not built.
 - **The updater's Linux path is tested with GitHub's answer for v0.9.0** with a Linux archive added (`tests/fixtures/github/latest_release_with_linux.json`): find the archive, download, install, desktop entry placed.
 
+## Decisions, 2026-11-14 (review of the Linux work)
+
+- **One adapter value per OS.** Each adapter module exports one `ADAPTER`, a plain `Adapter` holding every fact of its OS (triple, fonts, Primary key, key spelling, text keys, window buttons, app menu, Herdr raise), and `Os::adapter` is the one match on the OS; the `Os` methods read it. Before, each fact was its own constant, nine `Os` methods each matched on the OS, and Linux's missing app menu was an inline `Vec::new()` in `Os::app_menus`. A Windows port adds one `ADAPTER` and one match arm.
+
 ## Known open
 
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.

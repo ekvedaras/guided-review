@@ -32,66 +32,50 @@ impl Os {
         Self::Linux
     };
 
+    /// Every fact of this OS, from its adapter.
+    fn adapter(self) -> &'static Adapter {
+        match self {
+            Self::MacOs => &macos::ADAPTER,
+            Self::Linux => &linux::ADAPTER,
+        }
+    }
+
     /// The vendor and system half of a Rust target triple, as release archives are named.
     pub fn triple_system(self) -> &'static str {
-        match self {
-            Self::MacOs => macos::TRIPLE_SYSTEM,
-            Self::Linux => linux::TRIPLE_SYSTEM,
-        }
+        self.adapter().triple_system
     }
 
     /// The family for the app's text: the first of this OS's choices that is installed, or its
     /// last choice unasked.
     pub fn text_font(self, installed: impl Fn(&str) -> bool) -> &'static str {
-        first_installed(
-            match self {
-                Self::MacOs => macos::TEXT_FONTS,
-                Self::Linux => linux::TEXT_FONTS,
-            },
-            installed,
-        )
+        first_installed(self.adapter().text_fonts, installed)
     }
 
     /// The family for code, picked like [`Self::text_font`].
     pub fn code_font(self, installed: impl Fn(&str) -> bool) -> &'static str {
-        first_installed(
-            match self {
-                Self::MacOs => macos::CODE_FONTS,
-                Self::Linux => linux::CODE_FONTS,
-            },
-            installed,
-        )
+        first_installed(self.adapter().code_fonts, installed)
     }
 
     /// The key held for the app's own shortcuts, as gpui's `secondary` picks it.
     pub fn primary_key(self) -> PrimaryKey {
-        match self {
-            Self::MacOs => macos::PRIMARY_KEY,
-            Self::Linux => linux::PRIMARY_KEY,
-        }
+        self.adapter().primary_key
     }
 
     /// How keys are written in a line of text and on key caps.
     pub fn key_spelling(self) -> KeySpelling {
-        match self {
-            Self::MacOs => macos::KEY_SPELLING,
-            Self::Linux => linux::KEY_SPELLING,
-        }
+        self.adapter().key_spelling
     }
 
     /// The text box keys that differ by OS, as gpui keystroke text. The keys every OS shares
     /// (arrows, Home, End, Backspace …) are the text box's own.
     pub fn text_keys(self) -> &'static [(&'static str, TextEdit)] {
-        match self {
-            Self::MacOs => macos::TEXT_KEYS,
-            Self::Linux => linux::TEXT_KEYS,
-        }
+        self.adapter().text_keys
     }
 
     /// The window's own title bar options. With window buttons the app draws the title bar
     /// under them; without, the window manager decides the decorations.
     pub fn titlebar(self, title: gpui::SharedString) -> gpui::TitlebarOptions {
-        let buttons = self.window_buttons();
+        let buttons = self.adapter().window_buttons;
         gpui::TitlebarOptions {
             title: Some(title),
             appears_transparent: buttons.is_some(),
@@ -102,31 +86,49 @@ impl Os {
 
     /// Room kept free at the left of the title bar, so nothing is drawn under the window buttons.
     pub fn window_buttons_inset(self) -> f32 {
-        self.window_buttons().map_or(0., |buttons| buttons.inset)
+        self.adapter()
+            .window_buttons
+            .map_or(0., |buttons| buttons.inset)
     }
 
-    /// The menus the OS shows for the app, holding Quit beside its key. None on Linux.
+    /// The menus the OS shows for the app, holding Quit beside its key.
     pub fn app_menus(self, quit: impl gpui::Action) -> Vec<gpui::Menu> {
-        match self {
-            Self::MacOs => macos::app_menus(quit),
-            Self::Linux => Vec::new(),
-        }
-    }
-
-    fn window_buttons(self) -> Option<WindowButtons> {
-        match self {
-            Self::MacOs => macos::WINDOW_BUTTONS,
-            Self::Linux => linux::WINDOW_BUTTONS,
-        }
+        self.adapter()
+            .app_menu
+            .map(|menu| gpui::Menu {
+                name: menu.name.into(),
+                items: vec![gpui::MenuItem::action(menu.quit, quit)],
+                disabled: false,
+            })
+            .into_iter()
+            .collect()
     }
 
     /// What brings the Herdr window to the front once a terminal in it is focused.
     pub fn herdr_raise(self) -> HerdrRaise {
-        match self {
-            Self::MacOs => macos::HERDR_RAISE,
-            Self::Linux => linux::HERDR_RAISE,
-        }
+        self.adapter().herdr_raise
     }
+}
+
+/// What the app knows of one OS, as plain data. Another OS is one more of these.
+struct Adapter {
+    triple_system: &'static str,
+    /// Best first.
+    text_fonts: &'static [&'static str],
+    code_fonts: &'static [&'static str],
+    primary_key: PrimaryKey,
+    key_spelling: KeySpelling,
+    text_keys: &'static [(&'static str, TextEdit)],
+    window_buttons: Option<WindowButtons>,
+    app_menu: Option<AppMenu>,
+    herdr_raise: HerdrRaise,
+}
+
+/// The app menu, holding only Quit.
+#[derive(Debug, Clone, Copy)]
+struct AppMenu {
+    name: &'static str,
+    quit: &'static str,
 }
 
 /// The XDG folders, on every OS so far: the variables when set to an absolute path, the XDG
