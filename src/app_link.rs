@@ -359,7 +359,7 @@ fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
         Some(program) => PathBuf::from(program),
         None => ReleaseInstall::in_home(folder.folders.home())
             .desktop_entry()
-            .launcher_for(
+            .start_program_for(
                 &std::env::current_exe().context("could not find the guided-review binary")?,
             ),
     };

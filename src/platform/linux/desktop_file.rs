@@ -70,7 +70,7 @@ impl DesktopEntry for DesktopFile {
         LAUNCHED_APP
     }
 
-    fn launcher_for(&self, exe: &Path) -> PathBuf {
+    fn start_program_for(&self, exe: &Path) -> PathBuf {
         exe.to_path_buf()
     }
 

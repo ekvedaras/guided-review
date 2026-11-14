@@ -264,7 +264,7 @@ fn the_app_is_started_through_the_bundle_when_the_bundle_runs_the_same_binary() 
         .unwrap();
 
     assert_eq!(
-        bundle.launcher_for(&binary),
+        bundle.start_program_for(&binary),
         bundle_in(home.path()).join("Contents/MacOS/guided-review")
     );
 }
@@ -282,7 +282,7 @@ fn another_binary_is_started_as_itself() {
     fs::create_dir_all(cargo_bin.parent().unwrap()).unwrap();
     fs::write(&cargo_bin, "binary from source").unwrap();
 
-    assert_eq!(bundle.launcher_for(&cargo_bin), cargo_bin);
+    assert_eq!(bundle.start_program_for(&cargo_bin), cargo_bin);
 }
 
 #[test]
@@ -290,5 +290,5 @@ fn with_no_bundle_the_binary_is_started_as_itself() {
     let home = home();
     let binary = with_bin_link_to(home.path(), "binary 0.7.0");
 
-    assert_eq!(bundle(home.path()).launcher_for(&binary), binary);
+    assert_eq!(bundle(home.path()).start_program_for(&binary), binary);
 }

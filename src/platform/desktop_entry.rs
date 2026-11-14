@@ -31,7 +31,7 @@ pub trait DesktopEntry: std::fmt::Debug + Send + Sync {
     fn place_from(&self, release: &Path) -> anyhow::Result<EntryPlaced>;
 
     /// What to start `exe` as when it starts the app.
-    fn launcher_for(&self, exe: &Path) -> PathBuf;
+    fn start_program_for(&self, exe: &Path) -> PathBuf;
 
     /// The environment variable that names the app a launch from the OS launcher started.
     fn launched_app_variable(&self) -> &'static str;

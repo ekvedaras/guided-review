@@ -206,5 +206,5 @@ fn a_run_not_launched_from_the_desktop_file_runs_as_it_is() {
 fn the_app_is_started_as_the_binary_itself() {
     let exe = Path::new("/home/you/.local/share/guided-review/0.7.0/guided-review");
 
-    assert_eq!(entry(Path::new("/home/you")).launcher_for(exe), exe);
+    assert_eq!(entry(Path::new("/home/you")).start_program_for(exe), exe);
 }

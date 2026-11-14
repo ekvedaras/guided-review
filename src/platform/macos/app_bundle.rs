@@ -74,7 +74,7 @@ impl DesktopEntry for AppBundle {
 
     /// The bundle's executable when that is `exe`, so the Dock names the app Guided Review and
     /// shows its icon even when the CLI starts it, else `exe` itself.
-    fn launcher_for(&self, exe: &Path) -> PathBuf {
+    fn start_program_for(&self, exe: &Path) -> PathBuf {
         let bundled = self.executable();
         let is_same = match (fs::canonicalize(&bundled), fs::canonicalize(exe)) {
             (Ok(bundled), Ok(exe)) => bundled == exe,
