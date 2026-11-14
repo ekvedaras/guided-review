@@ -357,9 +357,11 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> Option<()> {
 fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
     let program = match std::env::var_os(APP_COMMAND_VARIABLE) {
         Some(program) => PathBuf::from(program),
-        None => Os::RUNNING.desktop_entry(folder.folders.home()).launcher_for(
-            &std::env::current_exe().context("could not find the guided-review binary")?,
-        ),
+        None => Os::RUNNING
+            .desktop_entry(folder.folders.home())
+            .launcher_for(
+                &std::env::current_exe().context("could not find the guided-review binary")?,
+            ),
     };
     let log_path = folder.log();
     if let Some(dir) = log_path.parent() {
