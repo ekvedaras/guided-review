@@ -37,7 +37,7 @@ fn a_diagram_has_no_ground_of_its_own_so_the_page_shows_through_and_is_in_the_ap
             "{appearance:?} diagram covers the page at its corner"
         );
         assert!(
-            svg.text().contains(TEXT_FONT),
+            svg.text().contains(*TEXT_FONT),
             "{appearance:?} diagram is not in the app font"
         );
         assert!(svg.width() > 0.0 && svg.height() > 0.0);

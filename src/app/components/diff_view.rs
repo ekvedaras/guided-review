@@ -266,7 +266,7 @@ impl RenderOnce for DiffRow {
             .flex()
             .overflow_hidden()
             .when(!line.wraps, Styled::whitespace_nowrap)
-            .font_family(CODE_FONT)
+            .font_family(*CODE_FONT)
             .text_sm()
             .when_some(self.on_scroll_x, |row, on_scroll_x| {
                 row.on_scroll(move |event, window, cx| {
@@ -468,7 +468,7 @@ impl RenderOnce for PieceHeader {
                     .gap_2()
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .font_family(CODE_FONT)
+                    .font_family(*CODE_FONT)
                     .child(
                         div()
                             .flex()
@@ -542,7 +542,7 @@ impl RenderOnce for PieceMarker {
             .px_3()
             .border_t_1()
             .text_xs()
-            .font_family(CODE_FONT)
+            .font_family(*CODE_FONT)
             .text_color(colors.muted_text)
             .child(
                 div()

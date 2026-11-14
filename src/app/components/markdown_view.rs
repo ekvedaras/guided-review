@@ -513,7 +513,7 @@ fn suggestion_view(colors: &Colors, removed: &[Arc<str>], added: &[SharedString]
         .border_1()
         .border_color(colors.subtle_border)
         .bg(colors.background)
-        .font_family(CODE_FONT)
+        .font_family(*CODE_FONT)
         .text_sm()
         .overflow_hidden()
         .child(
@@ -837,7 +837,7 @@ fn code_block(colors: &Colors, key: &str, lines: &[CodeLine]) -> AnyElement {
         .bg(colors.background)
         .border_1()
         .border_color(colors.subtle_border)
-        .font_family(CODE_FONT)
+        .font_family(*CODE_FONT)
         .text_sm()
         .overflow_x_scroll()
         .child(

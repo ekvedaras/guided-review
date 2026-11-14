@@ -65,7 +65,7 @@ impl RenderOnce for SwitchingVeil {
                 .justify_center()
                 .bg(colors.scrim)
                 .occlude()
-                .font_family(TEXT_FONT),
+                .font_family(*TEXT_FONT),
             "switching-veil",
             STATE,
         )

@@ -222,7 +222,7 @@ impl RenderOnce for CommentComposer {
             .gap_2p5()
             .m_2()
             .p_3()
-            .font_family(super::palette::TEXT_FONT)
+            .font_family(*super::palette::TEXT_FONT)
             .on_click(move |_, window, cx| on_focus(window, cx))
             .child(
                 div()

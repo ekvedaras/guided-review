@@ -148,7 +148,7 @@ fn before_block(colors: &Colors, before: &[String]) -> gpui::Div {
                 .px_2()
                 .rounded(px(CONTROL_RADIUS))
                 .bg(colors.removed_line)
-                .font_family(CODE_FONT)
+                .font_family(*CODE_FONT)
                 .text_sm()
                 .overflow_hidden()
                 .children(before.iter().map(|line| {
@@ -1166,7 +1166,7 @@ impl RenderOnce for ThreadElement {
             .m_2()
             .px_3()
             .py_2()
-            .font_family(super::palette::TEXT_FONT)
+            .font_family(*super::palette::TEXT_FONT)
             .child(
                 div()
                     .flex()

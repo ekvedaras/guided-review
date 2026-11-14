@@ -542,7 +542,7 @@ impl SettingsPanel {
     fn shown_text(colors: &Colors, text: impl Into<SharedString>) -> gpui::Div {
         div()
             .text_xs()
-            .font_family(CODE_FONT)
+            .font_family(*CODE_FONT)
             .text_color(colors.muted_text)
             .child(text.into())
     }
@@ -909,7 +909,7 @@ impl SettingsPanel {
                                     editing.ide.text = text;
                                 },
                             )
-                            .font_family(CODE_FONT),
+                            .font_family(*CODE_FONT),
                         )
                         .child(div().text_xs().text_color(colors.muted_text).child(
                             "A link or a shell command. {path} and {line} become the file and the line.",
@@ -1258,7 +1258,7 @@ impl SettingsPanel {
                                                 .text_ellipsis_middle()
                                                 .text_xs()
                                                 .when(has_folder, |path| {
-                                                    path.font_family(CODE_FONT)
+                                                    path.font_family(*CODE_FONT)
                                                 })
                                                 .text_color(folder_color)
                                                 .child(label),
@@ -1613,7 +1613,7 @@ fn file_row(colors: &Colors, path: SharedString, is_invalid: bool) -> gpui::Div 
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis_middle()
-                .font_family(CODE_FONT)
+                .font_family(*CODE_FONT)
                 .text_xs()
                 .child(path),
         )
@@ -1904,7 +1904,7 @@ impl Render for SettingsPanel {
             .on_key_down(cx.listener(Self::on_key_down))
             .flex()
             .flex_col()
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .text_sm()
             .text_color(colors.text);
         match self.placement {

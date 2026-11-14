@@ -10,7 +10,7 @@ use merman::{
     Engine, OperationControl, RenderOutput, RenderRequest, Renderer, SvgEnvironment, SvgRequest,
 };
 
-use crate::app::components::palette::{Appearance, Colors, TEXT_FONT, TEXT_FONT_FILE};
+use crate::app::components::palette::{Appearance, Colors, INSTALLED_FONTS, TEXT_FONT, font_files};
 
 /// A diagram drawn as SVG for one appearance. Only this text is kept between steps;
 /// bitmaps are made from it again when the diagram is on screen.
@@ -41,9 +41,8 @@ impl Svg {
 }
 
 pub(super) static SVG_OPTIONS: LazyLock<usvg::Options<'static>> = LazyLock::new(|| {
-    let mut fonts = usvg::fontdb::Database::new();
-    fonts.load_system_fonts();
-    fonts.set_sans_serif_family(TEXT_FONT);
+    let mut fonts = INSTALLED_FONTS.clone();
+    fonts.set_sans_serif_family(*TEXT_FONT);
     usvg::Options {
         fontdb: Arc::new(fonts),
         ..Default::default()
@@ -136,8 +135,16 @@ impl Setup {
 
 /// Merman places boxes around the text it measures; with any other font the labels overflow them.
 fn measured_with_app_font() -> Result<SvgEnvironment, String> {
-    let fonts = NativeFontOptions::default()
-        .with_font_file(TEXT_FONT_FILE)
+    let files = font_files(*TEXT_FONT);
+    if files.is_empty() {
+        return Err(format!("no file holds the app font {}", *TEXT_FONT));
+    }
+    let fonts = files
+        .into_iter()
+        .fold(
+            NativeFontOptions::default(),
+            NativeFontOptions::with_font_file,
+        )
         .load(&OperationControl::new())
         .map_err(|error| format!("the app font did not load: {error}"))?;
     SvgEnvironment::deterministic()
@@ -175,7 +182,7 @@ fn host_theme(appearance: Appearance, colors: &Colors) -> Result<HostTheme, Stri
             Appearance::Light => HostThemeAppearance::Light,
             Appearance::Dark => HostThemeAppearance::Dark,
         })
-        .try_with_font_family(TEXT_FONT)
+        .try_with_font_family(*TEXT_FONT)
         .map_err(|error| format!("the app font name is not a font family: {error}"))?;
     let theme = roles.into_iter().try_fold(theme, |theme, (role, color)| {
         theme

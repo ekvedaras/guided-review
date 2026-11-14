@@ -581,7 +581,7 @@ impl Render for AskPanel {
             .border_l_1()
             .border_color(colors.subtle_border)
             .shadow(colors.page_shadow())
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .text_sm()
             .text_color(colors.text)
             .child(

@@ -1126,7 +1126,7 @@ impl OneStepLayout {
         let font_size = window.rem_size() * 0.875;
         let font_id = window
             .text_system()
-            .resolve_font(&gpui::font(crate::app::components::palette::CODE_FONT));
+            .resolve_font(&gpui::font(*crate::app::components::palette::CODE_FONT));
         let char_width = window
             .text_system()
             .advance(font_id, font_size, 'm')
@@ -2858,7 +2858,7 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
             div()
                 .flex()
                 .gap_2()
-                .font_family(crate::app::components::palette::CODE_FONT)
+                .font_family(*crate::app::components::palette::CODE_FONT)
                 .child(
                     div()
                         .text_color(colors.success)
@@ -3505,7 +3505,7 @@ impl Render for OneStepLayout {
             } else {
                 colors.sidebar_ground()
             })
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .text_color(colors.text)
             .child(self.sidebar(cx))
             .child(

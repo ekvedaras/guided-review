@@ -28,6 +28,39 @@ impl Os {
             Self::Linux => linux::TRIPLE_SYSTEM,
         }
     }
+
+    /// The family for the app's text: the first of this OS's choices that is installed, or its
+    /// last choice unasked.
+    pub fn text_font(self, installed: impl Fn(&str) -> bool) -> &'static str {
+        first_installed(
+            match self {
+                Self::MacOs => macos::TEXT_FONTS,
+                Self::Linux => linux::TEXT_FONTS,
+            },
+            installed,
+        )
+    }
+
+    /// The family for code, picked like [`Self::text_font`].
+    pub fn code_font(self, installed: impl Fn(&str) -> bool) -> &'static str {
+        first_installed(
+            match self {
+                Self::MacOs => macos::CODE_FONTS,
+                Self::Linux => linux::CODE_FONTS,
+            },
+            installed,
+        )
+    }
+}
+
+fn first_installed(choices: &[&'static str], installed: impl Fn(&str) -> bool) -> &'static str {
+    let Some((last, before)) = choices.split_last() else {
+        return "";
+    };
+    before
+        .iter()
+        .find(|family| installed(family))
+        .unwrap_or(last)
 }
 
 /// The app's icon in the Dock, which a binary with no app bundle lacks. Nothing on Linux.
