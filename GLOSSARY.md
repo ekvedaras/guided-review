@@ -90,7 +90,9 @@
 
 **Release install**: The app as the README installs a release: each version in its own folder under `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` (and usually `~/.claude/skills/tour`) linked into the newest. Only a release install updates itself. Avoid: managed install.
 
-**App bundle**: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Launched with no PR, it shows the PR switcher alone in the window. Avoid: launcher, wrapper.
+**Desktop entry**: What the OS launcher starts the app from, put in place from the release install by `guided-review install-app` and kept current by each update. It starts the release install's bin link, marks the run as its launch, and that run starts itself again through the reviewer's login shell, so `gh`, `claude` and `hc` are found. Launched with no PR, it shows the PR switcher alone in the window. On macOS it is the App bundle; on Linux it is `~/.local/share/applications/io.github.ekvedaras.guided-review.desktop` with its icon in `~/.local/share/icons/hicolor/`, and the app's window carries the same app id. Avoid: launcher, shortcut, wrapper.
+
+**App bundle**: The Desktop entry on macOS: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Avoid: launcher, wrapper.
 
 **In the way**: Of the release install, while it runs: another `guided-review` that comes before its bin link on `PATH`, so the tour skill and a terminal run that one and miss updates. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary. Avoid: shadowing.
 

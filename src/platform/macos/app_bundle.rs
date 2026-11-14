@@ -1,17 +1,16 @@
-use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use super::Version;
 use crate::app_icon::AppIcon;
+use crate::platform::desktop_entry::{APP_ID, EntryPlaced, put_file, replace};
+use crate::update::Version;
 
 /// The bundle's folder name, in a release archive and in `~/Applications`.
 pub const BUNDLE_FOLDER: &str = "Guided Review.app";
 const APP_NAME: &str = "Guided Review";
-const BUNDLE_ID: &str = "io.github.ekvedaras.guided-review";
 const EXECUTABLE: &str = "guided-review";
 const ICON: &str = "AppIcon";
 const MINIMUM_MACOS: &str = "11.0";
@@ -20,6 +19,11 @@ const INFO_PLIST: &str = "Contents/Info.plist";
 const CARRIED: [&str; 2] = [INFO_PLIST, "Contents/Resources/AppIcon.icns"];
 const EXECUTABLE_PATH: &str = "Contents/MacOS/guided-review";
 
+/// Launch Services names the app it launched here. The bundle's executable is a link to the bin link,
+/// which macOS follows before it runs it, so the binary's own path does not tell a launch of the app.
+pub const LAUNCHED_APP: &str = "__CFBundleIdentifier";
+pub const LOGIN_SHELL: &str = "/bin/zsh";
+
 /// `~/Applications/Guided Review.app`: what the Dock, Spotlight and Raycast start. A real folder, as
 /// Spotlight does not index a linked one; its binary is a link to the bin link, so it runs whatever
 /// release the bin link names.
@@ -27,16 +31,6 @@ const EXECUTABLE_PATH: &str = "Contents/MacOS/guided-review";
 pub struct AppBundle {
     folder: PathBuf,
     bin_link: PathBuf,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BundlePlaced {
-    /// The bundle was already as the release has it.
-    Current,
-    /// Some of its files were put in place.
-    Refreshed,
-    /// The release carries no bundle, as releases before 0.7.0 do not.
-    NotInRelease,
 }
 
 impl AppBundle {
@@ -62,37 +56,33 @@ impl AppBundle {
         if is_same { bundled } else { exe.to_path_buf() }
     }
 
-    /// Makes the bundle match `template`, the bundle inside a release folder, one file at a time: each
-    /// is written beside its place and renamed over it, so the bundle never lacks a file, and a file
-    /// already the same is left alone.
-    pub fn place_from(&self, template: &Path) -> anyhow::Result<BundlePlaced> {
+    /// Makes the bundle match the one inside the `release` folder, one file at a time, so the bundle
+    /// never lacks a file, and a file already the same is left alone.
+    pub fn place_from(&self, release: &Path) -> anyhow::Result<EntryPlaced> {
+        let template = release.join(BUNDLE_FOLDER);
         if !template.join(INFO_PLIST).is_file() {
-            return Ok(BundlePlaced::NotInRelease);
+            return Ok(EntryPlaced::NotInRelease);
         }
-        let mut placed = BundlePlaced::Current;
+        let mut placed = EntryPlaced::Current;
         for file in CARRIED {
-            let (from, to) = (template.join(file), self.folder.join(file));
+            let from = template.join(file);
             let content =
                 fs::read(&from).with_context(|| format!("could not read {}", from.display()))?;
-            if fs::read(&to).is_ok_and(|there| there == content) {
-                continue;
+            if put_file(&self.folder.join(file), &content)? {
+                placed = EntryPlaced::Refreshed;
             }
-            replace(&to, |next| fs::write(next, &content))?;
-            placed = BundlePlaced::Refreshed;
         }
         let executable = self.executable();
         if fs::read_link(&executable).ok().as_deref() != Some(self.bin_link.as_path()) {
             replace(&executable, |next| symlink(&self.bin_link, next))?;
-            placed = BundlePlaced::Refreshed;
+            placed = EntryPlaced::Refreshed;
         }
-        if placed == BundlePlaced::Refreshed {
+        if placed == EntryPlaced::Refreshed {
             self.mark_changed()?;
         }
         Ok(placed)
     }
-}
 
-impl AppBundle {
     /// Finder and Launch Services read a bundle's Info.plist again only once the bundle folder itself
     /// looks changed.
     fn mark_changed(&self) -> anyhow::Result<()> {
@@ -102,67 +92,12 @@ impl AppBundle {
     }
 }
 
-/// Makes `next` beside `path` and renames it over `path`.
-fn replace(path: &Path, make: impl FnOnce(&Path) -> std::io::Result<()>) -> anyhow::Result<()> {
-    let folder = path.parent().context("a bundle file has no folder")?;
-    fs::create_dir_all(folder).with_context(|| format!("could not make {}", folder.display()))?;
-    let name = path.file_name().context("a bundle file has no name")?;
-    let next = folder.join(format!(".{}.next", name.to_string_lossy()));
-    if fs::symlink_metadata(&next).is_ok() {
-        fs::remove_file(&next).with_context(|| format!("could not remove {}", next.display()))?;
-    }
-    make(&next).with_context(|| format!("could not write {}", next.display()))?;
-    fs::rename(&next, path).with_context(|| format!("could not put {} in place", path.display()))
-}
-
-/// Launch Services names the app it launched here. The bundle's executable is a link to the bin link,
-/// which macOS follows before it runs it, so the binary's own path does not tell a launch of the app.
-pub const LAUNCHED_APP: &str = "__CFBundleIdentifier";
-
-/// Set on the run the login shell makes, so it does not relaunch again.
-pub const IN_LOGIN_SHELL: &str = "GUIDED_REVIEW_IN_LOGIN_SHELL";
-
-/// How to run the binary again.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Relaunch {
-    pub program: PathBuf,
-    pub args: Vec<OsString>,
-}
-
-impl AppBundle {
-    /// A launch from the Dock, Spotlight or Raycast gets launchd's short `PATH`, without `gh`,
-    /// `claude` or `hc`. So a launch of the app runs the bundle's executable again through the
-    /// reviewer's login shell, which reads their profile as a terminal does. The bundle's path keeps
-    /// the Dock naming the app.
-    pub fn relaunch_in_login_shell(
-        &self,
-        launched_app: Option<&OsStr>,
-        shell: Option<&OsStr>,
-        is_in_login_shell: bool,
-    ) -> Option<Relaunch> {
-        let is_our_app = launched_app == Some(OsStr::new(BUNDLE_ID));
-        if !is_our_app || is_in_login_shell {
-            return None;
-        }
-        let executable = self.executable();
-        let args = [OsStr::new("-l"), OsStr::new("-i"), OsStr::new("-c")]
-            .into_iter()
-            .chain([OsStr::new("exec \"$0\""), executable.as_os_str()])
-            .map(OsStr::to_os_string)
-            .collect();
-        Some(Relaunch {
-            program: PathBuf::from(shell.unwrap_or_else(|| OsStr::new("/bin/zsh"))),
-            args,
-        })
-    }
-}
-
 /// What macOS reads to name the app, find its binary and icon, and tell its version.
 pub fn info_plist(version: Version) -> String {
     let entries = [
         ("CFBundleName", APP_NAME.to_owned()),
         ("CFBundleDisplayName", APP_NAME.to_owned()),
-        ("CFBundleIdentifier", BUNDLE_ID.to_owned()),
+        ("CFBundleIdentifier", APP_ID.to_owned()),
         ("CFBundleExecutable", EXECUTABLE.to_owned()),
         ("CFBundleIconFile", ICON.to_owned()),
         ("CFBundleShortVersionString", version.to_string()),
@@ -186,7 +121,7 @@ pub fn info_plist(version: Version) -> String {
 
 /// What the release workflow packs: `Guided Review.app` with its Info.plist, and beside it the
 /// `AppIcon.iconset` that `iconutil` turns into the bundle's `AppIcon.icns`.
-pub fn write_bundle_template(out: &Path, version: Version) -> anyhow::Result<()> {
+pub fn write_template(out: &Path, version: Version) -> anyhow::Result<()> {
     let contents = out.join(BUNDLE_FOLDER).join("Contents");
     fs::create_dir_all(contents.join("Resources"))
         .with_context(|| format!("could not make {}", contents.display()))?;

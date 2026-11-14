@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::platform::Os;
 use crate::tour::StepId;
-use crate::update::AppBundle;
 use crate::viewer::{AgentReplied, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
@@ -61,7 +61,7 @@ pub enum Request {
     },
     /// Show Settings: over the PR on screen, or in a window of its own when no PR is open.
     ShowSettings,
-    /// Show the PR switcher, as a launch of Guided Review.app does: over the PR on screen, or in a
+    /// Show the PR switcher, as a launch from the Desktop entry does: over the PR on screen, or in a
     /// window of its own when no PR is open.
     ShowSwitcher,
     Quit,
@@ -357,7 +357,7 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> Option<()> {
 fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
     let program = match std::env::var_os(APP_COMMAND_VARIABLE) {
         Some(program) => PathBuf::from(program),
-        None => AppBundle::in_home(&folder.home).launcher_for(
+        None => Os::RUNNING.desktop_entry(&folder.home).launcher_for(
             &std::env::current_exe().context("could not find the guided-review binary")?,
         ),
     };

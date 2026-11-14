@@ -1,6 +1,5 @@
 //! Updates: finding a newer published release of the app and installing it in place of this one.
 
-mod app_bundle;
 mod release_install;
 
 use std::str::FromStr;
@@ -9,10 +8,6 @@ use anyhow::Context;
 
 use crate::platform::Os;
 
-pub use app_bundle::{
-    AppBundle, BundlePlaced, IN_LOGIN_SHELL, LAUNCHED_APP, Relaunch, info_plist,
-    write_bundle_template,
-};
 pub use release_install::{Build, InTheWay, Installed, ReleaseInstall, SkillLink};
 
 /// The build of this binary as `--version` prints it and the app shows it: the release version and

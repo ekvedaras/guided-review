@@ -1,3 +1,5 @@
+pub mod desktop_file;
+
 use super::{HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
 
 pub const TRIPLE_SYSTEM: &str = "unknown-linux-gnu";

@@ -5,8 +5,14 @@
 //! check both adapters wherever they run. `Os::RUNNING` is the one place that picks the adapter;
 //! only code that needs one OS's libraries is behind `cfg` instead.
 
+mod desktop_entry;
 mod linux;
 mod macos;
+
+pub use desktop_entry::{
+    APP_ID, DesktopEntry, EntryPlaced, IN_LOGIN_SHELL, Relaunch, info_plist,
+    write_desktop_entry_templates,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {

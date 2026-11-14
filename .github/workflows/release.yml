@@ -38,9 +38,10 @@ jobs:
       - run: scripts/check
       - name: Guided Review.app
         # The bundle is the same for both targets: its Info.plist and icon, no binary. Each archive's
-        # copy links its binary in at install (src/update/app_bundle.rs).
+        # copy links its binary in at install (src/platform/macos/app_bundle.rs). The template also
+        # holds the Linux entry's icons (icons/), for a Linux archive.
         run: |
-          cargo run --locked --quiet -- bundle-template dist/bundle
+          cargo run --locked --quiet -- desktop-entry-template dist/bundle
           iconutil -c icns dist/bundle/AppIcon.iconset -o "dist/bundle/Guided Review.app/Contents/Resources/AppIcon.icns"
           rm -r dist/bundle/AppIcon.iconset
       - uses: actions/upload-artifact@v4

@@ -13,6 +13,7 @@ use guided_review::github::GitHub;
 use guided_review::opened_pr::{OpenedPr, home_folder};
 use guided_review::outline::Outline;
 use guided_review::pieces;
+use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, Os, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
@@ -20,17 +21,14 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{StepId, Tour};
 use guided_review::tour_check;
-use guided_review::update::{
-    AppBundle, AppVersion, BundlePlaced, IN_LOGIN_SHELL, LAUNCHED_APP, ReleaseInstall, Version,
-    write_bundle_template,
-};
+use guided_review::update::{AppVersion, ReleaseInstall, Version};
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
 #[command(version = AppVersion::RUNNING.as_str(), about)]
 struct Cli {
-    /// With none, as when Guided Review.app is launched, the app shows the PR switcher
+    /// With none, as when the app is started from the OS launcher, the app shows the PR switcher
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -72,11 +70,11 @@ enum Command {
     },
     /// Show the app's Settings, also with no PR open
     Settings,
-    /// Put Guided Review.app in ~/Applications, from this release install
+    /// Put the app in the OS launcher (Guided Review.app on macOS), from this release install
     InstallApp,
-    /// Write the Info.plist and the icon pictures the release archive's Guided Review.app is made of
+    /// Write the files the release archives' Desktop entries are made of, for every OS
     #[command(hide = true)]
-    BundleTemplate { out: std::path::PathBuf },
+    DesktopEntryTemplate { out: std::path::PathBuf },
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
         pr: PullRequestUrl,
@@ -127,7 +125,9 @@ fn main() -> anyhow::Result<()> {
         Command::Restart { pr, at } => open(&pr, &Launch::Restart { at }),
         Command::Settings => settings(),
         Command::InstallApp => install_app(),
-        Command::BundleTemplate { out } => write_bundle_template(&out, Version::running()),
+        Command::DesktopEntryTemplate { out } => {
+            write_desktop_entry_templates(&out, Version::running())
+        }
         Command::AgentReply {
             pr,
             hand_off,
@@ -354,14 +354,15 @@ fn settings() -> anyhow::Result<()> {
     }
 }
 
-/// A launch of Guided Review.app first runs itself again through the login shell, then shows the PR
+/// A launch from the OS launcher first runs itself again through the login shell, then shows the PR
 /// switcher; `guided-review` with no command shows it too.
 fn launch() -> anyhow::Result<()> {
     let home = home_folder()?;
-    let launched_app = std::env::var_os(LAUNCHED_APP);
+    let desktop_entry = Os::RUNNING.desktop_entry(&home);
+    let launched_app = std::env::var_os(desktop_entry.launched_app_variable());
     let shell = std::env::var_os("SHELL");
     let is_in_login_shell = std::env::var_os(IN_LOGIN_SHELL).is_some();
-    if let Some(relaunch) = AppBundle::in_home(&home).relaunch_in_login_shell(
+    if let Some(relaunch) = desktop_entry.relaunch_in_login_shell(
         launched_app.as_deref(),
         shell.as_deref(),
         is_in_login_shell,
@@ -389,13 +390,18 @@ fn launch() -> anyhow::Result<()> {
 
 fn install_app() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("could not find the guided-review binary")?;
-    let placed = ReleaseInstall::in_home(&home_folder()?).bring_bundle_up_to_date(&exe)?;
+    let install = ReleaseInstall::in_home(&home_folder()?);
+    let placed = install.bring_desktop_entry_up_to_date(&exe)?;
+    let (name, folder) = (
+        install.desktop_entry().name(),
+        install.desktop_entry().folder(),
+    );
     match placed {
-        BundlePlaced::Refreshed => println!("Guided Review.app is in ~/Applications"),
-        BundlePlaced::Current => println!("Guided Review.app in ~/Applications is up to date"),
-        BundlePlaced::NotInRelease => anyhow::bail!(
-            "only a release install carries Guided Review.app; this guided-review is not one"
-        ),
+        EntryPlaced::Refreshed => println!("{name} is in {folder}"),
+        EntryPlaced::Current => println!("{name} in {folder} is up to date"),
+        EntryPlaced::NotInRelease => {
+            anyhow::bail!("only a release install carries {name}; this guided-review is not one")
+        }
     }
     Ok(())
 }

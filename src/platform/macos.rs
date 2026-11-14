@@ -1,3 +1,5 @@
+/// Plain files, so it compiles and is tested on every host.
+pub mod app_bundle;
 #[cfg(target_os = "macos")]
 pub mod dock_icon;
 #[cfg(target_os = "macos")]

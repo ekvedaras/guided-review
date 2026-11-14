@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use guided_review::platform::Os;
+use guided_review::platform::{EntryPlaced, Os, info_plist};
 use guided_review::update::{
-    Build, BundlePlaced, Cpu, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update,
-    Version, info_plist,
+    Build, Cpu, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
 };
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -163,7 +162,7 @@ impl Home {
     }
 
     fn install(&self) -> ReleaseInstall {
-        ReleaseInstall::in_home(self.path())
+        ReleaseInstall::for_os(TARGET.os, self.path())
     }
 }
 
@@ -487,10 +486,10 @@ fn a_release_install_updated_by_0_6_0_puts_its_own_bundle_in_place_when_it_start
 
     let placed = home
         .install()
-        .bring_bundle_up_to_date(&home.bin_link())
+        .bring_desktop_entry_up_to_date(&home.bin_link())
         .unwrap();
 
-    assert_eq!(placed, BundlePlaced::Refreshed);
+    assert_eq!(placed, EntryPlaced::Refreshed);
     assert_eq!(
         fs::read_to_string(home.bundle().join("Contents/Info.plist")).unwrap(),
         info_plist(Version::from_tag("v0.7.0").unwrap())
@@ -501,9 +500,9 @@ fn a_release_install_updated_by_0_6_0_puts_its_own_bundle_in_place_when_it_start
     );
     assert_eq!(
         home.install()
-            .bring_bundle_up_to_date(&home.bin_link())
+            .bring_desktop_entry_up_to_date(&home.bin_link())
             .unwrap(),
-        BundlePlaced::Current
+        EntryPlaced::Current
     );
 }
 
@@ -512,9 +511,12 @@ fn a_source_build_starting_leaves_the_bundle_alone() {
     let home = Home::as_the_0_6_0_updater_leaves_it("0.7.0");
     let cargo_bin = home.source_build();
 
-    let placed = home.install().bring_bundle_up_to_date(&cargo_bin).unwrap();
+    let placed = home
+        .install()
+        .bring_desktop_entry_up_to_date(&cargo_bin)
+        .unwrap();
 
-    assert_eq!(placed, BundlePlaced::NotInRelease);
+    assert_eq!(placed, EntryPlaced::NotInRelease);
     assert!(!home.bundle().exists());
 }
 

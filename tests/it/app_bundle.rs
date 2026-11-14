@@ -2,16 +2,18 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use guided_review::update::{
-    AppBundle, BundlePlaced, Relaunch, Version, info_plist, write_bundle_template,
+use guided_review::platform::{
+    DesktopEntry, EntryPlaced, Os, Relaunch, info_plist, write_desktop_entry_templates,
 };
+use guided_review::update::Version;
 use tempfile::TempDir;
 
 fn version(text: &str) -> Version {
     text.parse().unwrap()
 }
 
-/// A `Guided Review.app` as the release workflow packs it: the Info.plist and the icon, no executable.
+/// A release folder with `Guided Review.app` as the release workflow packs it: the Info.plist and the
+/// icon, no executable.
 fn template(dir: &Path, version_text: &str) -> PathBuf {
     let app = dir.join("Guided Review.app");
     fs::create_dir_all(app.join("Contents/Resources")).unwrap();
@@ -25,7 +27,11 @@ fn template(dir: &Path, version_text: &str) -> PathBuf {
         format!("icon {version_text}"),
     )
     .unwrap();
-    app
+    dir.to_path_buf()
+}
+
+fn bundle(home: &Path) -> DesktopEntry {
+    Os::MacOs.desktop_entry(home)
 }
 
 fn home() -> TempDir {
@@ -60,7 +66,7 @@ fn the_info_plist_names_the_app_its_version_its_icon_and_the_binary_it_runs() {
 fn the_template_holds_the_info_plist_and_every_picture_iconutil_needs() {
     let out = TempDir::new().unwrap();
 
-    write_bundle_template(out.path(), version("0.7.0")).unwrap();
+    write_desktop_entry_templates(out.path(), version("0.7.0")).unwrap();
 
     assert_eq!(
         fs::read_to_string(out.path().join("Guided Review.app/Contents/Info.plist")).unwrap(),
@@ -96,12 +102,10 @@ fn placing_the_bundle_makes_a_real_app_folder_whose_binary_is_the_bin_link() {
     let release = TempDir::new().unwrap();
     let template = template(release.path(), "0.7.0");
 
-    let placed = AppBundle::in_home(home.path())
-        .place_from(&template)
-        .unwrap();
+    let placed = bundle(home.path()).place_from(&template).unwrap();
 
     let bundle = bundle_in(home.path());
-    assert_eq!(placed, BundlePlaced::Refreshed);
+    assert_eq!(placed, EntryPlaced::Refreshed);
     assert!(fs::symlink_metadata(&bundle).unwrap().is_dir());
     assert_eq!(
         fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap(),
@@ -122,22 +126,22 @@ fn placing_the_same_release_again_changes_nothing() {
     let home = home();
     let release = TempDir::new().unwrap();
     let template = template(release.path(), "0.7.0");
-    let bundle = AppBundle::in_home(home.path());
+    let bundle = bundle(home.path());
     bundle.place_from(&template).unwrap();
 
-    assert_eq!(bundle.place_from(&template).unwrap(), BundlePlaced::Current);
+    assert_eq!(bundle.place_from(&template).unwrap(), EntryPlaced::Current);
 }
 
 #[test]
 fn placing_a_newer_release_replaces_the_files_of_the_older_one() {
     let home = home();
     let (old, new) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let bundle = AppBundle::in_home(home.path());
+    let bundle = bundle(home.path());
     bundle.place_from(&template(old.path(), "0.7.0")).unwrap();
 
     let placed = bundle.place_from(&template(new.path(), "0.8.0")).unwrap();
 
-    assert_eq!(placed, BundlePlaced::Refreshed);
+    assert_eq!(placed, EntryPlaced::Refreshed);
     let app = bundle_in(home.path());
     assert_eq!(
         fs::read_to_string(app.join("Contents/Info.plist")).unwrap(),
@@ -154,11 +158,9 @@ fn a_release_without_a_bundle_places_none() {
     let home = home();
     let release = TempDir::new().unwrap();
 
-    let placed = AppBundle::in_home(home.path())
-        .place_from(&release.path().join("Guided Review.app"))
-        .unwrap();
+    let placed = bundle(home.path()).place_from(release.path()).unwrap();
 
-    assert_eq!(placed, BundlePlaced::NotInRelease);
+    assert_eq!(placed, EntryPlaced::NotInRelease);
     assert!(!bundle_in(home.path()).exists());
 }
 
@@ -167,7 +169,7 @@ const OUR_APP: &str = "io.github.ekvedaras.guided-review";
 #[test]
 fn a_launch_of_the_app_runs_the_bundle_again_through_the_login_shell_so_gh_claude_and_hc_are_found()
 {
-    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+    let bundle = bundle(Path::new("/Users/you"));
 
     let relaunch = bundle.relaunch_in_login_shell(
         Some(OsStr::new(OUR_APP)),
@@ -194,7 +196,7 @@ fn a_launch_of_the_app_runs_the_bundle_again_through_the_login_shell_so_gh_claud
 
 #[test]
 fn with_no_shell_named_the_launch_runs_through_zsh() {
-    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+    let bundle = bundle(Path::new("/Users/you"));
 
     let relaunch = bundle
         .relaunch_in_login_shell(Some(OsStr::new(OUR_APP)), None, false)
@@ -205,7 +207,7 @@ fn with_no_shell_named_the_launch_runs_through_zsh() {
 
 #[test]
 fn a_launch_already_in_the_login_shell_runs_as_it_is() {
-    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+    let bundle = bundle(Path::new("/Users/you"));
 
     assert_eq!(
         bundle.relaunch_in_login_shell(
@@ -219,7 +221,7 @@ fn a_launch_already_in_the_login_shell_runs_as_it_is() {
 
 #[test]
 fn a_run_from_a_terminal_app_runs_as_it_is() {
-    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+    let bundle = bundle(Path::new("/Users/you"));
 
     assert_eq!(
         bundle.relaunch_in_login_shell(
@@ -233,7 +235,7 @@ fn a_run_from_a_terminal_app_runs_as_it_is() {
 
 #[test]
 fn a_run_not_launched_as_any_app_runs_as_it_is() {
-    let bundle = AppBundle::in_home(Path::new("/Users/you"));
+    let bundle = bundle(Path::new("/Users/you"));
 
     assert_eq!(
         bundle.relaunch_in_login_shell(None, Some(OsStr::new("/bin/zsh")), false),
@@ -255,12 +257,15 @@ fn the_app_is_started_through_the_bundle_when_the_bundle_runs_the_same_binary() 
     let home = home();
     let binary = with_bin_link_to(home.path(), "binary 0.7.0");
     let release = TempDir::new().unwrap();
-    let bundle = AppBundle::in_home(home.path());
+    let bundle = bundle(home.path());
     bundle
         .place_from(&template(release.path(), "0.7.0"))
         .unwrap();
 
-    assert_eq!(bundle.launcher_for(&binary), bundle.executable());
+    assert_eq!(
+        bundle.launcher_for(&binary),
+        bundle_in(home.path()).join("Contents/MacOS/guided-review")
+    );
 }
 
 #[test]
@@ -268,7 +273,7 @@ fn another_binary_is_started_as_itself() {
     let home = home();
     with_bin_link_to(home.path(), "binary 0.7.0");
     let release = TempDir::new().unwrap();
-    let bundle = AppBundle::in_home(home.path());
+    let bundle = bundle(home.path());
     bundle
         .place_from(&template(release.path(), "0.7.0"))
         .unwrap();
@@ -284,8 +289,5 @@ fn with_no_bundle_the_binary_is_started_as_itself() {
     let home = home();
     let binary = with_bin_link_to(home.path(), "binary 0.7.0");
 
-    assert_eq!(
-        AppBundle::in_home(home.path()).launcher_for(&binary),
-        binary
-    );
+    assert_eq!(bundle(home.path()).launcher_for(&binary), binary);
 }

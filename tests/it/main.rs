@@ -27,6 +27,7 @@ mod code_links;
 mod code_source;
 mod comment_actions;
 mod contrast;
+mod desktop_file;
 mod diagrams;
 mod diff_hunks;
 mod eval;
