@@ -7,7 +7,9 @@ pub mod word_keys;
 
 use std::sync::Arc;
 
-use super::{Adapter, AppMenu, HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
+use super::{
+    Adapter, AppMenu, HerdrRaise, KeySpelling, PrimaryKey, RaiseFailed, TextEdit, WindowButtons,
+};
 use app_bundle::AppBundle;
 
 pub(super) const ADAPTER: Adapter = Adapter {
@@ -55,7 +57,7 @@ pub(super) const ADAPTER: Adapter = Adapter {
     herdr_raise: HerdrRaise {
         program: "/usr/bin/open",
         args: &["-a", "Herdr"],
-        best_effort: false,
+        when_it_fails: RaiseFailed::FailsShowing,
     },
     desktop_entry: |home, bin_link| Arc::new(AppBundle::in_home(home, bin_link)),
 };

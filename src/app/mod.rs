@@ -108,7 +108,12 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
             switching.refresh(cx);
             cx.set_global(switching);
             tour_writer::resume(cx);
-            platform::start(takes_focus(), Quit, cx);
+            let focus = if takes_focus() {
+                platform::Focus::Taken
+            } else {
+                platform::Focus::LeftAlone
+            };
+            platform::start(focus, Quit, cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             components::toast_stack::Toaster::install(cx);
             let configured = keymap::configured_keymap();

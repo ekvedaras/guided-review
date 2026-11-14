@@ -78,6 +78,7 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **One adapter value per OS.** Each adapter module exports one `ADAPTER`, a plain `Adapter` holding every fact of its OS (triple, fonts, Primary key, key spelling, text keys, window buttons, app menu, Herdr raise), and `Os::adapter` is the one match on the OS; the `Os` methods read it. Before, each fact was its own constant, nine `Os` methods each matched on the OS, and Linux's missing app menu was an inline `Vec::new()` in `Os::app_menus`. A Windows port adds one `ADAPTER` and one match arm.
 - **The Desktop entry is a trait** (`platform::DesktopEntry`), implemented by `AppBundle` and `DesktopFile` and picked once, by the adapter's `desktop_entry` constructor. Before, `DesktopEntry` wrapped a private enum of the two that six methods matched on. The relaunch through the login shell is the trait's one shared method.
 - **The bin link is the release install's** (`ReleaseInstall`) and passed to the entry, which no longer names `~/.local/bin/guided-review` itself; the launch and `app_link` get the entry from `ReleaseInstall`. The bundle's folder and the `~/Applications` that messages name are one constant.
+- **No bool parameters in the platform** (CODING_STANDARDS): `platform::start` takes a `Focus` (`Taken` or `LeftAlone`), and `HerdrRaise` says what a failed raise does with `RaiseFailed` (`FailsShowing` on macOS, `LeavesHerdrBehind` on Linux), where they had `takes_focus: bool` and `best_effort: bool`.
 
 ## Known open
 

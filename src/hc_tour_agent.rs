@@ -13,7 +13,7 @@ use serde_json::Value;
 use crate::app_folders::AppFolders;
 use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
-use crate::platform::{HerdrRaise, Os};
+use crate::platform::{HerdrRaise, Os, RaiseFailed};
 use crate::pull_request::PullRequestUrl;
 use crate::tour::Tour;
 use crate::viewer::{
@@ -432,10 +432,10 @@ impl HcTourAgents {
     /// `agent.focus` switches the Herdr window to the terminal but leaves the window behind ours.
     fn bring_herdr_to_the_front(&self) -> anyhow::Result<()> {
         let raised = self.raise_herdr();
-        if self.herdr_raise.best_effort {
-            return Ok(());
+        match self.herdr_raise.when_it_fails {
+            RaiseFailed::FailsShowing => raised,
+            RaiseFailed::LeavesHerdrBehind => Ok(()),
         }
-        raised
     }
 
     fn raise_herdr(&self) -> anyhow::Result<()> {

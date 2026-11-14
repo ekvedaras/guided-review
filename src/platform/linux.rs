@@ -2,7 +2,7 @@ pub mod desktop_file;
 
 use std::sync::Arc;
 
-use super::{Adapter, HerdrRaise, KeySpelling, PrimaryKey, TextEdit};
+use super::{Adapter, HerdrRaise, KeySpelling, PrimaryKey, RaiseFailed, TextEdit};
 use desktop_file::DesktopFile;
 
 pub(super) const ADAPTER: Adapter = Adapter {
@@ -52,7 +52,7 @@ pub(super) const ADAPTER: Adapter = Adapter {
     herdr_raise: HerdrRaise {
         program: "hyprctl",
         args: &["dispatch", "focuswindow", "class:herdr-app"],
-        best_effort: true,
+        when_it_fails: RaiseFailed::LeavesHerdrBehind,
     },
     desktop_entry: |home, bin_link| Arc::new(DesktopFile::in_home(home, bin_link)),
 };

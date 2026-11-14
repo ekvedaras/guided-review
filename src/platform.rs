@@ -195,9 +195,22 @@ pub struct KeySpelling {
 pub struct HerdrRaise {
     pub program: &'static str,
     pub args: &'static [&'static str],
-    /// Only the desktop can raise a window on Linux, and not every one lets a program ask; there
-    /// a raise that cannot run or fails leaves Herdr behind instead of failing the hand-off.
-    pub best_effort: bool,
+    pub when_it_fails: RaiseFailed,
+}
+
+/// What a Herdr raise that cannot run or fails does to showing the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RaiseFailed {
+    FailsShowing,
+    /// Only the desktop can raise a window on Linux, and not every one lets a program ask.
+    LeavesHerdrBehind,
+}
+
+/// Whether the app takes the focus as it starts; it leaves it alone while it takes snapshots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Taken,
+    LeftAlone,
 }
 
 /// An edit or caret move a text box key does.
@@ -234,13 +247,12 @@ pub enum TextEdit {
         reason = "only the macOS adapter needs these"
     )
 )]
-pub fn start(takes_focus: bool, quit: impl gpui::Action, cx: &mut gpui::App) {
+pub fn start(focus: Focus, quit: impl gpui::Action, cx: &mut gpui::App) {
     #[cfg(target_os = "macos")]
     {
-        if takes_focus {
-            macos::dock_icon::show();
-        } else {
-            macos::dock_icon::stay_in_background();
+        match focus {
+            Focus::Taken => macos::dock_icon::show(),
+            Focus::LeftAlone => macos::dock_icon::stay_in_background(),
         }
         macos::word_keys::take(cx);
         cx.set_menus(Os::MacOs.app_menus(quit));
