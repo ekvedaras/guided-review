@@ -1,5 +1,4 @@
 use std::ops::ControlFlow;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
@@ -11,6 +10,8 @@ use guided_review::viewer::{
 };
 use tempfile::TempDir;
 
+use crate::support::write_executable;
+
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
 fn pr() -> PullRequestUrl {
@@ -21,7 +22,7 @@ fn pr() -> PullRequestUrl {
 /// failing when the server is made to be down.
 fn fake_hc(dir: &Path) -> PathBuf {
     let script = dir.join("hc");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             r#"#!/bin/sh
@@ -42,9 +43,7 @@ if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
 "#,
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 
@@ -52,7 +51,7 @@ if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
 /// `<dir>/not-taken-up` makes its next call find no such space, as before the window takes a terminal up.
 fn fake_herdr_app(dir: &Path) -> PathBuf {
     let script = dir.join("herdr-app");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             r#"#!/bin/sh
@@ -69,9 +68,7 @@ fi
 "#,
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 
@@ -88,7 +85,7 @@ fn adapter_on(dir: &Path, os: Os) -> HcTourAgents {
 /// `<dir>/raise-fails` makes it fail.
 fn fake_raise(dir: &Path) -> PathBuf {
     let script = dir.join("raise");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             r#"#!/bin/sh
@@ -100,9 +97,7 @@ fi
 "#,
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 

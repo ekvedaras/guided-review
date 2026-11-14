@@ -41,6 +41,25 @@ pub fn folders_in(home: &Path) -> AppFolders {
     guided_review::platform::app_folders(home, |_| None)
 }
 
+/// Writes `script` to `path` as a file that runs. A child spawned by another test thread holds
+/// every descriptor this process has open until the child execs, and a write descriptor to the
+/// script held that way makes running it fail with "Text file busy". Renaming does not help, the
+/// descriptor is to the file, not its name. So this process never opens the script for writing:
+/// `install`, a process of its own, writes it.
+pub fn write_executable(path: &Path, script: impl AsRef<[u8]>) {
+    let mut source = path.as_os_str().to_owned();
+    source.push(".source");
+    std::fs::write(&source, script).unwrap();
+    let installed = Command::new("install")
+        .args(["-m", "755"])
+        .arg(&source)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(installed.success(), "install {} failed", path.display());
+    std::fs::remove_file(&source).unwrap();
+}
+
 pub struct FixtureRepo {
     root: TempDir,
     home: TempDir,
