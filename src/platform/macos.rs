@@ -3,8 +3,40 @@ pub mod dock_icon;
 #[cfg(target_os = "macos")]
 pub mod word_keys;
 
+use super::{KeySpelling, PrimaryKey, TextEdit};
+
 pub const TRIPLE_SYSTEM: &str = "apple-darwin";
 
 /// Both come with macOS.
 pub const TEXT_FONTS: &[&str] = &["Helvetica Neue"];
 pub const CODE_FONTS: &[&str] = &["Menlo"];
+
+pub const PRIMARY_KEY: PrimaryKey = PrimaryKey::Command;
+
+pub const KEY_SPELLING: KeySpelling = KeySpelling {
+    primary: "⌘",
+    ctrl: "⌃",
+    alt: "⌥",
+    shift: "⇧",
+    joiner: "",
+};
+
+pub const TEXT_KEYS: &[(&str, TextEdit)] = &[
+    ("alt-backspace", TextEdit::BackspaceWord),
+    ("cmd-backspace", TextEdit::BackspaceLine),
+    ("alt-delete", TextEdit::DeleteWord),
+    ("alt-left", TextEdit::WordLeft),
+    ("alt-right", TextEdit::WordRight),
+    ("cmd-left", TextEdit::LineStart),
+    ("cmd-right", TextEdit::LineEnd),
+    ("cmd-up", TextEdit::TextStart),
+    ("cmd-down", TextEdit::TextEnd),
+    ("alt-shift-left", TextEdit::SelectWordLeft),
+    ("alt-shift-right", TextEdit::SelectWordRight),
+    ("cmd-shift-left", TextEdit::SelectLineStart),
+    ("cmd-shift-right", TextEdit::SelectLineEnd),
+    ("cmd-a", TextEdit::SelectAll),
+    ("cmd-c", TextEdit::Copy),
+    ("cmd-x", TextEdit::Cut),
+    ("cmd-v", TextEdit::Paste),
+];

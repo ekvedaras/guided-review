@@ -10,6 +10,8 @@ use gpui::{
     point, px, relative, size,
 };
 
+use crate::platform::{Os, TextEdit};
+
 use super::palette::{CONTROL_RADIUS, Colors};
 use super::text_input::{Caret, Direction, Lines, Step, TextDraft};
 
@@ -114,39 +116,47 @@ impl RenderOnce for Field {
 const KEY_CONTEXT: &str = "TextBox";
 const MULTI_LINE: &str = "MultiLine";
 
-/// The editing keys. The keys that send or close a box are the app's shortcuts, bound from its table.
+/// The editing keys: the ones every OS shares, then this OS's text keys. The keys that send or
+/// close a box are the app's shortcuts, bound from its table.
 pub fn bind_keys(cx: &mut App) {
     let single = Some(KEY_CONTEXT);
     let multi_line = format!("{KEY_CONTEXT} && {MULTI_LINE}");
     let one_line = format!("{KEY_CONTEXT} && !{MULTI_LINE}");
     let multi = Some(multi_line.as_str());
+    cx.bind_keys(
+        Os::RUNNING
+            .text_keys()
+            .iter()
+            .map(|(keys, edit)| match edit {
+                TextEdit::BackspaceWord => KeyBinding::new(keys, BackspaceWord, single),
+                TextEdit::BackspaceLine => KeyBinding::new(keys, BackspaceLine, single),
+                TextEdit::DeleteWord => KeyBinding::new(keys, DeleteWord, single),
+                TextEdit::WordLeft => KeyBinding::new(keys, WordLeft, single),
+                TextEdit::WordRight => KeyBinding::new(keys, WordRight, single),
+                TextEdit::LineStart => KeyBinding::new(keys, LineStart, single),
+                TextEdit::LineEnd => KeyBinding::new(keys, LineEnd, single),
+                TextEdit::TextStart => KeyBinding::new(keys, TextStart, single),
+                TextEdit::TextEnd => KeyBinding::new(keys, TextEnd, single),
+                TextEdit::SelectWordLeft => KeyBinding::new(keys, SelectWordLeft, single),
+                TextEdit::SelectWordRight => KeyBinding::new(keys, SelectWordRight, single),
+                TextEdit::SelectLineStart => KeyBinding::new(keys, SelectLineStart, single),
+                TextEdit::SelectLineEnd => KeyBinding::new(keys, SelectLineEnd, single),
+                TextEdit::SelectAll => KeyBinding::new(keys, SelectAll, single),
+                TextEdit::Copy => KeyBinding::new(keys, Copy, single),
+                TextEdit::Cut => KeyBinding::new(keys, Cut, single),
+                TextEdit::Paste => KeyBinding::new(keys, Paste, single),
+            }),
+    );
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, single),
         KeyBinding::new("shift-backspace", Backspace, single),
-        KeyBinding::new("alt-backspace", BackspaceWord, single),
-        KeyBinding::new("cmd-backspace", BackspaceLine, single),
         KeyBinding::new("delete", Delete, single),
-        KeyBinding::new("alt-delete", DeleteWord, single),
         KeyBinding::new("left", Left, single),
         KeyBinding::new("right", Right, single),
-        KeyBinding::new("alt-left", WordLeft, single),
-        KeyBinding::new("alt-right", WordRight, single),
-        KeyBinding::new("cmd-left", LineStart, single),
-        KeyBinding::new("cmd-right", LineEnd, single),
         KeyBinding::new("home", LineStart, single),
         KeyBinding::new("end", LineEnd, single),
-        KeyBinding::new("cmd-up", TextStart, single),
-        KeyBinding::new("cmd-down", TextEnd, single),
         KeyBinding::new("shift-left", SelectLeft, single),
         KeyBinding::new("shift-right", SelectRight, single),
-        KeyBinding::new("alt-shift-left", SelectWordLeft, single),
-        KeyBinding::new("alt-shift-right", SelectWordRight, single),
-        KeyBinding::new("cmd-shift-left", SelectLineStart, single),
-        KeyBinding::new("cmd-shift-right", SelectLineEnd, single),
-        KeyBinding::new("cmd-a", SelectAll, single),
-        KeyBinding::new("cmd-c", Copy, single),
-        KeyBinding::new("cmd-x", Cut, single),
-        KeyBinding::new("cmd-v", Paste, single),
         KeyBinding::new("enter", Submit, Some(one_line.as_str())),
         KeyBinding::new("enter", Newline, multi),
         KeyBinding::new("shift-enter", Newline, multi),
@@ -202,7 +212,7 @@ impl TextBox {
         self
     }
 
-    /// Cmd-shift-enter: sends the text with Ask agent. Without it the key does nothing.
+    /// Primary-shift-enter: sends the text with Ask agent. Without it the key does nothing.
     pub fn on_submit_to_agent(
         mut self,
         enabled: bool,

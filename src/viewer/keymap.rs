@@ -98,7 +98,7 @@ impl KeyChanges {
         }
         self.entries.insert(
             command.config_name().to_owned(),
-            WrittenKeys::Texts(chords.iter().copied().map(Chord::keystroke).collect()),
+            WrittenKeys::Texts(chords.iter().copied().map(Chord::written).collect()),
         );
     }
 
@@ -225,7 +225,7 @@ impl KeyProblem {
                 commands: [first, second],
             } => format!(
                 "{} is taken by both “{}” and “{}”",
-                chord.keystroke(),
+                chord.written(),
                 first.label(),
                 second.label()
             ),

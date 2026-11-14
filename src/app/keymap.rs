@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 use gpui::{App, Global, Keystroke};
 
 use crate::config::Config;
+use crate::platform::{Os, PrimaryKey};
 use crate::viewer::{Chord, Key, Keymap, Modifier, ResolvedKeymap};
 
 /// The keys the app is bound to now, which buttons, the shortcuts sheet and the palette show.
@@ -40,7 +41,18 @@ pub fn set_keymap(keymap: Keymap, cx: &mut App) {
 /// The chord a key press is. A printed key that Shift changes, such as `?`, is that key alone, as
 /// gpui binds it.
 pub fn chord_of(keystroke: &Keystroke) -> Option<Chord> {
+    chord_on(Os::RUNNING, keystroke)
+}
+
+/// Where Control is the Primary modifier, gpui's `platform` is Super, which the app leaves to the
+/// desktop: a press with it is no chord.
+pub fn chord_on(os: Os, keystroke: &Keystroke) -> Option<Chord> {
     let modifiers = &keystroke.modifiers;
+    let (primary, ctrl) = match os.primary_key() {
+        PrimaryKey::Command => (modifiers.platform, modifiers.control),
+        PrimaryKey::Control if modifiers.platform => return None,
+        PrimaryKey::Control => (modifiers.control, false),
+    };
     let shifted_face = keystroke
         .key_char
         .as_deref()
@@ -52,8 +64,8 @@ pub fn chord_of(keystroke: &Keystroke) -> Option<Chord> {
         None => (Key::of_name(&keystroke.key)?, false),
     };
     let held = [
-        (modifiers.platform, Modifier::Cmd),
-        (modifiers.control, Modifier::Ctrl),
+        (primary, Modifier::Primary),
+        (ctrl, Modifier::Ctrl),
         (modifiers.alt, Modifier::Alt),
         (modifiers.shift && !shift_is_in_the_key, Modifier::Shift),
     ];

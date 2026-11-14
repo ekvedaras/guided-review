@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use super::shortcuts::Command;
+
 /// The work running now that a reopen would kill, as the window counts it: Ask turns answer in threads
 /// the Ask panel owns, and hand-offs and Asks handed to the agent are typed in by tasks of the session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -160,11 +162,20 @@ impl RestartGuard {
                 "A restart now does not wait until {waits}. Pick Restart again to restart anyway."
             ),
             Departure::Quit => format!(
-                "Quitting now does not wait until {waits}. Press cmd+q again to quit anyway."
+                "Quitting now does not wait until {waits}. Press {} again to quit anyway.",
+                default_key(Command::Quit)
             ),
             Departure::CloseWindow => format!(
-                "Closing the window quits the app, which does not wait until {waits}. Press cmd+w again to close anyway."
+                "Closing the window quits the app, which does not wait until {waits}. Press {} again to close anyway.",
+                default_key(Command::CloseWindow)
             ),
         })
     }
+}
+
+fn default_key(command: Command) -> String {
+    command
+        .default_chords()
+        .first()
+        .map_or_else(String::new, |chord| chord.spelled())
 }

@@ -170,7 +170,7 @@ async fn shoot(
 }
 
 /// With a comment box open on the page, a double click on the first added line's code on screen, as the
-/// mouse gives it, then cmd-c: the word is selected, and the copy says so.
+/// mouse gives it, then Primary+C: the word is selected, and the copy says so.
 async fn pick_a_word_and_copy(
     camera: &Camera,
     layout: &WeakEntity<OneStepLayout>,
@@ -221,7 +221,7 @@ async fn pick_a_word_and_copy(
     })?;
     camera.take("37-word", cx).await?;
     cx.update(|window, cx| {
-        if let Ok(keys) = Keystroke::parse("cmd-c") {
+        if let Ok(keys) = Keystroke::parse("secondary-c") {
             window.dispatch_keystroke(keys, cx);
         }
     })?;

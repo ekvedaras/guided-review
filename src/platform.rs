@@ -51,6 +51,31 @@ impl Os {
             installed,
         )
     }
+
+    /// The key held for the app's own shortcuts, as gpui's `secondary` picks it.
+    pub fn primary_key(self) -> PrimaryKey {
+        match self {
+            Self::MacOs => macos::PRIMARY_KEY,
+            Self::Linux => linux::PRIMARY_KEY,
+        }
+    }
+
+    /// How keys are written in a line of text and on key caps.
+    pub fn key_spelling(self) -> KeySpelling {
+        match self {
+            Self::MacOs => macos::KEY_SPELLING,
+            Self::Linux => linux::KEY_SPELLING,
+        }
+    }
+
+    /// The text box keys that differ by OS, as gpui keystroke text. The keys every OS shares
+    /// (arrows, Home, End, Backspace …) are the text box's own.
+    pub fn text_keys(self) -> &'static [(&'static str, TextEdit)] {
+        match self {
+            Self::MacOs => macos::TEXT_KEYS,
+            Self::Linux => linux::TEXT_KEYS,
+        }
+    }
 }
 
 fn first_installed(choices: &[&'static str], installed: impl Fn(&str) -> bool) -> &'static str {
@@ -61,6 +86,45 @@ fn first_installed(choices: &[&'static str], installed: impl Fn(&str) -> bool) -
         .iter()
         .find(|family| installed(family))
         .unwrap_or(last)
+}
+
+/// Which key the Primary modifier is. On Linux Super belongs to the desktop, so Control is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimaryKey {
+    Command,
+    Control,
+}
+
+/// The face of each modifier, and what stands between the caps when a chord is spelled in text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeySpelling {
+    pub primary: &'static str,
+    pub ctrl: &'static str,
+    pub alt: &'static str,
+    pub shift: &'static str,
+    pub joiner: &'static str,
+}
+
+/// An edit or caret move a text box key does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextEdit {
+    BackspaceWord,
+    BackspaceLine,
+    DeleteWord,
+    WordLeft,
+    WordRight,
+    LineStart,
+    LineEnd,
+    TextStart,
+    TextEnd,
+    SelectWordLeft,
+    SelectWordRight,
+    SelectLineStart,
+    SelectLineEnd,
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
 }
 
 /// The app's icon in the Dock, which a binary with no app bundle lacks. Nothing on Linux.

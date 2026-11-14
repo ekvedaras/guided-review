@@ -1,6 +1,8 @@
 use gpui::Keystroke;
+use guided_review::app::keymap::chord_on;
 use guided_review::config::Config;
-use guided_review::viewer::{Chord, Command, KeyProblem, Keymap};
+use guided_review::platform::{Os, TextEdit};
+use guided_review::viewer::{Chord, Command, KeyProblem, Keymap, Modifier};
 
 fn chord(text: &str) -> Chord {
     Chord::parse(text).unwrap_or_else(|| panic!("{text} is not a chord"))
@@ -15,7 +17,7 @@ fn keys(keymap: &Keymap, command: Command) -> Vec<String> {
         .chords(command)
         .iter()
         .copied()
-        .map(Chord::keystroke)
+        .map(Chord::written)
         .collect()
 }
 
@@ -30,13 +32,16 @@ fn with_no_keys_table_every_command_has_its_default_keys() {
 }
 
 #[test]
-fn a_chord_is_read_in_any_modifier_order_and_written_as_gpui_reads_it() {
-    assert_eq!(chord("shift-cmd-enter").keystroke(), "cmd-shift-enter");
-    assert_eq!(chord("alt-ctrl-x").keystroke(), "ctrl-alt-x");
+fn a_chord_is_read_in_any_modifier_order_and_written_in_one() {
+    assert_eq!(
+        chord("shift-primary-enter").written(),
+        "primary-shift-enter"
+    );
+    assert_eq!(chord("shift-alt-x").written(), "alt-shift-x");
     assert_eq!(chord("W"), chord("w"));
-    assert_eq!(chord("cmd--").keystroke(), "cmd--");
-    assert_eq!(chord("[").keystroke(), "[");
-    assert_eq!(chord("tab").keystroke(), "tab");
+    assert_eq!(chord("primary--").written(), "primary--");
+    assert_eq!(chord("[").written(), "[");
+    assert_eq!(chord("tab").written(), "tab");
     for text in ["cmd-", "", "f13", "cmd-shift", "hyper-x", "ą"] {
         assert_eq!(Chord::parse(text), None, "{text} read as a chord");
     }
@@ -79,7 +84,7 @@ fn a_command_named_in_the_keys_table_takes_only_its_new_keys() {
     assert_eq!(keys(&keymap, Command::WrapLines), ["y"]);
     assert_eq!(keys(&keymap, Command::NextScreen), ["space", "n"]);
     assert!(keymap.is_changed(Command::WrapLines));
-    assert_eq!(keys(&keymap, Command::Jump), ["cmd-k"]);
+    assert_eq!(keys(&keymap, Command::Jump), ["primary-k"]);
     assert!(!keymap.is_changed(Command::Jump));
 }
 
@@ -188,8 +193,8 @@ fn one_bad_line_leaves_the_good_lines_in_force() {
         resolved("[keys]\nwrap = \"l\"\njump = \"cmd-\"\nnext_unread_step = \"u\"\nquit = 7");
 
     assert_eq!(keys(&keymap, Command::NextUnreadStep), ["u"]);
-    assert_eq!(keys(&keymap, Command::Jump), ["cmd-k"]);
-    assert_eq!(keys(&keymap, Command::Quit), ["cmd-q"]);
+    assert_eq!(keys(&keymap, Command::Jump), ["primary-k"]);
+    assert_eq!(keys(&keymap, Command::Quit), ["primary-q"]);
     assert_eq!(problems.len(), 3);
 }
 
@@ -264,11 +269,79 @@ fn the_notice_at_start_counts_the_problems_and_points_to_settings() {
 }
 
 #[test]
-fn a_chord_is_spelled_for_a_line_of_text_with_the_symbols_its_caps_use() {
-    assert_eq!(chord("w").spelled(), "W");
-    assert_eq!(chord("cmd-shift-enter").spelled(), "⌘⇧↵");
-    assert_eq!(chord("alt-left").spelled(), "⌥←");
-    assert_eq!(chord("escape").spelled(), "esc");
+fn a_chord_is_spelled_on_macos_with_the_symbols_its_caps_use() {
+    let spelled = |text: &str| {
+        Chord::parse_on(Os::MacOs, text)
+            .unwrap()
+            .spelled_on(Os::MacOs)
+    };
+
+    assert_eq!(spelled("w"), "W");
+    assert_eq!(spelled("primary-shift-enter"), "⌘⇧↵");
+    assert_eq!(spelled("alt-left"), "⌥←");
+    assert_eq!(spelled("ctrl-x"), "⌃X");
+    assert_eq!(spelled("escape"), "esc");
+}
+
+#[test]
+fn a_chord_is_spelled_on_linux_with_named_modifiers_joined_by_a_plus() {
+    let spelled = |text: &str| {
+        Chord::parse_on(Os::Linux, text)
+            .unwrap()
+            .spelled_on(Os::Linux)
+    };
+
+    assert_eq!(spelled("w"), "W");
+    assert_eq!(spelled("primary-shift-enter"), "Ctrl+Shift+↵");
+    assert_eq!(spelled("alt-left"), "Alt+←");
+    assert_eq!(spelled("escape"), "esc");
+}
+
+#[test]
+fn a_pressed_key_is_primary_with_cmd_on_macos_and_ctrl_on_linux() {
+    let pressed = |os: Os, keys: &str| chord_on(os, &Keystroke::parse(keys).unwrap());
+
+    assert_eq!(pressed(Os::MacOs, "cmd-k"), Some(chord("primary-k")));
+    assert_eq!(
+        pressed(Os::MacOs, "ctrl-k"),
+        Chord::parse_on(Os::MacOs, "ctrl-k")
+    );
+    assert_eq!(pressed(Os::Linux, "ctrl-k"), Some(chord("primary-k")));
+    assert_eq!(
+        pressed(Os::Linux, "super-k"),
+        None,
+        "Super belongs to the desktop"
+    );
+}
+
+#[test]
+fn a_saved_cmd_key_is_primary_and_a_written_ctrl_is_primary_only_where_ctrl_is() {
+    let primary_k = Chord::parse_on(Os::Linux, "primary-k");
+
+    assert_eq!(Chord::parse_on(Os::Linux, "cmd-k"), primary_k);
+    assert_eq!(Chord::parse_on(Os::Linux, "ctrl-k"), primary_k);
+    assert_eq!(Chord::parse_on(Os::MacOs, "cmd-k"), primary_k);
+    assert_ne!(Chord::parse_on(Os::MacOs, "ctrl-k"), primary_k);
+    assert_eq!(
+        keys(
+            &keymap_of("[keys]\njump = \"cmd-j\"").unwrap(),
+            Command::Jump
+        ),
+        ["primary-j"]
+    );
+}
+
+#[test]
+fn primary_is_written_as_primary_and_bound_as_gpui_secondary() {
+    assert_eq!(chord("cmd-k").written(), "primary-k");
+    assert_eq!(chord("cmd-k").keystroke(), "secondary-k");
+}
+
+#[test]
+fn a_modifier_cap_shows_the_face_its_spelling_uses() {
+    assert_eq!(Modifier::Primary.face(Os::MacOs), "⌘");
+    assert_eq!(Modifier::Primary.face(Os::Linux), "Ctrl");
+    assert_eq!(Modifier::Alt.face(Os::Linux), "Alt");
 }
 
 #[test]
@@ -290,4 +363,52 @@ fn s_on_the_page_clashes_with_a_command_of_the_window() {
             commands: [Command::HideWhitespace, Command::Settings],
         }]
     );
+}
+
+fn text_key(os: Os, edit: TextEdit) -> Vec<&'static str> {
+    os.text_keys()
+        .iter()
+        .filter(|(_, bound)| *bound == edit)
+        .map(|(keys, _)| *keys)
+        .collect()
+}
+
+#[test]
+fn text_boxes_take_macos_text_keys_on_macos() {
+    assert_eq!(text_key(Os::MacOs, TextEdit::WordLeft), ["alt-left"]);
+    assert_eq!(text_key(Os::MacOs, TextEdit::LineStart), ["cmd-left"]);
+    assert_eq!(text_key(Os::MacOs, TextEdit::TextEnd), ["cmd-down"]);
+    assert_eq!(
+        text_key(Os::MacOs, TextEdit::BackspaceLine),
+        ["cmd-backspace"]
+    );
+    assert_eq!(text_key(Os::MacOs, TextEdit::Paste), ["cmd-v"]);
+}
+
+#[test]
+fn text_boxes_take_linux_text_keys_on_linux_with_no_super() {
+    assert_eq!(text_key(Os::Linux, TextEdit::WordLeft), ["ctrl-left"]);
+    assert_eq!(
+        text_key(Os::Linux, TextEdit::BackspaceWord),
+        ["ctrl-backspace"]
+    );
+    assert_eq!(text_key(Os::Linux, TextEdit::TextEnd), ["ctrl-end"]);
+    assert_eq!(
+        text_key(Os::Linux, TextEdit::SelectLineStart),
+        ["shift-home"]
+    );
+    assert_eq!(text_key(Os::Linux, TextEdit::Paste), ["ctrl-v"]);
+    for (keys, _) in Os::Linux.text_keys() {
+        let modifiers = Keystroke::parse(keys).unwrap().modifiers;
+        assert!(!modifiers.platform, "{keys} holds Super");
+    }
+}
+
+#[test]
+fn every_text_key_is_one_gpui_can_bind() {
+    for os in [Os::MacOs, Os::Linux] {
+        for (keys, _) in os.text_keys() {
+            Keystroke::parse(keys).unwrap_or_else(|_| panic!("{keys} is not a key"));
+        }
+    }
 }
