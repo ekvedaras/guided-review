@@ -1,4 +1,5 @@
 use crate::support::FixtureRepo;
+use guided_review::app_folders::NotRead;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
@@ -25,7 +26,7 @@ fn open_review() -> (FixtureRepo, Review) {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let state_file = ReviewStateFile::for_pr(repo.home(), &PR.parse().unwrap());
+    let state_file = ReviewStateFile::for_pr(&repo.folders(), &PR.parse().unwrap());
     let review = Review::open(tour, &source, state_file).unwrap();
     (repo, review)
 }
@@ -124,6 +125,40 @@ fn a_guided_review_before_the_release_install_on_path_names_the_binary_to_remove
     assert_eq!(
         problem.to_string(),
         "/Users/me/.cargo/bin/guided-review comes first on PATH, so the tour skill misses updates"
+    );
+}
+
+#[test]
+fn files_left_beside_the_app_folders_are_named_each_with_the_file_read_instead() {
+    let (_repo, mut review) = open_review();
+    let not_read = |file: &str, read_instead: &str| NotRead {
+        file: file.into(),
+        read_instead: read_instead.into(),
+    };
+
+    review.raise_problem(Problem::FilesNotRead(vec![
+        not_read(
+            "/home/me/.guided-review/config.toml",
+            "/home/me/.config/guided-review/config.toml",
+        ),
+        not_read(
+            "/home/me/.guided-review/tours/a/b/1.json",
+            "/home/me/.local/state/guided-review/tours/a/b/1.json",
+        ),
+        not_read(
+            "/home/me/.guided-review/tours/a/b/2.json",
+            "/home/me/.local/state/guided-review/tours/a/b/2.json",
+        ),
+        not_read(
+            "/home/me/.guided-review/tours/a/b/3.json",
+            "/home/me/.local/state/guided-review/tours/a/b/3.json",
+        ),
+    ]));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(
+        problem.to_string(),
+        "4 files are not read, as the app reads another file in their place; nothing was merged, overwritten or deleted, so keep what you need by hand: /home/me/.guided-review/config.toml (read instead: /home/me/.config/guided-review/config.toml), /home/me/.guided-review/tours/a/b/1.json (read instead: /home/me/.local/state/guided-review/tours/a/b/1.json), /home/me/.guided-review/tours/a/b/2.json (read instead: /home/me/.local/state/guided-review/tours/a/b/2.json) and 1 more"
     );
 }
 

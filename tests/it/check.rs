@@ -41,7 +41,7 @@ impl Shop {
     fn tour_path(&self) -> std::path::PathBuf {
         self.repo
             .home()
-            .join(".guided-review/tours/acme/shop/7.json")
+            .join(".local/state/guided-review/tours/acme/shop/7.json")
     }
 
     fn write_tour(&self, tour: Value) {
@@ -232,7 +232,9 @@ fn hunk_pieces_are_valid_pointer_targets_and_cover_their_hunk() {
     repo.write("ci.yml", &lines("new"));
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
-    let path = repo.home().join(".guided-review/tours/acme/shop/7.json");
+    let path = repo
+        .home()
+        .join(".local/state/guided-review/tours/acme/shop/7.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let write = |pieces: Value| {
         std::fs::write(&path, tour(vec![step("ci", pieces)]).to_string()).unwrap();
@@ -314,7 +316,7 @@ impl CiFile {
         let path = self
             .repo
             .home()
-            .join(".guided-review/tours/acme/shop/7.json");
+            .join(".local/state/guided-review/tours/acme/shop/7.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, tour(steps).to_string()).unwrap();
         GuidedReview::new(&self.repo, &self.github).run(&["check", PR])

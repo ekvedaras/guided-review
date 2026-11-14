@@ -165,7 +165,7 @@ pub fn overlay_panel(colors: &Colors) -> Div {
         .border_color(colors.border)
         .rounded(px(CARD_RADIUS))
         .shadow(colors.overlay_shadow())
-        .font_family(TEXT_FONT)
+        .font_family(*TEXT_FONT)
         .text_sm()
         .text_color(colors.text)
 }

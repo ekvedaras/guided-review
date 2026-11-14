@@ -53,42 +53,42 @@ fn a_writer_works_in_the_clone_the_pr_was_opened_from_else_in_the_guided_review_
     let elsewhere = FixtureRepo::cloned_from("acme/blog");
 
     assert_eq!(
-        writer_folder(&pr(NO_TOUR), repo.home()),
+        writer_folder(&pr(NO_TOUR), &repo.folders()),
         repo.home(),
         "nothing remembered"
     );
-    ReviewStateFile::for_pr(repo.home(), &pr(NO_TOUR))
+    ReviewStateFile::for_pr(&repo.folders(), &pr(NO_TOUR))
         .remember_folder(elsewhere.path())
         .unwrap();
     assert_eq!(
-        writer_folder(&pr(NO_TOUR), repo.home()),
+        writer_folder(&pr(NO_TOUR), &repo.folders()),
         repo.home(),
         "a folder that is no clone of the repo"
     );
-    ReviewStateFile::for_pr(repo.home(), &pr(NO_TOUR))
+    ReviewStateFile::for_pr(&repo.folders(), &pr(NO_TOUR))
         .remember_folder(repo.path())
         .unwrap();
-    assert_eq!(writer_folder(&pr(NO_TOUR), repo.home()), repo.path());
+    assert_eq!(writer_folder(&pr(NO_TOUR), &repo.folders()), repo.path());
 }
 
 #[test]
 fn a_writer_without_a_clone_of_its_own_pr_tries_one_another_pr_of_the_repo_was_opened_from() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let elsewhere = FixtureRepo::cloned_from("acme/blog");
-    ReviewStateFile::for_pr(repo.home(), &pr(ELSEWHERE))
+    ReviewStateFile::for_pr(&repo.folders(), &pr(ELSEWHERE))
         .remember_folder(elsewhere.path())
         .unwrap();
     assert_eq!(
-        writer_folder(&pr(NO_TOUR), repo.home()),
+        writer_folder(&pr(NO_TOUR), &repo.folders()),
         repo.home(),
         "no clone of the repo"
     );
 
-    ReviewStateFile::for_pr(repo.home(), &pr(SHOWN))
+    ReviewStateFile::for_pr(&repo.folders(), &pr(SHOWN))
         .remember_folder(repo.path())
         .unwrap();
 
-    assert_eq!(writer_folder(&pr(NO_TOUR), repo.home()), repo.path());
+    assert_eq!(writer_folder(&pr(NO_TOUR), &repo.folders()), repo.path());
 }
 
 #[test]

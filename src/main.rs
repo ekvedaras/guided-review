@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use guided_review::agent_reply::{AgentReply, agent_reply};
+use guided_review::app_folders::AppFolders;
 use guided_review::app_link::{
     Answer, AppFolder, AppListener, BindError, OpenRequest, Request, hand_over,
     restart as restart_app,
@@ -10,9 +11,10 @@ use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
-use guided_review::opened_pr::{OpenedPr, home_folder};
+use guided_review::opened_pr::OpenedPr;
 use guided_review::outline::Outline;
 use guided_review::pieces;
+use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
@@ -20,17 +22,14 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{StepId, Tour};
 use guided_review::tour_check;
-use guided_review::update::{
-    AppBundle, AppVersion, BundlePlaced, IN_LOGIN_SHELL, LAUNCHED_APP, ReleaseInstall, Version,
-    write_bundle_template,
-};
+use guided_review::update::{AppVersion, ReleaseInstall, Version};
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
 #[command(version = AppVersion::RUNNING.as_str(), about)]
 struct Cli {
-    /// With none, as when Guided Review.app is launched, the app shows the PR switcher
+    /// With none, as when the app is started from the OS launcher, the app shows the PR switcher
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -72,11 +71,11 @@ enum Command {
     },
     /// Show the app's Settings, also with no PR open
     Settings,
-    /// Put Guided Review.app in ~/Applications, from this release install
+    /// Put the app in the OS launcher (Guided Review.app on macOS), from this release install
     InstallApp,
-    /// Write the Info.plist and the icon pictures the release archive's Guided Review.app is made of
+    /// Write the files the release archives' Desktop entries are made of, for every OS
     #[command(hide = true)]
-    BundleTemplate { out: std::path::PathBuf },
+    DesktopEntryTemplate { out: std::path::PathBuf },
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
         pr: PullRequestUrl,
@@ -113,7 +112,9 @@ enum EvalAction {
 }
 
 fn main() -> anyhow::Result<()> {
-    let Some(command) = Cli::parse().command else {
+    let cli = Cli::parse();
+    AppFolders::settle()?;
+    let Some(command) = cli.command else {
         return launch();
     };
     match command {
@@ -127,7 +128,9 @@ fn main() -> anyhow::Result<()> {
         Command::Restart { pr, at } => open(&pr, &Launch::Restart { at }),
         Command::Settings => settings(),
         Command::InstallApp => install_app(),
-        Command::BundleTemplate { out } => write_bundle_template(&out, Version::running()),
+        Command::DesktopEntryTemplate { out } => {
+            write_desktop_entry_templates(&out, Version::running())
+        }
         Command::AgentReply {
             pr,
             hand_off,
@@ -142,7 +145,13 @@ fn main() -> anyhow::Result<()> {
                 Some(body) => AgentReply::Answer(body.trim_end()),
                 None => AgentReply::WorkingOnIt,
             };
-            let said = agent_reply(&GitHub::from_env(), &home_folder()?, &pr, hand_off, &reply)?;
+            let said = agent_reply(
+                &GitHub::from_env(),
+                &AppFolders::running()?,
+                &pr,
+                hand_off,
+                &reply,
+            )?;
             println!("{said}");
             Ok(())
         }
@@ -159,15 +168,15 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    println!("{}", Tour::path_for(&home_folder()?, pr).display());
+    println!("{}", Tour::path_for(&AppFolders::running()?, pr).display());
     Ok(())
 }
 
 /// A config that cannot be read must not stop `outline` or `check`, which work without it.
 fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
-    let home = home_folder()?;
-    match Config::load_from(&home) {
-        Ok(config) => Ok(config.summary_instructions(&home)),
+    let folders = AppFolders::running()?;
+    match Config::load_from(&folders) {
+        Ok(config) => Ok(config.summary_instructions(&folders)),
         Err(error) => {
             eprintln!("warning: summary instructions not read: {error:#}");
             Ok(SummaryInstructions::none())
@@ -276,17 +285,17 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
 }
 
 fn eval_add(pr: &PullRequestUrl, note: &str) -> anyhow::Result<()> {
-    let home = home_folder()?;
-    EvalStore::in_home(&home).add(pr, note)?;
+    let folders = AppFolders::running()?;
+    EvalStore::in_folders(&folders).add(pr, note)?;
     println!("added {pr} to the test set");
     Ok(())
 }
 
 fn eval(existing_tours: bool) -> anyhow::Result<()> {
-    let home = home_folder()?;
+    let folders = AppFolders::running()?;
     let report = Eval {
-        store: &EvalStore::in_home(&home),
-        home: &home,
+        store: &EvalStore::in_folders(&folders),
+        folders: &folders,
         writer: &ClaudeEvalWriter::new(),
         judge: &ClaudeTourJudge::new(),
         skill: &Skill::bundled(),
@@ -316,8 +325,8 @@ enum Launch {
 }
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
-    let home = home_folder()?;
-    let folder = AppFolder::in_home(&home);
+    let folders = AppFolders::running()?;
+    let folder = AppFolder::of(&folders);
     let request = Request::Open(OpenRequest {
         pr: pr.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
@@ -344,7 +353,10 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
 }
 
 fn settings() -> anyhow::Result<()> {
-    let answer = hand_over(&AppFolder::in_home(&home_folder()?), &Request::ShowSettings)?;
+    let answer = hand_over(
+        &AppFolder::of(&AppFolders::running()?),
+        &Request::ShowSettings,
+    )?;
     match answer {
         Answer::ShowingSettings => {
             println!("{answer}");
@@ -354,14 +366,16 @@ fn settings() -> anyhow::Result<()> {
     }
 }
 
-/// A launch of Guided Review.app first runs itself again through the login shell, then shows the PR
+/// A launch from the OS launcher first runs itself again through the login shell, then shows the PR
 /// switcher; `guided-review` with no command shows it too.
 fn launch() -> anyhow::Result<()> {
-    let home = home_folder()?;
-    let launched_app = std::env::var_os(LAUNCHED_APP);
+    let folders = AppFolders::running()?;
+    let install = ReleaseInstall::in_home(folders.home());
+    let desktop_entry = install.desktop_entry();
+    let launched_app = std::env::var_os(desktop_entry.launched_app_variable());
     let shell = std::env::var_os("SHELL");
     let is_in_login_shell = std::env::var_os(IN_LOGIN_SHELL).is_some();
-    if let Some(relaunch) = AppBundle::in_home(&home).relaunch_in_login_shell(
+    if let Some(relaunch) = desktop_entry.relaunch_in_login_shell(
         launched_app.as_deref(),
         shell.as_deref(),
         is_in_login_shell,
@@ -377,7 +391,7 @@ fn launch() -> anyhow::Result<()> {
             )
         });
     }
-    let answer = hand_over(&AppFolder::in_home(&home), &Request::ShowSwitcher)?;
+    let answer = hand_over(&AppFolder::of(&folders), &Request::ShowSwitcher)?;
     match answer {
         Answer::ShowingSwitcher => {
             println!("{answer}");
@@ -389,22 +403,27 @@ fn launch() -> anyhow::Result<()> {
 
 fn install_app() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("could not find the guided-review binary")?;
-    let placed = ReleaseInstall::in_home(&home_folder()?).bring_bundle_up_to_date(&exe)?;
+    let install = ReleaseInstall::in_home(AppFolders::running()?.home());
+    let placed = install.bring_desktop_entry_up_to_date(&exe)?;
+    let (name, folder) = (
+        install.desktop_entry().name(),
+        install.desktop_entry().folder(),
+    );
     match placed {
-        BundlePlaced::Refreshed => println!("Guided Review.app is in ~/Applications"),
-        BundlePlaced::Current => println!("Guided Review.app in ~/Applications is up to date"),
-        BundlePlaced::NotInRelease => anyhow::bail!(
-            "only a release install carries Guided Review.app; this guided-review is not one"
-        ),
+        EntryPlaced::Refreshed => println!("{name} is in {folder}"),
+        EntryPlaced::Current => println!("{name} in {folder} is up to date"),
+        EntryPlaced::NotInRelease => {
+            anyhow::bail!("only a release install carries {name}; this guided-review is not one")
+        }
     }
     Ok(())
 }
 
 fn serve() -> anyhow::Result<()> {
-    let home = home_folder()?;
-    match AppListener::bind(&AppFolder::in_home(&home)) {
+    let folders = AppFolders::running()?;
+    match AppListener::bind(&AppFolder::of(&folders)) {
         Ok(listener) => {
-            guided_review::app::serve(listener, home);
+            guided_review::app::serve(listener, folders);
             Ok(())
         }
         Err(BindError::AlreadyRunning) => Ok(()),

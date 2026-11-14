@@ -8,8 +8,8 @@ const fn key(face: char) -> Chord {
     Chord::key(Key::Printed(face))
 }
 
-const fn cmd(face: char) -> Chord {
-    key(face).with(Modifier::Cmd)
+const fn primary(face: char) -> Chord {
+    key(face).with(Modifier::Primary)
 }
 
 const S: Chord = key('s');
@@ -31,14 +31,14 @@ const UP: Chord = Chord::key(Key::Up);
 const DOWN: Chord = Chord::key(Key::Down);
 const LEFT: Chord = Chord::key(Key::Left);
 const RIGHT: Chord = Chord::key(Key::Right);
-const CMD_ENTER: Chord = Chord::key(Key::Enter).with(Modifier::Cmd);
-const CMD_SHIFT_ENTER: Chord = CMD_ENTER.with(Modifier::Shift);
+const PRIMARY_ENTER: Chord = Chord::key(Key::Enter).with(Modifier::Primary);
+const PRIMARY_SHIFT_ENTER: Chord = PRIMARY_ENTER.with(Modifier::Shift);
 const ESCAPE: Chord = Chord::key(Key::Escape);
-const CMD_K: Chord = cmd('k');
-const CMD_C: Chord = cmd('c');
-const CMD_COMMA: Chord = cmd(',');
-const CMD_W: Chord = cmd('w');
-const CMD_Q: Chord = cmd('q');
+const PRIMARY_K: Chord = primary('k');
+const PRIMARY_C: Chord = primary('c');
+const PRIMARY_COMMA: Chord = primary(',');
+const PRIMARY_W: Chord = primary('w');
+const PRIMARY_Q: Chord = primary('q');
 
 /// Where a command's keys work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,20 +173,20 @@ impl Command {
             Self::MoreBelow => &[CLOSE_BRACKET],
             Self::ToggleRenderedView => &[R],
             Self::TogglePieceLabels => &[L],
-            Self::Jump => &[CMD_K],
+            Self::Jump => &[PRIMARY_K],
             Self::ToggleRead => &[M],
-            Self::CopyCode => &[CMD_C],
-            Self::AddToReview => &[CMD_ENTER],
-            Self::AskAgent => &[CMD_SHIFT_ENTER],
+            Self::CopyCode => &[PRIMARY_C],
+            Self::AddToReview => &[PRIMARY_ENTER],
+            Self::AskAgent => &[PRIMARY_SHIFT_ENTER],
             Self::CloseBox => &[ESCAPE],
             Self::WrapLines => &[W],
             Self::HideWhitespace => &[S],
             Self::AskAboutStep => &[A],
-            Self::Settings => &[CMD_COMMA],
+            Self::Settings => &[PRIMARY_COMMA],
             Self::Shortcuts => &[QUESTION],
             Self::OpenOnGitHub => &[G],
-            Self::CloseWindow => &[CMD_W],
-            Self::Quit => &[CMD_Q],
+            Self::CloseWindow => &[PRIMARY_W],
+            Self::Quit => &[PRIMARY_Q],
         }
     }
 

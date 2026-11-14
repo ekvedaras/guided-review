@@ -52,7 +52,7 @@ fn shop() -> Shop {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_pr(
-        repo.home(),
+        &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     Shop {
@@ -398,7 +398,7 @@ fn without_a_clone_or_with_the_place_gone_a_place_cannot_be_asked_about_and_says
     );
     assert_eq!(
         Unavailable::NoClone.message(),
-        "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml"
+        "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in config.toml"
     );
     assert_eq!(
         Unavailable::PlaceGone.message(),

@@ -9,7 +9,7 @@ use guided_review::app_link::AppFolder;
 const BUILD: &str = "test-build";
 
 use crate::support::fake_app::{CliEnded, accept_before};
-use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, folders_in, write_executable};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -18,7 +18,7 @@ type Seen = Arc<Mutex<Vec<String>>>;
 fn shop_with_a_tour_file() -> (FixtureRepo, FakeGitHub) {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let sha = repo.commit("base");
-    let tour = guided_review::tour::Tour::path_for(repo.home(), &PR.parse().unwrap());
+    let tour = guided_review::tour::Tour::path_for(&repo.folders(), &PR.parse().unwrap());
     std::fs::create_dir_all(tour.parent().unwrap()).unwrap();
     std::fs::write(tour, "{}").unwrap();
     let github = FakeGitHub::serving_pull("acme/shop", 7, &sha, &sha);
@@ -28,12 +28,7 @@ fn shop_with_a_tour_file() -> (FixtureRepo, FakeGitHub) {
 /// A script that stands for the app binary: it only records that it was started.
 fn start_script(home: &Path) -> PathBuf {
     let script = home.join("fake-app");
-    std::fs::write(&script, "#!/bin/sh\necho \"$@\" > \"$HOME/started\"\n").unwrap();
-    std::process::Command::new("chmod")
-        .arg("+x")
-        .arg(&script)
-        .status()
-        .unwrap();
+    write_executable(&script, "#!/bin/sh\necho \"$@\" > \"$HOME/started\"\n");
     script
 }
 
@@ -53,7 +48,7 @@ fn fake_app(
     answers: Vec<String>,
     seen: Seen,
 ) -> std::thread::JoinHandle<()> {
-    let socket = AppFolder::in_home(home).socket();
+    let socket = AppFolder::of(&folders_in(home)).socket();
     let listener = ready.is_none().then(|| bind(&socket));
     let cli_ended = cli_ended.clone();
     std::thread::spawn(move || {
@@ -164,7 +159,7 @@ fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
         let cli_ended = cli_ended.clone();
         std::thread::spawn(move || {
             old_app.join().unwrap();
-            std::fs::remove_file(AppFolder::in_home(&home).socket()).unwrap();
+            std::fs::remove_file(AppFolder::of(&folders_in(&home)).socket()).unwrap();
             fake_app(
                 &home,
                 &cli_ended,
@@ -391,7 +386,7 @@ fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_
         let cli_ended = cli_ended.clone();
         std::thread::spawn(move || {
             old_app.join().unwrap();
-            std::fs::remove_file(AppFolder::in_home(&home).socket()).unwrap();
+            std::fs::remove_file(AppFolder::of(&folders_in(&home)).socket()).unwrap();
             fake_app(
                 &home,
                 &cli_ended,

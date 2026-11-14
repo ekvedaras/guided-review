@@ -1,4 +1,5 @@
 use crate::support::FixtureRepo;
+use crate::support::folders_in;
 use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
@@ -26,13 +27,13 @@ fn skill(name: &str) -> SkillName {
 }
 
 fn write_config(home: &Path, text: &str) {
-    let path = home.join(".guided-review/config.toml");
+    let path = home.join(".config/guided-review/config.toml");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
 }
 
 fn config_text(home: &Path) -> String {
-    std::fs::read_to_string(home.join(".guided-review/config.toml")).unwrap()
+    std::fs::read_to_string(home.join(".config/guided-review/config.toml")).unwrap()
 }
 
 #[test]
@@ -40,7 +41,7 @@ fn saving_with_no_edits_leaves_the_config_byte_for_byte() {
     let shop = FixtureRepo::cloned_from("acme/shop");
     let config = commented_config(&shop);
     write_config(shop.home(), &config);
-    let mut settings = Settings::load(shop.home()).unwrap();
+    let mut settings = Settings::load(&shop.folders()).unwrap();
 
     let outcome = settings.save().unwrap();
 
@@ -52,7 +53,7 @@ fn loaded_with_commented_config() -> (FixtureRepo, String, Settings) {
     let shop = FixtureRepo::cloned_from("acme/shop");
     let config = commented_config(&shop);
     write_config(shop.home(), &config);
-    let settings = Settings::load(shop.home()).unwrap();
+    let settings = Settings::load(&shop.folders()).unwrap();
     (shop, config, settings)
 }
 
@@ -122,7 +123,7 @@ fn an_edit_is_unsaved_until_save_and_an_edit_back_to_the_saved_value_is_not() {
 fn summary_instructions_from(config: &str) -> SummaryInstructionsChoice {
     let home = tempfile::TempDir::new().unwrap();
     write_config(home.path(), config);
-    Settings::load(home.path())
+    Settings::load(&folders_in(home.path()))
         .unwrap()
         .summary_instructions()
         .clone()
@@ -214,7 +215,7 @@ fn a_removed_clone_takes_only_its_own_line() {
     let blog = FixtureRepo::cloned_from("acme/blog");
     let with_blog = format!("{config}\"acme/blog\" = \"{}\"\n", blog.path().display());
     write_config(shop.home(), &with_blog);
-    let mut settings = Settings::load(shop.home()).unwrap();
+    let mut settings = Settings::load(&shop.folders()).unwrap();
 
     settings.remove_clone(1);
     settings.save().unwrap();
@@ -338,7 +339,7 @@ fn the_skill_list_holds_the_skills_in_claude_skills_and_follows_symlinks() {
     std::fs::create_dir_all(skills.join("not-a-skill")).unwrap();
     std::fs::write(skills.join("notes.md"), "").unwrap();
 
-    let settings = Settings::load(home.path()).unwrap();
+    let settings = Settings::load(&folders_in(home.path())).unwrap();
 
     assert_eq!(settings.skills(), [skill("linked"), skill("real")]);
 }
@@ -346,11 +347,23 @@ fn the_skill_list_holds_the_skills_in_claude_skills_and_follows_symlinks() {
 #[test]
 fn the_default_file_choice_knows_whether_the_default_file_exists() {
     let (shop, _config, _settings) = loaded_with_commented_config();
-    assert!(!Settings::load(shop.home()).unwrap().default_file_exists());
+    assert!(
+        !Settings::load(&shop.folders())
+            .unwrap()
+            .default_file_exists()
+    );
 
-    std::fs::write(shop.home().join(".guided-review/summary.md"), "Warm me up").unwrap();
+    std::fs::write(
+        shop.home().join(".config/guided-review/summary.md"),
+        "Warm me up",
+    )
+    .unwrap();
 
-    assert!(Settings::load(shop.home()).unwrap().default_file_exists());
+    assert!(
+        Settings::load(&shop.folders())
+            .unwrap()
+            .default_file_exists()
+    );
 }
 
 #[test]
@@ -371,7 +384,7 @@ fn a_skill_name_outline_would_reject_is_not_a_skill_name_here_either() {
 fn loaded_from(config: &str) -> (tempfile::TempDir, Settings) {
     let home = tempfile::TempDir::new().unwrap();
     write_config(home.path(), config);
-    let settings = Settings::load(home.path()).unwrap();
+    let settings = Settings::load(&folders_in(home.path())).unwrap();
     (home, settings)
 }
 
@@ -506,7 +519,7 @@ fn a_custom_ide_survives_save_with_a_preset_in_ide_custom_beside_ide() {
         config,
         "ide = \"vscode://file{path}:{line}\" # mine\nask_effort = \"low\"\nide_custom = \"zed {path}:{line}\"\n"
     );
-    let reloaded = Settings::load(home.path()).unwrap();
+    let reloaded = Settings::load(&folders_in(home.path())).unwrap();
     assert_eq!(reloaded.ide(), IdeChoice::VsCode);
     assert_eq!(reloaded.ide_custom_text(), "zed {path}:{line}");
 }
@@ -662,7 +675,10 @@ fn a_skill_folder_whose_name_is_not_a_skill_name_is_not_listed() {
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("SKILL.md"), "").unwrap();
 
-    assert_eq!(Settings::load(home.path()).unwrap().skills(), Vec::new());
+    assert_eq!(
+        Settings::load(&folders_in(home.path())).unwrap().skills(),
+        Vec::new()
+    );
 }
 
 #[test]
@@ -707,7 +723,7 @@ fn a_blank_custom_ide_template_is_refused_with_a_message_and_nothing_is_written(
 #[test]
 fn creating_the_default_file_makes_an_empty_one_and_keeps_one_that_is_there() {
     let (home, settings) = loaded_from("");
-    let file = home.path().join(".guided-review/summary.md");
+    let file = home.path().join(".config/guided-review/summary.md");
     assert!(!settings.default_file_exists());
 
     assert_eq!(settings.create_default_file().unwrap(), file);
@@ -790,7 +806,7 @@ fn the_last_custom_ask_model_comes_back_and_survives_save_in_ask_model_custom() 
         config_text(home.path()),
         "ask_model = \"haiku\" # pinned\nask_model_custom = \"claude-opus-4-1\"\n"
     );
-    let reloaded = Settings::load(home.path()).unwrap();
+    let reloaded = Settings::load(&folders_in(home.path())).unwrap();
     assert_eq!(reloaded.ask_model(), AskModelChoice::Haiku);
     assert_eq!(reloaded.ask_model_custom_text(), "claude-opus-4-1");
 }
@@ -878,7 +894,7 @@ fn a_key_set_back_to_its_default_or_reset_leaves_no_line() {
 fn a_key_another_command_answers_blocks_the_save_and_names_both() {
     let shop = FixtureRepo::cloned_from("acme/shop");
     write_config(shop.home(), KEYED_CONFIG);
-    let mut settings = Settings::load(shop.home()).unwrap();
+    let mut settings = Settings::load(&shop.folders()).unwrap();
 
     settings.set_key(Command::WrapLines, chord("m"));
 

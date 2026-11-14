@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::app_folders::NotRead;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
@@ -44,6 +45,9 @@ pub enum Problem {
     ReviewingMarkNotChanged(String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
     ReleaseInstallInTheWay(InTheWay),
+    /// Files the app keeps that lie in the app folders it does not use: what a move from
+    /// `~/.guided-review` left behind or could not put back, or what an older binary wrote there since.
+    FilesNotRead(Vec<NotRead>),
 }
 
 /// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
@@ -82,6 +86,8 @@ pub enum ProblemKind {
     ReviewingMarkNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
     ReleaseInstallInTheWay,
+    /// Raised when the review opens; a review opened once the files are gone has none.
+    FilesNotRead,
 }
 
 impl Problem {
@@ -103,6 +109,7 @@ impl Problem {
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
+            Self::FilesNotRead(_) => ProblemKind::FilesNotRead,
         }
     }
 }
@@ -292,6 +299,35 @@ impl fmt::Display for Problem {
                 "{} comes first on PATH, so the tour skill misses updates",
                 binary.display()
             ),
+            Self::FilesNotRead(files) => {
+                const NAMED: usize = 3;
+                write!(
+                    formatter,
+                    "{} {} not read, as the app reads another file in their place; nothing was merged, overwritten or deleted, so keep what you need by hand: ",
+                    files.len(),
+                    if files.len() == 1 {
+                        "file is"
+                    } else {
+                        "files are"
+                    }
+                )?;
+                let named: Vec<String> = files
+                    .iter()
+                    .take(NAMED)
+                    .map(|not_read| {
+                        format!(
+                            "{} (read instead: {})",
+                            not_read.file.display(),
+                            not_read.read_instead.display()
+                        )
+                    })
+                    .collect();
+                write!(formatter, "{}", named.join(", "))?;
+                match files.len().saturating_sub(NAMED) {
+                    0 => Ok(()),
+                    more => write!(formatter, " and {more} more"),
+                }
+            }
         }
     }
 }

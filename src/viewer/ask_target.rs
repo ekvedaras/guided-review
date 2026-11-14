@@ -43,7 +43,7 @@ impl Unavailable {
     pub fn message(self) -> &'static str {
         match self {
             Self::NoClone => {
-                "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in ~/.guided-review/config.toml"
+                "Ask needs a local clone of this repo: run the app inside it or add it under [clones] in config.toml"
             }
             Self::PlaceGone => "These lines are not in the tour any more: select them again to ask",
         }

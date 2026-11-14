@@ -141,7 +141,7 @@ impl Render for LoadingScreen {
             .px_6()
             .gap_4()
             .bg(colors.background)
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .text_color(colors.text)
             .child(
                 div()
@@ -177,7 +177,7 @@ impl Render for LoadingScreen {
                     .p_3()
                     .rounded(px(CARD_RADIUS))
                     .bg(colors.surface)
-                    .font_family(CODE_FONT)
+                    .font_family(*CODE_FONT)
                     .text_xs()
                     .text_color(colors.muted_text)
                     .children(

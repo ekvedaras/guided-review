@@ -1,3 +1,10 @@
+use std::path::PathBuf;
+use std::sync::LazyLock;
+
+use usvg::fontdb::{Database, Family, Source};
+
+use crate::platform::Os;
+
 use gpui::{
     App, Background, BoxShadow, Global, Rgba, Window, WindowAppearance, linear_color_stop,
     linear_gradient, px, rgb,
@@ -6,10 +13,42 @@ use gpui::{
 use crate::viewer::{Capture, ReadProgress};
 
 /// GPUI has no usable default font outside Zed, so every text names its family.
-pub const TEXT_FONT: &str = "Helvetica Neue";
-pub const CODE_FONT: &str = "Menlo";
-/// Diagrams measure their text with this file, so it must hold `TEXT_FONT`.
-pub const TEXT_FONT_FILE: &str = "/System/Library/Fonts/HelveticaNeue.ttc";
+pub static TEXT_FONT: LazyLock<&'static str> = LazyLock::new(|| {
+    Os::RUNNING.text_font(is_installed, || {
+        INSTALLED_FONTS.family_name(&Family::SansSerif)
+    })
+});
+pub static CODE_FONT: LazyLock<&'static str> = LazyLock::new(|| {
+    Os::RUNNING.code_font(is_installed, || {
+        INSTALLED_FONTS.family_name(&Family::Monospace)
+    })
+});
+
+/// The fonts on this machine, read once: reading them is slow.
+pub static INSTALLED_FONTS: LazyLock<Database> = LazyLock::new(|| {
+    let mut fonts = Database::new();
+    fonts.load_system_fonts();
+    fonts
+});
+
+fn is_installed(family: &str) -> bool {
+    !font_files(family).is_empty()
+}
+
+/// The files that hold a family's faces on this machine.
+pub fn font_files(family: &str) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = INSTALLED_FONTS
+        .faces()
+        .filter(|face| face.families.iter().any(|(name, _)| name == family))
+        .filter_map(|face| match &face.source {
+            Source::File(path) | Source::SharedFile(path, _) => Some(path.clone()),
+            Source::Binary(_) => None,
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
 
 /// One radius for every card on the page, one for every control and one for what sits inside a
 /// control or is too small for the control's (a segment's thumb, a chip, a key cap), so corners agree.

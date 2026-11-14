@@ -44,7 +44,7 @@ fn a_request_is_one_json_line_with_the_version_and_the_open_fields() {
 #[test]
 fn a_second_app_cannot_take_the_lock_while_the_first_lives() {
     let repo = FixtureRepo::cloned_from("acme/shop");
-    let folder = AppFolder::in_home(repo.home());
+    let folder = AppFolder::of(&repo.folders());
 
     let first = AppListener::bind(&folder).unwrap();
     let second = AppListener::bind(&folder);
@@ -57,7 +57,7 @@ fn a_second_app_cannot_take_the_lock_while_the_first_lives() {
 #[test]
 fn a_socket_file_with_no_app_behind_it_is_cleaned_up() {
     let repo = FixtureRepo::cloned_from("acme/shop");
-    let folder = AppFolder::in_home(repo.home());
+    let folder = AppFolder::of(&repo.folders());
     drop(AppListener::bind(&folder).unwrap());
     assert!(folder.socket().exists());
 
@@ -67,7 +67,7 @@ fn a_socket_file_with_no_app_behind_it_is_cleaned_up() {
 #[test]
 fn the_listener_answers_each_request_line_through_the_handler() {
     let repo = FixtureRepo::cloned_from("acme/shop");
-    let folder = AppFolder::in_home(repo.home());
+    let folder = AppFolder::of(&repo.folders());
     AppListener::bind(&folder)
         .unwrap()
         .serve(|request| match request {
@@ -92,7 +92,7 @@ fn the_listener_answers_each_request_line_through_the_handler() {
 #[test]
 fn a_request_of_another_build_is_not_acted_on_but_a_quit_is() {
     let repo = FixtureRepo::cloned_from("acme/shop");
-    let folder = AppFolder::in_home(repo.home());
+    let folder = AppFolder::of(&repo.folders());
     AppListener::bind(&folder)
         .unwrap()
         .serve(|_| Answer::Quitting);

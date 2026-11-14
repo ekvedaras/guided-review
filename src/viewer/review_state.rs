@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
@@ -456,7 +457,7 @@ pub struct TypedText {
     finish_body: String,
 }
 
-/// `~/.guided-review/state/<owner>/<repo>/<pr>.json`
+/// `<owner>/<repo>/<pr>.json` in the state files folder
 #[derive(Clone)]
 pub struct ReviewStateFile {
     path: PathBuf,
@@ -464,13 +465,13 @@ pub struct ReviewStateFile {
 }
 
 impl ReviewStateFile {
-    pub fn for_pr(home: &Path, pr: &PullRequestUrl) -> Self {
+    pub fn for_pr(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
         Self {
-            path: home
-                .join(".guided-review/state")
+            path: folders
+                .state_files()
                 .join(pr.repo.to_string())
                 .join(format!("{}.json", pr.number)),
-            tour_files: Tour::files_for(home, pr),
+            tour_files: Tour::files_for(folders, pr),
         }
     }
 
@@ -482,10 +483,8 @@ impl ReviewStateFile {
 
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
     /// and folders count for nothing: this only looks for a clone to work in.
-    pub fn folders_opened_from_in(home: &Path, pr: &PullRequestUrl) -> Vec<PathBuf> {
-        let Ok(files) =
-            std::fs::read_dir(home.join(".guided-review/state").join(pr.repo.to_string()))
-        else {
+    pub fn folders_opened_from_in(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<PathBuf> {
+        let Ok(files) = std::fs::read_dir(folders.state_files().join(pr.repo.to_string())) else {
             return Vec::new();
         };
         let mut numbers: Vec<u64> = files
@@ -499,7 +498,7 @@ impl ReviewStateFile {
                     repo: pr.repo.clone(),
                     number,
                 };
-                Self::for_pr(home, &other).opened_from().ok().flatten()
+                Self::for_pr(folders, &other).opened_from().ok().flatten()
             })
             .collect()
     }

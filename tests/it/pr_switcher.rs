@@ -1,3 +1,4 @@
+use crate::support::folders_in;
 use std::fs;
 use std::path::Path;
 
@@ -45,7 +46,7 @@ fn three_pull_requests() -> FakeGitHub {
 }
 
 fn write_tour(home: &Path, url: &str) {
-    let path = Tour::path_for(home, &pr(url));
+    let path = Tour::path_for(&folders_in(home), &pr(url));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, "{}").unwrap();
 }
@@ -58,7 +59,7 @@ fn home_with_tour_of(url: &str) -> TempDir {
 
 fn loaded(github: &FakeGitHub, home: &Path) -> PrSwitcher {
     let mut switcher = PrSwitcher::default();
-    switcher.loaded(github.relevant_pull_requests(), home);
+    switcher.loaded(github.relevant_pull_requests(), &folders_in(home));
     switcher
 }
 
@@ -105,7 +106,7 @@ fn a_tour_written_since_the_list_loaded_shows_when_the_tours_are_checked_again()
     let mut switcher = loaded(&three_pull_requests(), home.path());
     write_tour(home.path(), SHOP_7);
 
-    switcher.check_tours(home.path(), &ActivePr::default());
+    switcher.check_tours(&folders_in(home.path()), &ActivePr::default());
 
     let tours: Vec<_> = switcher.visible().map(|row| row.tour).collect();
     assert_eq!(
@@ -183,7 +184,7 @@ fn rows_say_which_tours_are_being_written_failed_or_have_an_unseen_agent_reply()
     active.writer_started(&pr(SHOP_7), Err(anyhow::anyhow!("no room")));
     active.agent_replied(&pr(API_31));
 
-    switcher.check_tours(home.path(), &active);
+    switcher.check_tours(&folders_in(home.path()), &active);
 
     let rows: Vec<_> = switcher.visible().collect();
     let tours: Vec<_> = rows.iter().map(|row| row.tour).collect();
@@ -233,7 +234,7 @@ fn a_failed_refresh_keeps_the_rows_already_listed_and_gives_the_reason() {
 
     github.inject(GitHubFault::RelevantListFails);
     switcher.refreshing();
-    switcher.loaded(github.relevant_pull_requests(), home.path());
+    switcher.loaded(github.relevant_pull_requests(), &folders_in(home.path()));
 
     assert_eq!(visible_urls(&switcher), [BLOG_7, API_31, SHOP_7]);
     let notice = switcher.notice().unwrap();
@@ -259,7 +260,10 @@ fn while_the_list_loads_the_switcher_says_so() {
     let mut switcher = PrSwitcher::default();
     assert!(switcher.is_loading());
 
-    switcher.loaded(Ok(RelevantPullRequests::default()), Path::new("/nowhere"));
+    switcher.loaded(
+        Ok(RelevantPullRequests::default()),
+        &folders_in(Path::new("/nowhere")),
+    );
 
     assert!(!switcher.is_loading());
     assert_eq!(switcher.notice(), None);
@@ -274,7 +278,7 @@ fn teams_that_were_not_searched_are_named() {
             pull_requests: Vec::new(),
             teams_left_out: vec!["acme/team11".to_owned(), "acme/team12".to_owned()],
         }),
-        Path::new("/nowhere"),
+        &folders_in(Path::new("/nowhere")),
     );
 
     let notice = switcher.notice().unwrap();
@@ -293,7 +297,7 @@ fn a_reload_after_a_failure_clears_the_notice_and_keeps_the_filter() {
     switcher.filter("alice");
 
     github.heal(&GitHubFault::RelevantListFails);
-    switcher.loaded(github.relevant_pull_requests(), home.path());
+    switcher.loaded(github.relevant_pull_requests(), &folders_in(home.path()));
 
     assert_eq!(switcher.notice(), None);
     assert_eq!(visible_urls(&switcher), [SHOP_7]);
@@ -323,7 +327,7 @@ fn twelve_pull_requests() -> PrSwitcher {
             pull_requests,
             teams_left_out: Vec::new(),
         }),
-        Path::new("/nowhere"),
+        &folders_in(Path::new("/nowhere")),
     );
     switcher
 }
@@ -424,7 +428,7 @@ fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected()
     let mut active = ActivePr::default();
     show(&mut active, "https://github.com/acme/shop/pull/11");
 
-    switcher.check_tours(home.path(), &active);
+    switcher.check_tours(&folders_in(home.path()), &active);
     switcher.select_active();
 
     let marked: Vec<_> = switcher
@@ -442,7 +446,7 @@ fn with_no_pull_request_under_review_the_list_opens_on_its_first_row() {
     let mut switcher = twelve_pull_requests();
     switcher.select_next();
 
-    switcher.check_tours(home.path(), &ActivePr::default());
+    switcher.check_tours(&folders_in(home.path()), &ActivePr::default());
     switcher.select_active();
 
     assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));

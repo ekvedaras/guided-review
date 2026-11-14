@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use crate::app_folders::AppFolders;
 use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
@@ -11,6 +13,7 @@ use gpui::{
 use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
+use crate::platform::Os;
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{
     CloneRowProblem, MoreLines, Motion, Presence, SaveOutcome, SettingProblem, Settings,
@@ -29,7 +32,7 @@ use super::palette::{
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
+use super::title_bar::TitleBarArea;
 use super::version_link::version_link;
 
 mod keys;
@@ -148,8 +151,8 @@ struct Editing {
 }
 
 impl Editing {
-    fn load(home: &Path, cx: &mut Context<SettingsPanel>) -> anyhow::Result<Self> {
-        let settings = Settings::load(home)?;
+    fn load(folders: &AppFolders, cx: &mut Context<SettingsPanel>) -> anyhow::Result<Self> {
+        let settings = Settings::load(folders)?;
         let skills = settings
             .skills()
             .into_iter()
@@ -252,7 +255,7 @@ enum Loaded {
 /// The Settings panel: it covers what its `Placement` says. It draws a `Settings`
 /// model and passes clicks on to it; what is allowed, wrong or written is the model's.
 pub struct SettingsPanel {
-    home: PathBuf,
+    folders: AppFolders,
     /// What was loaded stays while the sheet leaves, so it is drawn until it is gone.
     loaded: Option<Loaded>,
     presence: Presence,
@@ -272,13 +275,13 @@ impl SettingsPanel {
     pub const KEY_CONTEXT: &str = "SettingsPanel";
 
     pub fn new(
-        home: PathBuf,
+        folders: AppFolders,
         owner_focus: FocusHandle,
         placement: Placement,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
-            home,
+            folders,
             loaded: None,
             presence: Presence::lasting(OVERLAY),
             focus: cx.focus_handle(),
@@ -318,7 +321,7 @@ impl SettingsPanel {
 
     /// Reads the config again, so the panel never shows what an earlier opening left.
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.loaded = Some(match Editing::load(&self.home, cx) {
+        self.loaded = Some(match Editing::load(&self.folders, cx) {
             Ok(editing) => Loaded::Ready(Box::new(editing)),
             Err(error) => Loaded::Failed(format!("{error:#}").into()),
         });
@@ -542,7 +545,7 @@ impl SettingsPanel {
     fn shown_text(colors: &Colors, text: impl Into<SharedString>) -> gpui::Div {
         div()
             .text_xs()
-            .font_family(CODE_FONT)
+            .font_family(*CODE_FONT)
             .text_color(colors.muted_text)
             .child(text.into())
     }
@@ -909,7 +912,7 @@ impl SettingsPanel {
                                     editing.ide.text = text;
                                 },
                             )
-                            .font_family(CODE_FONT),
+                            .font_family(*CODE_FONT),
                         )
                         .child(div().text_xs().text_color(colors.muted_text).child(
                             "A link or a shell command. {path} and {line} become the file and the line.",
@@ -1258,7 +1261,7 @@ impl SettingsPanel {
                                                 .text_ellipsis_middle()
                                                 .text_xs()
                                                 .when(has_folder, |path| {
-                                                    path.font_family(CODE_FONT)
+                                                    path.font_family(*CODE_FONT)
                                                 })
                                                 .text_color(folder_color)
                                                 .child(label),
@@ -1613,7 +1616,7 @@ fn file_row(colors: &Colors, path: SharedString, is_invalid: bool) -> gpui::Div 
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis_middle()
-                .font_family(CODE_FONT)
+                .font_family(*CODE_FONT)
                 .text_xs()
                 .child(path),
         )
@@ -1904,7 +1907,7 @@ impl Render for SettingsPanel {
             .on_key_down(cx.listener(Self::on_key_down))
             .flex()
             .flex_col()
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .text_sm()
             .text_color(colors.text);
         match self.placement {
@@ -1916,8 +1919,9 @@ impl Render for SettingsPanel {
                     .occlude()
                     .child(
                         TitleBarArea::new("settings-title-bar", colors.background).children(
-                            build_chip(&colors)
-                                .map(|chip| div().pl(px(TRAFFIC_LIGHTS_WIDTH)).child(chip)),
+                            build_chip(&colors).map(|chip| {
+                                div().pl(Os::RUNNING.window_buttons_inset()).child(chip)
+                            }),
                         ),
                     )
                     .child(header)

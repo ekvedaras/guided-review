@@ -90,7 +90,7 @@ impl Pull {
     }
 
     fn cache(&self) -> ImageCache {
-        ImageCache::under(self.repo.home())
+        ImageCache::in_folders(&self.repo.folders())
     }
 
     fn open(&self, source: &CountingSource) -> Review {
@@ -104,7 +104,7 @@ impl Pull {
                 "pieces": [{"file": self.path}], "children": []}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &PR.parse().unwrap());
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse().unwrap());
         let mut review = Review::open(tour, source, state_file).unwrap();
         review.go_forward();
         review

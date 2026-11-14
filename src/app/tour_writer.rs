@@ -91,15 +91,15 @@ fn start(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
         .shown()
         .cloned()
         .unwrap_or_else(|| pr.clone());
-    let (port, home) = (Arc::clone(&switching.agents), switching.home.clone());
+    let (port, folders) = (Arc::clone(&switching.agents), switching.folders.clone());
     cx.spawn(async move |cx| {
         let (writer_pr, writer_port) = (pr.clone(), Arc::clone(&port));
         let started = cx
             .background_executor()
             .spawn(async move {
                 TourAgents::new(writer_port)
-                    .with_summary_skill(SummaryInstructions::skill_for_launch(&home))
-                    .starting_in(writer_folder(&writer_pr, &home))
+                    .with_summary_skill(SummaryInstructions::skill_for_launch(&folders))
+                    .starting_in(writer_folder(&writer_pr, &folders))
                     .write_tour(&writer_pr, &shown)
             })
             .await;

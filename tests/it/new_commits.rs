@@ -95,11 +95,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(self.repo.home(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &self.pr())
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(self.repo.home(), &self.pr())
+        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
     }
 
     fn source(&self) -> LocalGit {
@@ -167,7 +167,7 @@ fn state_on_disk(shop: &Shop) -> serde_json::Value {
     let path = shop
         .repo
         .home()
-        .join(".guided-review/state/acme/shop/7.json");
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -585,7 +585,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     let github = FakeGitHub::with_pull(&shop.base, &second_head, &SentLog::default());
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
-        home: shop.repo.home().to_path_buf(),
+        folders: shop.repo.folders(),
         pr: shop.pr(),
         pick_code_source: Arc::new(move |_| {
             Ok(Box::new(

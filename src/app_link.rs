@@ -1,4 +1,4 @@
-//! How `guided-review open` and the one running app talk: a Unix socket in the guided-review home, one JSON
+//! How `guided-review open` and the one running app talk: a Unix socket in the state folder, one JSON
 //! line per request and per answer, each carrying the version of the binary that wrote it.
 
 use std::fs::{File, OpenOptions, TryLockError};
@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::app_folders::AppFolders;
 use crate::tour::StepId;
-use crate::update::AppBundle;
+use crate::update::ReleaseInstall;
 use crate::viewer::{AgentReplied, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
@@ -61,7 +62,7 @@ pub enum Request {
     },
     /// Show Settings: over the PR on screen, or in a window of its own when no PR is open.
     ShowSettings,
-    /// Show the PR switcher, as a launch of Guided Review.app does: over the PR on screen, or in a
+    /// Show the PR switcher, as a launch from the Desktop entry does: over the PR on screen, or in a
     /// window of its own when no PR is open.
     ShowSwitcher,
     Quit,
@@ -158,33 +159,29 @@ pub struct AnswerLine {
     pub answer: Answer,
 }
 
-/// Where the app keeps its socket, its lock and its log.
+/// Where the app keeps its socket, its lock and its log, in the app folders.
 #[derive(Debug, Clone)]
 pub struct AppFolder {
-    home: PathBuf,
+    folders: AppFolders,
 }
 
 impl AppFolder {
-    pub fn in_home(home: &Path) -> Self {
+    pub fn of(folders: &AppFolders) -> Self {
         Self {
-            home: home.to_path_buf(),
+            folders: folders.clone(),
         }
     }
 
-    fn folder(&self) -> PathBuf {
-        self.home.join(".guided-review")
-    }
-
     pub fn socket(&self) -> PathBuf {
-        self.folder().join("app.sock")
+        self.folders.socket()
     }
 
     pub fn lock(&self) -> PathBuf {
-        self.folder().join("app.lock")
+        self.folders.lock()
     }
 
     pub fn log(&self) -> PathBuf {
-        self.folder().join("app.log")
+        self.folders.log()
     }
 }
 
@@ -314,7 +311,10 @@ pub fn hand_over(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer
     start_and_hand(folder, request)
 }
 
+/// An app of an earlier version may have kept `~/.guided-review` from moving; with it gone the move is
+/// tried again first, so this start and the app it starts use the same folders.
 fn start_and_hand(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
+    let folder = &AppFolder::of(&folder.folders.settle_again()?);
     let socket = folder.socket();
     start_app(folder)?;
     let mut answer = None;
@@ -322,7 +322,7 @@ fn start_and_hand(folder: &AppFolder, request: &Request) -> anyhow::Result<Answe
         answer = exchange(&socket, request).ok().flatten();
         answer.is_some()
     })
-    .context("the app did not start; see its log in the guided-review folder")?;
+    .with_context(|| format!("the app did not start; see {}", folder.log().display()))?;
     answer
         .map(|line| line.answer)
         .context("the app did not answer")
@@ -357,9 +357,11 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> Option<()> {
 fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
     let program = match std::env::var_os(APP_COMMAND_VARIABLE) {
         Some(program) => PathBuf::from(program),
-        None => AppBundle::in_home(&folder.home).launcher_for(
-            &std::env::current_exe().context("could not find the guided-review binary")?,
-        ),
+        None => ReleaseInstall::in_home(folder.folders.home())
+            .desktop_entry()
+            .start_program_for(
+                &std::env::current_exe().context("could not find the guided-review binary")?,
+            ),
     };
     let log_path = folder.log();
     if let Some(dir) = log_path.parent() {

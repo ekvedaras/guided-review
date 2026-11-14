@@ -37,7 +37,7 @@ Iris is for what the reader acts on and where they are: the one `Primary` button
 
 ## Text
 
-One family for text (`TEXT_FONT`) and one for code (`CODE_FONT`); every text names its family.
+One family for text (`TEXT_FONT`) and one for code (`CODE_FONT`); every text names its family. The platform picks both ([Platform](platform.md)).
 
 - `text_2xl` semibold: a screen's or a sheet's title.
 - `text_base` semibold: a section title inside a sheet.

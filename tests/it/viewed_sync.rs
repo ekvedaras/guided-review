@@ -73,7 +73,7 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &self.pr());
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &self.pr());
         Review::open(tour, &source, state_file).unwrap()
     }
 

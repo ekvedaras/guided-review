@@ -19,6 +19,13 @@ for note in $added_notes; do
         *" $kind "*) ;;
         *) echo "$note: the name must start with one of: $kinds" >&2; exit 1 ;;
     esac
+    [ -f "$note" ] || continue
+    words=$(wc -w < "$note")
+    lines=$(grep -c . "$note" || true)
+    if [ "$words" -gt 20 ] || [ "$lines" -gt 1 ]; then
+        echo "$note: a note is one short sentence on one line, at most 20 words (has $words words, $lines lines)." >&2
+        exit 1
+    fi
 done
 
 [ -n "$added_notes" ] && exit 0

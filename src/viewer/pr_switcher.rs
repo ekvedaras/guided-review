@@ -1,4 +1,4 @@
-use std::path::Path;
+use crate::app_folders::AppFolders;
 
 use super::active_pr::ActivePr;
 use super::ports::GitHubError;
@@ -108,14 +108,14 @@ impl PrSwitcher {
     pub const ROWS_SHOWN: usize = 10;
 
     /// Starts on the list GitHub gave last time, when there is one, and keeps each new one for next time.
-    pub fn remembering_in(memory: RememberedPullRequestsFile, home: &Path) -> Self {
+    pub fn remembering_in(memory: RememberedPullRequestsFile, folders: &AppFolders) -> Self {
         let mut switcher = Self::default();
         match memory.load() {
             Ok(remembered) if remembered.is_empty() => {}
             Ok(remembered) => {
                 switcher.rows = remembered
                     .into_iter()
-                    .map(|pull_request| SwitcherRow::new(pull_request, home))
+                    .map(|pull_request| SwitcherRow::new(pull_request, folders))
                     .collect();
                 switcher.state = LoadState::Loaded {
                     teams_left_out: Vec::new(),
@@ -154,7 +154,11 @@ impl PrSwitcher {
     }
 
     /// Takes the answer of the background read. A failed read keeps the rows listed before and says why.
-    pub fn loaded(&mut self, answer: Result<RelevantPullRequests, GitHubError>, home: &Path) {
+    pub fn loaded(
+        &mut self,
+        answer: Result<RelevantPullRequests, GitHubError>,
+        folders: &AppFolders,
+    ) {
         self.is_refreshing = false;
         match answer {
             Ok(relevant) => {
@@ -167,7 +171,7 @@ impl PrSwitcher {
                 self.rows = relevant
                     .pull_requests
                     .into_iter()
-                    .map(|pull_request| SwitcherRow::new(pull_request, home))
+                    .map(|pull_request| SwitcherRow::new(pull_request, folders))
                     .collect();
                 self.state = LoadState::Loaded {
                     teams_left_out: relevant.teams_left_out,
@@ -223,12 +227,12 @@ impl PrSwitcher {
 
     /// Looks for tours again, as one may have been written since the list loaded, and takes what the
     /// app knows beyond the disk: tours being written and agent replies not seen.
-    pub fn check_tours(&mut self, home: &Path, active: &ActivePr) {
+    pub fn check_tours(&mut self, folders: &AppFolders, active: &ActivePr) {
         for row in &mut self.rows {
             let pr = &row.pull_request.url;
             row.tour = active
                 .tour_fact_of(pr)
-                .unwrap_or_else(|| TourFact::of(pr, home));
+                .unwrap_or_else(|| TourFact::of(pr, folders));
             row.has_unseen_reply = active.has_unseen_reply(pr);
             row.is_active = active.shown() == Some(pr);
         }
@@ -353,7 +357,7 @@ impl PrSwitcher {
 }
 
 impl SwitcherRow {
-    fn new(pull_request: RelevantPullRequest, home: &Path) -> Self {
+    fn new(pull_request: RelevantPullRequest, folders: &AppFolders) -> Self {
         let haystack = format!(
             "{} {} {}",
             pull_request.url.short(),
@@ -362,7 +366,7 @@ impl SwitcherRow {
         )
         .to_lowercase();
         Self {
-            tour: TourFact::of(&pull_request.url, home),
+            tour: TourFact::of(&pull_request.url, folders),
             has_unseen_reply: false,
             is_active: false,
             pull_request,
@@ -373,8 +377,8 @@ impl SwitcherRow {
 
 impl TourFact {
     /// What the disk says of the PR's tour.
-    pub fn of(pr: &PullRequestUrl, home: &Path) -> Self {
-        if Tour::path_for(home, pr).exists() {
+    pub fn of(pr: &PullRequestUrl, folders: &AppFolders) -> Self {
+        if Tour::path_for(folders, pr).exists() {
             Self::Ready
         } else {
             Self::Missing

@@ -28,7 +28,7 @@ permissions:
 jobs:
   stack-top:
     # Only the top of a PR stack holds every layer, and the stack merges all-or-nothing,
-    # so the expensive macOS run is spent there only.
+    # so the expensive gate runs are spent there only.
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     outputs:
@@ -49,9 +49,15 @@ jobs:
   test:
     needs: stack-top
     if: needs.stack-top.outputs.is-top == 'true'
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: scripts/linux-build-packages
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
-use crate::config::{AskEffortChoice, AskModelChoice, Config};
+use crate::app_folders::AppFolders;
+use crate::config::{AskEffortChoice, AskModelChoice};
 use crate::home::expand_home;
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::local_git::{CloneProblem, LocalGit};
@@ -15,10 +16,10 @@ use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
 use super::more_lines::{MoreLines, MoreLinesEntry};
 use super::shortcuts::Command;
 
-/// The reviewer's settings in `~/.guided-review/config.toml`, as the Settings panel shows and edits them.
+/// The reviewer's settings in `config.toml` in the config folder, as the Settings panel shows and edits them.
 /// Save writes only the keys that changed, so the reviewer's comments and key order survive.
 pub struct Settings {
-    home: PathBuf,
+    folders: AppFolders,
     file: PathBuf,
     document: DocumentMut,
     saved: Values,
@@ -264,8 +265,8 @@ pub enum SaveOutcome {
 }
 
 impl Settings {
-    pub fn load(home: &Path) -> anyhow::Result<Self> {
-        let file = Config::file_in(home);
+    pub fn load(folders: &AppFolders) -> anyhow::Result<Self> {
+        let file = folders.config_file();
         let text = match std::fs::read_to_string(&file) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -278,7 +279,7 @@ impl Settings {
             .with_context(|| format!("could not read {}", file.display()))?;
         let saved = Values::read(&document);
         Ok(Self {
-            home: home.to_path_buf(),
+            folders: folders.clone(),
             file,
             document,
             edited: saved.clone(),
@@ -334,7 +335,7 @@ impl Settings {
     }
 
     pub fn default_file(&self) -> PathBuf {
-        SummaryInstructionsChoice::default_file_in(&self.home)
+        self.folders.summary_file()
     }
 
     pub fn default_file_exists(&self) -> bool {
@@ -395,7 +396,7 @@ impl Settings {
 
     /// The skills in `~/.claude/skills`, symlinked ones too, by name.
     pub fn skills(&self) -> Vec<SkillName> {
-        let Ok(entries) = std::fs::read_dir(self.home.join(SKILLS_FOLDER)) else {
+        let Ok(entries) = std::fs::read_dir(self.folders.home().join(SKILLS_FOLDER)) else {
             return Vec::new();
         };
         let mut skills: Vec<SkillName> = entries
@@ -479,7 +480,7 @@ impl Settings {
     }
 
     fn in_home(&self, path: &Path) -> PathBuf {
-        expand_home(path, &self.home)
+        expand_home(path, self.folders.home())
     }
 
     /// The keys it answers to once saved; its defaults while its entry cannot be read.

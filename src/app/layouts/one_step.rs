@@ -73,7 +73,7 @@ use crate::app::components::thread_view::{
     DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnReplyDraft, OnThreadAction,
     OnTryHandOffAgain, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
 };
-use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
+use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
@@ -87,6 +87,7 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::platform::Os;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CodeLink, Command, CommentBox,
     CommentGesture, CommentPlace, Departure, Effect, FileToggle, FileView, GitHubPort, HandOffId,
@@ -249,8 +250,8 @@ impl OneStepLayout {
             });
             settings
         } else {
-            let home = switching.home.clone();
-            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::SheetOverReview, cx))
+            let folders = switching.folders.clone();
+            cx.new(|cx| SettingsPanel::new(folders, focus.clone(), Placement::SheetOverReview, cx))
         };
         cx.subscribe_in(
             &settings,
@@ -1126,7 +1127,7 @@ impl OneStepLayout {
         let font_size = window.rem_size() * 0.875;
         let font_id = window
             .text_system()
-            .resolve_font(&gpui::font(crate::app::components::palette::CODE_FONT));
+            .resolve_font(&gpui::font(*crate::app::components::palette::CODE_FONT));
         let char_width = window
             .text_system()
             .advance(font_id, font_size, 'm')
@@ -1411,7 +1412,7 @@ impl OneStepLayout {
                     .edge(TitleBarEdge::Open)
                     .child(
                         div()
-                            .pl(px(TRAFFIC_LIGHTS_WIDTH))
+                            .pl(Os::RUNNING.window_buttons_inset())
                             .flex()
                             .items_center()
                             .gap_2()
@@ -2858,7 +2859,7 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
             div()
                 .flex()
                 .gap_2()
-                .font_family(crate::app::components::palette::CODE_FONT)
+                .font_family(*crate::app::components::palette::CODE_FONT)
                 .child(
                     div()
                         .text_color(colors.success)
@@ -3505,7 +3506,7 @@ impl Render for OneStepLayout {
             } else {
                 colors.sidebar_ground()
             })
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .text_color(colors.text)
             .child(self.sidebar(cx))
             .child(

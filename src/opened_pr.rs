@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
+use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::GitHub;
 use crate::pick_code_source::pick_code_source;
@@ -14,7 +15,7 @@ use crate::viewer::{PickCodeSource, PullRequestTipsPort, ReviewStateFile};
 /// What every command needs to work on one PR: where its files live, GitHub, and the folder it runs in.
 pub struct OpenedPr {
     pub pr: PullRequestUrl,
-    pub home: PathBuf,
+    pub folders: AppFolders,
     pub current_dir: PathBuf,
     pub github: GitHub,
 }
@@ -23,27 +24,27 @@ impl OpenedPr {
     pub fn new(pr: &PullRequestUrl) -> anyhow::Result<Self> {
         Ok(Self {
             pr: pr.clone(),
-            home: home_folder()?,
+            folders: AppFolders::running()?,
             current_dir: std::env::current_dir().context("could not read the current folder")?,
             github: GitHub::from_env(),
         })
     }
 
-    pub fn in_folders(pr: &PullRequestUrl, home: &Path, current_dir: &Path) -> Self {
+    pub fn in_folders(pr: &PullRequestUrl, folders: &AppFolders, current_dir: &Path) -> Self {
         Self {
             pr: pr.clone(),
-            home: home.to_path_buf(),
+            folders: folders.clone(),
             current_dir: current_dir.to_path_buf(),
             github: GitHub::from_env(),
         }
     }
 
     pub fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.home, &self.pr)
+        Tour::path_for(&self.folders, &self.pr)
     }
 
     pub fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.home, &self.pr)
+        ReviewStateFile::for_pr(&self.folders, &self.pr)
     }
 
     /// The PR as GitHub has it now.
@@ -71,10 +72,6 @@ impl OpenedPr {
         );
         Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
     }
-}
-
-pub fn home_folder() -> anyhow::Result<PathBuf> {
-    std::env::home_dir().context("could not find the home folder")
 }
 
 pub struct CodeAtTips {

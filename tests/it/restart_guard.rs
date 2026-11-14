@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use guided_review::viewer::{Departure, InFlight, RestartGuard, RestartStep};
+use guided_review::viewer::{Command, Departure, InFlight, RestartGuard, RestartStep};
 
 fn answering() -> InFlight {
     InFlight {
@@ -68,7 +68,10 @@ fn quitting_with_work_running_warns_first_and_a_second_quit_soon_after_goes_ahea
     let text = warning(guard.ask_to(Departure::Quit, answering(), now));
 
     assert!(text.contains("Quitting"), "{text}");
-    assert!(text.contains("cmd+q"), "{text}");
+    assert!(
+        text.contains(&Command::Quit.default_chords()[0].spelled()),
+        "{text}"
+    );
     assert_eq!(
         guard.ask_to(Departure::Quit, answering(), now + Duration::from_secs(3)),
         RestartStep::Restart
@@ -85,7 +88,10 @@ fn closing_the_window_with_a_hand_off_being_sent_warns_in_its_own_words() {
 
     let text = warning(guard.ask_to(Departure::CloseWindow, sending, Instant::now()));
 
-    assert!(text.contains("cmd+w"), "{text}");
+    assert!(
+        text.contains(&Command::CloseWindow.default_chords()[0].spelled()),
+        "{text}"
+    );
 }
 
 #[test]

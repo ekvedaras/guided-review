@@ -1,3 +1,4 @@
+use crate::support::folders_in;
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -296,7 +297,7 @@ fn the_review_reads_every_changed_file_at_head_for_context_at_the_same_time() {
     .unwrap();
     let home = TempDir::new().unwrap();
     let state_file = ReviewStateFile::for_pr(
-        home.path(),
+        &folders_in(home.path()),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     let review = Review::open(tour, &cache, state_file).unwrap();
@@ -350,7 +351,7 @@ fn an_unchanged_line_whose_base_line_does_not_add_up_is_still_shown() {
     .unwrap();
     let home = TempDir::new().unwrap();
     let state_file = ReviewStateFile::for_pr(
-        home.path(),
+        &folders_in(home.path()),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     let mut review = Review::open(tour, &cache, state_file).unwrap();

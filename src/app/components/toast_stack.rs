@@ -183,7 +183,7 @@ impl Render for ToastShelf {
             .flex_col()
             .items_end()
             .gap_2()
-            .font_family(TEXT_FONT)
+            .font_family(*TEXT_FONT)
             .occlude()
             .on_hover(cx.listener(|this, is_over: &bool, _, cx| this.hover(*is_over, cx)))
             .children(toasts)

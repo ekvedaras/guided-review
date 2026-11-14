@@ -1,6 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
+use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use crate::repin::{Repin, repin};
@@ -34,7 +35,7 @@ pub type PickCodeSource =
 
 /// The "Update tour" button's work: what the CLI's `repin` does, then a fresh `Review` on the result.
 pub struct TourRepinner {
-    pub home: PathBuf,
+    pub folders: AppFolders,
     pub pr: PullRequestUrl,
     pub pick_code_source: PickCodeSource,
 }
@@ -42,7 +43,7 @@ pub struct TourRepinner {
 /// Reads the tour file again at the commits it is pinned to, for a tour the agent rewrote while the app
 /// shows it.
 pub struct TourReloader {
-    pub home: PathBuf,
+    pub folders: AppFolders,
     pub pr: PullRequestUrl,
     pub pick_code_source: PickCodeSource,
 }
@@ -50,12 +51,12 @@ pub struct TourReloader {
 impl TourReloader {
     /// Blocks on the code source; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let tour = Tour::load(&Tour::path_for(&self.home, &self.pr))?;
+        let tour = Tour::load(&Tour::path_for(&self.folders, &self.pr))?;
         let source = (self.pick_code_source)(&tour.pinned_tips())?;
         let review = Review::open(
             tour,
             source.as_ref(),
-            ReviewStateFile::for_pr(&self.home, &self.pr),
+            ReviewStateFile::for_pr(&self.folders, &self.pr),
         )?;
         Ok(RepinnedTour {
             review,
@@ -75,9 +76,9 @@ impl TourRepinner {
         let tips = github.pull_request_tips(&self.pr)?;
         let source = (self.pick_code_source)(&tips)?;
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-        let state_file = ReviewStateFile::for_pr(&self.home, &self.pr);
+        let state_file = ReviewStateFile::for_pr(&self.folders, &self.pr);
         let (tour, _) = repin_tour(
-            &Tour::path_for(&self.home, &self.pr),
+            &Tour::path_for(&self.folders, &self.pr),
             &state_file,
             source.as_ref(),
             &base,

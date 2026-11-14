@@ -15,9 +15,9 @@ pub struct ImageCache {
 }
 
 impl ImageCache {
-    pub fn under(home: &std::path::Path) -> Self {
+    pub fn in_folders(folders: &crate::app_folders::AppFolders) -> Self {
         Self {
-            dir: home.join(".guided-review/cache/images"),
+            dir: folders.images(),
         }
     }
 

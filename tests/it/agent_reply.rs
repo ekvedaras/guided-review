@@ -8,7 +8,7 @@ use guided_review::viewer::{CommentId, HandOffState, ReviewState, ReviewStateFil
 
 use crate::support::fake_app::{CliEnded, accept_before};
 use crate::support::graphql::serve_graphql;
-use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, folders_in};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 const BUILD: &str = "test-build";
@@ -16,7 +16,7 @@ const PENDING: &str = r#"{"data":{"repository":{"pullRequest":{"reviews":{"nodes
 const REPLIED: &str = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"R1","pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
 
 fn state_file(home: &Path) -> ReviewStateFile {
-    ReviewStateFile::for_pr(home, &PR.parse().unwrap())
+    ReviewStateFile::for_pr(&folders_in(home), &PR.parse().unwrap())
 }
 
 fn with_one_hand_off(home: &Path) {
@@ -75,7 +75,7 @@ fn fake_app(
     answer: &str,
 ) -> (std::thread::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
     let cli_ended = cli_ended.clone();
-    let socket = AppFolder::in_home(home).socket();
+    let socket = AppFolder::of(&folders_in(home)).socket();
     std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
     let listener = UnixListener::bind(socket).unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));

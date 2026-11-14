@@ -240,9 +240,9 @@ fn outline_uses_the_clone_from_config_when_the_current_folder_is_not_a_clone() {
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
     let elsewhere = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(repo.home().join(".guided-review")).unwrap();
+    std::fs::create_dir_all(repo.home().join(".config/guided-review")).unwrap();
     std::fs::write(
-        repo.home().join(".guided-review/config.toml"),
+        repo.home().join(".config/guided-review/config.toml"),
         format!("[clones]\n\"Acme/Shop\" = \"{}\"\n", repo.path().display()),
     )
     .unwrap();
@@ -401,8 +401,12 @@ fn outline_uses_the_current_folder_even_when_config_is_broken() {
     repo.write("app/Order.php", ORDER_V2);
     let head = repo.commit("head");
     let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
-    std::fs::create_dir_all(repo.home().join(".guided-review")).unwrap();
-    std::fs::write(repo.home().join(".guided-review/config.toml"), "[clones\n").unwrap();
+    std::fs::create_dir_all(repo.home().join(".config/guided-review")).unwrap();
+    std::fs::write(
+        repo.home().join(".config/guided-review/config.toml"),
+        "[clones\n",
+    )
+    .unwrap();
 
     let run = GuidedReview::new(&repo, &github).run(&["outline", PR]);
 

@@ -122,8 +122,8 @@ fn a_tours_own_files_sit_in_a_folder_beside_it_named_by_the_pr_number() {
     let home = std::path::Path::new("/home/me");
 
     assert_eq!(
-        Tour::files_for(home, &pr),
-        Tour::path_for(home, &pr).with_extension("")
+        Tour::files_for(&crate::support::folders_in(home), &pr),
+        Tour::path_for(&crate::support::folders_in(home), &pr).with_extension("")
     );
-    assert!(Tour::files_for(home, &pr).ends_with("acme/shop/7"));
+    assert!(Tour::files_for(&crate::support::folders_in(home), &pr).ends_with("acme/shop/7"));
 }

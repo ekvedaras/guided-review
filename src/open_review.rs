@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::app::AskSetup;
+use crate::app_folders::AppFolders;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
 use crate::config::Config;
@@ -32,28 +33,31 @@ pub struct OpenedReview {
 }
 
 /// The refusal `open` gives before it asks or starts any app.
-pub fn require_tour(pr: &PullRequestUrl, home: &Path) -> anyhow::Result<()> {
-    if !Tour::path_for(home, pr).exists() {
+pub fn require_tour(pr: &PullRequestUrl, folders: &AppFolders) -> anyhow::Result<()> {
+    if !Tour::path_for(folders, pr).exists() {
         anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
     }
     Ok(())
 }
 
 /// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else one
-/// another PR of the repo was opened from, else the clone `config.toml` names, else the guided-review
+/// another PR of the repo was opened from, else the clone `config.toml` names, else the reviewer's
 /// home, where the skill reads code through `show`.
-pub fn writer_folder(pr: &PullRequestUrl, home: &Path) -> PathBuf {
-    let own = ReviewStateFile::for_pr(home, pr)
+pub fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBuf {
+    let own = ReviewStateFile::for_pr(folders, pr)
         .opened_from()
         .ok()
         .flatten();
-    let others = ReviewStateFile::folders_opened_from_in(home, pr);
+    let others = ReviewStateFile::folders_opened_from_in(folders, pr);
     // An unreadable state file or config only costs the clone: the skill still reads code through `show`.
     own.into_iter()
         .chain(others)
-        .chain([home.to_path_buf()])
+        .chain([folders.home().to_path_buf()])
         .find_map(|folder| LocalGit::find(&pr.repo, &folder).ok().flatten())
-        .map_or_else(|| home.to_path_buf(), |clone| clone.root().to_path_buf())
+        .map_or_else(
+            || folders.home().to_path_buf(),
+            |clone| clone.root().to_path_buf(),
+        )
 }
 
 /// Builds the review of `pr` at the commits its tour is pinned to. `clones_from` is the folder a local
@@ -61,10 +65,10 @@ pub fn writer_folder(pr: &PullRequestUrl, home: &Path) -> PathBuf {
 pub fn open_review(
     pr: &PullRequestUrl,
     clones_from: &Path,
-    home: &Path,
+    folders: &AppFolders,
 ) -> anyhow::Result<OpenedReview> {
-    let opened = OpenedPr::in_folders(pr, home, clones_from);
-    require_tour(pr, home)?;
+    let opened = OpenedPr::in_folders(pr, folders, clones_from);
+    require_tour(pr, folders)?;
     let tour = Tour::load(&opened.tour_path())?;
     let code = opened.at_pinned_tips(&tour)?;
     let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
@@ -73,32 +77,37 @@ pub fn open_review(
     opened.state_file().remember_folder(clones_from)?;
 
     let clone = code.source.local_clone().map(Path::to_path_buf);
-    let config = Config::load_from(home)?;
+    let config = Config::load_from(folders)?;
     review
         .display_options_mut()
         .use_more_lines(config.more_lines());
     let pick_code_source = opened.code_source_picker();
 
-    let agent_folder = clone.clone().unwrap_or_else(|| home.to_path_buf());
+    let agent_folder = clone
+        .clone()
+        .unwrap_or_else(|| folders.home().to_path_buf());
     let ask = AskSetup {
         launcher: Arc::new(ClaudeCli::new()),
         settings: config.ask_settings(),
     };
     let refresher = TourRefresher {
-        home: home.to_path_buf(),
+        folders: folders.clone(),
         pr: pr.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
         writer: Arc::new(ClaudeRefreshWriter::new(
-            clone.clone().unwrap_or_else(|| home.to_path_buf()),
+            clone
+                .clone()
+                .unwrap_or_else(|| folders.home().to_path_buf()),
+            Tour::tours_dir(folders),
         )),
     };
     let reloader = TourReloader {
-        home: home.to_path_buf(),
+        folders: folders.clone(),
         pr: pr.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
     };
     let repinner = TourRepinner {
-        home: home.to_path_buf(),
+        folders: folders.clone(),
         pr: pr.clone(),
         pick_code_source,
     };
@@ -111,8 +120,8 @@ pub fn open_review(
         repinner,
         refresher,
         reloader,
-        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new()))
+        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
             .starting_in(agent_folder)
-            .with_summary_skill(SummaryInstructions::skill_for_launch(home)),
+            .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
     })
 }

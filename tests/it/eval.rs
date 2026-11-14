@@ -1,3 +1,4 @@
+use crate::support::folders_in;
 use std::cell::RefCell;
 
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -72,7 +73,7 @@ impl TourJudge for FakeJudge {
 
 fn setup() -> (TempDir, EvalStore) {
     let home = TempDir::new().unwrap();
-    let store = EvalStore::in_home(home.path());
+    let store = EvalStore::in_folders(&folders_in(home.path()));
     store
         .add(&PR.parse::<PullRequestUrl>().unwrap(), NOTE)
         .unwrap();
@@ -98,7 +99,7 @@ fn run_eval(
     };
     let report = Eval {
         store,
-        home: home.path(),
+        folders: &folders_in(home.path()),
         writer: &writer,
         judge,
         skill,
@@ -118,7 +119,7 @@ fn eval_add_stores_the_note_for_the_pr_under_the_evals_folder() {
     assert!(run.success, "{}", run.stderr);
     let stored = std::fs::read_to_string(
         repo.home()
-            .join(".guided-review/evals/notes/acme/shop.app/7.md"),
+            .join(".local/state/guided-review/evals/notes/acme/shop.app/7.md"),
     )
     .unwrap();
     assert_eq!(stored.trim(), NOTE);
@@ -159,7 +160,7 @@ fn the_judge_gets_the_note_and_the_tour_while_the_writer_never_sees_the_note() {
 fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
     let (home, store) = setup();
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let tour_path = Tour::path_for(home.path(), &pr);
+    let tour_path = Tour::path_for(&folders_in(home.path()), &pr);
     std::fs::create_dir_all(tour_path.parent().unwrap()).unwrap();
     std::fs::write(&tour_path, r#"{"title":"my real tour"}"#).unwrap();
 
@@ -172,7 +173,9 @@ fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
         "2026-10-22",
     );
 
-    let run_folder = home.path().join(".guided-review/evals/tours/2026-10-22");
+    let run_folder = home
+        .path()
+        .join(".local/state/guided-review/evals/tours/2026-10-22");
     assert_eq!(*writer.tours_dirs.borrow(), vec![run_folder.clone()]);
     assert!(Tour::path_in(&run_folder, &pr).exists());
     assert_eq!(
@@ -186,7 +189,7 @@ fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
 fn existing_tours_are_judged_without_running_the_writer() {
     let (home, store) = setup();
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let tour_path = Tour::path_for(home.path(), &pr);
+    let tour_path = Tour::path_for(&folders_in(home.path()), &pr);
     std::fs::create_dir_all(tour_path.parent().unwrap()).unwrap();
     std::fs::write(&tour_path, r#"{"title":"my real tour"}"#).unwrap();
     let judge = FakeJudge::answering(vec![Score::Pass]);
@@ -224,7 +227,7 @@ fn a_run_prints_its_scores_and_is_saved_with_date_and_skill_version() {
     let saved: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(
             home.path()
-                .join(".guided-review/evals/results/2026-10-22.json"),
+                .join(".local/state/guided-review/evals/results/2026-10-22.json"),
         )
         .unwrap(),
     )

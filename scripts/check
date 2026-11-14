@@ -5,11 +5,31 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if ! command -v cargo >/dev/null 2>&1; then
-    export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$HOME/.cargo/bin:$PATH"
+# rustup's cargo before any other: it follows rust-toolchain.toml, which a distro's older cargo cannot build.
+if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+elif ! command -v cargo >/dev/null 2>&1; then
+    for toolchain in "$HOME"/.rustup/toolchains/stable-*/bin; do
+        export PATH="$toolchain:$PATH"
+        break
+    done
 fi
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
 
+echo "== target_os only in src/platform"
+if grep -rn 'target_os' --include='*.rs' src tests build.rs | grep -vE '^src/platform(\.rs|/)'; then
+    echo "check the OS in src/platform, not here (docs/wiki/platform.md)" >&2
+    exit 1
+fi
+echo "== tests write a fake executable only through support::write_executable"
+# Allowed: read_ticks locks and unlocks a folder; release_install sets a mode inside a tar archive it builds in memory.
+if grep -rnE 'set_mode\(|from_mode\(|set_permissions\(|OpenOptionsExt' --include='*.rs' tests \
+    | grep -vE '^tests/it/support/' \
+    | grep -vE '^tests/it/read_ticks\.rs:[0-9]+:\s*std::fs::set_permissions\(&folder, ' \
+    | grep -vE '^tests/it/release_install\.rs:[0-9]+:\s*header\.set_mode\(mode\);'; then
+    echo "write a fake executable with support::write_executable, it never holds the file open for writing (Text file busy)" >&2
+    exit 1
+fi
 echo "== fmt"
 cargo fmt --all -- --check
 echo "== clippy, default features (what cargo install builds)"

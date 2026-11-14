@@ -1,3 +1,4 @@
+use crate::support::folders_in;
 use std::fs;
 use std::path::Path;
 
@@ -27,7 +28,10 @@ fn listing(numbers: impl IntoIterator<Item = u32>) -> RelevantPullRequests {
 }
 
 fn opened(home: &Path) -> PrSwitcher {
-    PrSwitcher::remembering_in(RememberedPullRequestsFile::in_home(home), home)
+    PrSwitcher::remembering_in(
+        RememberedPullRequestsFile::in_folders(&folders_in(home)),
+        &folders_in(home),
+    )
 }
 
 fn visible_numbers(switcher: &PrSwitcher) -> Vec<u64> {
@@ -51,7 +55,7 @@ fn number_on_screen_row(switcher: &PrSwitcher, screen_row: usize) -> u64 {
 fn the_list_read_before_a_restart_shows_at_once_after_it_while_it_refreshes() {
     let home = TempDir::new().unwrap();
     let mut before = opened(home.path());
-    before.loaded(Ok(listing([3, 2, 1])), home.path());
+    before.loaded(Ok(listing([3, 2, 1])), &folders_in(home.path()));
 
     let after = opened(home.path());
 
@@ -75,9 +79,12 @@ fn with_no_list_remembered_the_switcher_starts_loading() {
 #[test]
 fn a_failed_read_leaves_the_remembered_list_as_it_was() {
     let home = TempDir::new().unwrap();
-    opened(home.path()).loaded(Ok(listing([3, 2, 1])), home.path());
+    opened(home.path()).loaded(Ok(listing([3, 2, 1])), &folders_in(home.path()));
 
-    opened(home.path()).loaded(Err(anyhow::anyhow!("network is down").into()), home.path());
+    opened(home.path()).loaded(
+        Err(anyhow::anyhow!("network is down").into()),
+        &folders_in(home.path()),
+    );
 
     assert_eq!(visible_numbers(&opened(home.path())), vec![3, 2, 1]);
 }
@@ -85,7 +92,7 @@ fn a_failed_read_leaves_the_remembered_list_as_it_was() {
 #[test]
 fn a_remembered_list_that_cannot_be_read_is_moved_aside_and_said() {
     let home = TempDir::new().unwrap();
-    let state = home.path().join(".guided-review/state");
+    let state = home.path().join(".local/state/guided-review/state");
     fs::create_dir_all(&state).unwrap();
     fs::write(state.join("pull-requests.json"), "not json").unwrap();
 
@@ -105,13 +112,13 @@ fn a_remembered_list_that_cannot_be_read_is_moved_aside_and_said() {
 fn the_hovered_pull_request_keeps_its_place_on_screen_when_new_ones_come_in_above() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.scroll_by(3);
     switcher.hover(switcher.first_shown() + 4);
     let hovered = number_on_screen_row(&switcher, 4);
 
     switcher.refreshing();
-    switcher.loaded(Ok(listing((1..=22).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=22).rev())), &folders_in(home.path()));
 
     assert_eq!(number_on_screen_row(&switcher, 4), hovered);
 }
@@ -120,11 +127,11 @@ fn the_hovered_pull_request_keeps_its_place_on_screen_when_new_ones_come_in_abov
 fn with_no_hover_the_selected_pull_request_keeps_its_place_on_screen_and_stays_selected() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.select(2);
     let selected = number_on_screen_row(&switcher, 2);
 
-    switcher.loaded(Ok(listing((1..=23).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=23).rev())), &folders_in(home.path()));
 
     assert_eq!(number_on_screen_row(&switcher, 2), selected);
     let now_selected = switcher.visible().nth(switcher.selected()).unwrap();
@@ -135,7 +142,7 @@ fn with_no_hover_the_selected_pull_request_keeps_its_place_on_screen_and_stays_s
 fn the_selection_follows_its_pull_request_while_the_hovered_one_keeps_its_place() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.select(1);
     switcher.hover(5);
     let (selected, hovered) = (
@@ -143,7 +150,7 @@ fn the_selection_follows_its_pull_request_while_the_hovered_one_keeps_its_place(
         number_on_screen_row(&switcher, 5),
     );
 
-    switcher.loaded(Ok(listing((1..=21).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=21).rev())), &folders_in(home.path()));
 
     assert_eq!(number_on_screen_row(&switcher, 5), hovered);
     let now_selected = switcher.visible().nth(switcher.selected()).unwrap();
@@ -154,10 +161,10 @@ fn the_selection_follows_its_pull_request_while_the_hovered_one_keeps_its_place(
 fn a_hovered_pull_request_near_the_top_cannot_scroll_above_the_first_row() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.hover(0);
 
-    switcher.loaded(Ok(listing((1..=19).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=19).rev())), &folders_in(home.path()));
 
     assert_eq!(switcher.first_shown(), 0);
 }
@@ -166,7 +173,7 @@ fn a_hovered_pull_request_near_the_top_cannot_scroll_above_the_first_row() {
 fn when_the_hovered_pull_request_leaves_the_list_the_rows_stay_where_they_were() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.scroll_by(4);
     switcher.hover(switcher.first_shown() + 6);
     let gone = number_on_screen_row(&switcher, 6);
@@ -175,7 +182,7 @@ fn when_the_hovered_pull_request_leaves_the_list_the_rows_stay_where_they_were()
         Ok(listing(
             (1..=20).rev().filter(|&number| u64::from(number) != gone),
         )),
-        home.path(),
+        &folders_in(home.path()),
     );
 
     assert_eq!(switcher.first_shown(), 4);
@@ -185,14 +192,14 @@ fn when_the_hovered_pull_request_leaves_the_list_the_rows_stay_where_they_were()
 fn leaving_a_row_after_entering_the_next_keeps_the_next_one_hovered() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.select(9);
     switcher.hover(3);
     switcher.hover(4);
     switcher.unhover(3);
     let hovered = number_on_screen_row(&switcher, 4);
 
-    switcher.loaded(Ok(listing((1..=22).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=22).rev())), &folders_in(home.path()));
 
     assert_eq!(number_on_screen_row(&switcher, 4), hovered);
 }
@@ -201,12 +208,12 @@ fn leaving_a_row_after_entering_the_next_keeps_the_next_one_hovered() {
 fn the_hovered_pull_request_is_the_one_under_the_pointer_after_the_wheel_moved_the_rows() {
     let home = TempDir::new().unwrap();
     let mut switcher = opened(home.path());
-    switcher.loaded(Ok(listing((1..=20).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=20).rev())), &folders_in(home.path()));
     switcher.hover(2);
     switcher.scroll_by(5);
     let under_pointer = number_on_screen_row(&switcher, 2);
 
-    switcher.loaded(Ok(listing((1..=22).rev())), home.path());
+    switcher.loaded(Ok(listing((1..=22).rev())), &folders_in(home.path()));
 
     assert_eq!(number_on_screen_row(&switcher, 2), under_pointer);
 }

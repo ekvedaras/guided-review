@@ -6,9 +6,9 @@
 
 **Reviewer summary**: An extra summary at the start of a tour, written to the reviewer's own summary instructions. It is saved in the tour file next to the summary (`reviewer_summary`, Markdown, no length limit). Avoid: custom summary, extra summary, brief.
 
-**Summary instructions**: What tells the tour writer how to write the reviewer summary: a file, a skill (`summary_instructions = { skill = "<name>" }`) or off, set in `config.toml` as `summary_instructions`. With no key, `~/.guided-review/summary.md` is used when it exists. `guided-review outline` hands the text to the writer. Avoid: prompt, template.
+**Summary instructions**: What tells the tour writer how to write the reviewer summary: a file, a skill (`summary_instructions = { skill = "<name>" }`) or off, set in `config.toml` as `summary_instructions`. With no key, `summary.md` in the config folder (see App folders) is used when it exists. `guided-review outline` hands the text to the writer. Avoid: prompt, template.
 
-**Settings**: Where a reviewer edits their settings in the app: summary instructions, clones, IDE, Ask model and Ask effort. Save checks every setting first and writes nothing while one is wrong; it writes only the keys that changed back to `~/.guided-review/config.toml`, so the reviewer's comments stay. A custom IDE template or Ask model is kept when a preset is picked, in `ide_custom` and `ask_model_custom` beside `ide` and `ask_model`; only Settings reads those two keys. With a PR open it is a sheet over the whole window; with no PR open, `guided-review settings` shows it alone in the app's one window. Avoid: settings screen (**Screen** means summary, step or safety net), preferences.
+**Settings**: Where a reviewer edits their settings in the app: summary instructions, clones, IDE, Ask model and Ask effort. Save checks every setting first and writes nothing while one is wrong; it writes only the keys that changed back to `config.toml` in the config folder, so the reviewer's comments stay. A custom IDE template or Ask model is kept when a preset is picked, in `ide_custom` and `ask_model_custom` beside `ide` and `ask_model`; only Settings reads those two keys. With a PR open it is a sheet over the whole window; with no PR open, `guided-review settings` shows it alone in the app's one window. Avoid: settings screen (**Screen** means summary, step or safety net), preferences.
 
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 
@@ -76,7 +76,13 @@
 
 **Shortcuts sheet**: The overlay that lists every key the app answers, by heading (Navigate, Read, Comment, View, App), opened with `?`. It reads the same table the keys are bound from. Avoid: cheat sheet, help.
 
-**Palette action**: Something the cmd+k palette does rather than a place it goes to, such as Settings or Mark step as read. A query that starts with `>` lists only actions.
+**Primary modifier**: The key the app's own shortcuts are held with: Cmd (⌘) on macOS, Ctrl on Linux, where Super belongs to the desktop. `config.toml` writes it `primary-` (`primary-k`); a `cmd-` saved before reads as Primary everywhere, and on Linux so does `ctrl-`. A key is spelled in text and on caps as its OS does: `⌘K` on macOS, `Ctrl+K` on Linux. Avoid: Cmd key, command key, secondary.
+
+**Text keys**: The keys a text box edits with that differ by OS: on macOS Option moves by word and Cmd by line, on Linux Ctrl moves by word and Home/End by line. They are not the reviewer's to change.
+
+**Window buttons**: The OS's close, minimise and zoom buttons. On macOS they are the traffic lights, drawn on the app's own title bar, which keeps room free left of them (the button inset). On Linux the app draws none and keeps no room; the window manager decides the decorations. Avoid: traffic lights (macOS only), window controls.
+
+**Palette action**: Something the Primary+K palette does rather than a place it goes to, such as Settings or Mark step as read. A query that starts with `>` lists only actions.
 
 **Gap row**: The one row of a file box that stands for unchanged lines it does not show, between two changes or at either end, with how many and the buttons that show them.
 
@@ -84,13 +90,17 @@
 
 **Release install**: The app as the README installs a release: each version in its own folder under `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` (and usually `~/.claude/skills/tour`) linked into the newest. Only a release install updates itself. Avoid: managed install.
 
-**App bundle**: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Launched with no PR, it shows the PR switcher alone in the window. Avoid: launcher, wrapper.
+**Desktop entry**: What the OS launcher starts the app from, put in place from the release install by `guided-review install-app` and kept current by each update. It starts the release install's bin link, marks the run as its launch, and that run starts itself again through the reviewer's login shell, so `gh`, `claude` and `hc` are found. Launched with no PR, it shows the PR switcher alone in the window. On macOS it is the App bundle; on Linux it is `~/.local/share/applications/io.github.ekvedaras.guided-review.desktop` with its icon in `~/.local/share/icons/hicolor/`, and the app's window carries the same app id. Avoid: launcher, shortcut, wrapper.
+
+**App bundle**: The Desktop entry on macOS: `~/Applications/Guided Review.app`, what the Dock, Spotlight and Raycast start. Its binary is a link to the release install's bin link. Avoid: launcher, wrapper.
+
+**App folders**: Where the app keeps what it writes for the reviewer, by the XDG layout on every OS: the config folder (`config.toml`, `summary.md`; `~/.config/guided-review`), the state folder (tours, state files, Asks, evals, the app lock, socket and log; `~/.local/state/guided-review`) and the cache folder (image previews; `~/.cache/guided-review`). There is no runtime folder since 2026-11-14 (#75 review): the socket sits beside the lock, so a CLI started with another `XDG_RUNTIME_DIR` still finds the app. Until 2026-11-14 all were `~/.guided-review`, which the first start moves into them once; since the #75 review only a start of the release install, or of any build on a machine with none, moves it, file by file, never writing over what the app folders already hold. The release install's folders are not app folders. Avoid: guided-review home, data dir.
 
 **In the way**: Of the release install, while it runs: another `guided-review` that comes before its bin link on `PATH`, so the tour skill and a terminal run that one and miss updates. Typically a source build in `~/.cargo/bin`. The sidebar lists it as a problem naming the binary. Avoid: shadowing.
 
 **Build**: Which app runs: the release install (no badge; it alone checks for updates, also from the palette's Check for updates), a local build such as `cargo install` (badge `DEV`), or the snapshot build (badge `TEST`). A local build running is not a problem; its badge says it. Avoid: dev mode.
 
-**Update**: A published release newer than the running app, built for this Mac, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
+**Update**: A published release newer than the running app, built for this OS and CPU, that the app offers in the sidebar, above Settings. One click downloads it, checks it, unpacks it beside the old version, moves the links to it and restarts the app. Avoid: upgrade.
 
 **Toast**: A short note at the bottom right of the window about an outcome that is otherwise easy to miss. It leaves by itself unless it tells of a failure. Avoid: notification, snackbar.
 

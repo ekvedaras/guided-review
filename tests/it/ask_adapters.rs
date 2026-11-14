@@ -1,4 +1,4 @@
-use std::os::unix::fs::PermissionsExt;
+use crate::support::folders_in;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,13 +11,15 @@ use guided_review::viewer::{AgentLaunch, AgentLauncher, Asks, Place, ReviewState
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use crate::support::write_executable;
+
 const SESSION: &str = "7f2cd173-4eda-4770-aeb2-c82977b1b673";
 
 /// A stand-in `claude` that logs how it was started and what it was sent,
 /// and answers every line of input with one text delta and a result.
 fn fake_claude(dir: &Path) -> PathBuf {
     let script = dir.join("claude");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             r#"#!/bin/sh
@@ -31,9 +33,7 @@ done
 "#,
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 
@@ -127,10 +127,12 @@ fn a_missing_claude_binary_says_so() {
 fn asks_go_into_the_per_pr_state_file_next_to_whatever_else_it_holds() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = home.path().join(".guided-review/state/acme/shop/7.json");
+    let file = home
+        .path()
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(&file, r#"{"read_ticks":{"order":{"head":"abc"}}}"#).unwrap();
-    let store = Arc::new(ReviewStateFile::for_pr(home.path(), &pr));
+    let store = Arc::new(ReviewStateFile::for_pr(&folders_in(home.path()), &pr));
 
     let mut asks = Asks::load(Arc::<ReviewStateFile>::clone(&store)).unwrap();
     let id = asks.start(Place::Tour, &Sha::new("head1"));
@@ -148,7 +150,11 @@ fn without_a_state_file_there_are_no_asks() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
 
-    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+        &folders_in(home.path()),
+        &pr,
+    )))
+    .unwrap();
 
     assert_eq!(asks.count_at(&Place::Tour), 0);
 }
@@ -157,8 +163,12 @@ fn without_a_state_file_there_are_no_asks() {
 fn saving_asks_keeps_the_read_ticks_and_the_other_way_round() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(home.path(), &pr);
-    let mut asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let mut asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+        &folders_in(home.path()),
+        &pr,
+    )))
+    .unwrap();
 
     file.update(|state| state.tick(&"order".into(), &Sha::new("abc")))
         .unwrap();
@@ -166,8 +176,11 @@ fn saving_asks_keeps_the_read_ticks_and_the_other_way_round() {
     asks.begin_turn(id, "What is this?", "context");
     file.update(|state| state.untick(&"other".into())).unwrap();
 
-    let text =
-        std::fs::read_to_string(home.path().join(".guided-review/state/acme/shop/7.json")).unwrap();
+    let text = std::fs::read_to_string(
+        home.path()
+            .join(".local/state/guided-review/state/acme/shop/7.json"),
+    )
+    .unwrap();
     let state: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(state["read_ticks"]["order"]["head"], "abc");
     assert_eq!(state["asks"][0]["messages"][0]["text"], "What is this?");
@@ -195,7 +208,7 @@ fn stopping_a_turn_asks_claude_to_interrupt_over_its_input_and_keeps_the_process
 fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
     let written = json!({
         "asks": [
             {
@@ -228,12 +241,18 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
             "gone_by_step": {"order": ["app/Old.php#Old::run"]}
         }
     });
-    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    let path = home
+        .path()
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, written.to_string()).unwrap();
 
     let state = file.load().unwrap();
-    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+        &folders_in(home.path()),
+        &pr,
+    )))
+    .unwrap();
     let total = "app/Order.php#Order::total".parse().unwrap();
     assert_eq!(
         asks.all()[0].place,
@@ -256,7 +275,11 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     assert_eq!(saved["last_repin"], written["last_repin"]);
     assert_eq!(saved["asks"][0]["place"], written["asks"][0]["place"]);
     assert_eq!(saved["asks"][1]["place"], written["asks"][1]["place"]);
-    let reloaded = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let reloaded = Asks::load(Arc::new(ReviewStateFile::for_pr(
+        &folders_in(home.path()),
+        &pr,
+    )))
+    .unwrap();
     assert_eq!(reloaded.all(), asks.all());
 }
 
@@ -264,7 +287,7 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
 fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(home.path(), &pr);
+    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
     let written = json!({
         "asks": [{
             "id": 1,
@@ -285,7 +308,9 @@ fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
             "gone_by_step": {"docs": ["#old.md", ""]}
         }
     });
-    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    let path = home
+        .path()
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, written.to_string()).unwrap();
 
@@ -306,7 +331,11 @@ fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
     );
     assert_eq!(record.gone_count(&"docs".into()), 1);
 
-    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(home.path(), &pr))).unwrap();
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+        &folders_in(home.path()),
+        &pr,
+    )))
+    .unwrap();
     let Place::Piece { piece, .. } = &asks.all()[0].place else {
         panic!("not a piece place");
     };
@@ -317,8 +346,10 @@ fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
 fn a_saved_review_keeps_whole_files_with_a_hash_apart_from_symbols() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(home.path(), &pr);
-    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let path = home
+        .path()
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(
         &path,
@@ -347,8 +378,10 @@ fn a_saved_review_keeps_whole_files_with_a_hash_apart_from_symbols() {
 fn re_pin_keys_are_saved_in_the_order_of_their_text() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(home.path(), &pr);
-    let path = home.path().join(".guided-review/state/acme/shop/7.json");
+    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let path = home
+        .path()
+        .join(".local/state/guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(
         &path,

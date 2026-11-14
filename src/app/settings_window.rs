@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use crate::app_folders::AppFolders;
 
 use gpui::{
     AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
@@ -20,10 +20,10 @@ pub struct SettingsWindow {
 }
 
 impl SettingsWindow {
-    pub fn new(home: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(folders: AppFolders, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         let panel =
-            cx.new(|cx| SettingsPanel::new(home, focus.clone(), Placement::WholeWindow, cx));
+            cx.new(|cx| SettingsPanel::new(folders, focus.clone(), Placement::WholeWindow, cx));
         panel.update(cx, |panel, cx| panel.open(window, cx));
         let panel_events = cx.subscribe_in(&panel, window, |_, _, event, window, _| match event {
             SettingsEvent::Saved | SettingsEvent::Closed => window.remove_window(),

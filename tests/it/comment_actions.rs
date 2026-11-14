@@ -65,7 +65,7 @@ impl Pull {
             .unwrap()
             .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &pr);
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr);
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -787,7 +787,7 @@ fn break_saves(pull: &Pull) -> PathBuf {
     let lock = pull
         .repo
         .home()
-        .join(".guided-review/state/acme/shop/7.json.lock");
+        .join(".local/state/guided-review/state/acme/shop/7.json.lock");
     std::fs::remove_file(&lock).ok();
     std::fs::create_dir_all(&lock).unwrap();
     lock

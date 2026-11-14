@@ -10,12 +10,11 @@ const RIGHT: u16 = 124;
 const BACKSPACE: u16 = 51;
 const FORWARD_DELETE: u16 = 117;
 
-#[cfg(target_os = "macos")]
 #[expect(
     unsafe_code,
     reason = "objc2 marks the monitor unsafe; its block returns the event it was given or null, as AppKit asks"
 )]
-pub fn take_before_macos(cx: &mut gpui::App) {
+pub fn take(cx: &mut gpui::App) {
     use futures::StreamExt;
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
     use std::ptr::NonNull;
@@ -61,9 +60,6 @@ pub fn take_before_macos(cx: &mut gpui::App) {
     })
     .detach();
 }
-
-#[cfg(not(target_os = "macos"))]
-pub fn take_before_macos(_: &mut gpui::App) {}
 
 /// The keystroke to hand gpui for a key the text system would take, or `None` to leave the key alone.
 fn word_keystroke(key_code: u16, modifiers: Modifiers) -> Option<Keystroke> {

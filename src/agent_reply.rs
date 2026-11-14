@@ -1,7 +1,7 @@
 //! `guided-review agent-reply`: the tour agent answers a hand-off on GitHub, or says it is working on
 //! it, then the hand-off takes that on, in the running app when it shows the PR, else in the state file.
 
-use std::path::Path;
+use crate::app_folders::AppFolders;
 
 use anyhow::Context;
 
@@ -21,12 +21,12 @@ pub enum AgentReply<'a> {
 /// Says where the reply went. Nothing is posted for a hand-off the PR does not have.
 pub fn agent_reply(
     github: &(impl ReviewThreadsPort + ReviewWritesPort),
-    home: &Path,
+    folders: &AppFolders,
     pr: &PullRequestUrl,
     id: HandOffId,
     reply: &AgentReply<'_>,
 ) -> anyhow::Result<String> {
-    let state_file = ReviewStateFile::for_pr(home, pr);
+    let state_file = ReviewStateFile::for_pr(folders, pr);
     let state = state_file.load()?;
     let request = match reply {
         AgentReply::Answer(body) => state.hand_offs().agent_reply(pr, id, body)?,
@@ -35,7 +35,7 @@ pub fn agent_reply(
     let done = request
         .run(github)
         .with_context(|| format!("could not post the reply to {id} on {pr}"))?;
-    mark_replied(home, &state_file, pr, id, done.replied())?;
+    mark_replied(folders, &state_file, pr, id, done.replied())?;
     let what = match reply {
         AgentReply::Answer(_) => "replied to",
         AgentReply::WorkingOnIt => "said you are working on",
@@ -53,14 +53,14 @@ pub fn agent_reply(
 
 /// The app holds the state of the PR it shows and writes it back whole, so it marks that one itself.
 fn mark_replied(
-    home: &Path,
+    folders: &AppFolders,
     state_file: &ReviewStateFile,
     pr: &PullRequestUrl,
     id: HandOffId,
     replied: &AgentReplied,
 ) -> anyhow::Result<()> {
     let told = tell_app(
-        &AppFolder::in_home(home),
+        &AppFolder::of(folders),
         &Request::AgentReplied {
             pr: pr.to_string(),
             hand_off: id,

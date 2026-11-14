@@ -52,7 +52,7 @@ impl Shop {
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &pr());
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr());
         Review::open(tour, source, state_file).unwrap()
     }
 }

@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::app_folders::AppFolders;
 use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
 use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice};
 use crate::viewer::{KeyChanges, KeyProblem, Keymap, MoreLines, ResolvedKeymap, WrittenKeys};
 
-/// `~/.guided-review/config.toml`
+/// `config.toml` in the config folder.
 #[derive(Default, Deserialize)]
 pub struct Config {
     /// `"owner/repo" = "~/path/to/clone"`
@@ -160,19 +161,12 @@ impl Config {
         self.ide.clone().map(IdeTemplate::new)
     }
 
-    pub fn file_in(home: &Path) -> PathBuf {
-        home.join(".guided-review/config.toml")
-    }
-
     pub fn load() -> anyhow::Result<Self> {
-        let Some(home) = std::env::home_dir() else {
-            return Ok(Self::default());
-        };
-        Self::load_from(&home)
+        Self::load_from(&AppFolders::running()?)
     }
 
-    pub fn load_from(home: &Path) -> anyhow::Result<Self> {
-        let path = Self::file_in(home);
+    pub fn load_from(folders: &AppFolders) -> anyhow::Result<Self> {
+        let path = folders.config_file();
         match std::fs::read_to_string(&path) {
             Ok(text) => Self::parse(&text, &path.display().to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
@@ -180,12 +174,12 @@ impl Config {
         }
     }
 
-    /// What the config says, or the default file `~/.guided-review/summary.md` when it says nothing and the file exists.
-    pub fn summary_instructions(&self, home: &Path) -> SummaryInstructions {
+    /// What the config says, or the default file `summary.md` in the config folder when it says nothing and the file exists.
+    pub fn summary_instructions(&self, folders: &AppFolders) -> SummaryInstructions {
         if std::env::var_os(Self::SUMMARY_INSTRUCTIONS_OFF_ENV).is_some() {
             return SummaryInstructions::none();
         }
-        self.summary_instructions.resolve(home)
+        self.summary_instructions.resolve(folders)
     }
 
     pub fn ask_settings(&self) -> AskSettings {

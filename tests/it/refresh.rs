@@ -1,8 +1,8 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, write_executable};
+use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -58,11 +58,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(self.repo.home(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &self.pr())
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(self.repo.home(), &self.pr())
+        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
     }
 
     fn source(&self) -> LocalGit {
@@ -210,7 +210,7 @@ enum Writer {
 }
 
 struct SkillStandIn {
-    home: PathBuf,
+    folders: AppFolders,
     pr: PullRequestUrl,
     writer: Writer,
 }
@@ -234,7 +234,7 @@ impl RefreshWriter for SkillStandIn {
             Writer::Refreshes => {
                 on_line(&tool_use_line("Read", "file_path", "app/Pricing.php"));
                 on_line(&tool_use_line("Edit", "file_path", "tour.json"));
-                ReviewStateFile::for_pr(&self.home, pr)
+                ReviewStateFile::for_pr(&self.folders, pr)
                     .update(guided_review::viewer::ReviewState::finish_refresh)?;
                 on_line(&result_line("Refreshed the tour.", false));
                 Ok(())
@@ -263,11 +263,11 @@ fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
         ))
     });
     TourRefresher {
-        home: shop.repo.home().to_path_buf(),
+        folders: shop.repo.folders(),
         pr: shop.pr(),
         pick_code_source: pick,
         writer: Arc::new(SkillStandIn {
-            home: shop.repo.home().to_path_buf(),
+            folders: shop.repo.folders(),
             pr: shop.pr(),
             writer,
         }),
@@ -375,15 +375,13 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
 
 fn fake_claude(dir: &Path, exit_code: u8) -> PathBuf {
     let script = dir.join("claude");
-    std::fs::write(
+    write_executable(
         &script,
         format!(
             "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\npwd > \"{dir}/cwd\"\necho '{{\"type\":\"assistant\",\"message\":{{\"content\":[]}}}}'\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Refreshed the tour.\"}}'\necho 'no login' >&2\nexit {exit_code}\n",
             dir = dir.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script
 }
 
@@ -392,8 +390,11 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
 {
     let dir = TempDir::new().unwrap();
     let cwd = TempDir::new().unwrap();
-    let writer =
-        ClaudeRefreshWriter::with_binary(fake_claude(dir.path(), 0), cwd.path().to_path_buf());
+    let writer = ClaudeRefreshWriter::with_binary(
+        fake_claude(dir.path(), 0),
+        cwd.path().to_path_buf(),
+        PathBuf::from("/home/me/.local/state/guided-review/tours"),
+    );
 
     let mut lines = Vec::new();
     writer
@@ -427,7 +428,10 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
     );
     assert!(args.contains(&reads_in_cwd), "{args}");
     assert!(!args.contains(",Read,"), "{args}");
-    assert!(args.contains("Write(~/.guided-review/tours/**)"), "{args}");
+    assert!(
+        args.contains("Write(//home/me/.local/state/guided-review/tours/**)"),
+        "{args}"
+    );
     assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
     assert!(
         !args.contains("--bare") && !args.contains("--redo"),
@@ -443,8 +447,11 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
 #[test]
 fn a_claude_that_exits_with_an_error_fails_the_refresh_with_what_it_said() {
     let dir = TempDir::new().unwrap();
-    let writer =
-        ClaudeRefreshWriter::with_binary(fake_claude(dir.path(), 1), dir.path().to_path_buf());
+    let writer = ClaudeRefreshWriter::with_binary(
+        fake_claude(dir.path(), 1),
+        dir.path().to_path_buf(),
+        dir.path().join("tours"),
+    );
 
     let error = writer
         .refresh(&PR.parse().unwrap(), &mut |_| {})

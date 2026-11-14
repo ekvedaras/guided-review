@@ -32,8 +32,13 @@ impl Updates {
         };
         let bundling = install.clone();
         cx.background_spawn(async move {
-            if let Err(error) = bundling.bring_bundle_up_to_date(&exe) {
-                eprintln!("could not put Guided Review.app in ~/Applications: {error:#}");
+            if let Err(error) = bundling.bring_desktop_entry_up_to_date(&exe) {
+                let entry = bundling.desktop_entry();
+                eprintln!(
+                    "could not put {} in {}: {error:#}",
+                    entry.name(),
+                    entry.folder()
+                );
             }
         })
         .detach();

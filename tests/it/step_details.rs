@@ -71,7 +71,7 @@ impl Shop {
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_pr(
-            self.repo.home(),
+            &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7"
                 .parse::<PullRequestUrl>()
                 .unwrap(),

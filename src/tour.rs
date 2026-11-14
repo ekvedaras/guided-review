@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
 use crate::piece_id::PieceId;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
@@ -114,19 +115,18 @@ impl PieceRef {
 impl Tour {
     pub const TOURS_DIR_ENV: &'static str = "GUIDED_REVIEW_TOURS_DIR";
 
-    /// `~/.guided-review/tours`, unless `GUIDED_REVIEW_TOURS_DIR` points the commands elsewhere.
-    pub fn tours_dir(home: &Path) -> PathBuf {
-        std::env::var_os(Self::TOURS_DIR_ENV)
-            .map_or_else(|| home.join(".guided-review/tours"), PathBuf::from)
+    /// `tours` in the state folder, unless `GUIDED_REVIEW_TOURS_DIR` points the commands elsewhere.
+    pub fn tours_dir(folders: &AppFolders) -> PathBuf {
+        std::env::var_os(Self::TOURS_DIR_ENV).map_or_else(|| folders.tours(), PathBuf::from)
     }
 
-    pub fn path_for(home: &Path, pr: &PullRequestUrl) -> PathBuf {
-        Self::path_in(&Self::tours_dir(home), pr)
+    pub fn path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
+        Self::path_in(&Self::tours_dir(folders), pr)
     }
 
     /// Where the tour writer keeps files the tour shows, like the pictures of its summary.
-    pub fn files_for(home: &Path, pr: &PullRequestUrl) -> PathBuf {
-        Self::tours_dir(home)
+    pub fn files_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
+        Self::tours_dir(folders)
             .join(pr.repo.to_string())
             .join(pr.number.to_string())
     }

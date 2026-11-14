@@ -47,7 +47,7 @@ impl Shop {
     }
 
     fn tour_files(&self) -> std::path::PathBuf {
-        Tour::files_for(self.repo.home(), &PR.parse().unwrap())
+        Tour::files_for(&self.repo.folders(), &PR.parse().unwrap())
     }
 
     /// The tour's folder holds `before.png` and `explainer.html`.
@@ -82,7 +82,7 @@ impl Shop {
         Review::open(
             tour,
             &source,
-            ReviewStateFile::for_pr(self.repo.home(), &pr),
+            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
         )
         .unwrap()
     }

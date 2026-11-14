@@ -16,12 +16,14 @@ use gpui::{
 use crate::app::components::image_row::ImagePictures;
 use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::new_commits_banner::RepinProgress;
+use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::refresh_banner::RefreshProgress;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
+use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
@@ -118,6 +120,11 @@ impl ReviewSession {
         if let Some(in_the_way) = release_install_in_the_way() {
             review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
         }
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let not_read = AppFolders::xdg().map_or_default(|xdg| folders.files_not_read(&xdg));
+        if !not_read.is_empty() {
+            review.raise_problem(Problem::FilesNotRead(not_read));
+        }
         let SessionWiring {
             source,
             github,
@@ -155,7 +162,7 @@ impl ReviewSession {
             tour_work,
             repin_progress: RepinProgress::Idle,
             refresh_progress: RefreshProgress::Idle,
-            image_cache: ImageCache::under(&std::env::home_dir().unwrap_or_default()),
+            image_cache: ImageCache::in_folders(&folders),
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
             reload: None,

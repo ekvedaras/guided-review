@@ -2,13 +2,15 @@ use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
-use super::app_bundle::{AppBundle, BUNDLE_FOLDER, BundlePlaced};
 use super::{ReleasesPort, Update, Version};
+use crate::app_folders::Mover;
+use crate::platform::{DesktopEntry, EntryPlaced, Os};
 
 /// The way the README installs a release: each version unpacked in its own folder under
 /// `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` and
@@ -19,7 +21,7 @@ pub struct ReleaseInstall {
     versions: PathBuf,
     bin_link: PathBuf,
     skill_link: PathBuf,
-    bundle: AppBundle,
+    desktop_entry: Arc<dyn DesktopEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,11 +79,16 @@ pub enum SkillLink {
 
 impl ReleaseInstall {
     pub fn in_home(home: &Path) -> Self {
+        Self::for_os(Os::RUNNING, home)
+    }
+
+    pub fn for_os(os: Os, home: &Path) -> Self {
+        let bin_link = home.join(".local/bin/guided-review");
         Self {
             versions: home.join(".local/share/guided-review"),
-            bin_link: home.join(".local/bin/guided-review"),
+            desktop_entry: os.desktop_entry(home, &bin_link),
+            bin_link,
             skill_link: home.join(".claude/skills/tour"),
-            bundle: AppBundle::in_home(home),
         }
     }
 
@@ -92,6 +99,17 @@ impl ReleaseInstall {
             Build::Release
         } else {
             Build::Local
+        }
+    }
+
+    /// The release install moves the app folders while there is one; on a machine with none, a
+    /// source build is the only binary, so it does.
+    pub fn folder_mover(&self, exe: &Path) -> Mover {
+        let is_one = self.linked_into_versions(&self.bin_link).is_some();
+        if self.runs(exe) || !is_one {
+            Mover::ThisBinary
+        } else {
+            Mover::AnotherBinary
         }
     }
 
@@ -120,16 +138,20 @@ impl ReleaseInstall {
         })
     }
 
-    /// Puts the bundle of the running release in `~/Applications` when it is missing or another
-    /// version's. An update by 0.6.0, which knew nothing of the bundle, leaves it so.
-    pub fn bring_bundle_up_to_date(&self, exe: &Path) -> anyhow::Result<BundlePlaced> {
+    pub fn desktop_entry(&self) -> &dyn DesktopEntry {
+        self.desktop_entry.as_ref()
+    }
+
+    /// Puts the Desktop entry of the running release in place when it is missing or another
+    /// version's. An update by 0.6.0, which knew nothing of the entry, leaves it so.
+    pub fn bring_desktop_entry_up_to_date(&self, exe: &Path) -> anyhow::Result<EntryPlaced> {
         let release = self
             .linked_into_versions(&self.bin_link)
             .filter(|_| self.runs(exe))
             .and_then(|binary| binary.parent().map(Path::to_path_buf));
         match release {
-            Some(release) => self.bundle.place_from(&release.join(BUNDLE_FOLDER)),
-            None => Ok(BundlePlaced::NotInRelease),
+            Some(release) => self.desktop_entry.place_from(&release),
+            None => Ok(EntryPlaced::NotInRelease),
         }
     }
 
@@ -165,7 +187,7 @@ impl ReleaseInstall {
             }
             None => SkillLink::NotOurs,
         };
-        self.bundle.place_from(&release.join(BUNDLE_FOLDER))?;
+        self.desktop_entry.place_from(&release)?;
         let program = release.join("guided-review");
         relink(&self.bin_link, &program)?;
         Ok(Installed {

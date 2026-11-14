@@ -27,7 +27,7 @@ pub enum Intent {
     TogglePieceLabels,
     ToggleJump,
     TogglePrSwitcher,
-    /// The PR switcher asked for from outside the window, by a launch of Guided Review.app.
+    /// The PR switcher asked for from outside the window, by a launch from the Desktop entry.
     ShowPrSwitcher,
     ToggleSettings,
     /// Settings asked for from outside the window, by `guided-review settings`.

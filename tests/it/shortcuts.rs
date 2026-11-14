@@ -62,10 +62,10 @@ fn no_two_commands_of_one_scope_share_a_key() {
 
 #[test]
 fn a_chord_is_written_as_gpui_reads_it() {
-    assert_eq!(Command::Jump.default_chords()[0].keystroke(), "cmd-k");
+    assert_eq!(Command::Jump.default_chords()[0].keystroke(), "secondary-k");
     assert_eq!(
         Command::AskAgent.default_chords()[0].keystroke(),
-        "cmd-shift-enter"
+        "secondary-shift-enter"
     );
     assert_eq!(Command::NextScreen.default_chords()[0].keystroke(), "right");
     assert_eq!(Command::Shortcuts.default_chords()[0].keystroke(), "?");
@@ -85,10 +85,10 @@ fn the_keys_the_app_had_before_the_sheet_still_work() {
     assert_eq!(keys(Command::NextScreen), ["right", "j"]);
     assert_eq!(keys(Command::PreviousScreen), ["left", "k"]);
     assert_eq!(keys(Command::WrapLines), ["w"]);
-    assert_eq!(keys(Command::Jump), ["cmd-k"]);
-    assert_eq!(keys(Command::Settings), ["cmd-,"]);
-    assert_eq!(keys(Command::CopyCode), ["cmd-c"]);
-    assert_eq!(keys(Command::AddToReview), ["cmd-enter"]);
+    assert_eq!(keys(Command::Jump), ["secondary-k"]);
+    assert_eq!(keys(Command::Settings), ["secondary-,"]);
+    assert_eq!(keys(Command::CopyCode), ["secondary-c"]);
+    assert_eq!(keys(Command::AddToReview), ["secondary-enter"]);
     assert_eq!(keys(Command::CloseBox), ["escape"]);
 }
 
@@ -98,10 +98,10 @@ fn copying_code_works_with_a_comment_box_open_but_not_while_typing_in_it() {
 }
 
 #[test]
-fn cmd_w_closes_the_window_from_anywhere_in_it() {
+fn primary_w_closes_the_window_from_anywhere_in_it() {
     assert_eq!(
         Command::CloseWindow.default_chords()[0].keystroke(),
-        "cmd-w"
+        "secondary-w"
     );
     assert_eq!(Command::CloseWindow.scope(), KeyScope::Window);
 }
@@ -114,8 +114,8 @@ fn g_opens_the_pull_request_on_github_wherever_the_page_takes_keys() {
 }
 
 #[test]
-fn cmd_q_quits_from_any_window_of_the_app() {
-    assert_eq!(Command::Quit.default_chords()[0].keystroke(), "cmd-q");
+fn primary_q_quits_from_any_window_of_the_app() {
+    assert_eq!(Command::Quit.default_chords()[0].keystroke(), "secondary-q");
     assert_eq!(Command::Quit.scope(), KeyScope::App);
     assert_eq!(Command::Quit.group(), ShortcutGroup::App);
 }

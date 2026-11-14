@@ -1,5 +1,6 @@
 pub mod agent_reply;
 pub mod app;
+pub mod app_folders;
 pub mod app_icon;
 pub mod app_link;
 pub mod cached_code_source;
@@ -26,6 +27,7 @@ pub mod outline;
 pub mod pick_code_source;
 pub mod piece_id;
 pub mod pieces;
+pub mod platform;
 pub mod pull_request;
 pub mod repin;
 pub mod show;

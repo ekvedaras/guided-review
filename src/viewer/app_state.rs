@@ -1,6 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Context;
+
+use crate::app_folders::AppFolders;
 use serde::{Deserialize, Serialize};
 
 /// What the app keeps across a restart that belongs to no one PR: the tours being written and the PRs
@@ -13,16 +15,16 @@ pub struct AppState {
     pub unseen_replies: Vec<String>,
 }
 
-/// `~/.guided-review/state/app.json`, beside the per-PR state files (which sit under owner folders).
+/// `app.json` in the state files folder, beside the per-PR state files (which sit under owner folders).
 #[derive(Clone)]
 pub struct AppStateFile {
     path: PathBuf,
 }
 
 impl AppStateFile {
-    pub fn in_home(home: &Path) -> Self {
+    pub fn in_folders(folders: &AppFolders) -> Self {
         Self {
-            path: home.join(".guided-review/state/app.json"),
+            path: folders.state_files().join("app.json"),
         }
     }
 

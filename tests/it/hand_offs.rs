@@ -105,7 +105,7 @@ impl Pull {
         .unwrap();
         let source = self.source();
         let pr: PullRequestUrl = PR.parse().unwrap();
-        let state_file = ReviewStateFile::for_pr(self.repo.home(), &pr);
+        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr);
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -898,7 +898,7 @@ fn reply_request(
     body: &str,
 ) -> Result<AgentReplyRequest, AgentReplyRefused> {
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let state = ReviewStateFile::for_pr(pull.repo.home(), &pr)
+    let state = ReviewStateFile::for_pr(&pull.repo.folders(), &pr)
         .load()
         .unwrap();
     state.hand_offs().agent_reply(&pr, id, body)
@@ -1031,7 +1031,7 @@ fn an_answered_hand_off_is_answered_in_the_review_and_in_the_state_file() {
         [HandOffState::Answered, HandOffState::Queued]
     );
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let saved = ReviewStateFile::for_pr(pull.repo.home(), &pr)
+    let saved = ReviewStateFile::for_pr(&pull.repo.folders(), &pr)
         .load()
         .unwrap();
     assert_eq!(
@@ -1046,7 +1046,7 @@ fn a_hand_off_answered_in_the_state_file_alone_is_answered_and_an_unknown_one_is
     let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
     let id = asked_one(&pull, &github, SendMode::AddToReview);
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let file = ReviewStateFile::for_pr(pull.repo.home(), &pr);
+    let file = ReviewStateFile::for_pr(&pull.repo.folders(), &pr);
 
     let mut result = Ok(());
     file.update(|state| result = state.hand_off_replied(id, &AgentReplied::default()))
@@ -1113,7 +1113,7 @@ fn delivered_one(pull: &Pull, github: &FakeGitHub) -> (Review, HandOffId) {
 
 fn working_on_it_request(pull: &Pull, id: HandOffId) -> AgentReplyRequest {
     let pr: PullRequestUrl = PR.parse().unwrap();
-    ReviewStateFile::for_pr(pull.repo.home(), &pr)
+    ReviewStateFile::for_pr(&pull.repo.folders(), &pr)
         .load()
         .unwrap()
         .hand_offs()

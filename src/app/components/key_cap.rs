@@ -1,6 +1,7 @@
 use gpui::{Div, IntoElement, ParentElement, Styled, div, px};
 
-use crate::viewer::{Chord, Key, KeyCap, Modifier};
+use crate::platform::Os;
+use crate::viewer::{Chord, Key, KeyCap};
 
 use super::button::ButtonKind;
 use super::icon::{Icon, sized_icon};
@@ -16,10 +17,7 @@ pub enum KeyLabel {
 impl KeyLabel {
     pub fn of(cap: KeyCap) -> Self {
         match cap {
-            KeyCap::Modifier(Modifier::Cmd) => Self::Text("⌘"),
-            KeyCap::Modifier(Modifier::Ctrl) => Self::Text("⌃"),
-            KeyCap::Modifier(Modifier::Alt) => Self::Text("⌥"),
-            KeyCap::Modifier(Modifier::Shift) => Self::Text("⇧"),
+            KeyCap::Modifier(modifier) => Self::Text(modifier.face(Os::RUNNING)),
             KeyCap::Key(Key::Left) => Self::Icon(Icon::ArrowLeft),
             KeyCap::Key(Key::Right) => Self::Icon(Icon::ArrowRight),
             KeyCap::Key(Key::Up) => Self::Icon(Icon::ArrowUp),

@@ -1,40 +1,68 @@
 //! A key with the modifiers held down for it, as the reviewer presses it, writes it in
 //! `config.toml` and sees it on a key cap.
 
+use crate::platform::{Os, PrimaryKey};
+
 /// Held down while the key is pressed. The order is the order gpui and the caps show them in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Modifier {
-    Cmd,
+    /// The key the app's own shortcuts are held with: Cmd on macOS, Ctrl on Linux.
+    Primary,
     Ctrl,
     Alt,
     Shift,
 }
 
 impl Modifier {
-    const ALL: [Self; 4] = [Self::Cmd, Self::Ctrl, Self::Alt, Self::Shift];
+    const ALL: [Self; 4] = [Self::Primary, Self::Ctrl, Self::Alt, Self::Shift];
 
     const fn bit(self) -> u8 {
         match self {
-            Self::Cmd => 1,
+            Self::Primary => 1,
             Self::Ctrl => 2,
             Self::Alt => 4,
             Self::Shift => 8,
         }
     }
 
+    /// How `config.toml` writes it.
     fn name(self) -> &'static str {
         match self {
-            Self::Cmd => "cmd",
+            Self::Primary => "primary",
             Self::Ctrl => "ctrl",
             Self::Alt => "alt",
             Self::Shift => "shift",
         }
     }
 
-    fn of_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|modifier| modifier.name() == name)
+    /// What gpui binds it as: gpui's `secondary` is Cmd on macOS and Ctrl elsewhere.
+    fn gpui_name(self) -> &'static str {
+        match self {
+            Self::Primary => "secondary",
+            other => other.name(),
+        }
+    }
+
+    /// `cmd` is how keys were saved before there was a Primary modifier. Where Primary is Ctrl, a
+    /// written `ctrl` is Primary too, so the two can never bind one key twice.
+    fn of_name(name: &str, os: Os) -> Option<Self> {
+        match (name, os.primary_key()) {
+            ("cmd", _) | ("ctrl", PrimaryKey::Control) => Some(Self::Primary),
+            _ => Self::ALL
+                .into_iter()
+                .find(|modifier| modifier.name() == name),
+        }
+    }
+
+    /// What its cap shows and a line of text spells it as.
+    pub fn face(self, os: Os) -> &'static str {
+        let spelling = os.key_spelling();
+        match self {
+            Self::Primary => spelling.primary,
+            Self::Ctrl => spelling.ctrl,
+            Self::Alt => spelling.alt,
+            Self::Shift => spelling.shift,
+        }
     }
 }
 
@@ -175,8 +203,13 @@ impl Chord {
         Self::new(self.modifiers.with(modifier), self.key)
     }
 
-    /// gpui's keystroke text, such as `cmd-shift-enter`, with the modifiers in any order.
+    /// The text `config.toml` writes, such as `primary-shift-enter`, with the modifiers in any
+    /// order, read as this OS reads it.
     pub fn parse(text: &str) -> Option<Self> {
+        Self::parse_on(Os::RUNNING, text)
+    }
+
+    pub fn parse_on(os: Os, text: &str) -> Option<Self> {
         let (held, key) = match (text, text.strip_suffix("--")) {
             ("-", _) => ("", "-"),
             (_, Some(held)) => (held, "-"),
@@ -186,29 +219,39 @@ impl Chord {
             .split('-')
             .filter(|name| !name.is_empty() || !held.is_empty())
             .try_fold(Modifiers::NONE, |modifiers, name| {
-                Some(modifiers.with(Modifier::of_name(name)?))
+                Some(modifiers.with(Modifier::of_name(name, os)?))
             })?;
         Some(Self::new(modifiers, Key::of_name(key)?))
     }
 
-    /// gpui's keystroke text, with the modifiers in their one order.
+    /// The text `config.toml` writes, with the modifiers in their one order.
+    pub fn written(self) -> String {
+        self.joined(Modifier::name)
+    }
+
+    /// gpui's keystroke text, which binds the chord.
     pub fn keystroke(self) -> String {
+        self.joined(Modifier::gpui_name)
+    }
+
+    fn joined(self, modifier_name: fn(Modifier) -> &'static str) -> String {
         self.modifiers
             .iter()
-            .map(Modifier::name)
+            .map(modifier_name)
             .chain(std::iter::once(self.key.name()))
             .collect::<Vec<_>>()
             .join("-")
     }
 
-    /// The chord as a line of text says it: `⌘⇧↵`, `W`, `esc`.
+    /// The chord as a line of text says it on this OS: `⌘⇧↵` or `Ctrl+Shift+↵`, `W`, `esc`.
     pub fn spelled(self) -> String {
+        self.spelled_on(Os::RUNNING)
+    }
+
+    pub fn spelled_on(self, os: Os) -> String {
         self.caps()
             .map(|cap| match cap {
-                KeyCap::Modifier(Modifier::Cmd) => "⌘",
-                KeyCap::Modifier(Modifier::Ctrl) => "⌃",
-                KeyCap::Modifier(Modifier::Alt) => "⌥",
-                KeyCap::Modifier(Modifier::Shift) => "⇧",
+                KeyCap::Modifier(modifier) => modifier.face(os),
                 KeyCap::Key(Key::Left) => "←",
                 KeyCap::Key(Key::Right) => "→",
                 KeyCap::Key(Key::Up) => "↑",
@@ -216,7 +259,8 @@ impl Chord {
                 KeyCap::Key(Key::Enter) => "↵",
                 KeyCap::Key(key) => key.face(),
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .join(os.key_spelling().joiner)
     }
 
     pub fn caps(self) -> impl Iterator<Item = KeyCap> {
