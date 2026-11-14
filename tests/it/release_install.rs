@@ -5,14 +5,17 @@ use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use guided_review::github::GitHub;
 use guided_review::platform::{EntryPlaced, Os, info_plist};
 use guided_review::update::{
     Build, Cpu, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
+    find_update,
 };
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use crate::support::fake_ports::FakeReleases;
+use crate::support::serve_files;
 
 const TARGET: Target = Target {
     os: Os::MacOs,
@@ -532,4 +535,85 @@ fn a_failed_download_installs_nothing() {
 
     assert!(format!("{error:#}").contains("404"), "{error:#}");
     assert_eq!(fs::read_to_string(home.bin_link()).unwrap(), "binary 0.4.0");
+}
+
+/// GitHub's answer for v0.9.0, with the Linux archive and its checksum the release workflow now adds.
+const RECORDED_RELEASE_WITH_LINUX: &str =
+    include_str!("../fixtures/github/latest_release_with_linux.json");
+
+#[test]
+fn a_linux_release_install_finds_its_archive_in_the_published_release_and_installs_it_with_its_desktop_entry()
+ {
+    let linux = Target {
+        os: Os::Linux,
+        cpu: Cpu::X86_64,
+    };
+    let home = TempDir::new().unwrap();
+    let old_release = home
+        .path()
+        .join(".local/share/guided-review/0.8.1/guided-review-0.8.1-x86_64-unknown-linux-gnu");
+    fs::create_dir_all(&old_release).unwrap();
+    fs::write(old_release.join("guided-review"), "binary 0.8.1").unwrap();
+    let bin_link = home.path().join(".local/bin/guided-review");
+    fs::create_dir_all(bin_link.parent().unwrap()).unwrap();
+    symlink(old_release.join("guided-review"), &bin_link).unwrap();
+    let github = GitHub::without_token_at(&serve_files(vec![(
+        "/repos/ekvedaras/guided-review/releases/latest",
+        RECORDED_RELEASE_WITH_LINUX.as_bytes().to_vec(),
+    )]));
+
+    let update = find_update(&github, "0.8.1".parse().unwrap(), linux)
+        .unwrap()
+        .unwrap();
+    let folder = "guided-review-0.9.0-x86_64-unknown-linux-gnu";
+    let icon = |size: &str| {
+        format!("{folder}/icons/hicolor/{size}/apps/io.github.ekvedaras.guided-review.png")
+    };
+    let archive = packed(&[
+        (
+            format!("{folder}/guided-review"),
+            "binary 0.9.0".to_owned(),
+            0o755,
+        ),
+        (
+            format!("{folder}/skills/tour/SKILL.md"),
+            "# tour".to_owned(),
+            0o644,
+        ),
+        (icon("256x256"), "icon 256".to_owned(), 0o644),
+        (icon("512x512"), "icon 512".to_owned(), 0o644),
+    ]);
+    let releases = FakeReleases {
+        files: [
+            (update.archive.url.clone(), archive.clone()),
+            (
+                update.checksum.url.clone(),
+                checksum_of(&update, &archive).into_bytes(),
+            ),
+        ]
+        .into(),
+        ..FakeReleases::default()
+    };
+    ReleaseInstall::for_os(Os::Linux, home.path())
+        .download_and_install(&releases, &update)
+        .unwrap();
+
+    assert_eq!(
+        update.archive.url,
+        "https://github.com/ekvedaras/guided-review/releases/download/v0.9.0/guided-review-0.9.0-x86_64-unknown-linux-gnu.tar.gz"
+    );
+    assert_eq!(fs::read_to_string(&bin_link).unwrap(), "binary 0.9.0");
+    let share = home.path().join(".local/share");
+    assert!(
+        share
+            .join("applications/io.github.ekvedaras.guided-review.desktop")
+            .is_file()
+    );
+    assert_eq!(
+        fs::read_to_string(
+            share.join("icons/hicolor/512x512/apps/io.github.ekvedaras.guided-review.png")
+        )
+        .unwrap(),
+        "icon 512"
+    );
 }
