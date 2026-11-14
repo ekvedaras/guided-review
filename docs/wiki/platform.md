@@ -32,9 +32,15 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **The platform gives the window's title bar options and the button inset** (`Os::titlebar`, `Os::window_buttons_inset`), both from one adapter fact, `WINDOW_BUTTONS`. macOS: the traffic lights 14 px from the corner on a transparent title bar, 80 px kept free left of them, as before. Linux: none, so the title bar is not transparent and no room is kept; the window manager decides the decorations (Hyprland draws none). Before, the title bar code held `TRAFFIC_LIGHTS_WIDTH` and the sidebar and Settings left an empty 80 px gap on Linux.
 - **The title bar stays 40 px on every OS.** The app draws it on Linux too, as the strip that drags the window and carries the sidebar heading and the Settings chip.
 
+## Decisions, 2026-11-14 (#74, raising Herdr)
+
+- **The platform says how Herdr comes to the front** after `herdr-app do agent.focus` (`Os::herdr_raise`, `platform::HerdrRaise`): `/usr/bin/open -a Herdr` on macOS; `hyprctl dispatch focuswindow class:herdr-app` on Linux, the class Herdr's window has on Hyprland.
+- **On Linux the raise is best effort.** Only the desktop raises windows on Wayland and only Hyprland is asked, so a missing `hyprctl`, another desktop or a failed dispatch leaves Herdr behind and showing the agent still succeeds. On macOS a failed `open` still fails it, as before.
+- Tests run both adapters' commands through one stand-in (`HcTourAgents::raising_herdr_with(os, program)`).
+
 ## Known open
 
 - The Dock icon, background and word-key calls are three platform functions the app start calls in turn; one start call is a later ticket.
 - The app menu still holds the only Quit item; it is the App start hooks ticket's.
-- The Desktop entry, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
+- The Desktop entry, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
