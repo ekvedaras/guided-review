@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, bail};
 
 use crate::platform;
+use crate::update::ReleaseInstall;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppFolders {
@@ -42,7 +43,8 @@ impl AppFolders {
 
     /// Run once at start: moves `~/.guided-review` when it can, and makes the result this process's folders.
     pub fn settle() -> anyhow::Result<Self> {
-        let settled = Self::move_once(Self::xdg()?);
+        let xdg = Self::xdg()?;
+        let settled = Self::move_once(xdg.clone(), Mover::of_this_process(&xdg.home));
         Ok(RUNNING.get_or_init(|| settled).clone())
     }
 
@@ -50,7 +52,10 @@ impl AppFolders {
     /// since asked that app to quit.
     pub fn settle_again(&self) -> anyhow::Result<Self> {
         if *self == Self::before_xdg(&self.home) {
-            Ok(Self::move_once(Self::xdg()?))
+            Ok(Self::move_once(
+                Self::xdg()?,
+                Mover::of_this_process(&self.home),
+            ))
         } else {
             Ok(self.clone())
         }
@@ -67,7 +72,7 @@ impl AppFolders {
     /// its lock, or a step failed and what moved was put back. A file both hold stays in each, and
     /// `files_not_read` names it. A move never fails the start: what could not be put back stays where
     /// it is, `files_not_read` names that too, and the next start tries the move again.
-    pub fn move_once(xdg: Self) -> Self {
+    pub fn move_once(xdg: Self, mover: Mover) -> Self {
         let old = Self::before_xdg(&xdg.home);
         let moves: Vec<(PathBuf, PathBuf)> = MOVED
             .iter()
@@ -77,6 +82,9 @@ impl AppFolders {
             return xdg;
         }
         let not_moved = |xdg: Self| if xdg.holds_state() { xdg } else { old.clone() };
+        if mover == Mover::AnotherBinary {
+            return not_moved(xdg);
+        }
         let _lock = match take_lock(&old.lock()) {
             Ok(OldLock::Taken(lock)) => lock,
             Ok(OldLock::HeldByAnotherApp) => return not_moved(xdg),
@@ -216,6 +224,26 @@ impl AppFolders {
     /// ssh) must find the socket of the running app.
     pub fn socket(&self) -> PathBuf {
         self.state.join("app.sock")
+    }
+}
+
+/// Which binary moves `~/.guided-review`. A maintainer runs source builds beside the release install,
+/// and a move by one of them would leave the other on a folder no longer used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mover {
+    /// The release install, or any binary on a machine with none.
+    ThisBinary,
+    /// Uses the XDG folders once the move happened, the old folder before.
+    AnotherBinary,
+}
+
+impl Mover {
+    fn of_this_process(home: &Path) -> Self {
+        let install = ReleaseInstall::in_home(home);
+        match std::env::current_exe() {
+            Ok(exe) => install.folder_mover(&exe),
+            Err(_) => install.folder_mover(Path::new("")),
+        }
     }
 }
 

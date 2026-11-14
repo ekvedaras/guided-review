@@ -2,7 +2,8 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::path::Path;
 
-use guided_review::app_folders::{AppFolders, NotRead};
+use assert_cmd::cargo::cargo_bin_cmd;
+use guided_review::app_folders::{AppFolders, Mover, NotRead};
 use guided_review::platform;
 use tempfile::TempDir;
 
@@ -170,7 +171,7 @@ fn old_install() -> (TempDir, AppFolders, AppFolders) {
 fn the_old_folder_is_moved_into_the_xdg_folders_and_left_behind_empty() {
     let (home, _old, xdg) = old_install();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
 
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
@@ -180,10 +181,10 @@ fn the_old_folder_is_moved_into_the_xdg_folders_and_left_behind_empty() {
 #[test]
 fn a_second_start_moves_nothing() {
     let (home, _old, xdg) = old_install();
-    AppFolders::move_once(xdg.clone());
+    AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
     fs::write(xdg.config_file(), "changed since\n").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
 
     assert_eq!(
         fs::read_to_string(xdg.config_file()).unwrap(),
@@ -198,7 +199,7 @@ fn files_of_the_reviewer_s_own_in_the_old_folder_stay_there() {
     let own = home.path().join(".guided-review/elsewhere.md");
     fs::write(&own, "mine").unwrap();
 
-    AppFolders::move_once(xdg.clone());
+    AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
 
     assert_all_in(&xdg);
     assert_eq!(fs::read_to_string(own).unwrap(), "mine");
@@ -211,14 +212,14 @@ fn while_an_old_app_holds_the_lock_nothing_moves_and_the_old_folder_stays_in_use
     let running_app = File::options().write(true).open(old.lock()).unwrap();
     running_app.try_lock().unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), old);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), old);
 
     assert_all_in(&old);
     assert!(!xdg.config_file().parent().unwrap().exists());
     assert!(!xdg.tours().parent().unwrap().exists());
 
     drop(running_app);
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
     assert_all_in(&xdg);
 }
 
@@ -229,14 +230,14 @@ fn a_move_that_fails_part_way_puts_everything_back_and_the_old_folder_stays_in_u
     fs::create_dir_all(home.path().join(".local")).unwrap();
     fs::write(home.path().join(".local/state"), "in the way").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), old);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), old);
 
     assert_all_in(&old);
     assert!(!xdg.config_file().parent().unwrap().exists());
     assert!(!xdg.tours().parent().unwrap().exists());
 
     fs::remove_file(home.path().join(".local/state")).unwrap();
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
     assert_all_in(&xdg);
 }
 
@@ -252,7 +253,7 @@ fn a_move_cut_short_is_finished_by_the_next_start() {
     let half_copied = xdg.tours().with_extension("partial");
     fs::create_dir_all(half_copied.join("acme")).unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
 
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
@@ -262,12 +263,12 @@ fn a_move_cut_short_is_finished_by_the_next_start() {
 #[test]
 fn a_file_an_old_binary_writes_again_after_the_move_stays_beside_the_one_read_and_is_named() {
     let (_home, old, xdg) = old_install();
-    AppFolders::move_once(xdg.clone());
+    AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
     let written_again = path_of(&old, "state");
     fs::create_dir_all(written_again.parent().unwrap()).unwrap();
     fs::write(&written_again, "{\"read\":[]}").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
 
     assert_all_in(&xdg);
     assert_eq!(fs::read_to_string(&written_again).unwrap(), "{\"read\":[]}");
@@ -295,7 +296,7 @@ fn a_move_to_another_disk_copies_checks_and_then_deletes() {
         ]),
     );
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
 
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
@@ -312,7 +313,7 @@ fn starts_at_once_all_end_in_the_xdg_folders_whichever_moves() {
                 let xdg = xdg.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_micros(start * 10));
-                    AppFolders::move_once(xdg)
+                    AppFolders::move_once(xdg, Mover::ThisBinary)
                 })
             })
             .collect();
@@ -337,7 +338,7 @@ fn a_move_stuck_after_a_put_back_that_failed_never_fails_a_start_and_says_what_i
     fs::write(home.path().join(".local/state"), "in the way").unwrap();
 
     for _ in 0..2 {
-        assert_eq!(AppFolders::move_once(xdg.clone()), old);
+        assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), old);
     }
 
     assert_all_in(&old);
@@ -364,7 +365,7 @@ fn xdg_folders_already_holding_files_take_each_old_file_they_lack_and_leave_thos
     fs::create_dir_all(newer_tour.parent().unwrap()).unwrap();
     fs::write(&newer_tour, "{\"title\":\"Another\"}").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::ThisBinary), xdg);
 
     for (name, text) in WRITTEN.iter().filter(|(name, _)| *name != "config") {
         assert_eq!(fs::read_to_string(path_of(&xdg, name)).unwrap(), *text);
@@ -388,4 +389,58 @@ fn xdg_folders_already_holding_files_take_each_old_file_they_lack_and_leave_thos
             read_instead: xdg.config_file(),
         }]
     );
+}
+
+#[test]
+fn another_binary_than_the_mover_reads_the_old_folder_until_the_move_and_never_moves_it() {
+    let (_home, old, xdg) = old_install();
+
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::AnotherBinary), old);
+    assert_all_in(&old);
+    assert!(!xdg.config_file().parent().unwrap().exists());
+
+    AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::AnotherBinary), xdg);
+}
+
+#[test]
+fn another_binary_than_the_mover_reads_the_xdg_folders_once_moved_even_with_old_files_written_since() {
+    let (_home, old, xdg) = old_install();
+    AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
+    let written_since = old.tours().join("acme/shop/9.json");
+    fs::create_dir_all(written_since.parent().unwrap()).unwrap();
+    fs::write(&written_since, "{}").unwrap();
+
+    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::AnotherBinary), xdg);
+
+    assert_eq!(fs::read_to_string(&written_since).unwrap(), "{}");
+}
+
+#[test]
+fn a_source_build_run_beside_a_release_install_leaves_the_old_folder_to_it() {
+    let (home, old, _xdg) = old_install();
+    let release = home
+        .path()
+        .join(".local/share/guided-review/0.9.0/guided-review-0.9.0/guided-review");
+    fs::create_dir_all(release.parent().unwrap()).unwrap();
+    fs::write(&release, "binary 0.9.0").unwrap();
+    fs::create_dir_all(home.path().join(".local/bin")).unwrap();
+    std::os::unix::fs::symlink(&release, home.path().join(".local/bin/guided-review")).unwrap();
+
+    let printed = cargo_bin_cmd!("guided-review")
+        .args(["tour-path", "https://github.com/acme/shop/pull/7"])
+        .env("HOME", home.path())
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("GUIDED_REVIEW_TOURS_DIR")
+        .output()
+        .unwrap();
+
+    assert!(printed.status.success(), "{printed:?}");
+    assert_eq!(
+        String::from_utf8(printed.stdout).unwrap().trim(),
+        path_of(&old, "tour").display().to_string()
+    );
+    assert_all_in(&old);
 }

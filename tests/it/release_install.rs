@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use guided_review::app_folders::Mover;
 use guided_review::github::GitHub;
 use guided_review::platform::{EntryPlaced, Os, info_plist};
 use guided_review::update::{
@@ -236,6 +237,32 @@ fn the_release_install_running_and_first_on_path_has_nothing_in_its_way() {
     let path = path_of(&[home.path().join("empty"), home.bin_folder()]);
 
     assert_eq!(home.install().in_the_way(&home.bin_link(), &path), None);
+}
+
+#[test]
+fn while_there_is_a_release_install_only_it_moves_the_app_folders() {
+    let home = Home::with_release_installed();
+
+    assert_eq!(
+        home.install().folder_mover(&home.bin_link()),
+        Mover::ThisBinary
+    );
+    assert_eq!(
+        home.install().folder_mover(&home.source_build()),
+        Mover::AnotherBinary
+    );
+}
+
+#[test]
+fn with_no_release_install_a_source_build_moves_the_app_folders() {
+    let home = Home {
+        dir: TempDir::new().unwrap(),
+    };
+
+    assert_eq!(
+        home.install().folder_mover(&home.source_build()),
+        Mover::ThisBinary
+    );
 }
 
 #[test]

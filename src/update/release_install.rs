@@ -9,6 +9,7 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
 use super::{ReleasesPort, Update, Version};
+use crate::app_folders::Mover;
 use crate::platform::{DesktopEntry, EntryPlaced, Os};
 
 /// The way the README installs a release: each version unpacked in its own folder under
@@ -98,6 +99,17 @@ impl ReleaseInstall {
             Build::Release
         } else {
             Build::Local
+        }
+    }
+
+    /// The release install moves the app folders while there is one; on a machine with none, a
+    /// source build is the only binary, so it does.
+    pub fn folder_mover(&self, exe: &Path) -> Mover {
+        let is_one = self.linked_into_versions(&self.bin_link).is_some();
+        if self.runs(exe) || !is_one {
+            Mover::ThisBinary
+        } else {
+            Mover::AnotherBinary
         }
     }
 
