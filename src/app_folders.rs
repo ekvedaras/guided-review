@@ -10,6 +10,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
+use toml_edit::visit_mut::VisitMut;
+use toml_edit::{DocumentMut, Formatted, Value};
 
 use crate::platform;
 use crate::update::ReleaseInstall;
@@ -100,6 +102,9 @@ impl AppFolders {
             .try_for_each(|(from, to)| merge(from, to, &mut moved))
         {
             Ok(()) => {
+                if let Err(error) = old.point_config_at_moved_files(&xdg) {
+                    eprintln!("warning: {error:#}; it may name files in their old place");
+                }
                 old.tidy_after_move();
                 xdg
             }
@@ -135,15 +140,55 @@ impl AppFolders {
                 let (unused_place, used_place) = (place(unused), place(self));
                 files_under(&unused_place)
                     .into_iter()
-                    .map(move |file| NotRead {
-                        read_instead: match file.strip_prefix(&unused_place) {
-                            Ok(rest) if !rest.as_os_str().is_empty() => used_place.join(rest),
-                            _ => used_place.clone(),
-                        },
-                        file,
+                    .filter_map(move |file| {
+                        Some(NotRead {
+                            read_instead: rebased(&file, &unused_place, &used_place)?,
+                            file,
+                        })
                     })
             })
             .collect()
+    }
+
+    /// Config values naming a file the move took, such as
+    /// `summary_instructions = "~/.guided-review/summary.md"`, name its new place. Quotes, comments
+    /// and the rest stay as the reviewer wrote them.
+    fn point_config_at_moved_files(&self, xdg: &Self) -> anyhow::Result<()> {
+        let path = xdg.config_file();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Ok(());
+        };
+        let mut document: DocumentMut = text
+            .parse()
+            .with_context(|| format!("could not read {}", path.display()))?;
+        let mut repointing = Repointing {
+            old: self,
+            xdg,
+            changed: false,
+        };
+        repointing.visit_document_mut(&mut document);
+        if !repointing.changed {
+            return Ok(());
+        }
+        let written = partial(&path);
+        std::fs::write(&written, document.to_string())
+            .with_context(|| format!("could not write {}", written.display()))?;
+        std::fs::rename(&written, &path)
+            .with_context(|| format!("could not move {} to {}", written.display(), path.display()))
+    }
+
+    /// Where `written`, a path in a config value, is after the move, written the same way: under `~/`
+    /// when it was. `None` when it names no file the move took.
+    fn moved_place(&self, xdg: &Self, written: &str) -> Option<String> {
+        let from_home = written.strip_prefix("~/");
+        let path = from_home.map_or_else(|| PathBuf::from(written), |rest| self.home.join(rest));
+        let moved = MOVED
+            .iter()
+            .find_map(|place| rebased(&path, &place(self), &place(xdg)))?;
+        Some(match moved.strip_prefix(&self.home) {
+            Ok(rest) if from_home.is_some() => format!("~/{}", rest.display()),
+            _ => moved.display().to_string(),
+        })
     }
 
     /// Whether a move put what the app wrote here: a config alone may be written by hand.
@@ -444,6 +489,43 @@ fn same(left: &Path, right: &Path) -> anyhow::Result<bool> {
         Ok(bytes(left)? == bytes(right)?)
     } else {
         Ok(false)
+    }
+}
+
+/// `path` under `to` as it is under `from`; `None` when it is not under `from`.
+fn rebased(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
+    let rest = path.strip_prefix(from).ok()?;
+    Some(if rest.as_os_str().is_empty() {
+        to.to_path_buf()
+    } else {
+        to.join(rest)
+    })
+}
+
+/// Walks a config, `old` being the folders before the move.
+struct Repointing<'a> {
+    old: &'a AppFolders,
+    xdg: &'a AppFolders,
+    changed: bool,
+}
+
+impl VisitMut for Repointing<'_> {
+    fn visit_string_mut(&mut self, node: &mut Formatted<String>) {
+        let Some(moved) = self.old.moved_place(self.xdg, node.value()) else {
+            return;
+        };
+        let literal = node.display_repr().starts_with('\'') && !moved.contains(['\'', '\n']);
+        let mut fresh = if literal {
+            match format!("'{moved}'").parse::<Value>() {
+                Ok(Value::String(fresh)) => fresh,
+                _ => Formatted::new(moved),
+            }
+        } else {
+            Formatted::new(moved)
+        };
+        *fresh.decor_mut() = node.decor().clone();
+        *node = fresh;
+        self.changed = true;
     }
 }
 

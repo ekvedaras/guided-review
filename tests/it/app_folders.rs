@@ -444,3 +444,32 @@ fn a_source_build_run_beside_a_release_install_leaves_the_old_folder_to_it() {
     );
     assert_all_in(&old);
 }
+
+#[test]
+fn config_values_naming_a_moved_file_name_its_new_place_and_the_rest_of_the_config_stays_as_written() {
+    let (home, old, xdg) = old_install();
+    let config = |summary: &str, evals: &str| {
+        format!(
+            "# Opens with the risk.\nsummary_instructions = \"{summary}\"   # mine\n\n[clones]\n\"acme/evals\" = '{evals}'\n\"acme/mine\" = \"~/.guided-review/elsewhere\"\n"
+        )
+    };
+    let home_path = home.path().display();
+    fs::write(
+        old.config_file(),
+        config(
+            "~/.guided-review/summary.md",
+            &format!("{home_path}/.guided-review/evals"),
+        ),
+    )
+    .unwrap();
+
+    AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
+
+    assert_eq!(
+        fs::read_to_string(xdg.config_file()).unwrap(),
+        config(
+            "~/.config/guided-review/summary.md",
+            &format!("{home_path}/.local/state/guided-review/evals"),
+        )
+    );
+}
