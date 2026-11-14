@@ -121,9 +121,7 @@ impl ReviewSession {
             review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
         }
         let folders = cx.global::<PrSwitching>().folders.clone();
-        let not_read = AppFolders::xdg()
-            .map(|xdg| folders.files_not_read(&xdg))
-            .unwrap_or_default();
+        let not_read = AppFolders::xdg().map_or_default(|xdg| folders.files_not_read(&xdg));
         if !not_read.is_empty() {
             review.raise_problem(Problem::FilesNotRead(not_read));
         }

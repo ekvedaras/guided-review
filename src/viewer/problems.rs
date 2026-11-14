@@ -305,7 +305,11 @@ impl fmt::Display for Problem {
                     formatter,
                     "{} {} not read, as the app reads another file in their place; nothing was merged, overwritten or deleted, so keep what you need by hand: ",
                     files.len(),
-                    if files.len() == 1 { "file is" } else { "files are" }
+                    if files.len() == 1 {
+                        "file is"
+                    } else {
+                        "files are"
+                    }
                 )?;
                 let named: Vec<String> = files
                     .iter()

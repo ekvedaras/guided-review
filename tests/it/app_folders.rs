@@ -41,7 +41,8 @@ fn with_no_xdg_variables_the_folders_are_the_xdg_defaults_under_home() {
 }
 
 #[test]
-fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_the_runtime_folder() {
+fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_the_runtime_folder()
+{
     let folders = platform::app_folders(
         Path::new("/home/me"),
         env(&[
@@ -66,10 +67,7 @@ fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_
     assert_eq!(folders.lock(), Path::new("/st/guided-review/app.lock"));
     assert_eq!(folders.log(), Path::new("/st/guided-review/app.log"));
     assert_eq!(folders.images(), Path::new("/ca/guided-review/images"));
-    assert_eq!(
-        folders.socket(),
-        Path::new("/st/guided-review/app.sock")
-    );
+    assert_eq!(folders.socket(), Path::new("/st/guided-review/app.sock"));
 }
 
 #[test]
@@ -395,23 +393,33 @@ fn xdg_folders_already_holding_files_take_each_old_file_they_lack_and_leave_thos
 fn another_binary_than_the_mover_reads_the_old_folder_until_the_move_and_never_moves_it() {
     let (_home, old, xdg) = old_install();
 
-    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::AnotherBinary), old);
+    assert_eq!(
+        AppFolders::move_once(xdg.clone(), Mover::AnotherBinary),
+        old
+    );
     assert_all_in(&old);
     assert!(!xdg.config_file().parent().unwrap().exists());
 
     AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
-    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::AnotherBinary), xdg);
+    assert_eq!(
+        AppFolders::move_once(xdg.clone(), Mover::AnotherBinary),
+        xdg
+    );
 }
 
 #[test]
-fn another_binary_than_the_mover_reads_the_xdg_folders_once_moved_even_with_old_files_written_since() {
+fn another_binary_than_the_mover_reads_the_xdg_folders_once_moved_even_with_old_files_written_since()
+ {
     let (_home, old, xdg) = old_install();
     AppFolders::move_once(xdg.clone(), Mover::ThisBinary);
     let written_since = old.tours().join("acme/shop/9.json");
     fs::create_dir_all(written_since.parent().unwrap()).unwrap();
     fs::write(&written_since, "{}").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone(), Mover::AnotherBinary), xdg);
+    assert_eq!(
+        AppFolders::move_once(xdg.clone(), Mover::AnotherBinary),
+        xdg
+    );
 
     assert_eq!(fs::read_to_string(&written_since).unwrap(), "{}");
 }
@@ -446,7 +454,8 @@ fn a_source_build_run_beside_a_release_install_leaves_the_old_folder_to_it() {
 }
 
 #[test]
-fn config_values_naming_a_moved_file_name_its_new_place_and_the_rest_of_the_config_stays_as_written() {
+fn config_values_naming_a_moved_file_name_its_new_place_and_the_rest_of_the_config_stays_as_written()
+ {
     let (home, old, xdg) = old_install();
     let config = |summary: &str, evals: &str| {
         format!(
