@@ -14,8 +14,13 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **A release Target is an OS and a CPU** (`update::Target { os, cpu }`), so its triple and archive name follow from both: `x86_64-unknown-linux-gnu` on Linux. Before, `Target` was `AppleSilicon` or `Intel`, and a Linux build would have fetched a Mac archive.
 - **gpui gets its `wayland` and `x11` features** (`7a0f87a`). They change nothing on macOS. With them the app opened a native Wayland window on Hyprland (not through XWayland) on 2026-11-14; its window had no app id yet, which the Desktop entry work sets.
 
+## Decisions, 2026-11-14 (#69)
+
+- **The platform names the font families** (`083c89c`). Each adapter lists its text and code families, best first; `Os::text_font` and `Os::code_font` take the first that is installed and the last one unasked. macOS lists one of each (Helvetica Neue, Menlo), so it never reads the font database for the app's text. Linux lists Adwaita, Noto, Liberation and DejaVu (Sans and Mono), names checked against the installed fonts, not asked of fontconfig: a list is plain data, so both adapters are tested on any host, and the families come out the same on every desktop that has them.
+- **Diagrams find the files of the text family** in the font database (`palette::font_files`), all of them, so bold labels are measured in bold too. The path `/System/Library/Fonts/HelveticaNeue.ttc` is gone; it was why every diagram failed on Linux. The system font database is read once (`INSTALLED_FONTS`) and shared by the Linux font check and the diagram drawer.
+
 ## Known open
 
 - The Dock icon, background and word-key calls are three platform functions the app start calls in turn; one start call is a later ticket.
-- Fonts, the Primary modifier, the Desktop entry, window chrome, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
+- The Primary modifier, the Desktop entry, window chrome, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
