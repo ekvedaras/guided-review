@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use guided_review::platform::Os;
 use guided_review::update::{
-    Build, BundlePlaced, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update,
+    Build, BundlePlaced, Cpu, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update,
     Version, info_plist,
 };
 use sha2::{Digest, Sha256};
@@ -14,7 +15,10 @@ use tempfile::TempDir;
 
 use crate::support::fake_ports::FakeReleases;
 
-const TARGET: Target = Target::AppleSilicon;
+const TARGET: Target = Target {
+    os: Os::MacOs,
+    cpu: Cpu::Arm64,
+};
 
 fn update_to(version: &str) -> Update {
     let archive = format!("guided-review-{version}-{}.tar.gz", TARGET.triple());

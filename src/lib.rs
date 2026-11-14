@@ -26,6 +26,7 @@ pub mod outline;
 pub mod pick_code_source;
 pub mod piece_id;
 pub mod pieces;
+pub mod platform;
 pub mod pull_request;
 pub mod repin;
 pub mod show;

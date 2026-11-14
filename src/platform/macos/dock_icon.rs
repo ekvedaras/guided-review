@@ -5,7 +5,6 @@ use crate::app_icon::AppIcon;
 
 const SIZE: u16 = 512;
 
-#[cfg(target_os = "macos")]
 #[expect(
     unsafe_code,
     reason = "objc2 marks the Cocoa call unsafe; it runs on the main thread, proved by the marker, with an image made just above"
@@ -30,9 +29,6 @@ pub fn show() {
     unsafe { app.setApplicationIconImage(Some(&image)) };
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn show() {}
-
 fn picture() -> Option<Vec<u8>> {
     AppIcon::RUNNING
         .png(SIZE)
@@ -41,7 +37,6 @@ fn picture() -> Option<Vec<u8>> {
 }
 
 /// No Dock icon and no turn at the front: for the snapshot run, which draws in the background.
-#[cfg(target_os = "macos")]
 pub fn stay_in_background() {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
@@ -52,6 +47,3 @@ pub fn stay_in_background() {
     NSApplication::sharedApplication(main_thread)
         .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 }
-
-#[cfg(not(target_os = "macos"))]
-pub fn stay_in_background() {}

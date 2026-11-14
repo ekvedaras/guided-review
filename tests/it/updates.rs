@@ -1,12 +1,26 @@
 use std::path::PathBuf;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use guided_review::platform::Os;
 use guided_review::update::{
-    AppVersion, Installed, PublishedRelease, ReleaseAsset, SkillLink, Target, Update, UpdateOffer,
-    Version, find_update,
+    AppVersion, Cpu, Installed, PublishedRelease, ReleaseAsset, SkillLink, Target, Update,
+    UpdateOffer, Version, find_update,
 };
 
 use crate::support::fake_ports::FakeReleases;
+
+const APPLE_SILICON: Target = Target {
+    os: Os::MacOs,
+    cpu: Cpu::Arm64,
+};
+const INTEL_MAC: Target = Target {
+    os: Os::MacOs,
+    cpu: Cpu::X86_64,
+};
+const LINUX_X86_64: Target = Target {
+    os: Os::Linux,
+    cpu: Cpu::X86_64,
+};
 
 fn version(text: &str) -> Version {
     text.parse().unwrap()
@@ -22,7 +36,7 @@ fn asset(name: &str) -> ReleaseAsset {
 fn published(tag: &str, version: &str) -> PublishedRelease {
     PublishedRelease {
         tag: tag.to_owned(),
-        assets: [Target::AppleSilicon, Target::Intel]
+        assets: [APPLE_SILICON, INTEL_MAC, LINUX_X86_64]
             .iter()
             .flat_map(|target| {
                 let archive = format!("guided-review-{version}-{}.tar.gz", target.triple());
@@ -96,7 +110,7 @@ fn a_newer_release_is_offered_with_the_archive_for_this_mac() {
     let update = Update::offered(
         version("0.4.0"),
         &published("v0.5.0", "0.5.0"),
-        Target::AppleSilicon,
+        APPLE_SILICON,
     )
     .unwrap();
 
@@ -112,11 +126,51 @@ fn a_newer_release_is_offered_with_the_archive_for_this_mac() {
 }
 
 #[test]
+fn a_release_target_is_named_by_its_cpu_and_os() {
+    let named = |os, cpu| Target { os, cpu }.triple();
+
+    assert_eq!(named(Os::MacOs, Cpu::Arm64), "aarch64-apple-darwin");
+    assert_eq!(named(Os::MacOs, Cpu::X86_64), "x86_64-apple-darwin");
+    assert_eq!(named(Os::Linux, Cpu::Arm64), "aarch64-unknown-linux-gnu");
+    assert_eq!(named(Os::Linux, Cpu::X86_64), "x86_64-unknown-linux-gnu");
+}
+
+#[test]
+fn a_linux_build_is_offered_the_linux_archive_never_a_mac_one() {
+    let update = Update::offered(
+        version("0.4.0"),
+        &published("v0.5.0", "0.5.0"),
+        LINUX_X86_64,
+    )
+    .unwrap();
+
+    assert_eq!(
+        update.archive.name,
+        "guided-review-0.5.0-x86_64-unknown-linux-gnu.tar.gz"
+    );
+}
+
+#[test]
+fn a_release_with_only_mac_archives_is_not_offered_on_linux() {
+    let mut release = published("v0.5.0", "0.5.0");
+    release
+        .assets
+        .retain(|asset| asset.name.contains("apple-darwin"));
+
+    assert!(Update::offered(version("0.4.0"), &release, LINUX_X86_64).is_none());
+}
+
+#[test]
+fn the_running_target_is_this_builds_os() {
+    assert_eq!(Target::running().os, Os::RUNNING);
+}
+
+#[test]
 fn the_running_version_or_an_older_one_is_not_offered() {
     let running = version("0.5.0");
 
-    assert!(Update::offered(running, &published("v0.5.0", "0.5.0"), Target::Intel).is_none());
-    assert!(Update::offered(running, &published("v0.4.0", "0.4.0"), Target::Intel).is_none());
+    assert!(Update::offered(running, &published("v0.5.0", "0.5.0"), INTEL_MAC).is_none());
+    assert!(Update::offered(running, &published("v0.4.0", "0.4.0"), INTEL_MAC).is_none());
 }
 
 #[test]
@@ -126,15 +180,15 @@ fn a_release_without_this_macs_archive_and_its_checksum_is_not_offered() {
         .assets
         .retain(|asset| !asset.name.ends_with("x86_64-apple-darwin.tar.gz.sha256"));
 
-    assert!(Update::offered(version("0.4.0"), &release, Target::Intel).is_none());
-    assert!(Update::offered(version("0.4.0"), &release, Target::AppleSilicon).is_some());
+    assert!(Update::offered(version("0.4.0"), &release, INTEL_MAC).is_none());
+    assert!(Update::offered(version("0.4.0"), &release, APPLE_SILICON).is_some());
 }
 
 #[test]
 fn a_release_whose_tag_is_not_a_version_is_not_offered() {
     let release = published("nightly", "0.5.0");
 
-    assert!(Update::offered(version("0.4.0"), &release, Target::AppleSilicon).is_none());
+    assert!(Update::offered(version("0.4.0"), &release, APPLE_SILICON).is_none());
 }
 
 #[test]
@@ -144,7 +198,7 @@ fn finding_an_update_asks_github_for_its_latest_release() {
         ..FakeReleases::default()
     };
 
-    let update = find_update(&releases, version("0.4.0"), Target::Intel).unwrap();
+    let update = find_update(&releases, version("0.4.0"), INTEL_MAC).unwrap();
 
     assert_eq!(update.map(|update| update.version), Some(version("0.5.0")));
 }
@@ -153,7 +207,7 @@ fn finding_an_update_asks_github_for_its_latest_release() {
 fn finding_an_update_fails_when_github_does() {
     let releases = FakeReleases::default();
 
-    let error = find_update(&releases, version("0.4.0"), Target::Intel).unwrap_err();
+    let error = find_update(&releases, version("0.4.0"), INTEL_MAC).unwrap_err();
 
     assert!(format!("{error:#}").contains("GitHub is down"), "{error:#}");
 }
@@ -162,7 +216,7 @@ fn update_to(text: &str) -> Update {
     Update::offered(
         version("0.0.1"),
         &published(&format!("v{text}"), text),
-        Target::AppleSilicon,
+        APPLE_SILICON,
     )
     .unwrap()
 }

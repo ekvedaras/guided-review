@@ -7,6 +7,8 @@ use std::str::FromStr;
 
 use anyhow::Context;
 
+use crate::platform::Os;
+
 pub use app_bundle::{
     AppBundle, BundlePlaced, IN_LOGIN_SHELL, LAUNCHED_APP, Relaunch, info_plist,
     write_bundle_template,
@@ -113,27 +115,37 @@ impl std::fmt::Display for Version {
     }
 }
 
-/// Which Mac a release archive is built for.
+/// The OS and CPU a release archive is built for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
-    AppleSilicon,
-    Intel,
+pub struct Target {
+    pub os: Os,
+    pub cpu: Cpu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cpu {
+    Arm64,
+    X86_64,
 }
 
 impl Target {
     pub fn running() -> Self {
-        if cfg!(target_arch = "x86_64") {
-            Self::Intel
-        } else {
-            Self::AppleSilicon
+        Self {
+            os: Os::RUNNING,
+            cpu: if cfg!(target_arch = "x86_64") {
+                Cpu::X86_64
+            } else {
+                Cpu::Arm64
+            },
         }
     }
 
-    pub fn triple(self) -> &'static str {
-        match self {
-            Self::AppleSilicon => "aarch64-apple-darwin",
-            Self::Intel => "x86_64-apple-darwin",
-        }
+    pub fn triple(self) -> String {
+        let arch = match self.cpu {
+            Cpu::Arm64 => "aarch64",
+            Cpu::X86_64 => "x86_64",
+        };
+        format!("{arch}-{}", self.os.triple_system())
     }
 }
 
@@ -150,7 +162,7 @@ pub struct ReleaseAsset {
     pub url: String,
 }
 
-/// A newer release this Mac can install: its archive and the archive's checksum file.
+/// A newer release this OS and CPU can install: its archive and the archive's checksum file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Update {
     pub version: Version,

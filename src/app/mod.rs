@@ -7,7 +7,6 @@ mod avatar_pictures;
 mod code_links;
 mod code_selection;
 pub mod components;
-mod dock_icon;
 mod frame_stats;
 pub mod keymap;
 mod layouts;
@@ -21,7 +20,6 @@ mod snapshots;
 mod switcher_window;
 mod tour_writer;
 mod updater;
-mod word_keys;
 mod writing_window;
 
 use std::cell::RefCell;
@@ -42,6 +40,7 @@ use crate::app_link::{Answer, AppListener, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
+use crate::platform;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
@@ -110,9 +109,9 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             cx.set_global(switching);
             tour_writer::resume(cx);
             if takes_focus() {
-                dock_icon::show();
+                platform::show_app_icon();
             } else {
-                dock_icon::stay_in_background();
+                platform::stay_in_background();
             }
             quit_on_cmd_q(cx);
             components::toast_stack::Toaster::install(cx);
@@ -124,7 +123,7 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             avatar_pictures::AvatarPictures::install(cx);
             prose_selection::ProseSelections::install(cx);
             updater::Updates::install(&home, cx);
-            word_keys::take_before_macos(cx);
+            platform::take_word_keys(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
         });
