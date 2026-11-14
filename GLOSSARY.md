@@ -80,6 +80,8 @@
 
 **Text keys**: The keys a text box edits with that differ by OS: on macOS Option moves by word and Cmd by line, on Linux Ctrl moves by word and Home/End by line. They are not the reviewer's to change.
 
+**Window buttons**: The OS's close, minimise and zoom buttons. On macOS they are the traffic lights, drawn on the app's own title bar, which keeps room free left of them (the button inset). On Linux the app draws none and keeps no room; the window manager decides the decorations. Avoid: traffic lights (macOS only), window controls.
+
 **Palette action**: Something the Primary+K palette does rather than a place it goes to, such as Settings or Mark step as read. A query that starts with `>` lists only actions.
 
 **Gap row**: The one row of a file box that stands for unchanged lines it does not show, between two changes or at either end, with how many and the buttons that show them.

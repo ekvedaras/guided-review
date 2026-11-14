@@ -27,9 +27,14 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **One spelling table per OS** (`Os::key_spelling`): the faces of the modifiers and the joiner between caps. Spelled chords and key caps both read it: `⌘⇧↵` on macOS, `Ctrl+Shift+↵` on Linux. The quit and close warnings spell the default key instead of saying `cmd+q`.
 - **Text box keys come from a table per OS** (`Os::text_keys`, `platform::TextEdit`): the macOS text keys as before; on Linux Ctrl moves and deletes by word, Ctrl+Home/End go to the ends of the text, Shift+Home/End select to the line's ends, Ctrl+A/C/X/V. Linux has no delete-to-line-start key, as GTK has none. Keys every OS shares stay in `text_box::bind_keys`.
 
+## Decisions, 2026-11-14 (#72, window chrome)
+
+- **The platform gives the window's title bar options and the button inset** (`Os::titlebar`, `Os::window_buttons_inset`), both from one adapter fact, `WINDOW_BUTTONS`. macOS: the traffic lights 14 px from the corner on a transparent title bar, 80 px kept free left of them, as before. Linux: none, so the title bar is not transparent and no room is kept; the window manager decides the decorations (Hyprland draws none). Before, the title bar code held `TRAFFIC_LIGHTS_WIDTH` and the sidebar and Settings left an empty 80 px gap on Linux.
+- **The title bar stays 40 px on every OS.** The app draws it on Linux too, as the strip that drags the window and carries the sidebar heading and the Settings chip.
+
 ## Known open
 
 - The Dock icon, background and word-key calls are three platform functions the app start calls in turn; one start call is a later ticket.
 - The app menu still holds the only Quit item; it is the App start hooks ticket's.
-- The Desktop entry, window chrome, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
+- The Desktop entry, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.
