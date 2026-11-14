@@ -5,8 +5,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if ! command -v cargo >/dev/null 2>&1; then
-    export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$HOME/.cargo/bin:$PATH"
+# rustup's cargo before any other: it follows rust-toolchain.toml, which a distro's older cargo cannot build.
+if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+elif ! command -v cargo >/dev/null 2>&1; then
+    for toolchain in "$HOME"/.rustup/toolchains/stable-*/bin; do
+        export PATH="$toolchain:$PATH"
+        break
+    done
 fi
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
 
