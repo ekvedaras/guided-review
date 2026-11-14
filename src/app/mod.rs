@@ -867,6 +867,7 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
         focus: takes_focus(),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(Os::RUNNING.titlebar(marked_if_dev(title).into())),
+        app_id: Some(platform::APP_ID.to_owned()),
         ..Default::default()
     }
 }
