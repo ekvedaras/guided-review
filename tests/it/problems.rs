@@ -1,4 +1,5 @@
 use crate::support::FixtureRepo;
+use guided_review::app_folders::NotRead;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::Tour;
@@ -128,17 +129,36 @@ fn a_guided_review_before_the_release_install_on_path_names_the_binary_to_remove
 }
 
 #[test]
-fn an_old_folder_written_again_after_the_move_says_its_files_are_not_read() {
+fn files_left_beside_the_app_folders_are_named_each_with_the_file_read_instead() {
     let (_repo, mut review) = open_review();
+    let not_read = |file: &str, read_instead: &str| NotRead {
+        file: file.into(),
+        read_instead: read_instead.into(),
+    };
 
-    review.raise_problem(Problem::OldFolderWrittenAgain(
-        "/home/me/.guided-review".into(),
-    ));
+    review.raise_problem(Problem::FilesNotRead(vec![
+        not_read(
+            "/home/me/.guided-review/config.toml",
+            "/home/me/.config/guided-review/config.toml",
+        ),
+        not_read(
+            "/home/me/.guided-review/tours/a/b/1.json",
+            "/home/me/.local/state/guided-review/tours/a/b/1.json",
+        ),
+        not_read(
+            "/home/me/.guided-review/tours/a/b/2.json",
+            "/home/me/.local/state/guided-review/tours/a/b/2.json",
+        ),
+        not_read(
+            "/home/me/.guided-review/tours/a/b/3.json",
+            "/home/me/.local/state/guided-review/tours/a/b/3.json",
+        ),
+    ]));
 
     let [problem] = review.problems().try_into().unwrap();
     assert_eq!(
         problem.to_string(),
-        "/home/me/.guided-review was written again after it moved to the XDG folders, likely by an older guided-review. Its files are not read: move what you need by hand, then delete it"
+        "4 files are not read, as the app reads another file in their place; nothing was merged, overwritten or deleted, so keep what you need by hand: /home/me/.guided-review/config.toml (read instead: /home/me/.config/guided-review/config.toml), /home/me/.guided-review/tours/a/b/1.json (read instead: /home/me/.local/state/guided-review/tours/a/b/1.json), /home/me/.guided-review/tours/a/b/2.json (read instead: /home/me/.local/state/guided-review/tours/a/b/2.json) and 1 more"
     );
 }
 

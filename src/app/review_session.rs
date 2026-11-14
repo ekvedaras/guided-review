@@ -23,6 +23,7 @@ use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
+use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
@@ -120,8 +121,11 @@ impl ReviewSession {
             review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
         }
         let folders = cx.global::<PrSwitching>().folders.clone();
-        if let Some(old) = folders.old_folder_written_again() {
-            review.raise_problem(Problem::OldFolderWrittenAgain(old));
+        let not_read = AppFolders::xdg()
+            .map(|xdg| folders.files_not_read(&xdg))
+            .unwrap_or_default();
+        if !not_read.is_empty() {
+            review.raise_problem(Problem::FilesNotRead(not_read));
         }
         let SessionWiring {
             source,

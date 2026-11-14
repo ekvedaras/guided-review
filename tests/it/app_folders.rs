@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::path::Path;
 
-use guided_review::app_folders::AppFolders;
+use guided_review::app_folders::{AppFolders, NotRead};
 use guided_review::platform;
 use tempfile::TempDir;
 
@@ -170,20 +170,20 @@ fn old_install() -> (TempDir, AppFolders, AppFolders) {
 fn the_old_folder_is_moved_into_the_xdg_folders_and_left_behind_empty() {
     let (home, _old, xdg) = old_install();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
 
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
-    assert_eq!(xdg.old_folder_written_again(), None);
+    assert_eq!(xdg.files_not_read(&xdg), vec![]);
 }
 
 #[test]
 fn a_second_start_moves_nothing() {
     let (home, _old, xdg) = old_install();
-    AppFolders::move_once(xdg.clone()).unwrap();
+    AppFolders::move_once(xdg.clone());
     fs::write(xdg.config_file(), "changed since\n").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
 
     assert_eq!(
         fs::read_to_string(xdg.config_file()).unwrap(),
@@ -198,11 +198,11 @@ fn files_of_the_reviewer_s_own_in_the_old_folder_stay_there() {
     let own = home.path().join(".guided-review/elsewhere.md");
     fs::write(&own, "mine").unwrap();
 
-    AppFolders::move_once(xdg.clone()).unwrap();
+    AppFolders::move_once(xdg.clone());
 
     assert_all_in(&xdg);
     assert_eq!(fs::read_to_string(own).unwrap(), "mine");
-    assert_eq!(xdg.old_folder_written_again(), None);
+    assert_eq!(xdg.files_not_read(&xdg), vec![]);
 }
 
 #[test]
@@ -211,14 +211,14 @@ fn while_an_old_app_holds_the_lock_nothing_moves_and_the_old_folder_stays_in_use
     let running_app = File::options().write(true).open(old.lock()).unwrap();
     running_app.try_lock().unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), old);
+    assert_eq!(AppFolders::move_once(xdg.clone()), old);
 
     assert_all_in(&old);
     assert!(!xdg.config_file().parent().unwrap().exists());
     assert!(!xdg.tours().parent().unwrap().exists());
 
     drop(running_app);
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
     assert_all_in(&xdg);
 }
 
@@ -229,14 +229,14 @@ fn a_move_that_fails_part_way_puts_everything_back_and_the_old_folder_stays_in_u
     fs::create_dir_all(home.path().join(".local")).unwrap();
     fs::write(home.path().join(".local/state"), "in the way").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), old);
+    assert_eq!(AppFolders::move_once(xdg.clone()), old);
 
     assert_all_in(&old);
     assert!(!xdg.config_file().parent().unwrap().exists());
     assert!(!xdg.tours().parent().unwrap().exists());
 
     fs::remove_file(home.path().join(".local/state")).unwrap();
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
     assert_all_in(&xdg);
 }
 
@@ -252,7 +252,7 @@ fn a_move_cut_short_is_finished_by_the_next_start() {
     let half_copied = xdg.tours().with_extension("partial");
     fs::create_dir_all(half_copied.join("acme")).unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
 
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
@@ -261,19 +261,22 @@ fn a_move_cut_short_is_finished_by_the_next_start() {
 
 #[test]
 fn an_old_binary_writing_the_old_folder_after_the_move_is_a_problem_and_nothing_is_merged() {
-    let (home, old, xdg) = old_install();
-    AppFolders::move_once(xdg.clone()).unwrap();
+    let (_home, old, xdg) = old_install();
+    AppFolders::move_once(xdg.clone());
     let written_again = path_of(&old, "state");
     fs::create_dir_all(written_again.parent().unwrap()).unwrap();
     fs::write(&written_again, "{\"read\":[]}").unwrap();
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
 
     assert_all_in(&xdg);
-    assert_eq!(fs::read_to_string(written_again).unwrap(), "{\"read\":[]}");
+    assert_eq!(fs::read_to_string(&written_again).unwrap(), "{\"read\":[]}");
     assert_eq!(
-        xdg.old_folder_written_again(),
-        Some(home.path().join(".guided-review"))
+        xdg.files_not_read(&xdg),
+        vec![NotRead {
+            file: written_again,
+            read_instead: path_of(&xdg, "state"),
+        }]
     );
 }
 
@@ -292,7 +295,7 @@ fn a_move_to_another_disk_copies_checks_and_then_deletes() {
         ]),
     );
 
-    assert_eq!(AppFolders::move_once(xdg.clone()).unwrap(), xdg);
+    assert_eq!(AppFolders::move_once(xdg.clone()), xdg);
 
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
@@ -315,9 +318,38 @@ fn starts_at_once_all_end_in_the_xdg_folders_whichever_moves() {
             .collect();
 
         for start in starts {
-            assert_eq!(start.join().unwrap().unwrap(), xdg);
+            assert_eq!(start.join().unwrap(), xdg);
         }
         assert_all_in(&xdg);
         assert!(!home.path().join(".guided-review").exists());
     }
+}
+
+#[test]
+fn a_move_stuck_after_a_put_back_that_failed_never_fails_a_start_and_says_what_is_where() {
+    let (home, old, xdg) = old_install();
+    // As a start before this fix left it: the mark, the config moved, then written again in the
+    // old folder, and the tours blocked by a file where the state folder goes.
+    fs::write(home.path().join(".guided-review/.moving"), "").unwrap();
+    fs::create_dir_all(xdg.config_file().parent().unwrap()).unwrap();
+    fs::write(xdg.config_file(), "ask_model = \"opus\"\n").unwrap();
+    fs::create_dir_all(home.path().join(".local")).unwrap();
+    fs::write(home.path().join(".local/state"), "in the way").unwrap();
+
+    for _ in 0..2 {
+        assert_eq!(AppFolders::move_once(xdg.clone()), old);
+    }
+
+    assert_all_in(&old);
+    assert_eq!(
+        fs::read_to_string(xdg.config_file()).unwrap(),
+        "ask_model = \"opus\"\n"
+    );
+    assert_eq!(
+        old.files_not_read(&xdg),
+        vec![NotRead {
+            file: xdg.config_file(),
+            read_instead: old.config_file(),
+        }]
+    );
 }

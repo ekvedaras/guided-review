@@ -36,13 +36,13 @@ impl AppFolders {
     pub fn running() -> anyhow::Result<Self> {
         match RUNNING.get() {
             Some(folders) => Ok(folders.clone()),
-            None => Self::xdg_of_this_process(),
+            None => Self::xdg(),
         }
     }
 
     /// Run once at start: moves `~/.guided-review` when it can, and makes the result this process's folders.
     pub fn settle() -> anyhow::Result<Self> {
-        let settled = Self::move_once(Self::xdg_of_this_process()?)?;
+        let settled = Self::move_once(Self::xdg()?);
         Ok(RUNNING.get_or_init(|| settled).clone())
     }
 
@@ -50,24 +50,24 @@ impl AppFolders {
     /// since asked that app to quit.
     pub fn settle_again(&self) -> anyhow::Result<Self> {
         if *self == Self::before_xdg(&self.home) {
-            Self::move_once(platform::app_folders(&self.home, |name| {
-                std::env::var_os(name)
-            }))
+            Ok(Self::move_once(Self::xdg()?))
         } else {
             Ok(self.clone())
         }
     }
 
-    fn xdg_of_this_process() -> anyhow::Result<Self> {
+    /// The XDG folders of this process's environment, moved into or not.
+    pub fn xdg() -> anyhow::Result<Self> {
         let home = std::env::home_dir().context("could not find the home folder")?;
         Ok(platform::app_folders(&home, |name| std::env::var_os(name)))
     }
 
     /// The folders a start uses: `xdg`, after what `~/.guided-review` holds is moved into it, or the
     /// old folder while that cannot be done: an app of an earlier version holds its lock, or a step
-    /// failed and everything was put back. Never some of each. Once the XDG folders hold files, the old
-    /// folder is not read again, even if an older binary writes it.
-    pub fn move_once(xdg: Self) -> anyhow::Result<Self> {
+    /// failed and what moved was put back. A move never fails the start: what could not be put back
+    /// stays where it is, `files_not_read` names it, and the next start tries the move again. Once the
+    /// XDG folders hold files, the old folder is not read again, even if an older binary writes it.
+    pub fn move_once(xdg: Self) -> Self {
         let old = Self::before_xdg(&xdg.home);
         let mark = old.state.join(MOVING_MARK);
         let moves: Vec<(PathBuf, PathBuf)> = MOVED
@@ -75,66 +75,85 @@ impl AppFolders {
             .map(|place| (place(&old), place(&xdg)))
             .collect();
         if !exists(&mark) && !moves.iter().any(|(from, _)| exists(from)) {
-            return Ok(xdg);
+            return xdg;
         }
         let moved_before = |xdg: &Self| !exists(&mark) && xdg.holds_files();
-        let _lock = match take_lock(&old.lock())? {
-            OldLock::Taken(lock) => lock,
-            OldLock::HeldByAnotherApp => {
-                return Ok(if moved_before(&xdg) { xdg } else { old });
+        let _lock = match take_lock(&old.lock()) {
+            Ok(OldLock::Taken(lock)) => lock,
+            Ok(OldLock::HeldByAnotherApp) => {
+                return if moved_before(&xdg) { xdg } else { old };
             }
-            OldLock::FolderGone => return Ok(xdg),
+            Ok(OldLock::FolderGone) => return xdg,
+            Err(error) => {
+                eprintln!("warning: {error:#}; nothing was moved");
+                return if moved_before(&xdg) { xdg } else { old };
+            }
         };
         if moved_before(&xdg) {
             // Another start moved it while this one waited, and opening the lock made the folder again.
             old.tidy_after_move();
-            return Ok(xdg);
+            return xdg;
         }
         if let Err(error) = std::fs::write(&mark, "") {
             eprintln!(
                 "warning: could not start moving {} into the XDG folders, so it stays in use: {error}",
                 old.state.display()
             );
-            return Ok(old);
+            return old;
         }
         match moves.iter().try_for_each(|(from, to)| relocate(from, to)) {
             Ok(()) => {
                 old.tidy_after_move();
-                Ok(xdg)
+                xdg
             }
             Err(error) => {
                 eprintln!(
                     "warning: could not move {} into the XDG folders, so it stays in use: {error:#}",
                     old.state.display()
                 );
+                let mut all_put_back = true;
                 for (from, to) in moves.iter().rev() {
-                    relocate(to, from).with_context(|| {
-                        format!(
-                            "could not put {} back after a failed move; the next start finishes the move",
-                            from.display()
-                        )
-                    })?;
+                    if let Err(error) = relocate(to, from) {
+                        all_put_back = false;
+                        eprintln!(
+                            "warning: could not put {} back after a failed move, so it stays in {}; the next start tries the move again: {error:#}",
+                            from.display(),
+                            to.display()
+                        );
+                    }
                 }
-                discard(&mark)?;
-                xdg.remove_if_empty();
-                Ok(old)
+                if all_put_back {
+                    if let Err(error) = discard(&mark) {
+                        eprintln!("warning: {error:#}");
+                    }
+                    xdg.remove_if_empty();
+                }
+                old
             }
         }
     }
 
-    /// `~/.guided-review` when, after the move, something wrote what the app keeps back into it: an
-    /// older binary that still uses it. Its files are not read, so the reviewer must know.
-    pub fn old_folder_written_again(&self) -> Option<PathBuf> {
+    /// What the app keeps that lies in the folders it does not use, each beside the place the app
+    /// uses for it instead: what a move could not put back, or what an older binary wrote into
+    /// `~/.guided-review` after the move. `self` is the folders in use, `xdg` those of the move.
+    pub fn files_not_read(&self, xdg: &Self) -> Vec<NotRead> {
         let old = Self::before_xdg(&self.home);
-        if *self == old {
-            return None;
-        }
+        let unused = if *self == old { xdg } else { &old };
         MOVED
             .iter()
-            .map(|place| place(&old))
-            .chain([old.lock()])
-            .any(|path| exists(&path))
-            .then_some(old.state)
+            .flat_map(|place| {
+                let (unused_place, used_place) = (place(unused), place(self));
+                files_under(&unused_place)
+                    .into_iter()
+                    .map(move |file| NotRead {
+                        read_instead: match file.strip_prefix(&unused_place) {
+                            Ok(rest) if !rest.as_os_str().is_empty() => used_place.join(rest),
+                            _ => used_place.clone(),
+                        },
+                        file,
+                    })
+            })
+            .collect()
     }
 
     fn holds_files(&self) -> bool {
@@ -215,6 +234,14 @@ impl AppFolders {
     pub fn socket(&self) -> PathBuf {
         self.state.join("app.sock")
     }
+}
+
+/// A file the app does not read, as it uses `read_instead`, which may not exist. Nothing merges the
+/// two: the reviewer keeps what they need by hand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotRead {
+    pub file: PathBuf,
+    pub read_instead: PathBuf,
 }
 
 static RUNNING: OnceLock<AppFolders> = OnceLock::new();
@@ -373,6 +400,24 @@ fn same(left: &Path, right: &Path) -> anyhow::Result<bool> {
         Ok(bytes(left)? == bytes(right)?)
     } else {
         Ok(false)
+    }
+}
+
+/// The files at `path` and in the folders under it; none when nothing is there.
+fn files_under(path: &Path) -> Vec<PathBuf> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            let mut names: Vec<OsString> = std::fs::read_dir(path)
+                .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+                .unwrap_or_default();
+            names.sort();
+            names
+                .iter()
+                .flat_map(|name| files_under(&path.join(name)))
+                .collect()
+        }
+        Ok(_) => vec![path.to_path_buf()],
+        Err(_) => Vec::new(),
     }
 }
 
