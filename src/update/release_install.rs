@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use flate2::read::GzDecoder;
@@ -19,7 +20,7 @@ pub struct ReleaseInstall {
     versions: PathBuf,
     bin_link: PathBuf,
     skill_link: PathBuf,
-    desktop_entry: DesktopEntry,
+    desktop_entry: Arc<dyn DesktopEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,11 +82,12 @@ impl ReleaseInstall {
     }
 
     pub fn for_os(os: Os, home: &Path) -> Self {
+        let bin_link = home.join(".local/bin/guided-review");
         Self {
             versions: home.join(".local/share/guided-review"),
-            bin_link: home.join(".local/bin/guided-review"),
+            desktop_entry: os.desktop_entry(home, &bin_link),
+            bin_link,
             skill_link: home.join(".claude/skills/tour"),
-            desktop_entry: os.desktop_entry(home),
         }
     }
 
@@ -124,8 +126,8 @@ impl ReleaseInstall {
         })
     }
 
-    pub fn desktop_entry(&self) -> &DesktopEntry {
-        &self.desktop_entry
+    pub fn desktop_entry(&self) -> &dyn DesktopEntry {
+        self.desktop_entry.as_ref()
     }
 
     /// Puts the Desktop entry of the running release in place when it is missing or another

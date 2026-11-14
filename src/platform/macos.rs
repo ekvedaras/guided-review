@@ -5,7 +5,10 @@ pub mod dock_icon;
 #[cfg(target_os = "macos")]
 pub mod word_keys;
 
+use std::sync::Arc;
+
 use super::{Adapter, AppMenu, HerdrRaise, KeySpelling, PrimaryKey, TextEdit, WindowButtons};
+use app_bundle::AppBundle;
 
 pub(super) const ADAPTER: Adapter = Adapter {
     triple_system: "apple-darwin",
@@ -54,4 +57,5 @@ pub(super) const ADAPTER: Adapter = Adapter {
         args: &["-a", "Herdr"],
         best_effort: false,
     },
+    desktop_entry: |home, bin_link| Arc::new(AppBundle::in_home(home, bin_link)),
 };

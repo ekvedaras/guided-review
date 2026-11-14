@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::app_icon::AppIcon;
-use crate::platform::desktop_entry::{APP_ID, EntryPlaced, put_file, replace};
+use crate::platform::desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, put_file, replace};
 use crate::update::Version;
 
-/// The bundle's folder name, in a release archive and in `~/Applications`.
+/// The bundle's folder name, in a release archive and in [`APPLICATIONS`].
 pub const BUNDLE_FOLDER: &str = "Guided Review.app";
+const APPLICATIONS: &str = "~/Applications";
 const APP_NAME: &str = "Guided Review";
 const EXECUTABLE: &str = "guided-review";
 const ICON: &str = "AppIcon";
@@ -21,8 +22,7 @@ const EXECUTABLE_PATH: &str = "Contents/MacOS/guided-review";
 
 /// Launch Services names the app it launched here. The bundle's executable is a link to the bin link,
 /// which macOS follows before it runs it, so the binary's own path does not tell a launch of the app.
-pub const LAUNCHED_APP: &str = "__CFBundleIdentifier";
-pub const LOGIN_SHELL: &str = "/bin/zsh";
+const LAUNCHED_APP: &str = "__CFBundleIdentifier";
 
 /// `~/Applications/Guided Review.app`: what the Dock, Spotlight and Raycast start. A real folder, as
 /// Spotlight does not index a linked one; its binary is a link to the bin link, so it runs whatever
@@ -34,20 +34,47 @@ pub struct AppBundle {
 }
 
 impl AppBundle {
-    pub fn in_home(home: &Path) -> Self {
+    pub fn in_home(home: &Path, bin_link: &Path) -> Self {
+        let applications = home.join(APPLICATIONS.trim_start_matches("~/"));
         Self {
-            folder: home.join("Applications").join(BUNDLE_FOLDER),
-            bin_link: home.join(".local/bin/guided-review"),
+            folder: applications.join(BUNDLE_FOLDER),
+            bin_link: bin_link.to_path_buf(),
         }
     }
 
-    pub fn executable(&self) -> PathBuf {
+    /// Finder and Launch Services read a bundle's Info.plist again only once the bundle folder itself
+    /// looks changed.
+    fn mark_changed(&self) -> anyhow::Result<()> {
+        fs::File::open(&self.folder)
+            .and_then(|folder| folder.set_modified(std::time::SystemTime::now()))
+            .with_context(|| format!("could not mark {} changed", self.folder.display()))
+    }
+}
+
+impl DesktopEntry for AppBundle {
+    fn name(&self) -> &'static str {
+        BUNDLE_FOLDER
+    }
+
+    fn folder(&self) -> &'static str {
+        APPLICATIONS
+    }
+
+    fn executable(&self) -> PathBuf {
         self.folder.join(EXECUTABLE_PATH)
     }
 
-    /// What to start `exe` as: the bundle's executable when that is `exe`, so the Dock names the app
-    /// Guided Review and shows its icon even when the CLI starts it, else `exe` itself.
-    pub fn launcher_for(&self, exe: &Path) -> PathBuf {
+    fn login_shell(&self) -> &'static str {
+        "/bin/zsh"
+    }
+
+    fn launched_app_variable(&self) -> &'static str {
+        LAUNCHED_APP
+    }
+
+    /// The bundle's executable when that is `exe`, so the Dock names the app Guided Review and
+    /// shows its icon even when the CLI starts it, else `exe` itself.
+    fn launcher_for(&self, exe: &Path) -> PathBuf {
         let bundled = self.executable();
         let is_same = match (fs::canonicalize(&bundled), fs::canonicalize(exe)) {
             (Ok(bundled), Ok(exe)) => bundled == exe,
@@ -56,9 +83,9 @@ impl AppBundle {
         if is_same { bundled } else { exe.to_path_buf() }
     }
 
-    /// Makes the bundle match the one inside the `release` folder, one file at a time, so the bundle
-    /// never lacks a file, and a file already the same is left alone.
-    pub fn place_from(&self, release: &Path) -> anyhow::Result<EntryPlaced> {
+    /// One file at a time, so the bundle never lacks a file, and a file already the same is left
+    /// alone.
+    fn place_from(&self, release: &Path) -> anyhow::Result<EntryPlaced> {
         let template = release.join(BUNDLE_FOLDER);
         if !template.join(INFO_PLIST).is_file() {
             return Ok(EntryPlaced::NotInRelease);
@@ -81,14 +108,6 @@ impl AppBundle {
             self.mark_changed()?;
         }
         Ok(placed)
-    }
-
-    /// Finder and Launch Services read a bundle's Info.plist again only once the bundle folder itself
-    /// looks changed.
-    fn mark_changed(&self) -> anyhow::Result<()> {
-        fs::File::open(&self.folder)
-            .and_then(|folder| folder.set_modified(std::time::SystemTime::now()))
-            .with_context(|| format!("could not mark {} changed", self.folder.display()))
     }
 }
 

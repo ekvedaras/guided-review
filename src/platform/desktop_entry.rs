@@ -1,12 +1,13 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 
 use super::Os;
-use super::linux::desktop_file::{self, DesktopFile};
-use super::macos::app_bundle::{self, AppBundle};
+use super::linux::desktop_file;
+use super::macos::app_bundle;
 use crate::update::Version;
 
 /// Names the app to the OS: the macOS bundle id, the Linux desktop file and window app id.
@@ -19,15 +20,52 @@ pub use app_bundle::info_plist;
 
 /// What the OS launcher starts: the App bundle on macOS, a desktop file and its icon on Linux. A
 /// release carries its files; placing them from the release the bin link names keeps it current.
-#[derive(Debug, Clone)]
-pub struct DesktopEntry {
-    form: Form,
-}
+pub trait DesktopEntry: std::fmt::Debug + Send + Sync {
+    /// What the reviewer calls the entry, as messages name it.
+    fn name(&self) -> &'static str;
 
-#[derive(Debug, Clone)]
-enum Form {
-    AppBundle(AppBundle),
-    DesktopFile(DesktopFile),
+    /// Where the entry is put, as messages name it.
+    fn folder(&self) -> &'static str;
+
+    /// Makes the entry match the one carried by the `release` folder.
+    fn place_from(&self, release: &Path) -> anyhow::Result<EntryPlaced>;
+
+    /// What to start `exe` as when it starts the app.
+    fn launcher_for(&self, exe: &Path) -> PathBuf;
+
+    /// The environment variable that names the app a launch from the OS launcher started.
+    fn launched_app_variable(&self) -> &'static str;
+
+    /// The binary the entry starts.
+    fn executable(&self) -> PathBuf;
+
+    /// The shell a relaunch runs through when `$SHELL` is unset.
+    fn login_shell(&self) -> &'static str;
+
+    /// A launch from the OS launcher gets the session's short `PATH`, without `gh`, `claude` or `hc`.
+    /// So it runs the entry's binary again through the reviewer's login shell, which reads their
+    /// profile as a terminal does.
+    fn relaunch_in_login_shell(
+        &self,
+        launched_app: Option<&OsStr>,
+        shell: Option<&OsStr>,
+        is_in_login_shell: bool,
+    ) -> Option<Relaunch> {
+        let is_our_app = launched_app == Some(OsStr::new(APP_ID));
+        if !is_our_app || is_in_login_shell {
+            return None;
+        }
+        let executable = self.executable();
+        let args = [OsStr::new("-l"), OsStr::new("-i"), OsStr::new("-c")]
+            .into_iter()
+            .chain([OsStr::new("exec \"$0\""), executable.as_os_str()])
+            .map(OsStr::to_os_string)
+            .collect();
+        Some(Relaunch {
+            program: PathBuf::from(shell.unwrap_or_else(|| OsStr::new(self.login_shell()))),
+            args,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,82 +86,9 @@ pub struct Relaunch {
 }
 
 impl Os {
-    pub fn desktop_entry(self, home: &Path) -> DesktopEntry {
-        let form = match self {
-            Self::MacOs => Form::AppBundle(AppBundle::in_home(home)),
-            Self::Linux => Form::DesktopFile(DesktopFile::in_home(home)),
-        };
-        DesktopEntry { form }
-    }
-}
-
-impl DesktopEntry {
-    /// What the reviewer calls the entry, as messages name it.
-    pub fn name(&self) -> &'static str {
-        match self.form {
-            Form::AppBundle(_) => app_bundle::BUNDLE_FOLDER,
-            Form::DesktopFile(_) => desktop_file::NAME,
-        }
-    }
-
-    /// Where the entry is put, as messages name it.
-    pub fn folder(&self) -> &'static str {
-        match self.form {
-            Form::AppBundle(_) => "~/Applications",
-            Form::DesktopFile(_) => desktop_file::FOLDER,
-        }
-    }
-
-    /// Makes the entry match the one carried by the `release` folder.
-    pub fn place_from(&self, release: &Path) -> anyhow::Result<EntryPlaced> {
-        match &self.form {
-            Form::AppBundle(bundle) => bundle.place_from(release),
-            Form::DesktopFile(file) => file.place_from(release),
-        }
-    }
-
-    /// What to start `exe` as when it starts the app.
-    pub fn launcher_for(&self, exe: &Path) -> PathBuf {
-        match &self.form {
-            Form::AppBundle(bundle) => bundle.launcher_for(exe),
-            Form::DesktopFile(_) => exe.to_path_buf(),
-        }
-    }
-
-    /// The environment variable that names the app a launch from the OS launcher started.
-    pub fn launched_app_variable(&self) -> &'static str {
-        match self.form {
-            Form::AppBundle(_) => app_bundle::LAUNCHED_APP,
-            Form::DesktopFile(_) => desktop_file::LAUNCHED_APP,
-        }
-    }
-
-    /// A launch from the OS launcher gets the session's short `PATH`, without `gh`, `claude` or `hc`.
-    /// So it runs the entry's binary again through the reviewer's login shell, which reads their
-    /// profile as a terminal does.
-    pub fn relaunch_in_login_shell(
-        &self,
-        launched_app: Option<&OsStr>,
-        shell: Option<&OsStr>,
-        is_in_login_shell: bool,
-    ) -> Option<Relaunch> {
-        let is_our_app = launched_app == Some(OsStr::new(APP_ID));
-        if !is_our_app || is_in_login_shell {
-            return None;
-        }
-        let (executable, login_shell) = match &self.form {
-            Form::AppBundle(bundle) => (bundle.executable(), app_bundle::LOGIN_SHELL),
-            Form::DesktopFile(file) => (file.executable(), desktop_file::LOGIN_SHELL),
-        };
-        let args = [OsStr::new("-l"), OsStr::new("-i"), OsStr::new("-c")]
-            .into_iter()
-            .chain([OsStr::new("exec \"$0\""), executable.as_os_str()])
-            .map(OsStr::to_os_string)
-            .collect();
-        Some(Relaunch {
-            program: PathBuf::from(shell.unwrap_or_else(|| OsStr::new(login_shell))),
-            args,
-        })
+    /// This OS's Desktop entry in `home`, starting the release install's `bin_link`.
+    pub fn desktop_entry(self, home: &Path, bin_link: &Path) -> Arc<dyn DesktopEntry> {
+        (self.adapter().desktop_entry)(home, bin_link)
     }
 }
 

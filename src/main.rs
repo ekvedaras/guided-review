@@ -14,7 +14,7 @@ use guided_review::github::GitHub;
 use guided_review::opened_pr::OpenedPr;
 use guided_review::outline::Outline;
 use guided_review::pieces;
-use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, Os, write_desktop_entry_templates};
+use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
@@ -370,7 +370,8 @@ fn settings() -> anyhow::Result<()> {
 /// switcher; `guided-review` with no command shows it too.
 fn launch() -> anyhow::Result<()> {
     let folders = AppFolders::running()?;
-    let desktop_entry = Os::RUNNING.desktop_entry(folders.home());
+    let install = ReleaseInstall::in_home(folders.home());
+    let desktop_entry = install.desktop_entry();
     let launched_app = std::env::var_os(desktop_entry.launched_app_variable());
     let shell = std::env::var_os("SHELL");
     let is_in_login_shell = std::env::var_os(IN_LOGIN_SHELL).is_some();

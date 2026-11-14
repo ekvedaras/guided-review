@@ -3,6 +3,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use guided_review::platform::{
     DesktopEntry, EntryPlaced, Os, Relaunch, write_desktop_entry_templates,
@@ -13,8 +14,8 @@ use tempfile::TempDir;
 const OUR_APP: &str = "io.github.ekvedaras.guided-review";
 const ICON_SIZES: [&str; 2] = ["256x256", "512x512"];
 
-fn entry(home: &Path) -> DesktopEntry {
-    Os::Linux.desktop_entry(home)
+fn entry(home: &Path) -> Arc<dyn DesktopEntry> {
+    Os::Linux.desktop_entry(home, &home.join(".local/bin/guided-review"))
 }
 
 fn icon(size: &str) -> String {

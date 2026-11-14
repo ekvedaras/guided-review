@@ -13,8 +13,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
-use crate::platform::Os;
 use crate::tour::StepId;
+use crate::update::ReleaseInstall;
 use crate::viewer::{AgentReplied, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
@@ -357,8 +357,8 @@ fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> Option<()> {
 fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
     let program = match std::env::var_os(APP_COMMAND_VARIABLE) {
         Some(program) => PathBuf::from(program),
-        None => Os::RUNNING
-            .desktop_entry(folder.folders.home())
+        None => ReleaseInstall::in_home(folder.folders.home())
+            .desktop_entry()
             .launcher_for(
                 &std::env::current_exe().context("could not find the guided-review binary")?,
             ),

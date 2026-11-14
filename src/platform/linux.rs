@@ -1,6 +1,9 @@
 pub mod desktop_file;
 
+use std::sync::Arc;
+
 use super::{Adapter, HerdrRaise, KeySpelling, PrimaryKey, TextEdit};
+use desktop_file::DesktopFile;
 
 pub(super) const ADAPTER: Adapter = Adapter {
     triple_system: "unknown-linux-gnu",
@@ -51,4 +54,5 @@ pub(super) const ADAPTER: Adapter = Adapter {
         args: &["dispatch", "focuswindow", "class:herdr-app"],
         best_effort: true,
     },
+    desktop_entry: |home, bin_link| Arc::new(DesktopFile::in_home(home, bin_link)),
 };

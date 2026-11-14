@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use guided_review::platform::{
     DesktopEntry, EntryPlaced, Os, Relaunch, info_plist, write_desktop_entry_templates,
@@ -30,8 +31,8 @@ fn template(dir: &Path, version_text: &str) -> PathBuf {
     dir.to_path_buf()
 }
 
-fn bundle(home: &Path) -> DesktopEntry {
-    Os::MacOs.desktop_entry(home)
+fn bundle(home: &Path) -> Arc<dyn DesktopEntry> {
+    Os::MacOs.desktop_entry(home, &home.join(".local/bin/guided-review"))
 }
 
 fn home() -> TempDir {

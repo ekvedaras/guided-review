@@ -7,6 +7,7 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 
@@ -122,6 +123,8 @@ struct Adapter {
     window_buttons: Option<WindowButtons>,
     app_menu: Option<AppMenu>,
     herdr_raise: HerdrRaise,
+    /// This OS's Desktop entry in a home, starting a bin link.
+    desktop_entry: fn(&Path, &Path) -> Arc<dyn DesktopEntry>,
 }
 
 /// The app menu, holding only Quit.
