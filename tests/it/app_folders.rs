@@ -297,3 +297,27 @@ fn a_move_to_another_disk_copies_checks_and_then_deletes() {
     assert_all_in(&xdg);
     assert!(!home.path().join(".guided-review").exists());
 }
+
+#[test]
+fn starts_at_once_all_end_in_the_xdg_folders_whichever_moves() {
+    for _ in 0..40 {
+        let (home, _old, xdg) = old_install();
+
+        // Spread over the time a move takes, so some start once the folder is gone.
+        let starts: Vec<_> = (0..32)
+            .map(|start| {
+                let xdg = xdg.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_micros(start * 10));
+                    AppFolders::move_once(xdg)
+                })
+            })
+            .collect();
+
+        for start in starts {
+            assert_eq!(start.join().unwrap().unwrap(), xdg);
+        }
+        assert_all_in(&xdg);
+        assert!(!home.path().join(".guided-review").exists());
+    }
+}

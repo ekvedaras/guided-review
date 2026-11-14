@@ -78,10 +78,16 @@ impl AppFolders {
             return Ok(xdg);
         }
         let moved_before = |xdg: &Self| !exists(&mark) && xdg.holds_files();
-        let Some(_lock) = take_lock(&old.lock())? else {
-            return Ok(if moved_before(&xdg) { xdg } else { old });
+        let _lock = match take_lock(&old.lock())? {
+            OldLock::Taken(lock) => lock,
+            OldLock::HeldByAnotherApp => {
+                return Ok(if moved_before(&xdg) { xdg } else { old });
+            }
+            OldLock::FolderGone => return Ok(xdg),
         };
         if moved_before(&xdg) {
+            // Another start moved it while this one waited, and opening the lock made the folder again.
+            old.tidy_after_move();
             return Ok(xdg);
         }
         if let Err(error) = std::fs::write(&mark, "") {
@@ -232,23 +238,35 @@ const MOVING_MARK: &str = ".moving";
 const LOCK_WAIT: Duration = Duration::from_secs(1);
 const LOCK_POLL: Duration = Duration::from_millis(25);
 
-/// The app lock of the old folder, so no app of an earlier version writes it during the move. `None`
-/// when one holds it.
-fn take_lock(path: &Path) -> anyhow::Result<Option<File>> {
-    let lock = OpenOptions::new()
+enum OldLock {
+    Taken(File),
+    HeldByAnotherApp,
+    /// Another start moved everything and removed the folder.
+    FolderGone,
+}
+
+/// The app lock of the old folder, so no app of an earlier version writes it during the move.
+fn take_lock(path: &Path) -> anyhow::Result<OldLock> {
+    let lock = match OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(path)
-        .with_context(|| format!("could not open {}", path.display()))?;
+    {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(OldLock::FolderGone),
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not open {}", path.display()));
+        }
+    };
     let deadline = Instant::now() + LOCK_WAIT;
     loop {
         match lock.try_lock() {
-            Ok(()) => return Ok(Some(lock)),
+            Ok(()) => return Ok(OldLock::Taken(lock)),
             Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
                 std::thread::sleep(LOCK_POLL);
             }
-            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::WouldBlock) => return Ok(OldLock::HeldByAnotherApp),
             Err(TryLockError::Error(error)) => {
                 return Err(error).with_context(|| format!("could not lock {}", path.display()));
             }
