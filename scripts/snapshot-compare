@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Before/after pictures for a PR body; the work is in snapshot-compare.swift, which draws with AppKit.
+# Usage: scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]
+set -euo pipefail
+
+if [ "$(uname -s)" != Darwin ]; then
+    echo "scripts/snapshot-compare works on macOS only: it draws with Swift and AppKit" >&2
+    exit 1
+fi
+exec swift -suppress-warnings "$(dirname "$0")/snapshot-compare.swift" "$@"

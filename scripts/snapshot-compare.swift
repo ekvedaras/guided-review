@@ -1,4 +1,3 @@
-#!/usr/bin/env -S swift -suppress-warnings
 // Before/after pictures for a PR body: one side-by-side PNG per scene found in both folders, before left,
 // after right, each under a small label. With light/ and dark/ in both folders, each pair is done into
 // <out>/light and <out>/dark.

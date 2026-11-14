@@ -10,6 +10,11 @@
 # screen works. Code comes from this repo when the PR is this repo's, else from GitHub.
 set -euo pipefail
 
+if [ "$(uname -s)" != Darwin ]; then
+    echo "scripts/snapshot works on macOS only: it needs gpui's render_to_image, which this gpui has only on macOS" >&2
+    exit 1
+fi
+
 usage="usage: scripts/snapshot <pr-url> [out-dir] [--only <name-start>[,...]] [--light|--dark] [--readme]"
 positional=()
 only=""
@@ -29,8 +34,14 @@ out="${positional[1]:-/tmp/guided-review-snapshots}"
 
 cd "$(dirname "$0")/.."
 
-if ! command -v cargo >/dev/null 2>&1; then
-    export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$HOME/.cargo/bin:$PATH"
+# rustup's cargo before any other: it follows rust-toolchain.toml, which a distro's older cargo cannot build.
+if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+elif ! command -v cargo >/dev/null 2>&1; then
+    for toolchain in "$HOME"/.rustup/toolchains/stable-*/bin; do
+        export PATH="$toolchain:$PATH"
+        break
+    done
 fi
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
 

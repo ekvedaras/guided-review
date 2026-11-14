@@ -4,7 +4,7 @@ Rust 2024 gpui app.
 
 ## The gate
 
-`scripts/check` is the gate before every commit: fmt, clippy, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself. `rust-toolchain.toml` pins Rust for both, so CI's clippy is never newer than yours; raise it in its own commit.
+`scripts/check` is the gate before every commit: fmt, clippy, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself, rustup's (`~/.cargo/bin`) before any other, since a distro's cargo may be older than the pin. `rust-toolchain.toml` pins Rust for both, so CI's clippy is never newer than yours; raise it in its own commit.
 
 - Start it with `run_in_background` and read only until it ends. A commit stages what is on disk, so edit nothing while it runs, and stage first or check `git diff` against what you commit.
 - Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`.
@@ -22,6 +22,8 @@ Rust 2024 gpui app.
 The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`), run by its full path: a plain `guided-review` is the release install in `~/.local/bin`, which comes first on PATH, so `/tour` and normal use never run a trial build. Once the gate is green, run `cargo install --path . --locked` and check that `~/.cargo/bin/guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit.
 
 ## Seeing the app
+
+The snapshot scripts work on macOS only, and say so elsewhere: pictures need gpui's `render_to_image`, which this gpui has only on macOS, and `snapshot-compare` draws with Swift and AppKit. On Linux, a PR's pictures come from a Mac.
 
 `scripts/snapshot <pr-url> [out-dir] [--only <name-start>,...] [--light|--dark]` writes PNGs of the app to `<out>/light` and `<out>/dark` (default `/tmp/guided-review-snapshots`): `NN-top`/`NN-end` of every tour screen, then the scenes from `20-settings` on, staged in `src/app/layouts/one_step/scenes.rs`. To check one change, take only the pictures it shows, e.g. `--only 00-top --dark`; the full run takes minutes. It builds the `snapshots` feature, runs on a throwaway HOME with only that PR's tour, and draws on a timer, so it works with the screen locked. A scene is taken once its picture is unchanged for 1s (20s cap), so finite animations end first. The PR needs a tour in `~/.guided-review/tours`; use public PRs only (ekvedaras/guided-review#12 has one) for pictures that leave the machine. `screencapture` is blocked in auto mode.
 
