@@ -1412,7 +1412,7 @@ impl OneStepLayout {
                     .edge(TitleBarEdge::Open)
                     .child(
                         div()
-                            .pl(px(Os::RUNNING.window_buttons_inset()))
+                            .pl(Os::RUNNING.window_buttons_inset())
                             .flex()
                             .items_center()
                             .gap_2()

@@ -1920,7 +1920,7 @@ impl Render for SettingsPanel {
                     .child(
                         TitleBarArea::new("settings-title-bar", colors.background).children(
                             build_chip(&colors).map(|chip| {
-                                div().pl(px(Os::RUNNING.window_buttons_inset())).child(chip)
+                                div().pl(Os::RUNNING.window_buttons_inset()).child(chip)
                             }),
                         ),
                     )

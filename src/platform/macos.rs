@@ -46,8 +46,8 @@ pub(super) const ADAPTER: Adapter = Adapter {
     ],
     // The traffic lights.
     window_buttons: Some(WindowButtons {
-        corner: 14.,
-        inset: 80.,
+        corner: gpui::px(14.),
+        inset: gpui::px(80.),
     }),
     // macOS shows Quit's key beside it.
     app_menu: Some(AppMenu {

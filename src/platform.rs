@@ -81,15 +81,15 @@ impl Os {
             title: Some(title),
             appears_transparent: buttons.is_some(),
             traffic_light_position: buttons
-                .map(|buttons| gpui::point(gpui::px(buttons.corner), gpui::px(buttons.corner))),
+                .map(|buttons| gpui::point(buttons.corner, buttons.corner)),
         }
     }
 
     /// Room kept free at the left of the title bar, so nothing is drawn under the window buttons.
-    pub fn window_buttons_inset(self) -> f32 {
+    pub fn window_buttons_inset(self) -> gpui::Pixels {
         self.adapter()
             .window_buttons
-            .map_or(0., |buttons| buttons.inset)
+            .map_or(gpui::px(0.), |buttons| buttons.inset)
     }
 
     /// The menus the OS shows for the app, holding Quit beside its key.
@@ -158,9 +158,9 @@ pub fn app_folders(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> AppFo
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowButtons {
     /// From the window's top left corner to the buttons, both ways.
-    pub corner: f32,
+    pub corner: gpui::Pixels,
     /// From the window's left edge to past the buttons' right edge.
-    pub inset: f32,
+    pub inset: gpui::Pixels,
 }
 
 fn first_installed(choices: &[&'static str], installed: impl Fn(&str) -> bool) -> &'static str {
