@@ -73,7 +73,7 @@ use crate::app::components::thread_view::{
     DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnReplyDraft, OnThreadAction,
     OnTryHandOffAgain, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
 };
-use crate::app::components::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea, TitleBarEdge};
+use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge};
 use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
@@ -87,6 +87,7 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::platform::Os;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CodeLink, Command, CommentBox,
     CommentGesture, CommentPlace, Departure, Effect, FileToggle, FileView, GitHubPort, HandOffId,
@@ -1411,7 +1412,7 @@ impl OneStepLayout {
                     .edge(TitleBarEdge::Open)
                     .child(
                         div()
-                            .pl(px(TRAFFIC_LIGHTS_WIDTH))
+                            .pl(px(Os::RUNNING.window_buttons_inset()))
                             .flex()
                             .items_center()
                             .gap_2()

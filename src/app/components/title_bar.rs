@@ -7,10 +7,8 @@ use gpui::{
 
 use super::palette::Colors;
 
-/// Tall enough for the macOS traffic lights, which the window puts at 14 px from the corner.
+/// Tall enough for the window buttons the platform puts on it.
 pub const TITLE_BAR_HEIGHT: f32 = 40.;
-/// Room left of the traffic lights' right edge, so nothing is drawn under them.
-pub const TRAFFIC_LIGHTS_WIDTH: f32 = 80.;
 
 /// How a title bar meets what is under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

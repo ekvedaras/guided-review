@@ -76,6 +76,39 @@ impl Os {
             Self::Linux => linux::TEXT_KEYS,
         }
     }
+
+    /// The window's own title bar options. With window buttons the app draws the title bar
+    /// under them; without, the window manager decides the decorations.
+    pub fn titlebar(self, title: gpui::SharedString) -> gpui::TitlebarOptions {
+        let buttons = self.window_buttons();
+        gpui::TitlebarOptions {
+            title: Some(title),
+            appears_transparent: buttons.is_some(),
+            traffic_light_position: buttons
+                .map(|buttons| gpui::point(gpui::px(buttons.corner), gpui::px(buttons.corner))),
+        }
+    }
+
+    /// Room kept free at the left of the title bar, so nothing is drawn under the window buttons.
+    pub fn window_buttons_inset(self) -> f32 {
+        self.window_buttons().map_or(0., |buttons| buttons.inset)
+    }
+
+    fn window_buttons(self) -> Option<WindowButtons> {
+        match self {
+            Self::MacOs => macos::WINDOW_BUTTONS,
+            Self::Linux => linux::WINDOW_BUTTONS,
+        }
+    }
+}
+
+/// The OS's close, minimise and zoom buttons, drawn on the app's own title bar.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowButtons {
+    /// From the window's top left corner to the buttons, both ways.
+    pub corner: f32,
+    /// From the window's left edge to past the buttons' right edge.
+    pub inset: f32,
 }
 
 fn first_installed(choices: &[&'static str], installed: impl Fn(&str) -> bool) -> &'static str {

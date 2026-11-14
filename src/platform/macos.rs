@@ -3,7 +3,7 @@ pub mod dock_icon;
 #[cfg(target_os = "macos")]
 pub mod word_keys;
 
-use super::{KeySpelling, PrimaryKey, TextEdit};
+use super::{KeySpelling, PrimaryKey, TextEdit, WindowButtons};
 
 pub const TRIPLE_SYSTEM: &str = "apple-darwin";
 
@@ -40,3 +40,9 @@ pub const TEXT_KEYS: &[(&str, TextEdit)] = &[
     ("cmd-x", TextEdit::Cut),
     ("cmd-v", TextEdit::Paste),
 ];
+
+/// The traffic lights.
+pub const WINDOW_BUTTONS: Option<WindowButtons> = Some(WindowButtons {
+    corner: 14.,
+    inset: 80.,
+});

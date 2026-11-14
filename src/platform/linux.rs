@@ -1,4 +1,4 @@
-use super::{KeySpelling, PrimaryKey, TextEdit};
+use super::{KeySpelling, PrimaryKey, TextEdit, WindowButtons};
 
 pub const TRIPLE_SYSTEM: &str = "unknown-linux-gnu";
 
@@ -42,3 +42,6 @@ pub const TEXT_KEYS: &[(&str, TextEdit)] = &[
     ("ctrl-x", TextEdit::Cut),
     ("ctrl-v", TextEdit::Paste),
 ];
+
+/// The window manager draws them, or none, as Hyprland does.
+pub const WINDOW_BUTTONS: Option<WindowButtons> = None;

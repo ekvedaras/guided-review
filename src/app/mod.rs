@@ -31,8 +31,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Menu, MenuItem,
-    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, point, px, size,
+    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Menu, MenuItem, Window,
+    WindowBounds, WindowHandle, WindowOptions, actions, px, size,
 };
 use gpui_platform::application;
 
@@ -40,7 +40,7 @@ use crate::app_link::{Answer, AppListener, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
-use crate::platform;
+use crate::platform::{self, Os};
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
@@ -866,11 +866,7 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     WindowOptions {
         focus: takes_focus(),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions {
-            title: Some(marked_if_dev(title).into()),
-            appears_transparent: true,
-            traffic_light_position: Some(point(px(14.), px(14.))),
-        }),
+        titlebar: Some(Os::RUNNING.titlebar(marked_if_dev(title).into())),
         ..Default::default()
     }
 }

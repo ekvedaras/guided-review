@@ -11,6 +11,7 @@ use gpui::{
 use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
+use crate::platform::Os;
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{
     CloneRowProblem, MoreLines, Motion, Presence, SaveOutcome, SettingProblem, Settings,
@@ -29,7 +30,7 @@ use super::palette::{
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::title_bar::{TRAFFIC_LIGHTS_WIDTH, TitleBarArea};
+use super::title_bar::TitleBarArea;
 use super::version_link::version_link;
 
 mod keys;
@@ -1916,8 +1917,9 @@ impl Render for SettingsPanel {
                     .occlude()
                     .child(
                         TitleBarArea::new("settings-title-bar", colors.background).children(
-                            build_chip(&colors)
-                                .map(|chip| div().pl(px(TRAFFIC_LIGHTS_WIDTH)).child(chip)),
+                            build_chip(&colors).map(|chip| {
+                                div().pl(px(Os::RUNNING.window_buttons_inset())).child(chip)
+                            }),
                         ),
                     )
                     .child(header)

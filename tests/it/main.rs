@@ -97,5 +97,6 @@ mod tour_writing;
 mod updates;
 mod viewed_sync;
 mod viewer;
+mod window_chrome;
 mod work_agenda;
 mod write_comments;
