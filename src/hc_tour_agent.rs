@@ -432,9 +432,12 @@ impl HcTourAgents {
     /// `agent.focus` switches the Herdr window to the terminal but leaves the window behind ours.
     fn bring_herdr_to_the_front(&self) -> anyhow::Result<()> {
         let raised = self.raise_herdr();
-        match self.herdr_raise.when_it_fails {
-            RaiseFailed::FailsShowing => raised,
-            RaiseFailed::LeavesHerdrBehind => Ok(()),
+        match (raised, self.herdr_raise.when_it_fails) {
+            (Err(error), RaiseFailed::LeavesHerdrBehind) => {
+                eprintln!("{error:#}");
+                Ok(())
+            }
+            (raised, _) => raised,
         }
     }
 
