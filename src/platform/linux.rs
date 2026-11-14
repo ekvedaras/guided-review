@@ -2,24 +2,24 @@ pub mod desktop_file;
 
 use std::sync::Arc;
 
-use super::{Adapter, HerdrRaise, KeySpelling, PrimaryKey, RaiseFailed, TextEdit};
+use super::{Adapter, FontChoice, HerdrRaise, KeySpelling, PrimaryKey, RaiseFailed, TextEdit};
 use desktop_file::DesktopFile;
 
 pub(super) const ADAPTER: Adapter = Adapter {
     triple_system: "unknown-linux-gnu",
     // Desktops differ in what they install; the last comes with most.
-    text_fonts: &[
+    text_font: FontChoice::FirstInstalled(&[
         "Adwaita Sans",
         "Noto Sans",
         "Liberation Sans",
         "DejaVu Sans",
-    ],
-    code_fonts: &[
+    ]),
+    code_font: FontChoice::FirstInstalled(&[
         "Adwaita Mono",
         "Noto Sans Mono",
         "Liberation Mono",
         "DejaVu Sans Mono",
-    ],
+    ]),
     primary_key: PrimaryKey::Control,
     key_spelling: KeySpelling {
         primary: "Ctrl",

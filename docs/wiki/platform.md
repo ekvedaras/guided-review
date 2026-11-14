@@ -79,6 +79,7 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **The Desktop entry is a trait** (`platform::DesktopEntry`), implemented by `AppBundle` and `DesktopFile` and picked once, by the adapter's `desktop_entry` constructor. Before, `DesktopEntry` wrapped a private enum of the two that six methods matched on. The relaunch through the login shell is the trait's one shared method.
 - **The bin link is the release install's** (`ReleaseInstall`) and passed to the entry, which no longer names `~/.local/bin/guided-review` itself; the launch and `app_link` get the entry from `ReleaseInstall`. The bundle's folder and the `~/Applications` that messages name are one constant.
 - **No bool parameters in the platform** (CODING_STANDARDS): `platform::start` takes a `Focus` (`Taken` or `LeftAlone`), and `HerdrRaise` says what a failed raise does with `RaiseFailed` (`FailsShowing` on macOS, `LeavesHerdrBehind` on Linux), where they had `takes_focus: bool` and `best_effort: bool`.
+- **A family comes with the OS or is the first installed** (`FontChoice`). macOS's Helvetica Neue and Menlo come with it and are never looked up, as before. When none of Linux's families is installed, the app takes the font database's default sans-serif or monospace family (fontconfig's, read by fontdb) instead of DejaVu unasked, so diagrams find a file whenever that default is installed.
 - **A Herdr raise that fails on Linux is logged** to stderr, which is `app.log` for the app, and showing the agent still succeeds. Before, it left no trace.
 
 ## Known open

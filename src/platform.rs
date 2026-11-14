@@ -46,15 +46,23 @@ impl Os {
         self.adapter().triple_system
     }
 
-    /// The family for the app's text: the first of this OS's choices that is installed, or its
-    /// last choice unasked.
-    pub fn text_font(self, installed: impl Fn(&str) -> bool) -> &'static str {
-        first_installed(self.adapter().text_fonts, installed)
+    /// The family for the app's text: the one that comes with the OS, or the first of this OS's
+    /// choices that is installed, or else the font database's `default` sans-serif family.
+    pub fn text_font(
+        self,
+        installed: impl Fn(&str) -> bool,
+        default: impl FnOnce() -> &'static str,
+    ) -> &'static str {
+        self.adapter().text_font.pick(installed, default)
     }
 
-    /// The family for code, picked like [`Self::text_font`].
-    pub fn code_font(self, installed: impl Fn(&str) -> bool) -> &'static str {
-        first_installed(self.adapter().code_fonts, installed)
+    /// The family for code, picked like [`Self::text_font`], `default` being monospace.
+    pub fn code_font(
+        self,
+        installed: impl Fn(&str) -> bool,
+        default: impl FnOnce() -> &'static str,
+    ) -> &'static str {
+        self.adapter().code_font.pick(installed, default)
     }
 
     /// The key held for the app's own shortcuts, as gpui's `secondary` picks it.
@@ -114,9 +122,8 @@ impl Os {
 /// What the app knows of one OS, as plain data. Another OS is one more of these.
 struct Adapter {
     triple_system: &'static str,
-    /// Best first.
-    text_fonts: &'static [&'static str],
-    code_fonts: &'static [&'static str],
+    text_font: FontChoice,
+    code_font: FontChoice,
     primary_key: PrimaryKey,
     key_spelling: KeySpelling,
     text_keys: &'static [(&'static str, TextEdit)],
@@ -163,14 +170,29 @@ pub struct WindowButtons {
     pub inset: gpui::Pixels,
 }
 
-fn first_installed(choices: &[&'static str], installed: impl Fn(&str) -> bool) -> &'static str {
-    let Some((last, before)) = choices.split_last() else {
-        return "";
-    };
-    before
-        .iter()
-        .find(|family| installed(family))
-        .unwrap_or(last)
+/// Where a font family comes from on one OS.
+enum FontChoice {
+    /// It ships with the OS, so the font database is not read for it.
+    ComesWithOs(&'static str),
+    /// The first of these that is installed, best first.
+    FirstInstalled(&'static [&'static str]),
+}
+
+impl FontChoice {
+    fn pick(
+        &self,
+        installed: impl Fn(&str) -> bool,
+        default: impl FnOnce() -> &'static str,
+    ) -> &'static str {
+        match self {
+            Self::ComesWithOs(family) => family,
+            Self::FirstInstalled(choices) => choices
+                .iter()
+                .copied()
+                .find(|family| installed(family))
+                .unwrap_or_else(default),
+        }
+    }
 }
 
 /// Which key the Primary modifier is. On Linux Super belongs to the desktop, so Control is.

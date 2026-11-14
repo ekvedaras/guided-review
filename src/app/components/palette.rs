@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use usvg::fontdb::{Database, Source};
+use usvg::fontdb::{Database, Family, Source};
 
 use crate::platform::Os;
 
@@ -13,10 +13,16 @@ use gpui::{
 use crate::viewer::{Capture, ReadProgress};
 
 /// GPUI has no usable default font outside Zed, so every text names its family.
-pub static TEXT_FONT: LazyLock<&'static str> =
-    LazyLock::new(|| Os::RUNNING.text_font(is_installed));
-pub static CODE_FONT: LazyLock<&'static str> =
-    LazyLock::new(|| Os::RUNNING.code_font(is_installed));
+pub static TEXT_FONT: LazyLock<&'static str> = LazyLock::new(|| {
+    Os::RUNNING.text_font(is_installed, || {
+        INSTALLED_FONTS.family_name(&Family::SansSerif)
+    })
+});
+pub static CODE_FONT: LazyLock<&'static str> = LazyLock::new(|| {
+    Os::RUNNING.code_font(is_installed, || {
+        INSTALLED_FONTS.family_name(&Family::Monospace)
+    })
+});
 
 /// The fonts on this machine, read once: reading them is slow.
 pub static INSTALLED_FONTS: LazyLock<Database> = LazyLock::new(|| {

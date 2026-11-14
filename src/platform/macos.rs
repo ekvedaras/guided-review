@@ -8,15 +8,15 @@ pub mod word_keys;
 use std::sync::Arc;
 
 use super::{
-    Adapter, AppMenu, HerdrRaise, KeySpelling, PrimaryKey, RaiseFailed, TextEdit, WindowButtons,
+    Adapter, AppMenu, FontChoice, HerdrRaise, KeySpelling, PrimaryKey, RaiseFailed, TextEdit,
+    WindowButtons,
 };
 use app_bundle::AppBundle;
 
 pub(super) const ADAPTER: Adapter = Adapter {
     triple_system: "apple-darwin",
-    // Both come with macOS.
-    text_fonts: &["Helvetica Neue"],
-    code_fonts: &["Menlo"],
+    text_font: FontChoice::ComesWithOs("Helvetica Neue"),
+    code_font: FontChoice::ComesWithOs("Menlo"),
     primary_key: PrimaryKey::Command,
     key_spelling: KeySpelling {
         primary: "⌘",
