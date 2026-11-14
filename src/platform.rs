@@ -100,6 +100,14 @@ impl Os {
         self.window_buttons().map_or(0., |buttons| buttons.inset)
     }
 
+    /// The menus the OS shows for the app, holding Quit beside its key. None on Linux.
+    pub fn app_menus(self, quit: impl gpui::Action) -> Vec<gpui::Menu> {
+        match self {
+            Self::MacOs => macos::app_menus(quit),
+            Self::Linux => Vec::new(),
+        }
+    }
+
     fn window_buttons(self) -> Option<WindowButtons> {
         match self {
             Self::MacOs => macos::WINDOW_BUTTONS,
@@ -184,25 +192,27 @@ pub enum TextEdit {
     Paste,
 }
 
-/// The app's icon in the Dock, which a binary with no app bundle lacks. Nothing on Linux.
-pub fn show_app_icon() {
-    #[cfg(target_os = "macos")]
-    macos::dock_icon::show();
-}
-
-/// No Dock icon and no turn at the front, for the snapshot run. Nothing on Linux.
-pub fn stay_in_background() {
-    #[cfg(target_os = "macos")]
-    macos::dock_icon::stay_in_background();
-}
-
-/// Option with an arrow or backspace, taken before macOS swallows it on some layouts. Nothing on
-/// Linux.
+/// What the OS gets from the app as it starts. On macOS: the Dock icon a binary with no app
+/// bundle lacks, or no Dock icon and no turn at the front when the app must not take the focus;
+/// Option with an arrow or backspace, taken before macOS swallows it on some layouts; and the app
+/// menu with `quit`. Nothing on Linux.
 #[cfg_attr(
     not(target_os = "macos"),
-    expect(unused_variables, reason = "only the macOS adapter needs the app")
+    expect(
+        unused_variables,
+        clippy::needless_pass_by_value,
+        reason = "only the macOS adapter needs these"
+    )
 )]
-pub fn take_word_keys(cx: &mut gpui::App) {
+pub fn start(takes_focus: bool, quit: impl gpui::Action, cx: &mut gpui::App) {
     #[cfg(target_os = "macos")]
-    macos::word_keys::take(cx);
+    {
+        if takes_focus {
+            macos::dock_icon::show();
+        } else {
+            macos::dock_icon::stay_in_background();
+        }
+        macos::word_keys::take(cx);
+        cx.set_menus(Os::MacOs.app_menus(quit));
+    }
 }

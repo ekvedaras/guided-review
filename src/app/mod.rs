@@ -31,8 +31,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Menu, MenuItem, Window,
-    WindowBounds, WindowHandle, WindowOptions, actions, px, size,
+    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Window, WindowBounds,
+    WindowHandle, WindowOptions, actions, px, size,
 };
 use gpui_platform::application;
 
@@ -108,12 +108,8 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             switching.refresh(cx);
             cx.set_global(switching);
             tour_writer::resume(cx);
-            if takes_focus() {
-                platform::show_app_icon();
-            } else {
-                platform::stay_in_background();
-            }
-            quit_on_cmd_q(cx);
+            platform::start(takes_focus(), Quit, cx);
+            cx.on_action(|_: &Quit, cx| cx.quit());
             components::toast_stack::Toaster::install(cx);
             let configured = keymap::configured_keymap();
             if let Some(notice) = configured.notice() {
@@ -123,7 +119,6 @@ pub fn serve(listener: AppListener, home: PathBuf) {
             avatar_pictures::AvatarPictures::install(cx);
             prose_selection::ProseSelections::install(cx);
             updater::Updates::install(&home, cx);
-            platform::take_word_keys(cx);
             cx.spawn(async move |cx| answer_requests(asked, active, home, cx).await)
                 .detach();
         });
@@ -700,18 +695,9 @@ fn turn_writing_into_review(
     Ok(WindowHandle::new(window.window_id()))
 }
 
+// The Quit key ends the app from whichever window has the focus. The review's window answers it
+// first, warning once while work is in flight; the app's own handler is for a window with no review.
 actions!(app, [Quit]);
-
-/// cmd+q ends the app from whichever window has the focus. The review's window answers it first,
-/// warning once while work is in flight; this is for a window with no review. The menu item is what macOS shows the key beside.
-fn quit_on_cmd_q(cx: &mut App) {
-    cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.set_menus([Menu {
-        name: "guided-review".into(),
-        items: vec![MenuItem::action("Quit guided-review", Quit)],
-        disabled: false,
-    }]);
-}
 
 /// The window that held only the switcher becomes the picked PR's review.
 fn turn_switcher_into_review(

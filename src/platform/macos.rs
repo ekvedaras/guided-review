@@ -54,3 +54,11 @@ pub const HERDR_RAISE: HerdrRaise = HerdrRaise {
     args: &["-a", "Herdr"],
     best_effort: false,
 };
+
+pub fn app_menus(quit: impl gpui::Action) -> Vec<gpui::Menu> {
+    vec![gpui::Menu {
+        name: "guided-review".into(),
+        items: vec![gpui::MenuItem::action("Quit guided-review", quit)],
+        disabled: false,
+    }]
+}
