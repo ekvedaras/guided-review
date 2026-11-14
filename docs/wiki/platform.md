@@ -19,8 +19,17 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 - **The platform names the font families** (`083c89c`). Each adapter lists its text and code families, best first; `Os::text_font` and `Os::code_font` take the first that is installed and the last one unasked. macOS lists one of each (Helvetica Neue, Menlo), so it never reads the font database for the app's text. Linux lists Adwaita, Noto, Liberation and DejaVu (Sans and Mono), names checked against the installed fonts, not asked of fontconfig: a list is plain data, so both adapters are tested on any host, and the families come out the same on every desktop that has them.
 - **Diagrams find the files of the text family** in the font database (`palette::font_files`), all of them, so bold labels are measured in bold too. The path `/System/Library/Fonts/HelveticaNeue.ttc` is gone; it was why every diagram failed on Linux. The system font database is read once (`INSTALLED_FONTS`) and shared by the Linux font check and the diagram drawer.
 
+## Decisions, 2026-11-14 (#70, Primary modifier)
+
+- **The app's shortcuts are held with the Primary modifier** (`viewer::Modifier::Primary`, was `Cmd`): Cmd on macOS, Ctrl on Linux. It binds as gpui's `secondary`, which gpui maps the same way. Before, the app bound gpui `cmd`, which on Linux is Super, so Super+K opened the palette and Hyprland took Super for itself (`5f49503`).
+- **Super is not used on Linux.** A press with Super is no chord (`app::keymap::chord_on`), so Settings cannot record one. `Os::primary_key` says which key Primary is.
+- **`config.toml` writes `primary-`.** `cmd-` saved before still reads as Primary on every OS, and on Linux `ctrl-` reads as Primary too, so a Linux reviewer's natural `ctrl-k` and the default can never bind one key twice. `Chord::written` is the config text, `Chord::keystroke` the gpui text; they differed from here on. A config written by this version reads as "not a key" in older versions.
+- **One spelling table per OS** (`Os::key_spelling`): the faces of the modifiers and the joiner between caps. Spelled chords and key caps both read it: `⌘⇧↵` on macOS, `Ctrl+Shift+↵` on Linux. The quit and close warnings spell the default key instead of saying `cmd+q`.
+- **Text box keys come from a table per OS** (`Os::text_keys`, `platform::TextEdit`): the macOS text keys as before; on Linux Ctrl moves and deletes by word, Ctrl+Home/End go to the ends of the text, Shift+Home/End select to the line's ends, Ctrl+A/C/X/V. Linux has no delete-to-line-start key, as GTK has none. Keys every OS shares stay in `text_box::bind_keys`.
+
 ## Known open
 
 - The Dock icon, background and word-key calls are three platform functions the app start calls in turn; one start call is a later ticket.
-- The Primary modifier, the Desktop entry, window chrome, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
+- The app menu still holds the only Quit item; it is the App start hooks ticket's.
+- The Desktop entry, window chrome, raising Herdr, app folders, the Linux release and CI, and the macOS-only dev scripts are each their own ticket under #67.
 - `scripts/check` on Linux needs rustup: the pinned toolchain (`rust-toolchain.toml`) uses library features newer than Arch's `rust` package had on 2026-11-14.

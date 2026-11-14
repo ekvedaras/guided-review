@@ -76,7 +76,11 @@
 
 **Shortcuts sheet**: The overlay that lists every key the app answers, by heading (Navigate, Read, Comment, View, App), opened with `?`. It reads the same table the keys are bound from. Avoid: cheat sheet, help.
 
-**Palette action**: Something the cmd+k palette does rather than a place it goes to, such as Settings or Mark step as read. A query that starts with `>` lists only actions.
+**Primary modifier**: The key the app's own shortcuts are held with: Cmd (⌘) on macOS, Ctrl on Linux, where Super belongs to the desktop. `config.toml` writes it `primary-` (`primary-k`); a `cmd-` saved before reads as Primary everywhere, and on Linux so does `ctrl-`. A key is spelled in text and on caps as its OS does: `⌘K` on macOS, `Ctrl+K` on Linux. Avoid: Cmd key, command key, secondary.
+
+**Text keys**: The keys a text box edits with that differ by OS: on macOS Option moves by word and Cmd by line, on Linux Ctrl moves by word and Home/End by line. They are not the reviewer's to change.
+
+**Palette action**: Something the Primary+K palette does rather than a place it goes to, such as Settings or Mark step as read. A query that starts with `>` lists only actions.
 
 **Gap row**: The one row of a file box that stands for unchanged lines it does not show, between two changes or at either end, with how many and the buttons that show them.
 
