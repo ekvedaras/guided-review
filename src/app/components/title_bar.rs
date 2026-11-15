@@ -1,14 +1,21 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Background, ElementId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, WindowControlArea, div,
-    px,
+    ParentElement, Pixels, RenderOnce, StatefulInteractiveElement, Styled, Window,
+    WindowControlArea, div, px,
 };
 
 use super::palette::Colors;
+use crate::platform::Os;
 
 /// Tall enough for the window buttons the platform puts on it.
 pub const TITLE_BAR_HEIGHT: f32 = 40.;
+
+/// Where a title bar's own content starts: past the window buttons, or one margin in where the
+/// window manager draws none.
+pub fn title_inset() -> Pixels {
+    Os::RUNNING.window_buttons_inset().max(px(16.))
+}
 
 /// How a title bar meets what is under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,8 +1,9 @@
 use std::ops::Range;
+use std::path::Path;
 use std::sync::Arc;
 
-use gpui::RenderImage;
-use resvg::tiny_skia::{Pixmap, Transform};
+use gpui::{RenderImage, Rgba};
+use resvg::tiny_skia::{Color, Pixmap, Transform};
 
 use crate::image_facts::whole_pixels;
 
@@ -69,4 +70,34 @@ pub fn rasterize(svg: &Svg, scale: f32, strip: &Strip) -> Result<Arc<RenderImage
     let bgra = image::RgbaImage::from_raw(width_px, height_px, pixels)
         .ok_or("the strip buffer has the wrong size")?;
     Ok(Arc::new(RenderImage::new(vec![image::Frame::new(bgra)])))
+}
+
+/// The whole diagram as one PNG on the page's ground, for the picture zoom: see-through, its lines
+/// would be lost on the zoom's dark backdrop. Returns the scale it was drawn at, kept low enough
+/// that its texture stays within `MAX_STRIP_PX`.
+pub fn write_png(svg: &Svg, wanted_scale: f32, ground: Rgba, path: &Path) -> Result<f32, String> {
+    let tree = svg.tree()?;
+    let scale = wanted_scale.min(MAX_STRIP_PX as f32 / svg.width().max(svg.height()));
+    let width_px = whole_pixels((svg.width() * scale).ceil());
+    let height_px = whole_pixels((svg.height() * scale).ceil());
+    let mut pixmap = Pixmap::new(width_px, height_px).ok_or("the diagram has no pixels")?;
+    pixmap.fill(Color::from_rgba(ground.r, ground.g, ground.b, 1.).unwrap_or(Color::WHITE));
+    resvg::render(
+        &tree,
+        Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let pixels = pixmap
+        .pixels()
+        .iter()
+        .flat_map(|pixel| {
+            let color = pixel.demultiply();
+            [color.red(), color.green(), color.blue(), color.alpha()]
+        })
+        .collect();
+    image::RgbaImage::from_raw(width_px, height_px, pixels)
+        .ok_or("the diagram buffer has the wrong size")?
+        .save(path)
+        .map_err(|error| error.to_string())?;
+    Ok(scale)
 }

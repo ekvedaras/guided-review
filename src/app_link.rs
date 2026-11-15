@@ -28,6 +28,8 @@ pub fn build() -> String {
     if let Ok(named) = std::env::var("GUIDED_REVIEW_BUILD") {
         return named;
     }
+    // Not `platform::running_binary`: once a reinstall replaces this binary, that names the new
+    // one, and this build would take the new build's name.
     let built = std::env::current_exe()
         .and_then(|exe| exe.metadata())
         .and_then(|meta| meta.modified())
@@ -360,7 +362,8 @@ fn start_app(folder: &AppFolder) -> anyhow::Result<()> {
         None => ReleaseInstall::in_home(folder.folders.home())
             .desktop_entry()
             .start_program_for(
-                &std::env::current_exe().context("could not find the guided-review binary")?,
+                &crate::platform::running_binary()
+                    .context("could not find the guided-review binary")?,
             ),
     };
     let log_path = folder.log();

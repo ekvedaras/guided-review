@@ -23,6 +23,8 @@ pub struct PageChange {
     view: Option<ViewSwitch>,
     labels: Option<LabelSwitch>,
     pub(super) ids: Vec<ChangeId>,
+    /// Which part of its first change it is, counted on the page: a change cut in two has two.
+    part: usize,
     pub(super) rows: Range<usize>,
     pub(super) more_above: Option<MoreContext>,
     pub(super) more_below: Option<MoreContext>,
@@ -32,15 +34,23 @@ impl PageChange {
     pub(super) fn new(
         file: ChangeFile,
         ids: Vec<ChangeId>,
+        earlier: &[Self],
         rows: Range<usize>,
         more: (Option<MoreContext>, Option<MoreContext>),
     ) -> Self {
+        let part = ids.first().map_or(0, |first| {
+            earlier
+                .iter()
+                .filter(|change| change.ids.contains(first))
+                .count()
+        });
         Self {
             is_rendered_file: ids.is_empty(),
             path: file.path,
             view: file.view,
             labels: file.labels,
             ids,
+            part,
             rows,
             more_above: more.0,
             more_below: more.1,
@@ -66,16 +76,19 @@ impl PageChange {
         self.rows.start
     }
 
-    pub(super) fn holds(&self, focus: &Focus) -> bool {
+    fn holds(&self, focus: &Focus) -> bool {
         match focus {
-            Focus::Change(id) => self.ids.contains(id),
+            Focus::Change { id, .. } => self.ids.contains(id),
             Focus::RenderedFile(path) => self.is_rendered_file && self.path == *path,
         }
     }
 
     fn focus_target(&self) -> Focus {
         match self.ids.first() {
-            Some(id) => Focus::Change(id.clone()),
+            Some(id) => Focus::Change {
+                id: id.clone(),
+                part: self.part,
+            },
             None => Focus::RenderedFile(self.path.clone()),
         }
     }
@@ -89,8 +102,30 @@ impl PageChange {
 /// keep the focus so the key that rendered it can switch it back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Focus {
-    Change(ChangeId),
+    /// The `part`-th of the page changes that hold `id`. Lines shown that join the parts again
+    /// leave fewer parts; the focus goes to the last.
+    Change {
+        id: ChangeId,
+        part: usize,
+    },
     RenderedFile(FilePath),
+}
+
+impl Focus {
+    /// The index of the change it is on among the page's changes.
+    pub(super) fn find_in(&self, changes: &[PageChange]) -> Option<usize> {
+        let holding: Vec<usize> = changes
+            .iter()
+            .enumerate()
+            .filter(|(_, change)| change.holds(self))
+            .map(|(index, _)| index)
+            .collect();
+        let part = match self {
+            Self::Change { part, .. } => *part,
+            Self::RenderedFile(_) => 0,
+        };
+        holding.get(part).or_else(|| holding.last()).copied()
+    }
 }
 
 /// What the box of a change's file offers: the Code / Rendered switch and the piece labels' toggle.

@@ -98,7 +98,7 @@ impl Page {
         let focused = review
             .display_options()
             .focused_change()
-            .and_then(|id| changes.iter().position(|change| change.holds(id)));
+            .and_then(|focus| focus.find_in(&changes));
         let mut line_rows = HashMap::new();
         let mut pieces = Vec::new();
         for (index, row) in rows.iter().enumerate() {

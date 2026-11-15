@@ -12,6 +12,7 @@ mod ask_desk;
 mod ask_target;
 mod avatars;
 mod chord;
+mod clone_offer;
 mod code_link;
 mod comment_desk;
 mod comments;
@@ -81,6 +82,7 @@ pub use ask_desk::{
 pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use chord::{Chord, Key, KeyCap, Modifier, Modifiers};
+pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, TourFreshness};

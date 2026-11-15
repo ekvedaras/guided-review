@@ -559,3 +559,50 @@ fn down_and_up_on_a_screen_with_no_code_do_nothing() {
     assert_eq!(review.read_down(None), ReadStep::Nothing);
     assert_eq!(review.read_up(None), ReadStep::Nothing);
 }
+
+/// `notes.txt` changes lines 10 to 12 and 30. The first step shows line 11, so the rest of the
+/// file, in a box of two pieces on the second step, shows the change of lines 10 to 12 in two parts.
+fn a_change_in_two_parts() -> Review {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("notes.txt", &numbered("notes", |_| None));
+    let base = repo.commit("base");
+    repo.write(
+        "notes.txt",
+        &numbered("notes", |number| match number {
+            10 => Some("ten"),
+            11 => Some("eleven"),
+            12 => Some("twelve"),
+            30 => Some("thirty"),
+            _ => None,
+        }),
+    );
+    let head = repo.commit("head");
+    let pull = Pull { repo, base, head };
+    let mut review = pull.open(&json!([
+        {"id": "eleven", "title": "Eleven", "why": "because", "children": [],
+         "pieces": [{"file": "notes.txt", "lines": [11, 11]}]},
+        {"id": "rest", "title": "Rest", "why": "because", "children": [],
+         "pieces": [{"file": "notes.txt", "lines": [30, 30]}, {"rest": ""}]},
+    ]));
+    review.go_forward();
+    review.go_forward();
+    review
+}
+
+#[test]
+fn down_and_up_walk_both_parts_of_a_change_the_box_shows_in_two() {
+    let mut review = a_change_in_two_parts();
+    assert_eq!(review.page().changes().len(), 3);
+    let mut seen = Vec::new();
+
+    for _ in 0..3 {
+        review.read_down(None);
+        seen.push(focused(&review).unwrap());
+    }
+    for _ in 0..2 {
+        review.read_up(None);
+        seen.push(focused(&review).unwrap());
+    }
+
+    assert_eq!(seen, ["ten", "twelve", "thirty", "twelve", "ten"]);
+}

@@ -10,6 +10,8 @@
 
 **Settings**: Where a reviewer edits their settings in the app: summary instructions, clones, IDE, Ask model and Ask effort. Save checks every setting first and writes nothing while one is wrong; it writes only the keys that changed back to `config.toml` in the config folder, so the reviewer's comments stay. A custom IDE template or Ask model is kept when a preset is picked, in `ide_custom` and `ask_model_custom` beside `ide` and `ask_model`; only Settings reads those two keys. With a PR open it is a sheet over the whole window; with no PR open, `guided-review settings` shows it alone in the app's one window. Avoid: settings screen (**Screen** means summary, step or safety net), preferences.
 
+**Clone offer**: The sidebar's offer to clone the PR's repo when no local clone was found and its code is read from GitHub. The folder is suggested beside the clones Settings names, else in a usual code folder of home (`~/Work`, `~/Code`, `~/Projects`, `~/PhpStormProjects`, …), else in home; a picked folder that already is a clone is used as it is. `gh repo clone` makes it, Settings saves it, and the tour is read again on it in place. Not now hides it for this review only.
+
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 
 **Step**: One stop in a tour. It holds diff pieces, a diagram, or both, and a short text that says what they do and why they come at this point. A step can have child steps: the details of that step. The reader sees a step first, then its child steps.

@@ -399,6 +399,7 @@ impl<'a> Builder<'a> {
                     labels: labels.clone(),
                 },
                 hunk.changes.clone(),
+                &self.changes,
                 first_row..self.rows.len(),
                 (hunk.more_above.clone(), hunk.more_below.clone()),
             ));
@@ -489,6 +490,7 @@ impl<'a> Builder<'a> {
                 labels: None,
             },
             Vec::new(),
+            &self.changes,
             header_row..self.rows.len(),
             (None, None),
         ));

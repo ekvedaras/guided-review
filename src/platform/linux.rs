@@ -48,10 +48,14 @@ pub(super) const ADAPTER: Adapter = Adapter {
     window_buttons: None,
     // Linux desktops have no app menu bar.
     app_menu: None,
-    // Hyprland's; other desktops have no such command, so Herdr stays where it is there.
+    // Hyprland's; other desktops have no such command, so Herdr stays where it is there. Since
+    // Hyprland 0.56 a dispatch is Lua; the old `focuswindow class:...` form fails with exit 7.
     herdr_raise: HerdrRaise {
         program: "hyprctl",
-        args: &["dispatch", "focuswindow", "class:herdr-app"],
+        args: &[
+            "dispatch",
+            r#"hl.dsp.focus({ window = "class:herdr-app" })"#,
+        ],
         when_it_fails: RaiseFailed::LeavesHerdrBehind,
     },
     desktop_entry: |home, bin_link| Arc::new(DesktopFile::in_home(home, bin_link)),

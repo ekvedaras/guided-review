@@ -10,8 +10,12 @@ use gpui::{
 use crate::app::components::palette::{Appearance, CARD_RADIUS, Colors};
 
 use super::drawer::DiagramDrawer;
+use super::drawer::Svg;
 use super::memory::{DiagramMemory, Showing};
-use super::strip::{Strip, rasterize};
+use super::strip::{Strip, rasterize, write_png};
+use crate::app::components::picture_zoom::{ZoomedPicture, zoom_picture};
+use gpui::prelude::FluentBuilder;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 /// Owns every diagram of the tour and draws them off the main thread.
 /// The layout tells it each frame which diagram is shown; `DiagramView` puts that one on screen.
@@ -175,17 +179,21 @@ impl RenderOnce for DiagramView {
         let memory = &self.diagrams.read(cx).memory;
         let frame = div()
             .id(("diagram", self.diagrams.entity_id()))
-            .overflow_x_scroll()
+            .w_full()
             .rounded(px(CARD_RADIUS));
         if let Some(svg) = memory.svg() {
             let width = svg.width();
+            let zoomed = svg.clone();
             let strips = memory.strips().into_iter().map(|strip| {
                 match memory.strip_failure(strip.index()) {
                     Some(error) => failed_strip_block(&strip, width, error, &colors),
                     None => strip_block(&strip, width, self.diagrams.clone()).into_any_element(),
                 }
             });
-            return frame.child(div().flex().flex_col().children(strips));
+            return frame
+                .cursor_pointer()
+                .on_click(move |_, window, cx| zoom_diagram(zoomed.clone(), window, cx))
+                .child(div().flex().flex_col().children(strips));
         }
         let note = match memory.error() {
             Some(error) => format!("Could not draw the diagram: {error}"),
@@ -219,15 +227,64 @@ fn strip_block(strip: &Strip, width: f32, diagrams: Entity<Diagrams>) -> impl In
             }
         },
     )
-    .w(px(width))
-    .h(px(strip.height()))
+    .map(|block| fit_to_width(block, width, strip))
+}
+
+/// As wide as the diagram, or narrower with its height in proportion when the page is narrower, so
+/// no part of it is cut off.
+fn fit_to_width<E: Styled>(block: E, width: f32, strip: &Strip) -> E {
+    block
+        .w_full()
+        .max_w(px(width))
+        .aspect_ratio(width / strip.height())
+}
+
+/// Shows the whole diagram as large as the window holds it, drawn off the main thread first.
+fn zoom_diagram(svg: Svg, window: &mut Window, cx: &mut App) {
+    let wanted_scale = window.scale_factor() * 2.;
+    let ground = Colors::active(cx).background;
+    let mut hasher = DefaultHasher::new();
+    svg.text().hash(&mut hasher);
+    wanted_scale.to_bits().hash(&mut hasher);
+    [ground.r, ground.g, ground.b]
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    let path = std::env::temp_dir().join(format!(
+        "guided-review-diagram-{:016x}.png",
+        hasher.finish()
+    ));
+    window
+        .spawn(cx, async move |cx| {
+            let drawn = cx
+                .background_executor()
+                .spawn({
+                    let (svg, path) = (svg.clone(), path.clone());
+                    async move { write_png(&svg, wanted_scale, ground, &path) }
+                })
+                .await;
+            match drawn {
+                Ok(scale) => cx
+                    .update(|window, cx| {
+                        let picture = ZoomedPicture {
+                            path: path.into(),
+                            ratio: svg.width() / svg.height(),
+                            pixel_width: svg.width() * scale / window.scale_factor(),
+                        };
+                        zoom_picture(picture, None, window, cx);
+                    })
+                    .ok(),
+                Err(error) => {
+                    eprintln!("could not draw the diagram to zoom it: {error}");
+                    None
+                }
+            };
+        })
+        .detach();
 }
 
 /// Says why in the strip's own place, as a diagram that could not be drawn at all does.
 fn failed_strip_block(strip: &Strip, width: f32, note: &Arc<str>, colors: &Colors) -> AnyElement {
-    div()
-        .w(px(width))
-        .h(px(strip.height()))
+    fit_to_width(div(), width, strip)
         .p_3()
         .text_sm()
         .text_color(colors.muted_text)

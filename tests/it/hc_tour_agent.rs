@@ -780,7 +780,7 @@ fn on_linux_showing_an_agent_focuses_the_herdr_window_through_hyprland() {
 
     assert_eq!(
         calls(dir.path(), "raise-calls"),
-        ["dispatch focuswindow class:herdr-app"]
+        [r#"dispatch hl.dsp.focus({ window = "class:herdr-app" })"#]
     );
 }
 

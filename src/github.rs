@@ -16,9 +16,9 @@ use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
     AvatarPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
     PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
-    ReactionChange, ReactionCount, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
+    ReactionChange, ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview,
+    ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -1030,6 +1030,23 @@ fn graphql_side(side: Side) -> &'static str {
 
 fn non_empty_id(id: &serde_json::Value) -> Option<String> {
     id.as_str().filter(|id| !id.is_empty()).map(str::to_owned)
+}
+
+/// `gh` holds the reviewer's GitHub login, so private repos clone too.
+pub struct GhCloner;
+
+impl RepoCloner for GhCloner {
+    fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
+        let output = Command::new("gh")
+            .args(["repo", "clone", &repo.to_string()])
+            .arg(folder)
+            .output()
+            .context("could not run gh")?;
+        if !output.status.success() {
+            anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
+        }
+        Ok(())
+    }
 }
 
 fn token_from_gh_cli() -> Option<String> {

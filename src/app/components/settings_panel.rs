@@ -13,7 +13,6 @@ use gpui::{
 use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
-use crate::platform::Os;
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{
     CloneRowProblem, MoreLines, Motion, Presence, SaveOutcome, SettingProblem, Settings,
@@ -32,7 +31,7 @@ use super::palette::{
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::title_bar::TitleBarArea;
+use super::title_bar::{TitleBarArea, title_inset};
 use super::version_link::version_link;
 
 mod keys;
@@ -291,7 +290,7 @@ impl SettingsPanel {
             clone_focus: Vec::new(),
             recording: None,
             scroll: ScrollHandle::new(),
-            running_binary: std::env::current_exe()
+            running_binary: crate::platform::running_binary()
                 .map_or_else(|_| "unknown".into(), |exe| exe.display().to_string().into()),
         }
     }
@@ -1919,9 +1918,7 @@ impl Render for SettingsPanel {
                     .occlude()
                     .child(
                         TitleBarArea::new("settings-title-bar", colors.background).children(
-                            build_chip(&colors).map(|chip| {
-                                div().pl(Os::RUNNING.window_buttons_inset()).child(chip)
-                            }),
+                            build_chip(&colors).map(|chip| div().pl(title_inset()).child(chip)),
                         ),
                     )
                     .child(header)
