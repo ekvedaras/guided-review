@@ -4,6 +4,7 @@
 use crate::file_path::FilePath;
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,12 +26,13 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
+use crate::github::GhCloner;
 use crate::viewer::{
-    AfterLanding, AgentReplied, Ask, Audience, CommentOutcome, CommentPlace, CommentResult,
-    FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject, OldHead, Problem,
-    RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen, SendMode, TextBox,
-    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, WorkPorts, announcements, line_count,
+    AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
+    CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
+    OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
+    SendMode, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -76,6 +78,8 @@ pub struct ReviewSession {
     image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
     loading_images: HashSet<FilePath>,
     reload: Option<Task<()>>,
+    clone_offer: Option<CloneOffer>,
+    cloning: Option<Task<()>>,
     typing_save: Option<Task<()>>,
     frame_stats: FrameStatsHook,
     _focus_subscription: Subscription,
@@ -144,6 +148,8 @@ impl ReviewSession {
         })
         .detach();
         let rows = PageRows::of(&review, &open_details);
+        let clone_offer =
+            CloneOffer::for_source(review.pr().repo.clone(), source.as_ref(), &folders);
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
@@ -166,6 +172,8 @@ impl ReviewSession {
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
             reload: None,
+            clone_offer,
+            cloning: None,
             typing_save: None,
             frame_stats,
             _focus_subscription: focus_subscription,
@@ -491,6 +499,46 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    pub fn clone_offer(&self) -> Option<&CloneOffer> {
+        self.clone_offer.as_ref()
+    }
+
+    pub fn pick_clone_folder(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
+        if let Some(offer) = self.clone_offer.as_mut() {
+            offer.pick_folder(folder);
+        }
+        cx.notify();
+    }
+
+    pub fn decline_clone(&mut self, cx: &mut Context<Self>) {
+        self.clone_offer = None;
+        cx.notify();
+    }
+
+    /// Once the clone is saved, the tour is read again on it, so the screen stays where it is.
+    pub fn start_clone(&mut self, cx: &mut Context<Self>) {
+        let Some(job) = self.clone_offer.as_mut().and_then(CloneOffer::start) else {
+            return;
+        };
+        cx.notify();
+        self.cloning = Some(self.run_off_thread(
+            cx,
+            move || job.run(&GhCloner),
+            |this, cloned, cx| match cloned {
+                Ok(()) => {
+                    this.clone_offer = None;
+                    this.reload_tour(cx);
+                }
+                Err(error) => {
+                    if let Some(offer) = this.clone_offer.as_mut() {
+                        offer.failed(format!("{error:#}"));
+                    }
+                    cx.notify();
+                }
+            },
+        ));
     }
 
     /// Runs when `open` names the PR already shown: the tour file is read again and the screen stays.

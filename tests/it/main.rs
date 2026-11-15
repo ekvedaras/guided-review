@@ -25,6 +25,7 @@ mod ask_adapters;
 mod ask_lifecycle;
 mod avatars;
 mod check;
+mod clone_offer;
 mod code_links;
 mod code_source;
 mod comment_actions;

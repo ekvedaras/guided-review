@@ -1,0 +1,1 @@
+When a PR's code comes from GitHub because you have no local clone, the sidebar offers to clone the repo to a suggested folder or one you pick. The app saves it in Settings and switches the open review to it.

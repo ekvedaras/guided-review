@@ -2,8 +2,8 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
-    ParentElement, Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Subscription, Window, actions, div, list, px,
+    ParentElement, PathPromptOptions, Pixels, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -88,14 +88,15 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CodeLink, Command, CommentBox,
-    CommentGesture, CommentPlace, Departure, Effect, FileToggle, FileView, GitHubPort, HandOffId,
-    InFlight, Intent, LabelSwitch, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay,
-    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, Reopen, ReopenAfterSave,
-    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
-    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
-    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
-    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, ViewSwitch, WindowMoment,
+    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
+    CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
+    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
+    NoteSubject, NotesButton, Overlay, PageRow, PieceLabels, Place, QueuedComment, ReadProgress,
+    ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1201,6 +1202,104 @@ impl OneStepLayout {
         )
     }
 
+    /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
+    fn clone_offer_block(
+        colors: &Colors,
+        offer: &CloneOffer,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let is_cloning = offer.state() == &CloneOfferState::Cloning;
+        let failure = match offer.state() {
+            CloneOfferState::Failed(reason) => Some(
+                div()
+                    .text_xs()
+                    .text_color(colors.danger)
+                    .child(format!("Not cloned: {reason}")),
+            ),
+            CloneOfferState::Offered | CloneOfferState::Cloning => None,
+        };
+        let clone = icon_label_button(
+            colors,
+            "clone-repo",
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+            Icon::FolderGit,
+            match offer.state() {
+                CloneOfferState::Offered => "Clone",
+                CloneOfferState::Cloning => "Cloning…",
+                CloneOfferState::Failed(_) => "Try again",
+            },
+        )
+        .when(!is_cloning, |button| {
+            button.on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::start_clone);
+            }))
+        });
+        let other_folder = (!is_cloning).then(|| {
+            icon_label_button(
+                colors,
+                "clone-repo-folder",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::FolderOpen,
+                "Other folder…",
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.pick_clone_folder(cx)))
+        });
+        let not_now = (!is_cloning).then(|| {
+            icon_label_button(
+                colors,
+                "clone-repo-not-now",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Close,
+                "Not now",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::decline_clone);
+            }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.warning)
+                    .child(offer.line()),
+            )
+            .children(failure)
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .child(clone)
+                    .children(other_folder)
+                    .children(not_now),
+            )
+    }
+
+    /// The picker is the system's, so the answer comes back later.
+    fn pick_clone_folder(&mut self, cx: &mut Context<Self>) {
+        let answer = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        let session = self.session.clone();
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(Some(paths))) = answer.await
+                && let Some(folder) = paths.into_iter().next()
+            {
+                session.update(cx, |session, cx| session.pick_clone_folder(folder, cx));
+            }
+        })
+        .detach();
+    }
+
     /// A row touching the current one tells the layout while the mouse is on it.
     fn touching_hover(
         &self,
@@ -1304,6 +1403,9 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
+        let clone_offer = session
+            .clone_offer()
+            .map(|offer| Self::clone_offer_block(&colors, offer, cx));
         let finish_dialog = FinishReviewDialog::new(
             progress.total > 0 && progress.read == progress.total,
             sidebar.finishing,
@@ -1396,6 +1498,7 @@ impl OneStepLayout {
             .child(progress_meter(&colors, progress))
             .child(finish_dialog)
             .children(tour_agent)
+            .children(clone_offer)
             .children(changes_not_shown)
             .children(problems)
             .children(sync_notices);
