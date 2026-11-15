@@ -211,7 +211,7 @@ fn joined(pieces: &[PieceDiff]) -> (Vec<DiffHunk>, Vec<Option<usize>>) {
             rows,
             changes: edges
                 .iter()
-                .filter(|edge| first <= edge.first && edge.last <= last)
+                .filter(|edge| first <= edge.last && edge.first <= last)
                 .flat_map(|edge| edge.changes.iter().cloned())
                 .collect(),
             more_above: edges

@@ -168,7 +168,8 @@ pub struct MoreContext {
 pub struct DiffHunk {
     pub rows: Vec<DiffLine>,
     /// Every change these lines hold, first to last. More lines shown between two changes join
-    /// them into one hunk, which keeps the identity of each.
+    /// them into one hunk, which keeps the identity of each. A change cut in two, by lines of
+    /// another step in a box of several pieces, is held by both parts.
     pub changes: Vec<ChangeId>,
     /// `None` at the top of the file or next to another change.
     pub more_above: Option<MoreContext>,
