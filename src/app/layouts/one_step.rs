@@ -78,7 +78,6 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
-use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -599,27 +598,40 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let path = switch.path.clone();
         let labels = switch.labels;
-        toggle_button(
-            &colors,
-            format!("piece-labels-{path}"),
-            labels == PieceLabels::Shown,
-            ButtonSize::Small,
-        )
-        .tooltip(tooltip(|cx| {
-            match keymap(cx).first_chord(Command::TogglePieceLabels) {
-                Some(chord) => format!("Piece labels ({})", chord.spelled()),
-                None => "Piece labels".to_owned(),
-            }
-            .into()
-        }))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.change_review(cx, |review| {
-                review
-                    .display_options_mut()
-                    .show_piece_labels(&path, labels.flipped());
-            });
-        }))
-        .child("Labels")
+        let segment = Segment::new(
+            format!("piece-labels-on-{path}"),
+            "Labels",
+            cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| {
+                    review
+                        .display_options_mut()
+                        .show_piece_labels(&path, labels.flipped());
+                });
+            }),
+        );
+        div()
+            .id(SharedString::from(format!("piece-labels-{}", switch.path)))
+            .flex_none()
+            .tooltip(tooltip(|_| {
+                "Show or hide the piece labels of the focused change's file".into()
+            }))
+            .child(
+                Segmented::new(
+                    format!("piece-labels-{}", switch.path),
+                    SegmentLayout::Row {
+                        segment_width: px(64.),
+                    },
+                    vec![segment],
+                )
+                .compact()
+                .picked((labels == PieceLabels::Shown).then_some(0))
+                .keys(button_keys(
+                    &colors,
+                    ButtonKind::Ghost,
+                    Command::TogglePieceLabels,
+                    cx,
+                )),
+            )
     }
 
     /// The comments on the whole file are rows under it, not part of it.
@@ -656,7 +668,13 @@ impl OneStepLayout {
                     segments,
                 )
                 .compact()
-                .picked(Some(picked)),
+                .picked(Some(picked))
+                .keys(button_keys(
+                    &Colors::active(cx),
+                    ButtonKind::Ghost,
+                    Command::ToggleRenderedView,
+                    cx,
+                )),
             )
     }
 

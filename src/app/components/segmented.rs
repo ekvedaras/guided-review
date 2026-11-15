@@ -1,7 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, ClickEvent, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px, relative,
+    AnyElement, App, ClickEvent, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    relative,
 };
 
 use super::icon::{Icon, sized_icon};
@@ -56,6 +57,7 @@ pub struct Segmented {
     thumb_tone: Tone,
     is_invalid: bool,
     is_compact: bool,
+    keys: Option<AnyElement>,
 }
 
 impl Segmented {
@@ -68,6 +70,7 @@ impl Segmented {
             thumb_tone: Tone::Neutral,
             is_invalid: false,
             is_compact: false,
+            keys: None,
         }
     }
 
@@ -85,6 +88,12 @@ impl Segmented {
     /// Short enough to sit in a box header beside its buttons.
     pub fn compact(mut self) -> Self {
         self.is_compact = true;
+        self
+    }
+
+    /// The keys that do what the control does, at the track's trailing end.
+    pub fn keys(mut self, keys: impl IntoElement) -> Self {
+        self.keys = Some(keys.into_any_element());
         self
     }
 
@@ -206,7 +215,7 @@ impl RenderOnce for Segmented {
             })
             .bg(colors.inset)
             .when(matches!(layout, SegmentLayout::Row { .. }), |track| {
-                track.flex().self_start()
+                track.flex().items_center().self_start()
             })
             .child(
                 div()
@@ -217,5 +226,6 @@ impl RenderOnce for Segmented {
                     .children(thumb)
                     .children(segments),
             )
+            .children(self.keys.map(|keys| div().flex_none().pr_0p5().child(keys)))
     }
 }
