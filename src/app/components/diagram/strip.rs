@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::path::Path;
 use std::sync::Arc;
 
 use gpui::RenderImage;
@@ -69,4 +70,32 @@ pub fn rasterize(svg: &Svg, scale: f32, strip: &Strip) -> Result<Arc<RenderImage
     let bgra = image::RgbaImage::from_raw(width_px, height_px, pixels)
         .ok_or("the strip buffer has the wrong size")?;
     Ok(Arc::new(RenderImage::new(vec![image::Frame::new(bgra)])))
+}
+
+/// The whole diagram as one PNG, for the picture zoom. Returns the scale it was drawn at, kept
+/// low enough that its texture stays within `MAX_STRIP_PX`.
+pub fn write_png(svg: &Svg, wanted_scale: f32, path: &Path) -> Result<f32, String> {
+    let tree = svg.tree()?;
+    let scale = wanted_scale.min(MAX_STRIP_PX as f32 / svg.width().max(svg.height()));
+    let width_px = whole_pixels((svg.width() * scale).ceil());
+    let height_px = whole_pixels((svg.height() * scale).ceil());
+    let mut pixmap = Pixmap::new(width_px, height_px).ok_or("the diagram has no pixels")?;
+    resvg::render(
+        &tree,
+        Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let pixels = pixmap
+        .pixels()
+        .iter()
+        .flat_map(|pixel| {
+            let color = pixel.demultiply();
+            [color.red(), color.green(), color.blue(), color.alpha()]
+        })
+        .collect();
+    image::RgbaImage::from_raw(width_px, height_px, pixels)
+        .ok_or("the diagram buffer has the wrong size")?
+        .save(path)
+        .map_err(|error| error.to_string())?;
+    Ok(scale)
 }
