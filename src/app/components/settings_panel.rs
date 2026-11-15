@@ -290,7 +290,7 @@ impl SettingsPanel {
             clone_focus: Vec::new(),
             recording: None,
             scroll: ScrollHandle::new(),
-            running_binary: std::env::current_exe()
+            running_binary: crate::platform::running_binary()
                 .map_or_else(|_| "unknown".into(), |exe| exe.display().to_string().into()),
         }
     }

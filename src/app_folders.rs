@@ -285,7 +285,7 @@ pub enum Mover {
 impl Mover {
     fn of_this_process(home: &Path) -> Self {
         let install = ReleaseInstall::in_home(home);
-        match std::env::current_exe() {
+        match platform::running_binary() {
             Ok(exe) => install.folder_mover(&exe),
             Err(_) => install.folder_mover(Path::new("")),
         }

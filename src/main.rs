@@ -402,7 +402,8 @@ fn launch() -> anyhow::Result<()> {
 }
 
 fn install_app() -> anyhow::Result<()> {
-    let exe = std::env::current_exe().context("could not find the guided-review binary")?;
+    let exe = guided_review::platform::running_binary()
+        .context("could not find the guided-review binary")?;
     let install = ReleaseInstall::in_home(AppFolders::running()?.home());
     let placed = install.bring_desktop_entry_up_to_date(&exe)?;
     let (name, folder) = (

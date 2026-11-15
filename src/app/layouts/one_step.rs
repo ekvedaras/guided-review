@@ -1097,7 +1097,7 @@ impl OneStepLayout {
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
-            Effect::Restart(restart) => match std::env::current_exe() {
+            Effect::Restart(restart) => match crate::platform::running_binary() {
                 Ok(exe) => self.restart_app_with(exe, &restart, cx),
                 Err(error) => {
                     post_toast(cx, ToastTone::Danger, format!("Could not restart: {error}"));

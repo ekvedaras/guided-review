@@ -141,6 +141,23 @@ struct AppMenu {
     quit: &'static str,
 }
 
+/// The path of this app's binary, to run again or to tell where it is installed.
+pub fn running_binary() -> std::io::Result<PathBuf> {
+    std::env::current_exe().map(running_binary_from)
+}
+
+/// Linux names a binary deleted while it runs `<path> (deleted)`, as `cargo install` leaves the
+/// one it replaces; its replacement is at `<path>`.
+pub fn running_binary_from(reported: PathBuf) -> PathBuf {
+    match reported
+        .to_str()
+        .and_then(|path| path.strip_suffix(" (deleted)"))
+    {
+        Some(replacement) => PathBuf::from(replacement),
+        None => reported,
+    }
+}
+
 /// The XDG folders, on every OS so far: the variables when set to an absolute path, the XDG
 /// defaults under home otherwise.
 /// A Windows adapter would pick its own here.

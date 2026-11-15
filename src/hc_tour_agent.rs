@@ -50,7 +50,7 @@ pub struct HcTourAgents {
 impl HcTourAgents {
     /// Agents that write their tours in `tours`.
     pub fn new(tours: PathBuf) -> Self {
-        let agents_path = std::env::current_exe().map_or_else(
+        let agents_path = crate::platform::running_binary().map_or_else(
             |_| std::env::var("PATH").unwrap_or_default(),
             |own| Self::path_for_agents(&own, std::env::var_os("PATH").as_deref()),
         );

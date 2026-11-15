@@ -83,6 +83,7 @@ mod repin_guard;
 mod restart_guard;
 mod review_threads;
 mod reviewing_mark;
+mod running_binary;
 mod screen_travel;
 mod settings;
 mod shortcuts;

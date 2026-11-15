@@ -27,7 +27,10 @@ impl Global for Updates {}
 impl Updates {
     pub fn install(home: &Path, cx: &mut App) {
         let install = ReleaseInstall::in_home(home);
-        let Some(exe) = std::env::current_exe().ok().filter(|exe| install.runs(exe)) else {
+        let Some(exe) = crate::platform::running_binary()
+            .ok()
+            .filter(|exe| install.runs(exe))
+        else {
             return;
         };
         let bundling = install.clone();
@@ -77,7 +80,7 @@ pub fn running_build() -> Build {
         if cfg!(feature = "snapshots") {
             return Build::Test;
         }
-        match (std::env::home_dir(), std::env::current_exe()) {
+        match (std::env::home_dir(), crate::platform::running_binary()) {
             (Some(home), Ok(exe)) => ReleaseInstall::in_home(&home).build_of(&exe),
             _ => Build::Local,
         }
@@ -87,7 +90,7 @@ pub fn running_build() -> Build {
 /// Looked up again for each review opened, so removing the binary named clears it.
 pub fn release_install_in_the_way() -> Option<InTheWay> {
     let home = std::env::home_dir()?;
-    let exe = std::env::current_exe().ok()?;
+    let exe = crate::platform::running_binary().ok()?;
     let path = std::env::var_os("PATH").unwrap_or_default();
     ReleaseInstall::in_home(&home).in_the_way(&exe, &path)
 }
