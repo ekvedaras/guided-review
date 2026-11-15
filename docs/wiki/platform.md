@@ -34,7 +34,7 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 
 ## Decisions, 2026-11-14 (#74, raising Herdr)
 
-- **The platform says how Herdr comes to the front** after `herdr-app do agent.focus` (`Os::herdr_raise`, `platform::HerdrRaise`): `/usr/bin/open -a Herdr` on macOS; `hyprctl dispatch focuswindow class:herdr-app` on Linux, the class Herdr's window has on Hyprland.
+- **The platform says how Herdr comes to the front** after `herdr-app do agent.focus` (`Os::herdr_raise`, `platform::HerdrRaise`): `/usr/bin/open -a Herdr` on macOS; `hyprctl dispatch 'hl.dsp.focus({ window = "class:herdr-app" })'` on Linux, the class Herdr's window has on Hyprland. 2026-11-15: it was `hyprctl dispatch focuswindow class:herdr-app`, which Hyprland 0.56 refuses with exit 7, as its dispatch is now Lua; the error goes to stdout, so `app.log` showed it empty. Only the Lua form is sent: a Hyprland before 0.56 leaves Herdr behind.
 - **On Linux the raise is best effort.** Only the desktop raises windows on Wayland and only Hyprland is asked, so a missing `hyprctl`, another desktop or a failed dispatch leaves Herdr behind and showing the agent still succeeds. On macOS a failed `open` still fails it, as before.
 - Tests run both adapters' commands through one stand-in (`HcTourAgents::raising_herdr_with(os, program)`).
 
