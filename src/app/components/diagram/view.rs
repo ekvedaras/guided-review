@@ -241,9 +241,13 @@ fn fit_to_width<E: Styled>(block: E, width: f32, strip: &Strip) -> E {
 /// Shows the whole diagram as large as the window holds it, drawn off the main thread first.
 fn zoom_diagram(svg: Svg, window: &mut Window, cx: &mut App) {
     let wanted_scale = window.scale_factor() * 2.;
+    let ground = Colors::active(cx).background;
     let mut hasher = DefaultHasher::new();
     svg.text().hash(&mut hasher);
     wanted_scale.to_bits().hash(&mut hasher);
+    [ground.r, ground.g, ground.b]
+        .map(f32::to_bits)
+        .hash(&mut hasher);
     let path = std::env::temp_dir().join(format!(
         "guided-review-diagram-{:016x}.png",
         hasher.finish()
@@ -254,7 +258,7 @@ fn zoom_diagram(svg: Svg, window: &mut Window, cx: &mut App) {
                 .background_executor()
                 .spawn({
                     let (svg, path) = (svg.clone(), path.clone());
-                    async move { write_png(&svg, wanted_scale, &path) }
+                    async move { write_png(&svg, wanted_scale, ground, &path) }
                 })
                 .await;
             match drawn {
