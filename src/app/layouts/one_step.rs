@@ -2561,10 +2561,11 @@ impl OneStepLayout {
             .children(intro.notes.clone().map(StepNotesCard));
         let diagram = intro.diagram.as_ref().map(|diagram| {
             div()
+                .w_full()
                 .min_w_0()
-                .max_w_full()
                 .flex()
                 .flex_col()
+                .items_start()
                 .gap_2()
                 .child(DiagramView::new(self.diagrams.clone()))
                 .child(notes_button(

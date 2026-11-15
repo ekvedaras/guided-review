@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use guided_review::app::components::diagram::{DiagramDrawer, Strip, Svg, rasterize};
+use guided_review::app::components::diagram::{DiagramDrawer, Strip, Svg, rasterize, write_png};
 use guided_review::app::components::palette::{Appearance, Colors, TEXT_FONT};
 
 const FLOWCHART: &str = "flowchart TD\n  A[Open the tour] --> B{Has diagram?}\n  B -->|yes| C[Draw it]\n  B -->|no| D[Skip]\n";
@@ -394,4 +394,37 @@ mod memory {
         assert_eq!(memory.strips(), [] as [Strip; 0]);
         assert!(memory.error().is_some());
     }
+}
+
+#[test]
+fn a_zoomed_diagram_lies_on_the_page_ground_so_its_lines_show_on_the_dark_backdrop() {
+    let svg = svg(Appearance::Dark, FLOWCHART);
+    let ground = Colors::of(Appearance::Dark).background;
+    let folder = tempfile::TempDir::new().unwrap();
+    let path = folder.path().join("zoomed.png");
+
+    write_png(&svg, 2.0, ground, &path).unwrap();
+
+    let picture = image::open(&path).unwrap().to_rgba8();
+    let [r, g, b] = channels(ground);
+    assert_eq!(picture.get_pixel(0, 0).0, [r, g, b, 255]);
+}
+
+#[test]
+fn a_zoomed_diagram_too_big_for_one_texture_is_drawn_smaller() {
+    let svg = svg(Appearance::Dark, FLOWCHART);
+    let folder = tempfile::TempDir::new().unwrap();
+    let path = folder.path().join("zoomed.png");
+
+    let scale = write_png(
+        &svg,
+        10_000.0,
+        Colors::of(Appearance::Dark).background,
+        &path,
+    )
+    .unwrap();
+
+    let picture = image::open(&path).unwrap();
+    assert!(scale < 10_000.0);
+    assert!(picture.width().max(picture.height()) <= 4096);
 }

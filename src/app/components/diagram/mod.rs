@@ -5,5 +5,5 @@ mod view;
 
 pub use drawer::{DiagramDrawer, Svg};
 pub use memory::{DiagramMemory, Showing, StripJob, SvgJob};
-pub use strip::{Strip, rasterize};
+pub use strip::{Strip, rasterize, write_png};
 pub use view::{DiagramSet, DiagramView, Diagrams};

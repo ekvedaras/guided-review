@@ -179,6 +179,7 @@ impl RenderOnce for DiagramView {
         let memory = &self.diagrams.read(cx).memory;
         let frame = div()
             .id(("diagram", self.diagrams.entity_id()))
+            .w_full()
             .rounded(px(CARD_RADIUS));
         if let Some(svg) = memory.svg() {
             let width = svg.width();
