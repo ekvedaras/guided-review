@@ -61,7 +61,7 @@ pub fn open_review(
 ) -> anyhow::Result<OpenedReview> {
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
     opened.make_basic_tour_if_no_tour()?;
-    // A basic file with a guided one beside it shows the basic tour; the guided tour waits for #86.
+    // A basic file with a guided one beside it shows the basic tour.
     let tour = if ToursOnDisk::of(folders, pr).opens_basic() {
         Tour::Basic(BasicTour::load(&Tour::basic_path_for(folders, pr))?)
     } else {

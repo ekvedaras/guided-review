@@ -325,16 +325,18 @@ enum Launch {
 }
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
-    let opened = OpenedPr::new(pr)?;
-    let folders = &opened.folders;
+    let folders = &AppFolders::running()?;
+    let tours = ToursOnDisk::of(folders, pr);
     if let Launch::Restart { at: Some(step) } = launch
-        && ToursOnDisk::of(folders, pr).opens_basic()
+        && tours.opens_basic()
     {
         anyhow::bail!(
             "{pr} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
         );
     }
-    opened.make_basic_tour_if_no_tour()?;
+    if tours == ToursOnDisk::None {
+        OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?;
+    }
     let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {
         pr: pr.to_string(),
