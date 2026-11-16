@@ -8,16 +8,14 @@ fn agent_reply_given_a_local_change_sets_key_says_local_review_is_not_built_yet(
     let github = FakeGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
     let guided_review = GuidedReview::new(&repo, &github);
 
-    for args in [vec!["agent-reply", LOCAL_KEY, "h0", "--working"]] {
-        let run = guided_review.run(&args);
+    let run = guided_review.run(&["agent-reply", LOCAL_KEY, "h0", "--working"]);
 
-        assert!(!run.success, "{args:?} should be refused");
-        assert!(
-            run.stderr.contains("local review is not built yet"),
-            "{args:?} said:\n{}",
-            run.stderr
-        );
-    }
+    assert!(!run.success);
+    assert!(
+        run.stderr.contains("local review is not built yet"),
+        "{}",
+        run.stderr
+    );
 }
 
 #[test]
