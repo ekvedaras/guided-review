@@ -190,19 +190,21 @@ impl ActivePr {
             && self.shown.as_ref() == Some(&pr)
             && !self.is_reopening(&pr)
         {
-            self.guided_is_ready(&pr);
+            self.forget_writing(&pr);
             OpenOutcome::Tour(OpenDecision::GuidedReady)
         } else {
             OpenOutcome::Tour(self.request(pr, origin))
         }
     }
 
-    fn guided_is_ready(&mut self, pr: &PullRequestUrl) {
+    /// True when a writing of the PR was on.
+    fn forget_writing(&mut self, pr: &PullRequestUrl) -> bool {
         let was_written = self.writings.iter().any(|(writing, _)| writing == pr);
         self.writings.retain(|(writing, _)| writing != pr);
         if was_written {
             self.remember();
         }
+        was_written
     }
 
     /// What the review of the PR starts out knowing of its guided tour. A guided file on disk with no
@@ -222,11 +224,7 @@ impl ActivePr {
 
     /// An open of a PR being written is its writer saying the tour is checked, which ends the writing.
     pub fn request(&mut self, pr: PullRequestUrl, origin: OpenOrigin) -> OpenDecision {
-        let was_written = self.writings.iter().any(|(writing, _)| writing == &pr);
-        self.writings.retain(|(writing, _)| writing != &pr);
-        if was_written {
-            self.remember();
-        }
+        let was_written = self.forget_writing(&pr);
         if self.is_reopening(&pr) {
             return OpenDecision::Build(self.build(pr));
         }

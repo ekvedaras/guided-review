@@ -352,20 +352,19 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         Launch::Open => hand_over(&folder, &request)?,
     };
     match answer {
+        Answer::GuidedReady { .. } => println!("{answer}"),
         Answer::Opening { .. }
         | Answer::Writing { .. }
         | Answer::Reloaded { .. }
-        | Answer::KeptInBackground { .. }
-        | Answer::GuidedReady { .. } => {
+        | Answer::KeptInBackground { .. } => {
             println!("{answer}");
-            let is_guided_ready = matches!(answer, Answer::GuidedReady { .. });
-            if !is_guided_ready && ToursOnDisk::of(folders, pr).opens_basic() {
+            if ToursOnDisk::of(folders, pr).opens_basic() {
                 println!("{pr} opened in Basic mode");
             }
-            Ok(())
         }
         other => anyhow::bail!("{other}"),
     }
+    Ok(())
 }
 
 fn settings() -> anyhow::Result<()> {
