@@ -170,7 +170,10 @@ fn the_sidebar_calls_a_local_reviews_agent_an_agent_and_a_prs_a_tour_agent() {
     let agent = on("t2", AgentStatus::Idle);
 
     assert_eq!(agent.line_for(&local()), "Agent `t2`: idle");
-    assert_eq!(agent.line_for(&PR.parse().unwrap()), "Tour agent `t2`: idle");
+    assert_eq!(
+        agent.line_for(&PR.parse().unwrap()),
+        "Tour agent `t2`: idle"
+    );
     assert_eq!(TourAgentState::None.line_for(&local()), "Agent: none");
 }
 
@@ -272,5 +275,9 @@ fn the_ask_panel_line_for_a_local_review_says_what_to_do_about_the_agent() {
             .line()
             .starts_with("Not handed: no agent works in this review's folder yet")
     );
-    assert!(OwnAgentHandOff::PickAnAgent.line().contains("Use this agent"));
+    assert!(
+        OwnAgentHandOff::PickAnAgent
+            .line()
+            .contains("Use this agent")
+    );
 }

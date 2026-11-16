@@ -737,7 +737,10 @@ fn terminal_name(subject: &ReviewSubject) -> String {
                     change_set.folder().name(),
                     change_set.branch().as_str()
                 ),
-                format!("-{}", crate::hex::lower(digest.iter().take(NAME_HASH_BYTES))),
+                format!(
+                    "-{}",
+                    crate::hex::lower(digest.iter().take(NAME_HASH_BYTES))
+                ),
             )
         }
     };

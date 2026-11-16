@@ -32,7 +32,8 @@ use crate::viewer::{
     CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
     OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
     SendMode, TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState,
-    TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements,
+    line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
