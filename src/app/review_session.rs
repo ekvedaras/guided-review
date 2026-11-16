@@ -457,9 +457,7 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) {
         let note = thread_action_note(&action);
-        let Some(request) = self.review.thread_action_request(action) else {
-            return;
-        };
+        let request = self.review.thread_action_request(action);
         let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
@@ -1275,6 +1273,7 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
         SendMode::CommentNow => "posted on GitHub",
+        SendMode::SendNow => "kept here",
     };
     match audience {
         Audience::Author => format!("{what} {done}"),

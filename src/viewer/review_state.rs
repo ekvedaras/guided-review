@@ -17,6 +17,7 @@ use crate::tour::Tour;
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
+use super::local_threads::LocalThreads;
 use super::ports::Viewed;
 use super::review::{ReadSubject, StepId};
 use super::switch_to_guided::CarriedReads;
@@ -42,6 +43,9 @@ pub struct ReviewState {
     /// The folder the PR was last opened from, so a switch back to it finds the same clone.
     #[serde(default)]
     opened_from: Option<PathBuf>,
+    /// A local review's threads, written only through `LocalThreadStore`, never with the viewer's sections.
+    #[serde(default, skip_serializing_if = "LocalThreads::is_empty")]
+    local_threads: LocalThreads,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -433,6 +437,14 @@ impl ReviewState {
         &mut self.viewer.hand_offs
     }
 
+    pub(super) fn local_threads(&self) -> &LocalThreads {
+        &self.local_threads
+    }
+
+    pub(super) fn local_threads_mut(&mut self) -> &mut LocalThreads {
+        &mut self.local_threads
+    }
+
     pub(super) fn pr_description(&self) -> &str {
         &self.viewer.pr_description
     }
@@ -577,7 +589,7 @@ pub struct TypedText {
 }
 
 /// `<owner>/<repo>/<pr>.json` in the state files folder
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ReviewStateFile {
     path: PathBuf,
     local_key: Option<String>,
@@ -783,10 +795,23 @@ impl ReviewStateFile {
     /// Reads the file again before changing it: the viewer and the Asks each keep their own
     /// copy in memory, and neither may write the other's section back stale.
     pub fn update(&self, change: impl FnOnce(&mut ReviewState)) -> anyhow::Result<()> {
+        self.update_if(|state| {
+            change(state);
+            true
+        })
+    }
+
+    /// `update` that writes only when `change` says it changed something.
+    pub(super) fn update_if(
+        &self,
+        change: impl FnOnce(&mut ReviewState) -> bool,
+    ) -> anyhow::Result<()> {
         let _lock = self.lock()?;
         let mut state = self.load()?;
-        change(&mut state);
-        self.write(&state)
+        if change(&mut state) {
+            self.write(&state)?;
+        }
+        Ok(())
     }
 
     pub fn save(&self, state: &ReviewState) -> anyhow::Result<()> {

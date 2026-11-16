@@ -89,6 +89,9 @@ pub struct ThreadComment {
     /// GitHub's address of the author's picture; `None` for a deleted account.
     pub avatar_url: Option<String>,
     pub is_bot: bool,
+    /// Written by the change set's agent on a local thread, which knows its authors; on GitHub an
+    /// agent's comment is told by the robot in front of it instead.
+    pub by_agent: bool,
     /// The viewer wrote it, so the viewer may edit it.
     pub by_viewer: bool,
     pub body: String,
@@ -101,12 +104,12 @@ pub struct ThreadComment {
 impl ThreadComment {
     /// Written by the author's tour agent, which posts under their account with the robot in front.
     pub fn is_by_agent(&self) -> bool {
-        self.body.starts_with(AGENT_MARK)
+        self.by_agent || self.body.starts_with(AGENT_MARK)
     }
 
-    /// `<login>'s agent` for an agent's comment.
+    /// `<login>'s agent` for an agent's comment on GitHub; a local thread names its authors itself.
     pub fn shown_author(&self) -> String {
-        if self.is_by_agent() {
+        if !self.by_agent && self.is_by_agent() {
             format!("{}'s agent", self.author)
         } else {
             self.author.clone()

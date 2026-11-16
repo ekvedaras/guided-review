@@ -132,6 +132,7 @@ fn thread_on_line_ten() -> ReviewThread {
             id: CommentId::new("C1"),
             author: "me".into(),
             is_bot: false,
+            by_agent: false,
             body: "why ten?".into(),
             url: String::new(),
             reactions: Vec::new(),

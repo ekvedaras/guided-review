@@ -27,8 +27,8 @@ use super::ask_target::{AskTarget, Unavailable};
 use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
-    CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult, QueuedComment,
-    SendMode,
+    CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest, CommentResult,
+    QueuedComment, SendMode,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
 use super::disk_news::DiskNews;
@@ -45,6 +45,7 @@ use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
+use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
@@ -698,6 +699,30 @@ impl ReviewCore {
 
     pub fn subject(&self) -> &ReviewSubject {
         &self.subject
+    }
+
+    pub(super) fn thread_home(&self) -> ThreadHome {
+        ThreadHome::of(&self.subject, self.state.file())
+    }
+
+    /// The send actions a comment box of this review offers; Ask agent is one more for a PR.
+    pub fn send_modes(&self) -> &'static [SendMode] {
+        match &self.subject {
+            ReviewSubject::PullRequest(_) => &[SendMode::AddToReview, SendMode::CommentNow],
+            ReviewSubject::Local(_) => &SendMode::LOCAL,
+        }
+    }
+
+    /// A local review's comments are tasks for its agent: while the link to the agent is off they
+    /// stay drafts, and say why.
+    fn send_refusal(&self, mode: SendMode) -> Option<CommentRefusal> {
+        if !self.send_modes().contains(&mode) {
+            Some(CommentRefusal::NotOffered)
+        } else if mode.is_task() && self.agent_link_is_off {
+            Some(CommentRefusal::AgentLinkOff)
+        } else {
+            None
+        }
     }
 
     pub(super) fn has_seen_end_of_screen(&self) -> bool {
@@ -1567,22 +1592,40 @@ impl ReviewCore {
         self.comment_desk.can_comment_now()
     }
 
-    /// `None` for a local review: its threads are not on GitHub.
-    pub fn thread_action_request(&self, action: ThreadAction) -> Option<ThreadActionRequest> {
-        let pr = self.subject.pull_request()?;
-        let reply_body = match &action {
-            ThreadAction::Reply { thread_id, .. } => {
-                self.state.reply_draft(thread_id).map(str::to_owned)
+    /// A reply in a local thread is a follow-up task, so it always reaches the agent too.
+    pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
+        let (action, reply_body, send_refusal) = match action {
+            ThreadAction::Reply {
+                thread_id,
+                mode,
+                audience,
+            } => {
+                let reply_body = self.state.reply_draft(&thread_id).map(str::to_owned);
+                let audience = if mode.is_task() {
+                    Audience::Agent
+                } else {
+                    audience
+                };
+                let action = ThreadAction::Reply {
+                    thread_id,
+                    mode,
+                    audience,
+                };
+                (action, reply_body, self.send_refusal(mode))
             }
-            _ => None,
+            other => (other, None, None),
         };
-        Some(self.comment_desk.thread_action_request(
-            pr,
+        let mut request = self.comment_desk.thread_action_request(
+            (self.thread_home(), &self.head),
             &self.pulled_threads,
             action,
             reply_body,
             self.tour_freshness(),
-        ))
+        );
+        if send_refusal.is_some() {
+            request.refusal = send_refusal;
+        }
+        request
     }
 
     /// Asks the reviewer to confirm deleting one of their own comments, which a deletion needs.
@@ -1778,8 +1821,18 @@ impl ReviewCore {
     /// The comment boxes open on this review, each with what it is doing; each hangs under the
     /// last line of its place, or under the picture of its file.
     pub fn comment_boxes(&self) -> impl Iterator<Item = CommentBox<'_>> {
+        let agent_out_of_reach = SendMode::LOCAL
+            .iter()
+            .find_map(|mode| self.send_refusal(*mode))
+            .filter(|refusal| *refusal == CommentRefusal::AgentLinkOff);
         self.comment_desk
             .comment_boxes(&self.state, self.tour_freshness())
+            .map(move |mut comment_box| {
+                if comment_box.problem.is_none() {
+                    comment_box.problem = agent_out_of_reach.clone().map(CommentProblem::Refused);
+                }
+                comment_box
+            })
     }
 
     pub fn comment_box(&self, place: &CommentPlace) -> Option<CommentBox<'_>> {
@@ -1799,13 +1852,17 @@ impl ReviewCore {
         mode: SendMode,
         audience: Audience,
     ) -> Option<CommentRequest> {
-        self.comment_desk.start_sending(
-            &self.state,
-            place,
-            mode,
-            audience,
-            (&self.head, self.subject.pull_request()?),
-        )
+        if self.send_refusal(mode).is_some() {
+            return None;
+        }
+        let audience = if mode.is_task() {
+            Audience::Agent
+        } else {
+            audience
+        };
+        let home = self.thread_home();
+        self.comment_desk
+            .start_sending(&self.state, place, mode, audience, (&self.head, home))
     }
 
     pub fn hand_offs(&self) -> &HandOffs {
@@ -1823,7 +1880,7 @@ impl ReviewCore {
 
     /// The oldest comment in the queue, to send again.
     pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        CommentDesk::queued_comment_request(&self.state, &self.head, self.subject.pull_request()?)
+        CommentDesk::queued_comment_request(&self.state, &self.head, self.thread_home())
     }
 
     /// The window was asked for another PR and could not open it; named until another switch succeeds.

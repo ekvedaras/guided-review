@@ -9,6 +9,7 @@ use super::finish_review::{
     FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
 use super::hand_offs::{Audience, SentComment, SentFrom};
+use super::local_threads::ThreadHome;
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
@@ -324,7 +325,7 @@ impl CommentDesk {
         place: &CommentPlace,
         mode: SendMode,
         audience: Audience,
-        (tour_head, pr): (&Sha, &PullRequestUrl),
+        (tour_head, home): (&Sha, ThreadHome),
     ) -> Option<CommentRequest> {
         let draft = state.draft_at(place)?.clone();
         self.stop_composing(place);
@@ -336,7 +337,7 @@ impl CommentDesk {
             mode,
             audience,
             tour_head.clone(),
-            pr.clone(),
+            home,
         ))
     }
 
@@ -344,7 +345,7 @@ impl CommentDesk {
     pub(super) fn queued_comment_request(
         state: &ReviewState,
         tour_head: &Sha,
-        pr: &PullRequestUrl,
+        home: ThreadHome,
     ) -> Option<CommentRequest> {
         let queued = state.comment_queue().first()?;
         Some(CommentRequest::new(
@@ -353,7 +354,7 @@ impl CommentDesk {
             queued.mode,
             queued.audience,
             tour_head.clone(),
-            pr.clone(),
+            home,
         ))
     }
 
@@ -406,7 +407,10 @@ impl CommentDesk {
         let place = request.draft.place.clone();
         match how {
             Outcome::Sent => {
-                self.pending_review = PendingReview::exists(request.mode == SendMode::AddToReview);
+                if !request.mode.is_task() {
+                    self.pending_review =
+                        PendingReview::exists(request.mode == SendMode::AddToReview);
+                }
                 leave(state, &request.origin, &place);
                 if request.audience == Audience::Agent {
                     state.hand_offs_mut().record_new_thread(
@@ -445,7 +449,7 @@ impl CommentDesk {
 
     pub(super) fn thread_action_request(
         &self,
-        pr: &PullRequestUrl,
+        (home, head): (ThreadHome, &Sha),
         threads: &[ReviewThread],
         action: ThreadAction,
         reply_body: Option<String>,
@@ -462,7 +466,8 @@ impl CommentDesk {
             _ => None,
         };
         ThreadActionRequest {
-            pr: pr.clone(),
+            home,
+            head: head.clone(),
             action,
             draft_body,
             freshness,
@@ -641,7 +646,9 @@ impl CommentDesk {
                     audience,
                 },
             ) => {
-                self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
+                if !mode.is_task() {
+                    self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
+                }
                 let sent = state.record(|state| {
                     if *audience == Audience::Agent {
                         hand_off_reply(state, thread_id, *mode, from, outcome);

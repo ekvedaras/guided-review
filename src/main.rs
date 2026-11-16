@@ -154,7 +154,6 @@ fn main() -> anyhow::Result<()> {
             body,
             working: _,
         } => {
-            let pr = pull_request_of(&subject)?;
             let body = match body.as_deref() {
                 Some("-") => Some(std::io::read_to_string(std::io::stdin())?),
                 _ => body,
@@ -166,7 +165,7 @@ fn main() -> anyhow::Result<()> {
             let said = agent_reply(
                 &GitHub::from_env(),
                 &AppFolders::running()?,
-                &pr,
+                &subject,
                 hand_off,
                 &reply,
             )?;

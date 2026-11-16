@@ -402,8 +402,11 @@ fn a_local_review_reads_and_sends_nothing_on_github_whatever_the_reviewer_does()
     let ran_after = drive_without_agents(&mut review, &github, &source, Instant::now());
     let finishing = review.finish_review_request(ReviewVerdict::Comment, "");
 
-    assert_eq!(ran, [WorkKind::CheckWorkingTree]);
-    assert_eq!(ran_after, [WorkKind::CheckWorkingTree]);
+    assert_eq!(ran, [WorkKind::CheckWorkingTree, WorkKind::PullThreads]);
+    assert_eq!(
+        ran_after,
+        [WorkKind::CheckWorkingTree, WorkKind::PullThreads]
+    );
     assert!(!review.not_synced());
     assert_eq!(review.sync_banner(), None);
     assert!(finishing.is_err());

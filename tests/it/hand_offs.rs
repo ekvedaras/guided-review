@@ -13,8 +13,8 @@ use guided_review::viewer::{
     AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffId,
     HandOffState, LineLocation, Problem, Reaction, ReactionChange, ReplyPlacement, Review,
     ReviewStateFile, ReviewThread, SeenMark, SendMode, Side, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgentState,
-    TourAgents, Work, WorkKind, WorkPorts,
+    ThreadActionResult, ThreadComment, ThreadHome, ThreadId, ThreadMessage, TourAgentPort,
+    TourAgentState, TourAgents, Work, WorkKind, WorkPorts,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -122,6 +122,7 @@ fn comment(id: &str, author: &str, body: &str) -> ThreadComment {
         id: CommentId::new(id),
         author: author.into(),
         is_bot: false,
+        by_agent: false,
         body: body.into(),
         url: String::new(),
         reactions: Vec::new(),
@@ -904,7 +905,9 @@ fn reply_request(
         ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr.clone()))
             .load()
             .unwrap();
-    state.hand_offs().agent_reply(&pr, id, body)
+    state
+        .hand_offs()
+        .agent_reply(&ThreadHome::GitHub(pr), id, body)
 }
 
 fn replies(sent: &SentLog) -> Vec<(String, SendMode)> {
@@ -1120,7 +1123,7 @@ fn working_on_it_request(pull: &Pull, id: HandOffId) -> AgentReplyRequest {
         .load()
         .unwrap()
         .hand_offs()
-        .agent_working_on_it(&pr, id)
+        .agent_working_on_it(&ThreadHome::GitHub(pr), id)
         .unwrap()
 }
 

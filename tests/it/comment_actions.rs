@@ -82,6 +82,7 @@ fn comment(id: &str, body: &str) -> ThreadComment {
         id: CommentId::new(id),
         author: "alice".into(),
         is_bot: false,
+        by_agent: false,
         by_viewer: false,
         body: body.into(),
         url: format!("{PR}#discussion_{id}"),
@@ -207,6 +208,7 @@ fn a_thread_folds_once_it_is_resolved_even_when_the_reviewer_opened_it() {
     let by_bot = ThreadComment {
         avatar_url: None,
         is_bot: true,
+        by_agent: false,
         ..comment("C1", "nit")
     };
     let github = github_with_thread(&pull, thread_on_line_ten(vec![by_bot]));

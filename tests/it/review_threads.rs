@@ -93,6 +93,7 @@ fn comment(author: &str, is_bot: bool, body: &str) -> ThreadComment {
         reactions: Vec::new(),
         author: author.into(),
         is_bot,
+        by_agent: false,
         by_viewer: false,
         body: body.into(),
         url: format!("https://github.com/acme/shop/pull/7#discussion_{body}"),

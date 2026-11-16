@@ -13,6 +13,7 @@ use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
+use super::local_threads::ThreadHome;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort};
 use super::reactions::ReactionChange;
@@ -220,7 +221,7 @@ pub(super) enum Job {
     PullPrDescription(PullRequestUrl),
     SyncViewed(SyncRequest),
     PullThreads {
-        pr: PullRequestUrl,
+        home: ThreadHome,
         head: Sha,
     },
     PullPendingReview(PullRequestUrl),
@@ -280,8 +281,14 @@ impl Work {
             Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
-            Job::PullThreads { pr, head } => {
-                Done::Threads(github.review_threads(&pr).map(|threads| {
+            Job::PullThreads { home, head } => {
+                let threads = match &home {
+                    ThreadHome::GitHub(pr) => github.review_threads(pr),
+                    ThreadHome::StateFile(store) => {
+                        store.threads_at(&head).map_err(GitHubError::Other)
+                    }
+                };
+                Done::Threads(threads.map(|threads| {
                     let followed = follow_outdated(&threads, ports.source, &head);
                     (threads, followed)
                 }))

@@ -33,6 +33,7 @@ mod intent;
 mod jump;
 mod keymap;
 mod local_row;
+mod local_threads;
 mod markdown;
 mod more_lines;
 mod new_commits;
@@ -133,6 +134,7 @@ pub use jump::{
 };
 pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use local_row::LocalRow;
+pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};

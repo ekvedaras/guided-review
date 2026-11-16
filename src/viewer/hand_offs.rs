@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
 use crate::pull_request::PullRequestUrl;
-use crate::review_subject::ReviewSubject;
+use crate::review_subject::{LocalChangeSet, ReviewSubject};
+
+use super::local_threads::{LocalAuthor, LocalThreadStore, ThreadHome};
 
 use super::comments::SendMode;
 use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
@@ -191,6 +193,48 @@ impl HandOff {
 
     /// What the tour agent is typed: everything it needs to answer without asking back.
     fn message(&self, subject: &ReviewSubject) -> String {
+        match subject {
+            ReviewSubject::PullRequest(_) => self.pull_request_message(subject),
+            ReviewSubject::Local(change_set) => self.task_message(subject, change_set),
+        }
+    }
+
+    /// A task of a local review, for the change set's agent, which wrote the code in its own folder.
+    fn task_message(&self, subject: &ReviewSubject, change_set: &LocalChangeSet) -> String {
+        let id = self.id;
+        let folder = change_set.folder().as_path().display();
+        let branch = change_set.branch().as_str();
+        let mut lines = vec![
+            format!("Review task {id} on branch {branch} in {folder}"),
+            "This is a local review: the reviewer reads your branch and its uncommitted files on \
+             this machine, and there is no PR."
+                .to_owned(),
+            format!("Place: {}", self.place),
+        ];
+        lines.extend(self.file.iter().map(|file| format!("File: {file}")));
+        if !self.thread_so_far.is_empty() {
+            lines.push("Thread so far:".to_owned());
+            lines.extend(
+                self.thread_so_far
+                    .iter()
+                    .map(|said| format!("- {}: {}", said.author, said.body)),
+            );
+        }
+        lines.push(format!("Task: {}", self.comment));
+        lines.push(format!(
+            "Make the change in {folder}, on {branch}. Commit only if you normally would, and do not push \
+             for the review: the reviewer sees what changed on disk and updates. If the task asks for a \
+             change, first run `guided-review agent-reply {subject} {id} --working`: it says \
+             \"{WORKING_ON_IT}\" on the task's thread, and your answer replaces it. Answer with \
+             `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted \
+             heredoc (`<<'EOF'`): short paragraphs, a list for several points, code names in \
+             backticks. Read the reviewed change with `guided-review outline {subject}` and \
+             `guided-review show {subject} <piece ids> --around`."
+        ));
+        lines.join("\n")
+    }
+
+    fn pull_request_message(&self, subject: &ReviewSubject) -> String {
         let id = self.id;
         let mut lines = vec![
             format!("Reviewer comment {id} on {subject}"),
@@ -201,7 +245,7 @@ impl HandOff {
         lines.push(
             match self.mode {
                 SendMode::AddToReview => "Sent: added to the pending review",
-                SendMode::CommentNow => "Sent: posted at once",
+                SendMode::CommentNow | SendMode::SendNow => "Sent: posted at once",
             }
             .to_owned(),
         );
@@ -453,7 +497,10 @@ impl HandOffs {
             } else {
                 TourKind::Guided
             },
-            reviewer_comment: next.reviewer_comment.clone(),
+            reviewer_comment: next
+                .reviewer_comment
+                .clone()
+                .filter(|_| subject.pull_request().is_some()),
         })
     }
 
@@ -585,7 +632,7 @@ impl HandOffs {
     /// The agent's answer. It replaces the agent's "Working on it…" reply when there is one.
     pub fn agent_reply(
         &self,
-        pr: &PullRequestUrl,
+        home: &ThreadHome,
         id: HandOffId,
         body: &str,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
@@ -599,10 +646,10 @@ impl HandOffs {
             _ => None,
         };
         Self::reply_request(
-            pr,
+            home,
             hand_off,
             AgentReplyKind::Answer {
-                body: format!("{AGENT_MARK} {said}"),
+                said: said.to_owned(),
                 replacing,
             },
         )
@@ -611,14 +658,14 @@ impl HandOffs {
     /// The agent's "Working on it…" reply, which its answer replaces later.
     pub fn agent_working_on_it(
         &self,
-        pr: &PullRequestUrl,
+        home: &ThreadHome,
         id: HandOffId,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
         let hand_off = self.find(id)?;
         if matches!(hand_off.state, HandOffState::WorkingOnIt { .. }) {
             return Err(AgentReplyRefused::AlreadyWorkingOnIt { id });
         }
-        Self::reply_request(pr, hand_off, AgentReplyKind::WorkingOnIt)
+        Self::reply_request(home, hand_off, AgentReplyKind::WorkingOnIt)
     }
 
     fn find(&self, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
@@ -632,7 +679,7 @@ impl HandOffs {
     }
 
     fn reply_request(
-        pr: &PullRequestUrl,
+        home: &ThreadHome,
         hand_off: &HandOff,
         kind: AgentReplyKind,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
@@ -657,7 +704,7 @@ impl HandOffs {
             .clone()
             .filter(|_| hand_off.seen_mark == SeenMark::On);
         Ok(AgentReplyRequest {
-            pr: pr.clone(),
+            home: home.clone(),
             thread,
             kind,
             seen_mark: hand_off.seen_mark.clone(),
@@ -735,7 +782,8 @@ impl AgentReplyDone {
 #[derive(Debug)]
 enum AgentReplyKind {
     Answer {
-        body: String,
+        /// What the agent said, without the robot GitHub needs in front of it.
+        said: String,
         replacing: Option<CommentId>,
     },
     WorkingOnIt,
@@ -744,7 +792,7 @@ enum AgentReplyKind {
 /// The tour agent's reply to one hand-off, owned so it can run off the UI thread.
 #[derive(Debug)]
 pub struct AgentReplyRequest {
-    pr: PullRequestUrl,
+    home: ThreadHome,
     thread: ThreadId,
     kind: AgentReplyKind,
     seen_mark: SeenMark,
@@ -753,27 +801,20 @@ pub struct AgentReplyRequest {
 }
 
 impl AgentReplyRequest {
+    /// The subject the reply is for: the PR, or the local review whose state file keeps the thread.
+    pub fn home(&self) -> &ThreadHome {
+        &self.home
+    }
+
     pub fn run(
         &self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     ) -> Result<AgentReplyDone, GitHubError> {
-        let (placement, working_on_it) = match &self.kind {
-            AgentReplyKind::Answer {
-                body,
-                replacing: Some(reply),
-            } => {
-                github.edit_comment(reply, body)?;
-                (ReplyPlacement::ReplacedWorkingOnIt, None)
-            }
-            AgentReplyKind::Answer {
-                body,
-                replacing: None,
-            } => (self.post(github, body)?.0, None),
-            AgentReplyKind::WorkingOnIt => {
-                let (placement, reply) =
-                    self.post(github, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
-                (placement, Some(reply))
-            }
+        let (placement, working_on_it) = match &self.home {
+            ThreadHome::GitHub(pr) => self.post_on_github(github, pr)?,
+            ThreadHome::StateFile(store) => self.keep_locally(store).map_err(|error| {
+                GitHubError::Other(error.context("could not write the local thread"))
+            })?,
         };
         let seen_mark = match &self.seen_mark_on {
             Some(comment) => SeenMark::take_off(github, comment),
@@ -788,19 +829,75 @@ impl AgentReplyRequest {
         })
     }
 
+    fn post_on_github(
+        &self,
+        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        pr: &PullRequestUrl,
+    ) -> Result<(ReplyPlacement, Option<CommentId>), GitHubError> {
+        Ok(match &self.kind {
+            AgentReplyKind::Answer {
+                said,
+                replacing: Some(reply),
+            } => {
+                github.edit_comment(reply, &format!("{AGENT_MARK} {said}"))?;
+                (ReplyPlacement::ReplacedWorkingOnIt, None)
+            }
+            AgentReplyKind::Answer {
+                said,
+                replacing: None,
+            } => (
+                self.post(github, pr, &format!("{AGENT_MARK} {said}"))?.0,
+                None,
+            ),
+            AgentReplyKind::WorkingOnIt => {
+                let (placement, reply) =
+                    self.post(github, pr, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
+                (placement, Some(reply))
+            }
+        })
+    }
+
+    /// A local thread knows its authors, so the agent's text goes in as it is.
+    fn keep_locally(
+        &self,
+        store: &LocalThreadStore,
+    ) -> anyhow::Result<(ReplyPlacement, Option<CommentId>)> {
+        Ok(match &self.kind {
+            AgentReplyKind::Answer {
+                said,
+                replacing: Some(reply),
+            } => {
+                store.edit(reply, said)?;
+                (ReplyPlacement::ReplacedWorkingOnIt, None)
+            }
+            AgentReplyKind::Answer {
+                said,
+                replacing: None,
+            } => {
+                store.reply(&self.thread, said, LocalAuthor::Agent)?;
+                (ReplyPlacement::PostedAtOnce, None)
+            }
+            AgentReplyKind::WorkingOnIt => {
+                let reply = store.reply(&self.thread, WORKING_ON_IT, LocalAuthor::Agent)?;
+                (ReplyPlacement::PostedAtOnce, Some(reply))
+            }
+        })
+    }
+
     /// Joins the reviewer's pending review when there is one and never sends it; with none the
     /// reply is posted at once.
     fn post(
         &self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        pr: &PullRequestUrl,
         body: &str,
     ) -> Result<(ReplyPlacement, CommentId), GitHubError> {
-        let (placement, mode) = if github.has_pending_review(&self.pr)? {
+        let (placement, mode) = if github.has_pending_review(pr)? {
             (ReplyPlacement::JoinedPendingReview, SendMode::AddToReview)
         } else {
             (ReplyPlacement::PostedAtOnce, SendMode::CommentNow)
         };
-        let reply = github.reply_to_thread(&self.pr, &self.thread, body, mode)?;
+        let reply = github.reply_to_thread(pr, &self.thread, body, mode)?;
         Ok((placement, reply))
     }
 }

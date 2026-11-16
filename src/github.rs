@@ -1232,6 +1232,7 @@ pub(crate) fn parse_review_threads(
                             .author
                             .as_ref()
                             .is_some_and(|author| author.kind == "Bot"),
+                        by_agent: false,
                         author: comment
                             .author
                             .map_or_else(|| "ghost".to_owned(), |author| author.login),

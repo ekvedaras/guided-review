@@ -110,7 +110,7 @@ impl AppPath for Review {
         action: ThreadAction,
         github: &dyn GitHubPort,
     ) -> ThreadActionResult {
-        let outcome = self.thread_action_request(action).unwrap().run(github);
+        let outcome = self.thread_action_request(action).run(github);
         self.apply_thread_action(outcome)
     }
 

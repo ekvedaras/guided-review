@@ -459,6 +459,7 @@ mod tests {
                     id: CommentId::new("C1"),
                     author: "alice".into(),
                     is_bot: false,
+                    by_agent: false,
                     by_viewer: false,
                     body: "why?".into(),
                     url: String::new(),

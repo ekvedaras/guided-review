@@ -71,6 +71,7 @@ mod local_guided_tour;
 mod local_key_commands;
 mod local_open;
 mod local_review;
+mod local_tasks;
 mod local_work_tree;
 mod markdown;
 mod new_commits;

@@ -58,7 +58,7 @@ impl ReviewCore {
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
-                pr: pr()?,
+                home: self.thread_home(),
                 head: self.head.clone(),
             },
             WorkKind::PullPendingReview => Job::PullPendingReview(pr()?),

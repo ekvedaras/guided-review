@@ -1,23 +1,5 @@
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 
-const LOCAL_KEY: &str = "local:/Users/me/Code/shop@feature/discounts";
-
-#[test]
-fn agent_reply_given_a_local_change_sets_key_says_local_review_is_not_built_yet() {
-    let repo = FixtureRepo::cloned_from("acme/shop");
-    let github = FakeGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
-    let guided_review = GuidedReview::new(&repo, &github);
-
-    let run = guided_review.run(&["agent-reply", LOCAL_KEY, "h0", "--working"]);
-
-    assert!(!run.success);
-    assert!(
-        run.stderr.contains("local review is not built yet"),
-        "{}",
-        run.stderr
-    );
-}
-
 #[test]
 fn a_command_given_neither_a_pr_link_nor_a_local_key_names_what_it_takes() {
     let repo = FixtureRepo::cloned_from("acme/shop");
