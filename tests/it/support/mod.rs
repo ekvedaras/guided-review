@@ -239,7 +239,7 @@ impl FakeGitHub {
         let url = format!("http://{}", listener.local_addr().unwrap());
         let pull_path = format!("/repos/{github_repo}/pulls/{number}");
         let pull_json = format!(
-            r#"{{"base":{{"sha":"{base_sha}"}},"head":{{"sha":"{head_sha}"}},"body":{body_json}}}"#
+            r#"{{"title":"Add the cart","base":{{"sha":"{base_sha}"}},"head":{{"sha":"{head_sha}"}},"body":{body_json}}}"#
         );
 
         thread::spawn(move || {

@@ -20,7 +20,7 @@ use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
-use guided_review::tour::{GuidedTour, StepId, Tour};
+use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
@@ -275,7 +275,7 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let tour = GuidedTour::load(&opened.tour_path())?;
-    let code = opened.at_pinned_tips(&tour)?;
+    let code = opened.at_pinned_tips(&tour.pin)?;
     let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
     print!(
         "{}",
@@ -325,8 +325,17 @@ enum Launch {
 }
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
-    let folders = AppFolders::running()?;
-    let folder = AppFolder::of(&folders);
+    let opened = OpenedPr::new(pr)?;
+    let folders = &opened.folders;
+    if let Launch::Restart { at: Some(step) } = launch
+        && ToursOnDisk::of(folders, pr).opens_basic()
+    {
+        anyhow::bail!(
+            "{pr} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
+        );
+    }
+    opened.make_basic_tour_if_no_tour()?;
+    let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {
         pr: pr.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
@@ -346,6 +355,9 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         | Answer::Reloaded { .. }
         | Answer::KeptInBackground { .. } => {
             println!("{answer}");
+            if ToursOnDisk::of(folders, pr).opens_basic() {
+                println!("{pr} opened in Basic mode");
+            }
             Ok(())
         }
         other => anyhow::bail!("{other}"),

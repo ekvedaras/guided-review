@@ -76,17 +76,3 @@ fn the_review_shows_as_many_more_lines_as_the_config_says() {
 
     assert_eq!(opened.review.display_options().more_lines().get(), 5);
 }
-
-#[test]
-fn a_pr_without_a_tour_is_refused_with_the_command_that_writes_one() {
-    let repo = FixtureRepo::cloned_from("acme/shop");
-
-    let error = open_review(&pr(), repo.path(), &repo.folders())
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        error.to_string(),
-        format!("no tour for {PR} yet; run `/tour {PR}` first")
-    );
-}

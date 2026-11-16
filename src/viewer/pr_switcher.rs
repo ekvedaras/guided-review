@@ -5,7 +5,7 @@ use super::ports::GitHubError;
 use super::relevant_prs::{RelevantPullRequest, RelevantPullRequests};
 use super::remembered_prs::RememberedPullRequestsFile;
 use crate::pull_request::PullRequestUrl;
-use crate::tour::Tour;
+use crate::tour::ToursOnDisk;
 
 /// The list behind the PR title: the reviewer's relevant PRs, what each has, and what was typed
 /// to narrow it. It loads in the background, so it starts out loading.
@@ -20,8 +20,6 @@ pub struct PrSwitcher {
     first_shown: usize,
     state: LoadState,
     is_refreshing: bool,
-    /// Whether tour agents can be reached, so a PR with no tour can be written; the reason when not.
-    agent_link: Result<(), String>,
     /// The row under the pointer, counted from the top of the rows on screen, as the pointer stays
     /// where it is when the wheel moves the rows.
     hovered_screen_row: Option<usize>,
@@ -56,15 +54,20 @@ pub struct SwitcherRow {
     haystack: String,
 }
 
-/// What the PR has to read.
+/// What the PR has to read: the tours on disk, and apart from them what the app is writing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TourFact {
-    Ready,
-    Missing,
-    /// A tour agent the app started is writing it.
+pub struct TourFact {
+    pub on_disk: ToursOnDisk,
+    pub writing: WritingFact,
+}
+
+/// A tour agent the app started writing a guided tour of the PR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritingFact {
+    None,
     Writing,
     /// The writing ended without a tour.
-    WritingFailed,
+    Failed,
 }
 
 /// What picking a row does.
@@ -72,16 +75,12 @@ pub enum TourFact {
 pub enum Pick {
     /// Switch to the PR's tour.
     Show(PullRequestUrl),
-    /// Show the writing of the PR's tour on the loading screen, starting it when none is on.
+    /// Show the writing of the PR's tour on the loading screen.
     Write(PullRequestUrl),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotPickable {
-    #[error(
-        "this pull request has no tour, and writing one needs herdr (`hc`) with its server running: {0}"
-    )]
-    NeedsHerdr(String),
     #[error("there is no such row")]
     NoSuchRow,
 }
@@ -96,7 +95,6 @@ impl Default for PrSwitcher {
             first_shown: 0,
             state: LoadState::Loading,
             is_refreshing: true,
-            agent_link: Ok(()),
             hovered_screen_row: None,
             memory: None,
             memory_problem: None,
@@ -230,26 +228,23 @@ impl PrSwitcher {
     pub fn check_tours(&mut self, folders: &AppFolders, active: &ActivePr) {
         for row in &mut self.rows {
             let pr = &row.pull_request.url;
-            row.tour = active
-                .tour_fact_of(pr)
-                .unwrap_or_else(|| TourFact::of(pr, folders));
+            row.tour = TourFact {
+                on_disk: ToursOnDisk::of(folders, pr),
+                writing: active.writing_fact_of(pr),
+            };
             row.has_unseen_reply = active.has_unseen_reply(pr);
             row.is_active = active.shown() == Some(pr);
         }
     }
 
-    pub fn agent_link(&mut self, link: Result<(), String>) {
-        self.agent_link = link;
-    }
-
     /// What the row says of the PR's tour.
     pub fn tour_label(&self, row: &SwitcherRow) -> &'static str {
-        match row.tour {
-            TourFact::Ready => "tour",
-            TourFact::Missing if self.agent_link.is_err() => "needs herdr",
-            TourFact::Missing => "no tour yet",
-            TourFact::Writing => "writing",
-            TourFact::WritingFailed => "writing failed",
+        match (row.tour.writing, row.tour.on_disk) {
+            (WritingFact::Writing, _) => "writing",
+            (WritingFact::Failed, _) => "writing failed",
+            (WritingFact::None, ToursOnDisk::None | ToursOnDisk::Basic) => "basic",
+            (WritingFact::None, ToursOnDisk::Guided) => "guided",
+            (WritingFact::None, ToursOnDisk::BasicWithGuided) => "guided ready",
         }
     }
 
@@ -331,12 +326,10 @@ impl PrSwitcher {
     pub fn pick(&self, nth: usize) -> Result<Pick, NotPickable> {
         let row = self.visible().nth(nth).ok_or(NotPickable::NoSuchRow)?;
         let pr = row.pull_request.url.clone();
-        match (row.tour, &self.agent_link) {
-            (TourFact::Ready, _) => Ok(Pick::Show(pr)),
-            (TourFact::Missing, Err(reason)) => Err(NotPickable::NeedsHerdr(reason.clone())),
-            (TourFact::Missing | TourFact::Writing | TourFact::WritingFailed, _) => {
-                Ok(Pick::Write(pr))
-            }
+        if row.tour.is_waited_for() {
+            Ok(Pick::Write(pr))
+        } else {
+            Ok(Pick::Show(pr))
         }
     }
 
@@ -366,7 +359,7 @@ impl SwitcherRow {
         )
         .to_lowercase();
         Self {
-            tour: TourFact::of(&pull_request.url, folders),
+            tour: TourFact::on_disk_of(&pull_request.url, folders),
             has_unseen_reply: false,
             is_active: false,
             pull_request,
@@ -376,12 +369,16 @@ impl SwitcherRow {
 }
 
 impl TourFact {
-    /// What the disk says of the PR's tour.
-    pub fn of(pr: &PullRequestUrl, folders: &AppFolders) -> Self {
-        if Tour::path_for(folders, pr).exists() {
-            Self::Ready
-        } else {
-            Self::Missing
+    /// What the disk says of the PR's tours, with no writing known.
+    pub fn on_disk_of(pr: &PullRequestUrl, folders: &AppFolders) -> Self {
+        Self {
+            on_disk: ToursOnDisk::of(folders, pr),
+            writing: WritingFact::None,
         }
+    }
+
+    /// A tour is being written and there is nothing to read yet, so the loading screen shows it.
+    pub fn is_waited_for(self) -> bool {
+        self.writing != WritingFact::None && self.on_disk == ToursOnDisk::None
     }
 }

@@ -6,7 +6,7 @@ use guided_review::open_review::writer_folder;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
     ActivePr, AgentStatus, Finished, OpenDecision, OpenOrigin, ReviewStateFile, TerminalId,
-    TourAgentPort, TourAgents, TourFact, WriteDecision, WritingStage,
+    TourAgentPort, TourAgents, WriteDecision, WritingFact, WritingStage,
 };
 
 const SHOWN: &str = "https://github.com/acme/shop/pull/7";
@@ -149,10 +149,7 @@ fn a_writer_that_goes_idle_after_working_without_opening_failed_and_keeps_its_la
         active.loading().unwrap().1.screen,
         ["Permission denied: mkdir"]
     );
-    assert_eq!(
-        active.tour_fact_of(&pr(NO_TOUR)),
-        Some(TourFact::WritingFailed)
-    );
+    assert_eq!(active.writing_fact_of(&pr(NO_TOUR)), WritingFact::Failed);
 }
 
 #[test]
@@ -221,7 +218,11 @@ fn the_writers_open_completes_the_loading_screen_with_the_new_tour() {
 
     assert!(active.loading().is_none());
     assert_eq!(active.shown(), Some(&pr(NO_TOUR)));
-    assert_eq!(active.tour_fact_of(&pr(NO_TOUR)), None, "no longer writing");
+    assert_eq!(
+        active.writing_fact_of(&pr(NO_TOUR)),
+        WritingFact::None,
+        "no longer writing"
+    );
 }
 
 #[test]
@@ -230,15 +231,15 @@ fn a_tour_finished_for_a_pr_the_reviewer_left_does_not_switch() {
     let mut active = showing_a_pr();
     pick_no_tour(&mut active, &fake);
     active.stop_waiting();
-    assert_eq!(active.tour_fact_of(&pr(NO_TOUR)), Some(TourFact::Writing));
+    assert_eq!(active.writing_fact_of(&pr(NO_TOUR)), WritingFact::Writing);
 
     let decision = active.request(pr(NO_TOUR), OpenOrigin::AppStartedAgent);
 
     assert!(matches!(decision, OpenDecision::KeepInBackground));
     assert_eq!(active.shown(), Some(&pr(SHOWN)));
     assert_eq!(
-        active.tour_fact_of(&pr(NO_TOUR)),
-        None,
+        active.writing_fact_of(&pr(NO_TOUR)),
+        WritingFact::None,
         "the disk says ready"
     );
 }
@@ -253,7 +254,7 @@ fn switching_to_another_pr_leaves_the_loading_screen_and_the_writing_goes_on() {
 
     assert!(matches!(decision, OpenDecision::Build(_)));
     assert!(active.loading().is_none());
-    assert_eq!(active.tour_fact_of(&pr(NO_TOUR)), Some(TourFact::Writing));
+    assert_eq!(active.writing_fact_of(&pr(NO_TOUR)), WritingFact::Writing);
 }
 
 #[test]

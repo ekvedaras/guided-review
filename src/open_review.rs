@@ -12,7 +12,7 @@ use crate::local_git::LocalGit;
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::summary_instructions::SummaryInstructions;
-use crate::tour::{GuidedTour, Tour};
+use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
     GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader, TourRepinner,
     WorkingCopy,
@@ -30,14 +30,6 @@ pub struct OpenedReview {
     pub refresher: TourRefresher,
     pub reloader: TourReloader,
     pub tour_agents: TourAgents,
-}
-
-/// The refusal `open` gives before it asks or starts any app.
-pub fn require_tour(pr: &PullRequestUrl, folders: &AppFolders) -> anyhow::Result<()> {
-    if !Tour::path_for(folders, pr).exists() {
-        anyhow::bail!("no tour for {pr} yet; run `/tour {pr}` first");
-    }
-    Ok(())
 }
 
 /// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else one
@@ -68,11 +60,19 @@ pub fn open_review(
     folders: &AppFolders,
 ) -> anyhow::Result<OpenedReview> {
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
-    require_tour(pr, folders)?;
-    let tour = GuidedTour::load(&opened.tour_path())?;
-    let code = opened.at_pinned_tips(&tour)?;
-    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin.head);
-    let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
+    opened.make_basic_tour_if_no_tour()?;
+    // A basic file with a guided one beside it shows the basic tour; the guided tour waits for #86.
+    let tour = if ToursOnDisk::of(folders, pr).opens_basic() {
+        Tour::Basic(BasicTour::load(&Tour::basic_path_for(folders, pr))?)
+    } else {
+        Tour::Guided(GuidedTour::load(&opened.tour_path())?)
+    };
+    let code = opened.at_pinned_tips(tour.pin())?;
+    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin().head);
+    let mut review = match tour {
+        Tour::Basic(tour) => Review::open_basic(tour, code.source.as_ref(), opened.state_file())?,
+        Tour::Guided(tour) => Review::open(tour, code.source.as_ref(), opened.state_file())?,
+    };
     review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
     opened.state_file().remember_folder(clones_from)?;
 

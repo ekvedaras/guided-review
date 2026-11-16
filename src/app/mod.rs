@@ -42,12 +42,12 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::platform::{self, Os};
 use crate::pull_request::PullRequestUrl;
-use crate::tour::Tour;
+use crate::tour::{Tour, ToursOnDisk};
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
     RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
-    ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, TourFact, WriteDecision,
+    ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, WriteDecision,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -274,9 +274,9 @@ async fn answer_requests(
                 claim_terminal(&pr, &open, &folders, cx);
                 let origin = origin_of(&open, &folders, cx).await;
                 let active = screen.borrow().active.clone();
-                let tour = TourFact::of(&pr, &folders);
+                let on_disk = ToursOnDisk::of(&folders, &pr);
                 let outcome = active.update(cx, |active, cx| {
-                    let outcome = active.open(pr.clone(), origin, tour);
+                    let outcome = active.open(pr.clone(), origin, on_disk);
                     cx.notify();
                     outcome
                 });

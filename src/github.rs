@@ -67,6 +67,11 @@ struct PullJson {
 }
 
 #[derive(Deserialize)]
+struct PullTitleJson {
+    title: String,
+}
+
+#[derive(Deserialize)]
 struct PullBodyJson {
     body: Option<String>,
 }
@@ -441,6 +446,20 @@ impl PullRequestTipsPort for GitHub {
             base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })
+    }
+}
+
+impl GitHub {
+    /// The PR's own title, as GitHub has it now.
+    pub fn pull_request_title(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+        let pull: PullTitleJson = self
+            .get(
+                &format!("repos/{}/pulls/{}", pr.repo, pr.number),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not read the title of {pr} from GitHub"))?;
+        Ok(pull.title)
     }
 }
 

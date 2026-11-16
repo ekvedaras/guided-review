@@ -19,6 +19,34 @@ pub enum Tour {
     Guided(GuidedTour),
 }
 
+/// Which tour files a PR has on disk. A PR with both shows its basic tour, the guided one being ready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToursOnDisk {
+    None,
+    Basic,
+    Guided,
+    BasicWithGuided,
+}
+
+impl ToursOnDisk {
+    /// A PR with no tour opens as a basic one, and with both files the basic one is shown.
+    pub fn opens_basic(self) -> bool {
+        self != Self::Guided
+    }
+
+    pub fn of(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
+        match (
+            Tour::basic_path_for(folders, pr).exists(),
+            Tour::path_for(folders, pr).exists(),
+        ) {
+            (false, false) => Self::None,
+            (true, false) => Self::Basic,
+            (false, true) => Self::Guided,
+            (true, true) => Self::BasicWithGuided,
+        }
+    }
+}
+
 /// What both kinds are pinned to. Any viewer reads this.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TourPin {

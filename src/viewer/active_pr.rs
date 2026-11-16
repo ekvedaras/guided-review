@@ -1,9 +1,10 @@
 use super::app_state::{AppState, AppStateFile};
 use super::hand_offs::{AgentReplied, HandOffId};
-use super::pr_switcher::TourFact;
+use super::pr_switcher::WritingFact;
 use super::tour_agent::{AgentStatus, TerminalId, TourAgentPort};
 use super::tour_writing::TourWriting;
 use crate::pull_request::PullRequestUrl;
+use crate::tour::ToursOnDisk;
 
 /// Which PR the window shows, and what an incoming open request does to it. A PR that is built takes
 /// the screen only when it is the newest request, so the one on screen stays until then. It also keeps
@@ -47,11 +48,11 @@ pub enum OpenOrigin {
     AppStartedAgent,
 }
 
-/// What an open request of a PR comes to, by whether the PR has a tour.
+/// What an open request of a PR comes to.
 pub enum OpenOutcome {
+    /// The PR has a tour, or none and no writing: the build makes its basic tour when none is on disk.
     Tour(OpenDecision),
-    /// No tour yet: the loading screen shows it being written, as when the reviewer picks the PR with no
-    /// tour in the switcher.
+    /// A tour of the PR is being written and nothing is on disk to read yet: the loading screen shows it.
     Writing(WriteDecision),
 }
 
@@ -170,14 +171,19 @@ impl ActivePr {
         }
     }
 
-    /// The one way in for an open request, whoever sent it: a PR with a tour is requested, a PR without
-    /// one gets its tour written.
-    pub fn open(&mut self, pr: PullRequestUrl, origin: OpenOrigin, tour: TourFact) -> OpenOutcome {
-        match tour {
-            TourFact::Ready => OpenOutcome::Tour(self.request(pr, origin)),
-            TourFact::Missing | TourFact::Writing | TourFact::WritingFailed => {
-                OpenOutcome::Writing(self.write(pr))
-            }
+    /// The one way in for an open request, whoever sent it: a PR with a tour, or with none and no writing,
+    /// is requested, as its basic tour is made by the build; a PR whose tour is being written with nothing
+    /// to read yet shows that writing.
+    pub fn open(
+        &mut self,
+        pr: PullRequestUrl,
+        origin: OpenOrigin,
+        on_disk: ToursOnDisk,
+    ) -> OpenOutcome {
+        if on_disk == ToursOnDisk::None && self.writing_of(&pr).is_some() {
+            OpenOutcome::Writing(self.write(pr))
+        } else {
+            OpenOutcome::Tour(self.request(pr, origin))
         }
     }
 
@@ -376,14 +382,12 @@ impl ActivePr {
     }
 
     /// What the switcher says of the PR's tour beyond what the disk says, while it is being written.
-    pub fn tour_fact_of(&self, pr: &PullRequestUrl) -> Option<TourFact> {
-        self.writing_of(pr).map(|writing| {
-            if writing.has_failed() {
-                TourFact::WritingFailed
-            } else {
-                TourFact::Writing
-            }
-        })
+    pub fn writing_fact_of(&self, pr: &PullRequestUrl) -> WritingFact {
+        match self.writing_of(pr) {
+            None => WritingFact::None,
+            Some(writing) if writing.has_failed() => WritingFact::Failed,
+            Some(_) => WritingFact::Writing,
+        }
     }
 
     /// The tour agent answered a hand-off of the PR. Unless the PR is on screen, the switcher marks it.
