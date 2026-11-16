@@ -560,6 +560,10 @@ impl ReviewSession {
     /// Move to <pr>, on the button only. The review takes no changes from here on, as its state file is
     /// carried to the PR's and deleted; the PR's review takes the window when the move is done.
     pub fn move_to_pr(&mut self, cx: &mut Context<Self>) {
+        if let Some(here) = self.review.move_here_offer() {
+            self.move_here(here, cx);
+            return;
+        }
         let (Some(offer), Some(mover)) = (self.review.move_offer(), self.tour_work.mover.clone())
         else {
             return;
@@ -592,13 +596,57 @@ impl ReviewSession {
         ));
     }
 
+    /// The PR's review takes over a local review. This review's copy of the state is stale once the move
+    /// has saved the PR's, so it takes no more changes and the window opens the PR again from disk, as
+    /// after Save in Settings.
+    fn move_here(&mut self, here: crate::viewer::MoveHereOffer, cx: &mut Context<Self>) {
+        if self.moving.is_some() {
+            return;
+        }
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        self.save_typing_now();
+        self.change(cx, |review| review.start_drop());
+        self.moving = Some(self.run_off_thread(
+            cx,
+            {
+                let here = here.clone();
+                move || {
+                    PrMover::for_change_set(&folders, &here.change_set)
+                        .run(&here.offer, &GitHub::from_env())
+                }
+            },
+            move |this, moved, cx| {
+                this.moving = None;
+                match moved {
+                    Ok(()) => (cx.global::<PrSwitching>().reopen)(),
+                    Err(error) => {
+                        this.review.repin_failed();
+                        post_toast(
+                            cx,
+                            ToastTone::Danger,
+                            format!(
+                                "Could not move {} here: {error:#}",
+                                here.change_set.branch().as_str()
+                            ),
+                        );
+                    }
+                }
+            },
+        ));
+    }
+
     /// Not now: the offer goes for that PR and the local review stays.
     pub fn decline_move(&mut self, cx: &mut Context<Self>) {
         if self.moving.is_some() {
             return;
         }
         self.change(cx, |review| {
-            if let Err(error) = review.decline_move() {
+            let declined = if review.move_here_offer().is_some() {
+                review.decline_move_here()
+            } else {
+                review.decline_move()
+            };
+            if let Err(error) = declined {
                 eprintln!("could not keep that the move was declined: {error:#}");
             }
         });

@@ -7,14 +7,15 @@ use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, serve_files};
 use guided_review::github::GitHub;
 use guided_review::local_work_tree::LocalWorkTree;
+use guided_review::make_basic_tour::make_basic_tour;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::ToursOnDisk;
 use guided_review::viewer::{
     Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveOffer,
-    PULL_OF_BRANCH_RETRY, PieceDiff, PullOfBranch, PullsOfBranchPort, Resolution, ReviewStateFile,
-    SendMode, Side, TextBox,
+    PULL_OF_BRANCH_RETRY, PieceDiff, PrMover, PullOfBranch, PullsOfBranchPort, Resolution,
+    ReviewStateFile, SendMode, Side, TextBox,
 };
 
 const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
@@ -194,6 +195,27 @@ fn the_github_adapter_lists_the_open_pr_of_a_branch_of_the_repo_itself() {
         })
     );
     assert_eq!(none, None);
+}
+
+#[test]
+fn the_github_adapter_names_the_branch_a_pr_is_opened_from_unless_it_is_from_a_fork() {
+    let own = r#"{"head":{"ref":"feature/cart","sha":"a","repo":{"full_name":"Acme/Shop"}}}"#;
+    let fork = r#"{"head":{"ref":"patch","sha":"b","repo":{"full_name":"someone/shop"}}}"#;
+    let url = serve_files(vec![
+        ("/repos/acme/shop/pulls/7", own.as_bytes().to_vec()),
+        ("/repos/acme/shop/pulls/8", fork.as_bytes().to_vec()),
+    ]);
+    let github = GitHub::without_token_at(&url);
+
+    let own = github
+        .pull_request_head_branch(&SHOP_7.parse().unwrap())
+        .unwrap();
+    let fork = github
+        .pull_request_head_branch(&"https://github.com/acme/shop/pull/8".parse().unwrap())
+        .unwrap();
+
+    assert_eq!(own, Some(BranchName::new("feature/cart").unwrap()));
+    assert_eq!(fork, None);
 }
 
 fn path(text: &str) -> guided_review::file_path::FilePath {
@@ -583,4 +605,152 @@ fn declining_hides_the_offer_for_that_pr_for_good_and_keeps_the_local_review() {
         reopened.review.move_offer().map(|offer| offer.label()),
         Some("Move to acme/shop#8".to_owned())
     );
+}
+
+impl Feature {
+    /// The PR's review is open, as when the reviewer opens the PR from the switcher: its basic tour is
+    /// on disk, made at the PR's tips.
+    fn open_the_pr(&self, github: &FakeGitHub, head: &Sha) -> OpenedReview {
+        let pr: PullRequestUrl = SHOP_7.parse().unwrap();
+        let source = guided_review::local_git::LocalGit::find(&pr.repo, self.repo.path())
+            .unwrap()
+            .unwrap();
+        let main = self.repo.git(&["rev-parse", "main"]);
+        make_basic_tour(
+            &self.repo.folders(),
+            &ReviewSubject::from(pr.clone()),
+            &source,
+            &guided_review::pull_request::ChangeTips {
+                base_branch_tip: Sha::new(main.trim()),
+                head: head.clone(),
+            },
+            "Add the cart",
+        )
+        .unwrap();
+        let mut opened = open_review(
+            &ReviewSubject::from(pr),
+            self.repo.path(),
+            &self.repo.folders(),
+        )
+        .unwrap();
+        self.focus(&mut opened, github, Instant::now());
+        opened
+    }
+}
+
+#[test]
+fn a_pr_review_offers_to_take_over_the_local_review_of_the_branch_it_is_opened_from() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+
+    let opened = feature.open_the_pr(&github, &head);
+
+    let offer = opened.review.move_here_offer().unwrap();
+    assert_eq!(offer.change_set, *feature.subject.local().unwrap());
+    assert_eq!(offer.label(), "Move feature here");
+    assert_eq!(offer.offer.pr, SHOP_7.parse().unwrap());
+    assert!(
+        feature
+            .sent
+            .branch_lookups()
+            .contains(&"head of acme/shop#7".to_owned())
+    );
+}
+
+#[test]
+fn a_pr_review_offers_nothing_for_another_branch_or_without_a_local_review_and_asks_nothing_then() {
+    let other_branch = Feature::with_work_in_progress();
+    drop(other_branch.open());
+    let (github, head) = other_branch.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "another");
+    let opened = other_branch.open_the_pr(&github, &head);
+    assert_eq!(opened.review.move_here_offer(), None);
+
+    let no_local_review = Feature::with_work_in_progress();
+    let (github, head) = no_local_review.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    opened_without_a_local_review(&no_local_review);
+    let opened = no_local_review.open_the_pr(&github, &head);
+    assert_eq!(opened.review.move_here_offer(), None);
+}
+
+fn opened_without_a_local_review(feature: &Feature) {
+    // The local review was never opened, so none is on disk: nothing is looked up for the PR's branch.
+    assert!(!local_review_is_on_disk(feature));
+}
+
+#[test]
+fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_drafts_through_its_next_save()
+ {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    local.review.go_to_file(&path("README.md"));
+    local.review.tick_file(&path("README.md")).unwrap();
+    local.review.tick_file(&path("src/cart.rs")).unwrap();
+    threads_store(&feature)
+        .start(
+            &readme_line(2),
+            "Say who the world is",
+            &feature.snapshot_head(),
+        )
+        .unwrap();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&github, &pr_head);
+    opened.review.tick_file(&path("src/cart.rs")).unwrap();
+    let offer = opened.review.move_here_offer().unwrap();
+
+    opened.review.start_drop();
+    PrMover::for_change_set(&feature.repo.folders(), &offer.change_set)
+        .run(&offer.offer, &github)
+        .unwrap();
+    assert!(!local_review_is_on_disk(&feature));
+    assert!(
+        opened.review.tick_file(&path("README.md")).is_err(),
+        "the open review's stale copy takes no more changes"
+    );
+
+    let mut reopened = feature.open_the_pr(&github, &pr_head);
+    reopened.review.tick_file(&path("README.md")).unwrap();
+    let state = pr_state(&feature);
+    assert_eq!(
+        state.file_read_tick(&path("README.md")).unwrap().head,
+        pr_head
+    );
+    assert_eq!(
+        state.file_read_tick(&path("src/cart.rs")).unwrap().head,
+        pr_head
+    );
+    assert_eq!(state.file_read_before(&path("src/cart.rs")), None);
+    assert_eq!(
+        drafts_of_the_pr(&feature),
+        [(
+            "Comment on README.md line 2".to_owned(),
+            "Say who the world is".to_owned(),
+            Some(pr_head)
+        )]
+    );
+}
+
+#[test]
+fn keeping_the_local_review_hides_the_pr_reviews_offer_and_the_local_ones_too() {
+    let feature = Feature::with_work_in_progress();
+    let local = feature.open();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&github, &pr_head);
+    assert!(opened.review.move_here_offer().is_some());
+
+    opened.review.decline_move_here().unwrap();
+
+    assert_eq!(opened.review.move_here_offer(), None);
+    let reopened = feature.open_the_pr(&github, &pr_head);
+    assert_eq!(reopened.review.move_here_offer(), None);
+    drop(local);
+    let mut local = feature.open();
+    feature.focus(&mut local, &github, Instant::now());
+    assert_eq!(local.review.move_offer(), None);
+    assert!(local_review_is_on_disk(&feature));
 }

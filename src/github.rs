@@ -479,6 +479,45 @@ impl PullsOfBranchPort for GitHub {
             title: pull.title,
         }))
     }
+
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<BranchName>, GitHubError> {
+        let pull: PullHeadJson = self
+            .get(
+                &format!("repos/{}/pulls/{}", pr.repo, pr.number),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not read the branch of {pr} from GitHub"))?;
+        let from_the_repo_itself = pull.head.repo.is_some_and(|repo| {
+            RepoName::from_github_remote(&format!("https://github.com/{}", repo.full_name))
+                .is_some_and(|head_repo| head_repo == pr.repo)
+        });
+        Ok(if from_the_repo_itself {
+            Some(BranchName::new(&pull.head.branch)?)
+        } else {
+            None
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct PullHeadJson {
+    head: HeadJson,
+}
+
+#[derive(Deserialize)]
+struct HeadJson {
+    #[serde(rename = "ref")]
+    branch: String,
+    repo: Option<HeadRepoJson>,
+}
+
+#[derive(Deserialize)]
+struct HeadRepoJson {
+    full_name: String,
 }
 
 impl GitHub {

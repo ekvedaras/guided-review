@@ -40,6 +40,7 @@ pub enum WorkKind {
     CheckWorkingTree,
     CheckWorkingCopy,
     LookUpPullOfBranch,
+    LookUpHeadBranch,
     PullPrDescription,
     SyncViewed,
     PullThreads,
@@ -65,11 +66,12 @@ enum WhileRunning {
 impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
     /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
-    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 11] = [
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 12] = [
         Self::CheckPrHead,
         Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
         Self::LookUpPullOfBranch,
+        Self::LookUpHeadBranch,
         Self::PullPrDescription,
         Self::SyncViewed,
         Self::PullThreads,
@@ -90,6 +92,7 @@ impl WorkKind {
             | Self::CheckWorkingTree
             | Self::CheckWorkingCopy
             | Self::LookUpPullOfBranch
+            | Self::LookUpHeadBranch
             | Self::PullPrDescription
             | Self::PullThreads
             | Self::PullPendingReview
@@ -227,6 +230,7 @@ pub(super) enum Job {
         repo: RepoName,
         branch: BranchName,
     },
+    LookUpHeadBranch(PullRequestUrl),
     PullPrDescription(PullRequestUrl),
     SyncViewed(SyncRequest),
     PullThreads {
@@ -252,6 +256,7 @@ impl Job {
             Self::CheckWorkingTree { .. } => WorkKind::CheckWorkingTree,
             Self::CheckWorkingCopy(_) => WorkKind::CheckWorkingCopy,
             Self::LookUpPullOfBranch { .. } => WorkKind::LookUpPullOfBranch,
+            Self::LookUpHeadBranch(_) => WorkKind::LookUpHeadBranch,
             Self::PullPrDescription(_) => WorkKind::PullPrDescription,
             Self::SyncViewed(_) => WorkKind::SyncViewed,
             Self::PullThreads { .. } => WorkKind::PullThreads,
@@ -291,6 +296,7 @@ impl Work {
             Job::LookUpPullOfBranch { repo, branch } => {
                 Done::PullOfBranch(github.open_pull_of_branch(&repo, &branch))
             }
+            Job::LookUpHeadBranch(pr) => Done::HeadBranch(github.pull_request_head_branch(&pr)),
             Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
@@ -342,6 +348,7 @@ pub(super) enum Done {
     WorkingTree(Result<OnDisk, String>),
     WorkingCopy(bool),
     PullOfBranch(Result<Option<PullOfBranch>, GitHubError>),
+    HeadBranch(Result<Option<BranchName>, GitHubError>),
     PrDescription(Result<String, GitHubError>),
     SyncViewed(SyncOutcome),
     Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), GitHubError>),

@@ -44,6 +44,23 @@ pub struct PrMover {
 }
 
 impl PrMover {
+    /// The move of `change_set`, reading the PR's commits from the change set's own folder.
+    pub fn for_change_set(folders: &AppFolders, change_set: &LocalChangeSet) -> Self {
+        let folder = change_set.folder().as_path().to_path_buf();
+        Self {
+            folders: folders.clone(),
+            change_set: change_set.clone(),
+            pick_code_source: Arc::new(move |pr, tips| {
+                crate::pick_code_source::pick_code_source(
+                    &crate::github::GitHub::from_env(),
+                    pr,
+                    tips,
+                    &folder,
+                )
+            }),
+        }
+    }
+
     /// Blocks on git and on GitHub; the app runs it off the main thread. Nothing is posted: the open
     /// comments become drafts the reviewer sends or drops.
     pub fn run(&self, offer: &MoveOffer, github: &dyn ChangeTipsPort) -> anyhow::Result<()> {

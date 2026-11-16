@@ -40,6 +40,16 @@ impl PullsOfBranchPort for NoGitHub {
             None => refused(),
         }
     }
+
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<BranchName>, GitHubError> {
+        match &self.branch_lookups {
+            Some(lookups) => lookups.pull_request_head_branch(pr),
+            None => refused(),
+        }
+    }
 }
 
 fn refused<T>() -> Result<T, GitHubError> {

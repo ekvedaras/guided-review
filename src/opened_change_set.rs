@@ -12,6 +12,7 @@ use crate::local_git::LocalGit;
 use crate::local_work_tree::{LocalWorkTree, snapshot_ref};
 use crate::make_basic_tour::make_basic_tour;
 use crate::opened_pr::CodeAtTips;
+use crate::pull_request::PullRequestUrl;
 use crate::repin::Repin;
 use crate::review_subject::{LOCAL_FILES_FOLDER, LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use crate::tour::{Tour, TourPin, ToursOnDisk};
@@ -152,6 +153,19 @@ impl LocalReviewsOnDisk {
             unreadable.path.starts_with(&tours_folder) || tours_folder.starts_with(&unreadable.path)
         })
     }
+}
+
+/// The local reviews on disk of the PR's repo whose move to the PR was not declined: one of them may be of
+/// the branch the PR is opened from. Reads the disk and no GitHub.
+pub fn local_reviews_of_repo(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<LocalChangeSet> {
+    local_reviews_on_disk(folders)
+        .into_iter()
+        .filter(|review| LocalGit::origin_of(review.folder().as_path()).as_ref() == Some(&pr.repo))
+        .filter(|review| {
+            let subject = ReviewSubject::from(review.clone());
+            !ReviewStateFile::for_subject(folders, &subject).has_declined_move_to(pr)
+        })
+        .collect()
 }
 
 /// What every command needs to work on one local change set: where its files live and its working

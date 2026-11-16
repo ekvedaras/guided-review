@@ -175,6 +175,7 @@ pub struct FakeGitHub {
     deleted_now: Mutex<BTreeSet<CommentId>>,
     description: Mutex<String>,
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
+    head_branches: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeGitHub {
@@ -195,7 +196,17 @@ impl FakeGitHub {
             deleted_now: Mutex::default(),
             description: Mutex::default(),
             pulls_of_branches: Mutex::default(),
+            head_branches: Mutex::default(),
         }
+    }
+
+    /// The PR is opened from `branch` of its own repo.
+    pub fn with_head_branch(self, pr: &str, branch: &str) -> Self {
+        self.head_branches
+            .lock()
+            .unwrap()
+            .push((pr.to_owned(), branch.to_owned()));
+        self
     }
 
     /// An open PR whose head is `branch`.
@@ -342,6 +353,36 @@ impl PullsOfBranchPort for FakeGitHub {
             .iter()
             .find(|(head, pull)| head == branch.as_str() && &pull.pr.repo == repo)
             .map(|(_, pull)| pull.clone()))
+    }
+
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<guided_review::review_subject::BranchName>, GitHubError> {
+        self.head_branch_of(pr)
+    }
+}
+
+impl FakeGitHub {
+    fn head_branch_of(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<guided_review::review_subject::BranchName>, GitHubError> {
+        self.sent
+            .0
+            .lock()
+            .unwrap()
+            .branch_lookups
+            .push(format!("head of {}", pr.short()));
+        self.fail_if_reads_fail()?;
+        let found = self
+            .head_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(url, _)| *url == pr.to_string())
+            .map(|(_, branch)| branch.clone());
+        Ok(found.map(|branch| guided_review::review_subject::BranchName::new(&branch).unwrap()))
     }
 }
 

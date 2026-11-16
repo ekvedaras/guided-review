@@ -85,7 +85,7 @@ use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::{
-    SidebarDiskNews, SidebarGuidedTour, SidebarRows, SidebarTourAgent, WriteOffer,
+    SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows, SidebarTourAgent, WriteOffer,
 };
 use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
@@ -1541,7 +1541,7 @@ impl OneStepLayout {
     /// A local review's branch has an open PR: the line, Move to <pr> and Keep local review.
     fn move_offer_block(
         colors: &Colors,
-        offer: &MoveOffer,
+        offer: &SidebarMoveOffer,
         is_moving: bool,
         cx: &Context<Self>,
     ) -> impl IntoElement {
@@ -1554,7 +1554,7 @@ impl OneStepLayout {
                 div()
                     .text_xs()
                     .text_color(colors.accent)
-                    .child(format!("{} is open from this branch", offer.pr.short())),
+                    .child(offer.heading.clone()),
             )
             .child(
                 div()
@@ -1571,7 +1571,7 @@ impl OneStepLayout {
                             if is_moving {
                                 "Moving…".to_owned()
                             } else {
-                                offer.label()
+                                offer.button.to_string()
                             },
                         )
                         .when(!is_moving, |button| {
@@ -1588,7 +1588,7 @@ impl OneStepLayout {
                                 ButtonKind::Secondary,
                                 ButtonSize::Small,
                                 Icon::Close,
-                                "Keep local review",
+                                offer.keep,
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.session.update(cx, ReviewSession::decline_move);

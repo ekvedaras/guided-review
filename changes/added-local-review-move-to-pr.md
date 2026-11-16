@@ -1,1 +1,1 @@
-When a PR is opened from a local review's branch, Move to it carries your ticks and comments as drafts.
+A local review and the PR opened from its branch offer to move your ticks and comments to the PR.

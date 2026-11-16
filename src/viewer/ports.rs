@@ -30,6 +30,12 @@ pub trait PullsOfBranchPort: Send + Sync {
         repo: &RepoName,
         branch: &BranchName,
     ) -> Result<Option<PullOfBranch>, GitHubError>;
+
+    /// The branch of the PR's own repo that the PR is opened from; `None` for a PR from a fork.
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<BranchName>, GitHubError>;
 }
 
 pub trait ViewedFilesPort: Send + Sync {

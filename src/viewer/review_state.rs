@@ -762,6 +762,12 @@ impl ReviewStateFile {
             .collect()
     }
 
+    /// Whether the move of this review to the PR was declined; an unreadable file declines nothing.
+    pub fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {
+        self.load()
+            .is_ok_and(|state| state.has_declined_move_to(pr))
+    }
+
     pub fn exists(&self) -> bool {
         self.path.exists()
     }

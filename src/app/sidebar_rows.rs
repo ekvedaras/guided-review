@@ -6,8 +6,8 @@ use gpui::SharedString;
 
 use crate::viewer::{
     ApproveWarning, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal,
-    GuidedTourStage, MoveOffer, Problem, ReadProgress, ReadUnit, Review, Screen, StepId,
-    TerminalId, TourAgentState, TreeRow,
+    GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId,
+    TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -118,7 +118,14 @@ pub struct SidebarRows {
     /// A local review's folder is not its snapshot any more: Changed on disk, another branch, or gone.
     pub disk_news: Option<SidebarDiskNews>,
     /// A local review's branch has an open PR, which the review offers to move to.
-    pub move_offer: Option<MoveOffer>,
+    pub move_offer: Option<SidebarMoveOffer>,
+}
+
+/// The lasting line that offers to move a local review to its PR, seen from either side.
+pub struct SidebarMoveOffer {
+    pub heading: SharedString,
+    pub button: SharedString,
+    pub keep: &'static str,
 }
 
 pub struct SidebarDiskNews {
@@ -198,7 +205,24 @@ impl SidebarRows {
             }),
             basic_mode_label: review.basic_mode_label(),
             local_heading: review.local_heading().map(Into::into),
-            move_offer: review.move_offer(),
+            move_offer: review
+                .move_offer()
+                .map(|offer| SidebarMoveOffer {
+                    heading: format!("{} is open from this branch", offer.pr.short()).into(),
+                    button: offer.label().into(),
+                    keep: "Keep local review",
+                })
+                .or_else(|| {
+                    review.move_here_offer().map(|offer| SidebarMoveOffer {
+                        heading: format!(
+                            "A local review of {} is on this machine",
+                            offer.change_set.branch().as_str()
+                        )
+                        .into(),
+                        button: offer.label().into(),
+                        keep: "Keep it separate",
+                    })
+                }),
             disk_news: review
                 .disk_news()
                 .map(|DiskNews { line, offer }| SidebarDiskNews {

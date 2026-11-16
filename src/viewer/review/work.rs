@@ -59,6 +59,12 @@ impl ReviewCore {
                 repo: self.local_facts.as_ref()?.repo.clone()?,
                 branch: self.subject.local()?.branch().clone(),
             },
+            WorkKind::LookUpHeadBranch => {
+                if self.local_reviews_of_repo.is_empty() {
+                    return None;
+                }
+                Job::LookUpHeadBranch(pr()?)
+            }
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
@@ -119,6 +125,13 @@ impl ReviewCore {
                 Err(_) => self
                     .work
                     .want_in(WorkKind::LookUpPullOfBranch, PULL_OF_BRANCH_RETRY),
+            },
+            Done::HeadBranch(found) => match found {
+                Ok(branch) => self.head_branch_is(branch),
+                // Silent, as for a local review's look for its PR.
+                Err(_) => self
+                    .work
+                    .want_in(WorkKind::LookUpHeadBranch, PULL_OF_BRANCH_RETRY),
             },
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();

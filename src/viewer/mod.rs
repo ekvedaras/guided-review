@@ -140,7 +140,7 @@ pub use local_row::LocalRow;
 pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
-pub use move_offer::MoveOffer;
+pub use move_offer::{MoveHereOffer, MoveOffer};
 pub use move_to_pr::{PickPullCodeSource, PrMover};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use no_github::NoGitHub;
