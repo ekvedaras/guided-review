@@ -110,6 +110,8 @@ pub struct SidebarRows {
     /// Only a basic review has one; its steps are then empty.
     pub tree: Option<SidebarTree>,
     pub basic_mode_label: Option<&'static str>,
+    /// What a local review is of, leading the sidebar where a PR has no such line.
+    pub local_heading: Option<SharedString>,
 }
 
 impl SidebarRows {
@@ -182,6 +184,7 @@ impl SidebarRows {
                 rows: review.basic_sidebar(),
             }),
             basic_mode_label: review.basic_mode_label(),
+            local_heading: review.local_heading().map(Into::into),
         }
     }
 }

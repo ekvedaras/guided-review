@@ -627,16 +627,16 @@ async fn build_and_show(
             let shown = cx.update(|cx| {
                 let shown = match window.show_review() {
                     ShowReview::Switch(window) => {
-                        switch_window(window, opened, &pr, cx).map(|()| window)
+                        switch_window(window, opened, cx).map(|()| window)
                     }
-                    ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, &pr, cx),
+                    ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, cx),
                     ShowReview::TurnSwitcherIntoReview(window) => {
-                        turn_switcher_into_review(window, opened, &pr, cx)
+                        turn_switcher_into_review(window, opened, cx)
                     }
                     ShowReview::TurnWritingIntoReview(window) => {
-                        turn_writing_into_review(window, opened, &pr, cx)
+                        turn_writing_into_review(window, opened, cx)
                     }
-                    ShowReview::OpenWindow => open_window(opened, &pr, cx),
+                    ShowReview::OpenWindow => open_window(opened, cx),
                 };
                 bring_app_to_front(cx);
                 shown
@@ -681,12 +681,11 @@ fn apply_replies_held_for_reopen(
 fn switch_window(
     window: WindowHandle<OneStepLayout>,
     opened: OpenedReview,
-    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<()> {
     window.update(cx, |layout, window, cx| {
         layout.flush_typing(cx);
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })
 }
 
@@ -694,13 +693,12 @@ fn switch_window(
 fn turn_into_review(
     window: WindowHandle<SettingsWindow>,
     opened: OpenedReview,
-    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |settings_window, window, cx| {
         let settings = settings_window.panel();
         window.replace_root(cx, |window, cx| {
-            new_layout(opened, pr, Some(settings), window, cx)
+            new_layout(opened, Some(settings), window, cx)
         });
     })?;
     Ok(WindowHandle::new(window.window_id()))
@@ -755,11 +753,10 @@ fn replace_switcher_with_writing(
 fn turn_writing_into_review(
     window: WindowHandle<WritingWindow>,
     opened: OpenedReview,
-    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |_, window, cx| {
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -772,11 +769,10 @@ actions!(app, [Quit]);
 fn turn_switcher_into_review(
     window: WindowHandle<SwitcherWindow>,
     opened: OpenedReview,
-    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |_, window, cx| {
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -851,15 +847,11 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
     cx.bind_keys(bindings);
 }
 
-fn open_window(
-    opened: OpenedReview,
-    pr: &ReviewSubject,
-    cx: &mut App,
-) -> anyhow::Result<WindowHandle<OneStepLayout>> {
-    let options = window_options(window_title(&opened, pr), cx);
+fn open_window(opened: OpenedReview, cx: &mut App) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    let options = window_options(window_title(&opened), cx);
     cx.open_window(options, |window, cx| {
         Appearance::follow(window, cx);
-        cx.new(|cx| new_layout(opened, pr, None, window, cx))
+        cx.new(|cx| new_layout(opened, None, window, cx))
     })
 }
 
@@ -930,8 +922,8 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     }
 }
 
-fn window_title(opened: &OpenedReview, pr: &ReviewSubject) -> String {
-    format!("{pr}: {}", opened.review.title())
+fn window_title(opened: &OpenedReview) -> String {
+    opened.review.window_title()
 }
 
 /// A debug build names itself in its title, which the Window menu and Mission Control show.
@@ -945,12 +937,11 @@ fn marked_if_dev(title: String) -> String {
 
 fn new_layout(
     opened: OpenedReview,
-    pr: &ReviewSubject,
     carried_settings: Option<Entity<SettingsPanel>>,
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,
 ) -> OneStepLayout {
-    window.set_window_title(&marked_if_dev(window_title(&opened, pr)));
+    window.set_window_title(&marked_if_dev(window_title(&opened)));
     let collaborators = Collaborators {
         github: opened.github,
         ide: opened.ide,

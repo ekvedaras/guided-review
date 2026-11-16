@@ -87,19 +87,20 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::local_facts::LocalChange;
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
-    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
-    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal, Reopen, ReopenAfterSave,
-    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
-    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
-    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
-    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
-    WindowMoment, pluralised,
+    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, LocalOverview,
+    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
+    PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal,
+    Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1788,6 +1789,12 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_3()
+            .children(
+                sidebar
+                    .local_heading
+                    .clone()
+                    .map(|heading| div().text_xs().text_color(colors.muted_text).child(heading)),
+            )
             .child(match sidebar.basic_mode_label {
                 Some(label) => div()
                     .flex()
@@ -1919,6 +1926,9 @@ impl OneStepLayout {
         let review = self.session.read(cx).review();
         let subject_name = review.subject().short();
         let title = review.title().to_owned();
+        let local_heading = review.local_heading();
+        let is_local = local_heading.is_some();
+        let can_open_on_github = review.can_open_on_github();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -1934,26 +1944,28 @@ impl OneStepLayout {
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
-        let github = button(
-            &colors,
-            "title-bar-github",
-            ButtonKind::Ghost,
-            ButtonSize::Small,
-        )
-        .child(button_icon(
-            &colors,
-            ButtonKind::Ghost,
-            ButtonSize::Small,
-            Icon::ExternalLink,
-        ))
-        .child("GitHub")
-        .child(button_keys(
-            &colors,
-            ButtonKind::Ghost,
-            Command::OpenOnGitHub,
-            cx,
-        ))
-        .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)));
+        let github = can_open_on_github.then(|| {
+            button(
+                &colors,
+                "title-bar-github",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+            .child(button_icon(
+                &colors,
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ExternalLink,
+            ))
+            .child("GitHub")
+            .child(button_keys(
+                &colors,
+                ButtonKind::Ghost,
+                Command::OpenOnGitHub,
+                cx,
+            ))
+            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)))
+        });
         let switch_pr = div()
             .id("title-bar-switch-pr")
             .min_w_0()
@@ -1966,24 +1978,48 @@ impl OneStepLayout {
             .cursor_pointer()
             .hover(|button| button.bg(colors.hover))
             .active(|button| button.bg(colors.pressed))
-            .tooltip(tooltip(|_| "Switch pull request".into()))
+            .tooltip(tooltip(move |_| {
+                if is_local {
+                    "Switch review"
+                } else {
+                    "Switch pull request"
+                }
+                .into()
+            }))
             .on_click(
                 cx.listener(|this, _, window, cx| this.act(Intent::TogglePrSwitcher, window, cx)),
             )
-            .child(icon(Icon::PullRequest, colors.success))
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(colors.muted_text)
-                    .child(subject_name),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(InlineMarkdown::new("title-bar-title", &title)),
-            )
+            .child(icon(
+                if is_local {
+                    Icon::FolderGit
+                } else {
+                    Icon::PullRequest
+                },
+                colors.success,
+            ))
+            .children(match local_heading {
+                Some(heading) => vec![
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(heading)
+                        .into_any_element(),
+                ],
+                None => vec![
+                    div()
+                        .flex_none()
+                        .text_color(colors.muted_text)
+                        .child(subject_name)
+                        .into_any_element(),
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(InlineMarkdown::new("title-bar-title", &title))
+                        .into_any_element(),
+                ],
+            })
             .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
         let page_share = scrolled_share(
             -self.screen_list.scroll_px_offset_for_scrollbar().y,
@@ -2003,7 +2039,7 @@ impl OneStepLayout {
                     .child(switch_pr)
                     .child(div().flex_1())
                     .child(jump)
-                    .child(github),
+                    .children(github),
             )
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
@@ -2751,6 +2787,10 @@ impl OneStepLayout {
                     cx,
                 )
             });
+        let local = overview
+            .local
+            .as_ref()
+            .map(|local| local_overview_card(&colors, local));
         let files = overview.files.iter().map(|file| {
             let path = file.path.clone();
             let (folder, name) = match file.path.as_str().rsplit_once('/') {
@@ -2798,6 +2838,7 @@ impl OneStepLayout {
                         }))
                         .child(div().min_w_0().truncate().child(name.to_owned())),
                 )
+                .children(file.change.map(|change| change_chip(&colors, change)))
                 .child(line_counts(&colors, file.added_lines, file.removed_lines))
         });
         let write_guided_tour = Some(overview.write_guided_tour_refusal).map(|refusal| {
@@ -2854,6 +2895,7 @@ impl OneStepLayout {
             )
             .child(overview_stats(&colors, overview.stats))
             .children(description)
+            .children(local)
             .child(
                 div()
                     .pb_4()
@@ -2972,6 +3014,7 @@ impl OneStepLayout {
             .flex_wrap()
             .items_center()
             .gap_2()
+            .children(toolbar.change.map(|change| change_chip(&colors, change)))
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
@@ -3465,6 +3508,106 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .child(dot())
                 .child(item(Icon::Check, SharedString::from(started_read)))
         }))
+}
+
+/// Where a file's change in a local review comes from, as a chip.
+fn change_chip(colors: &Colors, change: LocalChange) -> impl IntoElement {
+    chip(
+        colors,
+        match change {
+            LocalChange::Committed => Tone::Neutral,
+            LocalChange::Uncommitted => Tone::Warning,
+            LocalChange::Both => Tone::Accent,
+        },
+    )
+    .child(change.label())
+}
+
+/// One line of the local overview card: a quiet label and its value.
+fn local_fact(colors: &Colors, label: &'static str, value: impl IntoElement) -> impl IntoElement {
+    div()
+        .flex()
+        .items_baseline()
+        .gap_3()
+        .child(
+            div()
+                .flex_none()
+                .w(px(96.))
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().child(value))
+}
+
+/// What a local review is of, in place of the PR description: where it is, which branch against
+/// which, the branch's commits and how many files are not committed.
+fn local_overview_card(colors: &Colors, local: &LocalOverview) -> impl IntoElement {
+    let commits = if local.commit_subjects.is_empty() {
+        vec![
+            div()
+                .text_color(colors.muted_text)
+                .child(format!("None beyond {}", local.default_branch))
+                .into_any_element(),
+        ]
+    } else {
+        local
+            .commit_subjects
+            .iter()
+            .map(|subject| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_3()
+                    .child(bullet(colors, SUMMARY_LINE))
+                    .child(div().flex_1().min_w_0().child(subject.clone()))
+                    .into_any_element()
+            })
+            .collect()
+    };
+    div()
+        .pb_4()
+        .w_full()
+        .max_w(READING_WIDTH)
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(note_label("LOCAL CHANGES").text_color(colors.muted_text))
+        .child(
+            card(colors)
+                .px_5()
+                .py_4()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .text_sm()
+                .children(
+                    local
+                        .repo
+                        .as_ref()
+                        .map(|repo| local_fact(colors, "Repo", repo.to_string())),
+                )
+                .child(local_fact(
+                    colors,
+                    "Folder",
+                    local.folder.as_path().display().to_string(),
+                ))
+                .child(local_fact(
+                    colors,
+                    "Branch",
+                    format!(
+                        "{} (compared with {})",
+                        local.branch.as_str(),
+                        local.default_branch
+                    ),
+                ))
+                .child(local_fact(
+                    colors,
+                    "Commits",
+                    div().flex().flex_col().children(commits),
+                ))
+                .child(local_fact(colors, "Working tree", local.uncommitted_label())),
+        )
 }
 
 /// How big a basic review's PR is, in the numbers the review truly has.
