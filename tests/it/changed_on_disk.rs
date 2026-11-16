@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::support::fake_ports::{FakeGitHub, SentLog};
@@ -559,35 +558,26 @@ fn dropping_the_review_of_a_deleted_folder_deletes_its_files() {
     );
 }
 
-/// Makes deleting the review's state file fail, as a crash part way through a drop would leave it.
-fn state_files_read_only(folders: &AppFolders, subject: &ReviewSubject) -> impl Drop + use<> {
-    struct Writable(PathBuf);
-    impl Drop for Writable {
-        fn drop(&mut self) {
-            set_read_only(&self.0, false);
-        }
-    }
-    fn set_read_only(folder: &Path, read_only: bool) {
-        let mut permissions = std::fs::metadata(folder).unwrap().permissions();
-        permissions.set_readonly(read_only);
-        std::fs::set_permissions(folder, permissions).unwrap();
-    }
-    let folder = folders.state_files().join(subject.files_folder());
-    set_read_only(&folder, true);
-    Writable(folder)
+/// Makes deleting the review's state file fail, as a crash part way through a drop would leave it: a
+/// folder in its place cannot be deleted as a file.
+fn state_file_undeletable(folders: &AppFolders, subject: &ReviewSubject) {
+    let path = folders
+        .state_files()
+        .join(subject.files_folder())
+        .join(format!("{}.json", subject.file_stem()));
+    std::fs::remove_file(&path).ok();
+    std::fs::create_dir_all(path.join("in-the-way")).unwrap();
 }
 
 #[test]
 fn a_drop_that_stops_part_way_leaves_no_snapshot_ref_once_the_app_starts_again() {
     let feature = Feature::with_work_in_progress();
-    let mut opened = feature.open();
-    opened.review.tick_file(&file_path("README.md")).unwrap();
+    feature.open();
     let folders = feature.repo.folders();
-    let read_only = state_files_read_only(&folders, &feature.subject());
+    state_file_undeletable(&folders, &feature.subject());
 
     let dropped =
         OpenedChangeSet::new(feature.subject().local().unwrap(), &folders).drop_review();
-    drop(read_only);
     clean_snapshot_refs(&folders);
 
     assert!(dropped.is_err());
