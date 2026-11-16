@@ -33,15 +33,19 @@ fi
 echo "== change notes"
 # The base is the open PR's, so a stacked layer is not blamed for the layers below; without one, origin/main.
 # "changelog: none" in the PR body passes, as in CI. CHANGES_BASE overrides the base.
-changes_base="${CHANGES_BASE:-}"
-if [ -z "$changes_base" ] && command -v gh >/dev/null 2>&1; then
-    pr=$(gh pr view --json baseRefName,body 2>/dev/null || true)
-    if [ -n "$pr" ]; then
-        changes_base="origin/$(printf '%s' "$pr" | jq -r .baseRefName)"
-        if printf '%s' "$pr" | jq -r .body | tr -d '\r' | grep -qix 'changelog: none'; then export CHANGELOG_NONE=1; fi
+if [ -n "${CI:-}" ]; then
+    echo "skipped in CI: the change-notes workflow covers it"
+else
+    changes_base="${CHANGES_BASE:-}"
+    if [ -z "$changes_base" ] && command -v gh >/dev/null 2>&1; then
+        pr=$(gh pr view --json baseRefName,body 2>/dev/null || true)
+        if [ -n "$pr" ]; then
+            changes_base="origin/$(printf '%s' "$pr" | jq -r .baseRefName)"
+            if printf '%s' "$pr" | jq -r .body | tr -d '\r' | grep -qix 'changelog: none'; then export CHANGELOG_NONE=1; fi
+        fi
     fi
+    scripts/changes-check "${changes_base:-origin/main}" --worktree
 fi
-scripts/changes-check "${changes_base:-origin/main}" --worktree
 echo "== fmt"
 cargo fmt --all -- --check
 echo "== clippy, default features (what cargo install builds)"
