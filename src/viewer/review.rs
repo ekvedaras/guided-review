@@ -68,6 +68,13 @@ use crate::repin::RepinStatus;
 use crate::update::Build;
 
 pub use crate::tour::StepId;
+
+/// What a read tick says was read: a guided tour's step, or a basic tour's whole file.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ReadSubject {
+    Step(StepId),
+    File(FilePath),
+}
 pub use kept::Review;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -118,6 +125,22 @@ impl ReadProgress {
     }
 }
 
+/// What a tour's read ticks count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadUnit {
+    Steps,
+    Files,
+}
+
+impl ReadUnit {
+    pub fn plural(self) -> &'static str {
+        match self {
+            Self::Steps => "steps",
+            Self::Files => "files",
+        }
+    }
+}
+
 /// A step the reader has not read yet, named for a button that leads there.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnreadStep {
@@ -134,11 +157,24 @@ pub enum TourLead {
     Nowhere,
     Start(UnreadStep),
     Continue(UnreadStep),
+    /// A basic tour leads by files.
+    StartFile(UnreadFile),
+    ContinueFile(UnreadFile),
+    FinishFiles {
+        files: usize,
+        can_finish: bool,
+    },
     Finish {
         steps: usize,
         /// The PR takes a review from the viewer; an own PR with nothing to send does not.
         can_finish: bool,
     },
+}
+
+/// A file the reader has not read yet, named for a button that leads there.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnreadFile {
+    pub path: FilePath,
 }
 
 /// One top-level step of the tour as the summary lists it.
@@ -614,10 +650,10 @@ impl ReviewCore {
             .filter_map(|path| {
                 let file = self.files.iter().find(|file| file.path == path)?;
                 Some(OverviewFile {
-                    path,
                     added_lines: file.added,
                     removed_lines: file.removed,
-                    is_read: false,
+                    is_read: self.is_file_ticked(&path),
+                    path,
                 })
             })
             .collect();
@@ -1050,7 +1086,9 @@ impl ReviewCore {
             Screen::File(path) => Some(path),
             _ => None,
         };
-        self.file_tree.rows(&self.folded_folders, current)
+        self.file_tree.rows(&self.folded_folders, current, &|path| {
+            self.is_file_ticked(path)
+        })
     }
 
     /// Folds an open folder of the tree and opens a folded one. Not saved.
@@ -1348,11 +1386,21 @@ impl ReviewCore {
                 .collect::<BTreeSet<_>>()
                 .len()
         });
-        let warning = ApproveWarning {
-            unread_steps: progress.total - progress.read,
-            unread_safety_net_pieces,
+        let unread = progress.total - progress.read;
+        let warning = match &self.tour {
+            Tour::Guided(_) => ApproveWarning {
+                unread_steps: unread,
+                unread_files: 0,
+                unread_safety_net_pieces,
+            },
+            Tour::Basic(_) => ApproveWarning {
+                unread_steps: 0,
+                unread_files: unread,
+                unread_safety_net_pieces,
+            },
         };
-        (warning.unread_steps + warning.unread_safety_net_pieces > 0).then_some(warning)
+        (warning.unread_steps + warning.unread_files + warning.unread_safety_net_pieces > 0)
+            .then_some(warning)
     }
 
     pub fn finish_review_request(
@@ -1588,13 +1636,13 @@ impl ReviewCore {
             Screen::Step(id) => Some(id),
             Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
         };
-        let tick = step.map(|id| {
-            if self.is_ticked(id) {
-                PaletteAction::MarkStepUnread
-            } else {
-                PaletteAction::MarkStepRead
-            }
-        });
+        let tick = match &self.screen {
+            Screen::Step(id) if self.is_ticked(id) => Some(PaletteAction::MarkStepUnread),
+            Screen::Step(_) => Some(PaletteAction::MarkStepRead),
+            Screen::File(path) if self.is_file_ticked(path) => Some(PaletteAction::MarkFileUnread),
+            Screen::File(_) => Some(PaletteAction::MarkFileRead),
+            Screen::Summary | Screen::Overview | Screen::SafetyNet => None,
+        };
         let wrap = if self.display_options.wraps_lines() {
             PaletteAction::StopWrappingLines
         } else {
@@ -1605,9 +1653,9 @@ impl ReviewCore {
         } else {
             PaletteAction::HideWhitespace
         };
-        let next_unread = self
-            .first_unread_step()
-            .map(|_| PaletteAction::NextUnreadStep);
+        let next_unread = (self.first_unread_step().is_some()
+            || self.first_unread_file().is_some())
+        .then_some(PaletteAction::NextUnreadStep);
         let ask = step.map(|_| PaletteAction::AskAboutStep);
         let finish = self
             .can_finish_review()
@@ -1704,7 +1752,23 @@ impl ReviewCore {
         reading_order
             .into_iter()
             .skip(here + 1)
-            .find(|screen| !matches!(screen, Screen::Step(id) if self.is_ticked(id)))
+            .find(|screen| !self.is_read_screen(screen))
+    }
+
+    fn is_read_screen(&self, screen: &Screen) -> bool {
+        match screen {
+            Screen::Step(id) => self.is_ticked(id),
+            Screen::File(path) => self.is_file_ticked(path),
+            Screen::Summary | Screen::Overview | Screen::SafetyNet => false,
+        }
+    }
+
+    fn is_unread_screen(&self, screen: &Screen) -> bool {
+        match screen {
+            Screen::Step(id) => !self.is_ticked(id),
+            Screen::File(path) => !self.is_file_ticked(path),
+            Screen::Summary | Screen::Overview | Screen::SafetyNet => false,
+        }
     }
 
     /// False on the summary, the first screen.
@@ -1723,7 +1787,7 @@ impl ReviewCore {
         let after = reading_order.iter().skip(here + 1);
         let next = after
             .chain(reading_order.iter().take(here + 1))
-            .find(|screen| matches!(screen, Screen::Step(id) if !self.is_ticked(id)))
+            .find(|screen| self.is_unread_screen(screen))
             .cloned();
         match next {
             Some(screen) if screen != self.screen => {
@@ -1739,10 +1803,22 @@ impl ReviewCore {
         if progress.total == 0 {
             return TourLead::Nowhere;
         }
+        let can_finish = self.can_finish_review();
+        if let Tour::Basic(_) = &self.tour {
+            return match self.first_unread_file() {
+                _ if progress.is_complete() => TourLead::FinishFiles {
+                    files: progress.total,
+                    can_finish,
+                },
+                Some(first) if progress.read == 0 => TourLead::StartFile(first),
+                Some(next) => TourLead::ContinueFile(next),
+                None => TourLead::Nowhere,
+            };
+        }
         if progress.is_complete() {
             return TourLead::Finish {
                 steps: progress.total,
-                can_finish: self.can_finish_review(),
+                can_finish,
             };
         }
         match self.first_unread_step() {
@@ -1797,6 +1873,61 @@ impl ReviewCore {
         })
     }
 
+    pub fn is_file_ticked(&self, path: &FilePath) -> bool {
+        self.state.file_read_tick(path).is_some()
+    }
+
+    /// The file on screen, if it is not read yet: the footer ticks it on the way on.
+    pub fn file_to_tick_on_screen(&self) -> Option<FilePath> {
+        match &self.screen {
+            Screen::File(path) if !self.is_file_ticked(path) => Some(path.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn is_read(&self, subject: &ReadSubject) -> bool {
+        match subject {
+            ReadSubject::Step(id) => self.is_ticked(id),
+            ReadSubject::File(path) => self.is_file_ticked(path),
+        }
+    }
+
+    /// The first file in reading order that is not read yet; none in a guided tour.
+    pub fn first_unread_file(&self) -> Option<UnreadFile> {
+        self.steps_in_reading_order.iter().find_map(|screen| {
+            let Screen::File(path) = screen else {
+                return None;
+            };
+            (!self.is_file_ticked(path)).then(|| UnreadFile { path: path.clone() })
+        })
+    }
+
+    /// Only files of this tour can be read; a file the tour does not hold is ignored. Viewed
+    /// marks follow it one to one.
+    pub fn tick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
+        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        if !self.reading_order().contains(&Screen::File(path.clone())) {
+            return Ok(());
+        }
+        let coverage = self.coverage();
+        let subject = ReadSubject::File(path.clone());
+        self.state.change(|state| {
+            state.tick_file(path, &self.head);
+            self.viewed_sync.wish_after_tick(state, &coverage, &subject);
+        })
+    }
+
+    pub fn untick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
+        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        let coverage = self.coverage();
+        let subject = ReadSubject::File(path.clone());
+        self.state.change(|state| {
+            state.untick_file(path);
+            self.viewed_sync
+                .wish_after_untick(state, &coverage, &subject);
+        })
+    }
+
     pub fn is_ticked(&self, id: &StepId) -> bool {
         self.state.read_tick(id).is_some()
     }
@@ -1828,20 +1959,23 @@ impl ReviewCore {
             return Ok(());
         }
         let coverage = self.coverage();
+        let subject = ReadSubject::Step(id.clone());
         self.state.change(|state| {
             state.tick(id, &self.head);
             self.fold_flipped.remove(id);
-            self.viewed_sync.wish_after_tick(state, &coverage, id);
+            self.viewed_sync.wish_after_tick(state, &coverage, &subject);
         })
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
         self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         let coverage = self.coverage();
+        let subject = ReadSubject::Step(id.clone());
         self.state.change(|state| {
             state.untick(id);
             self.fold_flipped.remove(id);
-            self.viewed_sync.wish_after_untick(state, &coverage, id);
+            self.viewed_sync
+                .wish_after_untick(state, &coverage, &subject);
         })
     }
 
@@ -1883,16 +2017,27 @@ impl ReviewCore {
         }
     }
 
+    pub fn read_unit(&self) -> ReadUnit {
+        match &self.tour {
+            Tour::Guided(_) => ReadUnit::Steps,
+            Tour::Basic(_) => ReadUnit::Files,
+        }
+    }
+
     /// Only steps of this tour count: ticks of steps a refresh removed stay in the file but not here.
     pub fn progress(&self) -> ReadProgress {
         let reading_order = self.reading_order();
-        let steps = reading_order.iter().filter_map(|screen| match screen {
-            Screen::Step(id) => Some(id),
-            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
+        let subjects = reading_order.iter().filter_map(|screen| match screen {
+            Screen::Step(id) => Some(ReadSubject::Step(id.clone())),
+            Screen::File(path) => Some(ReadSubject::File(path.clone())),
+            Screen::Summary | Screen::Overview | Screen::SafetyNet => None,
         });
         ReadProgress {
-            read: steps.clone().filter(|id| self.is_ticked(id)).count(),
-            total: steps.count(),
+            read: subjects
+                .clone()
+                .filter(|subject| self.is_read(subject))
+                .count(),
+            total: subjects.count(),
         }
     }
 
@@ -1923,8 +2068,10 @@ impl ReviewCore {
             let (unticked, sync_error) = self
                 .viewed_sync
                 .take_in(state, &coverage, &self.head, outcome);
-            for step in &unticked {
-                self.fold_flipped.remove(step);
+            for subject in &unticked {
+                if let ReadSubject::Step(step) = subject {
+                    self.fold_flipped.remove(step);
+                }
             }
             error = sync_error;
         });
@@ -1949,11 +2096,11 @@ impl ReviewCore {
         }
     }
 
-    /// Nothing for a basic tour: viewed marks follow its file ticks (ticket #83).
     fn coverage(&self) -> Coverage {
-        self.tour
-            .guided()
-            .map_or_default(|guided| Coverage::of(guided, &self.files))
+        match &self.tour {
+            Tour::Guided(guided) => Coverage::of(guided, &self.files),
+            Tour::Basic(_) => Coverage::of_files(self.files.iter().map(|file| &file.path)),
+        }
     }
 
     /// Changed code no page can show, by piece id: the reviewer has to read it on GitHub.

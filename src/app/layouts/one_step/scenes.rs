@@ -61,10 +61,11 @@ enum Scene {
     BasicOverview,
     BasicOverviewFiles,
     BasicFile,
+    BasicRead,
 }
 
 impl Scene {
-    const ALL: [Self; 33] = [
+    const ALL: [Self; 34] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -98,6 +99,7 @@ impl Scene {
         Self::BasicOverview,
         Self::BasicOverviewFiles,
         Self::BasicFile,
+        Self::BasicRead,
     ];
 
     fn file_name(self) -> &'static str {
@@ -135,6 +137,7 @@ impl Scene {
             Self::BasicOverview => "52-basic-overview",
             Self::BasicOverviewFiles => "54-basic-overview-files",
             Self::BasicFile => "53-basic-file",
+            Self::BasicRead => "55-basic-read",
         }
     }
 }
@@ -536,6 +539,7 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::stage_basic);
                 self.change_review(cx, |review| review.go_forward());
             }
+            Scene::BasicRead => self.session.update(cx, ReviewSession::stage_basic_read),
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::RefreshRunning => {
@@ -642,7 +646,10 @@ impl OneStepLayout {
             Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {
                 review.clear_problem(ProblemKind::ReleaseInstallInTheWay);
             }),
-            Scene::BasicOverview | Scene::BasicOverviewFiles | Scene::BasicFile => {
+            Scene::BasicOverview
+            | Scene::BasicOverviewFiles
+            | Scene::BasicFile
+            | Scene::BasicRead => {
                 self.session.update(cx, ReviewSession::unstage_basic);
                 self.go_to_first_open_code(cx);
             }

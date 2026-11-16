@@ -7,7 +7,7 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
 use super::ports::{GitHubError, PullRequestTipsPort, Viewed, ViewedFilesPort};
-use super::review::StepId;
+use super::review::ReadSubject;
 use super::review_state::ReviewState;
 
 /// Keeps GitHub's "viewed" marks and the read ticks in step. Ticks keep working when it is off.
@@ -30,15 +30,15 @@ impl ViewedSync {
         &self,
         state: &mut ReviewState,
         coverage: &Coverage,
-        step: &StepId,
+        subject: &ReadSubject,
     ) {
         if self.off_because.is_some() {
             return;
         }
         let fully_ticked: Vec<&FilePath> = coverage
-            .files_of(step)
+            .files_of(subject)
             .iter()
-            .filter(|file| coverage.is_fully_ticked(file, |step| is_ticked(state, step)))
+            .filter(|file| coverage.is_fully_ticked(file, |subject| state.is_read(subject)))
             .collect();
         for file in fully_ticked {
             state.want_viewed(file, Viewed::Yes);
@@ -49,12 +49,12 @@ impl ViewedSync {
         &self,
         state: &mut ReviewState,
         coverage: &Coverage,
-        step: &StepId,
+        subject: &ReadSubject,
     ) {
         if self.off_because.is_some() {
             return;
         }
-        for file in coverage.files_of(step) {
+        for file in coverage.files_of(subject) {
             state.want_viewed(file, Viewed::No);
         }
     }
@@ -79,14 +79,14 @@ impl ViewedSync {
         }
     }
 
-    /// Takes in what GitHub said. Returns the steps it unticked, and the error of the network part.
+    /// Takes in what GitHub said. Returns what it unticked, and the error of the network part.
     pub(super) fn take_in(
         &self,
         state: &mut ReviewState,
         coverage: &Coverage,
         tour_head: &Sha,
         outcome: SyncOutcome,
-    ) -> (Vec<StepId>, Option<GitHubError>) {
+    ) -> (Vec<ReadSubject>, Option<GitHubError>) {
         let mut unticked = Vec::new();
         match (&outcome.baseline_wishes, &outcome.on_github) {
             (Some(wishes), Some(on_github)) => {
@@ -125,18 +125,14 @@ impl ViewedSync {
     }
 }
 
-fn is_ticked(state: &ReviewState, step: &StepId) -> bool {
-    state.read_tick(step).is_some()
-}
-
 /// After a re-pin: viewed for every file whose steps are all still ticked, and the queued
 /// "not viewed" edits for the rest. Queued "viewed" edits are dropped: the ticks say it again
 /// where it is still true.
 fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<FilePath, Viewed> {
     let is_fully_ticked =
-        |path: &FilePath| coverage.is_fully_ticked(path, |step| is_ticked(state, step));
+        |path: &FilePath| coverage.is_fully_ticked(path, |subject| state.is_read(subject));
     let still_viewed = coverage
-        .files_by_step
+        .files_by_subject
         .values()
         .flatten()
         .filter(|path| is_fully_ticked(path))
@@ -150,13 +146,13 @@ fn baseline_wishes(state: &ReviewState, coverage: &Coverage) -> BTreeMap<FilePat
 }
 
 /// Reacts only to files whose state changed since the last sync, and never to files with an
-/// unsent local change: those win. Returns the steps it unticked.
+/// unsent local change: those win. Returns what it unticked.
 fn pull_viewed(
     state: &mut ReviewState,
     coverage: &Coverage,
     tour_head: &Sha,
     on_github: &BTreeMap<FilePath, Viewed>,
-) -> Vec<StepId> {
+) -> Vec<ReadSubject> {
     let unsent = state.unsent_viewed().clone();
     let is_viewed = |path: &FilePath| {
         unsent
@@ -175,16 +171,16 @@ fn pull_viewed(
 
     let mut unticked = Vec::new();
     for (path, _) in changed.iter().filter(|(_, now)| *now == Viewed::No) {
-        for step in coverage.steps_holding(path) {
-            state.untick(step);
-            unticked.push(step.clone());
+        for subject in coverage.subjects_holding(path) {
+            state.untick_subject(subject);
+            unticked.push(subject.clone());
         }
     }
     for (path, _) in changed.iter().filter(|(_, now)| *now == Viewed::Yes) {
-        for step in coverage.steps_holding(path) {
-            let files = coverage.files_of(step);
-            if !is_ticked(state, step) && files.iter().all(|path| is_viewed(path) == Viewed::Yes) {
-                state.tick(step, tour_head);
+        for subject in coverage.subjects_holding(path) {
+            let files = coverage.files_of(subject);
+            if !state.is_read(subject) && files.iter().all(|path| is_viewed(path) == Viewed::Yes) {
+                state.tick_subject(subject, tour_head);
             }
         }
     }
@@ -196,10 +192,11 @@ fn pull_viewed(
     unticked
 }
 
-/// Which files each step holds, and which files have changes no step holds.
+/// Which files each read subject holds, and which files have changes no step holds. In a basic
+/// tour each file is held by itself and nothing is partly unheld.
 #[derive(Default)]
 pub(super) struct Coverage {
-    files_by_step: BTreeMap<StepId, BTreeSet<FilePath>>,
+    files_by_subject: BTreeMap<ReadSubject, BTreeSet<FilePath>>,
     partly_unheld: BTreeSet<FilePath>,
 }
 
@@ -215,8 +212,8 @@ impl Coverage {
                 .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
                 .map(|part| part.piece.id.path().clone());
             coverage
-                .files_by_step
-                .entry(step.id.clone())
+                .files_by_subject
+                .entry(ReadSubject::Step(step.id.clone()))
                 .or_default()
                 .extend(paths);
         }
@@ -227,21 +224,37 @@ impl Coverage {
         coverage
     }
 
-    fn files_of(&self, step: &StepId) -> &BTreeSet<FilePath> {
-        static NONE: BTreeSet<FilePath> = BTreeSet::new();
-        self.files_by_step.get(step).unwrap_or(&NONE)
+    /// A basic tour holds every changed file by itself.
+    pub(super) fn of_files<'a>(paths: impl IntoIterator<Item = &'a FilePath>) -> Self {
+        Self {
+            files_by_subject: paths
+                .into_iter()
+                .map(|path| {
+                    (
+                        ReadSubject::File(path.clone()),
+                        BTreeSet::from([path.clone()]),
+                    )
+                })
+                .collect(),
+            partly_unheld: BTreeSet::new(),
+        }
     }
 
-    fn steps_holding<'a>(&'a self, path: &'a FilePath) -> impl Iterator<Item = &'a StepId> {
-        self.files_by_step
+    fn files_of(&self, subject: &ReadSubject) -> &BTreeSet<FilePath> {
+        static NONE: BTreeSet<FilePath> = BTreeSet::new();
+        self.files_by_subject.get(subject).unwrap_or(&NONE)
+    }
+
+    fn subjects_holding<'a>(&'a self, path: &'a FilePath) -> impl Iterator<Item = &'a ReadSubject> {
+        self.files_by_subject
             .iter()
             .filter(move |(_, files)| files.contains(path))
-            .map(|(step, _)| step)
+            .map(|(subject, _)| subject)
     }
 
     /// A file counts as read only when no change of it is left outside the steps.
-    fn is_fully_ticked(&self, path: &FilePath, is_ticked: impl Fn(&StepId) -> bool) -> bool {
-        !self.partly_unheld.contains(path) && self.steps_holding(path).all(is_ticked)
+    fn is_fully_ticked(&self, path: &FilePath, is_read: impl Fn(&ReadSubject) -> bool) -> bool {
+        !self.partly_unheld.contains(path) && self.subjects_holding(path).all(is_read)
     }
 }
 

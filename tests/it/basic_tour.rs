@@ -189,7 +189,13 @@ fn guided_only_questions_get_empty_answers_on_every_screen_of_a_basic_review() {
         let _ = review.page();
         assert_eq!(review.sidebar().len(), 0);
         assert!(review.current_step().is_none());
-        assert!(review.approve_warning().is_none());
+        assert_eq!(
+            review
+                .approve_warning()
+                .map(|warning| (warning.unread_steps, warning.unread_safety_net_pieces)),
+            Some((0, 0)),
+            "a basic review counts files, never steps or safety net pieces"
+        );
         assert_eq!(review.summary().len(), 0);
         assert!(review.reviewer_summary().is_none());
         assert_eq!(review.route().len(), 0);
@@ -370,4 +376,20 @@ fn folding_does_not_change_the_reading_order() {
     review.toggle_folder(&FolderPath::new("src"));
 
     assert_eq!(reading_order(&mut review).len(), 6);
+}
+
+#[test]
+fn the_tree_sorts_names_without_regard_to_case_as_an_ide_does() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = open_basic(&repo, &["B.txt", "a.txt", "Zeta/x.txt", "alpha/y.txt"]);
+
+    assert_eq!(
+        reading_order(&mut review)[1..],
+        [
+            file("alpha/y.txt"),
+            file("Zeta/x.txt"),
+            file("a.txt"),
+            file("B.txt"),
+        ]
+    );
 }

@@ -42,11 +42,14 @@ pub enum TreeRowKind {
         /// The folder's own name, or the joined names (`src/viewer`).
         label: String,
         is_folded: bool,
+        /// Every file under it is read.
+        is_read: bool,
     },
     File {
         path: FilePath,
         label: String,
         is_current: bool,
+        is_read: bool,
     },
 }
 
@@ -57,8 +60,29 @@ pub struct FileTree {
 
 #[derive(Debug, Default)]
 struct Folder {
-    folders: BTreeMap<String, Self>,
-    files: BTreeMap<String, FilePath>,
+    folders: BTreeMap<Name, Self>,
+    files: BTreeMap<Name, FilePath>,
+}
+
+/// A file or folder name, ordered as an IDE lists them: by its lowercase form first, so `a.txt`
+/// comes before `B.txt`, and by the exact name when only the case differs.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Name {
+    lowercase: String,
+    exact: String,
+}
+
+impl Name {
+    fn of(name: &str) -> Self {
+        Self {
+            lowercase: name.to_lowercase(),
+            exact: name.to_owned(),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        &self.exact
+    }
 }
 
 impl FileTree {
@@ -69,9 +93,9 @@ impl FileTree {
             let mut names = path.as_str().split('/').peekable();
             while let Some(name) = names.next() {
                 if names.peek().is_some() {
-                    folder = folder.folders.entry(name.to_owned()).or_default();
+                    folder = folder.folders.entry(Name::of(name)).or_default();
                 } else {
-                    folder.files.insert(name.to_owned(), path.clone());
+                    folder.files.insert(Name::of(name), path.clone());
                 }
             }
         }
@@ -86,11 +110,28 @@ impl FileTree {
     }
 
     /// Every folder and file in reading order, minus what sits under a folded folder.
-    pub fn rows(&self, folded: &BTreeSet<FolderPath>, current: Option<&FilePath>) -> Vec<TreeRow> {
+    pub fn rows(
+        &self,
+        folded: &BTreeSet<FolderPath>,
+        current: Option<&FilePath>,
+        is_read: &dyn Fn(&FilePath) -> bool,
+    ) -> Vec<TreeRow> {
         let mut rows = Vec::new();
-        self.root.rows_into(None, 0, folded, current, &mut rows);
+        let look = Look {
+            folded,
+            current,
+            is_read,
+        };
+        self.root.rows_into(None, 0, &look, &mut rows);
         rows
     }
+}
+
+/// What a row's look depends on, besides where it sits in the tree.
+struct Look<'a> {
+    folded: &'a BTreeSet<FolderPath>,
+    current: Option<&'a FilePath>,
+    is_read: &'a dyn Fn(&FilePath) -> bool,
 }
 
 impl Folder {
@@ -105,23 +146,23 @@ impl Folder {
         &self,
         parent: Option<&FolderPath>,
         depth: usize,
-        folded: &BTreeSet<FolderPath>,
-        current: Option<&FilePath>,
+        look: &Look<'_>,
         rows: &mut Vec<TreeRow>,
     ) {
         for (name, first) in &self.folders {
-            let (label, path, folder) = first.joined_with(name, parent);
-            let is_folded = folded.contains(&path);
+            let (label, path, folder) = first.joined_with(name.as_str(), parent);
+            let is_folded = look.folded.contains(&path);
             rows.push(TreeRow {
                 depth,
                 kind: TreeRowKind::Folder {
                     path: path.clone(),
                     label,
                     is_folded,
+                    is_read: folder.is_read(look.is_read),
                 },
             });
             if !is_folded {
-                folder.rows_into(Some(&path), depth + 1, folded, current, rows);
+                folder.rows_into(Some(&path), depth + 1, look, rows);
             }
         }
         for (name, path) in &self.files {
@@ -129,11 +170,18 @@ impl Folder {
                 depth,
                 kind: TreeRowKind::File {
                     path: path.clone(),
-                    label: name.clone(),
-                    is_current: current == Some(path),
+                    label: name.as_str().to_owned(),
+                    is_current: look.current == Some(path),
+                    is_read: (look.is_read)(path),
                 },
             });
         }
+    }
+
+    /// Every file under the folder, however deep, is read.
+    fn is_read(&self, is_read: &dyn Fn(&FilePath) -> bool) -> bool {
+        self.files.values().all(is_read)
+            && self.folders.values().all(|inner| inner.is_read(is_read))
     }
 
     /// Follows folders that hold nothing but one folder, as an IDE joins them into one row.
@@ -145,7 +193,7 @@ impl Folder {
             && folder.folders.len() == 1
         {
             label.push('/');
-            label.push_str(only);
+            label.push_str(only.as_str());
             folder = inner;
         }
         let path = match parent {

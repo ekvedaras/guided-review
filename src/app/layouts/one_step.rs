@@ -91,11 +91,12 @@ use crate::viewer::{
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
     FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
     NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    QueuedComment, ReadProgress, ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs,
-    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
-    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
-    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
-    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Reopen, ReopenAfterSave,
+    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
+    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
+    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
+    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
+    WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1418,6 +1419,7 @@ impl OneStepLayout {
                             path,
                             label,
                             is_folded,
+                            is_read,
                         } => {
                             let folder = path.clone();
                             self.touching_hover(
@@ -1426,7 +1428,11 @@ impl OneStepLayout {
                                     SharedString::from(format!("folder-{path}")),
                                     row.depth,
                                     place,
-                                    RowMark::Page,
+                                    if *is_read {
+                                        RowMark::Read
+                                    } else {
+                                        RowMark::Page
+                                    },
                                     hovered_touching,
                                 ),
                                 index,
@@ -1447,7 +1453,12 @@ impl OneStepLayout {
                             ))
                             .child(row_label(SharedString::from(label.clone())))
                         }
-                        TreeRowKind::File { path, label, .. } => {
+                        TreeRowKind::File {
+                            path,
+                            label,
+                            is_read,
+                            ..
+                        } => {
                             let file = path.clone();
                             self.touching_hover(
                                 sidebar_row(
@@ -1455,7 +1466,11 @@ impl OneStepLayout {
                                     SharedString::from(format!("file-{path}")),
                                     row.depth,
                                     place,
-                                    RowMark::Page,
+                                    if *is_read {
+                                        RowMark::Read
+                                    } else {
+                                        RowMark::Unread
+                                    },
                                     hovered_touching,
                                 ),
                                 index,
@@ -1602,7 +1617,7 @@ impl OneStepLayout {
                     .flex()
                     .child(chip(&colors, Tone::Accent).child(label))
                     .into_any_element(),
-                None => progress_meter(&colors, progress).into_any_element(),
+                None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
             .child(finish_dialog)
             .children(tour_agent)
@@ -2255,6 +2270,18 @@ impl OneStepLayout {
                     TourLead::Finish { steps, can_finish } => Some(
                         finish_card(
                             *steps,
+                            ReadUnit::Steps,
+                            *can_finish,
+                            ReviewAgain::Offered,
+                            "summary-lead",
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                    TourLead::FinishFiles { files, can_finish } => Some(
+                        finish_card(
+                            *files,
+                            ReadUnit::Files,
                             *can_finish,
                             ReviewAgain::Offered,
                             "summary-lead",
@@ -2830,7 +2857,7 @@ impl OneStepLayout {
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
-        let change = ReviewChange::ToggleTick(id.clone());
+        let change = ReviewChange::ToggleTick(ReadSubject::Step(id.clone()));
         self.session
             .update(cx, |session, cx| session.apply(change, cx));
     }
@@ -3066,7 +3093,11 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         NextScreen::File { path } => path.to_string(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
-    if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {
+    if let Some((count, unit, can_finish)) = footer.lead.as_ref().and_then(|lead| match lead {
+        TourLead::Finish { steps, can_finish } => Some((*steps, ReadUnit::Steps, *can_finish)),
+        TourLead::FinishFiles { files, can_finish } => Some((*files, ReadUnit::Files, *can_finish)),
+        _ => None,
+    }) {
         return div()
             .pt_8()
             .pb_10()
@@ -3075,8 +3106,9 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .gap_3()
             .children(previous)
             .child(finish_card(
-                *steps,
-                *can_finish,
+                count,
+                unit,
+                can_finish,
                 ReviewAgain::NotOffered,
                 "footer",
                 cx,
@@ -3405,6 +3437,14 @@ enum LeadLabel {
     Short,
 }
 
+/// The file a lead names.
+fn next_file_screen(lead: &TourLead) -> Screen {
+    match lead {
+        TourLead::StartFile(file) | TourLead::ContinueFile(file) => Screen::File(file.path.clone()),
+        _ => Screen::Overview,
+    }
+}
+
 fn lead_button(
     lead: &TourLead,
     label_kind: LeadLabel,
@@ -3412,19 +3452,40 @@ fn lead_button(
     cx: &mut Context<OneStepLayout>,
 ) -> Option<AnyElement> {
     let colors = Colors::active(cx);
-    let (step, label, command) = match lead {
+    let (place, label, command) = match lead {
         TourLead::Start(first) => (
-            first.id.clone(),
+            Screen::Step(first.id.clone()),
             div().child("Start the tour").into_any_element(),
             Command::NextScreen,
         ),
+        TourLead::StartFile(first) => (
+            Screen::File(first.path.clone()),
+            div().child("Start reading").into_any_element(),
+            Command::NextScreen,
+        ),
         TourLead::Continue(next) if label_kind == LeadLabel::Short => (
-            next.id.clone(),
+            Screen::Step(next.id.clone()),
             div().child("Continue").into_any_element(),
             Command::NextUnreadStep,
         ),
+        TourLead::ContinueFile(_) if label_kind == LeadLabel::Short => (
+            next_file_screen(lead),
+            div().child("Continue").into_any_element(),
+            Command::NextUnreadStep,
+        ),
+        TourLead::ContinueFile(next) => (
+            Screen::File(next.path.clone()),
+            div()
+                .flex()
+                .min_w_0()
+                .gap_1()
+                .child(div().flex_none().child("Continue at"))
+                .child(div().min_w_0().truncate().child(next.path.to_string()))
+                .into_any_element(),
+            Command::NextUnreadStep,
+        ),
         TourLead::Continue(next) => (
-            next.id.clone(),
+            Screen::Step(next.id.clone()),
             div()
                 .flex()
                 .min_w_0()
@@ -3439,7 +3500,7 @@ fn lead_button(
                 .into_any_element(),
             Command::NextUnreadStep,
         ),
-        TourLead::Finish { .. } | TourLead::Nowhere => return None,
+        TourLead::Finish { .. } | TourLead::FinishFiles { .. } | TourLead::Nowhere => return None,
     };
     Some(
         button(&colors, id, ButtonKind::Primary, ButtonSize::Large)
@@ -3447,8 +3508,12 @@ fn lead_button(
             .min_w_0()
             .max_w(px(460.))
             .on_click(cx.listener(move |this, _, _, cx| {
-                let step = step.clone();
-                this.change_review(cx, move |review| review.go_to(&step));
+                let place = place.clone();
+                this.change_review(cx, move |review| match &place {
+                    Screen::Step(id) => review.go_to(id),
+                    Screen::File(path) => review.go_to_file(path),
+                    Screen::Summary | Screen::Overview | Screen::SafetyNet => {}
+                });
             }))
             .child(label)
             .child(button_keys(&colors, ButtonKind::Primary, command, cx))
@@ -3459,17 +3524,18 @@ fn lead_button(
 /// The tour's end once every step is read: a calm success card whose check pops in once, with
 /// Finish review when the PR takes a review from the reader.
 fn finish_card(
-    steps: usize,
+    count: usize,
+    unit: ReadUnit,
     can_finish: bool,
     review_again: ReviewAgain,
     id: &'static str,
     cx: &mut Context<OneStepLayout>,
 ) -> impl IntoElement {
     let colors = Colors::active(cx);
-    let title = if steps == 1 {
-        "The one step is read".to_owned()
-    } else {
-        format!("All {steps} steps read")
+    let title = match (count, unit) {
+        (1, ReadUnit::Steps) => "The one step is read".to_owned(),
+        (1, ReadUnit::Files) => "The one file is read".to_owned(),
+        (count, unit) => format!("All {count} {} read", unit.plural()),
     };
     let finish = can_finish.then(|| {
         icon_label_button(
@@ -3533,16 +3599,18 @@ fn finish_card(
                         .text_color(colors.text)
                         .child(title),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(colors.muted_text)
-                        .child(if can_finish {
+                .child(div().text_sm().text_color(colors.muted_text).child(
+                    match (unit, can_finish) {
+                        (ReadUnit::Steps, true) => {
                             "Every step of the tour is read. Send your review when you are ready."
-                        } else {
-                            "Every step of the tour is read."
-                        }),
-                ),
+                        }
+                        (ReadUnit::Steps, false) => "Every step of the tour is read.",
+                        (ReadUnit::Files, true) => {
+                            "Every changed file is read. Send your review when you are ready."
+                        }
+                        (ReadUnit::Files, false) => "Every changed file is read.",
+                    },
+                )),
         )
         .children(again)
         .children(finish)
@@ -3620,7 +3688,7 @@ fn tick_button(
         .child(button_keys(&colors, kind, Command::ToggleRead, cx).ml_2())
 }
 
-fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
+fn progress_meter(colors: &Colors, progress: ReadProgress, unit: ReadUnit) -> impl IntoElement {
     let share = progress.share();
     div()
         .flex()
@@ -3631,8 +3699,10 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
                 .flex()
                 .justify_between()
                 .child(div().font_weight(FontWeight::MEDIUM).child(format!(
-                    "{} of {} steps read",
-                    progress.read, progress.total
+                    "{} of {} {} read",
+                    progress.read,
+                    progress.total,
+                    unit.plural()
                 )))
                 .child(
                     div()

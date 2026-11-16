@@ -155,8 +155,8 @@ pub use reopen_after_save::{
     Departure, InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep,
 };
 pub use review::{
-    NextScreen, OldHead, ReadProgress, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen,
-    SidebarEntry, StepId, SummaryStats, TourLead, UnreadStep,
+    NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop,
+    SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadFile, UnreadStep,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};

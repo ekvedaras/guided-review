@@ -17,8 +17,8 @@ use crate::viewer::focused_change::ChangeFile;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
     BoxState, CommentPlace, FileBlock, FilePage, LineLocation, Markdown, NoteSubject, NotesButton,
-    PieceDiff, Place, QueuedComment, SafetyNetPage, Screen, StepId, StepPage, ThreadView, TourLead,
-    hidden_lines_after, hidden_lines_before,
+    PieceDiff, Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, StepPage, ThreadView,
+    TourLead, hidden_lines_after, hidden_lines_before,
 };
 use crate::viewer::{FileView, LabelSwitch, PageChange, PieceLabels, Rendering, ViewSwitch};
 
@@ -193,7 +193,10 @@ impl<'a> Builder<'a> {
                 .into_iter()
                 .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
         );
-        self.rows.push(screen_footer(review, None));
+        self.rows.push(screen_footer(
+            review,
+            review.file_to_tick_on_screen().map(ReadSubject::File),
+        ));
     }
 
     /// Returns the diagram the step shows.
@@ -253,7 +256,10 @@ impl<'a> Builder<'a> {
             ignores_whitespace: has_code.then(|| review.display_options().ignores_whitespace()),
             wraps_lines: has_code.then(|| review.display_options().wraps_lines()),
         })));
-        let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
+        let footer = screen_footer(
+            review,
+            (!page.is_ticked).then(|| ReadSubject::Step(id.clone())),
+        );
         let shown = if page
             .since_read
             .as_ref()
@@ -628,11 +634,12 @@ fn reviewer_summary_row(review: &ReviewCore, summary: Markdown) -> ReviewerSumma
     }
 }
 
-fn screen_footer(review: &ReviewCore, ticks: Option<StepId>) -> PageRow {
+fn screen_footer(review: &ReviewCore, ticks: Option<ReadSubject>) -> PageRow {
     let place = review.reading_place();
     let lead = review.tour_lead();
-    let leads_on =
-        matches!(lead, TourLead::Finish { .. }) && place.next.is_none() && ticks.is_none();
+    let leads_on = matches!(lead, TourLead::Finish { .. } | TourLead::FinishFiles { .. })
+        && place.next.is_none()
+        && ticks.is_none();
     PageRow::ScreenFooter(Arc::new(ScreenFooter {
         ticks,
         has_previous: place.has_previous,

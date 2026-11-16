@@ -708,6 +708,39 @@ impl ReviewSession {
         self.swapped_review(cx);
     }
 
+    /// The PR in Basic mode with its first two files read. The ticks go into the state file before
+    /// the review opens on it, so no viewed mark is wished for and nothing reaches GitHub.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic_read(&mut self, cx: &mut Context<Self>) {
+        let Ok(probe) = Review::open_basic(
+            self.review.basic_tour_of_same_pin(),
+            self.source.as_ref(),
+            self.review.state_file(),
+        ) else {
+            return;
+        };
+        let head = probe.head().clone();
+        let read: Vec<FilePath> = probe
+            .overview_page()
+            .files
+            .into_iter()
+            .take(2)
+            .map(|file| file.path)
+            .collect();
+        let state_file = probe.state_file();
+        if state_file
+            .update(|state| {
+                for path in &read {
+                    state.tick_file(path, &head);
+                }
+            })
+            .is_err()
+        {
+            return;
+        }
+        self.stage_basic(cx);
+    }
+
     #[cfg(feature = "snapshots")]
     pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
         if let Some(guided) = self.guided_before_staging.take() {

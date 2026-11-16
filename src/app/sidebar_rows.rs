@@ -5,7 +5,8 @@ use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{
-    ApproveWarning, Problem, ReadProgress, Review, Screen, StepId, TourAgentState, TreeRow,
+    ApproveWarning, Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TourAgentState,
+    TreeRow,
 };
 
 pub struct SidebarStep {
@@ -72,6 +73,7 @@ impl SidebarProblem {
 pub struct SidebarRows {
     pub tour_agent: SidebarTourAgent,
     pub progress: ReadProgress,
+    pub progress_unit: ReadUnit,
     pub last_review: Option<SidebarLastReview>,
     /// Approve and Request changes show only on someone else's PR.
     pub finishing: Finishing,
@@ -127,6 +129,7 @@ impl SidebarRows {
                 is_body_long: last.body_is_long(),
                 is_old,
             }),
+            progress_unit: review.read_unit(),
             finishing: Finishing::of(review),
             approve_warning: review.approve_warning(),
             progress,

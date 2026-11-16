@@ -181,6 +181,9 @@ pub enum PaletteAction {
     NextUnreadStep,
     MarkStepRead,
     MarkStepUnread,
+    /// A basic tour's read tick is per file.
+    MarkFileRead,
+    MarkFileUnread,
     WrapLines,
     StopWrappingLines,
     HideWhitespace,
@@ -208,6 +211,8 @@ impl PaletteAction {
             Self::NextUnreadStep => "Next unread step",
             Self::MarkStepRead => "Mark step as read",
             Self::MarkStepUnread => "Mark step as unread",
+            Self::MarkFileRead => "Mark file as read",
+            Self::MarkFileUnread => "Mark file as unread",
             Self::WrapLines => "Wrap lines",
             Self::StopWrappingLines => "Stop wrapping lines",
             Self::HideWhitespace => "Hide whitespace",
@@ -231,7 +236,10 @@ impl PaletteAction {
     pub fn command(self) -> Option<Command> {
         match self {
             Self::NextUnreadStep => Some(Command::NextUnreadStep),
-            Self::MarkStepRead | Self::MarkStepUnread => Some(Command::ToggleRead),
+            Self::MarkStepRead
+            | Self::MarkStepUnread
+            | Self::MarkFileRead
+            | Self::MarkFileUnread => Some(Command::ToggleRead),
             Self::WrapLines | Self::StopWrappingLines => Some(Command::WrapLines),
             Self::ShowPieceLabels | Self::HidePieceLabels => Some(Command::TogglePieceLabels),
             Self::ShowRendered | Self::ShowCode => Some(Command::ToggleRenderedView),

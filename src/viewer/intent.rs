@@ -5,7 +5,7 @@
 
 use super::file_tree::FolderPath;
 use super::jump::PaletteAction;
-use super::review::{ReviewCore, Screen};
+use super::review::{ReadSubject, ReviewCore, Screen};
 use crate::pull_request::PullRequestUrl;
 use crate::tour::StepId;
 
@@ -46,7 +46,10 @@ impl From<PaletteAction> for Intent {
     fn from(action: PaletteAction) -> Self {
         match action {
             PaletteAction::NextUnreadStep => Self::NextUnreadStep,
-            PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => Self::ToggleRead,
+            PaletteAction::MarkStepRead
+            | PaletteAction::MarkStepUnread
+            | PaletteAction::MarkFileRead
+            | PaletteAction::MarkFileUnread => Self::ToggleRead,
             PaletteAction::WrapLines | PaletteAction::StopWrappingLines => Self::ToggleWrapLines,
             PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => Self::ToggleWhitespace,
             PaletteAction::ShowPieceLabels | PaletteAction::HidePieceLabels => {
@@ -91,11 +94,11 @@ pub enum Effect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewChange {
     GoOn {
-        ticking: Option<StepId>,
+        ticking: Option<ReadSubject>,
     },
     GoBack,
     GoToNextUnread,
-    ToggleTick(StepId),
+    ToggleTick(ReadSubject),
     /// A folder of a basic tour's sidebar tree folds or unfolds.
     ToggleFolder(FolderPath),
     ToggleWrapLines,
@@ -211,19 +214,22 @@ impl ReviewCore {
         match intent {
             Intent::NextScreen => Effect::Change(ReviewChange::GoOn {
                 ticking: self
-                    .unread_step_on_screen()
+                    .unread_subject_on_screen()
                     .filter(|_| self.has_seen_end_of_screen()),
             }),
             Intent::MarkReadAndGoOn => Effect::Change(ReviewChange::GoOn {
-                ticking: self.unread_step_on_screen(),
+                ticking: self.unread_subject_on_screen(),
             }),
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
             Intent::ToggleRead => match self.screen() {
-                Screen::Step(id) => Effect::Change(ReviewChange::ToggleTick(id.clone())),
-                Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => {
-                    Effect::Nothing
+                Screen::Step(id) => {
+                    Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))
                 }
+                Screen::File(path) => {
+                    Effect::Change(ReviewChange::ToggleTick(ReadSubject::File(path.clone())))
+                }
+                Screen::Summary | Screen::Overview | Screen::SafetyNet => Effect::Nothing,
             },
             Intent::ToggleWrapLines => Effect::Change(ReviewChange::ToggleWrapLines),
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
@@ -250,7 +256,7 @@ impl ReviewCore {
     pub fn apply(&mut self, change: ReviewChange) -> anyhow::Result<()> {
         match change {
             ReviewChange::GoOn { ticking } => {
-                let ticked = ticking.map_or(Ok(()), |id| self.tick(&id));
+                let ticked = ticking.map_or(Ok(()), |subject| self.tick_subject(&subject));
                 self.go_on();
                 ticked
             }
@@ -262,11 +268,11 @@ impl ReviewCore {
                 self.go_to_next_unread();
                 Ok(())
             }
-            ReviewChange::ToggleTick(id) => {
-                if self.is_ticked(&id) {
-                    self.untick(&id)
+            ReviewChange::ToggleTick(subject) => {
+                if self.is_read(&subject) {
+                    self.untick_subject(&subject)
                 } else {
-                    self.tick(&id)
+                    self.tick_subject(&subject)
                 }
             }
             ReviewChange::ToggleFolder(folder) => {
@@ -295,9 +301,26 @@ impl ReviewCore {
         }
     }
 
-    fn unread_step_on_screen(&self) -> Option<StepId> {
+    fn tick_subject(&mut self, subject: &ReadSubject) -> anyhow::Result<()> {
+        match subject {
+            ReadSubject::Step(id) => self.tick(id),
+            ReadSubject::File(path) => self.tick_file(path),
+        }
+    }
+
+    fn untick_subject(&mut self, subject: &ReadSubject) -> anyhow::Result<()> {
+        match subject {
+            ReadSubject::Step(id) => self.untick(id),
+            ReadSubject::File(path) => self.untick_file(path),
+        }
+    }
+
+    fn unread_subject_on_screen(&self) -> Option<ReadSubject> {
         match self.screen() {
-            Screen::Step(id) if !self.is_ticked(id) => Some(id.clone()),
+            Screen::Step(id) if !self.is_ticked(id) => Some(ReadSubject::Step(id.clone())),
+            Screen::File(path) if !self.is_file_ticked(path) => {
+                Some(ReadSubject::File(path.clone()))
+            }
             Screen::Summary
             | Screen::Overview
             | Screen::File(_)

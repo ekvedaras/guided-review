@@ -12,7 +12,7 @@ use crate::tour::Step;
 use crate::viewer::{
     Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LabelSwitch, LineKind,
     LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place, QueuedComment,
-    RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead, ViewSwitch,
+    ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead, ViewSwitch,
 };
 
 #[derive(Clone)]
@@ -135,7 +135,7 @@ pub struct FullDiffControl {
 #[derive(Hash)]
 pub struct ScreenFooter {
     /// The step that is ticked on the way on: the open step, if not read yet.
-    pub ticks: Option<StepId>,
+    pub ticks: Option<ReadSubject>,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
     /// A basic tour's file screen: its number among the files, and how many files there are.

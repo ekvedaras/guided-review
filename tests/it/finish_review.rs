@@ -79,6 +79,7 @@ fn approve_warns_with_the_unread_steps_and_unread_safety_net_pieces() {
         review.approve_warning(),
         Some(ApproveWarning {
             unread_steps: 1,
+            unread_files: 0,
             unread_safety_net_pieces: 1
         })
     );

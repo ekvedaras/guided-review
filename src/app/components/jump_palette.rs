@@ -108,7 +108,10 @@ impl ShownEntry {
 fn action_icon(action: PaletteAction) -> Icon {
     match action {
         PaletteAction::NextUnreadStep => Icon::CircleDot,
-        PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => Icon::Check,
+        PaletteAction::MarkStepRead
+        | PaletteAction::MarkStepUnread
+        | PaletteAction::MarkFileRead
+        | PaletteAction::MarkFileUnread => Icon::Check,
         PaletteAction::WrapLines | PaletteAction::StopWrappingLines => Icon::WrapText,
         PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => Icon::Space,
         PaletteAction::ShowPieceLabels | PaletteAction::HidePieceLabels => Icon::Milestone,

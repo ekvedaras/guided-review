@@ -395,17 +395,10 @@ impl RenderOnce for FinishReviewDialog {
             })
         };
         let warning_text = unread_warning.filter(|_| is_confirming).map(|warning| {
-            div().text_sm().text_color(colors.danger).child(format!(
-                "Not read yet: {} step{} and {} safety net piece{}. Approve anyway?",
-                warning.unread_steps,
-                if warning.unread_steps == 1 { "" } else { "s" },
-                warning.unread_safety_net_pieces,
-                if warning.unread_safety_net_pieces == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-            ))
+            div()
+                .text_sm()
+                .text_color(colors.danger)
+                .child(unread_warning_text(&warning))
         });
         let form = div()
             .flex()
@@ -447,4 +440,23 @@ impl RenderOnce for FinishReviewDialog {
             ))
             .into_any_element()
     }
+}
+
+/// A basic review has files to name, a guided one steps and the safety net's pieces.
+fn unread_warning_text(warning: &ApproveWarning) -> String {
+    let plural = |count: usize| if count == 1 { "" } else { "s" };
+    if warning.unread_files > 0 {
+        return format!(
+            "Not read yet: {} file{}. Approve anyway?",
+            warning.unread_files,
+            plural(warning.unread_files),
+        );
+    }
+    format!(
+        "Not read yet: {} step{} and {} safety net piece{}. Approve anyway?",
+        warning.unread_steps,
+        plural(warning.unread_steps),
+        warning.unread_safety_net_pieces,
+        plural(warning.unread_safety_net_pieces),
+    )
 }
