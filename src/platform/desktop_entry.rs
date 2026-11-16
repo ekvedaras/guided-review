@@ -42,6 +42,11 @@ pub trait DesktopEntry: std::fmt::Debug + Send + Sync {
     /// The shell a relaunch runs through when `$SHELL` is unset.
     fn login_shell(&self) -> &'static str;
 
+    /// Whether the OS launcher started this run, named by the value of `launched_app_variable`.
+    fn is_launch_of_the_app(&self, launched_app: Option<&OsStr>) -> bool {
+        launched_app == Some(OsStr::new(APP_ID))
+    }
+
     /// A launch from the OS launcher gets the session's short `PATH`, without `gh`, `claude` or `hc`.
     /// So it runs the entry's binary again through the reviewer's login shell, which reads their
     /// profile as a terminal does.
@@ -51,8 +56,7 @@ pub trait DesktopEntry: std::fmt::Debug + Send + Sync {
         shell: Option<&OsStr>,
         is_in_login_shell: bool,
     ) -> Option<Relaunch> {
-        let is_our_app = launched_app == Some(OsStr::new(APP_ID));
-        if !is_our_app || is_in_login_shell {
+        if !self.is_launch_of_the_app(launched_app) || is_in_login_shell {
             return None;
         }
         let executable = self.executable();

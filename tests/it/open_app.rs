@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use guided_review::app_link::AppFolder;
+use guided_review::platform::{APP_ID, IN_LOGIN_SHELL};
+use guided_review::update::ReleaseInstall;
 
 const BUILD: &str = "test-build";
 
@@ -137,40 +139,58 @@ fn open_starts_the_app_when_none_answers_then_hands_it_the_pr() {
     assert_eq!(seen.lock().unwrap().len(), 1);
 }
 
+/// An app of the `old` build that answers `old_answers`, then, once the CLI started a new app, one of
+/// this build that answers `new_answers`.
+fn old_app_then_new(
+    repo: &FixtureRepo,
+    cli_ended: &CliEnded,
+    old_answers: Vec<String>,
+    new_answers: Vec<String>,
+    seen: &Seen,
+) -> std::thread::JoinHandle<()> {
+    let old_app = fake_app(repo.home(), cli_ended, None, old_answers, Arc::clone(seen));
+    let home = repo.home().to_path_buf();
+    let seen = Arc::clone(seen);
+    let cli_ended = cli_ended.clone();
+    std::thread::spawn(move || {
+        old_app.join().unwrap();
+        if new_answers.is_empty() {
+            return;
+        }
+        std::fs::remove_file(AppFolder::of(&folders_in(&home)).socket()).unwrap();
+        fake_app(
+            &home,
+            &cli_ended,
+            Some(home.join("started")),
+            new_answers,
+            seen,
+        )
+        .join()
+        .unwrap();
+    })
+}
+
+fn requests(seen: &Seen) -> Vec<serde_json::Value> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
 #[test]
-fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
+fn open_leaves_an_app_of_another_build_that_does_not_take_it_running_and_names_both_builds() {
     let (repo, github) = shop_with_a_tour_file();
     let cli_ended = CliEnded::default();
     let script = start_script(repo.home());
     let seen = Seen::default();
-    let old_app = fake_app(
-        repo.home(),
+    let app = old_app_then_new(
+        &repo,
         &cli_ended,
-        None,
-        vec![
-            answer_line("0.0.0-older", r#""other_build""#),
-            answer_line("0.0.0-older", r#""quitting""#),
-        ],
-        Arc::clone(&seen),
+        vec![answer_line("0.0.0-older", r#""other_build""#)],
+        vec![],
+        &seen,
     );
-    let new_app = {
-        let home = repo.home().to_path_buf();
-        let seen = Arc::clone(&seen);
-        let cli_ended = cli_ended.clone();
-        std::thread::spawn(move || {
-            old_app.join().unwrap();
-            std::fs::remove_file(AppFolder::of(&folders_in(&home)).socket()).unwrap();
-            fake_app(
-                &home,
-                &cli_ended,
-                Some(home.join("started")),
-                vec![opening_line()],
-                seen,
-            )
-            .join()
-            .unwrap();
-        })
-    };
 
     let run = GuidedReview::new(&repo, &github)
         .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
@@ -178,18 +198,146 @@ fn open_asks_an_app_of_an_older_build_to_quit_and_starts_a_new_one() {
         .run(&["open", PR]);
 
     cli_ended.mark();
-    new_app.join().unwrap();
-    assert!(run.success, "stderr: {}", run.stderr);
-    let requests: Vec<serde_json::Value> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(requests.len(), 3);
+    app.join().unwrap();
+    assert!(!run.success);
+    assert!(run.stderr.contains("0.0.0-older"), "stderr: {}", run.stderr);
+    assert!(run.stderr.contains(BUILD), "stderr: {}", run.stderr);
+    assert!(!repo.home().join("started").exists());
+    let requests = requests(&seen);
+    assert_eq!(requests.len(), 1);
     assert!(requests[0]["request"]["open"].is_object());
+    assert_eq!(requests[0]["across_builds"], "any_build");
+}
+
+#[test]
+fn a_launch_from_the_os_launcher_replaces_an_app_of_another_build() {
+    let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
+    let script = start_script(repo.home());
+    let seen = Seen::default();
+    let app = old_app_then_new(
+        &repo,
+        &cli_ended,
+        vec![
+            answer_line("0.0.0-older", r#""other_build""#),
+            answer_line("0.0.0-older", r#""quitting""#),
+        ],
+        vec![answer_line(BUILD, r#""showing_switcher""#)],
+        &seen,
+    );
+    let launched_app_variable = ReleaseInstall::in_home(repo.home())
+        .desktop_entry()
+        .launched_app_variable();
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .with_env(launched_app_variable, Path::new(APP_ID))
+        .with_env(IN_LOGIN_SHELL, Path::new("1"))
+        .run(&[]);
+
+    cli_ended.mark();
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    let requests = requests(&seen);
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0]["request"], "show_switcher");
     assert_eq!(requests[1]["request"], "quit");
-    assert!(requests[2]["request"]["open"].is_object());
+    assert_eq!(requests[1]["replacing"], "0.0.0-older");
+    assert_eq!(requests[2]["request"], "show_switcher");
+}
+
+#[test]
+fn a_launch_from_a_terminal_leaves_an_app_of_another_build_running() {
+    let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
+    let script = start_script(repo.home());
+    let seen = Seen::default();
+    let app = old_app_then_new(
+        &repo,
+        &cli_ended,
+        vec![answer_line("0.0.0-older", r#""other_build""#)],
+        vec![],
+        &seen,
+    );
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&[]);
+
+    cli_ended.mark();
+    app.join().unwrap();
+    assert!(!run.success);
+    assert!(
+        run.stderr.contains("left running"),
+        "stderr: {}",
+        run.stderr
+    );
+    assert_eq!(requests(&seen).len(), 1);
+    assert!(!repo.home().join("started").exists());
+}
+
+#[test]
+fn restart_leaves_an_app_of_another_build_running() {
+    let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
+    let script = start_script(repo.home());
+    let seen = Seen::default();
+    let app = old_app_then_new(
+        &repo,
+        &cli_ended,
+        vec![answer_line("0.0.0-older", r#""other_build""#)],
+        vec![],
+        &seen,
+    );
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["restart", PR]);
+
+    cli_ended.mark();
+    app.join().unwrap();
+    assert!(!run.success);
+    assert!(run.stderr.contains("0.0.0-older"), "stderr: {}", run.stderr);
+    let requests = requests(&seen);
+    assert_eq!(requests.len(), 1);
+    assert_ne!(requests[0]["request"], "quit");
+    assert!(!repo.home().join("started").exists());
+}
+
+#[test]
+fn the_apps_restart_ends_the_app_of_the_build_that_ran_it_and_opens_the_pr_in_a_new_one() {
+    let (repo, github) = shop_with_a_tour_file();
+    let cli_ended = CliEnded::default();
+    let script = start_script(repo.home());
+    let seen = Seen::default();
+    let app = old_app_then_new(
+        &repo,
+        &cli_ended,
+        vec![
+            answer_line("0.0.0-older", r#""other_build""#),
+            answer_line("0.0.0-older", r#""quitting""#),
+        ],
+        vec![opening_line()],
+        &seen,
+    );
+
+    let run = GuidedReview::new(&repo, &github)
+        .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["restart", PR, "--replacing", "0.0.0-older"]);
+
+    cli_ended.mark();
+    app.join().unwrap();
+    assert!(run.success, "stderr: {}", run.stderr);
+    let requests = requests(&seen);
+    assert_eq!(requests.len(), 3);
+    assert_ne!(requests[0]["request"], "quit");
+    assert_eq!(requests[1]["request"], "quit");
+    assert_eq!(requests[1]["replacing"], "0.0.0-older");
+    assert_eq!(requests[2]["request"]["open"]["pr"], PR);
 }
 
 #[test]
@@ -373,31 +521,16 @@ fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_
     let cli_ended = CliEnded::default();
     let script = start_script(repo.home());
     let seen = Seen::default();
-    let old_app = fake_app(
-        repo.home(),
+    let app = old_app_then_new(
+        &repo,
         &cli_ended,
-        None,
-        vec![answer_line(BUILD, r#""quitting""#)],
-        Arc::clone(&seen),
+        vec![
+            answer_line(BUILD, r#""other_build""#),
+            answer_line(BUILD, r#""quitting""#),
+        ],
+        vec![opening_line()],
+        &seen,
     );
-    let new_app = {
-        let home = repo.home().to_path_buf();
-        let seen = Arc::clone(&seen);
-        let cli_ended = cli_ended.clone();
-        std::thread::spawn(move || {
-            old_app.join().unwrap();
-            std::fs::remove_file(AppFolder::of(&folders_in(&home)).socket()).unwrap();
-            fake_app(
-                &home,
-                &cli_ended,
-                Some(home.join("started")),
-                vec![opening_line()],
-                seen,
-            )
-            .join()
-            .unwrap();
-        })
-    };
 
     let run = GuidedReview::new(&repo, &github)
         .with_env("GUIDED_REVIEW_APP_COMMAND", &script)
@@ -405,18 +538,14 @@ fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_
         .run(&["restart", PR, "--at", "readme"]);
 
     cli_ended.mark();
-    new_app.join().unwrap();
+    app.join().unwrap();
     assert!(run.success, "stderr: {}", run.stderr);
-    let requests: Vec<serde_json::Value> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0]["request"], "quit");
-    assert_eq!(requests[1]["request"]["open"]["pr"], PR);
-    assert_eq!(requests[1]["request"]["open"]["at_step"], "readme");
+    let requests = requests(&seen);
+    assert_eq!(requests.len(), 3);
+    assert_ne!(requests[0]["request"], "quit");
+    assert_eq!(requests[1]["request"], "quit");
+    assert_eq!(requests[2]["request"]["open"]["pr"], PR);
+    assert_eq!(requests[2]["request"]["open"]["at_step"], "readme");
 }
 
 fn shop_with_a_pull_of_one_changed_file() -> (FixtureRepo, FakeGitHub) {

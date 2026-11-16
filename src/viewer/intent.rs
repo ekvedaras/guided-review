@@ -171,11 +171,14 @@ pub struct RestartArgs {
 }
 
 impl RestartArgs {
-    pub fn args(&self) -> Vec<String> {
+    /// `app_build` names the app restarting, which the restart may quit though its binary, reinstalled
+    /// or updated, is another build: only a restart the reviewer asked for ends an app of another build.
+    pub fn args(&self, app_build: &str) -> Vec<String> {
         let mut args = vec!["restart".to_owned(), self.pr.to_string()];
         if let Some(step) = &self.at {
             args.extend(["--at".to_owned(), step.to_string()]);
         }
+        args.extend(["--replacing".to_owned(), app_build.to_owned()]);
         args
     }
 }

@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use guided_review::agent_reply::{AgentReply, agent_reply};
 use guided_review::app_folders::AppFolders;
 use guided_review::app_link::{
-    Answer, AppFolder, AppListener, BindError, OpenRequest, Request, hand_over,
+    Answer, AppFolder, AppListener, BindError, Caller, OpenRequest, Request, hand_over,
     restart as restart_app,
 };
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
@@ -62,12 +62,15 @@ enum Command {
     },
     /// Open the app on the tour of a PR
     Open { pr: PullRequestUrl },
-    /// Quit the running app and open a PR in a new one, as after an install
+    /// Quit the running app of this build and open a PR in a new one
     Restart {
         pr: PullRequestUrl,
         /// The id of the step to show, else the summary
         #[arg(long)]
         at: Option<StepId>,
+        /// The build of the app whose Restart ran this, which this may quit though it is another build
+        #[arg(long, hide = true)]
+        replacing: Option<String>,
     },
     /// Show the app's Settings, also with no PR open
     Settings,
@@ -125,7 +128,7 @@ fn main() -> anyhow::Result<()> {
         Command::Repin { pr } => repin_command(&pr),
         Command::Refresh { pr, done } => refresh(&pr, done),
         Command::Open { pr } => open(&pr, &Launch::Open),
-        Command::Restart { pr, at } => open(&pr, &Launch::Restart { at }),
+        Command::Restart { pr, at, replacing } => open(&pr, &Launch::Restart { at, replacing }),
         Command::Settings => settings(),
         Command::InstallApp => install_app(),
         Command::DesktopEntryTemplate { out } => {
@@ -321,13 +324,15 @@ enum Launch {
     /// Shows the step `at`, else the summary.
     Restart {
         at: Option<StepId>,
+        /// Set by the app's Restart: the app's own build, which this may quit.
+        replacing: Option<String>,
     },
 }
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
     let folders = &AppFolders::running()?;
     let tours = ToursOnDisk::of(folders, pr);
-    if let Launch::Restart { at: Some(step) } = launch
+    if let Launch::Restart { at: Some(step), .. } = launch
         && tours.opens_basic()
     {
         anyhow::bail!(
@@ -344,12 +349,24 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         terminal: std::env::var("HC_TERMINAL_ID").ok(),
         at_step: match launch {
             Launch::Open => None,
-            Launch::Restart { at } => at.clone(),
+            Launch::Restart { at, .. } => at.clone(),
         },
     });
     let answer = match launch {
-        Launch::Restart { .. } => restart_app(&folder, &request)?,
-        Launch::Open => hand_over(&folder, &request)?,
+        Launch::Restart {
+            replacing: Some(replacing),
+            ..
+        } => restart_app(
+            &folder,
+            &request,
+            &Caller::AppRestart {
+                replacing: replacing.clone(),
+            },
+        )?,
+        Launch::Restart {
+            replacing: None, ..
+        } => restart_app(&folder, &request, &Caller::Command)?,
+        Launch::Open => hand_over(&folder, &request, &Caller::Command)?,
     };
     match answer {
         Answer::GuidedReady { .. } => println!("{answer}"),
@@ -371,6 +388,7 @@ fn settings() -> anyhow::Result<()> {
     let answer = hand_over(
         &AppFolder::of(&AppFolders::running()?),
         &Request::ShowSettings,
+        &Caller::Command,
     )?;
     match answer {
         Answer::ShowingSettings => {
@@ -406,7 +424,12 @@ fn launch() -> anyhow::Result<()> {
             )
         });
     }
-    let answer = hand_over(&AppFolder::of(&folders), &Request::ShowSwitcher)?;
+    let caller = if desktop_entry.is_launch_of_the_app(launched_app.as_deref()) {
+        Caller::Launcher
+    } else {
+        Caller::Command
+    };
+    let answer = hand_over(&AppFolder::of(&folders), &Request::ShowSwitcher, &caller)?;
     match answer {
         Answer::ShowingSwitcher => {
             println!("{answer}");

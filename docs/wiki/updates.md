@@ -47,3 +47,5 @@ The archive is checked against its `.sha256` file before anything on disk change
 Once installed, the app restarts the way Restart app here does, but runs the new release's own binary by its full path in the version folder. The restart guard still holds: with an Ask or hand-off in flight, the first restart only warns, and the button then reads Restart for the version, to restart anyway.
 
 2026-11-12: the restart ran the bin link until then. It now runs the exact binary the install unpacked, never the bin link or a `guided-review` looked up on `PATH`, since by the time the restart runs (it may wait on the restart guard) either may lead to another binary.
+
+2026-11-16: the restart passes the app's own build (`restart --replacing <build>`), the only way a `restart` may quit an app of another build ([agent runs](agent-runs.md)). An app from before this passes none, so its update to the first release with it cannot restart; the reviewer starts the app once by hand.
