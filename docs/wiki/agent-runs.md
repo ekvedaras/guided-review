@@ -138,3 +138,11 @@ The sidebar once said "Tour agent is off, it needs herdr (`hc`) and its server r
 - `AgentLinkOff` names the cases: `hc` missing, server not running (`hc server status` fails), and herdr running but a command failed (`HerdrFailed`, with the reason herdr gave and no command line, plus a hint to `hc server restart`, which may pause running terminals). The hc adapter raises `HerdrRefused` for a failed command so the viewer can take the reason out.
 - While the link is off the work agenda holds `WorkKind::CheckAgentLink`, due `AGENT_LINK_RECHECK` (30 s) after the last news and at once on the sidebar's Retry. It runs `TourAgents::lookup`, not only `link()`, because the incident had `server status` answering and `ls` failing. Still off: checked again. Back: `AfterLanding::TourAgentIs` makes the app follow the tour agent again, which clears the message.
 - Not done: a restart of herdr is never run by the app, it is only suggested.
+
+## 2026-11-16: the agent ran the wrong `guided-review`, and an app with no window
+
+Found by the maintainer on a trial build in `~/.cargo/bin`, with `~/.local/bin` (the release install) before it on `PATH`.
+
+- `path_for_agents` put the running binary's folder in front only when `PATH` lacked it. With `~/.cargo/bin` already on it behind `~/.local/bin`, the agent's `guided-review open` ran the release install, not the build that started it. Now the folder always moves to the front, once.
+- That `open` started the release app, which had nothing on screen. `ActivePr::request` keeps an app-started agent's open in the background (`KeepInBackground`) whatever is shown, so the app opened no window and stayed in the Dock. A click on the Dock icon did nothing: macOS sends a running app a reopen event, not a new launch, and the app had no handler. Now `AppWindow::relaunched` decides: with no window the switcher opens alone; a window out of sight (minimized) comes back as it was. On Linux gpui never fires reopen; the launcher starts a new process, which hands `show_switcher` to the running app as before.
+- Open: the CLI still answers "the reviewer reads another PR" when nothing is on screen.

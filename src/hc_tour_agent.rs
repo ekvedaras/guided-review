@@ -84,13 +84,13 @@ impl HcTourAgents {
 
     /// Herdr starts a terminal with its server's environment, not the app's, and Claude's Bash tool
     /// looks commands up in it: without the folder of the running `guided-review` in front, an agent
-    /// may find no `guided-review` at all (docs/wiki/agent-runs.md).
+    /// may find no `guided-review` at all, or another one earlier on `PATH` than the build that
+    /// started it (docs/wiki/agent-runs.md).
     pub fn path_for_agents(guided_review: &Path, path: Option<&OsStr>) -> String {
         let mut folders: Vec<PathBuf> =
             path.map_or_default(|path| std::env::split_paths(path).collect());
-        if let Some(own) = guided_review.parent()
-            && !folders.iter().any(|folder| folder == own)
-        {
+        if let Some(own) = guided_review.parent() {
+            folders.retain(|folder| folder != own);
             folders.insert(0, own.to_owned());
         }
         folders

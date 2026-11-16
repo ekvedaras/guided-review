@@ -77,7 +77,8 @@ pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
 pub use app_window::{
-    AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
+    AfterClose, AppWindow, FailedBuild, Relaunched, ShowReview, ShowSettings, ShowSwitcher,
+    ShowWriting,
 };
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place, ShownOn};
 pub use ask_desk::{

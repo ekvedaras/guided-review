@@ -1,5 +1,5 @@
 use guided_review::viewer::{
-    ActivePr, AfterClose, AppWindow, FailedBuild, OpenDecision, OpenOrigin, ShowReview,
+    ActivePr, AfterClose, AppWindow, FailedBuild, OpenDecision, OpenOrigin, Relaunched, ShowReview,
     ShowSettings, ShowSwitcher, ShowWriting,
 };
 
@@ -122,6 +122,32 @@ fn a_launch_with_no_window_opens_the_window_holding_only_the_pr_switcher() {
         Window::Closed.show_switcher(),
         ShowSwitcher::OpenSwitcherOnly
     );
+}
+
+#[test]
+fn the_dock_clicked_with_no_window_opens_the_window_holding_only_the_pr_switcher() {
+    let mut active = ActivePr::default();
+    assert!(matches!(
+        active.request(
+            "https://github.com/acme/shop/pull/7".parse().unwrap(),
+            OpenOrigin::AppStartedAgent
+        ),
+        OpenDecision::KeepInBackground
+    ));
+
+    assert_eq!(Window::Closed.relaunched(), Relaunched::OpenSwitcherOnly);
+}
+
+#[test]
+fn the_dock_clicked_with_a_window_out_of_sight_brings_that_window_back_as_it_was() {
+    for window in [
+        Window::SettingsOnly(SettingsOnlyWindow),
+        Window::SwitcherOnly(SwitcherOnlyWindow),
+        Window::WritingOnly(WritingOnlyWindow),
+        Window::Review(ReviewWindow),
+    ] {
+        assert_eq!(window.relaunched(), Relaunched::Raise(window));
+    }
 }
 
 #[test]
