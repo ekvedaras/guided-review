@@ -231,6 +231,25 @@ fn the_summary_says_how_many_steps_start_read() {
 }
 
 #[test]
+fn a_switch_run_again_after_a_crash_before_the_basic_file_went_still_counts_the_steps_that_start_read()
+ {
+    let shop = Shop::new();
+    shop.read_a_and_b_in_basic_mode();
+    let third = shop.commit_third(&["c.txt"]);
+    shop.write_guided_tour_at(&third);
+    let basic_file = std::fs::read(shop.basic_path()).unwrap();
+    shop.switcher().run().unwrap();
+    std::fs::write(shop.basic_path(), basic_file).unwrap();
+
+    let switched = shop.switcher().run().unwrap().review;
+
+    assert_eq!(
+        started_read_line(&switched).as_deref(),
+        Some("1 step starts read")
+    );
+}
+
+#[test]
 fn the_summary_has_no_such_line_when_no_step_starts_read() {
     let shop = Shop::new();
     let third = shop.commit_third(&["c.txt"]);

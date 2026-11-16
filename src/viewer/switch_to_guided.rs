@@ -31,10 +31,10 @@ impl TourSwitcher {
         let state_file = ReviewStateFile::for_pr(&self.folders, &self.pr);
         let files = pieces::cut(source.as_ref(), &guided.pin.base, &guided.pin.head)?;
         let carried = CarriedReads::of(&state_file.load()?, &guided, &files, source.as_ref())?;
-        let started_read = carried.ticked.len();
         state_file.update(|state| state.carry_file_reads_into_steps(&carried))?;
         let mut review = Review::open(guided, source.as_ref(), state_file)?;
-        review.steps_start_read(started_read);
+        let started_read = review.progress().read;
+        review.steps_carried_read_ticks_are(started_read);
         self.delete_basic_file()?;
         Ok(RepinnedTour {
             review,

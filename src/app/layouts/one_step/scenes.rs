@@ -551,7 +551,7 @@ impl OneStepLayout {
                 .update(cx, ReviewSession::stage_basic_guided_ready),
             Scene::SwitchedSummary => self.change_review(cx, |review| {
                 review.go_to_summary();
-                review.steps_start_read(3);
+                review.steps_carried_read_ticks_are(3);
             }),
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
@@ -668,7 +668,7 @@ impl OneStepLayout {
                 self.go_to_first_open_code(cx);
             }
             Scene::SwitchedSummary => {
-                self.change_review(cx, |review| review.steps_start_read(0));
+                self.change_review(cx, |review| review.steps_carried_read_ticks_are(0));
                 self.go_to_first_open_code(cx);
             }
             Scene::AgentLinkOff => self

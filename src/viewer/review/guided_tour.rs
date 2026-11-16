@@ -18,11 +18,11 @@ impl ReviewCore {
     }
 
     /// The switch from a basic tour carried read ticks to this many steps; the summary says so.
-    pub fn steps_start_read(&mut self, count: usize) {
+    pub fn steps_carried_read_ticks_are(&mut self, count: usize) {
         self.steps_started_read = Some(count);
     }
 
-    pub fn steps_started_read(&self) -> Option<usize> {
+    pub fn steps_that_started_read(&self) -> Option<usize> {
         self.steps_started_read
     }
 
