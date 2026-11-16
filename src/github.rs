@@ -17,9 +17,10 @@ use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause,
     PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview,
-    ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RepoCloner, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]

@@ -17,7 +17,7 @@ use super::comments::CommentPlace;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::Resolution;
 use super::review_state::ReviewStateFile;
-use super::step_page::Side;
+use super::step_page::{LineLocation, Side};
 use super::threads::{CommentId, ReviewThread, ThreadComment, ThreadId};
 
 /// Where a review's threads are kept: on GitHub for a PR, in its state file for a local review.
@@ -188,6 +188,48 @@ impl LocalThreads {
             .collect()
     }
 
+    /// What the review of the PR the threads move to takes of them: each open thread's own words, at the
+    /// same lines when the code there is the same at `head` and followed to where they went when it is not,
+    /// else on the file. Resolved threads are left behind. Reads the code, so it runs off the main thread.
+    pub(super) fn moved_to(&self, source: &dyn CodeSource, head: &Sha) -> Vec<MovedComment> {
+        let open: Vec<&LocalThread> = self
+            .threads
+            .iter()
+            .filter(|thread| !thread.resolved)
+            .collect();
+        let seen: Vec<ReviewThread> = open
+            .iter()
+            .map(|thread| thread.as_review_thread(head))
+            .collect();
+        let followed = follow_outdated(&seen, source, head);
+        open.into_iter()
+            .zip(seen)
+            .filter_map(|(thread, seen)| {
+                let body = thread.reviewer_words()?;
+                let place = if !seen.is_outdated {
+                    thread.place.clone()
+                } else {
+                    match (followed.get(&thread.id), &thread.place) {
+                        (Some(lines), CommentPlace::Lines { end, .. }) => CommentPlace::Lines {
+                            start: LineLocation {
+                                path: end.path.clone(),
+                                side: Side::Head,
+                                line: lines.start,
+                            },
+                            end: LineLocation {
+                                path: end.path.clone(),
+                                side: Side::Head,
+                                line: lines.end,
+                            },
+                        },
+                        _ => CommentPlace::on_file(thread.place.path()),
+                    }
+                };
+                Some(MovedComment { place, body })
+            })
+            .collect()
+    }
+
     /// Takes every thread that was written on an older snapshot to `head`, at the lines `followed` found
     /// for it. A thread that could not be followed stays where it was.
     fn move_to(&mut self, head: &Sha, followed: &BTreeMap<ThreadId, FollowedLines>) {
@@ -225,12 +267,30 @@ impl LocalThreads {
     }
 }
 
+/// A thread's words, for the draft the PR's review gets of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MovedComment {
+    pub(super) place: CommentPlace,
+    pub(super) body: String,
+}
+
 impl LocalThread {
     fn lines(&self) -> Option<(LineNumber, LineNumber)> {
         match &self.place {
             CommentPlace::File(_) => None,
             CommentPlace::Lines { start, end } => Some((start.line, end.line)),
         }
+    }
+
+    /// What the reviewer wrote in the thread; the agent's answers are the agent's, not the reviewer's to post.
+    fn reviewer_words(&self) -> Option<String> {
+        let words: Vec<&str> = self
+            .comments
+            .iter()
+            .filter(|said| said.by == LocalAuthor::Reviewer)
+            .map(|said| said.body.as_str())
+            .collect();
+        (!words.is_empty()).then(|| words.join("\n\n"))
     }
 
     fn as_review_thread(&self, head: &Sha) -> ReviewThread {

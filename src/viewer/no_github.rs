@@ -4,8 +4,8 @@ use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::ports::{
     ChangeTipsPort, GitHubError, NoAccess, PictureUploadPort, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullsOfBranchPort, Resolution, ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile,
-    ViewedFilesPort,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullsOfBranchPort, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort,
 };
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};

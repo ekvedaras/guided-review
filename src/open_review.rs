@@ -17,7 +17,7 @@ use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
-    GitHubPort, NoGitHub, PickCodeSource, Problem, Review, ReviewStateFile, TourAgents,
+    GitHubPort, NoGitHub, PickCodeSource, PrMover, Problem, Review, ReviewStateFile, TourAgents,
     TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkingCopy,
 };
 
@@ -34,6 +34,8 @@ pub struct OpenedReview {
     pub reloader: TourReloader,
     pub switcher: TourSwitcher,
     pub tour_agents: TourAgents,
+    /// Only a local review has one: the move to the PR opened from its branch.
+    pub mover: Option<PrMover>,
 }
 
 /// Where a tour agent that writes the subject's tour works. A local change set's agent works in its
@@ -206,6 +208,16 @@ fn assemble(
         subject: subject.clone(),
         pick_code_source,
     };
+    let mover = subject.local().map(|change_set| {
+        let folder = change_set.folder().as_path().to_path_buf();
+        PrMover {
+            folders: folders.clone(),
+            change_set: change_set.clone(),
+            pick_code_source: Arc::new(move |pr, tips| {
+                crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
+            }),
+        }
+    });
     Ok(OpenedReview {
         review,
         source: source.into(),
@@ -219,5 +231,6 @@ fn assemble(
         tour_agents: TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
             .starting_in(agent_folder)
             .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
+        mover,
     })
 }

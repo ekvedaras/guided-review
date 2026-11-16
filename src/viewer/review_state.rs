@@ -18,6 +18,7 @@ use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::local_threads::LocalThreads;
+use super::move_to_pr::MovedReview;
 use super::ports::Viewed;
 use super::review::{ReadSubject, StepId};
 use super::switch_to_guided::CarriedReads;
@@ -438,6 +439,77 @@ impl ReviewState {
 
     pub(super) fn hand_offs_mut(&mut self) -> &mut HandOffs {
         &mut self.viewer.hand_offs
+    }
+
+    /// The file ticks after a re-pin: those that stayed, and those a re-pin took away, each with the head
+    /// the file was read at.
+    pub(super) fn file_reads_after_repin(
+        &self,
+    ) -> (BTreeMap<FilePath, Sha>, BTreeMap<FilePath, Sha>) {
+        let heads = |ticks: &BTreeMap<FilePath, ReadTick>| {
+            ticks
+                .iter()
+                .map(|(path, tick)| (path.clone(), tick.head.clone()))
+                .collect()
+        };
+        (
+            heads(&self.viewer.file_read_ticks),
+            heads(&self.viewer.file_read_before),
+        )
+    }
+
+    /// The hand-over of a local review's move to this PR. The PR's review may have gone on since the
+    /// move was worked out, or a first try may have saved already, so a mark the PR's state has is kept
+    /// and a draft it has already is never written twice.
+    pub(super) fn take_moved_review(&mut self, moved: &MovedReview) {
+        for (path, head) in &moved.file_ticks {
+            if !self.viewer.file_read_ticks.contains_key(path) {
+                self.tick_file(path, head);
+            }
+        }
+        for (path, head) in &moved.file_read_before {
+            if !self.viewer.file_read_ticks.contains_key(path)
+                && !self.viewer.file_read_before.contains_key(path)
+            {
+                self.viewer
+                    .file_read_before
+                    .insert(path.clone(), ReadTick { head: head.clone() });
+            }
+        }
+        for (step, head) in &moved.steps.ticked {
+            if !self.viewer.read_ticks.contains_key(step) {
+                self.tick(step, head);
+            }
+        }
+        for (step, head) in &moved.steps.read_before {
+            if !self.viewer.read_ticks.contains_key(step)
+                && !self.viewer.read_before.contains_key(step)
+            {
+                self.viewer
+                    .read_before
+                    .insert(step.clone(), ReadTick { head: head.clone() });
+            }
+        }
+        for comment in &moved.comments {
+            self.take_moved_comment(&comment.place, &comment.body, &moved.head);
+        }
+    }
+
+    fn take_moved_comment(&mut self, place: &CommentPlace, body: &str, head: &Sha) {
+        self.open_draft(place.clone(), Some(head));
+        let Some(draft) = self
+            .typed
+            .comment_drafts
+            .iter_mut()
+            .find(|d| &d.place == place)
+        else {
+            return;
+        };
+        if draft.body.is_empty() {
+            body.clone_into(&mut draft.body);
+        } else if !draft.body.contains(body) {
+            draft.body = format!("{}\n\n{body}", draft.body);
+        }
     }
 
     pub(super) fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {

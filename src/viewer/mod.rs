@@ -19,7 +19,6 @@ mod comments;
 mod diff_display;
 mod diff_fence;
 mod disk_news;
-mod move_offer;
 mod display_options;
 mod file_block;
 mod file_tree;
@@ -37,6 +36,8 @@ mod local_row;
 mod local_threads;
 mod markdown;
 mod more_lines;
+mod move_offer;
+mod move_to_pr;
 mod new_commits;
 mod no_github;
 mod outdated_lines;
@@ -108,7 +109,6 @@ pub use diff_display::{
 };
 pub use diff_fence::{FenceLine, fence_lines};
 pub use disk_news::{DiskNews, DiskOffer};
-pub use move_offer::MoveOffer;
 pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
@@ -140,6 +140,8 @@ pub use local_row::LocalRow;
 pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
+pub use move_offer::MoveOffer;
+pub use move_to_pr::{PickPullCodeSource, PrMover};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};
@@ -154,8 +156,8 @@ pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort, NoAccess,
     PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile,
-    ViewedFilesPort, ViewedState,
+    PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};

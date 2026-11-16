@@ -75,6 +75,7 @@ impl TourSwitcher {
 }
 
 /// What the basic tour's file ticks make of the guided tour's steps.
+#[derive(Default)]
 pub(super) struct CarriedReads {
     /// Steps that start read, at the oldest head their files were read at.
     pub(super) ticked: Vec<(StepId, Sha)>,
@@ -96,7 +97,7 @@ pub(super) struct ReadCarrier {
 }
 
 impl ReadCarrier {
-    fn of(
+    pub(super) fn of(
         guided: &GuidedTour,
         files: &[ChangedFile],
         heads: &BTreeSet<Sha>,
