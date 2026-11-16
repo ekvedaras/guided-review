@@ -32,6 +32,7 @@ mod basic_repin;
 mod basic_review_finish;
 mod basic_ticks;
 mod basic_tour;
+mod change_set_agent;
 mod check;
 mod clone_offer;
 mod code_links;

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
+use sha2::{Digest, Sha256};
 
 use super::active_pr::OpenOrigin;
-use crate::review_subject::ReviewSubject;
+use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
 /// A herdr terminal, as `hc` names it (`t7`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -224,6 +225,8 @@ pub enum TourAgentState {
         terminal: TerminalId,
         status: AgentStatus,
     },
+    /// A local change set's folder has several Claude terminals and none is claimed: the reviewer picks.
+    Choose(Vec<TerminalId>),
 }
 
 impl TourAgentState {
@@ -238,20 +241,50 @@ impl TourAgentState {
 
     /// There is an agent, or news about why there cannot be one; "none" and "looking" say nothing.
     pub fn is_worth_a_line(&self) -> bool {
-        matches!(self, Self::Agent { .. } | Self::LinkOff(_))
+        matches!(
+            self,
+            Self::Agent { .. } | Self::LinkOff(_) | Self::Choose(_)
+        )
+    }
+
+    /// The terminals the sidebar offers "Use this agent" for.
+    pub fn choices(&self) -> &[TerminalId] {
+        match self {
+            Self::Choose(terminals) => terminals,
+            _ => &[],
+        }
+    }
+
+    /// What the sidebar says, in the words of what the subject's agent is: a PR's tour agent, a local
+    /// change set's agent.
+    pub fn line_for(&self, subject: &ReviewSubject) -> String {
+        let who = match subject {
+            ReviewSubject::PullRequest(_) => "Tour agent",
+            ReviewSubject::Local(_) => "Agent",
+        };
+        self.line_as(who)
+    }
+
+    fn line_as(&self, who: &str) -> String {
+        match self {
+            Self::Unknown => format!("{who}: looking"),
+            Self::LinkOff(reason) => format!("{who} is off: {reason}"),
+            Self::None => format!("{who}: none"),
+            Self::Agent { terminal, status } => format!("{who} `{terminal}`: {status}"),
+            Self::Choose(terminals) => {
+                let named: Vec<String> = terminals
+                    .iter()
+                    .map(|terminal| format!("`{terminal}`"))
+                    .collect();
+                format!("Several agents work in this folder: {}", named.join(", "))
+            }
+        }
     }
 }
 
 impl fmt::Display for TourAgentState {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Unknown => write!(formatter, "Tour agent: looking"),
-            Self::LinkOff(reason) => write!(formatter, "Tour agent is off: {reason}"),
-            Self::None => write!(formatter, "Tour agent: none"),
-            Self::Agent { terminal, status } => {
-                write!(formatter, "Tour agent `{terminal}`: {status}")
-            }
-        }
+        formatter.write_str(&self.line_as("Tour agent"))
     }
 }
 
@@ -263,6 +296,10 @@ pub enum OwnAgentHandOff {
     /// Nothing was typed, for this reason.
     NotSent(String),
     NoAgent,
+    /// A local change set whose folder has no agent yet.
+    NoAgentInFolder,
+    /// A local change set whose folder has several agents and none is picked.
+    PickAnAgent,
 }
 
 impl OwnAgentHandOff {
@@ -277,6 +314,8 @@ impl OwnAgentHandOff {
             ),
             Self::NotSent(reason) => format!("Not handed: {reason}. Try again when it is free"),
             Self::NoAgent => format!("Not handed: this PR has no tour agent. {MAKE_YOURS}"),
+            Self::NoAgentInFolder => "Not handed: no agent works in this review's folder yet. Run `guided-review open` from your own Claude in it, or send a task to start one".to_owned(),
+            Self::PickAnAgent => "Not handed: several agents work in this review's folder. Pick one with Use this agent in the sidebar".to_owned(),
         }
     }
 }
@@ -331,15 +370,19 @@ impl TourAgents {
         active: &ReviewSubject,
         first_task: String,
     ) -> anyhow::Result<TerminalId> {
-        let Some(folder) = &self.folder else {
+        let folder = match subject {
+            ReviewSubject::Local(change_set) => Some(change_set.folder().as_path().to_owned()),
+            ReviewSubject::PullRequest(_) => self.folder.clone(),
+        };
+        let Some(folder) = folder else {
             bail!("no folder to start a tour agent for {subject} in");
         };
-        let name = terminal_name(subject)?;
+        let name = terminal_name(subject);
         self.make_room(active)?;
         self.port.start(&TourAgentStart {
             subject: subject.clone(),
             name,
-            folder: folder.clone(),
+            folder,
             first_task,
             summary_skill: self.summary_skill.clone(),
         })
@@ -403,6 +446,7 @@ impl TourAgents {
                 }
             }
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
+            TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
             TourAgentState::None | TourAgentState::Unknown => self
                 .launch(subject, active, task)
                 .map(WriterHandOver::Started),
@@ -457,6 +501,9 @@ impl TourAgents {
         subject: &ReviewSubject,
         terminal: Option<&str>,
     ) -> anyhow::Result<()> {
+        if let Some(change_set) = subject.local() {
+            return self.claim_for_open_of_local(subject, change_set, terminal);
+        }
         let Some(address) = terminal else {
             return Ok(());
         };
@@ -472,6 +519,29 @@ impl TourAgents {
             .filter(|other| other.runs_claude && other.space == origin.space);
         match (beside.next(), beside.next()) {
             (Some(only), None) => self.claim(subject, &only.terminal),
+            _ => Ok(()),
+        }
+    }
+
+    /// A local change set's agent is the terminal that ran `open` when it runs Claude, else the only
+    /// Claude terminal working in the folder, wherever the request came from. With several there, nothing
+    /// is claimed: the reviewer picks.
+    fn claim_for_open_of_local(
+        &self,
+        subject: &ReviewSubject,
+        change_set: &LocalChangeSet,
+        terminal: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let live = self.port.live_terminals()?;
+        let caller = terminal.and_then(|address| {
+            live.iter()
+                .find(|live| live.runs_claude && live.terminal.as_str() == address)
+        });
+        if let Some(caller) = caller {
+            return self.claim(subject, &caller.terminal);
+        }
+        match claude_terminals_in(&live, change_set).as_slice() {
+            [only] => self.claim(subject, only),
             _ => Ok(()),
         }
     }
@@ -557,6 +627,7 @@ impl TourAgents {
                 status: AgentStatus::WaitingForYou,
             } => Ok(SendOutcome::Refused(format!("{terminal} waits for you"))),
             TourAgentState::Agent { terminal, .. } => self.port.send_if_idle(&terminal, text),
+            TourAgentState::Choose(_) => Ok(SendOutcome::Refused(SEVERAL_AGENTS.to_owned())),
             TourAgentState::LinkOff(reason) => Ok(SendOutcome::Refused(format!(
                 "tour agents are off: {reason}"
             ))),
@@ -572,14 +643,24 @@ impl TourAgents {
             TourAgentState::LinkOff(reason) => {
                 return OwnAgentHandOff::NotSent(format!("tour agents are off: {reason}"));
             }
-            TourAgentState::None | TourAgentState::Unknown => return OwnAgentHandOff::NoAgent,
-        };
-        match self.port.app_started() {
-            Ok(by_app) if by_app.iter().any(|agent| agent.terminal == terminal) => {
-                return OwnAgentHandOff::StartedByApp(terminal);
+            TourAgentState::Choose(_) => return OwnAgentHandOff::PickAnAgent,
+            TourAgentState::None | TourAgentState::Unknown => {
+                return if subject.local().is_some() {
+                    OwnAgentHandOff::NoAgentInFolder
+                } else {
+                    OwnAgentHandOff::NoAgent
+                };
             }
-            Ok(_) => {}
-            Err(error) => return OwnAgentHandOff::NotSent(format!("{error:#}")),
+        };
+        // A PR's app-started agent only reads the PR; a change set's agent changes the code in its folder.
+        if subject.pull_request().is_some() {
+            match self.port.app_started() {
+                Ok(by_app) if by_app.iter().any(|agent| agent.terminal == terminal) => {
+                    return OwnAgentHandOff::StartedByApp(terminal);
+                }
+                Ok(_) => {}
+                Err(error) => return OwnAgentHandOff::NotSent(format!("{error:#}")),
+            }
         }
         match self.send_if_idle(subject, text) {
             Ok(SendOutcome::Delivered) => OwnAgentHandOff::Delivered(terminal),
@@ -596,26 +677,71 @@ impl TourAgents {
         match self.lookup(subject) {
             TourAgentState::Agent { terminal, .. } => self.port.show(&terminal),
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
+            TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
             TourAgentState::None | TourAgentState::Unknown => bail!("no tour agent for {subject}"),
         }
     }
 
     fn find(&self, subject: &ReviewSubject) -> anyhow::Result<TourAgentState> {
         let Some(terminal) = self.port.terminals_of(subject)?.into_iter().next() else {
-            return Ok(TourAgentState::None);
+            return self.find_unclaimed_in_folder(subject);
         };
         let status = self.port.status(&terminal)?;
         Ok(TourAgentState::Agent { terminal, status })
     }
 }
 
-/// Herdr names are 1-32 of a-z 0-9 - _, so a long repo name is cut and the PR number stays.
-fn terminal_name(subject: &ReviewSubject) -> anyhow::Result<String> {
-    let Some(pr) = subject.pull_request() else {
-        bail!("starting the agent of a local change set is not built yet");
+const SEVERAL_AGENTS: &str = "several agents work in this folder: pick one with Use this agent";
+
+impl TourAgents {
+    /// A local change set nobody claimed an agent for: the only Claude terminal working in its folder
+    /// becomes its agent, several are offered to the reviewer. A PR has no folder to look in.
+    fn find_unclaimed_in_folder(&self, subject: &ReviewSubject) -> anyhow::Result<TourAgentState> {
+        let Some(change_set) = subject.local() else {
+            return Ok(TourAgentState::None);
+        };
+        let mut candidates = claude_terminals_in(&self.port.live_terminals()?, change_set);
+        match candidates.len() {
+            0 => Ok(TourAgentState::None),
+            1 => {
+                let terminal = candidates.remove(0);
+                self.claim(subject, &terminal)?;
+                let status = self.port.status(&terminal)?;
+                Ok(TourAgentState::Agent { terminal, status })
+            }
+            _ => Ok(TourAgentState::Choose(candidates)),
+        }
+    }
+}
+
+fn claude_terminals_in(live: &[LiveTerminal], change_set: &LocalChangeSet) -> Vec<TerminalId> {
+    live.iter()
+        .filter(|live| live.runs_claude && live.cwd.starts_with(change_set.folder().as_path()))
+        .map(|live| live.terminal.clone())
+        .collect()
+}
+
+/// Herdr names are 1-32 of a-z 0-9 - _, so a long repo name is cut and the PR number stays. A local change
+/// set's name ends on a short hash of its key, so a long folder or branch name stays unique.
+fn terminal_name(subject: &ReviewSubject) -> String {
+    let (head, tail) = match subject {
+        ReviewSubject::PullRequest(pr) => (
+            format!("tour-{}-{}", pr.repo.owner(), pr.repo.name()),
+            format!("-{}", pr.number),
+        ),
+        ReviewSubject::Local(change_set) => {
+            let digest = Sha256::digest(subject.to_string().as_bytes());
+            (
+                format!(
+                    "local-{}-{}",
+                    change_set.folder().name(),
+                    change_set.branch().as_str()
+                ),
+                format!("-{}", crate::hex::lower(digest.iter().take(NAME_HASH_BYTES))),
+            )
+        }
     };
-    let number = format!("-{}", pr.number);
-    let repo: String = format!("tour-{}-{}", pr.repo.owner(), pr.repo.name())
+    let head: String = head
         .to_lowercase()
         .chars()
         .map(|c| {
@@ -625,10 +751,13 @@ fn terminal_name(subject: &ReviewSubject) -> anyhow::Result<String> {
                 '-'
             }
         })
-        .take(32 - number.len())
+        .take(32 - tail.len())
         .collect();
-    Ok(format!("{repo}{number}"))
+    format!("{head}{tail}")
 }
+
+/// Three bytes are the 6 hex characters that end a local change set's agent name.
+const NAME_HASH_BYTES: usize = 3;
 
 /// Writing a guided tour of a local change set comes with local review; until then it is refused
 /// before any agent is touched.
@@ -682,6 +811,9 @@ fn basic_writer_task(subject: &ReviewSubject) -> String {
 
 /// What a tour agent the app started is told first. Hand-offs follow as messages that carry the rest of the protocol.
 fn first_task(subject: &ReviewSubject, tour: TourKind) -> String {
+    if let Some(change_set) = subject.local() {
+        return change_set_first_task(subject, change_set);
+    }
     match tour {
         TourKind::Guided => format!(
             "You are the tour agent of {subject}: you wrote or know its guided-review tour, and the reviewer's comments on it \
@@ -696,6 +828,21 @@ fn first_task(subject: &ReviewSubject, tour: TourKind) -> String {
              answer. Answer each comment as its message says, and never change the PR's code. Then wait for the next message."
         ),
     }
+}
+
+/// What the change set's agent the app starts is told first. Unlike a PR's tour agent it changes code: in its
+/// own folder, and it pushes nothing.
+fn change_set_first_task(subject: &ReviewSubject, change_set: &LocalChangeSet) -> String {
+    format!(
+        "You are the agent of the local change set {subject}: the reviewer reads the changes of branch {} in {} \
+         (commits not on the default branch, and uncommitted files) in guided-review, and their comments reach \
+         you here as tasks. Read the change now with `guided-review outline {subject}`, and \
+         `guided-review show {subject} <piece ids> --around` for more of it, so you can act on a task. Change \
+         code in this folder when a task asks for it, do not push, and commit only if your session normally \
+         would. Then wait for the next message.",
+        change_set.branch().as_str(),
+        change_set.folder().as_path().display()
+    )
 }
 
 /// What a tour agent started by the app is told the reviewer reads.
