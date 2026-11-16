@@ -401,7 +401,7 @@ impl TourAgents {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        refuse_tour_writing_of_local(subject)?;
+        refuse_replacing_the_agent_of_local(subject)?;
         let app_started: Vec<TerminalId> = self
             .port
             .app_started()?
@@ -433,7 +433,6 @@ impl TourAgents {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        refuse_tour_writing_of_local(subject)?;
         let task = basic_writer_task(subject);
         match self.lookup(subject) {
             TourAgentState::Agent {
@@ -790,11 +789,12 @@ fn terminal_name(subject: &ReviewSubject) -> String {
 /// Three bytes are the 6 hex characters that end a local change set's agent name.
 const NAME_HASH_BYTES: usize = 3;
 
-/// Writing a guided tour of a local change set comes with local review; until then it is refused
-/// before any agent is touched.
-fn refuse_tour_writing_of_local(subject: &ReviewSubject) -> anyhow::Result<()> {
+/// `write_tour` replaces the subject's agent, which for a local change set is the reviewer's own agent
+/// that wrote the code. A local review always has its basic tour, so its guided tour is written through
+/// `hand_writer_task`, which keeps that agent.
+fn refuse_replacing_the_agent_of_local(subject: &ReviewSubject) -> anyhow::Result<()> {
     if subject.local().is_some() {
-        bail!("writing a guided tour of a local change set is not built yet");
+        bail!("the agent of a local change set is never replaced to write its guided tour");
     }
     Ok(())
 }
@@ -828,6 +828,9 @@ pub enum WriterHandOver {
 /// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
 /// guided tour never replaces it on disk, so the agent writes a whole tour at the guided path.
 fn basic_writer_task(subject: &ReviewSubject) -> String {
+    if subject.local().is_some() {
+        return change_set_writer_task(subject);
+    }
     format!(
         "/tour {subject} (you are the tour agent of this PR. The reviewer reads it as a basic tour in the app, with no \
          tour text, and asked for a guided tour, which they keep reading the basic tour meanwhile. Write a full new \
@@ -837,6 +840,20 @@ fn basic_writer_task(subject: &ReviewSubject) -> String {
          app the guided tour is ready and does not move the reviewer's screen. Afterwards the reviewer's comments \
          reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
          wrong, and never change the PR's code."
+    )
+}
+
+/// The writer task for a local change set's agent, which wrote the code and is not on a fixed tool list.
+fn change_set_writer_task(subject: &ReviewSubject) -> String {
+    format!(
+        "/tour {subject} (you are the agent of this local change set. The reviewer reads it as a basic tour in the \
+         app, with no tour text, and asked for a guided tour, which they keep reading the basic tour meanwhile. Write a \
+         full new tour at the path `guided-review tour-path {subject}` prints: the basic tour is not a tour file and \
+         needs no edit.) Run one command per Bash call, with the key written out, without shell variables, pipes, \
+         `&&`, `;` or `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, \
+         which tells the app the guided tour is ready and does not move the reviewer's screen. Do not change the \
+         code while you write the tour. Afterwards the reviewer's comments reach you here as tasks: act on each as \
+         its message says."
     )
 }
 

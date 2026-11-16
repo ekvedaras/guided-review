@@ -10,7 +10,7 @@ use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Tour};
 
-use super::new_commits::{PickCodeSource, RepinnedTour};
+use super::new_commits::{PickCodeSource, RepinnedTour, local_facts_of};
 use super::review::{Review, StepId};
 use super::review_state::ReviewStateFile;
 use super::step_page::{pieces_changed_since, pieces_of};
@@ -36,7 +36,11 @@ impl TourSwitcher {
         let carrier = ReadCarrier::of(&guided, &files, &heads, source.as_ref())?;
         let carried = carrier.carry(&reads);
         state_file.update(|state| state.carry_file_reads_into_steps(&carried))?;
+        let facts = local_facts_of(&self.folders, &self.subject, &guided.pin)?;
         let mut review = Review::open(guided, source.as_ref(), state_file)?;
+        if let Some(facts) = facts {
+            review.local_facts_are(facts);
+        }
         let started_read = review.progress().read;
         review.steps_carried_read_ticks_are(started_read);
         review.takes_over_from_basic_with(carrier);

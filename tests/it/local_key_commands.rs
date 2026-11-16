@@ -3,16 +3,12 @@ use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 const LOCAL_KEY: &str = "local:/Users/me/Code/shop@feature/discounts";
 
 #[test]
-fn a_command_given_a_local_change_sets_key_says_local_review_is_not_built_yet() {
+fn agent_reply_given_a_local_change_sets_key_says_local_review_is_not_built_yet() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let github = FakeGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
     let guided_review = GuidedReview::new(&repo, &github);
 
-    for args in [
-        vec!["check", LOCAL_KEY],
-        vec!["refresh", LOCAL_KEY],
-        vec!["agent-reply", LOCAL_KEY, "h0", "--working"],
-    ] {
+    for args in [vec!["agent-reply", LOCAL_KEY, "h0", "--working"]] {
         let run = guided_review.run(&args);
 
         assert!(!run.success, "{args:?} should be refused");

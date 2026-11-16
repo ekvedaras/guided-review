@@ -25,7 +25,7 @@ use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
-use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
+use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile, repin_tour};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
@@ -134,9 +134,9 @@ fn main() -> anyhow::Result<()> {
             around,
         } => show(&subject, &ids, around),
         Command::TourPath { subject } => tour_path(&subject),
-        Command::Check { subject } => check(&pull_request_of(&subject)?),
+        Command::Check { subject } => check(&subject),
         Command::Repin { subject } => repin_command(&subject),
-        Command::Refresh { subject, done } => refresh(&pull_request_of(&subject)?, done),
+        Command::Refresh { subject, done } => refresh(&subject, done),
         Command::Open { target } => open(&target, &Launch::Open),
         Command::Restart {
             target,
@@ -285,22 +285,28 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
     Ok(())
 }
 
-fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let opened = OpenedPr::new(pr)?;
-    let tour_path = opened.tour_path();
+fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let tour_path = Tour::path_for(&AppFolders::running()?, subject);
     let mut tour = GuidedTour::load(&tour_path)?;
 
-    let code = opened.at_live_tips()?;
-    let subject = ReviewSubject::from(pr.clone());
+    let code = code_to_read(subject)?;
     if tour.pin.head.is_empty() {
         tour.pin
-            .pin_to(&subject, &code.merge_base()?, &code.tips.head);
+            .pin_to(subject, &code.merge_base()?, &code.tips.head);
     } else {
         if tour.pin.pr.is_empty() && tour.pin.local.is_none() {
-            tour.pin.pr = subject.to_string();
+            tour.pin
+                .pin_to(subject, &tour.pin.base.clone(), &tour.pin.head.clone());
         }
         if tour.pin.head != code.tips.head {
-            println!("warning: PR has new commits; run `guided-review repin`");
+            match subject {
+                ReviewSubject::PullRequest(_) => {
+                    println!("warning: PR has new commits; run `guided-review repin`");
+                }
+                ReviewSubject::Local(_) => println!(
+                    "warning: the review has a new snapshot of its folder; run `guided-review repin`"
+                ),
+            }
         }
     }
     tour.save(&tour_path)?;
@@ -344,16 +350,21 @@ fn repin_command(subject: &ReviewSubject) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
-    let opened = OpenedPr::new(pr)?;
-    let state_file = opened.state_file();
+fn refresh(subject: &ReviewSubject, done: bool) -> anyhow::Result<()> {
+    let folders = AppFolders::running()?;
+    let state_file = ReviewStateFile::for_subject(&folders, subject);
     if done {
         state_file.update(guided_review::viewer::ReviewState::finish_refresh)?;
         println!("refresh done: marks cleared");
         return Ok(());
     }
-    let tour = GuidedTour::load(&opened.tour_path())?;
-    let code = opened.at_pinned_tips(&tour.pin)?;
+    let tour = GuidedTour::load(&Tour::path_for(&folders, subject))?;
+    let code = match subject {
+        ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_pinned_tips(&tour.pin)?,
+        ReviewSubject::Local(change_set) => {
+            OpenedChangeSet::new(change_set, &folders).code_at(&tour.pin)
+        }
+    };
     let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
     print!(
         "{}",

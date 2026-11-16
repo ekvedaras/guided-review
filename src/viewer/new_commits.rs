@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
+use crate::local_facts::LocalFacts;
 use crate::opened_change_set::OpenedChangeSet;
 use crate::pull_request::{ChangeTips, Sha};
 use crate::repin::{Repin, repin};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
-use crate::tour::{GuidedTour, Tour};
+use crate::tour::{GuidedTour, Tour, TourPin};
 
 use super::ports::ChangeTipsPort;
 use super::review::Review;
@@ -30,6 +31,19 @@ pub fn repin_tour(
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
     state_file.update(|state| state.record_repin(record, &result))?;
     Ok((tour, result))
+}
+
+/// What a local review's overview shows for the snapshot a tour is pinned to; a PR has none. A review
+/// rebuilt from its tour file must be given these again, as they are not saved.
+pub(super) fn local_facts_of(
+    folders: &AppFolders,
+    subject: &ReviewSubject,
+    pin: &TourPin,
+) -> anyhow::Result<Option<LocalFacts>> {
+    subject
+        .local()
+        .map(|change_set| OpenedChangeSet::new(change_set, folders).facts(pin))
+        .transpose()
 }
 
 /// Finds the code source that can read the given tips, fetching what is missing.
@@ -57,11 +71,15 @@ impl TourReloader {
         let tour =
             GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
-        let review = Review::open(
+        let facts = local_facts_of(&self.folders, &self.subject, &tour.pin)?;
+        let mut review = Review::open(
             tour,
             source.as_ref(),
             ReviewStateFile::for_subject(&self.folders, &self.subject),
         )?;
+        if let Some(facts) = facts {
+            review.local_facts_are(facts);
+        }
         Ok(RepinnedTour {
             review,
             source: source.into(),

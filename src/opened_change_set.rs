@@ -307,10 +307,16 @@ impl OpenedChangeSet {
             "no tour for {subject}; run `guided-review open <folder>` first"
         );
         let tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &subject), &subject)?;
+        Ok(self.code_at(tour.pin()))
+    }
+
+    /// The code at the snapshot a tour's pin names, as `refresh` reads a guided tour that waits beside
+    /// the basic one.
+    pub fn code_at(&self, pin: &TourPin) -> CodeAtTips {
         let source: Arc<dyn CodeSource> = Arc::new(LocalGit::at_worktree(self.change_set.folder()));
-        Ok(CodeAtTips {
-            tips: tour.pin().pinned_tips(),
+        CodeAtTips {
+            tips: pin.pinned_tips(),
             source: Box::new(CachedCodeSource::wrapping(source)),
-        })
+        }
     }
 }
