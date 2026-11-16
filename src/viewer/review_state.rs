@@ -33,6 +33,10 @@ pub struct ReviewState {
     typed: TypedText,
     #[serde(default)]
     asks: Vec<Ask>,
+    /// The key of the local review the file belongs to. Its path holds only a short hash of the folder, so
+    /// the key is what tells a file of another review that landed on the same path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
     #[serde(default)]
     last_repin: Option<RepinRecord>,
     /// The folder the PR was last opened from, so a switch back to it finds the same clone.
@@ -576,12 +580,14 @@ pub struct TypedText {
 #[derive(Clone)]
 pub struct ReviewStateFile {
     path: PathBuf,
+    local_key: Option<String>,
     tour_files: PathBuf,
 }
 
 impl ReviewStateFile {
     pub fn for_subject(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         Self {
+            local_key: subject.local().map(|_| subject.to_string()),
             path: folders
                 .state_files()
                 .join(subject.files_folder())
@@ -624,7 +630,9 @@ impl ReviewStateFile {
     /// A PR not reviewed before has no file yet: that is an empty state, not an error.
     pub fn load(&self) -> anyhow::Result<ReviewState> {
         match self.read_text()? {
-            Some(text) => self.parse(&text),
+            Some(text) => self
+                .parse(&text)
+                .and_then(|state| self.of_this_review(state)),
             None => Ok(ReviewState::default()),
         }
     }
@@ -646,7 +654,7 @@ impl ReviewStateFile {
             return Ok((ReviewState::default(), None));
         };
         match self.parse(&text) {
-            Ok(state) => Ok((state, None)),
+            Ok(state) => Ok((self.of_this_review(state)?, None)),
             Err(not_valid) => {
                 let backup = self
                     .set_aside()
@@ -669,6 +677,17 @@ impl ReviewStateFile {
     fn parse(&self, text: &str) -> anyhow::Result<ReviewState> {
         serde_json::from_str(text)
             .with_context(|| format!("{} is not a valid review state file", self.path.display()))
+    }
+
+    /// A file of another review is not this review's to read, nor to set aside.
+    fn of_this_review(&self, state: ReviewState) -> anyhow::Result<ReviewState> {
+        match (&self.local_key, &state.subject) {
+            (Some(wanted), Some(held)) if wanted != held => anyhow::bail!(
+                "{} holds the review of {held}, not of {wanted}",
+                self.path.display()
+            ),
+            _ => Ok(state),
+        }
     }
 
     /// A hard link fails when the name is taken, so an earlier backup is never overwritten.
@@ -750,7 +769,11 @@ impl ReviewStateFile {
 
     /// Written to a temp file of its own first, so a crash mid-write never leaves half a file behind.
     fn write(&self, state: &ReviewState) -> anyhow::Result<()> {
-        let text = serde_json::to_string_pretty(state)? + "\n";
+        let mut value = serde_json::to_value(state)?;
+        if let (Some(key), Some(object)) = (&self.local_key, value.as_object_mut()) {
+            object.insert("subject".into(), key.clone().into());
+        }
+        let text = serde_json::to_string_pretty(&value)? + "\n";
         let temp = self.unique_temp_path();
         std::fs::write(&temp, text)
             .with_context(|| format!("could not write {}", temp.display()))?;

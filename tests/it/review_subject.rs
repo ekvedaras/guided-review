@@ -73,6 +73,34 @@ fn text_that_is_neither_a_pr_link_nor_a_local_key_is_refused() {
 }
 
 #[test]
+fn a_local_change_sets_folder_is_its_canonical_path_so_two_names_of_it_are_one_review() {
+    let real = tempfile::tempdir().unwrap();
+    let links = tempfile::tempdir().unwrap();
+    let link = links.path().join("shop-link");
+    std::os::unix::fs::symlink(real.path(), &link).unwrap();
+    let canonical = real.path().canonicalize().unwrap();
+
+    let through_link = subject(&format!("local:{}@main", link.display()));
+
+    assert_eq!(
+        through_link,
+        subject(&format!("local:{}@main", canonical.display()))
+    );
+    assert_eq!(
+        through_link.to_string(),
+        format!("local:{}@main", canonical.display())
+    );
+}
+
+#[test]
+fn what_the_app_tells_a_refused_open_is_one_short_line_naming_what_open_takes() {
+    assert_eq!(
+        ReviewSubject::not_a_subject("acme/shop#7"),
+        "`acme/shop#7` is not a PR link or a local key"
+    );
+}
+
+#[test]
 fn a_local_change_sets_identity_is_its_folder_and_branch() {
     assert_eq!(
         subject("local:/Users/me/shop@main"),
@@ -164,5 +192,91 @@ mod on_disk {
                 .join("local/shop-c15cfd06/feature%2Fdiscounts.json")
                 .is_file()
         );
+    }
+
+    #[test]
+    fn a_tour_file_pinned_to_another_subject_is_refused_when_it_is_loaded_for_this_one() {
+        let home = tempfile::tempdir().unwrap();
+        let folders = folders_in(home.path());
+        let this = subject(LOCAL);
+        let other = subject("local:/Users/me/Other/shop@feature/discounts");
+        let path = Tour::path_for(&folders, &this);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(r#"{{"local": "{other}", "base": "aaa", "head": "bbb"}}"#),
+        )
+        .unwrap();
+
+        let refused = Tour::load_of(&path, &this).unwrap_err();
+
+        assert!(
+            format!("{refused:#}").contains(&other.to_string()),
+            "{refused:#}"
+        );
+    }
+
+    #[test]
+    fn a_tour_file_pinned_to_this_subject_loads() {
+        let home = tempfile::tempdir().unwrap();
+        let folders = folders_in(home.path());
+        let this = subject(LOCAL);
+        let path = Tour::path_for(&folders, &this);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(r#"{{"local": "{this}", "base": "aaa", "head": "bbb"}}"#),
+        )
+        .unwrap();
+
+        assert!(Tour::load_of(&path, &this).is_ok());
+    }
+
+    #[test]
+    fn a_state_file_of_another_subject_is_refused_when_it_is_loaded_for_this_one() {
+        let home = tempfile::tempdir().unwrap();
+        let folders = folders_in(home.path());
+        let this = subject(LOCAL);
+        let other = subject("local:/Users/me/Other/shop@feature/discounts");
+        ReviewStateFile::for_subject(&folders, &other)
+            .save(&ReviewState::default())
+            .unwrap();
+        let state_path = |subject: &super::ReviewSubject| {
+            folders
+                .state_files()
+                .join(subject.files_folder())
+                .join(format!("{}.json", subject.file_stem()))
+        };
+        std::fs::create_dir_all(state_path(&this).parent().unwrap()).unwrap();
+        std::fs::copy(state_path(&other), state_path(&this)).unwrap();
+
+        let refused = ReviewStateFile::for_subject(&folders, &this)
+            .load()
+            .unwrap_err();
+
+        assert!(
+            format!("{refused:#}").contains(&other.to_string()),
+            "{refused:#}"
+        );
+    }
+
+    #[test]
+    fn a_state_file_keeps_its_subjects_full_key_through_a_save() {
+        let home = tempfile::tempdir().unwrap();
+        let folders = folders_in(home.path());
+        let this = subject(LOCAL);
+        let file = ReviewStateFile::for_subject(&folders, &this);
+
+        file.save(&ReviewState::default()).unwrap();
+        file.update(|_| {}).unwrap();
+
+        assert!(file.load().is_ok());
+        let text = std::fs::read_to_string(
+            folders
+                .state_files()
+                .join("local/shop-c15cfd06/feature%2Fdiscounts.json"),
+        )
+        .unwrap();
+        assert!(text.contains(LOCAL), "{text}");
     }
 }

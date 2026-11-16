@@ -26,7 +26,8 @@ pub struct TourSwitcher {
 impl TourSwitcher {
     /// Blocks on the code source and on git; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let guided = GuidedTour::load(&Tour::path_for(&self.folders, &self.subject))?;
+        let guided =
+            GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&guided.pin.pinned_tips())?;
         let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
         let files = pieces::cut(source.as_ref(), &guided.pin.base, &guided.pin.head)?;
@@ -48,9 +49,12 @@ impl TourSwitcher {
 
     /// The head the basic review ticks files at while the guided review is built.
     fn basic_head(&self) -> Option<Sha> {
-        BasicTour::load(&Tour::basic_path_for(&self.folders, &self.subject))
-            .ok()
-            .map(|basic| basic.pin.head)
+        BasicTour::load_of(
+            &Tour::basic_path_for(&self.folders, &self.subject),
+            &self.subject,
+        )
+        .ok()
+        .map(|basic| basic.pin.head)
     }
 
     /// Only once the state is saved: a crash before this carries again instead of losing ticks.

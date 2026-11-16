@@ -72,9 +72,12 @@ pub fn open_review(
     opened.make_basic_tour_if_no_tour()?;
     // A basic file with a guided one beside it shows the basic tour.
     let tour = if ToursOnDisk::of(folders, subject).opens_basic() {
-        Tour::Basic(BasicTour::load(&Tour::basic_path_for(folders, subject))?)
+        Tour::Basic(BasicTour::load_of(
+            &Tour::basic_path_for(folders, subject),
+            subject,
+        )?)
     } else {
-        Tour::Guided(GuidedTour::load(&opened.tour_path())?)
+        Tour::Guided(GuidedTour::load_of(&opened.tour_path(), subject)?)
     };
     let code = opened.at_pinned_tips(tour.pin())?;
     let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin().head);

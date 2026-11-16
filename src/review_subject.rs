@@ -23,7 +23,8 @@ pub struct LocalChangeSet {
     repo: Option<RepoName>,
 }
 
-/// The root of a working tree, absolute.
+/// The root of a working tree, absolute and canonical, so `/tmp/x` and `/private/tmp/x` are one review. A
+/// folder that is not there keeps the path it was given.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WorkTreeRoot(PathBuf);
 
@@ -48,6 +49,11 @@ impl ReviewSubject {
             Self::PullRequest(_) => None,
             Self::Local(change_set) => Some(change_set),
         }
+    }
+
+    /// What the app answers an open request whose key is neither; the whole error chain is for logs.
+    pub fn not_a_subject(key: &str) -> String {
+        format!("`{key}` is not a PR link or a local key")
     }
 
     /// The name the app shows for it: `owner/repo#number` for a PR, `<folder name>@<branch>` for a
@@ -209,7 +215,7 @@ impl WorkTreeRoot {
         if !folder.is_absolute() {
             bail!("the folder {} is not an absolute path", folder.display());
         }
-        Ok(Self(folder))
+        Ok(Self(std::fs::canonicalize(&folder).unwrap_or(folder)))
     }
 
     pub fn as_path(&self) -> &Path {

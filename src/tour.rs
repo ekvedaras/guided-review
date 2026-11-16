@@ -313,6 +313,14 @@ impl Tour {
         .with_context(invalid)
     }
 
+    /// Loads the tour file of `subject`, refusing one pinned to another subject: a local review's path
+    /// holds only a short hash of its folder, so two reviews could share it.
+    pub fn load_of(path: &Path, subject: &ReviewSubject) -> anyhow::Result<Self> {
+        let tour = Self::load(path)?;
+        tour.pin().ensure_is_of(subject, path)?;
+        Ok(tour)
+    }
+
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         match self {
             Self::Basic(tour) => tour.save(path),
@@ -371,6 +379,15 @@ impl TourPin {
         }
     }
 
+    fn ensure_is_of(&self, subject: &ReviewSubject, path: &Path) -> anyhow::Result<()> {
+        match &self.local {
+            Some(held) if subject.local().is_some() && *held != subject.to_string() => {
+                anyhow::bail!("{} is the tour of {held}, not of {subject}", path.display())
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// The subject's key as text, for prompts that print it; a PR's key is its URL.
     pub fn subject_key(&self) -> &str {
         self.local.as_deref().unwrap_or(&self.pr)
@@ -389,6 +406,12 @@ impl TourPin {
 }
 
 impl BasicTour {
+    pub fn load_of(path: &Path, subject: &ReviewSubject) -> anyhow::Result<Self> {
+        let tour = Self::load(path)?;
+        tour.pin.ensure_is_of(subject, path)?;
+        Ok(tour)
+    }
+
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         Self::try_from(read_json(path)?)
             .with_context(|| format!("{} is not a valid basic tour file", path.display()))
@@ -400,6 +423,12 @@ impl BasicTour {
 }
 
 impl GuidedTour {
+    pub fn load_of(path: &Path, subject: &ReviewSubject) -> anyhow::Result<Self> {
+        let tour = Self::load(path)?;
+        tour.pin.ensure_is_of(subject, path)?;
+        Ok(tour)
+    }
+
     /// Reads the guided tour's file: no `kind`, or `"kind": "guided"`.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         match Tour::load(path)? {

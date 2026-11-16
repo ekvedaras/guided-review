@@ -279,7 +279,10 @@ async fn answer_requests(
                 let pr = match open.subject.parse::<ReviewSubject>() {
                     Ok(subject) => subject,
                     Err(error) => {
-                        reply.send(refused(&format!("{error:#}"))).ok();
+                        eprintln!("refused to open {}: {error:#}", open.subject);
+                        reply
+                            .send(refused(&ReviewSubject::not_a_subject(&open.subject)))
+                            .ok();
                         continue;
                     }
                 };

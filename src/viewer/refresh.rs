@@ -143,7 +143,8 @@ impl TourRefresher {
         if let Some(reason) = failure {
             anyhow::bail!("claude stopped: {reason}");
         }
-        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.subject))?;
+        let tour =
+            GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let pinned = ChangeTips {
             base_branch_tip: tour.pin.base.clone(),
             head: tour.pin.head.clone(),

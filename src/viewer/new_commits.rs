@@ -52,7 +52,8 @@ pub struct TourReloader {
 impl TourReloader {
     /// Blocks on the code source; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.subject))?;
+        let tour =
+            GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
         let review = Review::open(
             tour,
