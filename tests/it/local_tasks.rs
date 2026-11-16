@@ -10,11 +10,13 @@ use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run,
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::review_subject::ReviewSubject;
+use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
-    CommentRefusal, CommentResult, HandOffState, LineLocation, PieceDiff, ReviewStateFile,
-    SendMode, Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHome,
-    ThreadMessage, ThreadView, TourAgentPort, TourAgentState, TourAgents, WorkPorts,
+    CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffState, Intent, LineLocation,
+    PieceDiff, ReviewStateFile, ReviewVerdict, SendMode, Side, TerminalId, TextBox, ThreadAction,
+    ThreadActionResult, ThreadHome, ThreadMessage, ThreadView, TourAgentPort, TourAgentState,
+    TourAgents, WindowMoment, WorkPorts,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README's second line written and not
@@ -909,13 +911,62 @@ fn answered_while_the_app_shows(feature: &Feature, app: &mut OpenedReview, nth: 
     let home = ThreadHome::of(&feature.subject, &app.review.state_file());
     let hand_off = app.review.hand_offs().all()[nth].id();
     let state = app.review.state_file().load().unwrap();
-    let request = state.hand_offs().agent_reply(&home, hand_off, body).unwrap();
+    let request = state
+        .hand_offs()
+        .agent_reply(&home, hand_off, body)
+        .unwrap();
     let done = request.run(&feature.github()).unwrap();
-    app.review.hand_off_replied(hand_off, done.replied()).unwrap();
+    app.review
+        .hand_off_replied(hand_off, done.replied())
+        .unwrap();
     feature.agent.set_status("t1", AgentStatus::Idle);
     feature.run_work(app);
 }
 
 fn opened_on_cart(opened: &mut OpenedReview) {
     opened.review.go_to_file(&file_path("src/cart.rs"));
+}
+
+fn palette(opened: &OpenedReview) -> Vec<&'static str> {
+    opened
+        .review
+        .palette_actions(Build::Local)
+        .iter()
+        .map(|action| action.label())
+        .collect()
+}
+
+#[test]
+fn a_local_review_gives_no_verdict_or_approve_warning_and_finishes_with_send_tasks() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+
+    assert!(!opened.review.can_approve_or_request_changes());
+    assert_eq!(opened.review.approve_warning(), None);
+    assert_eq!(
+        opened
+            .review
+            .finish_review_request(ReviewVerdict::Approve, "")
+            .err(),
+        Some(FinishRefusal::NoPullRequest)
+    );
+    assert!(!opened.review.can_finish_review(), "no task is queued");
+    assert!(!palette(&opened).contains(&"Send tasks"));
+
+    add_to_tasks(&feature, &mut opened, "world", "Say who the world is");
+
+    assert!(opened.review.can_finish_review());
+    let offered = palette(&opened);
+    assert!(offered.contains(&"Send tasks"), "{offered:?}");
+    assert!(!offered.contains(&"Finish review"), "{offered:?}");
+    let moment = WindowMoment::default();
+    for intent in [Intent::FinishReview, Intent::SendTasks] {
+        assert_eq!(opened.review.decide(intent, moment), Effect::SendTasks);
+    }
+    assert_eq!(
+        opened.review.progress().total,
+        2,
+        "read progress still shows"
+    );
+    assert_eq!(opened.review.approve_warning(), None);
 }

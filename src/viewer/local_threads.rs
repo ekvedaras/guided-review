@@ -401,6 +401,41 @@ impl LocalThreadStore {
         Ok(answered?)
     }
 
+    /// A task added to tasks and not sent yet, written as Add to tasks would write it, for a snapshot
+    /// scene of a local review. Nothing is written when a thread holds the task already.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_queued_task(
+        &self,
+        place: &CommentPlace,
+        head: &Sha,
+        task: &str,
+    ) -> anyhow::Result<()> {
+        use super::hand_offs::{SentComment, SentFrom};
+
+        let staged = self.threads_at(head)?;
+        if staged
+            .iter()
+            .any(|thread| thread.comments.iter().any(|said| said.body == task))
+        {
+            return Ok(());
+        }
+        self.start(place, task, head)?;
+        let threads = self.threads_at(head)?;
+        self.file.update(|state| {
+            state.hand_offs_mut().record_new_thread(
+                place.path(),
+                &SentComment {
+                    place: place.describe(),
+                    from: SentFrom::File(place.path().clone()),
+                    mode: super::comments::SendMode::AddToTasks,
+                    body: task,
+                    code: None,
+                },
+                Some(&Ok(threads)),
+            );
+        })
+    }
+
     /// Nothing is written when the change is refused.
     fn change<T>(
         &self,

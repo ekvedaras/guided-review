@@ -41,6 +41,8 @@ pub enum Intent {
     WriteGuidedTour,
     SwitchToGuidedTour,
     FinishReview,
+    /// A local review's finish, from the sidebar, the finish card or the palette.
+    SendTasks,
     OpenOnGitHub,
     CheckForUpdates,
     RestartApp,
@@ -65,6 +67,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::FinishReview => Self::FinishReview,
+            PaletteAction::SendTasks => Self::SendTasks,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
             PaletteAction::Settings => Self::ToggleSettings,
@@ -93,6 +96,8 @@ pub enum Effect {
     /// The reviewer asked to switch to a ready guided tour.
     SwitchToGuidedTour,
     OpenFinishForm,
+    /// Hands a local review's queued tasks to its agent.
+    SendTasks,
     OpenOnGitHub(PullRequestUrl),
     Restart(RestartArgs),
     /// Asks GitHub for a newer release now.
@@ -206,6 +211,7 @@ impl Intent {
             | Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
             | Self::FinishReview
+            | Self::SendTasks
             | Self::OpenOnGitHub
             | Self::CheckForUpdates
             | Self::RestartApp => false,
@@ -271,7 +277,11 @@ impl ReviewCore {
                 Ok(()) => Effect::SwitchToGuidedTour,
                 Err(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
             },
-            Intent::FinishReview => Effect::OpenFinishForm,
+            Intent::FinishReview | Intent::SendTasks => match self.finishes_with_send_tasks() {
+                Some(0) => Effect::Nothing,
+                Some(_) => Effect::SendTasks,
+                None => Effect::OpenFinishForm,
+            },
             Intent::OpenOnGitHub => self
                 .subject()
                 .pull_request()

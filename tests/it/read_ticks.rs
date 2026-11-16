@@ -446,7 +446,7 @@ fn the_summary_leads_into_the_tour_from_where_the_reader_is() {
         review.tour_lead(),
         TourLead::Finish {
             steps: 3,
-            can_finish: review.can_finish_review()
+            finish: review.finish_action()
         }
     );
 }

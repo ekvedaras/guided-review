@@ -86,6 +86,13 @@ pub struct SubmittedReview {
     pub commit: Sha,
 }
 
+/// What finishing does: a PR takes a review on GitHub; a local review sends its queued tasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FinishAction {
+    FinishReview,
+    SendTasks,
+}
+
 /// What approving now would skip over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApproveWarning {

@@ -418,7 +418,7 @@ impl Page {
                         file_place: footer.file_place,
                         lead: Some(crate::viewer::TourLead::Finish {
                             steps,
-                            can_finish: true,
+                            finish: Some(crate::viewer::FinishAction::FinishReview),
                         }),
                     }));
                 }

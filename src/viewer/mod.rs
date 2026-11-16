@@ -111,8 +111,8 @@ pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
 pub use finish_review::{
-    ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
-    ReviewOutcome, ReviewVerdict, SubmittedReview,
+    ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
+    FinishResult, ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};

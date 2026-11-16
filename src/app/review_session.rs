@@ -473,6 +473,27 @@ impl ReviewSession {
         .detach();
     }
 
+    /// A local review's finish: the queued tasks go to the agent as the hand-offs deliver them.
+    pub fn send_tasks(&mut self, cx: &mut Context<Self>) {
+        let queued = self.review.queued_tasks();
+        match self.change(cx, |review| review.send_tasks()) {
+            Ok(()) if queued > 0 => {
+                let tasks = if queued == 1 { "task" } else { "tasks" };
+                post_toast(
+                    cx,
+                    ToastTone::Success,
+                    format!("{queued} {tasks} handed to your agent"),
+                );
+            }
+            Ok(()) => {}
+            Err(error) => post_toast(
+                cx,
+                ToastTone::Danger,
+                format!("Could not send the tasks: {error:#}"),
+            ),
+        }
+    }
+
     /// Sends the review in the background; `on_done` gets the answer.
     pub fn finish_review(
         &mut self,
@@ -848,7 +869,8 @@ impl ReviewSession {
     }
 
     /// The local review with a task on the README's new line that its agent answered, kept in the
-    /// review's state file as Send now and `agent-reply` keep it.
+    /// review's state file as Send now and `agent-reply` keep it, and a task on the README added to
+    /// tasks, waiting for Send tasks.
     #[cfg(feature = "snapshots")]
     pub fn stage_local_with_task(&mut self, cx: &mut Context<Self>) {
         let folders = cx.global::<PrSwitching>().folders.clone();
@@ -875,6 +897,11 @@ impl ReviewSession {
                     "Say that tax is added on top, so nobody reads the total as the price.",
                     "Done: the README now says the total is before tax, and `tax` names the rate.",
                 ),
+            )?;
+            store.stage_queued_task(
+                &CommentPlace::File(FilePath::new("README.md")?),
+                &head,
+                "Add a line on how to run the shop's tests.",
             )
         });
         if let Err(error) = staged {

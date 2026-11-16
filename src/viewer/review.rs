@@ -36,8 +36,8 @@ use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finish_review::{
-    ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
-    SubmittedReview,
+    ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
+    ReviewVerdict, SubmittedReview,
 };
 use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
@@ -193,12 +193,12 @@ pub enum TourLead {
     ContinueFile(UnreadFile),
     FinishFiles {
         files: usize,
-        can_finish: bool,
+        finish: Option<FinishAction>,
     },
     Finish {
         steps: usize,
         /// The PR takes a review from the viewer; an own PR with nothing to send does not.
-        can_finish: bool,
+        finish: Option<FinishAction>,
     },
 }
 
@@ -1723,17 +1723,43 @@ impl ReviewCore {
     }
 
     /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.
+    /// A local review gives no verdict.
     pub fn can_approve_or_request_changes(&self) -> bool {
-        self.comment_desk.can_approve_or_request_changes()
+        self.finishes_with_send_tasks().is_none()
+            && self.comment_desk.can_approve_or_request_changes()
     }
 
-    /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments to send.
+    /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments
+    /// to send; a local review's finish sends its queued tasks, so it needs some.
     pub fn can_finish_review(&self) -> bool {
-        self.comment_desk.can_finish_review()
+        match self.finishes_with_send_tasks() {
+            Some(queued) => queued > 0,
+            None => self.comment_desk.can_finish_review(),
+        }
+    }
+
+    /// What finishing the review does now; `None` when there is nothing to finish.
+    pub fn finish_action(&self) -> Option<FinishAction> {
+        self.can_finish_review().then(|| {
+            if self.finishes_with_send_tasks().is_some() {
+                FinishAction::SendTasks
+            } else {
+                FinishAction::FinishReview
+            }
+        })
+    }
+
+    /// A local review finishes with Send tasks, never with a review on GitHub: how many tasks it
+    /// would send. `None` for a PR.
+    pub fn finishes_with_send_tasks(&self) -> Option<usize> {
+        self.subject.local().map(|_| self.queued_tasks())
     }
 
     /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
     pub fn approve_warning(&self) -> Option<ApproveWarning> {
+        if self.finishes_with_send_tasks().is_some() {
+            return None;
+        }
         let progress = self.progress();
         let unread_safety_net_pieces = self.tour.guided().map_or(0, |guided| {
             coverage::safety_net(guided, &self.files)
@@ -2064,9 +2090,10 @@ impl ReviewCore {
             || self.first_unread_file().is_some())
         .then_some(PaletteAction::NextUnreadStep);
         let ask = step.map(|_| PaletteAction::AskAboutStep);
-        let finish = self
-            .can_finish_review()
-            .then_some(PaletteAction::FinishReview);
+        let finish = self.finish_action().map(|finish| match finish {
+            FinishAction::FinishReview => PaletteAction::FinishReview,
+            FinishAction::SendTasks => PaletteAction::SendTasks,
+        });
         let check_for_updates = build
             .takes_updates()
             .then_some(PaletteAction::CheckForUpdates);
@@ -2211,12 +2238,12 @@ impl ReviewCore {
         if progress.total == 0 {
             return TourLead::Nowhere;
         }
-        let can_finish = self.can_finish_review();
+        let finish = self.finish_action();
         if let Tour::Basic(_) = &self.tour {
             return match self.first_unread_file() {
                 _ if progress.is_complete() => TourLead::FinishFiles {
                     files: progress.total,
-                    can_finish,
+                    finish,
                 },
                 Some(first) if progress.read == 0 => TourLead::StartFile(first),
                 Some(next) => TourLead::ContinueFile(next),
@@ -2226,7 +2253,7 @@ impl ReviewCore {
         if progress.is_complete() {
             return TourLead::Finish {
                 steps: progress.total,
-                can_finish,
+                finish,
             };
         }
         match self.first_unread_step() {

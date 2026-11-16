@@ -84,7 +84,9 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
-use crate::app::sidebar_rows::{SidebarDiskNews, SidebarGuidedTour, SidebarTourAgent, WriteOffer};
+use crate::app::sidebar_rows::{
+    SidebarDiskNews, SidebarGuidedTour, SidebarRows, SidebarTourAgent, WriteOffer,
+};
 use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
@@ -95,10 +97,10 @@ use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, DiskOffer, Effect,
-    FileToggle, FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation,
-    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
-    PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal,
-    Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch,
+    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats,
+    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit,
+    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
     ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
     SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
     SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
@@ -908,6 +910,50 @@ impl OneStepLayout {
         })
     }
 
+    fn finish_review_dialog(
+        &self,
+        sidebar: &SidebarRows,
+        is_everything_read: bool,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        FinishReviewDialog::new(
+            is_everything_read,
+            sidebar.finishing,
+            sidebar.approve_warning,
+            sidebar.last_review.clone(),
+            self.session
+                .read(cx)
+                .review()
+                .text_of(&TextBox::FinishBody)
+                .unwrap_or_default()
+                .to_owned(),
+            self.on_finish_body_edit(),
+            self.on_finish_review(),
+        )
+        .opened_by(self.finish_form_request)
+        .into_any_element()
+    }
+
+    /// A local review's finish: no verdict and no body, only its queued tasks to send.
+    fn send_tasks_button(
+        colors: &Colors,
+        queued: usize,
+        is_everything_read: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let kind = if is_everything_read {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Secondary
+        };
+        button(colors, "send-tasks", kind, ButtonSize::Regular)
+            .child(button_icon(colors, kind, ButtonSize::Regular, Icon::Send))
+            .child(SharedString::from(format!("Send tasks ({queued})")))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::SendTasks, window, cx);
+            }))
+    }
+
     fn on_finish_review(&self) -> OnFinish {
         let session = self.session.clone();
         Rc::new(move |verdict, body, on_done, cx| {
@@ -1194,6 +1240,7 @@ impl OneStepLayout {
                 .update(cx, |switcher, cx| switcher.show(window, cx)),
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
+            Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::Restart(restart) => match crate::platform::running_binary() {
                 Ok(exe) => self.restart_app_with(exe, &restart, cx),
@@ -1807,20 +1854,13 @@ impl OneStepLayout {
         let clone_offer = session
             .clone_offer()
             .map(|offer| Self::clone_offer_block(&colors, offer, cx));
-        let finish_dialog = FinishReviewDialog::new(
-            progress.total > 0 && progress.read == progress.total,
-            sidebar.finishing,
-            sidebar.approve_warning,
-            sidebar.last_review.clone(),
-            session
-                .review()
-                .text_of(&TextBox::FinishBody)
-                .unwrap_or_default()
-                .to_owned(),
-            self.on_finish_body_edit(),
-            self.on_finish_review(),
-        )
-        .opened_by(self.finish_form_request);
+        let is_everything_read = progress.total > 0 && progress.read == progress.total;
+        let finish_dialog = match session.review().finishes_with_send_tasks() {
+            Some(queued) => (queued > 0)
+                .then(|| Self::send_tasks_button(&colors, queued, is_everything_read, cx))
+                .map(IntoElement::into_any_element),
+            None => Some(self.finish_review_dialog(sidebar, is_everything_read, cx)),
+        };
         let step_rows = sidebar
             .steps
             .iter()
@@ -1910,7 +1950,7 @@ impl OneStepLayout {
                     .into_any_element(),
                 None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
-            .child(finish_dialog)
+            .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
             .children(clone_offer)
@@ -2588,22 +2628,22 @@ impl OneStepLayout {
                 .max_w(READING_WIDTH)
                 .flex()
                 .children(match lead.as_ref() {
-                    TourLead::Finish { steps, can_finish } => Some(
+                    TourLead::Finish { steps, finish } => Some(
                         finish_card(
                             *steps,
                             ReadUnit::Steps,
-                            *can_finish,
+                            *finish,
                             ReviewAgain::Offered,
                             "summary-lead",
                             cx,
                         )
                         .into_any_element(),
                     ),
-                    TourLead::FinishFiles { files, can_finish } => Some(
+                    TourLead::FinishFiles { files, finish } => Some(
                         finish_card(
                             *files,
                             ReadUnit::Files,
-                            *can_finish,
+                            *finish,
                             ReviewAgain::Offered,
                             "summary-lead",
                             cx,
@@ -3441,9 +3481,9 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         NextScreen::File { path } => path.to_string(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
-    if let Some((count, unit, can_finish)) = footer.lead.as_ref().and_then(|lead| match lead {
-        TourLead::Finish { steps, can_finish } => Some((*steps, ReadUnit::Steps, *can_finish)),
-        TourLead::FinishFiles { files, can_finish } => Some((*files, ReadUnit::Files, *can_finish)),
+    if let Some((count, unit, finish)) = footer.lead.as_ref().and_then(|lead| match lead {
+        TourLead::Finish { steps, finish } => Some((*steps, ReadUnit::Steps, *finish)),
+        TourLead::FinishFiles { files, finish } => Some((*files, ReadUnit::Files, *finish)),
         _ => None,
     }) {
         return div()
@@ -3456,7 +3496,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .child(finish_card(
                 count,
                 unit,
-                can_finish,
+                finish,
                 ReviewAgain::NotOffered,
                 "footer",
                 cx,
@@ -3982,11 +4022,12 @@ fn lead_button(
 }
 
 /// The tour's end once every step is read: a calm success card whose check pops in once, with
-/// Finish review when the PR takes a review from the reader.
+/// Finish review when the PR takes a review from the reader, or Send tasks when a local review
+/// has tasks queued.
 fn finish_card(
     count: usize,
     unit: ReadUnit,
-    can_finish: bool,
+    finish: Option<FinishAction>,
     review_again: ReviewAgain,
     id: &'static str,
     cx: &mut Context<OneStepLayout>,
@@ -3997,16 +4038,22 @@ fn finish_card(
         (1, ReadUnit::Files) => "The one file is read".to_owned(),
         (count, unit) => format!("All {count} {} read", unit.plural()),
     };
-    let finish = can_finish.then(|| {
+    let finish_button = finish.map(|finish| {
+        let (icon, label) = match finish {
+            FinishAction::FinishReview => (Icon::ListChecks, "Finish review"),
+            FinishAction::SendTasks => (Icon::Send, "Send tasks"),
+        };
         icon_label_button(
             &colors,
             SharedString::from(format!("{id}-finish")),
             ButtonKind::Primary,
             ButtonSize::Large,
-            Icon::ListChecks,
-            "Finish review",
+            icon,
+            label,
         )
-        .on_click(cx.listener(|this, _, _, cx| this.open_finish_form(cx)))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.act(Intent::FinishReview, window, cx);
+        }))
     });
     let again = (review_again == ReviewAgain::Offered).then(|| {
         icon_label_button(
@@ -4060,20 +4107,26 @@ fn finish_card(
                         .child(title),
                 )
                 .child(div().text_sm().text_color(colors.muted_text).child(
-                    match (unit, can_finish) {
-                        (ReadUnit::Steps, true) => {
+                    match (unit, finish) {
+                        (ReadUnit::Steps, Some(FinishAction::FinishReview)) => {
                             "Every step of the tour is read. Send your review when you are ready."
                         }
-                        (ReadUnit::Steps, false) => "Every step of the tour is read.",
-                        (ReadUnit::Files, true) => {
+                        (ReadUnit::Steps, Some(FinishAction::SendTasks)) => {
+                            "Every step of the tour is read. Send your tasks when you are ready."
+                        }
+                        (ReadUnit::Steps, None) => "Every step of the tour is read.",
+                        (ReadUnit::Files, Some(FinishAction::FinishReview)) => {
                             "Every changed file is read. Send your review when you are ready."
                         }
-                        (ReadUnit::Files, false) => "Every changed file is read.",
+                        (ReadUnit::Files, Some(FinishAction::SendTasks)) => {
+                            "Every changed file is read. Send your tasks when you are ready."
+                        }
+                        (ReadUnit::Files, None) => "Every changed file is read.",
                     },
                 )),
         )
         .children(again)
-        .children(finish)
+        .children(finish_button)
 }
 
 /// Whether the footer's primary action moves on to another screen, which its key says.
