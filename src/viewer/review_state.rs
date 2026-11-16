@@ -581,6 +581,9 @@ pub struct TypedText {
 pub struct ReviewStateFile {
     path: PathBuf,
     local_key: Option<String>,
+    /// A local review's tour files. With none of them on disk the review was dropped, and its state is
+    /// never written again.
+    local_tours: Option<[PathBuf; 2]>,
     tour_files: PathBuf,
 }
 
@@ -588,6 +591,12 @@ impl ReviewStateFile {
     pub fn for_subject(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         Self {
             local_key: subject.local().map(|_| subject.to_string()),
+            local_tours: subject.local().map(|_| {
+                [
+                    Tour::basic_path_for(folders, subject),
+                    Tour::path_for(folders, subject),
+                ]
+            }),
             path: folders
                 .state_files()
                 .join(subject.files_folder())
@@ -632,7 +641,9 @@ impl ReviewStateFile {
     }
 
     /// For a dropped review; a file never written is already gone.
+    /// Under the writers' lock, so a save that began before it ends before the file goes.
     pub fn delete(&self) -> anyhow::Result<()> {
+        let _lock = self.lock()?;
         remove_if_there(&self.path, std::fs::remove_file(&self.path))
     }
 
@@ -777,7 +788,15 @@ impl ReviewStateFile {
     }
 
     /// Written to a temp file of its own first, so a crash mid-write never leaves half a file behind.
+    /// Drop review deletes the tours before the state file, so a writer that finds no tour never puts
+    /// back the state of a review that is gone.
     fn write(&self, state: &ReviewState) -> anyhow::Result<()> {
+        if let (Some(key), Some(tours)) = (&self.local_key, &self.local_tours) {
+            anyhow::ensure!(
+                tours.iter().any(|tour| tour.exists()),
+                "the review of {key} was dropped, so nothing of it is saved"
+            );
+        }
         let mut value = serde_json::to_value(state)?;
         if let (Some(key), Some(object)) = (&self.local_key, value.as_object_mut()) {
             object.insert("subject".into(), key.clone().into());

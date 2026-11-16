@@ -127,6 +127,20 @@ mod on_disk {
 
     const LOCAL: &str = "local:/Users/me/Code/shop@feature/discounts";
 
+    /// A local review's state is saved only while its tour is on disk.
+    fn with_its_tour(
+        folders: &guided_review::app_folders::AppFolders,
+        subject: &super::ReviewSubject,
+    ) {
+        let path = Tour::path_for(folders, subject);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(r#"{{"local": "{subject}", "base": "aaa", "head": "bbb"}}"#),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn a_local_change_sets_tours_are_in_a_folder_named_by_its_folder_and_a_hash_of_its_path() {
         let folders = folders_in(Path::new("/home/me"));
@@ -181,6 +195,7 @@ mod on_disk {
     fn a_local_reviews_state_is_saved_at_the_matching_path_under_the_state_folder() {
         let home = tempfile::tempdir().unwrap();
         let folders = folders_in(home.path());
+        with_its_tour(&folders, &subject(LOCAL));
 
         ReviewStateFile::for_subject(&folders, &subject(LOCAL))
             .save(&ReviewState::default())
@@ -238,6 +253,7 @@ mod on_disk {
         let folders = folders_in(home.path());
         let this = subject(LOCAL);
         let other = subject("local:/Users/me/Other/shop@feature/discounts");
+        with_its_tour(&folders, &other);
         ReviewStateFile::for_subject(&folders, &other)
             .save(&ReviewState::default())
             .unwrap();
@@ -266,6 +282,7 @@ mod on_disk {
         let folders = folders_in(home.path());
         let this = subject(LOCAL);
         let file = ReviewStateFile::for_subject(&folders, &this);
+        with_its_tour(&folders, &this);
 
         file.save(&ReviewState::default()).unwrap();
         file.update(|_| {}).unwrap();

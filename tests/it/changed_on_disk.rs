@@ -497,6 +497,25 @@ fn a_review_being_dropped_takes_no_change_so_nothing_writes_its_state_file_again
 }
 
 #[test]
+fn a_review_dropped_from_elsewhere_never_writes_its_state_file_again() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let folders = feature.repo.folders();
+    OpenedChangeSet::new(feature.subject().local().unwrap(), &folders)
+        .drop_review()
+        .unwrap();
+
+    let ticked = opened.review.tick_file(&file_path("README.md"));
+
+    assert!(ticked.is_err());
+    assert!(!ReviewStateFile::for_subject(&folders, &feature.subject()).exists());
+    assert_eq!(
+        ToursOnDisk::of(&folders, &feature.subject()),
+        ToursOnDisk::None
+    );
+}
+
+#[test]
 fn on_start_the_refs_of_local_reviews_no_longer_on_disk_are_deleted() {
     let feature = Feature::with_work_in_progress();
     feature.open();
