@@ -546,29 +546,25 @@ impl ReviewState {
                 self.tick_file(path, head);
             }
         }
-        for (path, head) in &moved.file_read_before {
-            if !self.viewer.file_read_ticks.contains_key(path)
-                && !self.viewer.file_read_before.contains_key(path)
-            {
-                self.viewer
-                    .file_read_before
-                    .insert(path.clone(), ReadTick { head: head.clone() });
-            }
-        }
+        keep_read_before(
+            &mut self.viewer.file_read_before,
+            &self.viewer.file_read_ticks,
+            &moved.file_read_before,
+        );
         for (step, head) in &moved.steps.ticked {
             if !self.viewer.read_ticks.contains_key(step) {
                 self.tick(step, head);
             }
         }
-        for (step, head) in &moved.steps.read_before {
-            if !self.viewer.read_ticks.contains_key(step)
-                && !self.viewer.read_before.contains_key(step)
-            {
-                self.viewer
-                    .read_before
-                    .insert(step.clone(), ReadTick { head: head.clone() });
-            }
-        }
+        keep_read_before(
+            &mut self.viewer.read_before,
+            &self.viewer.read_ticks,
+            moved
+                .steps
+                .read_before
+                .iter()
+                .map(|(step, head)| (step, head)),
+        );
         for comment in &moved.comments {
             self.take_moved_comment(&comment.place, &comment.body, &moved.head);
         }
@@ -1043,5 +1039,19 @@ impl AskStore for ReviewStateFile {
 
     fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {
         self.update(|state| state.asks = asks.to_vec())
+    }
+}
+
+/// What a move marks as read before its change, but not where the PR's review has a tick or a mark of
+/// its own.
+fn keep_read_before<'a, K: Ord + Clone + 'a>(
+    marks: &mut BTreeMap<K, ReadTick>,
+    ticks: &BTreeMap<K, ReadTick>,
+    moved: impl IntoIterator<Item = (&'a K, &'a Sha)>,
+) {
+    for (key, head) in moved {
+        if !ticks.contains_key(key) && !marks.contains_key(key) {
+            marks.insert(key.clone(), ReadTick { head: head.clone() });
+        }
     }
 }
