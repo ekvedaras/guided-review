@@ -541,6 +541,26 @@ fn a_release_install_updated_by_0_6_0_puts_its_own_bundle_in_place_when_it_start
     );
 }
 
+/// An updater that knew of fewer bundle files, as 0.10.0's knew no `Assets.car`, puts the rest of
+/// the new bundle in place but leaves the new file out.
+#[test]
+fn a_release_starting_puts_a_bundle_file_its_updater_left_out_in_place() {
+    let home = Home::as_the_0_6_0_updater_leaves_it("0.7.0");
+    home.install()
+        .bring_desktop_entry_up_to_date(&home.bin_link())
+        .unwrap();
+    let assets = home.bundle().join("Contents/Resources/Assets.car");
+    fs::remove_file(&assets).unwrap();
+
+    let placed = home
+        .install()
+        .bring_desktop_entry_up_to_date(&home.bin_link())
+        .unwrap();
+
+    assert_eq!(placed, EntryPlaced::Refreshed);
+    assert_eq!(fs::read_to_string(&assets).unwrap(), "assets 0.7.0");
+}
+
 #[test]
 fn a_source_build_starting_leaves_the_bundle_alone() {
     let home = Home::as_the_0_6_0_updater_leaves_it("0.7.0");
