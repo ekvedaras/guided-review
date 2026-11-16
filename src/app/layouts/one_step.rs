@@ -234,8 +234,9 @@ impl OneStepLayout {
                 this.reopen_if_work_ended(cx);
                 cx.notify();
             }),
-            cx.subscribe(&session, |this, _, SessionEvent::Reopened, cx| {
-                this.reopened(cx);
+            cx.subscribe_in(&session, window, |this, _, event, window, cx| match event {
+                SessionEvent::Reopened => this.reopened(cx),
+                SessionEvent::CommentBoxTakesKeysAgain => window.focus(&this.composer_focus, cx),
             }),
         ];
         // A text box that is sent, given up or saved goes, and with it what had the focus; gpui

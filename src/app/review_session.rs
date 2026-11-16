@@ -50,6 +50,8 @@ pub struct TourWork {
 pub enum SessionEvent {
     /// A re-pin or a Refresh replaced the review: what the layout keeps about the old one is stale.
     Reopened,
+    /// A comment did not go, and its box takes the keys again.
+    CommentBoxTakesKeysAgain,
 }
 
 /// Every change of the review goes through `change`, which rebuilds the rows and the sidebar and tells the
@@ -418,6 +420,9 @@ impl ReviewSession {
         let result = self.change(cx, |review| review.apply_comment(outcome));
         if matches!(result, Ok(CommentResult::Sent)) {
             post_toast(cx, ToastTone::Success, sent_note("Comment", mode, audience));
+        }
+        if self.review.composing().is_some() {
+            cx.emit(SessionEvent::CommentBoxTakesKeysAgain);
         }
     }
 

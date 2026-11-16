@@ -361,8 +361,8 @@ impl CommentDesk {
         result
     }
 
-    /// A sent or queued comment closes the box; any other keeps it, with why, until a click on it
-    /// gives it the keys again.
+    /// A sent or queued comment closes the box; any other keeps it, with why, and gives it the
+    /// keys again, so the reviewer can fix the text and send it again.
     fn show_landing(&mut self, place: &CommentPlace, result: &anyhow::Result<CommentResult>) {
         self.boxes.sending.remove(place);
         let problem = match result {
@@ -372,6 +372,7 @@ impl CommentDesk {
             Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
         };
         self.boxes.send_problems.insert(place.clone(), problem);
+        self.boxes.composing = Some(place.clone());
     }
 
     fn settle(

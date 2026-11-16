@@ -322,7 +322,7 @@ fn a_sent_or_queued_comment_closes_its_box() {
 }
 
 #[test]
-fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_the_keys_stay_with_the_page() {
+fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_gives_it_the_keys_again() {
     let pull = Pull::new();
     let github = pull.github();
     github.inject(GitHubFault::NewThreadsAnswerNull);
@@ -333,11 +333,11 @@ fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_the_keys_stay_with
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();
 
-    let Some((BoxState::Idle, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
+    let Some((BoxState::Composing, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
     else {
         panic!("{:?}", state_of(&review, &place));
     };
-    assert_eq!(review.composing(), None);
+    assert_eq!(review.composing(), Some(&place));
     assert_eq!(review.text_of(&TextBox::Draft(place)), Some("why ten?"));
 }
 
@@ -355,7 +355,7 @@ fn a_refused_comment_keeps_its_box_with_the_refusal_until_it_is_sent_again() {
     assert_eq!(
         state_of(&review, &place),
         Some((
-            BoxState::Idle,
+            BoxState::Composing,
             Some(CommentProblem::Refused(CommentRefusal::TourIsOld))
         ))
     );
