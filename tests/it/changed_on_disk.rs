@@ -192,7 +192,9 @@ fn a_folder_that_cannot_be_looked_at_is_one_problem_however_often_it_is_looked_a
         .collect();
     assert_eq!(shown.len(), 1, "{shown:?}");
     assert!(
-        shown[0].starts_with("The folder could not be looked at, so the sidebar may not say how it changed: "),
+        shown[0].starts_with(
+            "The folder could not be looked at, so the sidebar may not say how it changed: "
+        ),
         "{shown:?}"
     );
 }
@@ -414,7 +416,9 @@ fn two_updates_at_once_leave_the_ref_on_the_snapshot_the_tour_reads() {
         });
         is_held.recv().unwrap();
         let before = tour_head(&feature);
-        feature.repo.write("notes.txt", &format!("round {round}, first\n"));
+        feature
+            .repo
+            .write("notes.txt", &format!("round {round}, first\n"));
         let first = update_in_the_background(&feature);
         let waited = Instant::now();
         while tour_head(&feature) == before {
@@ -432,7 +436,11 @@ fn two_updates_at_once_leave_the_ref_on_the_snapshot_the_tour_reads() {
             update.join().unwrap();
         }
 
-        assert_eq!(snapshot_ref_target(&feature), tour_head(&feature), "round {round}");
+        assert_eq!(
+            snapshot_ref_target(&feature),
+            tour_head(&feature),
+            "round {round}"
+        );
     }
 }
 
@@ -533,8 +541,7 @@ fn drop_review_deletes_its_tours_state_file_and_ref_and_nothing_of_other_reviews
 #[test]
 fn a_snapshot_ref_git_cannot_reach_is_an_error_and_not_a_ref_already_gone() {
     let not_a_clone = tempfile::TempDir::new().unwrap();
-    let work_tree =
-        LocalWorkTree::at(WorkTreeRoot::new(not_a_clone.path().to_path_buf()).unwrap());
+    let work_tree = LocalWorkTree::at(WorkTreeRoot::new(not_a_clone.path().to_path_buf()).unwrap());
 
     let deleted = work_tree.delete_snapshot_ref("refs/guided-review/local-0123456789ab");
 
@@ -576,8 +583,7 @@ fn a_drop_that_stops_part_way_leaves_no_snapshot_ref_once_the_app_starts_again()
     let folders = feature.repo.folders();
     state_file_undeletable(&folders, &feature.subject());
 
-    let dropped =
-        OpenedChangeSet::new(feature.subject().local().unwrap(), &folders).drop_review();
+    let dropped = OpenedChangeSet::new(feature.subject().local().unwrap(), &folders).drop_review();
     clean_snapshot_refs(&folders);
 
     assert!(dropped.is_err());

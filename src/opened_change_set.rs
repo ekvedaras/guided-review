@@ -57,7 +57,9 @@ pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
         };
         for stale in refs.iter().filter(|name| !kept.contains(*name)) {
             if let Err(error) = work_tree.delete_snapshot_ref(stale) {
-                not_cleaned.push(format!("could not delete the snapshot ref {stale}: {error}"));
+                not_cleaned.push(format!(
+                    "could not delete the snapshot ref {stale}: {error}"
+                ));
             }
         }
     }
@@ -89,7 +91,9 @@ impl LocalReviewsOnDisk {
         for clone in clones {
             match clone.and_then(|clone| Ok((std::fs::read_dir(clone.path())?, clone.path()))) {
                 Ok((tours, folder)) => on_disk.read_tours_in(&folder, tours),
-                Err(error) => on_disk.unreadable.push((local_tours.clone(), error.to_string())),
+                Err(error) => on_disk
+                    .unreadable
+                    .push((local_tours.clone(), error.to_string())),
             }
         }
         on_disk
@@ -100,7 +104,8 @@ impl LocalReviewsOnDisk {
             let path = match tour {
                 Ok(tour) => tour.path(),
                 Err(error) => {
-                    self.unreadable.push((folder.to_path_buf(), error.to_string()));
+                    self.unreadable
+                        .push((folder.to_path_buf(), error.to_string()));
                     continue;
                 }
             };
