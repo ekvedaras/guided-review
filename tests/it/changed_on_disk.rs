@@ -13,7 +13,8 @@ use guided_review::pull_request::Sha;
 use guided_review::review_subject::{ReviewSubject, WorkTreeRoot};
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, Review, ReviewStateFile, Side, WorkKind,
+    Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, ProblemKind, Review, ReviewStateFile,
+    Side, WorkKind,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README changed and not committed.
@@ -708,6 +709,48 @@ fn on_start_a_clone_with_a_tour_that_cannot_be_read_keeps_every_ref_and_names_th
     assert!(
         not_cleaned[0].contains(&unreadable.display().to_string()),
         "{not_cleaned:?}"
+    );
+}
+
+#[test]
+fn a_local_tour_that_cannot_be_read_is_a_problem_naming_the_file_in_any_review_opened() {
+    let feature = Feature::with_work_in_progress();
+    let second = with_a_second_review_and_a_pr_ref(&feature);
+    let unreadable = Tour::shown_path_for(&feature.repo.folders(), &second);
+    std::fs::write(&unreadable, "not a tour").unwrap();
+
+    let opened = feature.open();
+
+    let named: Vec<String> = opened
+        .review
+        .problems()
+        .iter()
+        .filter(|problem| problem.kind() == ProblemKind::LocalToursNotRead)
+        .map(ToString::to_string)
+        .collect();
+    let [problem] = named.try_into().unwrap();
+    assert!(
+        problem.starts_with(&format!(
+            "A local review's tour could not be read, so the snapshot refs of its clone are kept until it can: {} (",
+            unreadable.display()
+        )),
+        "{problem}"
+    );
+}
+
+#[test]
+fn a_review_opened_with_every_local_tour_readable_has_no_such_problem() {
+    let feature = Feature::with_work_in_progress();
+    with_a_second_review_and_a_pr_ref(&feature);
+
+    let opened = feature.open();
+
+    assert!(
+        !opened
+            .review
+            .problems()
+            .iter()
+            .any(|problem| problem.kind() == ProblemKind::LocalToursNotRead)
     );
 }
 

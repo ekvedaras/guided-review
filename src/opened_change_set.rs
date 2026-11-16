@@ -27,10 +27,11 @@ pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
     let mut not_cleaned: Vec<String> = on_disk
         .unreadable
         .iter()
-        .map(|(path, error)| {
+        .map(|unreadable| {
             format!(
-                "{} cannot be read, so the snapshot refs of its clone were kept: {error}",
-                path.display()
+                "{} cannot be read, so the snapshot refs of its clone were kept: {}",
+                unreadable.path.display(),
+                unreadable.reason
             )
         })
         .collect();
@@ -66,11 +67,24 @@ pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
     not_cleaned
 }
 
+/// The local tours, or folders of them, that could not be read. Each may be the review a snapshot ref
+/// keeps, so the clean-up keeps every ref of its clone, and the reviewer is told.
+pub fn unreadable_local_tours(folders: &AppFolders) -> Vec<UnreadableLocalTour> {
+    LocalReviewsOnDisk::read(folders).unreadable
+}
+
+/// A local tour, or a folder of them, that could not be read, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadableLocalTour {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
 /// The change sets whose tours are on disk, basic or guided, and the tours and folders of local tours
 /// that could not be read, which may be of any review.
 struct LocalReviewsOnDisk {
     change_sets: HashSet<LocalChangeSet>,
-    unreadable: Vec<(PathBuf, String)>,
+    unreadable: Vec<UnreadableLocalTour>,
 }
 
 impl LocalReviewsOnDisk {
@@ -84,16 +98,14 @@ impl LocalReviewsOnDisk {
             Ok(clones) => clones,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return on_disk,
             Err(error) => {
-                on_disk.unreadable.push((local_tours, error.to_string()));
+                on_disk.cannot_read(local_tours, error.to_string());
                 return on_disk;
             }
         };
         for clone in clones {
             match clone.and_then(|clone| Ok((std::fs::read_dir(clone.path())?, clone.path()))) {
                 Ok((tours, folder)) => on_disk.read_tours_in(&folder, tours),
-                Err(error) => on_disk
-                    .unreadable
-                    .push((local_tours.clone(), error.to_string())),
+                Err(error) => on_disk.cannot_read(local_tours.clone(), error.to_string()),
             }
         }
         on_disk
@@ -104,8 +116,7 @@ impl LocalReviewsOnDisk {
             let path = match tour {
                 Ok(tour) => tour.path(),
                 Err(error) => {
-                    self.unreadable
-                        .push((folder.to_path_buf(), error.to_string()));
+                    self.cannot_read(folder.to_path_buf(), error.to_string());
                     continue;
                 }
             };
@@ -117,9 +128,13 @@ impl LocalReviewsOnDisk {
                     self.change_sets.insert(change_set);
                 }
                 Ok(ReviewSubject::PullRequest(_)) => {}
-                Err(error) => self.unreadable.push((path, format!("{error:#}"))),
+                Err(error) => self.cannot_read(path, format!("{error:#}")),
             }
         }
+    }
+
+    fn cannot_read(&mut self, path: PathBuf, reason: String) {
+        self.unreadable.push(UnreadableLocalTour { path, reason });
     }
 
     /// Whether something unreadable may be a review of the change set's clone: a tour in its folder,
@@ -127,9 +142,9 @@ impl LocalReviewsOnDisk {
     fn cannot_tell_all_of(&self, folders: &AppFolders, change_set: &LocalChangeSet) -> bool {
         let subject = ReviewSubject::from(change_set.clone());
         let tours_folder = Tour::tours_dir(folders).join(subject.files_folder());
-        self.unreadable
-            .iter()
-            .any(|(path, _)| path.starts_with(&tours_folder) || tours_folder.starts_with(path))
+        self.unreadable.iter().any(|unreadable| {
+            unreadable.path.starts_with(&tours_folder) || tours_folder.starts_with(&unreadable.path)
+        })
     }
 }
 

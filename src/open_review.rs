@@ -9,15 +9,15 @@ use crate::config::Config;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
-use crate::opened_change_set::OpenedChangeSet;
+use crate::opened_change_set::{OpenedChangeSet, unreadable_local_tours};
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
-    GitHubPort, NoGitHub, PickCodeSource, Review, ReviewStateFile, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, TourSwitcher, WorkingCopy,
+    GitHubPort, NoGitHub, PickCodeSource, Problem, Review, ReviewStateFile, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkingCopy,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -165,6 +165,10 @@ fn assemble(
     review
         .display_options_mut()
         .use_more_lines(config.more_lines());
+    let unreadable = unreadable_local_tours(folders);
+    if !unreadable.is_empty() {
+        review.raise_problem(Problem::LocalToursNotRead(unreadable));
+    }
 
     let agent_folder = clone
         .clone()

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::app_folders::NotRead;
+use crate::opened_change_set::UnreadableLocalTour;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
@@ -55,6 +56,9 @@ pub enum Problem {
     /// Files the app keeps that lie in the app folders it does not use: what a move from
     /// `~/.guided-review` left behind or could not put back, or what an older binary wrote there since.
     FilesNotRead(Vec<NotRead>),
+    /// Local tours that could not be read: the app keeps every snapshot ref of their clones, and the
+    /// reviews they hold do not open.
+    LocalToursNotRead(Vec<UnreadableLocalTour>),
 }
 
 /// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
@@ -101,6 +105,8 @@ pub enum ProblemKind {
     ReleaseInstallInTheWay,
     /// Raised when the review opens; a review opened once the files are gone has none.
     FilesNotRead,
+    /// Raised when the review opens; a review opened once the tours are readable or gone has none.
+    LocalToursNotRead,
 }
 
 impl Problem {
@@ -126,6 +132,7 @@ impl Problem {
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
             Self::FilesNotRead(_) => ProblemKind::FilesNotRead,
+            Self::LocalToursNotRead(_) => ProblemKind::LocalToursNotRead,
         }
     }
 }
@@ -350,6 +357,31 @@ impl fmt::Display for Problem {
                     .collect();
                 write!(formatter, "{}", named.join(", "))?;
                 match files.len().saturating_sub(NAMED) {
+                    0 => Ok(()),
+                    more => write!(formatter, " and {more} more"),
+                }
+            }
+            Self::LocalToursNotRead(tours) => {
+                const NAMED: usize = 3;
+                if tours.len() == 1 {
+                    write!(
+                        formatter,
+                        "A local review's tour could not be read, so the snapshot refs of its clone are kept until it can: "
+                    )?;
+                } else {
+                    write!(
+                        formatter,
+                        "{} local tours could not be read, so the snapshot refs of their clones are kept until they can: ",
+                        tours.len()
+                    )?;
+                }
+                let named: Vec<String> = tours
+                    .iter()
+                    .take(NAMED)
+                    .map(|tour| format!("{} ({})", tour.path.display(), tour.reason))
+                    .collect();
+                write!(formatter, "{}", named.join(", "))?;
+                match tours.len().saturating_sub(NAMED) {
                     0 => Ok(()),
                     more => write!(formatter, " and {more} more"),
                 }
