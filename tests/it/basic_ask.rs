@@ -10,8 +10,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
-    AgentLauncher, Ask, AskTarget, Asks, CommentGesture, CommentPlace, LineLocation, PageRow,
-    Place, Review, ReviewStateFile, Screen, ShownOn, Side, StepId, Unavailable,
+    AgentLauncher, Ask, AskTarget, Asks, CommentGesture, CommentPlace, CommentRefusal,
+    LineLocation, PageRow, Place, Review, ReviewStateFile, Screen, ShownOn, Side, StepId,
+    Unavailable,
 };
 use serde_json::json;
 
@@ -454,15 +455,22 @@ fn use_as_comment_of_an_ask_on_a_whole_file_has_no_lines_to_comment_on() {
     let shop = Shop::new();
     let mut review = shop.open();
     on_file_screen(&mut review, "a.txt");
+    let place = Place::File {
+        path: file_path("a.txt"),
+    };
+    let context = review.ask_context(&place).unwrap();
     let mut asks = Asks::load(Arc::new(FakeAskStore::default())).unwrap();
-    let id = asks.start(
-        Place::File {
-            path: file_path("a.txt"),
-        },
-        review.head(),
-    );
+    let id = asks.start(place, review.head());
+    let mut agent = FakeAgentLauncher {
+        sent: SentLog::default(),
+        turns: vec![PONG.to_owned()],
+    }
+    .start(&review.agent_launch(PathBuf::from("/clones/shop"), &AskSettings::default(), None))
+    .unwrap();
+    asks.ask(id, "Why?", &context, agent.as_mut()).unwrap();
 
     let refused = review.open_comment_box(CommentGesture::AskAnswer(asks.get(id).unwrap()));
 
-    assert!(refused.is_err());
+    assert_eq!(refused, Err(CommentRefusal::NoLines));
+    assert_eq!(drafts(&shop.open()), []);
 }

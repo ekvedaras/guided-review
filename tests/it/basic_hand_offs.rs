@@ -207,11 +207,12 @@ fn with_no_agent_one_is_started_whose_first_task_says_the_tour_is_basic_and_poin
 }
 
 #[test]
-fn a_hand_off_from_a_file_screen_survives_a_restart() {
+fn a_hand_off_from_a_file_screen_survives_a_restart_still_naming_its_file() {
     let pull = Pull::new();
-    handed_off(&pull);
+    let review = handed_off(&pull);
 
     let reopened = pull.open();
 
     assert_eq!(reopened.hand_offs().all().len(), 1);
+    assert_eq!(reopened.hand_offs(), review.hand_offs());
 }
