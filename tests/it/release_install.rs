@@ -73,6 +73,11 @@ fn archive_with_bundle_of(version: &str, binary: &str) -> Vec<u8> {
             format!("icon {version}"),
             0o644,
         ),
+        (
+            format!("{app}/Resources/Assets.car"),
+            format!("assets {version}"),
+            0o644,
+        ),
     ])
 }
 

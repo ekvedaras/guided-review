@@ -1,16 +1,41 @@
 //! A binary run straight from `cargo install` has no app bundle, so macOS shows a blank Dock icon
-//! unless the app hands it one while it runs.
+//! unless the app hands it one while it runs. A bundle with a compiled icon (`CFBundleIconName`)
+//! needs none: macOS draws that icon in the user's icon style, which a picture from the app would
+//! cover.
 
 use crate::app_icon::{AppIcon, Look};
 
 const SIZE: u16 = 512;
 
+/// Also called again when macOS turns light or dark, so the Dock icon matches it.
+pub fn show(look: Look) {
+    if bundle_has_its_own_icon() {
+        return;
+    }
+    paint(look);
+}
+
+/// Asks Launch Services for the app's bundle, not `NSBundle::mainBundle`: a launch from Finder runs
+/// the bundle's linked binary from its real path, outside the bundle.
+fn bundle_has_its_own_icon() -> bool {
+    use objc2_app_kit::NSRunningApplication;
+    use objc2_foundation::{NSBundle, ns_string};
+
+    NSRunningApplication::currentApplication()
+        .bundleURL()
+        .and_then(|url| NSBundle::bundleWithURL(&url))
+        .is_some_and(|bundle| {
+            bundle
+                .objectForInfoDictionaryKey(ns_string!("CFBundleIconName"))
+                .is_some()
+        })
+}
+
 #[expect(
     unsafe_code,
     reason = "objc2 marks the Cocoa call unsafe; it runs on the main thread, proved by the marker, with an image made just above"
 )]
-/// Also called again when macOS turns light or dark, so the Dock icon matches it.
-pub fn show(look: Look) {
+fn paint(look: Look) {
     use objc2::AllocAnyThread;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSImage};

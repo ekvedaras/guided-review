@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::app_icon::{AppIcon, Look};
+use crate::app_icon::ICON_COMPOSER_FILES;
 use crate::platform::desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, put_file, replace};
 use crate::update::Version;
 
@@ -17,7 +17,11 @@ const ICON: &str = "AppIcon";
 const MINIMUM_MACOS: &str = "11.0";
 /// The files a release's bundle carries; the executable is not one, as it links to the bin link.
 const INFO_PLIST: &str = "Contents/Info.plist";
-const CARRIED: [&str; 2] = [INFO_PLIST, "Contents/Resources/AppIcon.icns"];
+const CARRIED: [&str; 3] = [
+    INFO_PLIST,
+    "Contents/Resources/AppIcon.icns",
+    "Contents/Resources/Assets.car",
+];
 const EXECUTABLE_PATH: &str = "Contents/MacOS/guided-review";
 
 /// Launch Services names the app it launched here. The bundle's executable is a link to the bin link,
@@ -119,6 +123,7 @@ pub fn info_plist(version: Version) -> String {
         ("CFBundleIdentifier", APP_ID.to_owned()),
         ("CFBundleExecutable", EXECUTABLE.to_owned()),
         ("CFBundleIconFile", ICON.to_owned()),
+        ("CFBundleIconName", ICON.to_owned()),
         ("CFBundleShortVersionString", version.to_string()),
         ("CFBundleVersion", version.to_string()),
         ("CFBundlePackageType", "APPL".to_owned()),
@@ -139,23 +144,21 @@ pub fn info_plist(version: Version) -> String {
 }
 
 /// What the release workflow packs: `Guided Review.app` with its Info.plist, and beside it the
-/// `AppIcon.iconset` that `iconutil` turns into the bundle's `AppIcon.icns`.
+/// `AppIcon.icon` that `actool` compiles into the bundle's `Assets.car` and `AppIcon.icns`.
 pub fn write_template(out: &Path, version: Version) -> anyhow::Result<()> {
     let contents = out.join(BUNDLE_FOLDER).join("Contents");
     fs::create_dir_all(contents.join("Resources"))
         .with_context(|| format!("could not make {}", contents.display()))?;
     fs::write(contents.join("Info.plist"), info_plist(version))
         .context("could not write the Info.plist")?;
-    let iconset = out.join(format!("{ICON}.iconset"));
-    fs::create_dir_all(&iconset)
-        .with_context(|| format!("could not make {}", iconset.display()))?;
-    for size in [16, 32, 128, 256, 512] {
-        for (scale, suffix) in [(1, ""), (2, "@2x")] {
-            let picture = AppIcon::release(Look::Dark).png(size * scale)?;
-            let name = format!("icon_{size}x{size}{suffix}.png");
-            fs::write(iconset.join(&name), picture)
-                .with_context(|| format!("could not write {name}"))?;
+    let icon = out.join(format!("{ICON}.icon"));
+    for (path, content) in ICON_COMPOSER_FILES {
+        let file = icon.join(path);
+        if let Some(folder) = file.parent() {
+            fs::create_dir_all(folder)
+                .with_context(|| format!("could not make {}", folder.display()))?;
         }
+        fs::write(&file, content).with_context(|| format!("could not write {}", file.display()))?;
     }
     Ok(())
 }

@@ -23,6 +23,19 @@ pub enum Look {
 }
 
 const DEV_BADGE: &str = include_str!("../assets/app-icon-dev-badge.svg");
+const TRAIL_LIGHT: &str = include_str!("../assets/AppIcon.icon/Assets/trail-light.svg");
+const TRAIL_DARK: &str = include_str!("../assets/AppIcon.icon/Assets/trail-dark.svg");
+
+/// The icon as Icon Composer keeps it, which `actool` compiles into the bundle's `Assets.car`, so
+/// macOS draws it light or dark itself: each file's path inside `AppIcon.icon`, and its content.
+pub const ICON_COMPOSER_FILES: [(&str, &str); 3] = [
+    (
+        "icon.json",
+        include_str!("../assets/AppIcon.icon/icon.json"),
+    ),
+    ("Assets/trail-light.svg", TRAIL_LIGHT),
+    ("Assets/trail-dark.svg", TRAIL_DARK),
+];
 
 impl AppIcon {
     pub const fn release(look: Look) -> Self {
@@ -48,10 +61,18 @@ impl AppIcon {
         }
     }
 
+    /// The rounded square Icon Composer draws from `icon.json`'s fill, for a picture made without it.
     fn ground(self) -> &'static str {
         match self.look {
-            Look::Light => include_str!("../assets/app-icon-light.svg"),
-            Look::Dark => include_str!("../assets/app-icon-dark.svg"),
+            Look::Light => include_str!("../assets/app-icon-ground-light.svg"),
+            Look::Dark => include_str!("../assets/app-icon-ground-dark.svg"),
+        }
+    }
+
+    fn trail(self) -> &'static str {
+        match self.look {
+            Look::Light => TRAIL_LIGHT,
+            Look::Dark => TRAIL_DARK,
         }
     }
 
@@ -59,7 +80,9 @@ impl AppIcon {
     pub fn png(self, size: u16) -> anyhow::Result<Vec<u8>> {
         let mut pixmap = Pixmap::new(u32::from(size), u32::from(size))
             .ok_or_else(|| anyhow::anyhow!("no picture can be {size} pixels wide"))?;
-        paint(self.ground(), &usvg::Options::default(), &mut pixmap)?;
+        let options = usvg::Options::default();
+        paint(self.ground(), &options, &mut pixmap)?;
+        paint(self.trail(), &options, &mut pixmap)?;
         if self.build == Build::Dev {
             let mut options = usvg::Options::default();
             options.fontdb_mut().load_system_fonts();
