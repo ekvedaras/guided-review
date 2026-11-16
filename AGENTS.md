@@ -7,6 +7,7 @@ Rust 2024 gpui app.
 `scripts/check` is the gate before every commit: change notes (`scripts/changes-check` against the open PR's base, else `origin/main`; `CHANGES_BASE=<ref>` overrides, `changelog: none` in the PR body skips the missing-note rule), fmt, clippy, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself, rustup's (`~/.cargo/bin`) before any other, since a distro's cargo may be older than the pin. `rust-toolchain.toml` pins Rust for both, so CI's clippy is never newer than yours; raise it in its own commit.
 
 - Start it with `run_in_background` and read only until it ends. A commit stages what is on disk, so edit nothing while it runs, and stage first or check `git diff` against what you commit.
+- Agent sessions, worktrees included, share the main checkout's `target` folder (`CARGO_TARGET_DIR` in `.claude/settings.json`), since a `target/` per worktree (3-5 GB each) filled the disk on 2026-11-16. Two builds at once wait for each other's cargo lock.
 - Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`.
 - Change files with the Edit and Write tools, not shell edits. In an agent worktree the sandbox has refused heredocs, `sed -i` without a backup suffix, and chained commands (2026-11-06).
 
@@ -19,7 +20,7 @@ Rust 2024 gpui app.
 
 ## Install
 
-The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`), run by its full path: a plain `guided-review` is the release install in `~/.local/bin`, which comes first on PATH, so `/tour` and normal use never run a trial build. Once the gate is green, run `cargo install --path . --locked` and check that `~/.cargo/bin/guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit.
+The maintainer tries changes by hand with the installed binary (`~/.cargo/bin/guided-review`), run by its full path: a plain `guided-review` is the release install in `~/.local/bin`, which comes first on PATH, so `/tour` and normal use never run a trial build. Once the gate is green, run `cargo install --path . --locked` and check that `~/.cargo/bin/guided-review --version` shows HEAD's short sha with no `-dirty`. Commit first, since the sha names the commit. Do it yourself without asking, every time a change is ready for the maintainer to try; then tell them it is installed.
 
 ## Seeing the app
 

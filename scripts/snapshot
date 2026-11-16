@@ -47,7 +47,7 @@ command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
 
 export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
 cargo build --features snapshots
-binary="$PWD/target/debug/guided-review"
+binary="$(cd "${CARGO_TARGET_DIR:-target}" && pwd)/debug/guided-review"
 
 tour="$("$binary" tour-path "$pr")"
 [ -f "$tour" ] || { echo "no tour at $tour: write one first" >&2; exit 1; }
