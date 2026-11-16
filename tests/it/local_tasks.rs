@@ -28,7 +28,10 @@ struct Feature {
 
 impl Feature {
     fn with_work_in_progress() -> Self {
-        let repo = FixtureRepo::cloned_from("acme/shop");
+        Self::in_repo(FixtureRepo::cloned_from("acme/shop"))
+    }
+
+    fn in_repo(repo: FixtureRepo) -> Self {
         repo.write("README.md", "hello\n");
         repo.commit("Start the shop");
         repo.git(&["checkout", "-q", "-b", "feature"]);
@@ -595,5 +598,46 @@ fn the_task_carries_the_code_the_comment_is_on() {
         typed[0].contains("Code:\n+ README.md:head:2: world"),
         "{}",
         typed[0]
+    );
+}
+
+#[test]
+fn the_review_key_in_the_task_commands_is_quoted_when_the_folder_name_needs_it() {
+    let feature = Feature::in_repo(FixtureRepo::cloned_into_folder_with_a_space("acme/shop"));
+    let mut opened = feature.open();
+
+    send_now(&feature, &mut opened, "world", "Say who the world is");
+
+    let typed = feature.typed_into_agent();
+    let key = feature.key();
+    assert!(
+        typed[0].contains(&format!("guided-review agent-reply '{key}' h0 --body -")),
+        "{}",
+        typed[0]
+    );
+    assert!(
+        typed[0].contains(&format!("guided-review outline '{key}'")),
+        "{}",
+        typed[0]
+    );
+}
+
+#[test]
+fn agent_reply_to_an_unknown_hand_off_of_a_local_review_names_the_local_review() {
+    let feature = Feature::with_work_in_progress();
+    drop(task_sent(&feature));
+    let github = ServedGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
+    let key = feature.key();
+
+    let run = GuidedReview::new(&feature.repo, &github)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["agent-reply", key.as_str(), "h9", "--working"]);
+
+    assert!(!run.success);
+    assert!(
+        run.stderr
+            .contains("no hand-off h9 in this local review; the known ones are h0"),
+        "stderr: {}",
+        run.stderr
     );
 }

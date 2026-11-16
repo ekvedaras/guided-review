@@ -16,6 +16,16 @@ use super::review::StepId;
 use super::threads::{AGENT_MARK, CommentId, ReviewThread, ThreadId};
 use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
+/// The word as a shell reads it as it is, or in single quotes when a character in it would split or expand.
+fn shell_word(text: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_./:@%+=,-".contains(c);
+    if !text.is_empty() && text.chars().all(plain) {
+        text.to_owned()
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
+}
+
 const WORKING_ON_IT: &str = "Working on it…";
 
 /// Who a comment is for. The plain send actions are for the PR's author; only Ask agent also
@@ -207,6 +217,7 @@ impl HandOff {
         let id = self.id;
         let folder = change_set.folder().as_path().display();
         let branch = change_set.branch().as_str();
+        let key = shell_word(&subject.to_string());
         let mut lines = vec![
             format!("Review task {id} on branch {branch} in {folder}"),
             "This is a local review: the reviewer reads your branch and its uncommitted files on \
@@ -230,12 +241,12 @@ impl HandOff {
         lines.push(format!(
             "Make the change in {folder}, on {branch}. Commit only if you normally would, and do not push \
              for the review: the reviewer sees what changed on disk and updates. If the task asks for a \
-             change, first run `guided-review agent-reply {subject} {id} --working`: it says \
+             change, first run `guided-review agent-reply {key} {id} --working`: it says \
              \"{WORKING_ON_IT}\" on the task's thread, and your answer replaces it. Answer with \
-             `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted \
+             `guided-review agent-reply {key} {id} --body -` and the answer on stdin, in a quoted \
              heredoc (`<<'EOF'`): short paragraphs, a list for several points, code names in \
-             backticks. Read the reviewed change with `guided-review outline {subject}` and \
-             `guided-review show {subject} <piece ids> --around`."
+             backticks. Read the reviewed change with `guided-review outline {key}` and \
+             `guided-review show {key} <piece ids> --around`."
         ));
         lines.join("\n")
     }
@@ -603,7 +614,7 @@ impl HandOffs {
             .0
             .iter_mut()
             .find(|hand_off| hand_off.id == id)
-            .ok_or_else(|| anyhow::anyhow!("no hand-off {id} on this PR"))?;
+            .ok_or_else(|| anyhow::anyhow!("no hand-off {id} in this review"))?;
         match (&hand_off.state, &hand_off.thread) {
             (HandOffState::Failed(_), Some(_)) => {
                 hand_off.state = HandOffState::Queued;
@@ -623,11 +634,13 @@ impl HandOffs {
         replied: &AgentReplied,
     ) -> Result<(), AgentReplyRefused> {
         let known = self.0.iter().map(|hand_off| hand_off.id).collect();
-        let hand_off = self
-            .0
-            .iter_mut()
-            .find(|hand_off| hand_off.id == id)
-            .ok_or(AgentReplyRefused::Unknown { id, known })?;
+        let hand_off = self.0.iter_mut().find(|hand_off| hand_off.id == id).ok_or(
+            AgentReplyRefused::Unknown {
+                id,
+                known,
+                reviewed: Reviewed::Either,
+            },
+        )?;
         hand_off.state = match &replied.working_on_it {
             Some(reply) => HandOffState::WorkingOnIt {
                 reply: reply.clone(),
@@ -649,7 +662,7 @@ impl HandOffs {
         if said.is_empty() {
             return Err(AgentReplyRefused::Empty);
         }
-        let hand_off = self.find(id)?;
+        let hand_off = self.find(home, id)?;
         let replacing = match &hand_off.state {
             HandOffState::WorkingOnIt { reply } => Some(reply.clone()),
             _ => None,
@@ -670,20 +683,21 @@ impl HandOffs {
         home: &ThreadHome,
         id: HandOffId,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
-        let hand_off = self.find(id)?;
+        let hand_off = self.find(home, id)?;
         if matches!(hand_off.state, HandOffState::WorkingOnIt { .. }) {
             return Err(AgentReplyRefused::AlreadyWorkingOnIt { id });
         }
         Self::reply_request(home, hand_off, AgentReplyKind::WorkingOnIt)
     }
 
-    fn find(&self, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
+    fn find(&self, home: &ThreadHome, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
         self.0
             .iter()
             .find(|hand_off| hand_off.id == id)
             .ok_or_else(|| AgentReplyRefused::Unknown {
                 id,
                 known: self.0.iter().map(|hand_off| hand_off.id).collect(),
+                reviewed: Reviewed::from(home),
             })
     }
 
@@ -731,10 +745,11 @@ impl HandOffs {
 /// Why a reply from the tour agent is not posted, before GitHub is asked.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AgentReplyRefused {
-    #[error("no hand-off {id} on this PR; {}", known_ids(.known))]
+    #[error("no hand-off {id} {reviewed}; {}", known_ids(.known))]
     Unknown {
         id: HandOffId,
         known: Vec<HandOffId>,
+        reviewed: Reviewed,
     },
     #[error("hand-off {id} has no thread to reply in: {reason}")]
     NoThread { id: HandOffId, reason: String },
@@ -744,6 +759,34 @@ pub enum AgentReplyRefused {
         "hand-off {id} has its \"{WORKING_ON_IT}\" reply already; answer with --body, which replaces it"
     )]
     AlreadyWorkingOnIt { id: HandOffId },
+}
+
+/// Which kind of review a hand-off was looked for in, as an error says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reviewed {
+    PullRequest,
+    Local,
+    /// The caller has no subject at hand.
+    Either,
+}
+
+impl From<&ThreadHome> for Reviewed {
+    fn from(home: &ThreadHome) -> Self {
+        match home {
+            ThreadHome::GitHub(_) => Self::PullRequest,
+            ThreadHome::StateFile(_) => Self::Local,
+        }
+    }
+}
+
+impl fmt::Display for Reviewed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::PullRequest => "on this PR",
+            Self::Local => "in this local review",
+            Self::Either => "in this review",
+        })
+    }
 }
 
 fn known_ids(known: &[HandOffId]) -> String {
