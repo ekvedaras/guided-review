@@ -4,7 +4,7 @@ use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     FolderPath, JumpPlace, NextScreen, OverviewStats, PageRow, ReadingPlace, Review, ReviewChange,
-    ReviewStateFile, Screen, TreeRow, TreeRowKind, WriteGuidedTourRefusal,
+    ReviewStateFile, Screen, TreeRow, TreeRowKind,
 };
 use std::sync::Arc;
 
@@ -207,7 +207,7 @@ fn guided_only_questions_get_empty_answers_on_every_screen_of_a_basic_review() {
 }
 
 #[test]
-fn the_overview_page_gives_title_counts_files_and_a_refused_write_guided_tour() {
+fn the_overview_page_gives_title_counts_files_and_an_offered_write_guided_tour() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let mut review = open_basic(&repo, &["src/a.rs", "b.txt"]);
     review
@@ -237,11 +237,7 @@ fn the_overview_page_gives_title_counts_files_and_a_refused_write_guided_tour() 
     );
     assert_eq!(overview.description, review.pr_description());
     assert!(overview.description.is_some());
-    assert_eq!(
-        overview.write_guided_tour_refusal,
-        Some(WriteGuidedTourRefusal::NotWiredYet)
-    );
-    assert_ne!(WriteGuidedTourRefusal::NotWiredYet.reason(), "");
+    assert_eq!(overview.write_guided_tour_refusal, None);
 }
 
 #[test]

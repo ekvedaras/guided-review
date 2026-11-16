@@ -1,5 +1,6 @@
 //! The overview: a basic tour's first screen, in place of the guided summary.
 
+use super::guided_tour::GuidedTourRefusal;
 use super::markdown::Markdown;
 use crate::file_path::FilePath;
 
@@ -13,7 +14,7 @@ pub struct OverviewPage {
     pub files: Vec<OverviewFile>,
     /// `Some` while Write guided tour is offered but cannot be done; the window draws it disabled
     /// with this reason.
-    pub write_guided_tour_refusal: Option<WriteGuidedTourRefusal>,
+    pub write_guided_tour_refusal: Option<GuidedTourRefusal>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,19 +32,4 @@ pub struct OverviewFile {
     pub added_lines: usize,
     pub removed_lines: usize,
     pub is_read: bool,
-}
-
-/// Why a basic tour cannot write its guided tour from the overview.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WriteGuidedTourRefusal {
-    /// The button exists before the writing is wired in (ticket #86).
-    NotWiredYet,
-}
-
-impl WriteGuidedTourRefusal {
-    pub fn reason(self) -> &'static str {
-        match self {
-            Self::NotWiredYet => "Writing a guided tour from a basic review is not available yet.",
-        }
-    }
 }

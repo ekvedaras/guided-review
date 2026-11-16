@@ -194,6 +194,9 @@ pub enum PaletteAction {
     ShowRendered,
     ShowCode,
     AskAboutStep,
+    /// Asks the PR's tour agent to write the guided tour of a basic review.
+    WriteGuidedTour,
+    SwitchToGuidedTour,
     FinishReview,
     OpenOnGitHub,
     SwitchPr,
@@ -222,6 +225,8 @@ impl PaletteAction {
             Self::ShowRendered => "Show this file rendered",
             Self::ShowCode => "Show this file as code",
             Self::AskAboutStep => "Ask about this step",
+            Self::WriteGuidedTour => "Write guided tour",
+            Self::SwitchToGuidedTour => "Switch to guided tour",
             Self::FinishReview => "Finish review",
             Self::OpenOnGitHub => "Open on GitHub",
             Self::SwitchPr => "Switch pull request",
@@ -247,7 +252,9 @@ impl PaletteAction {
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
             Self::AskAboutStep => Some(Command::AskAboutStep),
-            Self::FinishReview
+            Self::WriteGuidedTour
+            | Self::SwitchToGuidedTour
+            | Self::FinishReview
             | Self::OpenOnGitHub
             | Self::SwitchPr
             | Self::CheckForUpdates

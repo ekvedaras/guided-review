@@ -369,6 +369,38 @@ impl TourAgents {
         self.launch(pr, active, writer_task(pr))
     }
 
+    /// Hands the writer task of a basic tour's guided tour to the PR's tour agent: typed in when the
+    /// agent is idle, never into a working one and never ending it; with no agent, one is started with
+    /// the task. Anything else means the task waits and this is tried again.
+    pub fn hand_writer_task(
+        &self,
+        pr: &PullRequestUrl,
+        active: &PullRequestUrl,
+    ) -> anyhow::Result<WriterHandOver> {
+        if let Err(reason) = self.port.link() {
+            bail!("tour agents are off: {reason}");
+        }
+        let task = basic_writer_task(pr);
+        match self.lookup(pr) {
+            TourAgentState::Agent {
+                terminal,
+                status: AgentStatus::Working | AgentStatus::WaitingForYou,
+            } => Ok(WriterHandOver::Waiting(terminal)),
+            TourAgentState::Agent { terminal, .. } => {
+                match self.port.send_if_idle(&terminal, &task)? {
+                    SendOutcome::Delivered => Ok(WriterHandOver::Delivered(terminal)),
+                    SendOutcome::Refused(_) | SendOutcome::Starting | SendOutcome::NoAgent => {
+                        Ok(WriterHandOver::Waiting(terminal))
+                    }
+                }
+            }
+            TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
+            TourAgentState::None | TourAgentState::Unknown => {
+                self.launch(pr, active, task).map(WriterHandOver::Started)
+            }
+        }
+    }
+
     /// Who an `open` from the terminal came from. Without herdr no agent of the app can be running.
     pub fn origin_of(&self, terminal: Option<&str>) -> OpenOrigin {
         let Some(address) = terminal else {
@@ -597,6 +629,32 @@ fn writer_task(pr: &PullRequestUrl) -> String {
          asked: run one command per Bash call, with the PR url written out, without shell variables, pipes, \
          `&&`, `;` or `$(...)`. The Write tool makes the tour's folder. When `guided-review check {pr}` is clean, \
          run `guided-review open {pr}`, which shows the tour to the reviewer. Afterwards the reviewer's comments \
+         reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
+         wrong, and never change the PR's code."
+    )
+}
+
+/// What became of the writer task handed to a PR's tour agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriterHandOver {
+    /// Typed into the idle agent.
+    Delivered(TerminalId),
+    /// The agent is busy or not ready; the task waits for it.
+    Waiting(TerminalId),
+    /// The PR had no agent, so one was started with the task as its first.
+    Started(TerminalId),
+}
+
+/// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
+/// guided tour never replaces it on disk, so the agent writes a whole tour at the guided path.
+fn basic_writer_task(pr: &PullRequestUrl) -> String {
+    format!(
+        "/tour {pr} (you are the tour agent of this PR. The reviewer reads it as a basic tour in the app, with no \
+         tour text, and asked for a guided tour, which they keep reading the basic tour meanwhile. Write a full new \
+         tour at the path `guided-review tour-path {pr}` prints: the basic tour is not a tour file and needs no \
+         edit.) Run one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, \
+         `;` or `$(...)`. When `guided-review check {pr}` is clean, run `guided-review open {pr}`, which tells the \
+         app the guided tour is ready and does not move the reviewer's screen. Afterwards the reviewer's comments \
          reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
          wrong, and never change the PR's code."
     )

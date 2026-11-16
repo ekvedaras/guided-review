@@ -295,6 +295,9 @@ async fn answer_requests(
                     OpenDecision::KeepInBackground => {
                         reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
                     }
+                    OpenDecision::GuidedReady => {
+                        reply.send(Answer::GuidedReady { pr: open.pr }).ok();
+                    }
                     OpenDecision::Reload => {
                         reply.send(Answer::Reloaded { pr: open.pr }).ok();
                         let window = screen.borrow().window.review();
@@ -525,7 +528,8 @@ async fn build_and_show(
     cx: &mut AsyncApp,
 ) {
     let (build_pr, folder, at_step) = (pr.clone(), open.folder.clone(), open.at_step.clone());
-    let built = cx
+    let disk_folders = folders.clone();
+    let mut built = cx
         .background_executor()
         .spawn(async move {
             open_review(&build_pr, &folder, &folders).map(|mut opened| {
@@ -537,6 +541,12 @@ async fn build_and_show(
         })
         .await;
     let active = screen.borrow().active.clone();
+    if let Ok(opened) = &mut built {
+        let on_disk = ToursOnDisk::of(&disk_folders, &pr);
+        let progress =
+            active.read_with(cx, |active, _| active.guided_tour_progress_of(&pr, on_disk));
+        opened.review.guided_tour_is(progress);
+    }
     let finished = active.update(cx, |active, cx| {
         let finished = active.finished(ticket, built);
         cx.notify();

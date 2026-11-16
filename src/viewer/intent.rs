@@ -4,6 +4,7 @@
 //! screen on show) and carries out the `Effect`; the rules that pick the effect are here, once.
 
 use super::file_tree::FolderPath;
+use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
 use super::review::{ReadSubject, ReviewCore, Screen};
 use crate::pull_request::PullRequestUrl;
@@ -35,6 +36,9 @@ pub enum Intent {
     ShowSettings,
     ToggleShortcuts,
     AskAboutScreen,
+    /// Write guided tour, from the overview, the sidebar or the palette.
+    WriteGuidedTour,
+    SwitchToGuidedTour,
     FinishReview,
     OpenOnGitHub,
     CheckForUpdates,
@@ -57,6 +61,8 @@ impl From<PaletteAction> for Intent {
             }
             PaletteAction::ShowRendered | PaletteAction::ShowCode => Self::ToggleRenderedView,
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
+            PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
+            PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
@@ -81,6 +87,10 @@ pub enum Effect {
     /// Opens the PR switcher, or leaves it open.
     OpenPrSwitcher,
     AskAboutScreen,
+    /// Starts the guided tour's writing: the review took it and the app hands the task to the agent.
+    WriteGuidedTour,
+    /// The reviewer asked to switch to a ready guided tour.
+    SwitchToGuidedTour,
     OpenFinishForm,
     OpenOnGitHub(PullRequestUrl),
     Restart(RestartArgs),
@@ -127,6 +137,8 @@ pub enum Refusal {
     Reopening,
     /// Settings is a modal sheet: while it is open, the other overlays wait.
     SettingsOpen,
+    /// A guided-tour action that does not apply now.
+    GuidedTour(GuidedTourRefusal),
 }
 
 /// What only the window knows when an intent comes.
@@ -187,6 +199,8 @@ impl Intent {
             | Self::TogglePrSwitcher
             | Self::ShowPrSwitcher
             | Self::AskAboutScreen
+            | Self::WriteGuidedTour
+            | Self::SwitchToGuidedTour
             | Self::FinishReview
             | Self::OpenOnGitHub
             | Self::CheckForUpdates
@@ -245,6 +259,14 @@ impl ReviewCore {
             },
             Intent::ToggleShortcuts => Effect::Toggle(Overlay::Shortcuts),
             Intent::AskAboutScreen => Effect::AskAboutScreen,
+            Intent::WriteGuidedTour => match self.write_guided_tour_refusal() {
+                None => Effect::WriteGuidedTour,
+                Some(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
+            },
+            Intent::SwitchToGuidedTour => match self.switch_to_guided_tour() {
+                Ok(()) => Effect::SwitchToGuidedTour,
+                Err(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
+            },
             Intent::FinishReview => Effect::OpenFinishForm,
             Intent::OpenOnGitHub => Effect::OpenOnGitHub(self.pr().clone()),
             Intent::CheckForUpdates => Effect::CheckForUpdates,

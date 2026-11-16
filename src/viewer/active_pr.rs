@@ -1,4 +1,5 @@
 use super::app_state::{AppState, AppStateFile};
+use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
 use super::pr_switcher::WritingFact;
 use super::tour_agent::{AgentStatus, TerminalId, TourAgentPort};
@@ -63,6 +64,9 @@ pub enum OpenDecision {
     Build(BuildTicket),
     /// Not shown now: the switcher marks the PR ready instead.
     KeepInBackground,
+    /// The basic tour on screen has its guided tour written and checked: the review says so and
+    /// nothing is built, reloaded or moved.
+    GuidedReady,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,8 +186,37 @@ impl ActivePr {
     ) -> OpenOutcome {
         if on_disk == ToursOnDisk::None && self.writing_of(&pr).is_some() {
             OpenOutcome::Writing(self.write(pr))
+        } else if on_disk == ToursOnDisk::BasicWithGuided
+            && self.shown.as_ref() == Some(&pr)
+            && !self.is_reopening(&pr)
+        {
+            self.guided_is_ready(&pr);
+            OpenOutcome::Tour(OpenDecision::GuidedReady)
         } else {
             OpenOutcome::Tour(self.request(pr, origin))
+        }
+    }
+
+    fn guided_is_ready(&mut self, pr: &PullRequestUrl) {
+        let was_written = self.writings.iter().any(|(writing, _)| writing == pr);
+        self.writings.retain(|(writing, _)| writing != pr);
+        if was_written {
+            self.remember();
+        }
+    }
+
+    /// What the review of the PR starts out knowing of its guided tour. A guided file on disk with no
+    /// writing on means ready, so the banner outlives a restart, a re-pin and a tour written by `/tour`
+    /// from the reviewer's own session; one mid-writing does not, as it is not checked yet.
+    pub fn guided_tour_progress_of(
+        &self,
+        pr: &PullRequestUrl,
+        on_disk: ToursOnDisk,
+    ) -> GuidedTourProgress {
+        match (self.writing_of(pr), on_disk) {
+            (Some(writing), _) => GuidedTourProgress::of_writing(writing),
+            (None, ToursOnDisk::BasicWithGuided) => GuidedTourProgress::Ready,
+            (None, _) => GuidedTourProgress::NotAsked,
         }
     }
 
@@ -327,6 +360,21 @@ impl ActivePr {
         if self.writing_of(&pr).is_some() {
             return WriteDecision::Watch;
         }
+        self.writings.push((pr, TourWriting::starting()));
+        self.remember();
+        WriteDecision::StartWriter
+    }
+
+    /// The reviewer asked to write the guided tour of a basic review: the writing is recorded with no
+    /// loading screen, and the review goes on reading. Refused while a writing of the PR is on.
+    pub fn write_in_background(&mut self, pr: PullRequestUrl) -> WriteDecision {
+        if self
+            .writing_of(&pr)
+            .is_some_and(|writing| !writing.has_failed())
+        {
+            return WriteDecision::Watch;
+        }
+        self.writings.retain(|(writing, _)| writing != &pr);
         self.writings.push((pr, TourWriting::starting()));
         self.remember();
         WriteDecision::StartWriter

@@ -355,9 +355,11 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         Answer::Opening { .. }
         | Answer::Writing { .. }
         | Answer::Reloaded { .. }
-        | Answer::KeptInBackground { .. } => {
+        | Answer::KeptInBackground { .. }
+        | Answer::GuidedReady { .. } => {
             println!("{answer}");
-            if ToursOnDisk::of(folders, pr).opens_basic() {
+            let is_guided_ready = matches!(answer, Answer::GuidedReady { .. });
+            if !is_guided_ready && ToursOnDisk::of(folders, pr).opens_basic() {
                 println!("{pr} opened in Basic mode");
             }
             Ok(())

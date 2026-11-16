@@ -741,6 +741,15 @@ impl ReviewSession {
         self.stage_basic(cx);
     }
 
+    /// The PR in Basic mode with its guided tour ready: the banner in the page header and the sidebar.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic_guided_ready(&mut self, cx: &mut Context<Self>) {
+        self.stage_basic(cx);
+        self.change(cx, |review| {
+            review.guided_tour_is(crate::viewer::GuidedTourProgress::Ready);
+        });
+    }
+
     #[cfg(feature = "snapshots")]
     pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
         if let Some(guided) = self.guided_before_staging.take() {

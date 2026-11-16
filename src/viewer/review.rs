@@ -1,3 +1,4 @@
+mod guided_tour;
 mod kept;
 mod work;
 
@@ -35,13 +36,14 @@ use super::finish_review::{
     SubmittedReview,
 };
 use super::github_outage::{Affected, OutageCause};
+use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs, SentFrom};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
-use super::overview::{OverviewFile, OverviewPage, OverviewStats, WriteGuidedTourRefusal};
+use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
@@ -315,6 +317,8 @@ pub struct ReviewCore {
     replies_after_repin: Vec<(HandOffId, AgentReplied)>,
     /// The last news of the tour agent said tour agents cannot be reached. Not saved.
     agent_link_is_off: bool,
+    /// What is known of the guided tour of a basic review's PR. Not saved: the app tells it at a build.
+    guided_tour: GuidedTourProgress,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
     seen_end_of: Option<Screen>,
@@ -400,6 +404,7 @@ impl Review {
         let replaced = replaced.into_core();
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
+        self.guided_tour = replaced.guided_tour;
         self.seen_end_of = replaced.seen_end_of;
         self.ask_desk = replaced.ask_desk;
         self.check_asks_for_code_changes();
@@ -534,6 +539,7 @@ impl ReviewCore {
             reviewing_mark,
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
+            guided_tour: GuidedTourProgress::NotAsked,
             seen_end_of: None,
             tour_files,
         })
@@ -688,7 +694,7 @@ impl ReviewCore {
                 open_threads: stats.open_threads,
             },
             files,
-            write_guided_tour_refusal: Some(WriteGuidedTourRefusal::NotWiredYet),
+            write_guided_tour_refusal: self.write_guided_tour_refusal(),
         }
     }
 
@@ -1728,6 +1734,7 @@ impl ReviewCore {
             .into_iter()
             .chain(tick)
             .chain(ask)
+            .chain(self.guided_tour_palette_actions())
             .chain([wrap, whitespace])
             .chain(file_toggles)
             .chain(finish)

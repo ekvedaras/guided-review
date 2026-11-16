@@ -40,6 +40,7 @@ use crate::app::components::diff_view::{
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
+use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
@@ -81,17 +82,18 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
-use crate::app::sidebar_rows::SidebarTourAgent;
+use crate::app::sidebar_rows::{SidebarGuidedTour, SidebarTourAgent, WriteOffer};
 use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
     FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
     NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Reopen, ReopenAfterSave,
+    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal, Reopen, ReopenAfterSave,
     Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
     RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
     StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
@@ -242,8 +244,11 @@ impl OneStepLayout {
         let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
         let switching = cx.global::<PrSwitching>().clone();
         let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
-        cx.observe(&switching.active, |_, _, cx| cx.notify())
-            .detach();
+        cx.observe(&switching.active, |this, _, cx| {
+            this.guided_tour_follows_active_pr(cx);
+            cx.notify();
+        })
+        .detach();
         let settings = if let Some(settings) = carried_settings {
             settings.update(cx, |settings, cx| {
                 settings.move_to(focus.clone(), Placement::SheetOverReview, cx);
@@ -957,6 +962,49 @@ impl OneStepLayout {
         }
     }
 
+    /// The app keeps what it knows of the PR's guided tour in `ActivePr`, which outlives the review; the
+    /// review shows it. Nothing here moves the screen.
+    fn guided_tour_follows_active_pr(&mut self, cx: &mut Context<Self>) {
+        let switching = cx.global::<PrSwitching>().clone();
+        let review = self.session.read(cx).review();
+        if review.basic_mode_label().is_none() {
+            return;
+        }
+        let pr = review.pr().clone();
+        let on_disk = ToursOnDisk::of(&switching.folders, &pr);
+        let progress = switching
+            .active
+            .read(cx)
+            .guided_tour_progress_of(&pr, on_disk);
+        if review.guided_tour_progress() != &progress {
+            self.session.update(cx, |session, cx| {
+                session.change(cx, |review| review.guided_tour_is(progress));
+            });
+        }
+    }
+
+    /// Write guided tour, from the overview, the sidebar and the palette: the review takes the
+    /// asking, and the app's writer hands the task to the PR's tour agent in the background.
+    fn write_guided_tour(&mut self, cx: &mut Context<Self>) {
+        let pr = self.session.read(cx).review().pr().clone();
+        let asked = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.ask_to_write_guided_tour())
+        });
+        match asked {
+            Ok(()) => crate::app::tour_writer::write_in_background(pr, cx),
+            Err(refusal) => post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned()),
+        }
+    }
+
+    /// The switch is the next ticket's; the button is drawn off with "coming" until then.
+    fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
+        post_toast(
+            cx,
+            ToastTone::Neutral,
+            "Switching to the guided tour is coming.".to_owned(),
+        );
+    }
+
     /// Opens the finish-review form in the sidebar with its body box taking the keys.
     fn open_finish_form(&mut self, cx: &mut Context<Self>) {
         self.finish_form_request = self.finish_form_request.wrapping_add(1);
@@ -1131,6 +1179,11 @@ impl OneStepLayout {
                     "This build does not take updates".to_owned(),
                 ),
             },
+            Effect::WriteGuidedTour => self.write_guided_tour(cx),
+            Effect::SwitchToGuidedTour => self.switch_to_guided_tour(cx),
+            Effect::Refused(Refusal::GuidedTour(refusal)) => {
+                post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
+            }
             Effect::Nothing | Effect::Refused(_) => {}
         }
     }
@@ -1219,6 +1272,106 @@ impl OneStepLayout {
                 .children(show)
                 .children(retry),
         )
+    }
+
+    /// A basic review's guided tour in the sidebar: Write guided tour while nothing is asked, the stage
+    /// of the writing with Show agent and Try again, and the banner once it is ready.
+    fn guided_tour_block(
+        colors: &Colors,
+        guided_tour: &SidebarGuidedTour,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let write = guided_tour.write.map(|offer| {
+            let button = icon_label_button(
+                colors,
+                "sidebar-write-guided-tour",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Sparkles,
+                "Write guided tour",
+            );
+            match offer {
+                WriteOffer::Available => {
+                    div().child(button.on_click(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::WriteGuidedTour, window, cx);
+                    })))
+                }
+                WriteOffer::Refused(refusal) => div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
+                    .child(button.opacity(0.5).cursor_not_allowed())
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(refusal.reason()),
+                    ),
+            }
+        });
+        let stage = guided_tour.stage.as_ref().map(|stage| {
+            let show = guided_tour.can_show_agent.then(|| {
+                icon_label_button(
+                    colors,
+                    "show-writing-agent",
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                    Icon::Terminal,
+                    "Show agent",
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.session.update(cx, ReviewSession::show_tour_agent);
+                }))
+            });
+            let try_again = stage.can_try_again.then(|| {
+                icon_label_button(
+                    colors,
+                    "try-guided-tour-again",
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                    Icon::Refresh,
+                    "Try again",
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.act(Intent::WriteGuidedTour, window, cx);
+                }))
+            });
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(SharedString::from(stage.line.clone())),
+                )
+                .child(div().flex().gap_2().children(show).children(try_again))
+        });
+        let banner = guided_tour.banner.as_ref().map(|banner| {
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_1()
+                .child(div().text_xs().child(banner.text))
+                .child(switch_button(
+                    colors,
+                    "sidebar-switch-to-guided-tour",
+                    banner,
+                    Box::new(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::SwitchToGuidedTour, window, cx);
+                    })),
+                ))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(banner)
+            .children(stage)
+            .children(write)
     }
 
     /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
@@ -1516,6 +1669,10 @@ impl OneStepLayout {
             .changes_not_shown
             .clone()
             .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
+        let guided_tour = sidebar
+            .guided_tour
+            .as_ref()
+            .map(|guided_tour| Self::guided_tour_block(&colors, guided_tour, cx));
         let tour_agent = sidebar
             .tour_agent
             .is_shown
@@ -1620,6 +1777,7 @@ impl OneStepLayout {
                 None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
             .child(finish_dialog)
+            .children(guided_tour)
             .children(tour_agent)
             .children(clone_offer)
             .children(changes_not_shown)
@@ -2623,31 +2781,36 @@ impl OneStepLayout {
                 )
                 .child(line_counts(&colors, file.added_lines, file.removed_lines))
         });
-        let write_guided_tour = overview.write_guided_tour_refusal.map(|refusal| {
+        let write_guided_tour = Some(overview.write_guided_tour_refusal).map(|refusal| {
+            let button = icon_label_button(
+                &colors,
+                "write-guided-tour",
+                ButtonKind::Secondary,
+                ButtonSize::Regular,
+                Icon::Sparkles,
+                "Write guided tour",
+            );
             div()
                 .pt_6()
                 .flex()
                 .flex_col()
                 .items_start()
                 .gap_2()
-                .child(
-                    icon_label_button(
-                        &colors,
-                        "write-guided-tour",
-                        ButtonKind::Secondary,
-                        ButtonSize::Regular,
-                        Icon::Sparkles,
-                        "Write guided tour",
-                    )
-                    .opacity(0.5)
-                    .cursor_not_allowed(),
-                )
-                .child(
+                .child(if refusal.is_none() {
+                    button
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.act(Intent::WriteGuidedTour, window, cx);
+                        }))
+                        .into_any_element()
+                } else {
+                    button.opacity(0.5).cursor_not_allowed().into_any_element()
+                })
+                .children(refusal.map(|refusal| {
                     div()
                         .text_xs()
                         .text_color(colors.muted_text)
-                        .child(refusal.reason()),
-                )
+                        .child(refusal.reason())
+                }))
         });
         div()
             .pb_8()
@@ -3813,6 +3976,7 @@ impl Render for OneStepLayout {
                 .and_then(|selection| session.rows().selected_rows(selection)),
         );
         let old_head = session.old_head().cloned();
+        let guided_tour_banner = session.review().guided_tour_banner();
         let repin_progress = session.repin_progress().clone();
         let refresh_brief = session.refresh_brief().clone();
         let refresh_progress = session.refresh_progress().clone();
@@ -4013,6 +4177,14 @@ impl Render for OneStepLayout {
                             repin_progress,
                             cx.listener(|this, _, _, cx| {
                                 this.session.update(cx, ReviewSession::repin);
+                            }),
+                        )
+                    }))
+                    .children(guided_tour_banner.map(|banner| {
+                        GuidedTourReadyBanner::new(
+                            banner,
+                            cx.listener(|this, _, window, cx| {
+                                this.act(Intent::SwitchToGuidedTour, window, cx);
                             }),
                         )
                     }))

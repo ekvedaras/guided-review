@@ -24,6 +24,7 @@ mod file_tree;
 mod finish_review;
 mod focused_change;
 mod github_outage;
+mod guided_tour;
 mod hand_offs;
 mod highlight;
 mod image_preview;
@@ -106,6 +107,7 @@ pub use finish_review::{
 };
 pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
+pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
     HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, SeenMark, ThreadMessage,
@@ -126,7 +128,7 @@ pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
-pub use overview::{OverviewFile, OverviewPage, OverviewStats, WriteGuidedTourRefusal};
+pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
     Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,
@@ -176,6 +178,7 @@ pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff, SendOutcome,
     TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents, TourKind,
+    WriterHandOver,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
