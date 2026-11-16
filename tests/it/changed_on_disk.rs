@@ -168,6 +168,36 @@ fn looking_at_the_folder_writes_nothing_in_its_git_folder() {
     assert_eq!(modified(), before, "a file came and went in .git");
 }
 
+#[test]
+fn a_folder_that_cannot_be_looked_at_is_one_problem_however_often_it_is_looked_at() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let change_set = feature.subject().local().unwrap().clone();
+    feature
+        .repo
+        .git(&["update-ref", "-d", &snapshot_ref(&change_set)]);
+    feature
+        .repo
+        .git(&["reflog", "expire", "--expire=now", "--all"]);
+    feature.repo.git(&["gc", "-q", "--prune=now"]);
+    let now = Instant::now();
+
+    check_on_focus(&mut opened, now);
+    check_on_focus(&mut opened, now + Duration::from_secs(31));
+
+    let shown: Vec<String> = opened
+        .review
+        .problems()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(
+        shown[0].starts_with("The folder could not be looked at, so the sidebar may not say how it changed: "),
+        "{shown:?}"
+    );
+}
+
 fn readme_caveat(opened: &mut OpenedReview, feature: &Feature) -> Option<IdeCaveat> {
     let config = Config::from_text("ide = \"idea://open?file={path}&line={line}\"").unwrap();
     let ide = Ide::for_clone(

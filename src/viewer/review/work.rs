@@ -4,7 +4,7 @@ use super::{Review, ReviewCore};
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
 use crate::viewer::hand_offs::{AgentReplied, HandOffId};
-use crate::viewer::problems::Read;
+use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
@@ -99,10 +99,11 @@ impl ReviewCore {
             Done::PrHead(Err(error)) => self.could_not_read(Read::PrHead, &error),
             Done::WorkingTree(on_disk) => {
                 match on_disk {
-                    Ok(on_disk) => self.working_tree_is(on_disk),
-                    Err(error) => {
-                        eprintln!("could not look at the folder of {}: {error}", self.subject);
+                    Ok(on_disk) => {
+                        self.clear_problem(ProblemKind::FolderNotLookedAt);
+                        self.working_tree_is(on_disk);
                     }
+                    Err(error) => self.raise_problem(Problem::FolderNotLookedAt(error)),
                 }
                 self.work
                     .want_in(WorkKind::CheckWorkingTree, WORKING_TREE_RECHECK);

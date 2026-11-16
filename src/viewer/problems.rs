@@ -37,6 +37,9 @@ pub enum Problem {
     TourNotReloaded(String),
     /// Drop review of a local review failed part way; the review stays on screen.
     ReviewNotDropped(String),
+    /// git could not say how a local review's folder stands against its snapshot, so the sidebar
+    /// says what the last look that went through found.
+    FolderNotLookedAt(String),
     /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
@@ -80,6 +83,8 @@ pub enum ProblemKind {
     TourNotReloaded,
     /// Stays: a drop that goes through closes the review.
     ReviewNotDropped,
+    /// Cleared by a look at the folder that goes through.
+    FolderNotLookedAt,
     /// Raised when the review opens; the old file is kept, so nothing clears it.
     SavedReviewNotRead,
     /// Replaced by the next hand-off, which clears it when that one is sent.
@@ -113,6 +118,7 @@ impl Problem {
             Self::TourNotRefreshed(_) => ProblemKind::TourNotRefreshed,
             Self::TourNotReloaded(_) => ProblemKind::TourNotReloaded,
             Self::ReviewNotDropped(_) => ProblemKind::ReviewNotDropped,
+            Self::FolderNotLookedAt(_) => ProblemKind::FolderNotLookedAt,
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
@@ -295,6 +301,10 @@ impl fmt::Display for Problem {
             Self::ReviewNotDropped(reason) => {
                 write!(formatter, "The review was not dropped: {reason}")
             }
+            Self::FolderNotLookedAt(reason) => write!(
+                formatter,
+                "The folder could not be looked at, so the sidebar may not say how it changed: {reason}"
+            ),
             Self::HandOffNotSent { comment, reason } => write!(
                 formatter,
                 "The agent will not get your comment \"{comment}\": {reason}"
