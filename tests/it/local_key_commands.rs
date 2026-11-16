@@ -10,7 +10,6 @@ fn a_command_given_a_local_change_sets_key_says_local_review_is_not_built_yet() 
 
     for args in [
         vec!["check", LOCAL_KEY],
-        vec!["repin", LOCAL_KEY],
         vec!["refresh", LOCAL_KEY],
         vec!["agent-reply", LOCAL_KEY, "h0", "--working"],
     ] {

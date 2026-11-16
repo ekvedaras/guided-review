@@ -135,7 +135,7 @@ fn main() -> anyhow::Result<()> {
         } => show(&subject, &ids, around),
         Command::TourPath { subject } => tour_path(&subject),
         Command::Check { subject } => check(&pull_request_of(&subject)?),
-        Command::Repin { subject } => repin_command(&pull_request_of(&subject)?),
+        Command::Repin { subject } => repin_command(&subject),
         Command::Refresh { subject, done } => refresh(&pull_request_of(&subject)?, done),
         Command::Open { target } => open(&target, &Launch::Open),
         Command::Restart {
@@ -314,7 +314,17 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
+/// A PR's tour moves to the PR's head on GitHub; a local review's to a new snapshot of its folder.
+fn repin_command(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let pr = match subject {
+        ReviewSubject::PullRequest(pr) => pr,
+        ReviewSubject::Local(change_set) => {
+            let (_, result) = OpenedChangeSet::new(change_set, &AppFolders::running()?)
+                .repin_to_new_snapshot()?;
+            print!("{result}");
+            return Ok(());
+        }
+    };
     let opened = OpenedPr::new(pr)?;
     let tour_path = opened.tour_to_repin_path();
     // Fails before any network call when there is no tour yet.

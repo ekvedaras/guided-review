@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::work::drive_without_agents;
-use crate::support::{FixtureRepo, file_path};
+use crate::support::{FixtureRepo, GuidedReview, file_path};
 use guided_review::config::Config;
 use guided_review::ide::Ide;
 use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
@@ -435,4 +435,25 @@ fn on_start_the_refs_of_local_reviews_no_longer_on_disk_are_deleted() {
         refs_kept(&feature),
         ["refs/guided-review/7".to_owned(), local_ref(&second)]
     );
+}
+
+#[test]
+fn repin_with_a_local_key_updates_the_review_to_a_new_snapshot_from_the_cli() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let old_head = opened.review.head().clone();
+    for path in ["README.md", "src/cart.rs"] {
+        opened.review.tick_file(&file_path(path)).unwrap();
+    }
+    feature.repo.write("README.md", "hello\nworld\nagain\n");
+    let github = crate::support::FakeGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
+
+    let run =
+        GuidedReview::new(&feature.repo, &github).run(&["repin", &feature.subject().to_string()]);
+
+    assert!(run.success, "{}", run.stderr);
+    let reopened = feature.open();
+    assert_ne!(reopened.review.head(), &old_head);
+    assert_eq!(&snapshot_ref_target(&feature), reopened.review.head());
+    assert_eq!(ticked(&reopened.review), ["src/cart.rs"]);
 }
