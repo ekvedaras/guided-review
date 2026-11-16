@@ -4,7 +4,7 @@ use guided_review::config::Config;
 use guided_review::ide::{Ide, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CodeOpener, Destination, IdeCaveat, NotInIde, Review, ReviewStateFile, Side, WorkingCopy,
 };
@@ -32,7 +32,7 @@ impl Shop {
 
     /// Opened as the app opens it: the working copy is checked against the tour head once.
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": "https://github.com/acme/shop/pull/7",
             "base": self.base,
             "head": self.head,

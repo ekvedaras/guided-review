@@ -2,7 +2,7 @@ use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentReplied, Audience, CommentGesture, CommentId, CommentPlace, HandOffId, HandOffState,
     LineLocation, PieceDiff, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
@@ -48,7 +48,7 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,

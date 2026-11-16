@@ -6,7 +6,7 @@ use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
 };
@@ -106,7 +106,7 @@ impl Shop {
     }
 
     fn text_may_be_old(&self, step: &str) -> bool {
-        let tour = Tour::load(&self.tour_path()).unwrap();
+        let tour = GuidedTour::load(&self.tour_path()).unwrap();
         let mut review = Review::open(tour, &self.source(), self.state_file()).unwrap();
         review.go_to(&step.into());
         review.current_step().unwrap().text_may_be_old
@@ -177,7 +177,7 @@ fn done_clears_the_marks_and_the_brief() {
 fn the_app_offers_the_same_brief_until_done() {
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
-    let tour = Tour::load(&shop.tour_path()).unwrap();
+    let tour = GuidedTour::load(&shop.tour_path()).unwrap();
 
     let brief = Review::open(tour, &shop.source(), shop.state_file())
         .unwrap()
@@ -351,7 +351,7 @@ fn a_writer_that_ends_without_refreshing_fails_the_refresh_with_what_it_said() {
 fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_goes_through() {
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
-    let tour = Tour::load(&shop.tour_path()).unwrap();
+    let tour = GuidedTour::load(&shop.tour_path()).unwrap();
     let mut review = Review::open(tour, &shop.source(), shop.state_file()).unwrap();
 
     let error = refresher(&shop, Writer::GivesUp)

@@ -12,7 +12,7 @@ use crate::local_git::LocalGit;
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::summary_instructions::SummaryInstructions;
-use crate::tour::Tour;
+use crate::tour::{GuidedTour, Tour};
 use crate::viewer::{
     GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader, TourRepinner,
     WorkingCopy,
@@ -69,9 +69,9 @@ pub fn open_review(
 ) -> anyhow::Result<OpenedReview> {
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
     require_tour(pr, folders)?;
-    let tour = Tour::load(&opened.tour_path())?;
+    let tour = GuidedTour::load(&opened.tour_path())?;
     let code = opened.at_pinned_tips(&tour)?;
-    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.head);
+    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin.head);
     let mut review = Review::open(tour, code.source.as_ref(), opened.state_file())?;
     review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
     opened.state_file().remember_folder(clones_from)?;

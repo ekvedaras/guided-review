@@ -10,7 +10,7 @@ use crate::code_source::CodeSource;
 use crate::coverage;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
-use crate::tour::{Step, Tour};
+use crate::tour::{GuidedTour, Step};
 
 use std::path::{Path, PathBuf};
 
@@ -192,7 +192,7 @@ pub struct OldHead {
 
 /// What the reviewer reads and does on one PR. Reached through `Review`, which keeps the page built from it.
 pub struct ReviewCore {
-    tour: Tour,
+    tour: GuidedTour,
     pr: PullRequestUrl,
     base: Sha,
     head: Sha,
@@ -246,7 +246,7 @@ pub struct ReviewCore {
 impl Review {
     /// Code is read at the tour's own base and head, not the PR's current ones.
     pub fn open(
-        tour: Tour,
+        tour: GuidedTour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
@@ -354,15 +354,15 @@ impl Review {
 
 impl ReviewCore {
     fn open(
-        tour: Tour,
+        tour: GuidedTour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
-        let pr: PullRequestUrl = tour.pr.parse()?;
-        let (base, head) = (tour.base.clone(), tour.head.clone());
+        let pr: PullRequestUrl = tour.pin.pr.parse()?;
+        let (base, head) = (tour.pin.base.clone(), tour.pin.head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
         let steps = tour
@@ -375,7 +375,7 @@ impl ReviewCore {
             .steps()
             .iter()
             .filter_map(|step| read_head_of(&state, &step.id.clone()))
-            .filter(|read_head| **read_head != tour.head)
+            .filter(|read_head| **read_head != tour.pin.head)
             .collect();
         let changes_since = read_heads
             .into_iter()
@@ -433,12 +433,12 @@ impl ReviewCore {
 
     /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.
     pub fn highlight_request(&self) -> HighlightRequest {
-        HighlightRequest::for_files(&self.files, &self.tour.base, &self.tour.head)
+        HighlightRequest::for_files(&self.files, &self.tour.pin.base, &self.tour.pin.head)
     }
 
     /// Context lines come from the files at head, read off the main thread like the colours.
     pub fn files_at_head_request(&self) -> FilesAtHeadRequest {
-        FilesAtHeadRequest::for_files(&self.files, &self.tour.head)
+        FilesAtHeadRequest::for_files(&self.files, &self.tour.pin.head)
     }
 
     /// Files read at another head, e.g. before a re-pin, are dropped. Says whether they were kept.
@@ -724,7 +724,7 @@ impl ReviewCore {
     fn repin_record(&self) -> Option<&RepinRecord> {
         self.state
             .last_repin()
-            .filter(|record| record.to_head == self.tour.head)
+            .filter(|record| record.to_head == self.tour.pin.head)
     }
 
     fn mark_repin_status(&self, pieces: &mut [PieceDiff]) {
@@ -748,7 +748,7 @@ impl ReviewCore {
     }
 
     pub fn head(&self) -> &Sha {
-        &self.tour.head
+        &self.tour.pin.head
     }
 
     /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
@@ -758,7 +758,7 @@ impl ReviewCore {
 
     /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
     pub fn code_changed_since(&self, ask: &Ask) -> bool {
-        if ask.head == self.tour.head {
+        if ask.head == self.tour.pin.head {
             return false;
         }
         let Some(record) = self.repin_record() else {
@@ -789,7 +789,7 @@ impl ReviewCore {
         if matches!(ask.place, Place::Tour | Place::Step { .. }) {
             return Err(CommentRefusal::NoLines);
         }
-        if ask.head != self.tour.head {
+        if ask.head != self.tour.pin.head {
             return Err(CommentRefusal::AskIsOnOlderCode);
         }
         if self.tour_freshness() == TourFreshness::Behind {
@@ -881,7 +881,7 @@ impl ReviewCore {
             cwd,
             model: settings.model.clone(),
             effort: settings.effort.clone(),
-            system_prompt: ask_context::system_prompt(&self.tour.pr),
+            system_prompt: ask_context::system_prompt(&self.tour.pin.pr),
             resume,
         }
     }

@@ -8,7 +8,7 @@ use crate::code_source::CodeSource;
 use crate::coverage;
 use crate::pieces::{self, ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
-use crate::tour::{PieceRef, Step, StepId, Tour};
+use crate::tour::{GuidedTour, PieceRef, Step, StepId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -101,15 +101,15 @@ impl fmt::Display for Repin {
 /// Moves the tour to the new commits and says what became of each piece.
 /// The old pieces are cut again at the tour's own base and head, because the tour file keeps no hashes.
 pub fn repin(
-    tour: &mut Tour,
+    tour: &mut GuidedTour,
     source: &dyn CodeSource,
     new_base: &Sha,
     new_head: &Sha,
 ) -> anyhow::Result<Repin> {
-    if tour.base.is_empty() || tour.head.is_empty() {
+    if tour.pin.base.is_empty() || tour.pin.head.is_empty() {
         bail!("the tour is not pinned to commits yet; run `guided-review check` first");
     }
-    let old_files = pieces::cut(source, &tour.base, &tour.head)?;
+    let old_files = pieces::cut(source, &tour.pin.base, &tour.pin.head)?;
     let new_files = pieces::cut(source, new_base, new_head)?;
     let old: Vec<&Piece> = old_files.iter().flat_map(|file| &file.pieces).collect();
     let new: Vec<&Piece> = new_files.iter().flat_map(|file| &file.pieces).collect();
@@ -129,10 +129,10 @@ pub fn repin(
 
     let moved_line_ranges = line_ranges_in_changed_files(tour, &matching, &old, &new);
 
-    if tour.head != *new_head {
-        tour.previous_head = Some(std::mem::replace(&mut tour.head, new_head.clone()));
+    if tour.pin.head != *new_head {
+        tour.pin.previous_head = Some(std::mem::replace(&mut tour.pin.head, new_head.clone()));
     }
-    tour.base = new_base.clone();
+    tour.pin.base = new_base.clone();
     retarget(
         &mut tour.steps,
         &matching.new_id_of_old_hunk,
@@ -185,7 +185,7 @@ pub fn repin(
     })
 }
 
-fn shown_ids(step: &Step, tour: &Tour, files: &[ChangedFile]) -> Vec<PieceId> {
+fn shown_ids(step: &Step, tour: &GuidedTour, files: &[ChangedFile]) -> Vec<PieceId> {
     let mut ids: Vec<PieceId> = Vec::new();
     for part in step
         .pieces
@@ -202,7 +202,7 @@ fn shown_ids(step: &Step, tour: &Tour, files: &[ChangedFile]) -> Vec<PieceId> {
 /// Line numbers are not followed to the new head, so a range in a file whose pieces changed,
 /// went away or appeared may now point at other lines.
 fn line_ranges_in_changed_files(
-    tour: &Tour,
+    tour: &GuidedTour,
     matching: &Matching,
     old: &[&Piece],
     new: &[&Piece],

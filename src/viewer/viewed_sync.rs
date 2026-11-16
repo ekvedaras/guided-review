@@ -4,7 +4,7 @@ use crate::coverage;
 use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
-use crate::tour::Tour;
+use crate::tour::GuidedTour;
 
 use super::ports::{GitHubError, PullRequestTipsPort, Viewed, ViewedFilesPort};
 use super::review::StepId;
@@ -206,7 +206,7 @@ pub(super) struct Coverage {
 impl Coverage {
     /// A step holds a file when it shows any lines of it; a file is partly unheld when the
     /// safety net still has lines of it.
-    pub(super) fn of(tour: &Tour, files: &[ChangedFile]) -> Self {
+    pub(super) fn of(tour: &GuidedTour, files: &[ChangedFile]) -> Self {
         let mut coverage = Self::default();
         for step in tour.steps() {
             let paths = step

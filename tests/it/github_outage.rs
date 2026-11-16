@@ -3,7 +3,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubFault, ReadFailure, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     GitHubError, OutageCause, Problem, Read, Review, ReviewStateFile, ToastTone, announcements,
 };
@@ -35,7 +35,7 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,

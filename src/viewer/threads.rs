@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::coverage;
 use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
-use crate::tour::Tour;
+use crate::tour::GuidedTour;
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
 use super::hand_offs::{HandOffId, HandOffs};
@@ -223,7 +223,7 @@ impl Placed<'_> {
 
 impl ThreadPlacement {
     pub fn of(
-        tour: &Tour,
+        tour: &GuidedTour,
         files: &[ChangedFile],
         threads: &[ReviewThread],
         followed: &BTreeMap<ThreadId, FollowedLines>,
@@ -358,6 +358,6 @@ fn commented_lines(thread: &ReviewThread, files_at_head: &FilesAtHead) -> Arc<[A
     }
 }
 
-pub(super) fn uncovered(tour: &Tour, files: &[ChangedFile]) -> bool {
+pub(super) fn uncovered(tour: &GuidedTour, files: &[ChangedFile]) -> bool {
     !coverage::safety_net(tour, files).is_empty()
 }

@@ -6,7 +6,7 @@ use crate::coverage;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::{PullRequestTips, PullRequestUrl};
 use crate::repin::RepinStatus;
-use crate::tour::Tour;
+use crate::tour::{GuidedTour, Tour};
 
 use super::agent_event::AgentEvent;
 use super::new_commits::{PickCodeSource, RepinnedTour};
@@ -33,8 +33,8 @@ pub struct RefreshBrief {
 }
 
 impl RefreshBrief {
-    pub fn of(tour: &Tour, files: &[ChangedFile], record: Option<&RepinRecord>) -> Self {
-        let Some(record) = record.filter(|record| record.to_head == tour.head) else {
+    pub fn of(tour: &GuidedTour, files: &[ChangedFile], record: Option<&RepinRecord>) -> Self {
+        let Some(record) = record.filter(|record| record.to_head == tour.pin.head) else {
             return Self::default();
         };
         let stale_steps = tour
@@ -142,10 +142,10 @@ impl TourRefresher {
         if let Some(reason) = failure {
             anyhow::bail!("claude stopped: {reason}");
         }
-        let tour = Tour::load(&Tour::path_for(&self.folders, &self.pr))?;
+        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
         let pinned = PullRequestTips {
-            base_branch_tip: tour.base.clone(),
-            head: tour.head.clone(),
+            base_branch_tip: tour.pin.base.clone(),
+            head: tour.pin.head.clone(),
         };
         let source = (self.pick_code_source)(&pinned)?;
         let review = Review::open(

@@ -13,7 +13,7 @@ use crate::line_number::LineNumber;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::repin::RepinStatus;
-use crate::tour::{Step, Tour};
+use crate::tour::{GuidedTour, Step};
 
 use super::threads::ThreadView;
 
@@ -178,7 +178,7 @@ pub struct SinceRead {
 impl<'a> StepPage<'a> {
     pub(super) fn of(
         step: &'a Step,
-        tour: &Tour,
+        tour: &GuidedTour,
         files: &[ChangedFile],
         display: &DiffDisplay,
         is_folded: bool,
@@ -210,7 +210,7 @@ pub struct SafetyNetPage {
 }
 
 impl SafetyNetPage {
-    pub(super) fn of(tour: &Tour, files: &[ChangedFile], display: &DiffDisplay) -> Self {
+    pub(super) fn of(tour: &GuidedTour, files: &[ChangedFile], display: &DiffDisplay) -> Self {
         Self {
             pieces: coverage::safety_net(tour, files)
                 .into_iter()
@@ -349,7 +349,11 @@ impl PieceDiff {
 }
 
 /// The pieces a step shows, in pointer order.
-pub(super) fn pieces_of<'a>(step: &Step, tour: &Tour, files: &'a [ChangedFile]) -> Vec<&'a Piece> {
+pub(super) fn pieces_of<'a>(
+    step: &Step,
+    tour: &GuidedTour,
+    files: &'a [ChangedFile],
+) -> Vec<&'a Piece> {
     step.pieces
         .iter()
         .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))

@@ -9,7 +9,7 @@ use crate::github::GitHub;
 use crate::pick_code_source::pick_code_source;
 use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
-use crate::tour::Tour;
+use crate::tour::{GuidedTour, Tour};
 use crate::viewer::{PickCodeSource, PullRequestTipsPort, ReviewStateFile};
 
 /// What every command needs to work on one PR: where its files live, GitHub, and the folder it runs in.
@@ -54,8 +54,8 @@ impl OpenedPr {
     }
 
     /// The tour is read at the commits it is pinned to, even when the PR has moved on since.
-    pub fn at_pinned_tips(&self, tour: &Tour) -> anyhow::Result<CodeAtTips> {
-        self.at(tour.pinned_tips())
+    pub fn at_pinned_tips(&self, tour: &GuidedTour) -> anyhow::Result<CodeAtTips> {
+        self.at(tour.pin.pinned_tips())
     }
 
     fn at(&self, tips: PullRequestTips) -> anyhow::Result<CodeAtTips> {

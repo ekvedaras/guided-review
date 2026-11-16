@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use super::shortcuts::Command;
 use crate::file_path::FilePath;
 use crate::pieces::{ChangedFile, PieceId};
-use crate::tour::Tour;
+use crate::tour::GuidedTour;
 
 use super::review::Screen;
 use super::step_page::pieces_of;
@@ -47,7 +47,7 @@ impl JumpTarget {
 
 /// Steps, then the files and symbols each step shows, in reading order, then the files only the safety net shows.
 pub(super) fn all_targets(
-    tour: &Tour,
+    tour: &GuidedTour,
     files: &[ChangedFile],
     safety_net_files: &[&FilePath],
 ) -> Vec<JumpTarget> {

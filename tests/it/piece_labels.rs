@@ -4,7 +4,7 @@
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::update::Build;
 use guided_review::viewer::{
     Chord, Command, Effect, FileToggle, FileView, Intent, KeyScope, PageRow, PaletteAction,
@@ -90,7 +90,7 @@ impl Pull {
     }
 
     fn open_with(&self, pieces: Vec<Value>) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR, "base": self.base, "head": self.head, "title": "Cart", "summary": [],
             "steps": [{"id": "cart", "title": "Cart", "why": "because", "pieces": pieces,
                 "children": []}],

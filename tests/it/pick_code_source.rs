@@ -8,7 +8,7 @@ use guided_review::github::GitHub;
 use guided_review::local_git::LocalGit;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Problem, Review, ReviewStateFile};
 use serde_json::json;
 
@@ -43,7 +43,7 @@ impl Shop {
     }
 
     fn open(&self, source: &dyn CodeSource) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,

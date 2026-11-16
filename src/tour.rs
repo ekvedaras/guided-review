@@ -11,9 +11,17 @@ use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 
 const VERSION: u32 = 1;
 
-/// The tour file: pointers only, pinned to a base and a head. Any viewer reads this.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Tour {
+/// A tour is one of two kinds, told apart by type: the basic tour the app makes with no AI, and
+/// the guided tour the tour writer wrote.
+#[derive(Debug)]
+pub enum Tour {
+    Basic(BasicTour),
+    Guided(GuidedTour),
+}
+
+/// What both kinds are pinned to. Any viewer reads this.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TourPin {
     #[serde(default = "current_version")]
     pub version: u32,
     #[serde(default)]
@@ -24,6 +32,13 @@ pub struct Tour {
     pub head: Sha,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_head: Option<Sha>,
+}
+
+/// The tour file of a guided tour: pointers only, pinned to a base and a head.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GuidedTour {
+    #[serde(flatten)]
+    pub pin: TourPin,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -33,6 +48,75 @@ pub struct Tour {
     pub reviewer_summary: String,
     #[serde(default)]
     pub steps: Vec<Step>,
+}
+
+/// The tour file of a basic tour: the pin and the PR's own title, with no steps and no summary.
+#[derive(Debug, Clone, Serialize)]
+pub struct BasicTour {
+    #[serde(flatten)]
+    pub pin: TourPin,
+    pub pr_title: String,
+    kind: BasicKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum BasicKind {
+    Basic,
+}
+
+#[derive(Deserialize)]
+struct BasicFile {
+    #[serde(flatten)]
+    pin: TourPin,
+    #[serde(default)]
+    pr_title: String,
+    #[serde(rename = "kind")]
+    _kind: BasicKind,
+}
+
+/// What a basic file must not hold: only a guided tour has them.
+const GUIDED_ONLY_FIELDS: [&str; 4] = ["title", "summary", "reviewer_summary", "steps"];
+
+/// What a tour file says it is. A file with no `kind` is a guided tour, as every file written
+/// before the basic tour existed.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum KindTag {
+    Basic,
+    #[default]
+    Guided,
+}
+
+#[derive(Deserialize)]
+struct KindProbe {
+    #[serde(default)]
+    kind: KindTag,
+}
+
+impl BasicTour {
+    pub const fn new(pin: TourPin, pr_title: String) -> Self {
+        Self {
+            pin,
+            pr_title,
+            kind: BasicKind::Basic,
+        }
+    }
+}
+
+impl TryFrom<serde_json::Value> for BasicTour {
+    type Error = anyhow::Error;
+
+    fn try_from(value: serde_json::Value) -> anyhow::Result<Self> {
+        if let Some(field) = GUIDED_ONLY_FIELDS
+            .iter()
+            .find(|field| value.get(**field).is_some())
+        {
+            anyhow::bail!("a basic tour has no `{field}`; that belongs to a guided tour");
+        }
+        let file: BasicFile = serde_json::from_value(value)?;
+        Ok(Self::new(file.pin, file.pr_title))
+    }
 }
 
 fn current_version() -> u32 {
@@ -120,8 +204,15 @@ impl Tour {
         std::env::var_os(Self::TOURS_DIR_ENV).map_or_else(|| folders.tours(), PathBuf::from)
     }
 
+    /// Where the guided tour lives. This is the path `tour-path` prints: the tour writer, `check`
+    /// and `refresh` only ever see this file.
     pub fn path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
         Self::path_in(&Self::tours_dir(folders), pr)
+    }
+
+    /// Where the basic tour lives, beside the guided tour's file.
+    pub fn basic_path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
+        Self::basic_path_in(&Self::tours_dir(folders), pr)
     }
 
     /// Where the tour writer keeps files the tour shows, like the pictures of its summary.
@@ -137,25 +228,54 @@ impl Tour {
             .join(format!("{}.json", pr.number))
     }
 
+    pub fn basic_path_in(tours_dir: &Path, pr: &PullRequestUrl) -> PathBuf {
+        tours_dir
+            .join(pr.repo.to_string())
+            .join(format!("{}.basic.json", pr.number))
+    }
+
+    /// Reads a tour file of either kind; a file with no `kind` is a guided tour.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("could not read the tour file {}", path.display()))?;
-        serde_json::from_str(&text)
-            .with_context(|| format!("{} is not a valid tour file", path.display()))
+        let value = read_json(path)?;
+        let invalid = || format!("{} is not a valid tour file", path.display());
+        let probe: KindProbe = serde_json::from_value(value.clone()).with_context(invalid)?;
+        match probe.kind {
+            KindTag::Basic => BasicTour::try_from(value).map(Self::Basic),
+            KindTag::Guided => serde_json::from_value(value)
+                .map(Self::Guided)
+                .map_err(anyhow::Error::from),
+        }
+        .with_context(invalid)
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        let text = serde_json::to_string_pretty(self)?;
-        let mut temp_name = path.as_os_str().to_owned();
-        temp_name.push(".tmp");
-        let temp = PathBuf::from(temp_name);
-        std::fs::write(&temp, text + "\n")
-            .and_then(|()| std::fs::rename(&temp, path))
-            .with_context(|| format!("could not write {}", path.display()))
+        match self {
+            Self::Basic(tour) => tour.save(path),
+            Self::Guided(tour) => tour.save(path),
+        }
     }
+}
 
+fn read_json(path: &Path) -> anyhow::Result<serde_json::Value> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("could not read the tour file {}", path.display()))?;
+    serde_json::from_str(&text)
+        .with_context(|| format!("{} is not a valid tour file", path.display()))
+}
+
+fn write_json(value: &impl Serialize, path: &Path) -> anyhow::Result<()> {
+    let text = serde_json::to_string_pretty(value)?;
+    let mut temp_name = path.as_os_str().to_owned();
+    temp_name.push(".tmp");
+    let temp = PathBuf::from(temp_name);
+    std::fs::write(&temp, text + "\n")
+        .and_then(|()| std::fs::rename(&temp, path))
+        .with_context(|| format!("could not write {}", path.display()))
+}
+
+impl TourPin {
     /// The facts the tool owns; the tour writer never guesses them.
-    pub fn pin(&mut self, pr: &PullRequestUrl, base: &Sha, head: &Sha) {
+    pub fn pin_to(&mut self, pr: &PullRequestUrl, base: &Sha, head: &Sha) {
         self.version = VERSION;
         self.pr = pr.to_string();
         self.base = base.clone();
@@ -171,6 +291,33 @@ impl Tour {
             base_branch_tip: self.base.clone(),
             head: self.head.clone(),
         }
+    }
+}
+
+impl BasicTour {
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        Self::try_from(read_json(path)?)
+            .with_context(|| format!("{} is not a valid basic tour file", path.display()))
+    }
+
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        write_json(self, path)
+    }
+}
+
+impl GuidedTour {
+    /// Reads the guided tour's file: no `kind`, or `"kind": "guided"`.
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        match Tour::load(path)? {
+            Tour::Guided(tour) => Ok(tour),
+            Tour::Basic(_) => {
+                anyhow::bail!("{} holds a basic tour, not a guided one", path.display())
+            }
+        }
+    }
+
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        write_json(self, path)
     }
 
     /// Every step, parents before their children.

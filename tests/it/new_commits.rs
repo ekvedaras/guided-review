@@ -8,7 +8,7 @@ use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
-use guided_review::tour::Tour;
+use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
     ReviewStateFile, Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
@@ -109,7 +109,7 @@ impl Shop {
     }
 
     fn open(&self) -> Review {
-        let tour = Tour::load(&self.tour_path()).unwrap();
+        let tour = GuidedTour::load(&self.tour_path()).unwrap();
         Review::open(tour, &self.source(), self.state_file()).unwrap()
     }
 
@@ -598,7 +598,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
 
     assert_eq!(repinned.review.head(), &Sha::new(&second_head));
     assert_eq!(
-        Tour::load(&shop.tour_path()).unwrap().head,
+        GuidedTour::load(&shop.tour_path()).unwrap().pin.head,
         Sha::new(&second_head)
     );
     assert_eq!(ticked(&repinned.review), ["keep"]);

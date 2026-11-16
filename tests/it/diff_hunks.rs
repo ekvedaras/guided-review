@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     DiffHunk, FileBlock, LineKind, LineLocation, Review, ReviewStateFile, Side, hidden_lines_after,
     hidden_lines_before,
@@ -37,7 +37,7 @@ impl Pull {
 
     /// The step `notes` shows the whole changed file; its text at head is already read.
     fn open_step(&self, pieces: Value) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": "https://github.com/acme/shop/pull/7",
             "base": self.base,
             "head": self.head,

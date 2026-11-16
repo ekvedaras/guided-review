@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::pieces::ChangedFile;
-use crate::tour::Tour;
+use crate::tour::GuidedTour;
 
 use std::collections::HashMap;
 
@@ -24,7 +24,7 @@ pub(super) fn system_prompt(pr: &str) -> String {
 }
 
 pub(super) fn context_for(
-    tour: &Tour,
+    tour: &GuidedTour,
     files: &[ChangedFile],
     links: &CodeLinks,
     place: &Place,
@@ -107,10 +107,10 @@ pub(super) fn context_for(
     Some(text)
 }
 
-fn pointers(tour: &Tour) -> String {
+fn pointers(tour: &GuidedTour) -> String {
     format!(
         "PR: {}\nBase commit: {}\nHead commit: {}\n",
-        tour.pr, tour.base, tour.head
+        tour.pin.pr, tour.pin.base, tour.pin.head
     )
 }
 

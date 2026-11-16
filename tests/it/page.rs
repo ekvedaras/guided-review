@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, PieceLabels,
     Review, ReviewStateFile, ReviewThread, Side, ThreadComment, ThreadId, ThreadRowPlace,
@@ -89,7 +89,7 @@ impl Pull {
 
     /// Opens the tour on its first step, with the files at head read.
     fn open(&self, steps: Value) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR, "base": self.base, "head": self.head, "title": "Notes", "summary": [],
             "steps": steps,
         }))

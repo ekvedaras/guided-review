@@ -5,7 +5,7 @@ use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use crate::repin::{Repin, repin};
-use crate::tour::Tour;
+use crate::tour::{GuidedTour, Tour};
 
 use super::ports::PullRequestTipsPort;
 use super::review::Review;
@@ -19,9 +19,9 @@ pub fn repin_tour(
     source: &dyn CodeSource,
     new_base: &Sha,
     new_head: &Sha,
-) -> anyhow::Result<(Tour, Repin)> {
-    let mut tour = Tour::load(tour_path)?;
-    let (old_base, old_head) = (tour.base.clone(), tour.head.clone());
+) -> anyhow::Result<(GuidedTour, Repin)> {
+    let mut tour = GuidedTour::load(tour_path)?;
+    let (old_base, old_head) = (tour.pin.base.clone(), tour.pin.head.clone());
     let result = repin(&mut tour, source, new_base, new_head)?;
     tour.save(tour_path)?;
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
@@ -51,8 +51,8 @@ pub struct TourReloader {
 impl TourReloader {
     /// Blocks on the code source; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let tour = Tour::load(&Tour::path_for(&self.folders, &self.pr))?;
-        let source = (self.pick_code_source)(&tour.pinned_tips())?;
+        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
+        let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
         let review = Review::open(
             tour,
             source.as_ref(),

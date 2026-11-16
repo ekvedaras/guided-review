@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     NextScreen, Problem, ReadProgress, Review, ReviewState, ReviewStateFile, Screen, SummaryStats,
     TourLead,
@@ -52,7 +52,7 @@ impl Shop {
     }
 
     fn try_open(&self) -> anyhow::Result<Review> {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,

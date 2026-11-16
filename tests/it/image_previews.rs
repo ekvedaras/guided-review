@@ -7,7 +7,7 @@ use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CommentGesture, CommentResult, ImageCache, ImageMark, ImageSide, PageRow, Review,
     ReviewStateFile, SendMode, TextBox,
@@ -98,7 +98,7 @@ impl Pull {
     }
 
     fn open_at(&self, head: &str, source: &CountingSource) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR, "base": self.base, "head": head, "title": "Images", "summary": [],
             "steps": [{"id": "pics", "title": "Pictures", "why": "because",
                 "pieces": [{"file": self.path}], "children": []}],
