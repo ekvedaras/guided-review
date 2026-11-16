@@ -24,6 +24,29 @@ use super::review::{ReadSubject, StepId};
 use super::switch_to_guided::CarriedReads;
 use super::threads::ThreadId;
 
+/// PR links in the state file stay the strings an earlier build wrote.
+mod pull_request_links {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::pull_request::PullRequestUrl;
+
+    pub fn serialize<S: Serializer>(prs: &[PullRequestUrl], to: S) -> Result<S::Ok, S::Error> {
+        prs.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .serialize(to)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        from: D,
+    ) -> Result<Vec<PullRequestUrl>, D::Error> {
+        Vec::<String>::deserialize(from)?
+            .iter()
+            .map(|link| link.parse().map_err(serde::de::Error::custom))
+            .collect()
+    }
+}
+
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
 /// not the tour writer's. Every section defaults to empty, so a file written before a section
 /// existed still loads.
@@ -44,9 +67,13 @@ pub struct ReviewState {
     /// The folder the PR was last opened from, so a switch back to it finds the same clone.
     #[serde(default)]
     opened_from: Option<PathBuf>,
-    /// The PRs whose offer to move this local review to them was declined, as their links.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    declined_moves: BTreeSet<String>,
+    /// The PRs whose offer to move this local review to them was declined, written as their links.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "pull_request_links"
+    )]
+    declined_moves: Vec<PullRequestUrl>,
     /// A local review's threads, written only through `LocalThreadStore`, never with the viewer's sections.
     #[serde(default, skip_serializing_if = "LocalThreads::is_empty")]
     local_threads: LocalThreads,
@@ -291,8 +318,9 @@ impl ReviewState {
     /// into the steps.
     pub(super) fn take_over_from_basic(&mut self, basic: &Self, carried: &CarriedReads) {
         self.take_viewer_sections(basic);
-        self.declined_moves
-            .extend(basic.declined_moves.iter().cloned());
+        for pr in &basic.declined_moves {
+            self.decline_move_to(pr);
+        }
         self.carry_file_reads_into_steps(carried);
     }
 
@@ -564,11 +592,13 @@ impl ReviewState {
     }
 
     pub(super) fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {
-        self.declined_moves.contains(&pr.to_string())
+        self.declined_moves.contains(pr)
     }
 
     pub(super) fn decline_move_to(&mut self, pr: &PullRequestUrl) {
-        self.declined_moves.insert(pr.to_string());
+        if !self.has_declined_move_to(pr) {
+            self.declined_moves.push(pr.clone());
+        }
     }
 
     pub(super) fn local_threads(&self) -> &LocalThreads {
