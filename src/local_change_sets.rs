@@ -6,9 +6,10 @@ use crate::config::Config;
 use crate::local_git::LocalGit;
 use crate::local_work_tree::LocalWorkTree;
 use crate::opened_change_set::local_reviews_on_disk;
+use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use crate::tour::Tour;
-use crate::viewer::{LocalRow, ReviewStateFile, TourAgentPort};
+use crate::viewer::{LocalRow, PullsOfBranchPort, ReviewStateFile, TourAgentPort};
 
 /// The local change sets the switcher lists: the local reviews on disk, and the current branch of each
 /// folder a PR was opened from, each clone Settings names and each folder a live Claude terminal works
@@ -18,6 +19,7 @@ pub fn find_local_rows(
     folders: &AppFolders,
     config: &Config,
     agents: &dyn TourAgentPort,
+    pulls: &dyn PullsOfBranchPort,
 ) -> Vec<LocalRow> {
     let mut rows: Vec<LocalRow> = local_reviews_on_disk(folders)
         .into_iter()
@@ -30,8 +32,24 @@ pub fn find_local_rows(
             .filter_map(row_of_folder)
             .filter(|row| !reviewed.contains(&row.change_set)),
     );
+    for row in &mut rows {
+        row.open_pr = open_pr_of(&row.change_set, pulls);
+    }
     rows.sort_by_cached_key(|row| ReviewSubject::from(row.change_set.clone()).to_string());
     rows
+}
+
+/// The open PR whose head is the branch. A row is only a convenience, so a failed look names none.
+fn open_pr_of(
+    change_set: &LocalChangeSet,
+    pulls: &dyn PullsOfBranchPort,
+) -> Option<PullRequestUrl> {
+    let repo = change_set.repo()?;
+    pulls
+        .open_pull_of_branch(repo, change_set.branch())
+        .ok()
+        .flatten()
+        .map(|pull| pull.pr)
 }
 
 /// The working trees the sources point into, each once.
@@ -74,6 +92,7 @@ fn row_of_folder(root: &WorkTreeRoot) -> Option<LocalRow> {
         commits_ahead: Some(glance.commits_ahead),
         uncommitted_files: Some(glance.uncommitted_files),
         on_disk: None,
+        open_pr: None,
     })
 }
 
@@ -101,5 +120,6 @@ fn row_of_review(change_set: &LocalChangeSet, folders: &AppFolders) -> LocalRow 
         uncommitted_files: facts.as_ref().map(|facts| facts.uncommitted_files.len()),
         change_set,
         on_disk,
+        open_pr: None,
     }
 }

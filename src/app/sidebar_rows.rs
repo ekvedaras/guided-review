@@ -6,8 +6,8 @@ use gpui::SharedString;
 
 use crate::viewer::{
     ApproveWarning, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal,
-    GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId,
-    TourAgentState, TreeRow,
+    GuidedTourStage, MoveOffer, Problem, ReadProgress, ReadUnit, Review, Screen, StepId,
+    TerminalId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -117,6 +117,8 @@ pub struct SidebarRows {
     pub local_heading: Option<SharedString>,
     /// A local review's folder is not its snapshot any more: Changed on disk, another branch, or gone.
     pub disk_news: Option<SidebarDiskNews>,
+    /// A local review's branch has an open PR, which the review offers to move to.
+    pub move_offer: Option<MoveOffer>,
 }
 
 pub struct SidebarDiskNews {
@@ -196,6 +198,7 @@ impl SidebarRows {
             }),
             basic_mode_label: review.basic_mode_label(),
             local_heading: review.local_heading().map(Into::into),
+            move_offer: review.move_offer(),
             disk_news: review
                 .disk_news()
                 .map(|DiskNews { line, offer }| SidebarDiskNews {

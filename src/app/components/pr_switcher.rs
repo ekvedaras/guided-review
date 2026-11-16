@@ -11,6 +11,7 @@ use gpui::{
 
 use crate::app::tour_writer;
 use crate::config::Config;
+use crate::github::GitHub;
 use crate::local_change_sets::find_local_rows;
 use crate::opened_change_set::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
@@ -84,7 +85,7 @@ impl PrSwitching {
                 .spawn(async move {
                     // A config that cannot be read is Settings' to report; here it only names no clones.
                     let config = Config::load_from(&looked_in).unwrap_or_default();
-                    find_local_rows(&looked_in, &config, agents.as_ref())
+                    find_local_rows(&looked_in, &config, agents.as_ref(), &GitHub::from_env())
                 })
                 .await;
             list.update(cx, |list, cx| {
@@ -147,6 +148,8 @@ struct ShownRow {
     is_active: bool,
     /// What the folder of a local review is now, when it is no longer the snapshot.
     disk_label: Option<&'static str>,
+    /// A local row whose branch has an open PR: "PR acme/shop#7 open".
+    open_pr: Option<SharedString>,
     offers_drop_review: bool,
 }
 
@@ -182,6 +185,10 @@ impl ShownRow {
             has_unseen_reply: row.has_unseen_reply,
             is_active: row.is_active,
             disk_label: row.local().and_then(LocalRow::disk_label),
+            open_pr: row
+                .local()
+                .and_then(|local| local.open_pr.as_ref())
+                .map(|pr| format!("{} is open", pr.short()).into()),
             offers_drop_review: row.local().is_some_and(LocalRow::offers_drop_review),
         }
     }
@@ -497,6 +504,12 @@ impl PrSwitcherView {
         .when(shown.has_unseen_reply, |row| {
             row.child(chip(&colors, Tone::Accent).child("agent replied"))
         })
+        .children(
+            shown
+                .open_pr
+                .clone()
+                .map(|label| chip(&colors, Tone::Accent).child(label)),
+        )
         .children(
             shown
                 .disk_label

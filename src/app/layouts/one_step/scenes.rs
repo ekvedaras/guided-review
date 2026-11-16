@@ -68,11 +68,12 @@ enum Scene {
     LocalOverview,
     LocalFile,
     LocalChangedOnDisk,
+    LocalMoveOffer,
     LocalTaskSendAnyway,
 }
 
 impl Scene {
-    const ALL: [Self; 40] = [
+    const ALL: [Self; 41] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -112,6 +113,7 @@ impl Scene {
         Self::LocalOverview,
         Self::LocalFile,
         Self::LocalChangedOnDisk,
+        Self::LocalMoveOffer,
         Self::LocalTaskSendAnyway,
     ];
 
@@ -156,6 +158,7 @@ impl Scene {
             Self::LocalOverview => "58-local-overview",
             Self::LocalFile => "59-local-file",
             Self::LocalChangedOnDisk => "60-local-changed-on-disk",
+            Self::LocalMoveOffer => "61-local-move-to-pr",
             Self::LocalTaskSendAnyway => "62-local-task-send-anyway",
         }
     }
@@ -564,6 +567,9 @@ impl OneStepLayout {
             Scene::LocalChangedOnDisk => self
                 .session
                 .update(cx, ReviewSession::stage_local_changed_on_disk),
+            Scene::LocalMoveOffer => self
+                .session
+                .update(cx, ReviewSession::stage_local_move_offer),
             Scene::LocalFile => {
                 self.session
                     .update(cx, ReviewSession::stage_local_with_task);
@@ -702,6 +708,7 @@ impl OneStepLayout {
             | Scene::BasicRead
             | Scene::BasicGuidedReady
             | Scene::LocalOverview
+            | Scene::LocalMoveOffer
             | Scene::LocalFile
             | Scene::LocalTaskSendAnyway => {
                 self.session.update(cx, ReviewSession::unstage_basic);

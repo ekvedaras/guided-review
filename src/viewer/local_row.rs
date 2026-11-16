@@ -1,4 +1,5 @@
 use crate::local_work_tree::OnDisk;
+use crate::pull_request::PullRequestUrl;
 use crate::review_subject::LocalChangeSet;
 
 /// A local change set the switcher lists: one branch of one working tree, with what the reviewer
@@ -12,6 +13,8 @@ pub struct LocalRow {
     pub uncommitted_files: Option<usize>,
     /// Where the folder is against the snapshot of the review on disk; `None` when there is no review yet.
     pub on_disk: Option<OnDisk>,
+    /// The open PR whose head is the branch, when GitHub said so.
+    pub open_pr: Option<PullRequestUrl>,
 }
 
 impl LocalRow {

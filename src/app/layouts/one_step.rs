@@ -98,10 +98,10 @@ use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, DiskOffer, Effect,
     FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch,
-    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats,
-    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit,
-    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    LineLocation, MoveOffer, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage,
+    OverviewStats, PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject,
+    ReadUnit, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep,
+    Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
     SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
     SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
     Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
@@ -1538,6 +1538,65 @@ impl OneStepLayout {
             .children(action)
     }
 
+    /// A local review's branch has an open PR: the line, Move to <pr> and Keep local review.
+    fn move_offer_block(
+        colors: &Colors,
+        offer: &MoveOffer,
+        is_moving: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.accent)
+                    .child(format!("{} is open from this branch", offer.pr.short())),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        icon_label_button(
+                            colors,
+                            "move-to-pr",
+                            ButtonKind::Secondary,
+                            ButtonSize::Small,
+                            Icon::ArrowRight,
+                            if is_moving {
+                                "Moving…".to_owned()
+                            } else {
+                                offer.label()
+                            },
+                        )
+                        .when(!is_moving, |button| {
+                            button.on_click(cx.listener(|this, _, _, cx| {
+                                this.session.update(cx, ReviewSession::move_to_pr);
+                            }))
+                        }),
+                    )
+                    .when(!is_moving, |row| {
+                        row.child(
+                            icon_label_button(
+                                colors,
+                                "decline-move-to-pr",
+                                ButtonKind::Secondary,
+                                ButtonSize::Small,
+                                Icon::Close,
+                                "Keep local review",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.session.update(cx, ReviewSession::decline_move);
+                            })),
+                        )
+                    }),
+            )
+    }
+
     /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
     fn clone_offer_block(
         colors: &Colors,
@@ -1854,6 +1913,10 @@ impl OneStepLayout {
             .disk_news
             .as_ref()
             .map(|news| Self::disk_news_block(&colors, news, session.repin_progress(), cx));
+        let move_offer = sidebar
+            .move_offer
+            .as_ref()
+            .map(|offer| Self::move_offer_block(&colors, offer, session.is_moving(), cx));
         let clone_offer = session
             .clone_offer()
             .map(|offer| Self::clone_offer_block(&colors, offer, cx));
@@ -1946,6 +2009,7 @@ impl OneStepLayout {
                     .map(|heading| div().text_xs().text_color(colors.muted_text).child(heading)),
             )
             .children(disk_news)
+            .children(move_offer)
             .child(match sidebar.basic_mode_label {
                 Some(label) => div()
                     .flex()

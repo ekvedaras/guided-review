@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::{FixtureRepo, folders_in};
 use guided_review::app_folders::AppFolders;
@@ -10,8 +11,8 @@ use guided_review::opened_change_set::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    ActivePr, Pick, PrSwitcher, RelevantPullRequest, RelevantPullRequests, ReviewStateFile,
-    SwitcherRow, WhyListed,
+    ActivePr, NoGitHub, Pick, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
+    ReviewStateFile, SwitcherRow, WhyListed,
 };
 
 const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
@@ -44,7 +45,10 @@ fn clone_named_in_config(folder: &Path) -> Config {
 /// The switcher after the local rows were found from the sources the app has.
 fn found(folders: &AppFolders, config: &Config, agents: &FakeTourAgent) -> PrSwitcher {
     let mut switcher = PrSwitcher::default();
-    switcher.local_found(find_local_rows(folders, config, agents), folders);
+    switcher.local_found(
+        find_local_rows(folders, config, agents, &NoGitHub::default()),
+        folders,
+    );
     switcher
 }
 
@@ -330,6 +334,7 @@ fn local_rows_come_after_the_pull_requests_and_a_new_github_list_keeps_them() {
             &folders,
             &clone_named_in_config(repo.path()),
             &FakeTourAgent::new(),
+            &NoGitHub::default(),
         ),
         &folders,
     );
@@ -356,4 +361,32 @@ fn picking_a_local_row_opens_its_review() {
     );
 
     assert_eq!(switcher.pick(0).unwrap(), Pick::Show(subject_of(&repo)));
+}
+
+#[test]
+fn a_local_row_whose_branch_has_an_open_pr_says_so_and_one_without_says_nothing() {
+    let repo = shop_on_feature();
+    let config = clone_named_in_config(repo.path());
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", "head", &sent).with_open_pull_from(
+        "feature",
+        SHOP_7,
+        "Add the cart",
+    );
+
+    let with_a_pr = {
+        let mut switcher = PrSwitcher::default();
+        switcher.local_found(
+            find_local_rows(&repo.folders(), &config, &FakeTourAgent::new(), &github),
+            &repo.folders(),
+        );
+        switcher
+    };
+    let without = found(&repo.folders(), &config, &FakeTourAgent::new());
+
+    assert_eq!(
+        the_only_row(&with_a_pr).local().unwrap().open_pr,
+        Some(SHOP_7.parse().unwrap())
+    );
+    assert_eq!(the_only_row(&without).local().unwrap().open_pr, None);
 }

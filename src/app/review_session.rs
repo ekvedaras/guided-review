@@ -26,12 +26,12 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::GhCloner;
+use crate::github::{GhCloner, GitHub};
 use crate::opened_change_set::OpenedChangeSet;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
     CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, LineLocation,
-    NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, Review,
+    NoteSubject, OldHead, OwnAgentHandOff, PrMover, Problem, RefreshBrief, RepinnedTour, Review,
     ReviewChange, ReviewVerdict, Screen, SendMode, TerminalId, TextBox, ThreadAction,
     ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
     TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
@@ -50,6 +50,8 @@ pub struct TourWork {
     pub refresher: Arc<TourRefresher>,
     pub reloader: Arc<TourReloader>,
     pub switcher: Arc<TourSwitcher>,
+    /// Only a local review has one.
+    pub mover: Option<Arc<PrMover>>,
     pub tour_agents: TourAgents,
 }
 
@@ -94,6 +96,8 @@ pub struct ReviewSession {
     reload: Option<Task<()>>,
     /// The build of the guided review a click on Switch to guided tour started.
     switch: Option<Task<()>>,
+    /// The move of a local review to its PR a click on Move to <pr> started.
+    moving: Option<Task<()>>,
     clone_offer: Option<CloneOffer>,
     cloning: Option<Task<()>>,
     typing_save: Option<Task<()>>,
@@ -195,6 +199,7 @@ impl ReviewSession {
             loading_images: HashSet::new(),
             reload: None,
             switch: None,
+            moving: None,
             clone_offer,
             cloning: None,
             typing_save: None,
@@ -238,6 +243,10 @@ impl ReviewSession {
     /// The scroll state of the screen's rows; it follows every rebuild of the rows.
     pub fn screen_list(&self) -> &ListState {
         &self.screen_list
+    }
+
+    pub const fn is_moving(&self) -> bool {
+        self.moving.is_some()
     }
 
     pub fn repin_progress(&self) -> &RepinProgress {
@@ -546,6 +555,53 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    /// Move to <pr>, on the button only. The review takes no changes from here on, as its state file is
+    /// carried to the PR's and deleted; the PR's review takes the window when the move is done.
+    pub fn move_to_pr(&mut self, cx: &mut Context<Self>) {
+        let (Some(offer), Some(mover)) = (self.review.move_offer(), self.tour_work.mover.clone())
+        else {
+            return;
+        };
+        if self.moving.is_some() {
+            return;
+        }
+        self.save_typing_now();
+        self.change(cx, |review| review.start_drop());
+        self.moving = Some(self.run_off_thread(
+            cx,
+            {
+                let offer = offer.clone();
+                move || mover.run(&offer, &GitHub::from_env())
+            },
+            move |this, moved, cx| {
+                this.moving = None;
+                match moved {
+                    Ok(()) => (cx.global::<PrSwitching>().show)(offer.pr.into()),
+                    Err(error) => {
+                        this.review.repin_failed();
+                        post_toast(
+                            cx,
+                            ToastTone::Danger,
+                            format!("Could not move to {}: {error:#}", offer.pr.short()),
+                        );
+                    }
+                }
+            },
+        ));
+    }
+
+    /// Not now: the offer goes for that PR and the local review stays.
+    pub fn decline_move(&mut self, cx: &mut Context<Self>) {
+        if self.moving.is_some() {
+            return;
+        }
+        self.change(cx, |review| {
+            if let Err(error) = review.decline_move() {
+                eprintln!("could not keep that the move was declined: {error:#}");
+            }
+        });
     }
 
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
@@ -939,6 +995,22 @@ impl ReviewSession {
             eprintln!("could not stage a held back task in the local review: {error:#}");
         }
         self.stage_local(cx);
+    }
+
+    /// The local review whose branch has an open PR, so its sidebar offers Move to the PR. Looking for
+    /// the PR on GitHub would answer nothing for the sample repo, so the answer is given here.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_move_offer(&mut self, cx: &mut Context<Self>) {
+        self.stage_local(cx);
+        let Ok(pr) = "https://github.com/acme/shop/pull/7".parse() else {
+            return;
+        };
+        self.change(cx, |review| {
+            review.pull_of_branch_is(Some(crate::viewer::PullOfBranch {
+                pr,
+                title: "Add the cart".to_owned(),
+            }));
+        });
     }
 
     /// The local review with a file written in its folder after it opened, so its look at the folder

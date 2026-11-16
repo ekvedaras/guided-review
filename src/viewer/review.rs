@@ -825,7 +825,7 @@ impl ReviewCore {
     }
 
     /// What GitHub said of the PR opened from a local review's branch.
-    pub(super) fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
+    pub fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
         self.pull_of_branch = found;
     }
 
