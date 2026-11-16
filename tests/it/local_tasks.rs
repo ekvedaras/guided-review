@@ -11,9 +11,10 @@ use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
-    AgentStatus, Audience, CommentGesture, CommentPlace, CommentResult, HandOffState, LineLocation,
-    PieceDiff, ReviewStateFile, SendMode, TextBox, ThreadAction, ThreadHome, ThreadView,
-    TourAgentPort, TourAgents, WorkPorts,
+    AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
+    CommentRefusal, CommentResult, HandOffState, LineLocation, PieceDiff, ReviewStateFile,
+    SendMode, Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHome,
+    ThreadMessage, ThreadView, TourAgentPort, TourAgentState, TourAgents, WorkPorts,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README's second line written and not
@@ -369,4 +370,215 @@ fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
     );
     assert_eq!(threads(&app)[0].thread.comments.len(), 3);
     assert_eq!(feature.sent.github_calls(), []);
+}
+
+/// A thread action, as the app runs it.
+fn act(feature: &Feature, opened: &mut OpenedReview, action: ThreadAction) -> ThreadActionResult {
+    let request = opened.review.thread_action_request(action);
+    let result = opened
+        .review
+        .apply_thread_action(request.run(&feature.github()));
+    feature.run_work(opened);
+    result
+}
+
+#[test]
+fn a_reply_is_a_follow_up_task_and_replies_edits_deletes_and_resolve_last_across_a_restart() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = task_sent(&feature);
+    let thread_id = threads(&opened)[0].thread.id.clone();
+    let task = threads(&opened)[0].thread.comments[0].id.clone();
+    let reply_box = TextBox::Reply(thread_id.clone());
+    opened.review.open_box(&reply_box).unwrap();
+    opened.review.type_in(&reply_box, "And the cart?").unwrap();
+
+    let replied = act(
+        &feature,
+        &mut opened,
+        ThreadAction::Reply {
+            thread_id: thread_id.clone(),
+            mode: SendMode::SendNow,
+            audience: Audience::Author,
+        },
+    );
+    let follow_up = opened.review.hand_offs().all()[1].clone();
+    let reply = threads(&opened)[0].thread.comments[1].id.clone();
+    opened
+        .review
+        .open_box(&TextBox::Edit(task.clone()))
+        .unwrap();
+    opened
+        .review
+        .type_in(&TextBox::Edit(task.clone()), "Say who the world is, please")
+        .unwrap();
+    let edited = act(
+        &feature,
+        &mut opened,
+        ThreadAction::EditComment { comment_id: task },
+    );
+    opened.review.ask_to_delete(&reply);
+    let deleted = act(
+        &feature,
+        &mut opened,
+        ThreadAction::DeleteComment { comment_id: reply },
+    );
+    let resolved = act(
+        &feature,
+        &mut opened,
+        ThreadAction::Resolve {
+            thread_id: thread_id.clone(),
+        },
+    );
+
+    assert_eq!(
+        [replied, edited, deleted, resolved],
+        [
+            ThreadActionResult::Done,
+            ThreadActionResult::Done,
+            ThreadActionResult::Done,
+            ThreadActionResult::Done
+        ]
+    );
+    assert_eq!(follow_up.thread(), Some(&thread_id));
+    assert_eq!(follow_up.comment(), "And the cart?");
+    assert_eq!(
+        follow_up.thread_so_far(),
+        [ThreadMessage {
+            author: "You".to_owned(),
+            body: "Say who the world is".to_owned(),
+        }]
+    );
+    let reopened = feature.reopened();
+    let shown = threads(&reopened);
+    assert_eq!(
+        said(&shown[0]),
+        [("You".to_owned(), "Say who the world is, please".to_owned())]
+    );
+    assert!(shown[0].thread.is_resolved);
+    assert!(shown[0].is_folded);
+    assert_eq!(reopened.review.hand_offs().all().len(), 2);
+    assert_eq!(feature.sent.github_calls(), []);
+}
+
+/// Update, as the sidebar's button runs it, then the reads the re-pinned review wants.
+fn update(feature: &Feature, opened: &mut OpenedReview) {
+    let updated = opened.repinner.run(&feature.github()).unwrap();
+    let replaced = std::mem::replace(&mut opened.review, updated.review);
+    opened.review.carry_on_from(replaced);
+    opened.source = updated.source;
+    opened.review.go_to_file(&file_path("README.md"));
+    opened.review.pull_from_github();
+    feature.run_work(opened);
+}
+
+#[test]
+fn after_update_a_local_thread_follows_its_line_and_one_whose_line_changed_shows_as_outdated_with_what_it_was()
+ {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = task_sent(&feature);
+    feature.repo.write("README.md", "intro\nhello\nworld\n");
+
+    update(&feature, &mut opened);
+
+    let moved = threads(&opened).remove(0);
+    assert!(moved.thread.is_outdated);
+    assert_eq!(
+        moved.anchor.as_ref().map(|at| (at.side, at.line)),
+        Some((Side::Head, row(&opened, "world").line))
+    );
+    assert_eq!(row(&opened, "world").line, crate::support::line(3));
+
+    feature.repo.write("README.md", "hello\nthere\n");
+    update(&feature, &mut opened);
+
+    let changed = threads(&opened).remove(0);
+    assert!(changed.thread.is_outdated);
+    let followed = changed.followed.clone().unwrap();
+    assert!(followed.were_changed);
+    assert_eq!(followed.before, ["world"]);
+    assert_eq!(said(&changed)[0].1, "Say who the world is");
+    assert_eq!(feature.sent.github_calls(), []);
+}
+
+#[test]
+fn while_the_agent_link_is_off_a_comment_says_why_and_stays_a_draft_until_it_is_back() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let place = write_comment(&mut opened, "world", "Say who the world is");
+
+    opened
+        .review
+        .tour_agent_is(&TourAgentState::LinkOff(AgentLinkOff::ServerNotRunning));
+
+    assert_eq!(
+        opened.review.comment_box(&place).unwrap().problem,
+        Some(CommentProblem::Refused(CommentRefusal::AgentLinkOff))
+    );
+    assert!(
+        opened
+            .review
+            .start_sending(&place, SendMode::SendNow, Audience::Agent)
+            .is_none()
+    );
+    assert_eq!(
+        opened.review.text_of(&TextBox::Draft(place.clone())),
+        Some("Say who the world is")
+    );
+
+    opened.review.tour_agent_is(&TourAgentState::Agent {
+        terminal: TerminalId::new("t1"),
+        status: AgentStatus::Idle,
+    });
+
+    assert_eq!(opened.review.comment_box(&place).unwrap().problem, None);
+    assert!(
+        opened
+            .review
+            .start_sending(&place, SendMode::SendNow, Audience::Agent)
+            .is_some()
+    );
+}
+
+#[test]
+fn a_local_review_offers_only_send_now_and_a_pr_comment_cannot_be_sent_as_a_task() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let place = write_comment(&mut opened, "world", "Say who the world is");
+
+    assert_eq!(opened.review.send_modes(), [SendMode::SendNow]);
+    for github_mode in [SendMode::AddToReview, SendMode::CommentNow] {
+        assert!(
+            opened
+                .review
+                .start_sending(&place, github_mode, Audience::Author)
+                .is_none(),
+            "{github_mode:?}"
+        );
+    }
+}
+
+#[test]
+fn suggest_change_puts_the_lines_in_the_task_the_agent_gets() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let place = write_comment(&mut opened, "world", "Say it like this:");
+
+    let suggested = opened.review.suggest_change(&place).unwrap();
+    let request = opened
+        .review
+        .start_sending(&place, SendMode::SendNow, Audience::Agent)
+        .unwrap();
+    opened
+        .review
+        .apply_comment(request.run(&feature.github()))
+        .unwrap();
+    feature.run_work(&mut opened);
+
+    assert!(suggested.is_some());
+    let typed = feature.typed_into_agent();
+    assert!(
+        typed[0].contains("```suggestion\nworld\n```"),
+        "{}",
+        typed[0]
+    );
 }
