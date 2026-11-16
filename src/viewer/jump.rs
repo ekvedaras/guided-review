@@ -13,6 +13,8 @@ use super::step_page::pieces_of;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JumpPlace {
     StepTop,
+    /// A basic tour's overview.
+    Overview,
     File(FilePath),
     Piece(PieceId),
 }
@@ -30,19 +32,34 @@ impl JumpTarget {
     /// What the query is matched against: the step's title, the file's path or the piece's id.
     pub fn label(&self) -> Cow<'_, str> {
         match &self.place {
-            JumpPlace::StepTop => Cow::Borrowed(&self.screen_title),
+            JumpPlace::StepTop | JumpPlace::Overview => Cow::Borrowed(&self.screen_title),
             JumpPlace::File(path) => Cow::Borrowed(path.as_str()),
             JumpPlace::Piece(id) => Cow::Owned(id.to_string()),
         }
     }
 
-    /// Where a file or symbol is shown; a step needs none.
+    /// Where a file or symbol is shown; a step needs none, nor does a file that has a screen of its own.
     pub fn detail(&self) -> Option<&str> {
-        match self.place {
-            JumpPlace::StepTop => None,
-            JumpPlace::File(_) | JumpPlace::Piece(_) => Some(&self.screen_title),
+        match (&self.place, &self.screen) {
+            (JumpPlace::StepTop | JumpPlace::Overview, _) | (_, Screen::File(_)) => None,
+            (JumpPlace::File(_) | JumpPlace::Piece(_), _) => Some(&self.screen_title),
         }
     }
+}
+
+/// The overview, then a file screen for each changed file in `files_in_reading_order`.
+pub(super) fn basic_targets(files_in_reading_order: &[FilePath]) -> Vec<JumpTarget> {
+    let overview = JumpTarget {
+        screen: Screen::Overview,
+        place: JumpPlace::Overview,
+        screen_title: "Overview".to_owned(),
+    };
+    let files = files_in_reading_order.iter().map(|path| JumpTarget {
+        screen: Screen::File(path.clone()),
+        place: JumpPlace::File(path.clone()),
+        screen_title: path.to_string(),
+    });
+    std::iter::once(overview).chain(files).collect()
 }
 
 /// Steps, then the files and symbols each step shows, in reading order, then the files only the safety net shows.
@@ -234,6 +251,7 @@ impl PaletteAction {
 /// The palette's headings, in the order they show when nothing is typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteGroupKind {
+    Overview,
     Steps,
     Files,
     Symbols,
@@ -243,6 +261,7 @@ pub enum PaletteGroupKind {
 impl PaletteGroupKind {
     pub fn title(self) -> &'static str {
         match self {
+            Self::Overview => "Overview",
             Self::Steps => "Steps",
             Self::Files => "Files",
             Self::Symbols => "Symbols",
@@ -279,6 +298,7 @@ pub(super) fn palette(
     if !actions_only {
         for target in rank(places, query) {
             let kind = match target.place {
+                JumpPlace::Overview => PaletteGroupKind::Overview,
                 JumpPlace::StepTop => PaletteGroupKind::Steps,
                 JumpPlace::File(_) => PaletteGroupKind::Files,
                 JumpPlace::Piece(_) => PaletteGroupKind::Symbols,

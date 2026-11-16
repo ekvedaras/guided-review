@@ -155,16 +155,17 @@ fn a_folded_step_folds_each_file_box_on_its_own_and_opening_all_drops_single_cho
     let shop = Shop::with_pull();
     let mut review = shop.open();
     let readme = "readme".into();
+    let screen = Screen::Step("readme".into());
     review.tick(&readme).unwrap();
-    assert!(review.is_box_folded(&readme, &file_path("README.md")));
+    assert!(review.is_box_folded(&screen, &file_path("README.md")));
 
-    review.toggle_box_fold(&readme, &file_path("README.md"));
-    assert!(!review.is_box_folded(&readme, &file_path("README.md")));
+    review.toggle_box_fold(&screen, &file_path("README.md"));
+    assert!(!review.is_box_folded(&screen, &file_path("README.md")));
     assert!(review.is_folded(&readme), "the step stays folded");
 
     review.toggle_fold(&readme);
     review.toggle_fold(&readme);
-    assert!(review.is_box_folded(&readme, &file_path("README.md")));
+    assert!(review.is_box_folded(&screen, &file_path("README.md")));
 }
 
 #[test]

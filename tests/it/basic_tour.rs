@@ -3,8 +3,10 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
-    FolderPath, Review, ReviewChange, ReviewStateFile, Screen, TreeRow, TreeRowKind,
+    FolderPath, JumpPlace, NextScreen, OverviewStats, PageRow, ReadingPlace, Review, ReviewChange,
+    ReviewStateFile, Screen, TreeRow, TreeRowKind, WriteGuidedTourRefusal,
 };
+use std::sync::Arc;
 
 fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
     repo.write("seed.txt", "seed\n");
@@ -186,7 +188,6 @@ fn guided_only_questions_get_empty_answers_on_every_screen_of_a_basic_review() {
     loop {
         let _ = review.page();
         assert_eq!(review.sidebar().len(), 0);
-        assert_eq!(review.jump_targets("").len(), 0);
         assert!(review.current_step().is_none());
         assert!(review.approve_warning().is_none());
         assert_eq!(review.summary().len(), 0);
@@ -197,6 +198,168 @@ fn guided_only_questions_get_empty_answers_on_every_screen_of_a_basic_review() {
             break;
         }
     }
+}
+
+#[test]
+fn the_overview_page_gives_title_counts_files_and_a_refused_write_guided_tour() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = open_basic(&repo, &["src/a.rs", "b.txt"]);
+    review
+        .set_pr_description("Orders cost **two**.\n\nSee the ticket.")
+        .unwrap();
+
+    let page = Arc::clone(review.page());
+    let overview = page.overview().unwrap();
+
+    assert_eq!(overview.title, "Orders cost two");
+    assert_eq!(
+        overview.stats,
+        OverviewStats {
+            files: 2,
+            added_lines: 2,
+            removed_lines: 0,
+            open_threads: 0,
+        }
+    );
+    assert_eq!(
+        overview
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.added_lines, file.is_read))
+            .collect::<Vec<_>>(),
+        vec![("src/a.rs", 1, false), ("b.txt", 1, false)]
+    );
+    assert_eq!(overview.description, review.pr_description());
+    assert!(overview.description.is_some());
+    assert_eq!(
+        overview.write_guided_tour_refusal,
+        Some(WriteGuidedTourRefusal::NotWiredYet)
+    );
+    assert_ne!(WriteGuidedTourRefusal::NotWiredYet.reason(), "");
+}
+
+#[test]
+fn a_file_screen_shows_the_whole_file_in_a_box_that_folds_by_its_screen() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = open_basic(&repo, &["a.txt", "b.txt"]);
+    review.go_to_file(&file_path("a.txt"));
+
+    let page = Arc::clone(review.page());
+    let kinds: Vec<&str> = page
+        .rows()
+        .iter()
+        .map(|row| match row {
+            PageRow::Toolbar(_) => "toolbar",
+            PageRow::PieceHeader(_) => "header",
+            PageRow::Line(_) => "line",
+            PageRow::PieceEnd => "end",
+            PageRow::ScreenFooter(_) => "footer",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, vec!["toolbar", "header", "line", "end", "footer"]);
+    let Some(PageRow::PieceHeader(header)) = page.row(1) else {
+        panic!("no header");
+    };
+    let fold = header.fold.clone().unwrap();
+    assert_eq!(fold.screen, file("a.txt"));
+    assert!(!fold.is_folded);
+    assert_eq!(page.line(2).unwrap().code.as_ref(), "changed");
+    let Some(PageRow::ScreenFooter(footer)) = page.rows().last() else {
+        panic!("no footer");
+    };
+    assert_eq!(
+        footer.next,
+        Some(NextScreen::File {
+            path: file_path("b.txt")
+        })
+    );
+    assert!(footer.has_previous);
+
+    review.toggle_box_fold(&fold.screen, &fold.path);
+
+    assert!(
+        !review
+            .page()
+            .rows()
+            .iter()
+            .any(|row| matches!(row, PageRow::Line(_)))
+    );
+    assert!(review.is_box_folded(&file("a.txt"), &file_path("a.txt")));
+    assert!(!review.is_box_folded(&file("b.txt"), &file_path("a.txt")));
+}
+
+#[test]
+fn the_palette_lists_the_overview_then_the_files_in_tree_order() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = open_basic(&repo, &["src/b.rs", "src/a.rs", "z.txt"]);
+
+    let targets = review.jump_targets("");
+    assert_eq!(
+        targets
+            .iter()
+            .map(|target| (target.screen.clone(), target.label().into_owned()))
+            .collect::<Vec<_>>(),
+        vec![
+            (Screen::Overview, "Overview".to_owned()),
+            (file("src/a.rs"), "src/a.rs".to_owned()),
+            (file("src/b.rs"), "src/b.rs".to_owned()),
+            (file("z.txt"), "z.txt".to_owned()),
+        ]
+    );
+    assert_eq!(targets[0].place, JumpPlace::Overview);
+    assert_eq!(targets[1].place, JumpPlace::File(file_path("src/a.rs")));
+    assert_eq!(targets[1].detail(), None);
+
+    let found = review.jump_targets("b.rs");
+    assert_eq!(found.len(), 1);
+    review.jump_to(&found[0]);
+    assert_eq!(review.screen(), &file("src/b.rs"));
+}
+
+#[test]
+fn the_reading_place_counts_files_and_names_the_next_one() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = open_basic(&repo, &["a.txt", "b.txt", "c.txt"]);
+    let next = |name: &str| {
+        Some(NextScreen::File {
+            path: file_path(name),
+        })
+    };
+
+    assert_eq!(
+        review.reading_place(),
+        ReadingPlace {
+            step_number: None,
+            step_count: 0,
+            file_number: None,
+            file_count: 3,
+            has_previous: false,
+            next: next("a.txt"),
+        }
+    );
+    review.go_to_file(&file_path("b.txt"));
+    assert_eq!(
+        review.reading_place(),
+        ReadingPlace {
+            step_number: None,
+            step_count: 0,
+            file_number: Some(2),
+            file_count: 3,
+            has_previous: true,
+            next: next("c.txt"),
+        }
+    );
+    review.go_to_file(&file_path("c.txt"));
+    assert_eq!(review.reading_place().next, None);
+}
+
+#[test]
+fn a_basic_review_says_it_is_in_basic_mode() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let review = open_basic(&repo, &["a.txt"]);
+
+    assert_eq!(review.basic_mode_label(), Some("Basic mode"));
 }
 
 #[test]

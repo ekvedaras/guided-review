@@ -74,7 +74,9 @@ impl ShownEntry {
         let (label, detail) = match &entry {
             PaletteEntry::Place(target) => (
                 match &target.place {
-                    JumpPlace::StepTop => ShownLabel::Step(target.label().into_owned().into()),
+                    JumpPlace::StepTop | JumpPlace::Overview => {
+                        ShownLabel::Step(target.label().into_owned().into())
+                    }
                     JumpPlace::File(path) => {
                         ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(path.clone())))
                     }
@@ -94,7 +96,7 @@ impl ShownEntry {
     fn icon(&self) -> Icon {
         match &self.entry {
             PaletteEntry::Place(target) => match target.place {
-                JumpPlace::StepTop => Icon::Milestone,
+                JumpPlace::StepTop | JumpPlace::Overview => Icon::Milestone,
                 JumpPlace::File(_) => Icon::FileText,
                 JumpPlace::Piece(_) => Icon::Braces,
             },

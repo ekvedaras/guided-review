@@ -221,6 +221,25 @@ impl SafetyNetPage {
     }
 }
 
+/// One changed file of a basic tour, every piece of it whole.
+pub struct FilePage {
+    pub pieces: Vec<PieceDiff>,
+    pub threads: Vec<ThreadView>,
+}
+
+impl FilePage {
+    pub(super) fn of(file: &ChangedFile, files: &[ChangedFile], display: &DiffDisplay) -> Self {
+        Self {
+            pieces: file
+                .pieces
+                .iter()
+                .filter_map(|piece| PieceDiff::of(&PiecePart::whole(piece), files, display))
+                .collect(),
+            threads: Vec::new(),
+        }
+    }
+}
+
 impl PieceDiff {
     /// Where an IDE opens this piece: the first added line, or the first removed one when nothing was added.
     /// The first line at head, which the working copy has; a piece of only removed lines opens at its first.

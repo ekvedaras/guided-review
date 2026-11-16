@@ -41,6 +41,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
+use super::overview::{OverviewFile, OverviewPage, OverviewStats, WriteGuidedTourRefusal};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
@@ -51,7 +52,9 @@ use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
-use super::step_page::{DiffLine, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage};
+use super::step_page::{
+    DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
+};
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
@@ -67,7 +70,7 @@ use crate::update::Build;
 pub use crate::tour::StepId;
 pub use kept::Review;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Screen {
     Summary,
     /// A basic tour's first screen, in place of the summary.
@@ -168,6 +171,9 @@ pub struct ReadingPlace {
     /// Counted among the steps from 1; `None` on the summary and the safety net.
     pub step_number: Option<usize>,
     pub step_count: usize,
+    /// Counted among a basic tour's files from 1; `None` on the overview and in a guided tour.
+    pub file_number: Option<usize>,
+    pub file_count: usize,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
 }
@@ -177,6 +183,10 @@ pub enum NextScreen {
     /// Its title is markdown.
     Step {
         title: String,
+    },
+    /// A basic tour's next file.
+    File {
+        path: FilePath,
     },
     SafetyNet,
 }
@@ -226,7 +236,7 @@ pub struct ReviewCore {
     /// Not saved: a reopened app shows steps folded again.
     fold_flipped: BTreeSet<StepId>,
     /// File boxes of a step opened or folded against the step's fold, by step and path.
-    box_fold_flipped: BTreeSet<(StepId, FilePath)>,
+    box_fold_flipped: BTreeSet<(Screen, FilePath)>,
     /// The tour's own folder, whose pictures its summary shows and whose files its links open.
     tour_files: PathBuf,
     viewed_sync: ViewedSync,
@@ -592,6 +602,56 @@ impl ReviewCore {
                 tour_head: self.head.clone(),
                 pr_head: pr_head.clone(),
             })
+    }
+
+    /// The overview's facts: the PR's title and description, the counts and the files.
+    pub fn overview_page(&self) -> OverviewPage {
+        let stats = self.summary_stats();
+        let files = self
+            .file_tree
+            .reading_order()
+            .into_iter()
+            .filter_map(|path| {
+                let file = self.files.iter().find(|file| file.path == path)?;
+                Some(OverviewFile {
+                    path,
+                    added_lines: file.added,
+                    removed_lines: file.removed,
+                    is_read: false,
+                })
+            })
+            .collect();
+        OverviewPage {
+            title: self.title().to_owned(),
+            description: self.pr_description(),
+            stats: OverviewStats {
+                files: stats.files,
+                added_lines: stats.added_lines,
+                removed_lines: stats.removed_lines,
+                open_threads: stats.open_threads,
+            },
+            files,
+            write_guided_tour_refusal: Some(WriteGuidedTourRefusal::NotWiredYet),
+        }
+    }
+
+    /// The open file of a basic tour with every piece of it.
+    pub fn file_page(&self) -> Option<FilePage> {
+        let Screen::File(path) = &self.screen else {
+            return None;
+        };
+        let file = self.files.iter().find(|file| file.path == *path)?;
+        let links = self.links();
+        let display = self.display(&links);
+        Some(FilePage::of(file, &self.files, &display))
+    }
+
+    /// What the window shows where a guided tour shows its title and summary.
+    pub fn basic_mode_label(&self) -> Option<&'static str> {
+        match &self.tour {
+            Tour::Basic(_) => Some("Basic mode"),
+            Tour::Guided(_) => None,
+        }
     }
 
     /// A basic tour has the PR's own title.
@@ -1478,9 +1538,8 @@ impl ReviewCore {
 
     /// The cmd+k list for what the reviewer has typed so far.
     pub fn jump_targets(&self, query: &str) -> Vec<JumpTarget> {
-        // A basic tour's files join the palette with the file pages (slice B of ticket #82).
         let Some(guided) = self.tour.guided() else {
-            return Vec::new();
+            return jump::rank(jump::basic_targets(&self.file_tree.reading_order()), query);
         };
         let safety_net_files: Vec<&FilePath> = if self.reading_order().contains(&Screen::SafetyNet)
         {
@@ -1794,19 +1853,25 @@ impl ReviewCore {
         if !self.fold_flipped.remove(id) {
             self.fold_flipped.insert(id.clone());
         }
-        self.box_fold_flipped.retain(|(step, _)| step != id);
+        let step = Screen::Step(id.clone());
+        self.box_fold_flipped.retain(|(screen, _)| *screen != step);
     }
 
-    /// A folded step still lists its file boxes, each folded on its own.
-    pub fn is_box_folded(&self, step: &StepId, path: &FilePath) -> bool {
-        self.is_folded(step)
+    /// A folded step still lists its file boxes, each folded on its own. The box of a file screen
+    /// starts open.
+    pub fn is_box_folded(&self, screen: &Screen, path: &FilePath) -> bool {
+        let folds_by_default = match screen {
+            Screen::Step(id) => self.is_folded(id),
+            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => false,
+        };
+        folds_by_default
             != self
                 .box_fold_flipped
-                .contains(&(step.clone(), path.clone()))
+                .contains(&(screen.clone(), path.clone()))
     }
 
-    pub fn toggle_box_fold(&mut self, step: &StepId, path: &FilePath) {
-        let key = (step.clone(), path.clone());
+    pub fn toggle_box_fold(&mut self, screen: &Screen, path: &FilePath) {
+        let key = (screen.clone(), path.clone());
         if !self.box_fold_flipped.remove(&key) {
             self.box_fold_flipped.insert(key);
         }
@@ -1925,13 +1990,14 @@ impl ReviewCore {
             .iter()
             .position(|screen| screen == &self.screen);
         let is_step = |screen: &&Screen| matches!(screen, Screen::Step(_));
+        let is_file = |screen: &&Screen| matches!(screen, Screen::File(_));
         let next = self.onward_screen().and_then(|screen| match &screen {
             Screen::Step(id) => Some(NextScreen::Step {
                 title: self.step(id)?.title.clone(),
             }),
             Screen::SafetyNet => Some(NextScreen::SafetyNet),
-            // The words for the file screens come with their pages (slice B of ticket #82).
-            Screen::Summary | Screen::Overview | Screen::File(_) => None,
+            Screen::File(path) => Some(NextScreen::File { path: path.clone() }),
+            Screen::Summary | Screen::Overview => None,
         });
         ReadingPlace {
             step_number: match (&self.screen, position) {
@@ -1945,6 +2011,17 @@ impl ReviewCore {
                 _ => None,
             },
             step_count: reading_order.iter().filter(is_step).count(),
+            file_number: match (&self.screen, position) {
+                (Screen::File(_), Some(position)) => Some(
+                    reading_order
+                        .iter()
+                        .take(position + 1)
+                        .filter(is_file)
+                        .count(),
+                ),
+                _ => None,
+            },
+            file_count: reading_order.iter().filter(is_file).count(),
             has_previous: position.is_some_and(|position| position > 0),
             next,
         }

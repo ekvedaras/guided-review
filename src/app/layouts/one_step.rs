@@ -1841,7 +1841,7 @@ impl OneStepLayout {
             ))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| {
-                    review.toggle_box_fold(&fold.step, &fold.path);
+                    review.toggle_box_fold(&fold.screen, &fold.path);
                 });
                 if let Some(row) = header_row {
                     // From the row above, so the step bar does not cover the header.
@@ -2194,6 +2194,8 @@ impl OneStepLayout {
             } => repin_notes(&colors, gone_pieces, text_may_be_old).into_any_element(),
             PageRow::Toolbar(toolbar) => self.toolbar(&toolbar, cx).into_any_element(),
             PageRow::ScreenFooter(footer) => screen_footer(&footer, cx).into_any_element(),
+            // The window draws a basic tour's overview with ticket #82's app slice.
+            PageRow::Overview(_) => div().into_any_element(),
             PageRow::SafetyNetIntro => SafetyNetIntro.into_any_element(),
             PageRow::PieceHeader(heading) => {
                 let open_code = heading.code_link.as_ref().map(|link| {
@@ -2846,6 +2848,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
     });
     let next_label = footer.next.as_ref().map(|next| match next {
         NextScreen::Step { title } => title.clone(),
+        NextScreen::File { path } => path.to_string(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
     if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {

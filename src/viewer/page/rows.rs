@@ -11,12 +11,14 @@ use crate::pieces::PieceId;
 use crate::tour::Step;
 use crate::viewer::{
     Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LabelSwitch, LineKind,
-    LineLocation, Markdown, NextScreen, NotesButton, Place, QueuedComment, RenderedBlock, StepId,
-    SummaryStats, ThreadView, TourLead, ViewSwitch,
+    LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place, QueuedComment,
+    RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead, ViewSwitch,
 };
 
 #[derive(Clone)]
 pub enum PageRow {
+    /// A basic tour's first screen, all of it.
+    Overview(Arc<OverviewPage>),
     SummaryTitle(Arc<str>),
     SummaryStats(Arc<SummaryStatsRow>),
     SummaryBullet(Arc<str>),
@@ -186,10 +188,10 @@ pub struct RouteStopRow {
     pub is_last: bool,
 }
 
-/// The fold of one file box of a step.
+/// The fold of one file box of a step or of a file screen.
 #[derive(Clone, Hash)]
 pub struct BoxFold {
-    pub step: StepId,
+    pub screen: Screen,
     pub path: FilePath,
     pub is_folded: bool,
 }

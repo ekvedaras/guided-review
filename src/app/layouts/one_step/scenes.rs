@@ -288,7 +288,9 @@ impl OneStepLayout {
             }
         });
         if let Some(fold) = fold.filter(|fold| fold.is_folded) {
-            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
+            self.change_review(cx, |review| {
+                review.toggle_box_fold(&fold.screen, &fold.path);
+            });
         }
     }
 
@@ -334,7 +336,9 @@ impl OneStepLayout {
                 .collect()
         };
         for fold in folded {
-            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
+            self.change_review(cx, |review| {
+                review.toggle_box_fold(&fold.screen, &fold.path);
+            });
         }
     }
 

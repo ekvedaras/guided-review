@@ -20,6 +20,7 @@ use super::ask::Place;
 use super::file_block::FileBlock;
 use super::focused_change::PageChange;
 use super::jump::{JumpPlace, JumpTarget};
+use super::overview::OverviewPage;
 use super::review::{ReviewCore, Screen};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::step_page::{DiffLine, LineLocation};
@@ -77,8 +78,8 @@ impl Page {
         let screen = review.screen().clone();
         let laid = match &screen {
             Screen::Summary => Some(build::summary(review)),
-            // The pages of a basic tour's screens are slice B of ticket #82: empty until then.
-            Screen::Overview | Screen::File(_) => None,
+            Screen::Overview => Some(build::overview(review)),
+            Screen::File(_) => review.file_page().map(|page| build::file(review, page)),
             Screen::Step(_) => review.current_step().map(|page| build::step(review, page)),
             Screen::SafetyNet => review
                 .safety_net()
@@ -222,7 +223,7 @@ impl Page {
     /// file's piece labels are hidden), else the top.
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
         let piece = match &target.place {
-            JumpPlace::StepTop => None,
+            JumpPlace::StepTop | JumpPlace::Overview => None,
             JumpPlace::File(path) => self.pieces.iter().find(|piece| piece.path == *path),
             JumpPlace::Piece(id) => self
                 .pieces
@@ -303,6 +304,14 @@ impl Page {
         self.rows
             .iter()
             .position(|row| matches!(row, PageRow::StepIntro(intro) if intro.diagram.is_some()))
+    }
+
+    /// The overview of a basic tour, when this is its page.
+    pub fn overview(&self) -> Option<&OverviewPage> {
+        self.rows.iter().find_map(|row| match row {
+            PageRow::Overview(overview) => Some(overview.as_ref()),
+            _ => None,
+        })
     }
 
     /// The row of the summary that holds the PR description, and the description.

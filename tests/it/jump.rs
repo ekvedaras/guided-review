@@ -59,6 +59,7 @@ fn shop_tour() -> Vec<Value> {
 fn kind(place: &JumpPlace) -> &'static str {
     match place {
         JumpPlace::StepTop => "Step",
+        JumpPlace::Overview => "Overview",
         JumpPlace::File(_) => "File",
         JumpPlace::Piece(_) => "Symbol",
     }

@@ -34,6 +34,7 @@ mod markdown;
 mod more_lines;
 mod new_commits;
 mod outdated_lines;
+mod overview;
 mod page;
 mod piece_labels;
 mod ports;
@@ -125,6 +126,7 @@ pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
+pub use overview::{OverviewFile, OverviewPage, OverviewStats, WriteGuidedTourRefusal};
 pub use page::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
     Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,
@@ -163,7 +165,8 @@ pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};
 pub use step_page::{
-    DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
+    DiffLine, FilePage, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead,
+    StepPage,
 };
 pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,

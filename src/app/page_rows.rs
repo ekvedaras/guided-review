@@ -287,6 +287,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             toolbar.wraps_lines.hash(&mut hasher);
         }
         PageRow::ScreenFooter(footer) => footer.hash(&mut hasher),
+        PageRow::Overview(overview) => overview.hash(&mut hasher),
         PageRow::SummaryStats(stats) => stats.hash(&mut hasher),
         PageRow::RouteStop(stop) => stop.hash(&mut hasher),
         PageRow::TourLead(lead) => lead.hash(&mut hasher),

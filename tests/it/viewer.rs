@@ -143,6 +143,8 @@ fn the_reading_place_numbers_the_step_and_names_the_screen_after_it() {
         ReadingPlace {
             step_number: None,
             step_count: 5,
+            file_number: None,
+            file_count: 0,
             has_previous: false,
             next: next_step("checkout"),
         }
@@ -154,6 +156,8 @@ fn the_reading_place_numbers_the_step_and_names_the_screen_after_it() {
         ReadingPlace {
             step_number: Some(2),
             step_count: 5,
+            file_number: None,
+            file_count: 0,
             has_previous: true,
             next: next_step("rounding"),
         }
