@@ -141,7 +141,7 @@ pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome}
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
-pub use move_to_pr::{PickPullCodeSource, PrMover};
+pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};

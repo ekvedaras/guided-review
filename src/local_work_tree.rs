@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::file_path::FilePath;
 use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
-use crate::pull_request::{ChangeTips, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject, WorkTreeRoot};
 
 /// Why `open` stops before it makes a review.
@@ -88,6 +88,9 @@ pub struct LocalWorkTree {
 const SNAPSHOT_REF_PREFIX: &str = "refs/guided-review/local-";
 /// Six bytes are the 12 hex characters that tell one local review's ref from another's.
 const SNAPSHOT_REF_HASH_BYTES: usize = 6;
+/// Refs that keep the snapshots a PR's review still reads a moved file or step at; never matched by
+/// `SNAPSHOT_REF_PREFIX`, so the clean-up of local reviews leaves them be.
+const READ_HEAD_REF_PREFIX: &str = "refs/guided-review/read-";
 const SNAPSHOT_IDENTITY_NAME: &str = "guided-review";
 const SNAPSHOT_IDENTITY_EMAIL: &str = "snapshot@guided-review.invalid";
 
@@ -289,6 +292,48 @@ impl LocalWorkTree {
             snapshot.head.as_str(),
         ])
         .map(drop)
+    }
+
+    /// Keeps each of `heads` from `git gc` with a ref of the PR's own, as a moved review reads files at
+    /// snapshots no local review keeps once it is gone.
+    pub fn keep_read_heads(
+        &self,
+        pr: &PullRequestUrl,
+        heads: &BTreeSet<Sha>,
+    ) -> Result<(), OpenRefusal> {
+        for head in heads {
+            self.git(&["update-ref", &read_head_ref(pr, head), head.as_str()])?;
+        }
+        Ok(())
+    }
+
+    /// Deletes the PR's read-head refs of heads it no longer reads at. Returns how many it keeps.
+    pub fn let_go_of_read_heads(
+        &self,
+        pr: &PullRequestUrl,
+        still_read_at: &BTreeSet<Sha>,
+    ) -> Result<usize, OpenRefusal> {
+        if !self.root.as_path().exists() {
+            return Ok(0);
+        }
+        let kept: BTreeSet<String> = still_read_at
+            .iter()
+            .map(|head| read_head_ref(pr, head))
+            .collect();
+        let of_the_pr = self.git(&[
+            "for-each-ref",
+            "--format=%(refname)",
+            &format!("{}*", read_head_ref_prefix_of(pr)),
+        ])?;
+        let mut still_kept = 0;
+        for name in of_the_pr.lines() {
+            if kept.contains(name) {
+                still_kept += 1;
+            } else {
+                self.git(&["update-ref", "-d", name])?;
+            }
+        }
+        Ok(still_kept)
     }
 
     /// `(default branch tip, snapshot)`, the tips a PR has too.
@@ -507,6 +552,19 @@ pub fn snapshot_ref(change_set: &LocalChangeSet) -> String {
         "{SNAPSHOT_REF_PREFIX}{}",
         crate::hex::lower(digest.iter().take(SNAPSHOT_REF_HASH_BYTES))
     )
+}
+
+fn read_head_ref_prefix_of(pr: &PullRequestUrl) -> String {
+    let key = ReviewSubject::from(pr.clone()).to_string();
+    let digest = Sha256::digest(key.as_bytes());
+    format!(
+        "{READ_HEAD_REF_PREFIX}{}-",
+        crate::hex::lower(digest.iter().take(SNAPSHOT_REF_HASH_BYTES))
+    )
+}
+
+fn read_head_ref(pr: &PullRequestUrl, head: &Sha) -> String {
+    format!("{}{}", read_head_ref_prefix_of(pr), head.as_str())
 }
 
 /// An index file in the system's temp folder, gone when this is dropped: the clone's own git folder

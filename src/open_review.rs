@@ -19,6 +19,7 @@ use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
     GitHubPort, NoGitHub, PickCodeSource, PrMover, Problem, Review, ReviewStateFile, TourAgents,
     TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkingCopy,
+    let_go_of_unread_snapshots,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -91,6 +92,10 @@ fn build_pull_request(
     let subject = ReviewSubject::from(pr.clone());
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
     opened.make_basic_tour_if_no_tour()?;
+    if let Err(error) = let_go_of_unread_snapshots(folders, pr) {
+        // A ref kept too long only waits for the next open; the review reads the same either way.
+        eprintln!("could not let go of the snapshots {pr} no longer reads: {error:#}");
+    }
     // A basic file with a guided one beside it shows the basic tour.
     let tour = if ToursOnDisk::of(folders, &subject).opens_basic() {
         Tour::Basic(BasicTour::load_of(

@@ -2,18 +2,19 @@
 //! files. The PR's state is saved first and only then do the local tours, state file and snapshot ref
 //! go, so a crash between the two carries again instead of losing work.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
+use crate::local_work_tree::LocalWorkTree;
 use crate::make_basic_tour::make_basic_tour;
 use crate::opened_change_set::OpenedChangeSet;
 use crate::pieces;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::repin::repin;
-use crate::review_subject::{LocalChangeSet, ReviewSubject};
+use crate::review_subject::{LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use crate::tour::{Tour, ToursOnDisk};
 
 use super::local_threads::MovedComment;
@@ -34,6 +35,21 @@ pub(super) struct MovedReview {
     pub(super) file_read_before: BTreeMap<FilePath, Sha>,
     pub(super) steps: CarriedReads,
     pub(super) comments: Vec<MovedComment>,
+}
+
+impl MovedReview {
+    /// The heads the PR's review reads files or steps at that are not its own head: the local
+    /// review's snapshots, which nothing keeps once the local review is gone.
+    fn heads_before_the_pr(&self) -> BTreeSet<Sha> {
+        self.file_ticks
+            .values()
+            .chain(self.file_read_before.values())
+            .chain(self.steps.ticked.iter().map(|(_, head)| head))
+            .chain(self.steps.read_before.iter().map(|(_, head)| head))
+            .filter(|head| **head != self.head)
+            .cloned()
+            .collect()
+    }
 }
 
 /// The move of one local review to a PR, as the app runs it.
@@ -59,8 +75,17 @@ impl PrMover {
         let pr_tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &pr), &pr)?;
         let source = (self.pick_code_source)(&offer.pr, &pr_tour.pin().pinned_tips())?;
         let moved = self.worked_out(&pr_tour, source.as_ref())?;
-        ReviewStateFile::for_subject(&self.folders, &pr)
-            .update(|state| state.take_moved_review(&moved))
+        let clone = self.change_set.folder();
+        let mut kept = Ok(());
+        // The refs are made under the state file's lock, so a `let_go_of_unread_snapshots` of the PR's
+        // review never sees the record without the refs, or the refs without the record.
+        ReviewStateFile::for_subject(&self.folders, &pr).update(|state| {
+            kept = LocalWorkTree::at(clone.clone())
+                .keep_read_heads(&offer.pr, &moved.heads_before_the_pr());
+            state.take_moved_review(&moved);
+            state.keep_read_heads_in(clone.as_path());
+        })?;
+        Ok(kept?)
     }
 
     /// Only once the PR's state is saved: a crash before this carries again.
@@ -133,4 +158,30 @@ impl PrMover {
             comments: local_state.local_threads().moved_to(source, &pin.head),
         })
     }
+}
+
+/// Deletes the refs that keep the snapshots a moved local review was read at, of those the PR's review
+/// no longer reads a file or step at, so `git gc` takes them. Forgets the clone once none is kept.
+pub fn let_go_of_unread_snapshots(folders: &AppFolders, pr: &PullRequestUrl) -> anyhow::Result<()> {
+    let mut outcome = Ok(());
+    ReviewStateFile::for_subject(folders, &ReviewSubject::from(pr.clone())).update_if(|state| {
+        let Some(clone) = state.read_heads_kept_in() else {
+            return false;
+        };
+        let still_kept = WorkTreeRoot::new(clone.to_path_buf()).and_then(|clone| {
+            Ok(LocalWorkTree::at(clone).let_go_of_read_heads(pr, &state.read_heads())?)
+        });
+        match still_kept {
+            Ok(0) => {
+                state.read_heads_kept_nowhere();
+                true
+            }
+            Ok(_) => false,
+            Err(error) => {
+                outcome = Err(error);
+                false
+            }
+        }
+    })?;
+    outcome
 }

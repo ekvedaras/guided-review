@@ -77,6 +77,10 @@ pub struct ReviewState {
     /// A local review's threads, written only through `LocalThreadStore`, never with the viewer's sections.
     #[serde(default, skip_serializing_if = "LocalThreads::is_empty")]
     local_threads: LocalThreads,
+    /// The clone whose refs keep the snapshots a moved local review was read at, while this review
+    /// still reads a file or step at one of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    read_heads_kept_in: Option<PathBuf>,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -585,6 +589,31 @@ impl ReviewState {
         } else if !draft.body.contains(body) {
             draft.body = format!("{}\n\n{body}", draft.body);
         }
+    }
+
+    /// Every head a tick or a read-before mark names.
+    pub(super) fn read_heads(&self) -> BTreeSet<Sha> {
+        let viewer = &self.viewer;
+        viewer
+            .read_ticks
+            .values()
+            .chain(viewer.read_before.values())
+            .chain(viewer.file_read_ticks.values())
+            .chain(viewer.file_read_before.values())
+            .map(|tick| tick.head.clone())
+            .collect()
+    }
+
+    pub(super) fn read_heads_kept_in(&self) -> Option<&Path> {
+        self.read_heads_kept_in.as_deref()
+    }
+
+    pub(super) fn keep_read_heads_in(&mut self, clone: &Path) {
+        self.read_heads_kept_in = Some(clone.to_path_buf());
+    }
+
+    pub(super) fn read_heads_kept_nowhere(&mut self) {
+        self.read_heads_kept_in = None;
     }
 
     pub(super) fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {

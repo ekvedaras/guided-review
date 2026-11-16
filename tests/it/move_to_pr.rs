@@ -288,6 +288,83 @@ fn moving_carries_the_tick_of_a_file_whose_code_is_the_same_and_shows_what_chang
 }
 
 impl Feature {
+    /// The local review ticks both files, a PR is opened after one more commit to the cart, and the
+    /// review moves to it: the cart's tick becomes a mark of what it was read at, the snapshot.
+    fn moved_with_the_cart_read_at_the_snapshot(&self) -> Sha {
+        let mut opened = self.open();
+        opened.review.tick_file(&path("README.md")).unwrap();
+        opened.review.tick_file(&path("src/cart.rs")).unwrap();
+        let read_at = self.snapshot_head();
+        let (github, _) = self.open_a_pr_after_one_more_commit();
+        self.mover_of(self.subject.local().unwrap())
+            .run(&offer_of(SHOP_7, "Add the cart"), &github)
+            .unwrap();
+        read_at
+    }
+
+    /// `git gc` as it runs once two weeks have gone by.
+    fn collect_garbage(&self) {
+        self.repo
+            .git(&["reflog", "expire", "--expire=now", "--all"]);
+        self.repo.git(&["gc", "--quiet", "--prune=now"]);
+    }
+
+    fn has_commit(&self, sha: &Sha) -> bool {
+        self.repo
+            .git(&[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname)",
+            ])
+            .lines()
+            .any(|object| object == sha.as_str())
+    }
+
+    fn open_the_moved_pr(&self) -> OpenedReview {
+        open_review(
+            &ReviewSubject::from(SHOP_7.parse::<PullRequestUrl>().unwrap()),
+            self.repo.path(),
+            &self.repo.folders(),
+        )
+        .unwrap()
+    }
+}
+
+#[test]
+fn the_snapshot_a_moved_file_was_read_at_outlives_git_gc_while_the_pr_review_shows_what_changed_since()
+ {
+    let feature = Feature::with_work_in_progress();
+    let read_at = feature.moved_with_the_cart_read_at_the_snapshot();
+
+    feature.collect_garbage();
+    drop(feature.open_the_moved_pr());
+    feature.collect_garbage();
+
+    assert!(feature.has_commit(&read_at));
+    assert_eq!(
+        pr_state(&feature)
+            .file_read_before(&path("src/cart.rs"))
+            .map(|tick| &tick.head),
+        Some(&read_at)
+    );
+}
+
+#[test]
+fn once_the_pr_review_reads_from_no_snapshot_the_next_open_lets_git_gc_take_them() {
+    let feature = Feature::with_work_in_progress();
+    let read_at = feature.moved_with_the_cart_read_at_the_snapshot();
+    let mut opened = feature.open_the_moved_pr();
+    opened.review.tick_file(&path("src/cart.rs")).unwrap();
+    drop(opened);
+
+    drop(feature.open_the_moved_pr());
+    feature.collect_garbage();
+
+    assert_eq!(snapshot_refs(&feature), "");
+    assert!(!feature.has_commit(&read_at));
+}
+
+impl Feature {
     /// The writer's guided tour in place of the basic one, pinned to the same snapshot, with a step of
     /// the README and one of the rest.
     fn with_a_guided_tour_of_the_readme_and_the_rest(&self) {
