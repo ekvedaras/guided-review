@@ -817,7 +817,7 @@ impl ReviewCore {
         Some(page)
     }
 
-    /// Nothing for a basic tour: it has no steps to go stale (ticket #85 re-pins it).
+    /// A basic tour has no steps to go stale, so its brief is empty.
     pub fn refresh_brief(&self) -> RefreshBrief {
         self.tour
             .guided()

@@ -30,7 +30,6 @@ pub struct OverviewFile {
     pub path: FilePath,
     pub added_lines: usize,
     pub removed_lines: usize,
-    /// The slot of the read tick, which a basic tour gets with ticket #83; unticked until then.
     pub is_read: bool,
 }
 
