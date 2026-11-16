@@ -326,8 +326,24 @@ impl OpenedChangeSet {
             ToursOnDisk::of(&self.folders, &subject) != ToursOnDisk::None,
             "no tour for {subject}; run `guided-review open <folder>` first"
         );
+        self.refuse_when_gone()?;
         let tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &subject), &subject)?;
         Ok(self.code_at(tour.pin()))
+    }
+
+    /// A tour with no snapshot ref beside it was written after a drop or a move had deleted the review,
+    /// as by a tour agent still writing then: it is no review, so it is deleted rather than shown.
+    fn refuse_when_gone(&self) -> anyhow::Result<()> {
+        let kept = self.work_tree.snapshot_refs()?;
+        if kept.contains(&snapshot_ref(&self.change_set)) {
+            return Ok(());
+        }
+        self.drop_review()?;
+        anyhow::bail!(
+            "the local review of {} was dropped or moved to a PR, so its tour is not kept; `guided-review open {}` starts a new one",
+            self.subject(),
+            self.change_set.folder().as_path().display()
+        )
     }
 
     /// The code at the snapshot a tour's pin names, as `refresh` reads a guided tour that waits beside

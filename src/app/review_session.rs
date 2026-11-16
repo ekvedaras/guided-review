@@ -580,7 +580,11 @@ impl ReviewSession {
             move |this, moved, cx| {
                 this.moving = None;
                 match moved {
-                    Ok(()) => (cx.global::<PrSwitching>().show)(offer.pr.into()),
+                    Ok(()) => {
+                        let switching = cx.global::<PrSwitching>();
+                        (switching.dropped)(this.review.subject().clone());
+                        (switching.show)(offer.pr.into());
+                    }
                     Err(error) => {
                         this.review.move_failed();
                         post_toast(
@@ -615,7 +619,11 @@ impl ReviewSession {
             move |this, moved, cx| {
                 this.moving = None;
                 match moved {
-                    Ok(()) => (cx.global::<PrSwitching>().reopen)(),
+                    Ok(()) => {
+                        let switching = cx.global::<PrSwitching>();
+                        (switching.dropped)(here.change_set.into());
+                        (switching.reopen)();
+                    }
                     Err(error) => {
                         this.review.move_failed();
                         post_toast(

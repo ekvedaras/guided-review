@@ -411,3 +411,25 @@ fn after_update_a_guided_local_tour_offers_refresh_as_after_new_commits_on_a_pr(
     assert_eq!(updated.review.refresh_brief().stale_steps.len(), 1);
     assert!(updated.review.local_facts().is_some());
 }
+
+#[test]
+fn a_tour_written_after_the_local_review_was_moved_or_dropped_is_refused_by_check_and_deleted() {
+    let feature = Feature::with_work_in_progress().with_basic_tour();
+    feature.opened_change_set().drop_review().unwrap();
+    feature.writer_writes_a_tour_of_both_files();
+
+    let run = feature.run(&["check", &feature.key()]);
+
+    assert!(!run.success, "{}", run.stdout);
+    assert!(
+        run.stderr
+            .contains("was dropped or moved to a PR, so its tour is not kept"),
+        "{}",
+        run.stderr
+    );
+    assert!(!feature.guided_path().exists());
+    assert_eq!(
+        ToursOnDisk::of(&feature.repo.folders(), &feature.subject),
+        ToursOnDisk::None
+    );
+}
