@@ -408,6 +408,26 @@ fn two_updates_at_once_leave_the_ref_on_the_snapshot_the_tour_reads() {
 }
 
 #[test]
+fn update_refuses_a_tour_file_of_another_review_at_its_path_and_moves_nothing() {
+    let feature = Feature::with_work_in_progress();
+    let opened = feature.open();
+    let head = opened.review.head().clone();
+    let path = Tour::shown_path_for(&feature.repo.folders(), &feature.subject());
+    let key = feature.subject().to_string();
+    let other = "local:/somewhere/else@feature";
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace(&key, other)).unwrap();
+    feature.repo.write("notes.txt", "a new file\n");
+
+    let refused = OpenedChangeSet::new(feature.subject().local().unwrap(), &feature.repo.folders())
+        .repin_to_new_snapshot()
+        .unwrap_err();
+
+    assert!(format!("{refused:#}").contains(other), "{refused:#}");
+    assert_eq!(snapshot_ref_target(&feature), head);
+}
+
+#[test]
 fn update_refuses_while_the_folder_is_on_another_branch_and_moves_nothing() {
     let feature = Feature::with_work_in_progress();
     let opened = feature.open();

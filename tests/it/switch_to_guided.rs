@@ -187,6 +187,7 @@ fn a_file_whose_tick_a_re_pin_took_away_still_counts_as_read() {
     // b.txt changes and goes back: the re-pin takes its tick, and nothing differs since it was read
     let changed = shop.commit_third(&["b.txt"]);
     repin_tour(
+        &ReviewSubject::from(shop.pr()),
         &shop.basic_path(),
         &shop.state_file(),
         &shop.source(),

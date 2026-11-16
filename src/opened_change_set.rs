@@ -214,6 +214,7 @@ impl OpenedChangeSet {
         let source = LocalGit::at_worktree(self.change_set.folder());
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
         let repinned = repin_tour(
+            &subject,
             &Tour::shown_path_for(&self.folders, &subject),
             &self.state_file(),
             &source,

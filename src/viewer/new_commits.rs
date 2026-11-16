@@ -16,13 +16,14 @@ use super::review_state::{RepinRecord, ReviewStateFile};
 /// Re-pin as both the CLI and the app run it: the tour moves to the new commits, and the
 /// per-PR state learns what became of each piece, so the viewer can show it.
 pub fn repin_tour(
+    subject: &ReviewSubject,
     tour_path: &Path,
     state_file: &ReviewStateFile,
     source: &dyn CodeSource,
     new_base: &Sha,
     new_head: &Sha,
 ) -> anyhow::Result<(Tour, Repin)> {
-    let mut tour = Tour::load(tour_path)?;
+    let mut tour = Tour::load_of(tour_path, subject)?;
     let (old_base, old_head) = (tour.pin().base.clone(), tour.pin().head.clone());
     let result = repin(&mut tour, source, new_base, new_head)?;
     tour.save(tour_path)?;
@@ -85,6 +86,7 @@ impl TourRepinner {
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
         let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
         let (tour, _) = repin_tour(
+            &self.subject,
             &Tour::shown_path_for(&self.folders, &self.subject),
             &state_file,
             source.as_ref(),

@@ -98,6 +98,7 @@ impl Shop {
 
     fn repin_onto(&self, head: &str) {
         guided_review::viewer::repin_tour(
+            &ReviewSubject::from(self.pr()),
             &self.tour_path(),
             &self.state_file(),
             &self.source(),

@@ -328,11 +328,12 @@ fn repin_command(subject: &ReviewSubject) -> anyhow::Result<()> {
     let opened = OpenedPr::new(pr)?;
     let tour_path = opened.tour_to_repin_path();
     // Fails before any network call when there is no tour yet.
-    Tour::load(&tour_path)?;
+    Tour::load_of(&tour_path, subject)?;
 
     let code = opened.at_live_tips()?;
     let base = code.merge_base()?;
     let (_, result) = repin_tour(
+        subject,
         &tour_path,
         &opened.state_file(),
         code.source.as_ref(),
