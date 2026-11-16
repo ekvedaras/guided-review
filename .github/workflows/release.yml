@@ -84,7 +84,7 @@ jobs:
         run: |
           name="guided-review-$VERSION-$TARGET"
           mkdir -p "dist/$name"
-          cp "target/$TARGET/release/guided-review" LICENSE README.md "dist/$name/"
+          cp "${CARGO_TARGET_DIR:-target}/$TARGET/release/guided-review" LICENSE README.md "dist/$name/"
           mkdir -p "dist/$name/skills"
           cp -R skills/tour "dist/$name/skills/tour"
           cp -R "bundle/Guided Review.app" "dist/$name/"
@@ -128,7 +128,7 @@ jobs:
         run: |
           name="guided-review-$VERSION-$TARGET"
           mkdir -p "dist/$name"
-          cp "target/$TARGET/release/guided-review" LICENSE README.md "dist/$name/"
+          cp "${CARGO_TARGET_DIR:-target}/$TARGET/release/guided-review" LICENSE README.md "dist/$name/"
           mkdir -p "dist/$name/skills"
           cp -R skills/tour "dist/$name/skills/tour"
           cp -R bundle/icons "dist/$name/"

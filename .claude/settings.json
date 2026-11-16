@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CARGO_TARGET_DIR": "/Users/ekvedaras/Code/guided-review/target"
+  },
   "permissions": {
     "allow": [
       "Bash(guided-review show *)",
