@@ -668,11 +668,13 @@ impl CommentDesk {
                 self.delete_asked = None;
                 if outcome.result == ThreadActionResult::Done {
                     self.comment_edits.remove(comment_id);
-                    // The comment is gone already. A save refused while a re-pin runs is not an
-                    // error to show: the change is made in memory and the next save writes it.
-                    state
-                        .record(|state| state.hand_offs_mut().forget_queued_task(comment_id))
-                        .ok();
+                    // The comment is gone already; a refused save (a re-pin is running) is not an
+                    // error to show, and is saved again with the next typing.
+                    let forgotten =
+                        state.record(|state| state.hand_offs_mut().forget_queued_task(comment_id));
+                    if forgotten.is_err() {
+                        state.save_with_next_typing();
+                    }
                 }
             }
             (
