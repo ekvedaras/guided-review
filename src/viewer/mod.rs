@@ -134,7 +134,7 @@ pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};
-pub use overview::{LocalOverview, OverviewFile, OverviewPage, OverviewStats};
+pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
     Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,

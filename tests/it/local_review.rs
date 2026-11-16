@@ -16,7 +16,7 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    CodeOpener, Destination, Effect, IdeCaveat, Intent, LocalOverview, NotInIde, Opened, PieceDiff,
+    CodeOpener, Destination, Effect, IdeCaveat, Intent, NotInIde, Opened, PieceDiff,
     Review, ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
 };
 
@@ -171,17 +171,16 @@ fn the_overview_names_the_repo_folder_branch_default_branch_commits_and_uncommit
 
     assert_eq!(page.description, None);
     assert_eq!(page.title, "feature");
+    let local = page.local.unwrap();
+    assert_eq!(local.repo, Some(RepoName::new("acme", "shop")));
     assert_eq!(
-        page.local,
-        Some(LocalOverview {
-            repo: Some(RepoName::new("acme", "shop")),
-            folder: WorkTreeRoot::new(feature.repo.path().canonicalize().unwrap()).unwrap(),
-            branch: BranchName::new("feature").unwrap(),
-            default_branch: "main".to_owned(),
-            commit_subjects: vec!["Add the cart".to_owned()],
-            uncommitted_files: 3,
-        })
+        local.folder,
+        WorkTreeRoot::new(feature.repo.path().canonicalize().unwrap()).unwrap()
     );
+    assert_eq!(local.branch, BranchName::new("feature").unwrap());
+    assert_eq!(local.default_branch, BranchName::new("main").unwrap());
+    assert_eq!(local.commit_subjects, ["Add the cart"]);
+    assert_eq!(local.uncommitted_files.len(), 3);
 }
 
 #[test]
@@ -466,22 +465,12 @@ fn the_overview_counts_its_uncommitted_files_in_words() {
     let local = feature.open().overview_page().local.unwrap();
 
     assert_eq!(local.uncommitted_label(), "3 files uncommitted");
-    assert_eq!(
-        LocalOverview {
-            uncommitted_files: 1,
-            ..local.clone()
-        }
-        .uncommitted_label(),
-        "1 file uncommitted"
-    );
-    assert_eq!(
-        LocalOverview {
-            uncommitted_files: 0,
-            ..local
-        }
-        .uncommitted_label(),
-        "No uncommitted files"
-    );
+    let mut one = local.clone();
+    one.uncommitted_files.retain(|path| path.as_str() == "notes.txt");
+    assert_eq!(one.uncommitted_label(), "1 file uncommitted");
+    let mut none = local;
+    none.uncommitted_files.clear();
+    assert_eq!(none.uncommitted_label(), "No uncommitted files");
 }
 
 #[test]

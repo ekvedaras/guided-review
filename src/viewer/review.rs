@@ -45,7 +45,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
-use super::overview::{LocalOverview, OverviewFile, OverviewPage, OverviewStats};
+use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
@@ -279,6 +279,8 @@ pub struct ReviewCore {
     code_host: CodeHost,
     /// What a local review's overview shows; set by the app from the clone, `None` for a PR.
     local_facts: Option<LocalFacts>,
+    /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
+    local_heading: Option<Arc<str>>,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -418,8 +420,10 @@ impl Review {
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
-        if self.local_facts.is_none() {
-            self.local_facts = replaced.local_facts;
+        if self.local_facts.is_none()
+            && let Some(facts) = replaced.local_facts
+        {
+            self.local_facts_are(facts);
         }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
@@ -590,12 +594,14 @@ impl ReviewCore {
             .collect();
         let mut display_options = DisplayOptions::for_code(base.clone(), head.clone());
         display_options.cut_markdown(&files);
+        let local_heading = Self::heading_of(&subject, None);
         Ok(Self {
             tour,
             file_tree,
             folded_folders: BTreeSet::new(),
             subject,
             code_host,
+            local_heading,
             local_facts: None,
             base,
             head,
@@ -793,14 +799,7 @@ impl ReviewCore {
             },
             files,
             write_guided_tour_refusal: self.write_guided_tour_refusal(),
-            local: self.local_facts.as_ref().map(|facts| LocalOverview {
-                repo: facts.repo.clone(),
-                folder: facts.folder.clone(),
-                branch: facts.branch.clone(),
-                default_branch: facts.default_branch.clone(),
-                commit_subjects: facts.commit_subjects.clone(),
-                uncommitted_files: facts.uncommitted_files.len(),
-            }),
+            local: self.local_facts.clone(),
         }
     }
 
@@ -810,6 +809,7 @@ impl ReviewCore {
 
     /// What the app read of the clone for a local review's overview. Not saved: git tells it again.
     pub fn local_facts_are(&mut self, facts: LocalFacts) {
+        self.local_heading = Self::heading_of(&self.subject, Some(&facts));
         self.local_facts = Some(facts);
     }
 
@@ -894,22 +894,25 @@ impl ReviewCore {
 
     /// The window's title.
     pub fn window_title(&self) -> String {
-        match &self.subject {
-            ReviewSubject::PullRequest(_) => format!("{}: {}", self.subject, self.title()),
-            ReviewSubject::Local(change_set) => match self
-                .local_facts
-                .as_ref()
-                .and_then(|facts| facts.repo.as_ref())
-            {
-                Some(repo) => format!("Local changes · {repo} · {}", change_set.branch().as_str()),
-                None => format!("Local changes · {}", change_set.branch().as_str()),
-            },
+        match &self.local_heading {
+            Some(heading) => heading.to_string(),
+            None => format!("{}: {}", self.subject, self.title()),
         }
     }
 
     /// The line a local review's sidebar leads with, naming what is reviewed; `None` for a PR.
-    pub fn local_heading(&self) -> Option<String> {
-        self.subject.local().map(|_| self.window_title())
+    pub fn local_heading(&self) -> Option<Arc<str>> {
+        self.local_heading.clone()
+    }
+
+    fn heading_of(subject: &ReviewSubject, facts: Option<&LocalFacts>) -> Option<Arc<str>> {
+        let change_set = subject.local()?;
+        let branch = change_set.branch().as_str();
+        Some(match facts.and_then(|facts| facts.repo.as_ref()) {
+            Some(repo) => format!("Local changes · {repo} · {branch}"),
+            None => format!("Local changes · {branch}"),
+        }
+        .into())
     }
 
     /// Whether the review has a PR page to open.

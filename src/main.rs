@@ -200,13 +200,11 @@ impl std::str::FromStr for OpenTarget {
         if std::path::Path::new(text).exists() {
             return Ok(Self::Folder(text.into()));
         }
-        match text.parse() {
-            Ok(subject) => Ok(Self::Subject(subject)),
-            Err(error) if text.starts_with("local:") || text.starts_with("https://") => Err(error),
-            Err(_not_a_subject) => anyhow::bail!(
-                "{text} is neither a GitHub PR link, a local change set key nor a folder"
-            ),
-        }
+        text.parse().map(Self::Subject).map_err(|error: anyhow::Error| {
+            anyhow::anyhow!(
+                "{text} is neither a GitHub PR link, a local change set key nor a folder ({error:#})"
+            )
+        })
     }
 }
 

@@ -118,6 +118,9 @@ fn build_pull_request(
 /// A local review reads the snapshot its tour is pinned to from its own folder, and has no GitHub to
 /// ask: the port it holds refuses every call.
 fn build_local(change_set: &LocalChangeSet, folders: &AppFolders) -> anyhow::Result<Built> {
+    let change_set = &change_set
+        .clone()
+        .in_repo(LocalGit::origin_of(change_set.folder().as_path()));
     let subject = ReviewSubject::from(change_set.clone());
     let opened = OpenedChangeSet::new(change_set, folders);
     opened.make_basic_tour_if_no_tour()?;

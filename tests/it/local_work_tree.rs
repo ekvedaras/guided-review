@@ -144,7 +144,7 @@ fn the_default_branch_is_origin_head_when_the_clone_has_one() {
 
     let default = work_tree(&repo).default_branch().unwrap();
 
-    assert_eq!(default.name, "origin/trunk");
+    assert_eq!(default.name.as_str(), "origin/trunk");
     assert_eq!(default.tip.as_str(), upstream_tip);
 }
 
@@ -157,8 +157,8 @@ fn without_origin_head_the_default_branch_is_main_then_master() {
     repo.git(&["branch", "-m", "main", "master"]);
     let with_master = work_tree(&repo).default_branch().unwrap();
 
-    assert_eq!(with_main.name, "main");
-    assert_eq!(with_master.name, "master");
+    assert_eq!(with_main.name.as_str(), "main");
+    assert_eq!(with_master.name.as_str(), "master");
     assert_eq!(with_master.tip.as_str(), main_tip);
 }
 
@@ -332,7 +332,7 @@ fn the_facts_list_the_commits_and_mark_each_file_committed_uncommitted_or_both()
     let facts = work_tree.facts(&change_set, &tips).unwrap();
 
     assert_eq!(facts.commit_subjects, ["Add the cart", "Add payment"]);
-    assert_eq!(facts.default_branch, "main");
+    assert_eq!(facts.default_branch.as_str(), "main");
     assert_eq!(facts.branch.as_str(), "feature");
     assert_eq!(facts.repo.as_ref().unwrap().to_string(), "acme/shop");
     assert_eq!(facts.folder.as_path(), repo.path().canonicalize().unwrap());

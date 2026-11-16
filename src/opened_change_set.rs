@@ -96,7 +96,7 @@ impl OpenedChangeSet {
             ToursOnDisk::of(&self.folders, &subject) != ToursOnDisk::None,
             "no tour for {subject}; run `guided-review open <folder>` first"
         );
-        let tour = Tour::load(&Tour::shown_path_for(&self.folders, &subject))?;
+        let tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &subject), &subject)?;
         let source: Arc<dyn CodeSource> = Arc::new(LocalGit::at_worktree(self.change_set.folder()));
         Ok(CodeAtTips {
             tips: tour.pin().pinned_tips(),

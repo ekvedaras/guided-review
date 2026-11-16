@@ -87,13 +87,13 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
-use crate::local_facts::LocalChange;
+use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
-    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, LocalOverview,
+    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation,
     NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
     PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal,
     Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
@@ -1926,7 +1926,7 @@ impl OneStepLayout {
         let review = self.session.read(cx).review();
         let subject_name = review.subject().short();
         let title = review.title().to_owned();
-        let local_heading = review.local_heading();
+        let local_heading = review.local_heading().map(SharedString::from);
         let is_local = local_heading.is_some();
         let can_open_on_github = review.can_open_on_github();
         let jump = button(
@@ -3542,7 +3542,7 @@ fn local_fact(colors: &Colors, label: &'static str, value: impl IntoElement) -> 
 
 /// What a local review is of, in place of the PR description: where it is, which branch against
 /// which, the branch's commits and how many files are not committed.
-fn local_overview_card(colors: &Colors, local: &LocalOverview) -> impl IntoElement {
+fn local_overview_card(colors: &Colors, local: &LocalFacts) -> impl IntoElement {
     let commits = if local.commit_subjects.is_empty() {
         vec![
             div()

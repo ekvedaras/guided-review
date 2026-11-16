@@ -531,3 +531,31 @@ fn open_of_something_that_is_no_link_key_or_folder_says_what_it_takes() {
         run.stderr
     );
 }
+
+#[test]
+fn a_review_opened_from_a_parsed_key_still_knows_its_repo_from_the_folder() {
+    let repo = shop_with_work_in_progress();
+    let parsed = subject(&key_of(&repo, "feature"));
+
+    let opened =
+        guided_review::open_review::open_review(&parsed, repo.path(), &repo.folders()).unwrap();
+
+    let title = opened.review.window_title();
+    assert!(title.contains("acme/shop"), "title: {title}");
+    let overview = opened.review.overview_page().local.unwrap();
+    assert_eq!(overview.repo.unwrap().to_string(), "acme/shop");
+}
+
+#[test]
+fn open_of_a_key_that_is_malformed_says_what_is_wrong_with_it() {
+    let repo = shop_with_work_in_progress();
+
+    let run = GuidedReview::new(&repo, &no_github()).run(&["open", "local:/somewhere"]);
+
+    assert!(!run.success);
+    assert!(
+        run.stderr.contains("names no branch"),
+        "stderr: {}",
+        run.stderr
+    );
+}

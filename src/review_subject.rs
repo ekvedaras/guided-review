@@ -51,6 +51,14 @@ impl ReviewSubject {
         }
     }
 
+    /// What a question about the review as a whole is about, in the words the reviewer reads.
+    pub const fn whole_change(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => "the whole PR",
+            Self::Local(_) => "the whole change",
+        }
+    }
+
     /// What the app answers an open request whose key is neither; the whole error chain is for logs.
     pub fn not_a_subject(key: &str) -> String {
         format!("`{key}` is not a PR link or a local key")
@@ -176,6 +184,12 @@ impl LocalChangeSet {
         }
     }
 
+    /// The same change set with the repo its folder's clone belongs to; a key names no repo.
+    #[must_use]
+    pub fn in_repo(self, repo: Option<RepoName>) -> Self {
+        Self { repo, ..self }
+    }
+
     /// `<folder>@<branch>`: the folder's `@` is escaped, so the first `@` ends it.
     fn from_key(key: &str) -> anyhow::Result<Self> {
         let (folder, branch) = key
@@ -241,6 +255,12 @@ impl WorkTreeRoot {
         self.0
             .file_name()
             .map_or_else(|| "root".into(), |name| name.to_string_lossy())
+    }
+}
+
+impl fmt::Display for BranchName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
     }
 }
 

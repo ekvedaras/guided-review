@@ -173,12 +173,7 @@ impl<'a> Builder<'a> {
             ask: Some(AskAt {
                 id: "ask-tour".into(),
                 place: Place::Tour,
-                label: if self.review.subject().local().is_some() {
-                    "the whole change"
-                } else {
-                    "the whole PR"
-                }
-                .into(),
+                label: self.review.subject().whole_change().into(),
             }),
             comment_on_file: None,
             fold: None,

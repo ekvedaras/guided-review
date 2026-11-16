@@ -31,8 +31,8 @@ pub enum OpenRefusal {
     )]
     NothingToReview {
         folder: PathBuf,
-        branch: String,
-        default_branch: String,
+        branch: BranchName,
+        default_branch: BranchName,
     },
     #[error("git failed in {}: {reason}", .folder.display())]
     GitFailed { folder: PathBuf, reason: String },
@@ -41,7 +41,7 @@ pub enum OpenRefusal {
 /// The branch a change set is compared with, and where it is.
 #[derive(Debug, Clone)]
 pub struct DefaultBranch {
-    pub name: String,
+    pub name: BranchName,
     pub tip: Sha,
 }
 
@@ -126,7 +126,7 @@ impl LocalWorkTree {
                 &format!("{full}^{{commit}}"),
             ]) {
                 return Ok(DefaultBranch {
-                    name,
+                    name: BranchName::new(&name).map_err(|error| self.failed(error))?,
                     tip: Sha::new(&tip),
                 });
             }
@@ -149,7 +149,7 @@ impl LocalWorkTree {
         }
         Err(OpenRefusal::NothingToReview {
             folder: self.folder(),
-            branch: change_set.branch().as_str().to_owned(),
+            branch: change_set.branch().clone(),
             default_branch: default.name,
         })
     }
