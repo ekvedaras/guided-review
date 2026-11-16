@@ -52,7 +52,8 @@ use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
-use super::ports::{AgentLaunch, GitHubError};
+use super::move_offer::MoveOffer;
+use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
@@ -286,6 +287,8 @@ pub struct ReviewCore {
     local_facts: Option<LocalFacts>,
     /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
     local_heading: Option<Arc<str>>,
+    /// The open PR whose head is a local review's branch, as GitHub last said; not saved.
+    pull_of_branch: Option<PullOfBranch>,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -431,6 +434,9 @@ impl Review {
             && let Some(facts) = replaced.local_facts
         {
             self.local_facts_are(facts);
+        }
+        if self.pull_of_branch.is_none() {
+            self.pull_of_branch = replaced.pull_of_branch;
         }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
@@ -610,6 +616,7 @@ impl ReviewCore {
             code_host,
             local_heading,
             local_facts: None,
+            pull_of_branch: None,
             base,
             head,
             pr_head: None,
@@ -815,6 +822,31 @@ impl ReviewCore {
                 tour_head: self.head.clone(),
                 pr_head: pr_head.clone(),
             })
+    }
+
+    /// What GitHub said of the PR opened from a local review's branch.
+    pub(super) fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
+        self.pull_of_branch = found;
+    }
+
+    /// A lasting line of a local review: the PR opened from its branch, which it offers to move to.
+    pub fn move_offer(&self) -> Option<MoveOffer> {
+        self.subject.local()?;
+        let found = self.pull_of_branch.as_ref()?;
+        (!self.state.has_declined_move_to(&found.pr)).then(|| MoveOffer::of(found))
+    }
+
+    /// Declining hides the offer for that PR for good and keeps the local review. Written to the state
+    /// file on its own, so it never writes the viewer's sections back.
+    pub fn decline_move(&mut self) -> anyhow::Result<()> {
+        let Some(offer) = self.move_offer() else {
+            return Ok(());
+        };
+        self.state
+            .keep_until_repinned(|state| state.decline_move_to(&offer.pr));
+        self.state
+            .file()
+            .update(|state| state.decline_move_to(&offer.pr))
     }
 
     /// What a local review's folder is against its snapshot, once the folder was looked at.

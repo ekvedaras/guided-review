@@ -12,11 +12,12 @@ use crate::image_facts;
 use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause,
-    PictureUploadPort, PullRequestDescriptionPort, PullRequestReactionsPort, Reaction,
-    ReactionChange, ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread,
+    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread,
     ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview,
     ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
@@ -446,6 +447,36 @@ impl ChangeTipsPort for GitHub {
             base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })
+    }
+}
+
+#[derive(Deserialize)]
+struct PullListedJson {
+    number: u64,
+    title: String,
+}
+
+impl PullsOfBranchPort for GitHub {
+    fn open_pull_of_branch(
+        &self,
+        repo: &RepoName,
+        branch: &BranchName,
+    ) -> Result<Option<PullOfBranch>, GitHubError> {
+        let head = percent_encode_path(&format!("{}:{}", repo.owner(), branch.as_str()));
+        let pulls: Vec<PullListedJson> = self
+            .get(
+                &format!("repos/{repo}/pulls?head={head}&state=open"),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not look for a PR of {} in {repo}", branch.as_str()))?;
+        Ok(pulls.into_iter().next().map(|pull| PullOfBranch {
+            pr: PullRequestUrl {
+                repo: repo.clone(),
+                number: pull.number,
+            },
+            title: pull.title,
+        }))
     }
 }
 

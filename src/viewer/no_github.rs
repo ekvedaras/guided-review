@@ -3,19 +3,44 @@ use std::path::Path;
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::ports::{
-    ChangeTipsPort, GitHubError, NoAccess, PictureUploadPort, PullRequestDescriptionPort,
-    PullRequestReactionsPort, Resolution, ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile,
+    ChangeTipsPort, GitHubError, NoAccess, PictureUploadPort, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullsOfBranchPort, Resolution, ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile,
     ViewedFilesPort,
 };
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
-use crate::pull_request::{ChangeTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
+use crate::review_subject::BranchName;
+use std::sync::Arc;
 
-/// The GitHub a local review holds: nothing in the review calls it, and anything that did would be
-/// refused instead of reaching the network.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoGitHub;
+/// The GitHub a local review holds: it only looks for the PR opened from its branch, when it was given
+/// a way to. Anything else a review did would be refused instead of reaching the network.
+#[derive(Clone, Default)]
+pub struct NoGitHub {
+    branch_lookups: Option<Arc<dyn PullsOfBranchPort>>,
+}
+
+impl NoGitHub {
+    pub fn looking_up_branches_with(lookups: Arc<dyn PullsOfBranchPort>) -> Self {
+        Self {
+            branch_lookups: Some(lookups),
+        }
+    }
+}
+
+impl PullsOfBranchPort for NoGitHub {
+    fn open_pull_of_branch(
+        &self,
+        repo: &RepoName,
+        branch: &BranchName,
+    ) -> Result<Option<PullOfBranch>, GitHubError> {
+        match &self.branch_lookups {
+            Some(lookups) => lookups.open_pull_of_branch(repo, branch),
+            None => refused(),
+        }
+    }
+}
 
 fn refused<T>() -> Result<T, GitHubError> {
     Err(GitHubError::NoAccess(NoAccess::new(

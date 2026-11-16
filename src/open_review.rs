@@ -6,6 +6,7 @@ use crate::app_folders::AppFolders;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
 use crate::config::Config;
+use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
@@ -145,7 +146,9 @@ fn build_local(change_set: &LocalChangeSet, folders: &AppFolders) -> anyhow::Res
         review,
         source: code.source,
         pick_code_source: opened.code_source_picker(),
-        github: Arc::new(NoGitHub),
+        github: Arc::new(NoGitHub::looking_up_branches_with(Arc::new(
+            GitHub::from_env(),
+        ))),
     })
 }
 

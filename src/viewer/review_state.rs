@@ -43,6 +43,9 @@ pub struct ReviewState {
     /// The folder the PR was last opened from, so a switch back to it finds the same clone.
     #[serde(default)]
     opened_from: Option<PathBuf>,
+    /// The PRs whose offer to move this local review to them was declined, as their links.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    declined_moves: BTreeSet<String>,
     /// A local review's threads, written only through `LocalThreadStore`, never with the viewer's sections.
     #[serde(default, skip_serializing_if = "LocalThreads::is_empty")]
     local_threads: LocalThreads,
@@ -435,6 +438,14 @@ impl ReviewState {
 
     pub(super) fn hand_offs_mut(&mut self) -> &mut HandOffs {
         &mut self.viewer.hand_offs
+    }
+
+    pub(super) fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {
+        self.declined_moves.contains(&pr.to_string())
+    }
+
+    pub(super) fn decline_move_to(&mut self, pr: &PullRequestUrl) {
+        self.declined_moves.insert(pr.to_string());
     }
 
     pub(super) fn local_threads(&self) -> &LocalThreads {

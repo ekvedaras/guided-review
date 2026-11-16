@@ -72,6 +72,7 @@ mod local_key_commands;
 mod local_open;
 mod local_review;
 mod local_tasks;
+mod move_to_pr;
 mod local_work_tree;
 mod markdown;
 mod new_commits;

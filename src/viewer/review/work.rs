@@ -7,8 +7,8 @@ use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
 use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
-    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
-    WorkKind, WorkOutcome,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, PULL_OF_BRANCH_RETRY,
+    WORKING_TREE_RECHECK, Work, WorkKind, WorkOutcome,
 };
 
 impl Review {
@@ -55,6 +55,10 @@ impl ReviewCore {
                 pr()?;
                 Job::CheckWorkingCopy(self.head.clone())
             }
+            WorkKind::LookUpPullOfBranch => Job::LookUpPullOfBranch {
+                repo: self.local_facts.as_ref()?.repo.clone()?,
+                branch: self.subject.local()?.branch().clone(),
+            },
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
@@ -109,6 +113,13 @@ impl ReviewCore {
                     .want_in(WorkKind::CheckWorkingTree, WORKING_TREE_RECHECK);
             }
             Done::WorkingCopy(is_at) => self.working_copy_is(WorkingCopy::of(is_at)),
+            Done::PullOfBranch(found) => match found {
+                Ok(found) => self.pull_of_branch_is(found),
+                // Silent: a look for a PR is a convenience, so a failure is only tried again later.
+                Err(_) => self
+                    .work
+                    .want_in(WorkKind::LookUpPullOfBranch, PULL_OF_BRANCH_RETRY),
+            },
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();
             }

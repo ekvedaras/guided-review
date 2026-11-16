@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
 use crate::local_work_tree::OnDisk;
-use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
-use crate::review_subject::{LocalChangeSet, ReviewSubject};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_threads::ThreadHome;
 use super::outdated_lines::{FollowedLines, follow_outdated};
-use super::ports::{GitHubError, GitHubPort};
+use super::ports::{GitHubError, GitHubPort, PullOfBranch};
 use super::reactions::ReactionChange;
 use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
@@ -30,6 +30,8 @@ pub const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 pub const AGENT_LINK_RECHECK: Duration = Duration::from_secs(30);
 /// How often a local review's folder is looked at again while the review is open.
 pub const WORKING_TREE_RECHECK: Duration = Duration::from_secs(30);
+/// How long to wait before looking again for the PR of a local review's branch after GitHub did not answer.
+pub const PULL_OF_BRANCH_RETRY: Duration = Duration::from_secs(60);
 
 /// The kinds of work, in the order due work of several kinds starts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,6 +39,7 @@ pub enum WorkKind {
     CheckPrHead,
     CheckWorkingTree,
     CheckWorkingCopy,
+    LookUpPullOfBranch,
     PullPrDescription,
     SyncViewed,
     PullThreads,
@@ -62,10 +65,11 @@ enum WhileRunning {
 impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
     /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
-    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 10] = [
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 11] = [
         Self::CheckPrHead,
         Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
+        Self::LookUpPullOfBranch,
         Self::PullPrDescription,
         Self::SyncViewed,
         Self::PullThreads,
@@ -85,6 +89,7 @@ impl WorkKind {
             Self::CheckPrHead
             | Self::CheckWorkingTree
             | Self::CheckWorkingCopy
+            | Self::LookUpPullOfBranch
             | Self::PullPrDescription
             | Self::PullThreads
             | Self::PullPendingReview
@@ -218,6 +223,10 @@ pub(super) enum Job {
         snapshot: Sha,
     },
     CheckWorkingCopy(Sha),
+    LookUpPullOfBranch {
+        repo: RepoName,
+        branch: BranchName,
+    },
     PullPrDescription(PullRequestUrl),
     SyncViewed(SyncRequest),
     PullThreads {
@@ -242,6 +251,7 @@ impl Job {
             Self::CheckPrHead(_) => WorkKind::CheckPrHead,
             Self::CheckWorkingTree { .. } => WorkKind::CheckWorkingTree,
             Self::CheckWorkingCopy(_) => WorkKind::CheckWorkingCopy,
+            Self::LookUpPullOfBranch { .. } => WorkKind::LookUpPullOfBranch,
             Self::PullPrDescription(_) => WorkKind::PullPrDescription,
             Self::SyncViewed(_) => WorkKind::SyncViewed,
             Self::PullThreads { .. } => WorkKind::PullThreads,
@@ -277,6 +287,9 @@ impl Work {
             ),
             Job::CheckWorkingCopy(head) => {
                 Done::WorkingCopy(ports.source.working_tree_is_at(&head))
+            }
+            Job::LookUpPullOfBranch { repo, branch } => {
+                Done::PullOfBranch(github.open_pull_of_branch(&repo, &branch))
             }
             Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
@@ -328,6 +341,7 @@ pub(super) enum Done {
     PrHead(Result<ChangeTips, GitHubError>),
     WorkingTree(Result<OnDisk, String>),
     WorkingCopy(bool),
+    PullOfBranch(Result<Option<PullOfBranch>, GitHubError>),
     PrDescription(Result<String, GitHubError>),
     SyncViewed(SyncOutcome),
     Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), GitHubError>),

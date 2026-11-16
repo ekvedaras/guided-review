@@ -9,11 +9,27 @@ use super::github_outage::OutageCause;
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
-use crate::pull_request::{ChangeTips, PullRequestUrl};
-use crate::review_subject::ReviewSubject;
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
+use crate::review_subject::{BranchName, ReviewSubject};
 
 pub trait ChangeTipsPort: Send + Sync {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError>;
+}
+
+/// An open PR whose head is a branch of the repo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullOfBranch {
+    pub pr: PullRequestUrl,
+    pub title: String,
+}
+
+pub trait PullsOfBranchPort: Send + Sync {
+    /// The open PR whose head is `branch` of `repo` itself, when there is one.
+    fn open_pull_of_branch(
+        &self,
+        repo: &RepoName,
+        branch: &BranchName,
+    ) -> Result<Option<PullOfBranch>, GitHubError>;
 }
 
 pub trait ViewedFilesPort: Send + Sync {
@@ -130,6 +146,7 @@ pub trait ReviewWritesPort: Send + Sync {
 /// Core actions take only the port they need, so tests can put a fake behind it.
 pub trait GitHubPort:
     ChangeTipsPort
+    + PullsOfBranchPort
     + PullRequestDescriptionPort
     + PullRequestReactionsPort
     + PictureUploadPort
@@ -141,6 +158,7 @@ pub trait GitHubPort:
 
 impl<T> GitHubPort for T where
     T: ChangeTipsPort
+        + PullsOfBranchPort
         + PullRequestDescriptionPort
         + PullRequestReactionsPort
         + PictureUploadPort
