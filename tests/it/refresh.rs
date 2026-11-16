@@ -465,3 +465,25 @@ fn a_claude_that_exits_with_an_error_fails_the_refresh_with_what_it_said() {
 
     assert!(format!("{error:#}").contains("no login"), "{error:#}");
 }
+
+#[test]
+fn claude_refreshing_a_local_review_is_asked_about_the_local_key_not_a_pr() {
+    let dir = TempDir::new().unwrap();
+    let writer = ClaudeRefreshWriter::with_binary(
+        fake_claude(dir.path(), 0),
+        dir.path().to_path_buf(),
+        dir.path().join("tours"),
+    );
+    let key = "local:/work/shop@feature";
+
+    writer.refresh(&key.parse().unwrap(), &mut |_| {}).unwrap();
+
+    let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
+    assert!(args.contains(&format!("/tour {key}")), "{args}");
+    assert!(
+        args.contains("a local review that already has a tour"),
+        "{args}"
+    );
+    assert!(args.contains("with the local key written out"), "{args}");
+    assert!(!args.contains("PR"), "{args}");
+}

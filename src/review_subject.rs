@@ -60,6 +60,22 @@ impl ReviewSubject {
         }
     }
 
+    /// What the review is, in the words a prompt to an agent uses.
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => "PR",
+            Self::Local(_) => "local review",
+        }
+    }
+
+    /// What names the review in a command, in the words a prompt to an agent uses.
+    pub const fn key_name(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => "PR url",
+            Self::Local(_) => "local key",
+        }
+    }
+
     /// What the app answers an open request whose key is neither; the whole error chain is for logs.
     pub fn not_a_subject(key: &str) -> String {
         format!("`{key}` is not a PR link or a local key")

@@ -194,10 +194,12 @@ impl RefreshWriter for ClaudeRefreshWriter {
         on_line: &mut dyn FnMut(&str),
     ) -> anyhow::Result<()> {
         let prompt = format!(
-            "Run the tour skill as `/tour {subject}` on a PR that already has a tour, which makes it a Refresh. \
+            "Run the tour skill as `/tour {subject}` on a {kind} that already has a tour, which makes it a Refresh. \
              Only the listed tools are allowed and a command outside them is denied, never asked: \
-             run each `guided-review` and `gh` command as its own Bash call with the PR url written out, \
-             without shell variables, `&&`, `;` or `$(...)`."
+             run each `guided-review` and `gh` command as its own Bash call with the {key_name} written out, \
+             without shell variables, `&&`, `;` or `$(...)`.",
+            kind = subject.kind(),
+            key_name = subject.key_name(),
         );
         let mut child = Command::new(&self.binary)
             .args(["-p", &prompt])
