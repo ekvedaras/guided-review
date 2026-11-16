@@ -152,10 +152,7 @@ fn a_pr_review_looks_for_no_branch() {
     let source = guided_review::local_git::LocalGit::find(&pr.repo, repo.path())
         .unwrap()
         .unwrap();
-    let state_file = guided_review::viewer::ReviewStateFile::for_subject(
-        &repo.folders(),
-        &ReviewSubject::from(pr),
-    );
+    let state_file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr));
     let mut review = guided_review::viewer::Review::open_basic(tour, &source, state_file).unwrap();
 
     review.pull_from_github();
@@ -205,7 +202,7 @@ fn path(text: &str) -> guided_review::file_path::FilePath {
 
 /// What the PR's review has of the move: the PR's state file, read from disk.
 fn pr_state(feature: &Feature) -> guided_review::viewer::ReviewState {
-    guided_review::viewer::ReviewStateFile::for_subject(
+    ReviewStateFile::for_subject(
         &feature.repo.folders(),
         &ReviewSubject::from(SHOP_7.parse::<PullRequestUrl>().unwrap()),
     )

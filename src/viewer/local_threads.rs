@@ -206,9 +206,7 @@ impl LocalThreads {
             .zip(seen)
             .filter_map(|(thread, seen)| {
                 let body = thread.reviewer_words()?;
-                let place = if !seen.is_outdated {
-                    thread.place.clone()
-                } else {
+                let place = if seen.is_outdated {
                     match (followed.get(&thread.id), &thread.place) {
                         (Some(lines), CommentPlace::Lines { end, .. }) => CommentPlace::Lines {
                             start: LineLocation {
@@ -224,6 +222,8 @@ impl LocalThreads {
                         },
                         _ => CommentPlace::on_file(thread.place.path()),
                     }
+                } else {
+                    thread.place.clone()
                 };
                 Some(MovedComment { place, body })
             })
