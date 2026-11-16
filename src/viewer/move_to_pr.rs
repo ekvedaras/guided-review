@@ -44,23 +44,6 @@ pub struct PrMover {
 }
 
 impl PrMover {
-    /// The move of `change_set`, reading the PR's commits from the change set's own folder.
-    pub fn for_change_set(folders: &AppFolders, change_set: &LocalChangeSet) -> Self {
-        let folder = change_set.folder().as_path().to_path_buf();
-        Self {
-            folders: folders.clone(),
-            change_set: change_set.clone(),
-            pick_code_source: Arc::new(move |pr, tips| {
-                crate::pick_code_source::pick_code_source(
-                    &crate::github::GitHub::from_env(),
-                    pr,
-                    tips,
-                    &folder,
-                )
-            }),
-        }
-    }
-
     /// Blocks on git and on GitHub; the app runs it off the main thread. Nothing is posted: the open
     /// comments become drafts the reviewer sends or drops.
     pub fn run(&self, offer: &MoveOffer, github: &dyn ChangeTipsPort) -> anyhow::Result<()> {
@@ -73,7 +56,7 @@ impl PrMover {
     pub fn carry(&self, offer: &MoveOffer, github: &dyn ChangeTipsPort) -> anyhow::Result<()> {
         let pr = ReviewSubject::from(offer.pr.clone());
         self.have_a_tour_of(offer, &pr, github)?;
-        let pr_tour = Tour::load(&Tour::shown_path_for(&self.folders, &pr))?;
+        let pr_tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &pr), &pr)?;
         let source = (self.pick_code_source)(&offer.pr, &pr_tour.pin().pinned_tips())?;
         let moved = self.worked_out(&pr_tour, source.as_ref())?;
         ReviewStateFile::for_subject(&self.folders, &pr)
@@ -106,7 +89,7 @@ impl PrMover {
     fn worked_out(&self, pr_tour: &Tour, source: &dyn CodeSource) -> anyhow::Result<MovedReview> {
         let pin = pr_tour.pin();
         let local = ReviewSubject::from(self.change_set.clone());
-        let mut local_tour = Tour::load(&Tour::shown_path_for(&self.folders, &local))?;
+        let mut local_tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &local), &local)?;
         let (from_base, from_head) = (local_tour.pin().base.clone(), local_tour.pin().head.clone());
         let repinned = repin(&mut local_tour, source, &pin.base, &pin.head)?;
         let mut local_state = ReviewStateFile::for_subject(&self.folders, &local).load()?;

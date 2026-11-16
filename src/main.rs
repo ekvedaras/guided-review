@@ -290,7 +290,7 @@ fn with_repo_of_its_clone(subject: &ReviewSubject) -> ReviewSubject {
 fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
     let subject = &with_repo_of_its_clone(subject);
     let tour_path = Tour::path_for(&AppFolders::running()?, subject);
-    let mut tour = GuidedTour::load(&tour_path)?;
+    let mut tour = GuidedTour::load_of(&tour_path, subject)?;
 
     let code = code_to_read(subject)?;
     if tour.pin.head.is_empty() {
@@ -360,7 +360,7 @@ fn refresh(subject: &ReviewSubject, done: bool) -> anyhow::Result<()> {
         println!("refresh done: marks cleared");
         return Ok(());
     }
-    let tour = GuidedTour::load(&Tour::path_for(&folders, subject))?;
+    let tour = GuidedTour::load_of(&Tour::path_for(&folders, subject), subject)?;
     let code = match subject {
         ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_pinned_tips(&tour.pin)?,
         ReviewSubject::Local(change_set) => {

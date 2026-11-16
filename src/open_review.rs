@@ -209,16 +209,9 @@ fn assemble(
         subject: subject.clone(),
         pick_code_source,
     };
-    let mover = subject.local().map(|change_set| {
-        let folder = change_set.folder().as_path().to_path_buf();
-        PrMover {
-            folders: folders.clone(),
-            change_set: change_set.clone(),
-            pick_code_source: Arc::new(move |pr, tips| {
-                crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
-            }),
-        }
-    });
+    let mover = subject
+        .local()
+        .map(|change_set| mover_of(folders, change_set));
     Ok(OpenedReview {
         review,
         source: source.into(),
@@ -234,4 +227,16 @@ fn assemble(
             .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
         mover,
     })
+}
+
+/// The move of a local review to a PR, reading the PR's commits from the review's own folder.
+pub fn mover_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PrMover {
+    let folder = change_set.folder().as_path().to_path_buf();
+    PrMover {
+        folders: folders.clone(),
+        change_set: change_set.clone(),
+        pick_code_source: Arc::new(move |pr, tips| {
+            crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
+        }),
+    }
 }

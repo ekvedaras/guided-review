@@ -616,7 +616,7 @@ impl ReviewSession {
             {
                 let here = here.clone();
                 move || {
-                    PrMover::for_change_set(&folders, &here.change_set)
+                    crate::open_review::mover_of(&folders, &here.change_set)
                         .run(&here.offer, &GitHub::from_env())
                 }
             },

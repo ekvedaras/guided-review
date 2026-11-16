@@ -2,6 +2,8 @@
 
 use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
+
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, serve_files};
@@ -10,7 +12,7 @@ use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::make_basic_tour::make_basic_tour;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::review_subject::{BranchName, ReviewSubject};
+use guided_review::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
     Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveOffer,
@@ -322,7 +324,8 @@ fn moving_a_guided_local_review_carries_its_step_ticks_as_file_ticks_by_the_same
         .unwrap();
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
 
-    PrMover::for_change_set(&feature.repo.folders(), feature.subject.local().unwrap())
+    feature
+        .mover_of(feature.subject.local().unwrap())
         .run(&offer_of(SHOP_7, "Add the cart"), &github)
         .unwrap();
 
@@ -668,6 +671,20 @@ fn declining_hides_the_offer_for_that_pr_for_good_and_keeps_the_local_review() {
 }
 
 impl Feature {
+    /// The move of a local review, reading the PR's commits from the repo of the fixture.
+    fn mover_of(&self, change_set: &LocalChangeSet) -> PrMover {
+        let repo_path = self.repo.path().to_path_buf();
+        PrMover {
+            folders: self.repo.folders(),
+            change_set: change_set.clone(),
+            pick_code_source: std::sync::Arc::new(move |pr, _| {
+                let clone = guided_review::local_git::LocalGit::find(&pr.repo, &repo_path)?
+                    .context("the fixture has a clone")?;
+                Ok(Box::new(clone))
+            }),
+        }
+    }
+
     /// The PR's review is open, as when the reviewer opens the PR from the switcher: its basic tour is
     /// on disk, made at the PR's tips.
     fn open_the_pr(&self, github: &FakeGitHub, head: &Sha) -> OpenedReview {
@@ -763,7 +780,8 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
     let offer = opened.review.move_here_offer().unwrap();
 
     assert!(opened.review.start_drop());
-    PrMover::for_change_set(&feature.repo.folders(), &offer.change_set)
+    feature
+        .mover_of(&offer.change_set)
         .run(&offer.offer, &github)
         .unwrap();
     assert!(!local_review_is_on_disk(&feature));
@@ -911,4 +929,27 @@ fn a_kept_local_review_is_not_offered_again_when_the_pr_review_comes_back_to_the
     feature.focus(&mut opened, &github, Instant::now());
 
     assert_eq!(opened.review.move_here_offer(), None);
+}
+
+#[test]
+fn a_local_tour_pinned_to_another_folder_is_refused_by_the_move_and_nothing_is_carried() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, _) = feature.open_a_pr_after_one_more_commit();
+    let tour_path = Tour::shown_path_for(&feature.repo.folders(), &feature.subject);
+    let other = "local:/Users/me/Other/shop@feature";
+    let pinned = std::fs::read_to_string(&tour_path).unwrap();
+    std::fs::write(
+        &tour_path,
+        pinned.replace(&feature.subject.to_string(), other),
+    )
+    .unwrap();
+
+    let moved = feature
+        .mover_of(feature.subject.local().unwrap())
+        .run(&offer_of(SHOP_7, "Add the cart"), &github);
+
+    let refused = format!("{:#}", moved.unwrap_err());
+    assert!(refused.contains(other), "{refused}");
+    assert!(!pr_state_path(&feature).exists());
 }
