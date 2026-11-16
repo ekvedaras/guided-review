@@ -145,11 +145,26 @@ impl FakeTourAgent {
         self.running(terminal, false, space)
     }
 
+    /// A live terminal running Claude in a folder; it can be the change set's agent of a local review.
+    pub fn claude_in(self, terminal: &str, cwd: &str) -> Self {
+        self.running_in(terminal, true, "herdr", cwd)
+    }
+
+    /// A live terminal running a plain shell in a folder.
+    pub fn shell_in(self, terminal: &str, cwd: &str) -> Self {
+        self.running_in(terminal, false, "herdr", cwd)
+    }
+
     fn running(self, terminal: &str, runs_claude: bool, space: &str) -> Self {
+        self.running_in(terminal, runs_claude, space, "/")
+    }
+
+    fn running_in(self, terminal: &str, runs_claude: bool, space: &str, cwd: &str) -> Self {
         self.live.lock().unwrap().push(LiveTerminal {
             terminal: TerminalId::new(terminal),
             runs_claude,
             space: space.to_owned(),
+            cwd: PathBuf::from(cwd),
         });
         self.with_terminal(terminal, None, AgentStatus::Unreported)
     }

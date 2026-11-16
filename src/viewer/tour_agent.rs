@@ -74,6 +74,8 @@ pub struct LiveTerminal {
     pub runs_claude: bool,
     /// The herdr space (workspace) it lives in.
     pub space: String,
+    /// The folder the terminal works in, which tells a local change set's agent from other terminals.
+    pub cwd: PathBuf,
 }
 
 /// What herdr did with text sent only if the agent is idle.

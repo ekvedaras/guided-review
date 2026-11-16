@@ -428,16 +428,17 @@ fn showing_an_agent_placed_while_the_herdr_app_was_closed_names_its_space_and_ta
     );
 }
 
-fn live(terminal: &str, runs_claude: bool, space: &str) -> LiveTerminal {
+fn live(terminal: &str, runs_claude: bool, space: &str, cwd: &str) -> LiveTerminal {
     LiveTerminal {
         terminal: TerminalId::new(terminal),
         runs_claude,
         space: space.to_owned(),
+        cwd: PathBuf::from(cwd),
     }
 }
 
 #[test]
-fn live_terminals_say_whether_they_run_claude_and_in_which_space_as_herdr_lists_them() {
+fn live_terminals_say_whether_they_run_claude_in_which_space_and_folder_as_herdr_lists_them() {
     let dir = TempDir::new().unwrap();
     answer(dir.path(), "ls", include_str!("../fixtures/herdr/ls.json"));
 
@@ -446,12 +447,22 @@ fn live_terminals_say_whether_they_run_claude_and_in_which_space_as_herdr_lists_
     assert_eq!(
         terminals,
         [
-            live("t1", true, "dotfiles"),
-            live("t3", false, "shop"),
-            live("t4", false, "shop"),
-            live("t1b", true, "guided-review"),
-            live("t2h", false, "guided-review"),
-            live("t2j", true, "guided-review"),
+            live("t1", true, "dotfiles", "/Users/me/dotfiles"),
+            live("t3", false, "shop", "/Users/me/Code/shop"),
+            live("t4", false, "shop", "/Users/me/Code/shop"),
+            live("t1b", true, "guided-review", "/Users/me/Code/guided-review"),
+            live(
+                "t2h",
+                false,
+                "guided-review",
+                "/Users/me/Code/guided-review/.claude/worktrees/agent-1"
+            ),
+            live(
+                "t2j",
+                true,
+                "guided-review",
+                "/Users/me/Code/guided-review/.claude/worktrees/agent-1"
+            ),
         ]
     );
     assert_eq!(calls(dir.path(), "calls"), ["ls --json"]);

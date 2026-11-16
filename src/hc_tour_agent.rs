@@ -208,6 +208,7 @@ impl TourAgentPort for HcTourAgents {
                     terminal: TerminalId::new(at(terminal, "/address").as_str()?),
                     runs_claude: at(terminal, "/agent") == CLAUDE_AGENT,
                     space: space_of(at(terminal, "/where").as_str()?).to_owned(),
+                    cwd: at(terminal, "/cwd").as_str().map_or_default(PathBuf::from),
                 })
             })
             .collect())
