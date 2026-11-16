@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::app_folders::AppFolders;
+use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
@@ -633,13 +633,7 @@ impl ReviewStateFile {
 
     /// For a dropped review; a file never written is already gone.
     pub fn delete(&self) -> anyhow::Result<()> {
-        match std::fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => {
-                Err(error).with_context(|| format!("could not delete {}", self.path.display()))
-            }
-        }
+        remove_if_there(&self.path, std::fs::remove_file(&self.path))
     }
 
     /// A PR not reviewed before has no file yet: that is an empty state, not an error.

@@ -2,9 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Context;
-
-use crate::app_folders::AppFolders;
+use crate::app_folders::{AppFolders, remove_if_there};
 use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
 use crate::local_facts::LocalFacts;
@@ -65,15 +63,6 @@ fn local_reviews_on_disk(folders: &AppFolders) -> HashSet<LocalChangeSet> {
             }
         })
         .collect()
-}
-
-/// A file or folder that was never there is already gone.
-fn remove_if_there(path: &Path, removed: std::io::Result<()>) -> anyhow::Result<()> {
-    match removed {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("could not delete {}", path.display())),
-    }
 }
 
 /// What every command needs to work on one local change set: where its files live and its working

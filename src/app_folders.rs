@@ -272,6 +272,15 @@ impl AppFolders {
     }
 }
 
+/// The outcome of deleting `path`: a file or folder that was never there is already gone.
+pub fn remove_if_there(path: &Path, removed: std::io::Result<()>) -> anyhow::Result<()> {
+    match removed {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("could not delete {}", path.display())),
+    }
+}
+
 /// Which binary moves `~/.guided-review`. A maintainer runs source builds beside the release install,
 /// and a move by one of them would leave the other on a folder no longer used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

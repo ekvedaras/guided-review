@@ -64,7 +64,7 @@ pub enum OnDisk {
     BranchGone,
 }
 
-/// The git adapter of a local review:the one place that runs git in the reviewer's own working tree.
+/// The git adapter of a local review: the one place that runs git in the reviewer's own working tree.
 /// It never changes their index, working tree, branches or stash; its only write is the snapshot's ref
 /// and the commit object behind it.
 #[derive(Debug, Clone)]
