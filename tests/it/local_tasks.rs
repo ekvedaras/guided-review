@@ -641,3 +641,23 @@ fn agent_reply_to_an_unknown_hand_off_of_a_local_review_names_the_local_review()
         run.stderr
     );
 }
+
+#[test]
+fn update_moves_every_open_local_thread_to_the_new_snapshot_so_none_needs_the_old_one() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = task_sent(&feature);
+    feature.repo.write("README.md", "intro\nhello\nworld\n");
+
+    update(&feature, &mut opened);
+
+    let moved = threads(&opened).remove(0);
+    assert_eq!(
+        moved.thread.original_commit.as_deref(),
+        Some(opened.review.head().to_string().as_str())
+    );
+    assert!(moved.thread.is_outdated, "it still says it was moved");
+    assert_eq!(
+        moved.followed.map(|followed| followed.were_changed),
+        Some(false)
+    );
+}

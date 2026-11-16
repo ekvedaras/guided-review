@@ -10,6 +10,7 @@ use crate::repin::{Repin, repin};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::{GuidedTour, Tour, TourPin};
 
+use super::local_threads::LocalThreadStore;
 use super::ports::ChangeTipsPort;
 use super::review::Review;
 use super::review_state::{RepinRecord, ReviewStateFile};
@@ -30,6 +31,9 @@ pub fn repin_tour(
     tour.save(tour_path)?;
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
     state_file.update(|state| state.record_repin(record, &result))?;
+    if subject.local().is_some() {
+        LocalThreadStore::in_file(state_file.clone()).follow_to(source, new_head)?;
+    }
     Ok((tour, result))
 }
 

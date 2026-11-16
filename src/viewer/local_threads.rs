@@ -2,7 +2,11 @@
 //! file, in their own section, and every change to them is a locked read and write of that file, so
 //! the app and `agent-reply` each change the newest threads and never write a stale copy back.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::code_source::CodeSource;
 
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
@@ -10,6 +14,7 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use crate::review_subject::ReviewSubject;
 
 use super::comments::CommentPlace;
+use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::Resolution;
 use super::review_state::ReviewStateFile;
 use super::step_page::Side;
@@ -64,8 +69,18 @@ struct LocalThread {
     /// The snapshot the place's line numbers belong to. After Update the thread is outdated there and
     /// is followed to its lines as GitHub's outdated threads are.
     written_at: Sha,
+    /// Set when Update followed the thread to a new snapshot: what its lines said before the move, so the
+    /// thread shows as moved without the old snapshot, which Update lets git collect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    moved: Option<Moved>,
     resolved: bool,
     comments: Vec<LocalComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Moved {
+    before: Vec<String>,
+    were_changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +111,7 @@ impl LocalThreads {
             id: id.clone(),
             place: place.clone(),
             written_at: at.clone(),
+            moved: None,
             resolved: false,
             comments: vec![comment],
         });
@@ -152,6 +168,54 @@ impl LocalThreads {
             .ok_or_else(|| anyhow::anyhow!("no thread {id} in the local threads"))
     }
 
+    /// Where Update moved threads to, as `follow_outdated` tells it for threads it followed from a snapshot.
+    pub fn moved(&self) -> BTreeMap<ThreadId, FollowedLines> {
+        self.threads
+            .iter()
+            .filter_map(|thread| {
+                let moved = thread.moved.as_ref()?;
+                let (start, end) = thread.lines()?;
+                Some((
+                    thread.id.clone(),
+                    FollowedLines {
+                        start,
+                        end,
+                        before: moved.before.clone(),
+                        were_changed: moved.were_changed,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Takes every thread that was written on an older snapshot to `head`, at the lines `followed` found
+    /// for it. A thread that could not be followed stays where it was.
+    fn move_to(&mut self, head: &Sha, followed: &BTreeMap<ThreadId, FollowedLines>) {
+        for thread in &mut self.threads {
+            let Some(found) = followed
+                .get(&thread.id)
+                .filter(|_| thread.written_at != *head)
+            else {
+                continue;
+            };
+            let CommentPlace::Lines { start, end } = &thread.place else {
+                continue;
+            };
+            let (mut start, mut end) = (start.clone(), end.clone());
+            start.line = found.start;
+            end.line = found.end;
+            let earlier = thread.moved.take().filter(|moved| moved.were_changed);
+            thread.moved = Some(Moved {
+                before: earlier
+                    .as_ref()
+                    .map_or_else(|| found.before.clone(), |moved| moved.before.clone()),
+                were_changed: found.were_changed || earlier.is_some(),
+            });
+            thread.place = CommentPlace::Lines { start, end };
+            thread.written_at = head.clone();
+        }
+    }
+
     /// The threads as the page places them, seen from the snapshot `head`.
     pub fn at(&self, head: &Sha) -> Vec<ReviewThread> {
         self.threads
@@ -162,6 +226,13 @@ impl LocalThreads {
 }
 
 impl LocalThread {
+    fn lines(&self) -> Option<(LineNumber, LineNumber)> {
+        match &self.place {
+            CommentPlace::File(_) => None,
+            CommentPlace::Lines { start, end } => Some((start.line, end.line)),
+        }
+    }
+
     fn as_review_thread(&self, head: &Sha) -> ReviewThread {
         let (path, side, start, end): (FilePath, Side, Option<LineNumber>, Option<LineNumber>) =
             match &self.place {
@@ -174,7 +245,7 @@ impl LocalThread {
                 ),
             };
         let is_file_comment = self.place.is_file_comment();
-        let is_outdated = !is_file_comment && self.written_at != *head;
+        let is_outdated = !is_file_comment && (self.written_at != *head || self.moved.is_some());
         ReviewThread {
             id: self.id.clone(),
             is_resolved: self.resolved,
@@ -234,6 +305,37 @@ impl LocalThreadStore {
 
     pub fn threads_at(&self, head: &Sha) -> anyhow::Result<Vec<ReviewThread>> {
         Ok(self.file.load()?.local_threads().at(head))
+    }
+
+    /// The threads at `head` and where each outdated one's lines are: the ones Update moved know it
+    /// themselves, the others are followed from their snapshot.
+    pub fn threads_and_followed_at(
+        &self,
+        source: &(impl CodeSource + ?Sized),
+        head: &Sha,
+    ) -> anyhow::Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>)> {
+        let state = self.file.load()?;
+        let threads = state.local_threads().at(head);
+        let moved = state.local_threads().moved();
+        let to_follow: Vec<ReviewThread> = threads
+            .iter()
+            .filter(|thread| !moved.contains_key(&thread.id))
+            .cloned()
+            .collect();
+        let mut followed = follow_outdated(&to_follow, source, head);
+        followed.extend(moved);
+        Ok((threads, followed))
+    }
+
+    /// Update: every thread written on an older snapshot is followed to `head` once and keeps its new place,
+    /// so no thread depends on the old snapshot after this.
+    pub fn follow_to(&self, source: &(impl CodeSource + ?Sized), head: &Sha) -> anyhow::Result<()> {
+        let threads = self.threads_at(head)?;
+        let followed = follow_outdated(&threads, source, head);
+        self.change(|threads| {
+            threads.move_to(head, &followed);
+            Ok(())
+        })
     }
 
     pub fn start(&self, place: &CommentPlace, body: &str, at: &Sha) -> anyhow::Result<ThreadId> {

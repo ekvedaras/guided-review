@@ -281,18 +281,15 @@ impl Work {
             Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
-            Job::PullThreads { home, head } => {
-                let threads = match &home {
-                    ThreadHome::GitHub(pr) => github.review_threads(pr),
-                    ThreadHome::StateFile(store) => {
-                        store.threads_at(&head).map_err(GitHubError::Other)
-                    }
-                };
-                Done::Threads(threads.map(|threads| {
+            Job::PullThreads { home, head } => Done::Threads(match &home {
+                ThreadHome::GitHub(pr) => github.review_threads(pr).map(|threads| {
                     let followed = follow_outdated(&threads, ports.source, &head);
                     (threads, followed)
-                }))
-            }
+                }),
+                ThreadHome::StateFile(store) => store
+                    .threads_and_followed_at(ports.source, &head)
+                    .map_err(GitHubError::Other),
+            }),
             Job::PullPendingReview(pr) => Done::PendingReview {
                 exists: github.has_pending_review(&pr),
                 authored: github.viewer_authored(&pr),
