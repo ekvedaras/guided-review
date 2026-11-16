@@ -44,6 +44,16 @@ impl OpenedPr {
         Tour::path_for(&self.folders, &self.pr)
     }
 
+    /// The tour `repin` moves: the guided tour when there is one, else the basic tour.
+    pub fn tour_to_repin_path(&self) -> PathBuf {
+        let guided = self.tour_path();
+        if guided.exists() {
+            guided
+        } else {
+            Tour::basic_path_for(&self.folders, &self.pr)
+        }
+    }
+
     /// Makes the PR's basic tour at the PR's tips now, unless a tour is on disk already; true when made.
     pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
         if ToursOnDisk::of(&self.folders, &self.pr) != ToursOnDisk::None {

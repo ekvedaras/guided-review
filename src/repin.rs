@@ -8,7 +8,7 @@ use crate::code_source::CodeSource;
 use crate::coverage;
 use crate::pieces::{self, ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
-use crate::tour::{GuidedTour, PieceRef, Step, StepId};
+use crate::tour::{GuidedTour, PieceRef, Step, StepId, Tour};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -101,43 +101,51 @@ impl fmt::Display for Repin {
 /// Moves the tour to the new commits and says what became of each piece.
 /// The old pieces are cut again at the tour's own base and head, because the tour file keeps no hashes.
 pub fn repin(
-    tour: &mut GuidedTour,
+    tour: &mut Tour,
     source: &dyn CodeSource,
     new_base: &Sha,
     new_head: &Sha,
 ) -> anyhow::Result<Repin> {
-    if tour.pin.base.is_empty() || tour.pin.head.is_empty() {
+    if !tour.pin().is_pinned() {
         bail!("the tour is not pinned to commits yet; run `guided-review check` first");
     }
-    let old_files = pieces::cut(source, &tour.pin.base, &tour.pin.head)?;
+    let old_files = pieces::cut(source, &tour.pin().base, &tour.pin().head)?;
     let new_files = pieces::cut(source, new_base, new_head)?;
     let old: Vec<&Piece> = old_files.iter().flat_map(|file| &file.pieces).collect();
     let new: Vec<&Piece> = new_files.iter().flat_map(|file| &file.pieces).collect();
 
     let matching = Matching::between(&old, &new);
-    let gone_by_step: Vec<Vec<PieceRepin>> = tour
-        .steps()
-        .iter()
-        .map(|step| {
-            shown_ids(step, tour, &old_files)
-                .into_iter()
-                .filter(|id| matching.gone_ids.contains(id))
-                .map(PieceRepin::gone)
-                .collect()
-        })
-        .collect();
+    // A basic tour has no steps, so it has no step part: only its pieces are reported.
+    let gone_by_step: Vec<Vec<PieceRepin>> = tour.guided().map_or_default(|guided| {
+        guided
+            .steps()
+            .iter()
+            .map(|step| {
+                shown_ids(step, guided, &old_files)
+                    .into_iter()
+                    .filter(|id| matching.gone_ids.contains(id))
+                    .map(PieceRepin::gone)
+                    .collect()
+            })
+            .collect()
+    });
 
-    let moved_line_ranges = line_ranges_in_changed_files(tour, &matching, &old, &new);
+    let moved_line_ranges = tour
+        .guided()
+        .map_or_default(|guided| line_ranges_in_changed_files(guided, &matching, &old, &new));
 
-    if tour.pin.head != *new_head {
-        tour.pin.previous_head = Some(std::mem::replace(&mut tour.pin.head, new_head.clone()));
+    let pin = tour.pin_mut();
+    if pin.head != *new_head {
+        pin.previous_head = Some(std::mem::replace(&mut pin.head, new_head.clone()));
     }
-    tour.pin.base = new_base.clone();
-    retarget(
-        &mut tour.steps,
-        &matching.new_id_of_old_hunk,
-        &matching.gone_hunks,
-    );
+    pin.base = new_base.clone();
+    if let Tour::Guided(guided) = tour {
+        retarget(
+            &mut guided.steps,
+            &matching.new_id_of_old_hunk,
+            &matching.gone_hunks,
+        );
+    }
 
     let status_of_new = |id: &PieceId| {
         matching
@@ -146,25 +154,26 @@ pub fn repin(
             .copied()
             .unwrap_or(RepinStatus::New)
     };
-    let steps = tour
-        .steps()
-        .iter()
-        .zip(gone_by_step)
-        .map(|(step, gone)| StepRepin {
-            step: step.id.clone(),
-            pieces: gone
-                .into_iter()
-                .chain(
-                    shown_ids(step, tour, &new_files)
+    let steps =
+        tour.guided().map_or_default(|guided| {
+            guided
+                .steps()
+                .iter()
+                .zip(gone_by_step)
+                .map(|(step, gone)| StepRepin {
+                    step: step.id.clone(),
+                    pieces: gone
                         .into_iter()
-                        .map(|id| PieceRepin {
-                            status: status_of_new(&id),
-                            id,
-                        }),
-                )
-                .collect(),
-        })
-        .collect();
+                        .chain(shown_ids(step, guided, &new_files).into_iter().map(|id| {
+                            PieceRepin {
+                                status: status_of_new(&id),
+                                id,
+                            }
+                        }))
+                        .collect(),
+                })
+                .collect()
+        });
 
     let mut pieces: Vec<PieceRepin> = new
         .iter()

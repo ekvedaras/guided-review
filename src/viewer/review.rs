@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::code_source::CodeSource;
-use crate::coverage;
+use crate::coverage::{self, PiecePart};
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
@@ -304,7 +304,7 @@ pub struct ReviewCore {
     /// A head that cannot be read (gone after a force push) is left out: those steps show the full diff.
     changes_since: BTreeMap<Sha, Vec<ChangedFile>>,
     /// Steps read before whose full diff the reviewer asked for. Not saved.
-    full_diff_shown: BTreeSet<StepId>,
+    full_diff_shown: BTreeSet<ReadSubject>,
     /// Until told, code opens in the IDE with a note that its lines may differ.
     working_copy: WorkingCopy,
     comment_desk: CommentDesk,
@@ -486,6 +486,11 @@ impl ReviewCore {
             .into_iter()
             .flat_map(GuidedTour::steps)
             .filter_map(|step| read_head_of(&state, &step.id.clone()))
+            .chain(
+                files
+                    .iter()
+                    .filter_map(|file| read_head_of_file(&state, &file.path)),
+            )
             .filter(|read_head| **read_head != head)
             .collect();
         let changes_since = read_heads
@@ -715,6 +720,37 @@ impl ReviewCore {
             &self.thread_work(),
             self.state.hand_offs(),
         );
+        self.mark_repin_status(&mut page.pieces);
+        if let Some((read_head, since_files)) = self.changes_since_file_read(path) {
+            let showing_full_diff = self
+                .full_diff_shown
+                .contains(&ReadSubject::File(path.clone()));
+            page.since_read = Some(SinceRead {
+                read_at: read_head.clone(),
+                showing_full_diff,
+            });
+            if !showing_full_diff {
+                let links_from_read_head = CodeLinks {
+                    pr: &self.pr,
+                    base: &read_head,
+                    head: &self.head,
+                };
+                let since_display = self.display(&links_from_read_head);
+                page.pieces = file
+                    .pieces
+                    .iter()
+                    .map(|piece| {
+                        PieceDiff::since_read(
+                            &PiecePart::whole(piece),
+                            since_files,
+                            Some(file),
+                            &since_display,
+                        )
+                    })
+                    .collect();
+                self.mark_repin_status(&mut page.pieces);
+            }
+        }
         Some(page)
     }
 
@@ -859,7 +895,9 @@ impl ReviewCore {
         }
         page.is_gone = self.is_gone(step);
         if let Some((read_head, since_files)) = self.changes_since_read(id) {
-            let showing_full_diff = self.full_diff_shown.contains(id);
+            let showing_full_diff = self
+                .full_diff_shown
+                .contains(&ReadSubject::Step(id.clone()));
             page.since_read = Some(SinceRead {
                 read_at: read_head.clone(),
                 showing_full_diff,
@@ -902,10 +940,20 @@ impl ReviewCore {
         Some((read_head.clone(), since_files))
     }
 
-    /// Flips a step read before between the change since reading and the full diff, for the session.
+    fn changes_since_file_read(&self, path: &FilePath) -> Option<(Sha, &[ChangedFile])> {
+        let read_head = read_head_of_file(&self.state, path)?;
+        let since_files = self.changes_since.get(read_head)?;
+        Some((read_head.clone(), since_files))
+    }
+
     pub fn toggle_full_diff(&mut self, id: &StepId) {
-        if !self.full_diff_shown.remove(id) {
-            self.full_diff_shown.insert(id.clone());
+        self.toggle_full_diff_of(&ReadSubject::Step(id.clone()));
+    }
+
+    /// Flips a step or file read before between the change since reading and the full diff, for the session.
+    pub fn toggle_full_diff_of(&mut self, subject: &ReadSubject) {
+        if !self.full_diff_shown.remove(subject) {
+            self.full_diff_shown.insert(subject.clone());
         }
     }
 
@@ -1164,9 +1212,15 @@ impl ReviewCore {
             Screen::File(path) => Some(path),
             _ => None,
         };
-        self.file_tree.rows(&self.folded_folders, current, &|path| {
-            self.is_file_ticked(path)
-        })
+        self.file_tree.rows(
+            &self.folded_folders,
+            current,
+            &|path| self.is_file_ticked(path),
+            &|path| {
+                self.repin_record()
+                    .and_then(|record| record.status_of_file(path))
+            },
+        )
     }
 
     /// Folds an open folder of the tree and opens a folded one. Not saved.
@@ -2263,6 +2317,14 @@ impl ReviewCore {
             None => false,
         }
     }
+}
+
+/// The head a basic tour's file was last read at: its tick, or the tick a re-pin took away.
+fn read_head_of_file<'a>(state: &'a ReviewState, path: &FilePath) -> Option<&'a Sha> {
+    state
+        .file_read_tick(path)
+        .or_else(|| state.file_read_before(path))
+        .map(|tick| &tick.head)
 }
 
 /// The head a step was last read at: its tick, or the tick a re-pin took away.

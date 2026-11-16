@@ -6,6 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
+use crate::repin::RepinStatus;
 
 /// A folder's path in the repo, with `/` separators. A folder that holds only one folder is joined
 /// with it (`src/viewer`) and stands for the inner one, so the path names the row.
@@ -50,6 +51,8 @@ pub enum TreeRowKind {
         label: String,
         is_current: bool,
         is_read: bool,
+        /// What the last re-pin did to the file: `New` or `Changed`; nothing when it stayed as it was.
+        repin: Option<RepinStatus>,
     },
 }
 
@@ -115,12 +118,14 @@ impl FileTree {
         folded: &BTreeSet<FolderPath>,
         current: Option<&FilePath>,
         is_read: &dyn Fn(&FilePath) -> bool,
+        repin_of: &dyn Fn(&FilePath) -> Option<RepinStatus>,
     ) -> Vec<TreeRow> {
         let mut rows = Vec::new();
         let look = Look {
             folded,
             current,
             is_read,
+            repin_of,
         };
         self.root.rows_into(None, 0, &look, &mut rows);
         rows
@@ -132,6 +137,7 @@ struct Look<'a> {
     folded: &'a BTreeSet<FolderPath>,
     current: Option<&'a FilePath>,
     is_read: &'a dyn Fn(&FilePath) -> bool,
+    repin_of: &'a dyn Fn(&FilePath) -> Option<RepinStatus>,
 }
 
 impl Folder {
@@ -173,6 +179,7 @@ impl Folder {
                     label: name.as_str().to_owned(),
                     is_current: look.current == Some(path),
                     is_read: (look.is_read)(path),
+                    repin: (look.repin_of)(path),
                 },
             });
         }

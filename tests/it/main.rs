@@ -28,6 +28,7 @@ mod avatars;
 mod basic_ask;
 mod basic_comments;
 mod basic_hand_offs;
+mod basic_repin;
 mod basic_review_finish;
 mod basic_ticks;
 mod basic_tour;

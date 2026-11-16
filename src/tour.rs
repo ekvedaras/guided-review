@@ -243,6 +243,17 @@ impl Tour {
         Self::basic_path_in(&Self::tours_dir(folders), pr)
     }
 
+    /// The tour file the app shows and a re-pin moves: the basic tour while there is one, else the
+    /// guided tour. With both files the guided one waits to be switched to.
+    pub fn shown_path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
+        let basic = Self::basic_path_for(folders, pr);
+        if basic.exists() {
+            basic
+        } else {
+            Self::path_for(folders, pr)
+        }
+    }
+
     /// Where the tour writer keeps files the tour shows, like the pictures of its summary.
     pub fn files_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
         Self::tours_dir(folders)
@@ -266,6 +277,13 @@ impl Tour {
         match self {
             Self::Basic(tour) => &tour.pin,
             Self::Guided(tour) => &tour.pin,
+        }
+    }
+
+    pub const fn pin_mut(&mut self) -> &mut TourPin {
+        match self {
+            Self::Basic(tour) => &mut tour.pin,
+            Self::Guided(tour) => &mut tour.pin,
         }
     }
 

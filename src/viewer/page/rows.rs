@@ -129,7 +129,7 @@ pub struct FoldControl {
 
 #[derive(Hash)]
 pub struct FullDiffControl {
-    pub step: StepId,
+    pub subject: ReadSubject,
     pub is_showing_full_diff: bool,
 }
 

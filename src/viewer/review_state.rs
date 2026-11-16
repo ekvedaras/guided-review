@@ -146,6 +146,27 @@ impl RepinRecord {
             .copied()
     }
 
+    /// What the re-pin did to a file as a whole: `New` when all its pieces are new, `Changed` when
+    /// some are changed or new, nothing when it stayed as it was.
+    pub fn status_of_file(&self, path: &FilePath) -> Option<RepinStatus> {
+        let statuses: Vec<RepinStatus> = self
+            .pieces
+            .iter()
+            .filter(|(id, _)| id.path() == path)
+            .map(|(_, status)| *status)
+            .collect();
+        if !statuses.is_empty() && statuses.iter().all(|status| *status == RepinStatus::New) {
+            Some(RepinStatus::New)
+        } else if statuses
+            .iter()
+            .any(|status| matches!(status, RepinStatus::Changed | RepinStatus::New))
+        {
+            Some(RepinStatus::Changed)
+        } else {
+            None
+        }
+    }
+
     pub fn gone_count(&self, step: &StepId) -> usize {
         self.gone_by_step.get(step).map_or(0, BTreeSet::len)
     }
@@ -220,6 +241,17 @@ impl ReviewState {
             let id = step.step.clone();
             if let Some(tick) = self.viewer.read_ticks.remove(&id) {
                 self.viewer.read_before.insert(id, tick);
+            }
+        }
+        let touched_files: BTreeSet<&FilePath> = repin
+            .pieces
+            .iter()
+            .filter(|piece| matches!(piece.status, RepinStatus::Changed | RepinStatus::New))
+            .map(|piece| piece.id.path())
+            .collect();
+        for path in touched_files {
+            if let Some(tick) = self.viewer.file_read_ticks.remove(path) {
+                self.viewer.file_read_before.insert(path.clone(), tick);
             }
         }
         self.last_repin = Some(match self.last_repin.take() {

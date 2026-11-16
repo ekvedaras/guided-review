@@ -878,10 +878,10 @@ impl ReviewSession {
         self.image_pictures.clear();
         self.loading_images.clear();
         self.rows = PageRows::none();
-        self.change(cx, |review| {
-            if let Screen::Step(id) = screen {
-                review.go_to(&id);
-            }
+        self.change(cx, |review| match screen {
+            Screen::Step(id) => review.go_to(&id),
+            Screen::File(path) => review.go_to_file(&path),
+            _ => {}
         });
         cx.emit(SessionEvent::Reopened);
         self.start_background_work(cx);

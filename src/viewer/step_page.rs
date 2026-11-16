@@ -225,6 +225,8 @@ impl SafetyNetPage {
 pub struct FilePage {
     pub pieces: Vec<PieceDiff>,
     pub threads: Vec<ThreadView>,
+    /// Set when the file was read at an older head: its pieces then show only what changed since.
+    pub since_read: Option<SinceRead>,
 }
 
 impl FilePage {
@@ -236,6 +238,7 @@ impl FilePage {
                 .filter_map(|piece| PieceDiff::of(&PiecePart::whole(piece), files, display))
                 .collect(),
             threads: Vec::new(),
+            since_read: None,
         }
     }
 }

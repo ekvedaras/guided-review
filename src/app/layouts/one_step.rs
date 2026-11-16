@@ -87,6 +87,7 @@ use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
@@ -1610,9 +1611,15 @@ impl OneStepLayout {
                             path,
                             label,
                             is_read,
+                            repin,
                             ..
                         } => {
                             let file = path.clone();
+                            let repin_note = match repin {
+                                Some(RepinStatus::New) => Some("new"),
+                                Some(RepinStatus::Changed) => Some("changed"),
+                                _ => None,
+                            };
                             self.touching_hover(
                                 sidebar_row(
                                     &colors,
@@ -1634,6 +1641,9 @@ impl OneStepLayout {
                                 this.change_review(cx, |review| review.go_to_file(&file));
                             }))
                             .child(row_label(SharedString::from(label.clone())))
+                            .children(repin_note.map(|note| {
+                                div().text_xs().text_color(colors.muted_text).child(note)
+                            }))
                         }
                     }
                 });
@@ -2878,7 +2888,7 @@ impl OneStepLayout {
             )
         });
         let full_diff = toolbar.full_diff.as_ref().map(|control| {
-            let step = control.step.clone();
+            let subject = control.subject.clone();
             toggle_button(
                 &colors,
                 "full-diff-toggle",
@@ -2886,7 +2896,7 @@ impl OneStepLayout {
                 ButtonSize::Small,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.toggle_full_diff(&step));
+                this.change_review(cx, |review| review.toggle_full_diff_of(&subject));
             }))
             .child("Full diff, not only the change since your read")
         });

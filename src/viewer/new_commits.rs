@@ -19,9 +19,9 @@ pub fn repin_tour(
     source: &dyn CodeSource,
     new_base: &Sha,
     new_head: &Sha,
-) -> anyhow::Result<(GuidedTour, Repin)> {
-    let mut tour = GuidedTour::load(tour_path)?;
-    let (old_base, old_head) = (tour.pin.base.clone(), tour.pin.head.clone());
+) -> anyhow::Result<(Tour, Repin)> {
+    let mut tour = Tour::load(tour_path)?;
+    let (old_base, old_head) = (tour.pin().base.clone(), tour.pin().head.clone());
     let result = repin(&mut tour, source, new_base, new_head)?;
     tour.save(tour_path)?;
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
@@ -78,13 +78,16 @@ impl TourRepinner {
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
         let state_file = ReviewStateFile::for_pr(&self.folders, &self.pr);
         let (tour, _) = repin_tour(
-            &Tour::path_for(&self.folders, &self.pr),
+            &Tour::shown_path_for(&self.folders, &self.pr),
             &state_file,
             source.as_ref(),
             &base,
             &tips.head,
         )?;
-        let review = Review::open(tour, source.as_ref(), state_file)?;
+        let review = match tour {
+            Tour::Basic(tour) => Review::open_basic(tour, source.as_ref(), state_file)?,
+            Tour::Guided(tour) => Review::open(tour, source.as_ref(), state_file)?,
+        };
         Ok(RepinnedTour {
             review,
             source: source.into(),

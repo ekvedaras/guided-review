@@ -194,10 +194,22 @@ impl<'a> Builder<'a> {
             comment_on_file: (!page.pieces.iter().any(|piece| piece.is_image))
                 .then(|| path.clone()),
             fold: None,
-            full_diff: None,
+            full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
+                subject: ReadSubject::File(path.clone()),
+                is_showing_full_diff: since.showing_full_diff,
+            }),
             ignores_whitespace: Some(review.display_options().ignores_whitespace()),
             wraps_lines: Some(review.display_options().wraps_lines()),
         })));
+        let shown = if page
+            .since_read
+            .as_ref()
+            .is_some_and(|since| !since.showing_full_diff)
+        {
+            DiffShown::ChangeSinceRead
+        } else {
+            DiffShown::Full
+        };
         let after_code = self.hang_threads_and_comments(page.threads);
         for block in FileBlock::group(page.pieces) {
             if !self.holds_file_comments(&block) {
@@ -210,7 +222,7 @@ impl<'a> Builder<'a> {
                 screen,
                 path: block.path.clone(),
             };
-            self.block_rows(block, None, Some(fold), DiffShown::Full);
+            self.block_rows(block, None, Some(fold), shown);
         }
         self.rows.extend(
             after_code
@@ -283,7 +295,7 @@ impl<'a> Builder<'a> {
                 piece_count: page.pieces.len(),
             }),
             full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
-                step: id.clone(),
+                subject: ReadSubject::Step(id.clone()),
                 is_showing_full_diff: since.showing_full_diff,
             }),
             ignores_whitespace: has_code.then(|| review.display_options().ignores_whitespace()),

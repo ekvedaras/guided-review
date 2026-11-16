@@ -249,9 +249,9 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
 
 fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let opened = OpenedPr::new(pr)?;
-    let tour_path = opened.tour_path();
+    let tour_path = opened.tour_to_repin_path();
     // Fails before any network call when there is no tour yet.
-    GuidedTour::load(&tour_path)?;
+    Tour::load(&tour_path)?;
 
     let code = opened.at_live_tips()?;
     let base = code.merge_base()?;
