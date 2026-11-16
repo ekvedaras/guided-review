@@ -289,12 +289,12 @@ fn a_removed_line_cannot_be_opened_and_says_it_exists_only_at_the_branchs_base()
         destination.explanation(),
         "Cannot open: removed lines exist only at the branch's base"
     );
-    let mut opened_urls = Vec::new();
+    let mut opened_urls: Vec<String> = Vec::new();
     assert_eq!(
         destination.open(|url| opened_urls.push(url.to_owned())),
         Opened::Nowhere
     );
-    assert!(opened_urls.is_empty());
+    assert_eq!(opened_urls, Vec::<String>::new());
 }
 
 #[test]
