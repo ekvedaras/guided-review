@@ -1,4 +1,5 @@
 use crate::app_folders::AppFolders;
+use crate::review_subject::ReviewSubject;
 
 use super::active_pr::ActivePr;
 use super::ports::GitHubError;
@@ -229,7 +230,7 @@ impl PrSwitcher {
         for row in &mut self.rows {
             let pr = &row.pull_request.url;
             row.tour = TourFact {
-                on_disk: ToursOnDisk::of(folders, pr),
+                on_disk: ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())),
                 writing: active.writing_fact_of(pr),
             };
             row.has_unseen_reply = active.has_unseen_reply(pr);
@@ -372,7 +373,7 @@ impl TourFact {
     /// What the disk says of the PR's tours, with no writing known.
     pub fn on_disk_of(pr: &PullRequestUrl, folders: &AppFolders) -> Self {
         Self {
-            on_disk: ToursOnDisk::of(folders, pr),
+            on_disk: ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())),
             writing: WritingFact::None,
         }
     }

@@ -6,6 +6,7 @@ use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
@@ -58,11 +59,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.repo.folders(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {
@@ -234,7 +235,7 @@ impl RefreshWriter for SkillStandIn {
             Writer::Refreshes => {
                 on_line(&tool_use_line("Read", "file_path", "app/Pricing.php"));
                 on_line(&tool_use_line("Edit", "file_path", "tour.json"));
-                ReviewStateFile::for_pr(&self.folders, pr)
+                ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(pr.clone()))
                     .update(guided_review::viewer::ReviewState::finish_refresh)?;
                 on_line(&result_line("Refreshed the tour.", false));
                 Ok(())

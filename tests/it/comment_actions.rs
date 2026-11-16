@@ -1,4 +1,5 @@
 use crate::support::line;
+use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
 
 use crate::support::app_path::AppPath;
@@ -65,7 +66,8 @@ impl Pull {
             .unwrap()
             .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr);
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr));
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);

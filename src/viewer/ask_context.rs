@@ -47,7 +47,9 @@ fn basic_context(
     let mut text = format!(
         "PR: {}\nBase commit: {}\nHead commit: {}\n\
          The reviewer reads this PR as a basic tour: its changed files one by one, with no written walkthrough.\n",
-        tour.pin.pr, tour.pin.base, tour.pin.head
+        tour.pin.subject_key(),
+        tour.pin.base,
+        tour.pin.head
     );
     let plain = ChangedLinesOnly::default();
     let display = plain.display(links);
@@ -199,7 +201,9 @@ fn selected_lines(
 fn pointers(tour: &GuidedTour) -> String {
     format!(
         "PR: {}\nBase commit: {}\nHead commit: {}\n",
-        tour.pin.pr, tour.pin.base, tour.pin.head
+        tour.pin.subject_key(),
+        tour.pin.base,
+        tour.pin.head
     )
 }
 

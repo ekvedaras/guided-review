@@ -2,6 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CommentId, FollowedLines, LineLocation, Review, ReviewStateFile, ReviewThread, Side,
@@ -61,7 +62,8 @@ impl Shop {
         }))
         .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr);
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr));
         let source = self.source();
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);

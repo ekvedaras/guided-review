@@ -2,6 +2,7 @@
 //! it, then the hand-off takes that on, in the running app when it shows the PR, else in the state file.
 
 use crate::app_folders::AppFolders;
+use crate::review_subject::ReviewSubject;
 
 use anyhow::Context;
 
@@ -26,7 +27,7 @@ pub fn agent_reply(
     id: HandOffId,
     reply: &AgentReply<'_>,
 ) -> anyhow::Result<String> {
-    let state_file = ReviewStateFile::for_pr(folders, pr);
+    let state_file = ReviewStateFile::for_subject(folders, &ReviewSubject::from(pr.clone()));
     let state = state_file.load()?;
     let request = match reply {
         AgentReply::Answer(body) => state.hand_offs().agent_reply(pr, id, body)?,

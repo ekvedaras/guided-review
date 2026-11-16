@@ -8,6 +8,7 @@ use guided_review::github::GitHub;
 use guided_review::local_git::LocalGit;
 use guided_review::pick_code_source::pick_code_source;
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Problem, Review, ReviewStateFile};
 use serde_json::json;
@@ -52,7 +53,8 @@ impl Shop {
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr());
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr()));
         Review::open(tour, source, state_file).unwrap()
     }
 }

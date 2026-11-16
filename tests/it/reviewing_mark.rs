@@ -6,6 +6,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Problem, Reaction, ReactionChange, Review, ReviewOutcome, ReviewStateFile, ReviewVerdict,
@@ -63,7 +64,7 @@ impl Pull {
         Review::open(
             tour,
             &self.source(),
-            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
         )
         .unwrap()
     }

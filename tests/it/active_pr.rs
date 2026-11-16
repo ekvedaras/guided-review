@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, AgentReplied, Finished, HandOffId, OpenDecision, OpenOrigin, OpenOutcome, Problem,
@@ -34,7 +35,7 @@ fn shop_with_tours_of_a_and_b() -> FixtureRepo {
             "summary": [],
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
         });
-        let path = Tour::path_for(&repo.folders(), &pr(url));
+        let path = Tour::path_for(&repo.folders(), &ReviewSubject::from(pr(url)));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, tour.to_string()).unwrap();
     }
@@ -42,17 +43,20 @@ fn shop_with_tours_of_a_and_b() -> FixtureRepo {
 }
 
 fn write_broken_tour(repo: &FixtureRepo, url: &str) {
-    let path = Tour::path_for(&repo.folders(), &pr(url));
+    let path = Tour::path_for(&repo.folders(), &ReviewSubject::from(pr(url)));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, "not json").unwrap();
 }
 
 /// A basic tour of `url` pinned where the guided tour of A is.
 fn write_basic_tour_like_a(repo: &FixtureRepo, url: &str) {
-    let pin = GuidedTour::load(&Tour::path_for(&repo.folders(), &pr(A)))
-        .unwrap()
-        .pin;
-    let path = Tour::basic_path_for(&repo.folders(), &pr(url));
+    let pin = GuidedTour::load(&Tour::path_for(
+        &repo.folders(),
+        &ReviewSubject::from(pr(A)),
+    ))
+    .unwrap()
+    .pin;
+    let path = Tour::basic_path_for(&repo.folders(), &ReviewSubject::from(pr(url)));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     BasicTour::new(pin, format!("PR title of {url}"))
         .save(&path)
@@ -250,7 +254,7 @@ fn the_folder_a_pr_was_opened_from_is_remembered_for_a_later_switch() {
     let repo = shop_with_tours_of_a_and_b();
     open_review(&pr(A), repo.path(), &repo.folders()).unwrap();
 
-    let file = ReviewStateFile::for_pr(&repo.folders(), &pr(A));
+    let file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr(A)));
 
     assert_eq!(file.opened_from().unwrap().as_deref(), Some(repo.path()));
 }

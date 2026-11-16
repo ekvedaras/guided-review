@@ -16,6 +16,7 @@ use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
@@ -171,7 +172,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    println!("{}", Tour::path_for(&AppFolders::running()?, pr).display());
+    println!(
+        "{}",
+        Tour::path_for(&AppFolders::running()?, &ReviewSubject::from(pr.clone())).display()
+    );
     Ok(())
 }
 
@@ -229,11 +233,13 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let mut tour = GuidedTour::load(&tour_path)?;
 
     let code = opened.at_live_tips()?;
+    let subject = ReviewSubject::from(pr.clone());
     if tour.pin.head.is_empty() {
-        tour.pin.pin_to(pr, &code.merge_base()?, &code.tips.head);
+        tour.pin
+            .pin_to(&subject, &code.merge_base()?, &code.tips.head);
     } else {
-        if tour.pin.pr.is_empty() {
-            tour.pin.pr = pr.to_string();
+        if tour.pin.pr.is_empty() && tour.pin.local.is_none() {
+            tour.pin.pr = subject.to_string();
         }
         if tour.pin.head != code.tips.head {
             println!("warning: PR has new commits; run `guided-review repin`");
@@ -331,7 +337,7 @@ enum Launch {
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
     let folders = &AppFolders::running()?;
-    let tours = ToursOnDisk::of(folders, pr);
+    let tours = ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone()));
     if let Launch::Restart { at: Some(step), .. } = launch
         && tours.opens_basic()
     {
@@ -375,7 +381,7 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         | Answer::Reloaded { .. }
         | Answer::KeptInBackground { .. } => {
             println!("{answer}");
-            if ToursOnDisk::of(folders, pr).opens_basic() {
+            if ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())).opens_basic() {
                 println!("{pr} opened in Basic mode");
             }
         }

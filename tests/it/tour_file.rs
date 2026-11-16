@@ -221,3 +221,72 @@ fn a_basic_tour_lives_beside_the_guided_tours_file() {
     assert_eq!(guided.parent(), basic.parent());
     assert!(basic.ends_with("acme/shop/7.basic.json"));
 }
+
+mod pin_subject {
+    use guided_review::pull_request::Sha;
+    use guided_review::review_subject::ReviewSubject;
+    use guided_review::tour::{GuidedTour, TourPin};
+
+    use super::{TOUR_JSON, tour_file};
+
+    const LOCAL_KEY: &str = "local:/Users/me/Code/shop@feature/discounts";
+    const PR_URL: &str = "https://github.com/acme/shop/pull/7";
+
+    fn pin(json: &str) -> TourPin {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_pull_requests_tour_file_pins_its_pull_request_and_saving_it_writes_no_local_key() {
+        let (_dir, path) = tour_file(TOUR_JSON);
+        let tour = GuidedTour::load(&path).unwrap();
+
+        assert_eq!(
+            tour.pin.subject().unwrap(),
+            PR_URL.parse::<ReviewSubject>().unwrap()
+        );
+        tour.save(&path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains(&format!("\"pr\": \"{PR_URL}\"")));
+        assert!(!saved.contains("local"));
+    }
+
+    #[test]
+    fn a_local_pin_round_trips_with_local_and_no_pr_url() {
+        let mut pinned = pin("{}");
+        let local: ReviewSubject = LOCAL_KEY.parse().unwrap();
+        pinned.pin_to(&local, &Sha::new("aaa"), &Sha::new("bbb"));
+
+        let json = serde_json::to_string(&pinned).unwrap();
+        let read = pin(&json);
+
+        assert!(!json.contains("github.com"));
+        assert_eq!(read.local.as_deref(), Some(LOCAL_KEY));
+        assert_eq!(read.subject().unwrap(), local);
+    }
+
+    #[test]
+    fn pinning_a_pull_request_clears_a_local_key() {
+        let mut pinned = pin(&format!(r#"{{"local": "{LOCAL_KEY}"}}"#));
+        let pr: ReviewSubject = PR_URL.parse().unwrap();
+
+        pinned.pin_to(&pr, &Sha::new("aaa"), &Sha::new("bbb"));
+
+        assert_eq!(pinned.local, None);
+        assert_eq!(pinned.subject().unwrap(), pr);
+    }
+
+    #[test]
+    fn a_pin_naming_both_a_pull_request_and_a_local_change_set_is_refused() {
+        let both = pin(&format!(r#"{{"pr": "{PR_URL}", "local": "{LOCAL_KEY}"}}"#));
+
+        assert!(both.subject().is_err());
+    }
+
+    #[test]
+    fn a_pin_naming_neither_is_refused_with_a_reason() {
+        let error = pin("{}").subject().unwrap_err();
+
+        assert!(error.to_string().contains("neither"), "{error}");
+    }
+}

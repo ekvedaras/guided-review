@@ -10,6 +10,7 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
+use crate::review_subject::ReviewSubject;
 use crate::timestamp::UtcTimestamp;
 use crate::tour::Tour;
 
@@ -579,13 +580,13 @@ pub struct ReviewStateFile {
 }
 
 impl ReviewStateFile {
-    pub fn for_pr(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
+    pub fn for_subject(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         Self {
             path: folders
                 .state_files()
-                .join(pr.repo.to_string())
-                .join(format!("{}.json", pr.number)),
-            tour_files: Tour::files_for(folders, pr),
+                .join(subject.files_folder())
+                .join(format!("{}.json", subject.file_stem())),
+            tour_files: Tour::files_for(folders, subject),
         }
     }
 
@@ -612,7 +613,10 @@ impl ReviewStateFile {
                     repo: pr.repo.clone(),
                     number,
                 };
-                Self::for_pr(folders, &other).opened_from().ok().flatten()
+                Self::for_subject(folders, &ReviewSubject::from(other))
+                    .opened_from()
+                    .ok()
+                    .flatten()
             })
             .collect()
     }

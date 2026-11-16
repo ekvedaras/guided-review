@@ -26,7 +26,7 @@ fn open_review() -> (FixtureRepo, Review) {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let state_file = ReviewStateFile::for_pr(&repo.folders(), &PR.parse().unwrap());
+    let state_file = ReviewStateFile::for_subject(&repo.folders(), &PR.parse().unwrap());
     let review = Review::open(tour, &source, state_file).unwrap();
     (repo, review)
 }

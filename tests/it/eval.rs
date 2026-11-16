@@ -1,4 +1,5 @@
 use crate::support::folders_in;
+use guided_review::review_subject::ReviewSubject;
 use std::cell::RefCell;
 
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -27,7 +28,7 @@ impl EvalWriter for FakeWriter<'_> {
         self.tours_dirs
             .borrow_mut()
             .push(brief.tours_dir.to_path_buf());
-        let path = Tour::path_in(brief.tours_dir, brief.pr);
+        let path = Tour::path_in(brief.tours_dir, &ReviewSubject::from(brief.pr.clone()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, r#"{"title":"written by the fake writer","steps":[]}"#).unwrap();
         Ok(())
@@ -160,7 +161,7 @@ fn the_judge_gets_the_note_and_the_tour_while_the_writer_never_sees_the_note() {
 fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
     let (home, store) = setup();
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let tour_path = Tour::path_for(&folders_in(home.path()), &pr);
+    let tour_path = Tour::path_for(&folders_in(home.path()), &ReviewSubject::from(pr.clone()));
     std::fs::create_dir_all(tour_path.parent().unwrap()).unwrap();
     std::fs::write(&tour_path, r#"{"title":"my real tour"}"#).unwrap();
 
@@ -177,7 +178,7 @@ fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
         .path()
         .join(".local/state/guided-review/evals/tours/2026-10-22");
     assert_eq!(*writer.tours_dirs.borrow(), vec![run_folder.clone()]);
-    assert!(Tour::path_in(&run_folder, &pr).exists());
+    assert!(Tour::path_in(&run_folder, &ReviewSubject::from(pr)).exists());
     assert_eq!(
         std::fs::read_to_string(&tour_path).unwrap(),
         r#"{"title":"my real tour"}"#
@@ -189,7 +190,7 @@ fn the_writer_is_pointed_at_a_run_folder_and_the_real_tour_is_never_touched() {
 fn existing_tours_are_judged_without_running_the_writer() {
     let (home, store) = setup();
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let tour_path = Tour::path_for(&folders_in(home.path()), &pr);
+    let tour_path = Tour::path_for(&folders_in(home.path()), &ReviewSubject::from(pr));
     std::fs::create_dir_all(tour_path.parent().unwrap()).unwrap();
     std::fs::write(&tour_path, r#"{"title":"my real tour"}"#).unwrap();
     let judge = FakeJudge::answering(vec![Score::Pass]);

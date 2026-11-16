@@ -6,6 +6,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Audience, BoxState, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
@@ -70,7 +71,7 @@ impl Pull {
         let mut review = Review::open(
             tour,
             &source,
-            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
         )
         .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);

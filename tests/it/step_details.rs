@@ -2,7 +2,8 @@ use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use crate::support::{FixtureRepo, on_github};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::RepoName;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{PieceDiff, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
@@ -70,10 +71,10 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file = ReviewStateFile::for_pr(
+        let state_file = ReviewStateFile::for_subject(
             &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7"
-                .parse::<PullRequestUrl>()
+                .parse::<ReviewSubject>()
                 .unwrap(),
         );
         Review::open(self.tour(steps), &source, state_file).unwrap()

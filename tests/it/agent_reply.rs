@@ -16,7 +16,7 @@ const PENDING: &str = r#"{"data":{"repository":{"pullRequest":{"reviews":{"nodes
 const REPLIED: &str = r#"{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"R1","pullRequestReview":{"id":"REVIEW_7","state":"PENDING"}}}}}"#;
 
 fn state_file(home: &Path) -> ReviewStateFile {
-    ReviewStateFile::for_pr(&folders_in(home), &PR.parse().unwrap())
+    ReviewStateFile::for_subject(&folders_in(home), &PR.parse().unwrap())
 }
 
 fn with_one_hand_off(home: &Path) {

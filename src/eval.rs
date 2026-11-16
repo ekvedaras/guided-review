@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use crate::app_folders::AppFolders;
 use crate::hex;
 use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -300,7 +301,10 @@ impl Eval<'_> {
         date: &str,
     ) -> anyhow::Result<Verdicts> {
         match source {
-            TourSource::ExistingTours => self.judge_tour(&Tour::path_for(self.folders, pr), note),
+            TourSource::ExistingTours => self.judge_tour(
+                &Tour::path_for(self.folders, &ReviewSubject::from(pr.clone())),
+                note,
+            ),
             TourSource::WriteNew => {
                 let tours_dir = self.store.run_tours_dir(date);
                 self.writer.write_tour(&WriterBrief {
@@ -309,7 +313,7 @@ impl Eval<'_> {
                     tours_dir: &tours_dir,
                     evals: &self.folders.evals(),
                 })?;
-                let tour_path = Tour::path_in(&tours_dir, pr);
+                let tour_path = Tour::path_in(&tours_dir, &ReviewSubject::from(pr.clone()));
                 if !tour_path.exists() {
                     bail!("the writer did not leave a tour file");
                 }

@@ -2,6 +2,7 @@ use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentReplied, Audience, CommentGesture, CommentId, CommentPlace, HandOffId, HandOffState,
@@ -44,7 +45,7 @@ impl Pull {
 
     fn state_file(&self) -> ReviewStateFile {
         let pr: PullRequestUrl = PR.parse().unwrap();
-        ReviewStateFile::for_pr(&self.repo.folders(), &pr)
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr))
     }
 
     fn open(&self) -> Review {

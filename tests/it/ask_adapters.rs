@@ -132,7 +132,7 @@ fn asks_go_into_the_per_pr_state_file_next_to_whatever_else_it_holds() {
         .join(".local/state/guided-review/state/acme/shop/7.json");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(&file, r#"{"read_ticks":{"order":{"head":"abc"}}}"#).unwrap();
-    let store = Arc::new(ReviewStateFile::for_pr(&folders_in(home.path()), &pr));
+    let store = Arc::new(ReviewStateFile::for_subject(&folders_in(home.path()), &pr));
 
     let mut asks = Asks::load(Arc::<ReviewStateFile>::clone(&store)).unwrap();
     let id = asks.start(Place::Tour, &Sha::new("head1"));
@@ -150,7 +150,7 @@ fn without_a_state_file_there_are_no_asks() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
 
-    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_subject(
         &folders_in(home.path()),
         &pr,
     )))
@@ -163,8 +163,8 @@ fn without_a_state_file_there_are_no_asks() {
 fn saving_asks_keeps_the_read_ticks_and_the_other_way_round() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
-    let mut asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+    let file = ReviewStateFile::for_subject(&folders_in(home.path()), &pr);
+    let mut asks = Asks::load(Arc::new(ReviewStateFile::for_subject(
         &folders_in(home.path()),
         &pr,
     )))
@@ -208,7 +208,7 @@ fn stopping_a_turn_asks_claude_to_interrupt_over_its_input_and_keeps_the_process
 fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let file = ReviewStateFile::for_subject(&folders_in(home.path()), &pr);
     let written = json!({
         "asks": [
             {
@@ -248,7 +248,7 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     std::fs::write(&path, written.to_string()).unwrap();
 
     let state = file.load().unwrap();
-    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_subject(
         &folders_in(home.path()),
         &pr,
     )))
@@ -278,7 +278,7 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     assert_eq!(lines["shown_on"], json!({"kind": "step", "step": "order"}));
     assert_eq!(lines["pieces"], written["asks"][1]["place"]["pieces"]);
     assert_eq!(lines["start"], written["asks"][1]["place"]["start"]);
-    let reloaded = Asks::load(Arc::new(ReviewStateFile::for_pr(
+    let reloaded = Asks::load(Arc::new(ReviewStateFile::for_subject(
         &folders_in(home.path()),
         &pr,
     )))
@@ -290,7 +290,7 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
 fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let file = ReviewStateFile::for_subject(&folders_in(home.path()), &pr);
     let written = json!({
         "asks": [{
             "id": 1,
@@ -334,7 +334,7 @@ fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
     );
     assert_eq!(record.gone_count(&"docs".into()), 1);
 
-    let asks = Asks::load(Arc::new(ReviewStateFile::for_pr(
+    let asks = Asks::load(Arc::new(ReviewStateFile::for_subject(
         &folders_in(home.path()),
         &pr,
     )))
@@ -349,7 +349,7 @@ fn a_state_file_naming_files_with_a_hash_loads_and_finds_their_pieces() {
 fn a_saved_review_keeps_whole_files_with_a_hash_apart_from_symbols() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let file = ReviewStateFile::for_subject(&folders_in(home.path()), &pr);
     let path = home
         .path()
         .join(".local/state/guided-review/state/acme/shop/7.json");
@@ -381,7 +381,7 @@ fn a_saved_review_keeps_whole_files_with_a_hash_apart_from_symbols() {
 fn re_pin_keys_are_saved_in_the_order_of_their_text() {
     let home = TempDir::new().unwrap();
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
-    let file = ReviewStateFile::for_pr(&folders_in(home.path()), &pr);
+    let file = ReviewStateFile::for_subject(&folders_in(home.path()), &pr);
     let path = home
         .path()
         .join(".local/state/guided-review/state/acme/shop/7.json");

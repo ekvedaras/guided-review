@@ -5,6 +5,7 @@ use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::repin::{Repin, repin};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
 use super::ports::ChangeTipsPort;
@@ -51,12 +52,15 @@ pub struct TourReloader {
 impl TourReloader {
     /// Blocks on the code source; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
+        let tour = GuidedTour::load(&Tour::path_for(
+            &self.folders,
+            &ReviewSubject::from(self.pr.clone()),
+        ))?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
         let review = Review::open(
             tour,
             source.as_ref(),
-            ReviewStateFile::for_pr(&self.folders, &self.pr),
+            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone())),
         )?;
         Ok(RepinnedTour {
             review,
@@ -76,9 +80,10 @@ impl TourRepinner {
         let tips = github.pull_request_tips(&self.pr)?;
         let source = (self.pick_code_source)(&tips)?;
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-        let state_file = ReviewStateFile::for_pr(&self.folders, &self.pr);
+        let state_file =
+            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone()));
         let (tour, _) = repin_tour(
-            &Tour::shown_path_for(&self.folders, &self.pr),
+            &Tour::shown_path_for(&self.folders, &ReviewSubject::from(self.pr.clone())),
             &state_file,
             source.as_ref(),
             &base,

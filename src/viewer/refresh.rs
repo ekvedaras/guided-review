@@ -6,6 +6,7 @@ use crate::coverage;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::{ChangeTips, PullRequestUrl};
 use crate::repin::RepinStatus;
+use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
 use super::agent_event::AgentEvent;
@@ -142,7 +143,10 @@ impl TourRefresher {
         if let Some(reason) = failure {
             anyhow::bail!("claude stopped: {reason}");
         }
-        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
+        let tour = GuidedTour::load(&Tour::path_for(
+            &self.folders,
+            &ReviewSubject::from(self.pr.clone()),
+        ))?;
         let pinned = ChangeTips {
             base_branch_tip: tour.pin.base.clone(),
             head: tour.pin.head.clone(),
@@ -151,7 +155,7 @@ impl TourRefresher {
         let review = Review::open(
             tour,
             source.as_ref(),
-            ReviewStateFile::for_pr(&self.folders, &self.pr),
+            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone())),
         )?;
         if !review.refresh_brief().is_empty() {
             anyhow::bail!("claude ended without refreshing the tour: {said}");

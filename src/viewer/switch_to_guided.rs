@@ -7,6 +7,7 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Tour};
 
 use super::new_commits::{PickCodeSource, RepinnedTour};
@@ -25,9 +26,13 @@ pub struct TourSwitcher {
 impl TourSwitcher {
     /// Blocks on the code source and on git; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let guided = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
+        let guided = GuidedTour::load(&Tour::path_for(
+            &self.folders,
+            &ReviewSubject::from(self.pr.clone()),
+        ))?;
         let source = (self.pick_code_source)(&guided.pin.pinned_tips())?;
-        let state_file = ReviewStateFile::for_pr(&self.folders, &self.pr);
+        let state_file =
+            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone()));
         let files = pieces::cut(source.as_ref(), &guided.pin.base, &guided.pin.head)?;
         let reads = state_file.load()?.file_read_heads();
         let heads = reads.values().cloned().chain(self.basic_head()).collect();
@@ -47,14 +52,17 @@ impl TourSwitcher {
 
     /// The head the basic review ticks files at while the guided review is built.
     fn basic_head(&self) -> Option<Sha> {
-        BasicTour::load(&Tour::basic_path_for(&self.folders, &self.pr))
-            .ok()
-            .map(|basic| basic.pin.head)
+        BasicTour::load(&Tour::basic_path_for(
+            &self.folders,
+            &ReviewSubject::from(self.pr.clone()),
+        ))
+        .ok()
+        .map(|basic| basic.pin.head)
     }
 
     /// Only once the state is saved: a crash before this carries again instead of losing ticks.
     fn delete_basic_file(&self) -> anyhow::Result<()> {
-        let path = Tour::basic_path_for(&self.folders, &self.pr);
+        let path = Tour::basic_path_for(&self.folders, &ReviewSubject::from(self.pr.clone()));
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

@@ -5,6 +5,7 @@ use crate::support::work::drive_without_agents;
 use crate::support::{drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Audience, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
@@ -120,7 +121,8 @@ impl Pull {
         }))
         .unwrap();
         let source = self.source();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &self.pr());
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()));
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -687,7 +689,10 @@ fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_o
     drop(review);
 
     outcome
-        .land_in(&ReviewStateFile::for_pr(&pull.repo.folders(), &pull.pr()))
+        .land_in(&ReviewStateFile::for_subject(
+            &pull.repo.folders(),
+            &ReviewSubject::from(pull.pr()),
+        ))
         .unwrap();
 
     assert_eq!(drafts(&pull.open()), []);
@@ -708,7 +713,10 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
     drop(review);
 
     outcome
-        .land_in(&ReviewStateFile::for_pr(&pull.repo.folders(), &pull.pr()))
+        .land_in(&ReviewStateFile::for_subject(
+            &pull.repo.folders(),
+            &ReviewSubject::from(pull.pr()),
+        ))
         .unwrap();
 
     let reopened = pull.open();

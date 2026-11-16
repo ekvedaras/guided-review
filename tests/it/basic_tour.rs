@@ -19,6 +19,7 @@ fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
         TourPin {
             version: 1,
             pr: "https://github.com/acme/shop/pull/7".to_owned(),
+            local: None,
             base: Sha::new(&base),
             head: Sha::new(&head),
             previous_head: None,
@@ -28,7 +29,7 @@ fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let state_file = ReviewStateFile::for_pr(
+    let state_file = ReviewStateFile::for_subject(
         &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );

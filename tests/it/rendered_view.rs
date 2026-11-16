@@ -69,7 +69,7 @@ impl Pull {
                 "children": []}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse().unwrap());
+        let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
         let source = self.source();
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);

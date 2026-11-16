@@ -2,6 +2,7 @@ use crate::support::FixtureRepo;
 use guided_review::github::GitHub;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Block, PullRequestDescriptionPort, Review, ReviewStateFile};
 use serde_json::json;
@@ -44,8 +45,10 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file =
-            ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap());
+        let state_file = ReviewStateFile::for_subject(
+            &self.repo.folders(),
+            &PR.parse::<ReviewSubject>().unwrap(),
+        );
         Review::open(tour, &source, state_file).unwrap()
     }
 }

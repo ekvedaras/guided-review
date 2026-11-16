@@ -2,6 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     NoteSubject, NotesButton, Review, ReviewStateFile, StepId, with_diagram_in_notes,
@@ -82,7 +83,7 @@ impl Shop {
         Review::open(
             tour,
             &source,
-            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
         )
         .unwrap()
     }

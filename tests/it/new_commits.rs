@@ -8,6 +8,7 @@ use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
@@ -95,11 +96,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.repo.folders(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {

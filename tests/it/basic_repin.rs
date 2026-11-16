@@ -3,6 +3,7 @@ use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run,
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
     GuidedTourProgress, PageRow, ReadSubject, RefreshBrief, Review, ReviewStateFile, TourRepinner,
@@ -41,6 +42,7 @@ impl Shop {
             TourPin {
                 version: 1,
                 pr: PR.to_owned(),
+                local: None,
                 base: Sha::new(&shop.base),
                 head: Sha::new(&shop.first_head),
                 previous_head: None,
@@ -57,13 +59,13 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        let path = Tour::basic_path_for(&self.repo.folders(), &self.pr());
+        let path = Tour::basic_path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         path
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {
@@ -251,7 +253,7 @@ fn a_read_file_the_new_commits_left_alone_says_it_has_no_change_since_it_was_rea
 #[test]
 fn update_tour_re_pins_the_basic_tour_not_the_guided_one_beside_it_and_the_banner_survives() {
     let shop = Shop::with_basic_tour_at_first_head();
-    let guided_path = Tour::path_for(&shop.repo.folders(), &shop.pr());
+    let guided_path = Tour::path_for(&shop.repo.folders(), &ReviewSubject::from(shop.pr()));
     let guided = serde_json::json!({
         "pr": PR, "base": shop.base, "head": shop.first_head,
         "title": "Orders", "summary": ["Orders change"], "steps": [],
@@ -302,7 +304,7 @@ fn the_cli_re_pins_the_basic_tour_of_a_pr_with_no_guided_tour() {
         serde_json::from_str(&std::fs::read_to_string(shop.tour_path()).unwrap()).unwrap();
     assert_eq!(on_disk["kind"], "basic");
     assert_eq!(on_disk["head"], second_head.as_str());
-    assert!(!Tour::path_for(&shop.repo.folders(), &shop.pr()).exists());
+    assert!(!Tour::path_for(&shop.repo.folders(), &ReviewSubject::from(shop.pr())).exists());
 }
 
 #[test]
@@ -314,7 +316,7 @@ fn the_cli_re_pin_of_a_pr_with_no_tour_names_the_guided_tour_file_it_could_not_r
     let run = cli_repin(&shop, &second_head);
 
     assert!(!run.success);
-    let guided_path = Tour::path_for(&shop.repo.folders(), &shop.pr());
+    let guided_path = Tour::path_for(&shop.repo.folders(), &ReviewSubject::from(shop.pr()));
     assert!(
         run.stderr.contains(&guided_path.display().to_string()),
         "{}",
@@ -325,7 +327,7 @@ fn the_cli_re_pin_of_a_pr_with_no_tour_names_the_guided_tour_file_it_could_not_r
 #[test]
 fn the_cli_re_pins_the_guided_tour_and_leaves_the_basic_one_when_both_exist() {
     let shop = Shop::with_basic_tour_at_first_head();
-    let guided_path = Tour::path_for(&shop.repo.folders(), &shop.pr());
+    let guided_path = Tour::path_for(&shop.repo.folders(), &ReviewSubject::from(shop.pr()));
     let guided = serde_json::json!({
         "pr": PR, "base": shop.base, "head": shop.first_head,
         "title": "Orders", "summary": ["Orders change"], "steps": [],

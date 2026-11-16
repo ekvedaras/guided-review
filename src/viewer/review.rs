@@ -523,7 +523,12 @@ impl ReviewCore {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
-        let pr: PullRequestUrl = tour.pin().pr.parse()?;
+        let pr = tour
+            .pin()
+            .subject()?
+            .pull_request()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("a local change set has no PR yet"))?;
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
@@ -1240,7 +1245,7 @@ impl ReviewCore {
             cwd,
             model: settings.model.clone(),
             effort: settings.effort.clone(),
-            system_prompt: ask_context::system_prompt(&self.tour.pin().pr),
+            system_prompt: ask_context::system_prompt(self.tour.pin().subject_key()),
             resume,
         }
     }

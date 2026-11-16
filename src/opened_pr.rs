@@ -10,6 +10,7 @@ use crate::make_basic_tour::make_basic_tour;
 use crate::pick_code_source::pick_code_source;
 use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin, ToursOnDisk};
 use crate::viewer::{ChangeTipsPort, PickCodeSource, ReviewStateFile};
 
@@ -41,21 +42,25 @@ impl OpenedPr {
     }
 
     pub fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.folders, &self.pr)
+        Tour::path_for(&self.folders, &ReviewSubject::from(self.pr.clone()))
     }
 
     /// The tour `repin` moves: the guided tour when there is one, else the basic tour. With neither it is
     /// the guided path, which is the file the reviewer is told is missing.
     pub fn tour_to_repin_path(&self) -> PathBuf {
-        match ToursOnDisk::of(&self.folders, &self.pr) {
-            ToursOnDisk::Basic => Tour::basic_path_for(&self.folders, &self.pr),
+        match ToursOnDisk::of(&self.folders, &ReviewSubject::from(self.pr.clone())) {
+            ToursOnDisk::Basic => {
+                Tour::basic_path_for(&self.folders, &ReviewSubject::from(self.pr.clone()))
+            }
             _ => self.tour_path(),
         }
     }
 
     /// Makes the PR's basic tour at the PR's tips now, unless a tour is on disk already; true when made.
     pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
-        if ToursOnDisk::of(&self.folders, &self.pr) != ToursOnDisk::None {
+        if ToursOnDisk::of(&self.folders, &ReviewSubject::from(self.pr.clone()))
+            != ToursOnDisk::None
+        {
             return Ok(false);
         }
         let code = self.at_live_tips()?;
@@ -71,7 +76,7 @@ impl OpenedPr {
     }
 
     pub fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.folders, &self.pr)
+        ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone()))
     }
 
     /// The PR as GitHub has it now.

@@ -3,7 +3,8 @@ use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffState,
@@ -48,14 +49,17 @@ impl Pull {
             TourPin {
                 version: 1,
                 pr: PR.to_owned(),
+                local: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
             },
             "Orders cost two".to_owned(),
         );
-        let state_file =
-            ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap());
+        let state_file = ReviewStateFile::for_subject(
+            &self.repo.folders(),
+            &PR.parse::<ReviewSubject>().unwrap(),
+        );
         let mut review = Review::open_basic(tour, &self.source(), state_file).unwrap();
         while review.screen() != &Screen::File(file_path("notes.txt")) {
             assert!(review.go_forward());

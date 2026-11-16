@@ -4,6 +4,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_tour_agent::FakeTourAgent;
 use guided_review::open_review::writer_folder;
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     ActivePr, AgentStatus, Finished, OpenDecision, OpenOrigin, ReviewStateFile, TerminalId,
     TourAgentPort, TourAgents, WriteDecision, WritingFact, WritingStage,
@@ -57,7 +58,7 @@ fn a_writer_works_in_the_clone_the_pr_was_opened_from_else_in_the_guided_review_
         repo.home(),
         "nothing remembered"
     );
-    ReviewStateFile::for_pr(&repo.folders(), &pr(NO_TOUR))
+    ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr(NO_TOUR)))
         .remember_folder(elsewhere.path())
         .unwrap();
     assert_eq!(
@@ -65,7 +66,7 @@ fn a_writer_works_in_the_clone_the_pr_was_opened_from_else_in_the_guided_review_
         repo.home(),
         "a folder that is no clone of the repo"
     );
-    ReviewStateFile::for_pr(&repo.folders(), &pr(NO_TOUR))
+    ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr(NO_TOUR)))
         .remember_folder(repo.path())
         .unwrap();
     assert_eq!(writer_folder(&pr(NO_TOUR), &repo.folders()), repo.path());
@@ -75,7 +76,7 @@ fn a_writer_works_in_the_clone_the_pr_was_opened_from_else_in_the_guided_review_
 fn a_writer_without_a_clone_of_its_own_pr_tries_one_another_pr_of_the_repo_was_opened_from() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let elsewhere = FixtureRepo::cloned_from("acme/blog");
-    ReviewStateFile::for_pr(&repo.folders(), &pr(ELSEWHERE))
+    ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr(ELSEWHERE)))
         .remember_folder(elsewhere.path())
         .unwrap();
     assert_eq!(
@@ -84,7 +85,7 @@ fn a_writer_without_a_clone_of_its_own_pr_tries_one_another_pr_of_the_repo_was_o
         "no clone of the repo"
     );
 
-    ReviewStateFile::for_pr(&repo.folders(), &pr(SHOWN))
+    ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr(SHOWN)))
         .remember_folder(repo.path())
         .unwrap();
 

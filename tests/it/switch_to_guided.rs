@@ -4,6 +4,7 @@ use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, TourPin};
 use guided_review::viewer::{
     Asks, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, GuidedTourProgress,
@@ -46,6 +47,7 @@ impl Shop {
             TourPin {
                 version: 1,
                 pr: PR.to_owned(),
+                local: None,
                 base: Sha::new(&shop.base),
                 head: Sha::new(&shop.second),
                 previous_head: None,
@@ -62,13 +64,13 @@ impl Shop {
     }
 
     fn basic_path(&self) -> PathBuf {
-        let path = Tour::basic_path_for(&self.repo.folders(), &self.pr());
+        let path = Tour::basic_path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         path
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {
@@ -97,7 +99,7 @@ impl Shop {
     }
 
     fn write_guided_tour_with_steps(&self, head: &str, steps: serde_json::Value) {
-        let path = Tour::path_for(&self.repo.folders(), &self.pr());
+        let path = Tour::path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let tour = json!({
             "pr": PR, "base": self.base, "head": head, "title": "T", "summary": [],
@@ -463,7 +465,11 @@ fn switched_while(shop: &Shop, meanwhile: impl FnOnce(&mut Review)) -> Review {
 
 /// The guided review as a restart opens it from what is saved.
 fn reopened_guided(shop: &Shop) -> Review {
-    let tour = GuidedTour::load(&Tour::path_for(&shop.repo.folders(), &shop.pr())).unwrap();
+    let tour = GuidedTour::load(&Tour::path_for(
+        &shop.repo.folders(),
+        &ReviewSubject::from(shop.pr()),
+    ))
+    .unwrap();
     Review::open(tour, &shop.source(), shop.state_file()).unwrap()
 }
 

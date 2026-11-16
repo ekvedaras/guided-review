@@ -88,6 +88,7 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
+use crate::review_subject::ReviewSubject;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
@@ -984,7 +985,7 @@ impl OneStepLayout {
             return;
         }
         let pr = review.pr().clone();
-        let on_disk = ToursOnDisk::of(&switching.folders, &pr);
+        let on_disk = ToursOnDisk::of(&switching.folders, &ReviewSubject::from(pr.clone()));
         let progress = switching
             .active
             .read(cx)

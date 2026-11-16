@@ -11,6 +11,7 @@ use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
@@ -37,7 +38,7 @@ pub struct OpenedReview {
 /// another PR of the repo was opened from, else the clone `config.toml` names, else the reviewer's
 /// home, where the skill reads code through `show`.
 pub fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBuf {
-    let own = ReviewStateFile::for_pr(folders, pr)
+    let own = ReviewStateFile::for_subject(folders, &ReviewSubject::from(pr.clone()))
         .opened_from()
         .ok()
         .flatten();
@@ -63,8 +64,11 @@ pub fn open_review(
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
     opened.make_basic_tour_if_no_tour()?;
     // A basic file with a guided one beside it shows the basic tour.
-    let tour = if ToursOnDisk::of(folders, pr).opens_basic() {
-        Tour::Basic(BasicTour::load(&Tour::basic_path_for(folders, pr))?)
+    let tour = if ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())).opens_basic() {
+        Tour::Basic(BasicTour::load(&Tour::basic_path_for(
+            folders,
+            &ReviewSubject::from(pr.clone()),
+        ))?)
     } else {
         Tour::Guided(GuidedTour::load(&opened.tour_path())?)
     };

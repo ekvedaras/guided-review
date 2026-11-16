@@ -42,6 +42,7 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::platform::{self, Os};
 use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
@@ -187,7 +188,7 @@ fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
 /// state file only loses the remembered clone folder.
 fn open_request_of(folders: &AppFolders, pr: &PullRequestUrl) -> OpenRequest {
-    let folder = ReviewStateFile::for_pr(folders, pr)
+    let folder = ReviewStateFile::for_subject(folders, &ReviewSubject::from(pr.clone()))
         .opened_from()
         .ok()
         .flatten()
@@ -285,7 +286,7 @@ async fn answer_requests(
                 claim_terminal(&pr, &open, &folders, cx);
                 let origin = origin_of(&open, &folders, cx).await;
                 let active = screen.borrow().active.clone();
-                let on_disk = ToursOnDisk::of(&folders, &pr);
+                let on_disk = ToursOnDisk::of(&folders, &ReviewSubject::from(pr.clone()));
                 let outcome = active.update(cx, |active, cx| {
                     let outcome = active.open(pr.clone(), origin, on_disk);
                     cx.notify();
@@ -582,7 +583,7 @@ async fn build_and_show(
         .await;
     let active = screen.borrow().active.clone();
     if let Ok(opened) = &mut built {
-        let on_disk = ToursOnDisk::of(&disk_folders, &pr);
+        let on_disk = ToursOnDisk::of(&disk_folders, &ReviewSubject::from(pr.clone()));
         let progress =
             active.read_with(cx, |active, _| active.guided_tour_progress_of(&pr, on_disk));
         opened.review.guided_tour_is(progress);

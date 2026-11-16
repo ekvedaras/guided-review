@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, bail};
+use sha2::{Digest, Sha256};
 
 use crate::pull_request::{PullRequestUrl, RepoName};
 
@@ -30,6 +31,9 @@ pub struct WorkTreeRoot(PathBuf);
 pub struct BranchName(String);
 
 const LOCAL_KEY_PREFIX: &str = "local:";
+const LOCAL_FILES_FOLDER: &str = "local";
+/// Four bytes are the 8 hex characters of the short hash in a local review's folder name.
+const SHORT_HASH_BYTES: usize = 4;
 
 impl ReviewSubject {
     pub const fn pull_request(&self) -> Option<&PullRequestUrl> {
@@ -43,6 +47,25 @@ impl ReviewSubject {
         match self {
             Self::PullRequest(_) => None,
             Self::Local(change_set) => Some(change_set),
+        }
+    }
+}
+
+/// Where the subject's files live, relative to the tours folder and the state folder: a folder, and a
+/// file stem in it. A PR keeps `<owner>/<repo>/<number>`; a local change set is
+/// `local/<folder name>-<short hash of the folder path>/<escaped branch>`.
+impl ReviewSubject {
+    pub fn files_folder(&self) -> PathBuf {
+        match self {
+            Self::PullRequest(pr) => PathBuf::from(pr.repo.to_string()),
+            Self::Local(change_set) => change_set.files_folder(),
+        }
+    }
+
+    pub fn file_stem(&self) -> String {
+        match self {
+            Self::PullRequest(pr) => pr.number.to_string(),
+            Self::Local(change_set) => escape(change_set.branch.as_str(), &['%', '/']),
         }
     }
 }
@@ -130,6 +153,16 @@ impl LocalChangeSet {
             branch: BranchName::new(branch)?,
             repo: None,
         })
+    }
+
+    fn files_folder(&self) -> PathBuf {
+        let path = self.folder.as_path();
+        let name = path
+            .file_name()
+            .map_or_else(|| "root".into(), |name| name.to_string_lossy());
+        let digest = Sha256::digest(path.to_string_lossy().as_bytes());
+        let hash = crate::hex::lower(digest.iter().take(SHORT_HASH_BYTES));
+        PathBuf::from(LOCAL_FILES_FOLDER).join(format!("{name}-{hash}"))
     }
 
     pub const fn folder(&self) -> &WorkTreeRoot {
