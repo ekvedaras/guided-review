@@ -159,6 +159,11 @@ impl ActivePr {
         self.shown.as_ref()
     }
 
+    /// Dropping the review on screen goes through its open session, which then writes nothing more.
+    pub fn is_shown(&self, subject: &ReviewSubject) -> bool {
+        self.shown.as_ref() == Some(subject)
+    }
+
     pub fn is_building(&self) -> bool {
         self.building.is_some()
     }

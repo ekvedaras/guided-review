@@ -58,7 +58,7 @@ use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
-use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching, SwitcherPlace};
+use crate::app::components::pr_switcher::{DropShownReview, PrSwitcherView, PrSwitching, SwitcherPlace};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
@@ -278,6 +278,10 @@ impl OneStepLayout {
         .detach();
         let pr_switcher = cx
             .new(|cx| PrSwitcherView::new(switching, SwitcherPlace::OverReview, focus.clone(), cx));
+        cx.subscribe(&pr_switcher, |this, _, DropShownReview, cx| {
+            this.session.update(cx, ReviewSession::drop_review);
+        })
+        .detach();
         let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
         cx.subscribe_in(

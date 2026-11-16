@@ -109,6 +109,9 @@ pub enum SwitcherPlace {
 /// The switcher was closed while it filled the window.
 pub struct SwitcherDismissed;
 
+/// The reviewer dropped the review on screen: its session deletes the files, so it writes nothing more.
+pub struct DropShownReview;
+
 /// The overlay behind the PR title: the reviewer's relevant PRs under a query box.
 pub struct PrSwitcherView {
     place: SwitcherPlace,
@@ -200,6 +203,7 @@ fn changes_of(local: &LocalRow) -> String {
 }
 
 impl EventEmitter<SwitcherDismissed> for PrSwitcherView {}
+impl EventEmitter<DropShownReview> for PrSwitcherView {}
 
 impl PrSwitcherView {
     pub const KEY_CONTEXT: &str = "PrSwitcherInput";
@@ -339,6 +343,10 @@ impl PrSwitcherView {
         let Some(change_set) = subject.local().cloned() else {
             return;
         };
+        if self.switching.active.read(cx).is_shown(&subject) {
+            cx.emit(DropShownReview);
+            return;
+        }
         let (folders, list, dropped) = (
             self.switching.folders.clone(),
             self.switching.list.clone(),

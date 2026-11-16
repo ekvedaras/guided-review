@@ -130,6 +130,15 @@ fn a_dropped_review_is_shown_no_more_and_a_later_open_of_it_builds_it_anew() {
 }
 
 #[test]
+fn a_drop_of_the_review_on_screen_goes_through_its_open_session_and_any_other_does_not() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+
+    assert!(active.is_shown(&pr(A)));
+    assert!(!active.is_shown(&pr(B)));
+}
+
+#[test]
 fn a_request_for_the_pr_on_screen_reloads_it() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
