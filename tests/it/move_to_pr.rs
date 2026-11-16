@@ -755,6 +755,60 @@ fn keeping_the_local_review_hides_the_pr_reviews_offer_and_the_local_ones_too() 
     assert!(local_review_is_on_disk(&feature));
 }
 
+fn head_branch_lookups(feature: &Feature) -> usize {
+    feature
+        .sent
+        .branch_lookups()
+        .iter()
+        .filter(|lookup| *lookup == "head of acme/shop#7")
+        .count()
+}
+
+#[test]
+fn a_pr_review_asks_github_for_its_head_branch_once_and_not_again_when_it_comes_to_the_front() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&github, &pr_head);
+
+    feature.focus(&mut opened, &github, Instant::now());
+    feature.focus(&mut opened, &github, Instant::now());
+
+    assert_eq!(head_branch_lookups(&feature), 1);
+    assert!(opened.review.move_here_offer().is_some());
+}
+
+#[test]
+fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on_focus() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    github.inject(GitHubFault::ReadsFail);
+    let opened_at = Instant::now();
+    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let drive_at = |opened: &mut OpenedReview, after: Duration| {
+        drive_without_agents(
+            &mut opened.review,
+            &github,
+            opened.source.as_ref(),
+            opened_at + after,
+        );
+    };
+    let a_second = Duration::from_secs(1);
+
+    drive_at(&mut opened, PULL_OF_BRANCH_RETRY + a_second);
+    assert_eq!(head_branch_lookups(&feature), 2);
+    feature.focus(&mut opened, &github, opened_at + PULL_OF_BRANCH_RETRY * 2 + a_second);
+    assert_eq!(head_branch_lookups(&feature), 2, "not on focus, nor before the longer wait");
+
+    github.heal(&GitHubFault::ReadsFail);
+    drive_at(&mut opened, PULL_OF_BRANCH_RETRY * 3 + a_second * 2);
+    assert_eq!(head_branch_lookups(&feature), 3);
+    assert!(opened.review.move_here_offer().is_some());
+}
+
 #[test]
 fn a_kept_local_review_is_not_offered_again_when_the_pr_review_comes_back_to_the_front() {
     let feature = Feature::with_work_in_progress();

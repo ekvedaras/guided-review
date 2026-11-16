@@ -296,6 +296,8 @@ pub struct ReviewCore {
     local_reviews_of_repo: Vec<LocalChangeSet>,
     /// For a PR: the local review of the branch it is opened from, which it offers to take over.
     local_to_move_here: Option<LocalChangeSet>,
+    /// How many looks for the PR's head branch failed in a row; each one waits longer for the next.
+    head_branch_failures: u32,
     /// Where those local reviews' files are.
     local_reviews_in: Option<AppFolders>,
     base: Sha,
@@ -450,6 +452,7 @@ impl Review {
         if self.local_reviews_of_repo.is_empty() {
             self.local_reviews_of_repo = replaced.local_reviews_of_repo;
             self.local_to_move_here = replaced.local_to_move_here;
+            self.head_branch_failures = replaced.head_branch_failures;
             self.local_reviews_in = replaced.local_reviews_in;
         }
         if !switched_to_guided {
@@ -633,6 +636,7 @@ impl ReviewCore {
             pull_of_branch: None,
             local_reviews_of_repo: Vec::new(),
             local_to_move_here: None,
+            head_branch_failures: 0,
             local_reviews_in: None,
             base,
             head,
@@ -847,6 +851,7 @@ impl ReviewCore {
     }
 
     /// The local reviews on disk that are of this PR's repo, so the review looks for one of the PR's branch.
+    /// A PR's head branch never changes, so it is looked up once here, never again on focus.
     pub fn local_reviews_of_repo_are(
         &mut self,
         folders: &AppFolders,
@@ -854,6 +859,7 @@ impl ReviewCore {
     ) {
         self.local_reviews_in = Some(folders.clone());
         self.local_reviews_of_repo = reviews;
+        self.work.want(WorkKind::LookUpHeadBranch);
     }
 
     pub(super) fn head_branch_is(&mut self, branch: Option<BranchName>) {

@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{Review, ReviewCore};
 use crate::viewer::code_link::WorkingCopy;
@@ -127,11 +127,18 @@ impl ReviewCore {
                     .want_in(WorkKind::LookUpPullOfBranch, PULL_OF_BRANCH_RETRY),
             },
             Done::HeadBranch(found) => match found {
-                Ok(branch) => self.head_branch_is(branch),
+                Ok(branch) => {
+                    self.head_branch_failures = 0;
+                    self.head_branch_is(branch);
+                }
                 // Silent, as for a local review's look for its PR.
-                Err(_) => self
-                    .work
-                    .want_in(WorkKind::LookUpHeadBranch, PULL_OF_BRANCH_RETRY),
+                Err(_) => {
+                    self.head_branch_failures += 1;
+                    self.work.want_in(
+                        WorkKind::LookUpHeadBranch,
+                        head_branch_retry_after(self.head_branch_failures),
+                    );
+                }
             },
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();
@@ -259,4 +266,11 @@ impl ReviewCore {
         self.record_hand_offs(|hand_offs| hand_offs.try_again(id))
             .and_then(|tried| tried)
     }
+}
+
+/// Each failed look for a PR's head branch doubles the wait for the next, up to a cap, since nothing
+/// but the move offer waits on it.
+fn head_branch_retry_after(failures: u32) -> Duration {
+    const LONGEST_WAIT_DOUBLINGS: u32 = 5;
+    PULL_OF_BRANCH_RETRY * 2_u32.pow(failures.saturating_sub(1).min(LONGEST_WAIT_DOUBLINGS))
 }

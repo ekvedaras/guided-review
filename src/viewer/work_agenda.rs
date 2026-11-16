@@ -66,12 +66,12 @@ enum WhileRunning {
 impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
     /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
-    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 12] = [
+    /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 11] = [
         Self::CheckPrHead,
         Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
         Self::LookUpPullOfBranch,
-        Self::LookUpHeadBranch,
         Self::PullPrDescription,
         Self::SyncViewed,
         Self::PullThreads,
