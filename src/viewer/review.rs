@@ -28,7 +28,7 @@ use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
     CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest, CommentResult,
-    QueuedComment, SendMode,
+    QueuedComment, SendMode, Sending,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
 use super::disk_news::DiskNews;
@@ -710,6 +710,14 @@ impl ReviewCore {
         match &self.subject {
             ReviewSubject::PullRequest(_) => &[SendMode::AddToReview, SendMode::CommentNow],
             ReviewSubject::Local(_) => &SendMode::LOCAL,
+        }
+    }
+
+    /// A local review's boxes send tasks for its agent, a PR's send to GitHub.
+    pub fn sending(&self) -> Sending {
+        match &self.subject {
+            ReviewSubject::PullRequest(_) => Sending::GitHub,
+            ReviewSubject::Local(_) => Sending::Tasks(&SendMode::LOCAL),
         }
     }
 

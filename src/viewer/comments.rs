@@ -150,6 +150,27 @@ impl CommentDraft {
     }
 }
 
+/// How a review's boxes send: to GitHub, with its own actions, or as tasks for a local review's agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sending {
+    GitHub,
+    /// These send actions replace every GitHub one; the first is what Enter does.
+    Tasks(&'static [SendMode]),
+}
+
+impl Sending {
+    pub fn on_github(self) -> bool {
+        matches!(self, Self::GitHub)
+    }
+
+    pub fn tasks(self) -> &'static [SendMode] {
+        match self {
+            Self::GitHub => &[],
+            Self::Tasks(modes) => modes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SendMode {
     /// Goes into the pending review, to be sent with the others.

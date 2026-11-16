@@ -99,7 +99,7 @@ pub use code_link::{
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, TourFreshness};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
-    CommentResult, QueuedComment, SendMode,
+    CommentResult, QueuedComment, SendMode, Sending,
 };
 pub use diff_display::{
     ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,

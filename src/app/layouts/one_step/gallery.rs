@@ -19,7 +19,8 @@ use crate::line_number::LineNumber;
 use crate::pull_request::Sha;
 use crate::viewer::{
     Audience, CommentDraft, CommentId, CommentPlace, LineLocation, OldHead, QueuedComment,
-    Reaction, ReactionCount, ReviewThread, SendMode, Side, ThreadComment, ThreadId, ThreadView,
+    Reaction, ReactionCount, ReviewThread, SendMode, Sending, Side, ThreadComment, ThreadId,
+    ThreadView,
 };
 
 const SAMPLE_MARKDOWN: &str = "A note with `inline code`, a [link](https://example.test) and a list:\n\n\
@@ -185,7 +186,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         ThreadDrafts {
             can_reply_now: true,
             can_ask_agent: true,
-            tasks: &[],
+            sending: Sending::GitHub,
             reply: is_open.then(|| "Agreed, and the test names it.".to_owned()),
             edits: BTreeMap::new(),
         },

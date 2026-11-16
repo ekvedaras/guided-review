@@ -144,7 +144,7 @@ impl LocalThreads {
         Ok(())
     }
 
-    /// A thread whose last comment goes goes with it, as on GitHub.
+    /// A thread whose last comment goes with it, as on GitHub.
     fn delete(&mut self, comment: &CommentId) -> anyhow::Result<()> {
         let thread = self
             .threads

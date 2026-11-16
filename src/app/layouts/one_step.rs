@@ -756,7 +756,7 @@ impl OneStepLayout {
             comment_now: review.can_comment_now(),
             suggest_change: review.can_suggest_change(place),
             ask_agent: session.agent_link_is_on(),
-            tasks: task_modes(review),
+            sending: review.sending(),
         };
         let ask_place = review.ask_place_of(place);
         let on_type = {
@@ -939,7 +939,7 @@ impl OneStepLayout {
             ThreadDrafts {
                 can_reply_now: can_comment_now,
                 can_ask_agent,
-                tasks: task_modes(review),
+                sending: review.sending(),
                 reply,
                 edits,
             },
@@ -4545,16 +4545,6 @@ fn scrolled_share(scrolled: Pixels, scrollable: Pixels) -> f32 {
         return 1.;
     }
     (scrolled / scrollable).clamp(0., 1.)
-}
-
-/// A local review's send actions, each a task for its agent; none for a PR, whose boxes offer GitHub's.
-fn task_modes(review: &Review) -> &'static [SendMode] {
-    let modes = review.send_modes();
-    if modes.iter().all(|mode| mode.is_task()) {
-        modes
-    } else {
-        &[]
-    }
 }
 
 #[cfg(test)]

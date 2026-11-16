@@ -12,7 +12,7 @@ use gpui::{
 use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    Audience, CommentId, HandOffId, Reaction, ReactionChange, ReactionCount, SendMode,
+    Audience, CommentId, HandOffId, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
     ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadView,
 };
 
@@ -87,7 +87,7 @@ struct ReplyBox<'a> {
     thread_id: &'a ThreadId,
     can_reply_now: bool,
     can_ask_agent: bool,
-    tasks: &'static [SendMode],
+    sending: Sending,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -102,7 +102,7 @@ pub struct ThreadElement {
     view: Arc<ThreadView>,
     can_reply_now: bool,
     can_ask_agent: bool,
-    tasks: &'static [SendMode],
+    sending: Sending,
     reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     edits: BTreeMap<CommentId, String>,
@@ -118,9 +118,8 @@ pub struct ThreadElement {
 pub struct ThreadDrafts {
     pub can_reply_now: bool,
     pub can_ask_agent: bool,
-    /// A local review's thread: a reply is a follow-up task sent with these, and nothing of it is on
-    /// GitHub. Empty for a PR.
-    pub tasks: &'static [SendMode],
+    /// A local review's thread: a reply is a follow-up task, and nothing of it is on GitHub.
+    pub sending: Sending,
     pub reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     pub edits: BTreeMap<CommentId, String>,
@@ -170,7 +169,7 @@ impl ThreadElement {
         let ThreadDrafts {
             can_reply_now,
             can_ask_agent,
-            tasks,
+            sending,
             reply,
             edits,
         } = drafts;
@@ -186,7 +185,7 @@ impl ThreadElement {
             view,
             can_reply_now,
             can_ask_agent,
-            tasks,
+            sending,
             reply,
             edits,
             on_reply_draft,
@@ -468,7 +467,7 @@ impl ThreadElement {
             thread_id,
             can_reply_now,
             can_ask_agent,
-            tasks,
+            sending,
             on_action,
             on_reply_draft,
             ui,
@@ -504,13 +503,13 @@ impl ThreadElement {
             )
             .on_edit(move |text, _, cx| on_edit(ReplyDraftChange::Edit(text), cx))
             .on_submit(move |_, cx| {
-                let (mode, audience) = match tasks.first() {
+                let (mode, audience) = match sending.tasks().first() {
                     Some(&task) => (task, Audience::Agent),
                     None => (SendMode::AddToReview, Audience::Author),
                 };
                 send_reply(&ui, &on_action, &submitted_thread, mode, audience, cx);
             })
-            .on_submit_to_agent(can_ask_agent && tasks.is_empty(), move |_, cx| {
+            .on_submit_to_agent(can_ask_agent && sending.on_github(), move |_, cx| {
                 send_reply(
                     &ask_ui,
                     &ask_action,
@@ -538,29 +537,28 @@ impl ThreadElement {
                 move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
             })
         });
-        let task_buttons =
-            (!is_busy && !tasks.is_empty()).then(|| {
-                div().flex().flex_wrap().items_center().gap_2().children(
-                    tasks.iter().enumerate().map(|(index, &mode)| {
-                        let (icon, label) = task_button(mode);
-                        let kind = if index == 0 {
-                            ButtonKind::Primary
-                        } else {
-                            ButtonKind::Secondary
-                        };
-                        icon_label_button(
-                            &colors,
-                            SharedString::from(format!("reply-task-{index}-{id}")),
-                            kind,
-                            ButtonSize::Small,
-                            icon,
-                            label,
-                        )
-                        .on_click(send(mode, Audience::Agent))
-                    }),
-                )
-            });
-        let buttons = (!is_busy && tasks.is_empty()).then(|| {
+        let task_buttons = (!is_busy && !sending.on_github()).then(|| {
+            div().flex().flex_wrap().items_center().gap_2().children(
+                sending.tasks().iter().enumerate().map(|(index, &mode)| {
+                    let (icon, label) = task_button(mode);
+                    let kind = if index == 0 {
+                        ButtonKind::Primary
+                    } else {
+                        ButtonKind::Secondary
+                    };
+                    icon_label_button(
+                        &colors,
+                        SharedString::from(format!("reply-task-{index}-{id}")),
+                        kind,
+                        ButtonSize::Small,
+                        icon,
+                        label,
+                    )
+                    .on_click(send(mode, Audience::Agent))
+                }),
+            )
+        });
+        let buttons = (!is_busy && sending.on_github()).then(|| {
             let ask_agent = can_ask_agent.then(|| {
                 let mut parts = vec![
                     icon_label_button(
@@ -980,7 +978,7 @@ impl RenderOnce for ThreadElement {
             ))
             .children(marks)
             .child(div().min_w_0().truncate().child(summary));
-        let on_github = self.tasks.is_empty();
+        let on_github = self.sending.on_github();
         let conversation_link =
             self.view
                 .thread
@@ -1119,10 +1117,10 @@ impl RenderOnce for ThreadElement {
         });
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
-        let (can_reply_now, can_ask_agent, tasks, on_action) = (
+        let (can_reply_now, can_ask_agent, sending, on_action) = (
             self.can_reply_now,
             self.can_ask_agent,
-            self.tasks,
+            self.sending,
             Rc::clone(&self.on_action),
         );
         let resolve = (!self.view.is_folded).then(|| {
@@ -1183,7 +1181,7 @@ impl RenderOnce for ThreadElement {
                             thread_id: &id,
                             can_reply_now,
                             can_ask_agent,
-                            tasks,
+                            sending,
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,
