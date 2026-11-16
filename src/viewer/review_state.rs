@@ -839,7 +839,9 @@ impl ReviewStateFile {
             .collect()
     }
 
-    /// Whether the move of this review to the PR was declined; an unreadable file declines nothing.
+    /// Whether the move of this review to the PR was declined. An unreadable file declines nothing, which
+    /// is safe: the offer only shows again, a move reads the same file and fails with its error before it
+    /// changes anything, and opening the review raises the unreadable file as a problem of its own.
     pub fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {
         self.load()
             .is_ok_and(|state| state.has_declined_move_to(pr))
