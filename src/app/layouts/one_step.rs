@@ -52,7 +52,7 @@ use crate::app::components::motion::{
     BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
     pop_in, slide_in, turn_to,
 };
-use crate::app::components::new_commits_banner::NewCommitsBanner;
+use crate::app::components::new_commits_banner::{NewCommitsBanner, RepinProgress};
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
@@ -82,7 +82,7 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
-use crate::app::sidebar_rows::{SidebarGuidedTour, SidebarTourAgent, WriteOffer};
+use crate::app::sidebar_rows::{SidebarDiskNews, SidebarGuidedTour, SidebarTourAgent, WriteOffer};
 use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
@@ -92,15 +92,15 @@ use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
-    CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
-    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
-    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal, Reopen, ReopenAfterSave,
-    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
-    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
-    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
-    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
-    WindowMoment, pluralised,
+    CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, DiskOffer, Effect,
+    FileToggle, FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation,
+    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats,
+    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit,
+    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1406,6 +1406,69 @@ impl OneStepLayout {
             .children(write)
     }
 
+    /// A local review's folder is not its snapshot any more: the line, with Update or Drop review when
+    /// the reviewer can do something about it.
+    fn disk_news_block(
+        colors: &Colors,
+        news: &SidebarDiskNews,
+        repin_progress: &RepinProgress,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let is_updating = repin_progress == &RepinProgress::Running;
+        let action = news.offer.map(|offer| match offer {
+            DiskOffer::Update => icon_label_button(
+                colors,
+                "changed-on-disk-update",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Refresh,
+                match repin_progress {
+                    RepinProgress::Idle => "Update",
+                    RepinProgress::Running => "Updating…",
+                    RepinProgress::Failed(_) => "Try again",
+                },
+            )
+            .when(!is_updating, |button| {
+                button.on_click(cx.listener(|this, _, _, cx| {
+                    this.session.update(cx, ReviewSession::repin);
+                }))
+            }),
+            DiskOffer::DropReview => icon_label_button(
+                colors,
+                "branch-gone-drop-review",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Trash,
+                "Drop review",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::drop_review);
+            })),
+        });
+        let failure = match repin_progress {
+            RepinProgress::Failed(reason) => Some(
+                div()
+                    .text_xs()
+                    .text_color(colors.danger)
+                    .child(SharedString::from(reason.clone())),
+            ),
+            RepinProgress::Idle | RepinProgress::Running => None,
+        };
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.warning)
+                    .child(news.line.clone()),
+            )
+            .children(failure)
+            .children(action)
+    }
+
     /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
     fn clone_offer_block(
         colors: &Colors,
@@ -1718,6 +1781,10 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
+        let disk_news = sidebar
+            .disk_news
+            .as_ref()
+            .map(|news| Self::disk_news_block(&colors, news, session.repin_progress(), cx));
         let clone_offer = session
             .clone_offer()
             .map(|offer| Self::clone_offer_block(&colors, offer, cx));
@@ -1816,6 +1883,7 @@ impl OneStepLayout {
                     .clone()
                     .map(|heading| div().text_xs().text_color(colors.muted_text).child(heading)),
             )
+            .children(disk_news)
             .child(match sidebar.basic_mode_label {
                 Some(label) => div()
                     .flex()

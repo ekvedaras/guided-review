@@ -59,11 +59,11 @@ fn news(review: &Review) -> Option<DiskNews> {
     review.disk_news()
 }
 
-fn changed_on_disk() -> Option<DiskNews> {
-    Some(DiskNews {
+fn changed_on_disk() -> DiskNews {
+    DiskNews {
         line: "Changed on disk".to_owned(),
         offer: Some(DiskOffer::Update),
-    })
+    }
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn writing_a_file_says_changed_on_disk_with_update() {
 
     check_on_focus(&mut opened, Instant::now());
 
-    assert_eq!(news(&opened.review), changed_on_disk());
+    assert_eq!(news(&opened.review), Some(changed_on_disk()));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn committing_says_changed_on_disk_with_update() {
 
     check_on_focus(&mut opened, Instant::now());
 
-    assert_eq!(news(&opened.review), changed_on_disk());
+    assert_eq!(news(&opened.review), Some(changed_on_disk()));
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn the_folder_is_checked_again_every_thirty_seconds() {
 
     assert_eq!(before, []);
     assert_eq!(after, [WorkKind::CheckWorkingTree]);
-    assert_eq!(news(&opened.review), changed_on_disk());
+    assert_eq!(news(&opened.review), Some(changed_on_disk()));
 }
 
 /// Update, as the sidebar's button runs it: the re-pinned review, with the old one carried into it.

@@ -198,6 +198,21 @@ impl ActivePr {
         }
     }
 
+    /// The review's files are gone: it is shown no more, and nothing of it is remembered. True when it
+    /// was the one on screen, whose window then shows something else.
+    pub fn dropped(&mut self, subject: &ReviewSubject) -> bool {
+        self.forget_writing(subject);
+        if self.has_unseen_reply(subject) {
+            self.unseen_replies.retain(|unseen| unseen != subject);
+            self.remember();
+        }
+        let was_shown = self.shown.as_ref() == Some(subject);
+        if was_shown {
+            self.shown = None;
+        }
+        was_shown
+    }
+
     /// True when a writing of the PR was on.
     fn forget_writing(&mut self, pr: &ReviewSubject) -> bool {
         let was_written = self.writings.iter().any(|(writing, _)| writing == pr);

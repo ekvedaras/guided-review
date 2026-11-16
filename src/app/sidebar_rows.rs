@@ -5,8 +5,9 @@ use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{
-    ApproveWarning, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage,
-    Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId, TourAgentState, TreeRow,
+    ApproveWarning, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal,
+    GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId,
+    TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -114,6 +115,13 @@ pub struct SidebarRows {
     pub basic_mode_label: Option<&'static str>,
     /// What a local review is of, leading the sidebar where a PR has no such line.
     pub local_heading: Option<SharedString>,
+    /// A local review's folder is not its snapshot any more: Changed on disk, another branch, or gone.
+    pub disk_news: Option<SidebarDiskNews>,
+}
+
+pub struct SidebarDiskNews {
+    pub line: SharedString,
+    pub offer: Option<DiskOffer>,
 }
 
 impl SidebarRows {
@@ -188,6 +196,12 @@ impl SidebarRows {
             }),
             basic_mode_label: review.basic_mode_label(),
             local_heading: review.local_heading().map(Into::into),
+            disk_news: review
+                .disk_news()
+                .map(|DiskNews { line, offer }| SidebarDiskNews {
+                    line: line.into(),
+                    offer,
+                }),
         }
     }
 }

@@ -111,6 +111,25 @@ fn shown_after(active: &mut ActivePr, url: &str) {
 }
 
 #[test]
+fn a_dropped_review_is_shown_no_more_and_a_later_open_of_it_builds_it_anew() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.agent_replied(&pr(B));
+
+    let was_shown = active.dropped(&pr(A));
+    let other_was_shown = active.dropped(&pr(B));
+
+    assert!(was_shown);
+    assert!(!other_was_shown);
+    assert_eq!(active.shown(), None);
+    assert!(!active.has_unseen_reply(&pr(B)));
+    assert!(matches!(
+        active.request(pr(A), OpenOrigin::Reviewer),
+        OpenDecision::Build(_)
+    ));
+}
+
+#[test]
 fn a_request_for_the_pr_on_screen_reloads_it() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);

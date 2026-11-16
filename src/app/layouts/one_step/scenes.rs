@@ -67,10 +67,11 @@ enum Scene {
     SwitchedSummary,
     LocalOverview,
     LocalFile,
+    LocalChangedOnDisk,
 }
 
 impl Scene {
-    const ALL: [Self; 38] = [
+    const ALL: [Self; 39] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -109,6 +110,7 @@ impl Scene {
         Self::SwitchedSummary,
         Self::LocalOverview,
         Self::LocalFile,
+        Self::LocalChangedOnDisk,
     ];
 
     fn file_name(self) -> &'static str {
@@ -151,6 +153,7 @@ impl Scene {
             Self::SwitchedSummary => "57-switched-summary",
             Self::LocalOverview => "58-local-overview",
             Self::LocalFile => "59-local-file",
+            Self::LocalChangedOnDisk => "60-local-changed-on-disk",
         }
     }
 }
@@ -553,6 +556,9 @@ impl OneStepLayout {
                 self.change_review(cx, |review| review.go_forward());
             }
             Scene::LocalOverview => self.session.update(cx, ReviewSession::stage_local),
+            Scene::LocalChangedOnDisk => self
+                .session
+                .update(cx, ReviewSession::stage_local_changed_on_disk),
             Scene::LocalFile => {
                 self.session.update(cx, ReviewSession::stage_local);
                 self.change_review(cx, |review| {
@@ -683,6 +689,11 @@ impl OneStepLayout {
             | Scene::LocalOverview
             | Scene::LocalFile => {
                 self.session.update(cx, ReviewSession::unstage_basic);
+                self.go_to_first_open_code(cx);
+            }
+            Scene::LocalChangedOnDisk => {
+                self.session
+                    .update(cx, ReviewSession::unstage_local_changed_on_disk);
                 self.go_to_first_open_code(cx);
             }
             Scene::SwitchedSummary => {

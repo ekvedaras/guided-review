@@ -40,6 +40,7 @@ use crate::app_link::{Answer, AppListener, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
+use crate::opened_change_set::clean_snapshot_refs;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, ToursOnDisk};
@@ -76,6 +77,8 @@ enum Asked {
     ReopenShown,
     /// The OS launched the running app again, as a click on its Dock icon with no window in sight.
     Relaunched,
+    /// Drop review deleted the review's files; the window shows the switcher in its place.
+    Dropped(ReviewSubject),
 }
 
 /// The one running app. It blocks until a quit request comes or the window closes with no build left to
@@ -116,6 +119,10 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
         switching.refresh(cx);
         cx.set_global(switching);
         tour_writer::resume(cx);
+        let cleaned = folders.clone();
+        cx.background_executor()
+            .spawn(async move { clean_snapshot_refs(&cleaned) })
+            .detach();
         let focus = if takes_focus() {
             platform::Focus::Taken
         } else {
@@ -149,6 +156,7 @@ fn pr_switching(
 ) -> PrSwitching {
     let requests = requests.clone();
     let reopen_requests = requests.clone();
+    let drop_requests = requests.clone();
     let all_folders = folders.clone();
     PrSwitching {
         relevant: relevant_pull_requests(),
@@ -171,6 +179,14 @@ fn pr_switching(
         reopen: Arc::new(move || {
             if reopen_requests.unbounded_send(Asked::ReopenShown).is_err() {
                 eprintln!("could not reopen the PR: the app is closing");
+            }
+        }),
+        dropped: Arc::new(move |subject| {
+            if drop_requests
+                .unbounded_send(Asked::Dropped(subject))
+                .is_err()
+            {
+                eprintln!("could not close the dropped review: the app is closing");
             }
         }),
     }
@@ -251,6 +267,10 @@ async fn answer_requests(
             }
             Asked::Relaunched => {
                 bring_window_back(&screen, cx);
+                continue;
+            }
+            Asked::Dropped(subject) => {
+                close_dropped(&screen, &subject, cx);
                 continue;
             }
         };
@@ -687,6 +707,38 @@ fn switch_window(
         layout.flush_typing(cx);
         window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })
+}
+
+/// A dropped review's window holds only the switcher instead, for the reviewer to pick another review.
+fn close_dropped(screen: &SharedScreen, subject: &ReviewSubject, cx: &mut AsyncApp) {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let was_shown = active.update(cx, |active, cx| {
+        let was_shown = active.dropped(subject);
+        cx.notify();
+        was_shown
+    });
+    let Some(window) = window.filter(|_| was_shown) else {
+        return;
+    };
+    match cx.update(|cx| replace_review_with_switcher(window, cx)) {
+        Ok(switcher) => screen.borrow_mut().window = AppWindow::SwitcherOnly(switcher),
+        Err(error) => eprintln!("could not close the dropped review {subject}: {error:#}"),
+    }
+}
+
+fn replace_review_with_switcher(
+    window: WindowHandle<OneStepLayout>,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<SwitcherWindow>> {
+    let switching = cx.global::<PrSwitching>().clone();
+    window.update(cx, |_, window, cx| {
+        window.set_window_title(&marked_if_dev("Pick a pull request".to_owned()));
+        window.replace_root(cx, |window, cx| SwitcherWindow::new(switching, window, cx));
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
 }
 
 /// The window that held only Settings becomes the review's, with Settings still open over it.

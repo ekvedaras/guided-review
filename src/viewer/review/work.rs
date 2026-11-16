@@ -101,7 +101,7 @@ impl ReviewCore {
                 match on_disk {
                     Ok(on_disk) => self.working_tree_is(on_disk),
                     Err(error) => {
-                        eprintln!("could not look at the folder of {}: {error}", self.subject)
+                        eprintln!("could not look at the folder of {}: {error}", self.subject);
                     }
                 }
                 self.work

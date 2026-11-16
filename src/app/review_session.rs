@@ -27,6 +27,7 @@ use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::GhCloner;
+use crate::opened_change_set::OpenedChangeSet;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
     CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
@@ -39,6 +40,9 @@ use crate::viewer::{
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Rows laid out beyond the visible part, so a fast scroll does not show a blank edge.
 const LIST_OVERDRAW: f32 = 300.;
+/// The file the Changed on disk scene writes into the staged local review's folder.
+#[cfg(feature = "snapshots")]
+const CHANGED_ON_DISK_FILE: &str = "later.txt";
 
 /// The two buttons that move a tour on: Re-pin (no AI) and Refresh (the local `claude`).
 pub struct TourWork {
@@ -498,6 +502,33 @@ impl ReviewSession {
         .detach();
     }
 
+    /// Drop review of a local review whose branch is gone, on the button only. The review takes no
+    /// changes from here on, so nothing writes its state file again once it is deleted; the app then
+    /// shows the switcher in its place.
+    pub fn drop_review(&mut self, cx: &mut Context<Self>) {
+        if self.repin_progress == RepinProgress::Running {
+            return;
+        }
+        let Some(change_set) = self.review.subject().local().cloned() else {
+            return;
+        };
+        self.save_typing_now();
+        self.change(cx, |review| review.start_drop());
+        let folders = self.tour_work.repinner.folders.clone();
+        self.run_off_thread(
+            cx,
+            move || OpenedChangeSet::new(&change_set, &folders).drop_review(),
+            |this, dropped, cx| match dropped {
+                Ok(()) => (cx.global::<PrSwitching>().dropped)(this.review.subject().clone()),
+                Err(error) => {
+                    this.review.drop_failed(&error);
+                    this.show_problems(cx);
+                }
+            },
+        )
+        .detach();
+    }
+
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
     pub fn repin(&mut self, cx: &mut Context<Self>) {
         if self.repin_progress == RepinProgress::Running {
@@ -800,11 +831,44 @@ impl ReviewSession {
     /// README and cart, and a note git does not know yet. `unstage_basic` puts the PR back.
     #[cfg(feature = "snapshots")]
     pub fn stage_local(&mut self, cx: &mut Context<Self>) {
+        self.stage_local_then(cx, |_| Ok(()));
+    }
+
+    /// The local review with a file written in its folder after it opened, so its look at the folder
+    /// says Changed on disk. `unstage_local_changed_on_disk` takes the file away again.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_changed_on_disk(&mut self, cx: &mut Context<Self>) {
+        self.stage_local_then(cx, |folder| {
+            Ok(std::fs::write(
+                folder.join(CHANGED_ON_DISK_FILE),
+                "written after the snapshot\n",
+            )?)
+        });
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_local_changed_on_disk(&mut self, cx: &mut Context<Self>) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        if let Ok(folder) = crate::app::snapshots::local_repo_in(folders.home()) {
+            // Only a later scene of the same run could see it.
+            std::fs::remove_file(folder.join(CHANGED_ON_DISK_FILE)).ok();
+        }
+        self.unstage_basic(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn stage_local_then(
+        &mut self,
+        cx: &mut Context<Self>,
+        after_open: impl FnOnce(&std::path::Path) -> anyhow::Result<()>,
+    ) {
         let folders = cx.global::<PrSwitching>().folders.clone();
         let opened = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
-            let change_set = crate::opened_change_set::OpenedChangeSet::change_set_at(&folder)?;
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
             let subject = crate::review_subject::ReviewSubject::from(change_set);
-            crate::open_review::open_review(&subject, &folder, &folders)
+            let opened = crate::open_review::open_review(&subject, &folder, &folders)?;
+            after_open(&folder)?;
+            Ok(opened)
         });
         let opened = match opened {
             Ok(opened) => opened,

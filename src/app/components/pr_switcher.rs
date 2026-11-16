@@ -39,6 +39,8 @@ pub struct PrSwitching {
     pub show: Arc<dyn Fn(ReviewSubject) + Send + Sync>,
     /// Asks the app to open the PR on screen again, after a save of the settings.
     pub reopen: Arc<dyn Fn() + Send + Sync>,
+    /// Tells the app a review's files were deleted with Drop review, so its window shows it no more.
+    pub dropped: Arc<dyn Fn(ReviewSubject) + Send + Sync>,
     /// The PR shown, the tours being written and the agent replies not seen.
     pub active: Entity<ActivePr>,
     /// Herdr, where tour agents write tours.
