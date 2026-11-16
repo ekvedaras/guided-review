@@ -2,6 +2,7 @@
 # Fails when a change to what users get (src/, skills/) adds no note in changes/.
 # A PR whose body has a line "changelog: none" passes without one (CHANGELOG_NONE=1).
 # Usage: scripts/changes-check <base-ref> [head-ref]
+# A head-ref of "--worktree" checks HEAD plus everything on disk, committed or not (what scripts/check runs).
 set -euo pipefail
 
 base="${1:?usage: scripts/changes-check <base-ref> [head-ref]}"
@@ -11,7 +12,20 @@ cd "$(dirname "$0")/.."
 
 kinds="added changed fixed removed"
 
-added_notes=$(git diff --name-only --diff-filter=A "$base...$head" -- changes/ | grep -v '^changes/README.md$' || true)
+if [ "$head" = "--worktree" ]; then
+    index=$(mktemp)
+    trap 'rm -f "$index"' EXIT
+    export GIT_INDEX_FILE="$index"
+    rm -f "$index"
+    git add -A
+    head=$(git write-tree)
+    unset GIT_INDEX_FILE
+    fork=$(git merge-base "$base" HEAD)
+else
+    fork=$(git merge-base "$base" "$head")
+fi
+
+added_notes=$(git diff --name-only --diff-filter=A "$fork" "$head" -- changes/ | grep -v '^changes/README.md$' || true)
 
 for note in $added_notes; do
     kind=$(basename "$note" | cut -d- -f1)
@@ -31,7 +45,7 @@ done
 [ -n "$added_notes" ] && exit 0
 [ "${CHANGELOG_NONE:-0}" = "1" ] && exit 0
 
-if git diff --quiet "$base...$head" -- src/ skills/; then
+if git diff --quiet "$fork" "$head" -- src/ skills/; then
     exit 0
 fi
 
