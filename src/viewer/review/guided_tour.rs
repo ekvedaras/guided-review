@@ -17,6 +17,15 @@ impl ReviewCore {
         self.guided_tour = progress;
     }
 
+    /// The switch from a basic tour carried read ticks to this many steps; the summary says so.
+    pub fn steps_start_read(&mut self, count: usize) {
+        self.steps_started_read = Some(count);
+    }
+
+    pub fn steps_started_read(&self) -> Option<usize> {
+        self.steps_started_read
+    }
+
     fn is_basic(&self) -> bool {
         matches!(self.tour, Tour::Basic(_))
     }
@@ -56,13 +65,13 @@ impl ReviewCore {
         })
     }
 
-    /// The reviewer's click on Switch to guided tour. The switch is the next ticket's, so it is refused.
+    /// The reviewer's click on Switch to guided tour; the app builds the guided review.
     pub fn switch_to_guided_tour(&self) -> Result<(), GuidedTourRefusal> {
         if !self.is_basic() {
             return Err(GuidedTourRefusal::NotBasic);
         }
         match self.guided_tour {
-            GuidedTourProgress::Ready => Err(GuidedTourRefusal::Coming),
+            GuidedTourProgress::Ready => Ok(()),
             GuidedTourProgress::NotAsked
             | GuidedTourProgress::Writing(_)
             | GuidedTourProgress::Failed(_) => Err(GuidedTourRefusal::NothingReady),

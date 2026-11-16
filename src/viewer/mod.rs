@@ -59,6 +59,7 @@ mod settings;
 mod shortcuts;
 mod step_page;
 mod suggestion;
+mod switch_to_guided;
 mod thread_actions;
 mod threads;
 mod toasts;
@@ -170,6 +171,7 @@ pub use step_page::{
     DiffLine, FilePage, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead,
     StepPage,
 };
+pub use switch_to_guided::TourSwitcher;
 pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };

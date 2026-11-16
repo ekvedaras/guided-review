@@ -109,6 +109,7 @@ impl<'a> Builder<'a> {
         rows.push(PageRow::SummaryTitle(review.title().into()));
         rows.push(PageRow::SummaryStats(Arc::new(SummaryStatsRow::of(
             review.summary_stats(),
+            review.steps_started_read(),
         ))));
         rows.extend(
             review

@@ -319,6 +319,8 @@ pub struct ReviewCore {
     agent_link_is_off: bool,
     /// What is known of the guided tour of a basic review's PR. Not saved: the app tells it at a build.
     guided_tour: GuidedTourProgress,
+    /// After a switch from a basic tour: how many steps started read. Not saved.
+    steps_started_read: Option<usize>,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
     seen_end_of: Option<Screen>,
@@ -402,11 +404,18 @@ impl Review {
     /// go), its work, whose outcomes still land here, and which screen's end the window saw.
     pub fn carry_on_from(&mut self, replaced: Self) {
         let replaced = replaced.into_core();
+        let switched_to_guided =
+            matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
-        self.guided_tour = replaced.guided_tour;
+        if !switched_to_guided {
+            self.guided_tour = replaced.guided_tour;
+        }
         self.seen_end_of = replaced.seen_end_of;
         self.ask_desk = replaced.ask_desk;
+        if switched_to_guided {
+            self.follow_file_asks_into_the_guided_tour();
+        }
         self.check_asks_for_code_changes();
         for (id, replied) in replaced.replies_after_repin {
             if let Err(error) = self.hand_off_replied(id, &replied) {
@@ -429,6 +438,41 @@ impl Review {
         let head = self.head().clone();
         self.check_asks_for_code_changes();
         self.change_asks(|desk| desk.open(target, &head, now, processes));
+    }
+
+    /// An Ask about lines of a file screen finds its rows in the first step that shows all its
+    /// pieces, else in the safety net; when neither shows them it stays as it was.
+    fn follow_file_asks_into_the_guided_tour(&mut self) {
+        let Some(guided) = self.tour.guided() else {
+            return;
+        };
+        let steps: Vec<(StepId, Vec<PieceId>)> = guided
+            .steps()
+            .into_iter()
+            .map(|step| {
+                let shown = super::step_page::pieces_of(step, guided, &self.files);
+                (
+                    step.id.clone(),
+                    shown.iter().map(|piece| piece.id.clone()).collect(),
+                )
+            })
+            .collect();
+        let in_safety_net: Vec<PieceId> = self
+            .safety_net()
+            .map_or_default(|page| page.pieces.iter().map(|piece| piece.id.clone()).collect());
+        let shows_all = |shown: &[PieceId], pieces: &[PieceId]| {
+            !pieces.is_empty() && pieces.iter().all(|piece| shown.contains(piece))
+        };
+        let moved = self.ask_desk.move_lines_asks(|pieces| {
+            steps
+                .iter()
+                .find(|(_, shown)| shows_all(shown, pieces))
+                .map(|(step, _)| ShownOn::Step { step: step.clone() })
+                .or_else(|| shows_all(&in_safety_net, pieces).then_some(ShownOn::SafetyNet))
+        });
+        if let Err(error) = moved {
+            eprintln!("could not save the Asks moved into the guided tour: {error:#}");
+        }
     }
 
     fn check_asks_for_code_changes(&mut self) {
@@ -545,6 +589,7 @@ impl ReviewCore {
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
             guided_tour: GuidedTourProgress::NotAsked,
+            steps_started_read: None,
             seen_end_of: None,
             tour_files,
         })
@@ -2320,7 +2365,7 @@ impl ReviewCore {
 }
 
 /// The head a basic tour's file was last read at: its tick, or the tick a re-pin took away.
-fn read_head_of_file<'a>(state: &'a ReviewState, path: &FilePath) -> Option<&'a Sha> {
+pub(super) fn read_head_of_file<'a>(state: &'a ReviewState, path: &FilePath) -> Option<&'a Sha> {
     state
         .file_read_tick(path)
         .or_else(|| state.file_read_before(path))

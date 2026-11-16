@@ -318,21 +318,7 @@ impl PieceDiff {
         else {
             return diff;
         };
-        let added_range = piece.added_lines.first().zip(piece.added_lines.last());
-        let changed_since: Vec<&Piece> = file
-            .pieces
-            .iter()
-            .filter(|since| match (piece.id.symbol_path(), piece.kind) {
-                (None, _) => true,
-                (Some(_), PieceKind::Hunk) => added_range.is_some_and(|(first, last)| {
-                    since
-                        .added_lines
-                        .iter()
-                        .any(|line| (first.number..=last.number).contains(&line.number))
-                }),
-                (Some(_), _) => since.id == piece.id,
-            })
-            .collect();
+        let changed_since = pieces_changed_since(piece, file);
         let removed: Vec<&Line> = changed_since
             .iter()
             .flat_map(|since| &since.removed_lines)
@@ -368,6 +354,29 @@ impl PieceDiff {
                 .then(|| display.links.to_file(file));
         diff
     }
+}
+
+/// The pieces of `since_file`, a file's changes between a read head and the tour's head, that
+/// change what `piece` shows.
+pub(super) fn pieces_changed_since<'a>(
+    piece: &Piece,
+    since_file: &'a ChangedFile,
+) -> Vec<&'a Piece> {
+    let added_range = piece.added_lines.first().zip(piece.added_lines.last());
+    since_file
+        .pieces
+        .iter()
+        .filter(|since| match (piece.id.symbol_path(), piece.kind) {
+            (None, _) => true,
+            (Some(_), PieceKind::Hunk) => added_range.is_some_and(|(first, last)| {
+                since
+                    .added_lines
+                    .iter()
+                    .any(|line| (first.number..=last.number).contains(&line.number))
+            }),
+            (Some(_), _) => since.id == piece.id,
+        })
+        .collect()
 }
 
 /// The pieces a step shows, in pointer order.

@@ -102,6 +102,7 @@ mod shortcuts;
 mod show;
 mod step_details;
 mod summary_instructions;
+mod switch_to_guided;
 mod symbol_edges;
 mod text_boxes;
 mod timestamp;

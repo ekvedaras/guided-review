@@ -15,7 +15,7 @@ use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
     GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader, TourRepinner,
-    WorkingCopy,
+    TourSwitcher, WorkingCopy,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -29,6 +29,7 @@ pub struct OpenedReview {
     pub repinner: TourRepinner,
     pub refresher: TourRefresher,
     pub reloader: TourReloader,
+    pub switcher: TourSwitcher,
     pub tour_agents: TourAgents,
 }
 
@@ -106,6 +107,11 @@ pub fn open_review(
         pr: pr.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
     };
+    let switcher = TourSwitcher {
+        folders: folders.clone(),
+        pr: pr.clone(),
+        pick_code_source: Arc::clone(&pick_code_source),
+    };
     let repinner = TourRepinner {
         folders: folders.clone(),
         pr: pr.clone(),
@@ -120,6 +126,7 @@ pub fn open_review(
         repinner,
         refresher,
         reloader,
+        switcher,
         tour_agents: TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
             .starting_in(agent_folder)
             .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),

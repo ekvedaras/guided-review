@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::pieces::PieceId;
 use crate::pull_request::Sha;
 
 use super::agent_event::AgentEvent;
 use super::agent_pool::{AgentPool, Opening};
-use super::ask::{Ask, AskId, Asks, Place};
+use super::ask::{Ask, AskId, Asks, Place, ShownOn};
 use super::ask_target::AskTarget;
 use super::ports::{AgentLaunch, TurnStopper};
 use super::review::Screen;
@@ -95,6 +96,13 @@ impl AskDesk {
             notice: None,
             hand_offs: HashMap::new(),
         }
+    }
+
+    pub(super) fn move_lines_asks(
+        &mut self,
+        moved: impl Fn(&[PieceId]) -> Option<ShownOn>,
+    ) -> anyhow::Result<()> {
+        self.asks.move_lines_asks(moved)
     }
 
     pub fn clone_folder(&self) -> Option<&PathBuf> {

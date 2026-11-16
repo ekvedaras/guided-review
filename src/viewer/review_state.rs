@@ -18,6 +18,7 @@ use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::ports::Viewed;
 use super::review::{ReadSubject, StepId};
+use super::switch_to_guided::CarriedReads;
 use super::threads::ThreadId;
 
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
@@ -258,6 +259,23 @@ impl ReviewState {
             Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
             _ => record,
         });
+        self.viewer.github_baseline_due = true;
+    }
+
+    /// Switching to a guided tour: its steps take the reads the files had, and the file sections and
+    /// the re-pin record, which only a basic tour holds, are cleared, as after a Refresh.
+    pub(super) fn carry_file_reads_into_steps(&mut self, carried: &CarriedReads) {
+        for (step, head) in &carried.ticked {
+            self.tick(step, head);
+        }
+        for (step, head) in &carried.read_before {
+            self.viewer
+                .read_before
+                .insert(step.clone(), ReadTick { head: head.clone() });
+        }
+        self.viewer.file_read_ticks.clear();
+        self.viewer.file_read_before.clear();
+        self.last_repin = None;
         self.viewer.github_baseline_due = true;
     }
 

@@ -325,6 +325,40 @@ impl Asks {
         self.asks.iter_mut().find(|ask| ask.id == id)
     }
 
+    /// Asks about lines of a file screen are shown on another screen from now on, where `moved`
+    /// says so; saved once when any moved.
+    pub(super) fn move_lines_asks(
+        &mut self,
+        moved: impl Fn(&[PieceId]) -> Option<ShownOn>,
+    ) -> anyhow::Result<()> {
+        let mut any_moved = false;
+        for ask in &mut self.asks {
+            let Place::Lines {
+                shown_on, pieces, ..
+            } = &mut ask.place
+            else {
+                continue;
+            };
+            let ShownOn::File { .. } = &*shown_on else {
+                continue;
+            };
+            if let Some(now) = moved(pieces) {
+                *shown_on = now;
+                any_moved = true;
+            }
+        }
+        if !any_moved {
+            return Ok(());
+        }
+        let kept: Vec<Ask> = self
+            .asks
+            .iter()
+            .filter(|ask| !ask.messages.is_empty())
+            .cloned()
+            .collect();
+        self.store.save(&kept)
+    }
+
     fn save(&mut self, id: AskId) {
         let kept: Vec<Ask> = self
             .asks

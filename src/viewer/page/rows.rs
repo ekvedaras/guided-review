@@ -155,10 +155,12 @@ pub struct SummaryStatsRow {
     pub removed: Arc<str>,
     /// `None` when no thread is open.
     pub open_threads: Option<Arc<str>>,
+    /// After a switch from a basic tour: how many steps start read.
+    pub started_read: Option<Arc<str>>,
 }
 
 impl SummaryStatsRow {
-    pub(super) fn of(stats: SummaryStats) -> Self {
+    pub(super) fn of(stats: SummaryStats, started_read: Option<usize>) -> Self {
         Self {
             steps: pluralised(stats.steps, "step", "steps").into(),
             files: pluralised(stats.files, "file changed", "files changed").into(),
@@ -166,6 +168,9 @@ impl SummaryStatsRow {
             removed: format!("\u{2212}{}", stats.removed_lines).into(),
             open_threads: (stats.open_threads > 0)
                 .then(|| pluralised(stats.open_threads, "open thread", "open threads").into()),
+            started_read: started_read
+                .filter(|steps| *steps > 0)
+                .map(|steps| pluralised(steps, "step starts read", "steps start read").into()),
         }
     }
 }

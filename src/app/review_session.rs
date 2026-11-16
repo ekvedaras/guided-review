@@ -32,7 +32,7 @@ use crate::viewer::{
     CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
     OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
     SendMode, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, WorkPorts, announcements, line_count,
+    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -44,6 +44,7 @@ pub struct TourWork {
     pub repinner: Arc<TourRepinner>,
     pub refresher: Arc<TourRefresher>,
     pub reloader: Arc<TourReloader>,
+    pub switcher: Arc<TourSwitcher>,
     pub tour_agents: TourAgents,
 }
 
@@ -81,6 +82,8 @@ pub struct ReviewSession {
     image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
     loading_images: HashSet<FilePath>,
     reload: Option<Task<()>>,
+    /// The build of the guided review a click on Switch to guided tour started.
+    switch: Option<Task<()>>,
     clone_offer: Option<CloneOffer>,
     cloning: Option<Task<()>>,
     typing_save: Option<Task<()>>,
@@ -177,6 +180,7 @@ impl ReviewSession {
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
             reload: None,
+            switch: None,
             clone_offer,
             cloning: None,
             typing_save: None,
@@ -504,6 +508,31 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    /// Runs only on the reviewer's click. The guided review is built in the background, carrying the
+    /// read ticks; the basic review stays on screen until it is ready.
+    pub fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
+        if self.switch.is_some() {
+            return;
+        }
+        self.save_typing_now();
+        let switcher = Arc::clone(&self.tour_work.switcher);
+        self.switch = Some(self.run_off_thread(
+            cx,
+            move || switcher.run(),
+            |this, switched, cx| {
+                this.switch = None;
+                match switched {
+                    Ok(switched) => this.reopen_on_summary(switched, cx),
+                    Err(error) => post_toast(
+                        cx,
+                        ToastTone::Danger,
+                        format!("Could not switch to the guided tour: {error:#}"),
+                    ),
+                }
+            },
+        ));
     }
 
     pub fn clone_offer(&self) -> Option<&CloneOffer> {
@@ -870,7 +899,22 @@ impl ReviewSession {
     }
 
     fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
-        let screen = self.review.screen().clone();
+        self.reopen_on(repinned, None, cx);
+    }
+
+    /// Opens the review of the guided tour the reviewer asked for, on its summary.
+    fn reopen_on_summary(&mut self, switched: RepinnedTour, cx: &mut Context<Self>) {
+        self.reopen_on(switched, Some(Screen::Summary), cx);
+    }
+
+    /// `screen` is where the new review opens; `None` keeps the one on show.
+    fn reopen_on(
+        &mut self,
+        repinned: RepinnedTour,
+        screen: Option<Screen>,
+        cx: &mut Context<Self>,
+    ) {
+        let screen = screen.unwrap_or_else(|| self.review.screen().clone());
         self.save_typing_now();
         let replaced = std::mem::replace(&mut self.review, repinned.review);
         self.review.carry_on_from(replaced);

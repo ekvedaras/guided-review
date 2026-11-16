@@ -997,13 +997,10 @@ impl OneStepLayout {
         }
     }
 
-    /// The switch is the next ticket's; the button is drawn off with "coming" until then.
+    /// Switch to guided tour, from the banner, the sidebar and the palette: the reviewer's click only.
     fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
-        post_toast(
-            cx,
-            ToastTone::Neutral,
-            "Switching to the guided tour is coming.".to_owned(),
-        );
+        self.session
+            .update(cx, ReviewSession::switch_to_guided_tour);
     }
 
     /// Opens the finish-review form in the sidebar with its body box taking the keys.
@@ -3447,6 +3444,14 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .gap_3()
                 .child(dot())
                 .child(item(Icon::MessageSquare, SharedString::from(threads)))
+        }))
+        .children(stats.started_read.clone().map(|started_read| {
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(dot())
+                .child(item(Icon::Check, SharedString::from(started_read)))
         }))
 }
 

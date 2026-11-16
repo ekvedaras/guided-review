@@ -32,8 +32,6 @@ pub enum GuidedTourRefusal {
     AlreadyWriting,
     AlreadyReady,
     NothingReady,
-    /// Switching comes with its own ticket; until then the button is drawn and off.
-    Coming,
 }
 
 impl GuidedTourRefusal {
@@ -46,7 +44,6 @@ impl GuidedTourRefusal {
             Self::AlreadyWriting => "A guided tour is being written.",
             Self::AlreadyReady => "The guided tour is ready. Switch to it.",
             Self::NothingReady => "No guided tour is ready yet.",
-            Self::Coming => "coming",
         }
     }
 }

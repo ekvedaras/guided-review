@@ -141,7 +141,7 @@ fn a_failed_writing_can_be_tried_again() {
 }
 
 #[test]
-fn a_ready_guided_tour_shows_the_banner_with_a_switch_that_is_not_there_yet() {
+fn a_ready_guided_tour_shows_the_banner_with_a_switch_that_is_on() {
     let shop = Shop::new();
     let mut review = shop.basic();
 
@@ -149,12 +149,8 @@ fn a_ready_guided_tour_shows_the_banner_with_a_switch_that_is_not_there_yet() {
 
     let banner = review.guided_tour_banner().unwrap();
     assert_eq!(banner.switch_label, "Switch to guided tour");
-    assert_eq!(banner.switch_refusal, Some(GuidedTourRefusal::Coming));
-    assert_eq!(GuidedTourRefusal::Coming.reason(), "coming");
-    assert_eq!(
-        review.switch_to_guided_tour(),
-        Err(GuidedTourRefusal::Coming)
-    );
+    assert_eq!(banner.switch_refusal, None);
+    assert_eq!(review.switch_to_guided_tour(), Ok(()));
     assert_eq!(
         review.ask_to_write_guided_tour(),
         Err(GuidedTourRefusal::AlreadyReady)
