@@ -883,13 +883,15 @@ impl ReviewCore {
         let Some(offer) = self.move_here_offer() else {
             return Ok(());
         };
-        let local = ReviewSubject::from(offer.change_set);
+        let local = ReviewSubject::from(offer.change_set.clone());
         let folders = self
             .local_reviews_in
             .clone()
             .context("no local review is known here")?;
         ReviewStateFile::for_subject(&folders, &local)
             .update(|state| state.decline_move_to(&offer.offer.pr))?;
+        self.local_reviews_of_repo
+            .retain(|review| *review != offer.change_set);
         self.local_to_move_here = None;
         Ok(())
     }

@@ -754,3 +754,17 @@ fn keeping_the_local_review_hides_the_pr_reviews_offer_and_the_local_ones_too() 
     assert_eq!(local.review.move_offer(), None);
     assert!(local_review_is_on_disk(&feature));
 }
+
+#[test]
+fn a_kept_local_review_is_not_offered_again_when_the_pr_review_comes_back_to_the_front() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&github, &pr_head);
+
+    opened.review.decline_move_here().unwrap();
+    feature.focus(&mut opened, &github, Instant::now());
+
+    assert_eq!(opened.review.move_here_offer(), None);
+}
