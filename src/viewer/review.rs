@@ -441,7 +441,7 @@ impl Review {
     }
 
     /// An Ask about lines of a file screen finds its rows in the first step that shows all its
-    /// pieces, else in the safety net; when neither shows them it stays as it was.
+    /// pieces, else in the safety net; when neither shows them its place is gone, as after a re-pin.
     fn follow_file_asks_into_the_guided_tour(&mut self) {
         let Some(guided) = self.tour.guided() else {
             return;
@@ -1142,6 +1142,7 @@ impl ReviewCore {
                 StepPage::of(self.step(&step)?, guided, &self.files, &display, false).pieces
             }
             ShownOn::SafetyNet => self.safety_net()?.pieces,
+            ShownOn::File { .. } if self.tour.guided().is_some() => return None,
             ShownOn::File { path } => {
                 let links = self.links();
                 let display = self.display(&links);
