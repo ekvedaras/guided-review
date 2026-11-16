@@ -9,14 +9,9 @@ fn a_command_given_a_local_change_sets_key_says_local_review_is_not_built_yet() 
     let guided_review = GuidedReview::new(&repo, &github);
 
     for args in [
-        vec!["outline", LOCAL_KEY],
-        vec!["show", LOCAL_KEY, "README.md"],
-        vec!["tour-path", LOCAL_KEY],
         vec!["check", LOCAL_KEY],
         vec!["repin", LOCAL_KEY],
         vec!["refresh", LOCAL_KEY],
-        vec!["open", LOCAL_KEY],
-        vec!["restart", LOCAL_KEY],
         vec!["agent-reply", LOCAL_KEY, "h0", "--working"],
     ] {
         let run = guided_review.run(&args);

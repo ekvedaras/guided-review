@@ -25,6 +25,7 @@ pub mod local_git;
 pub mod local_work_tree;
 pub mod make_basic_tour;
 pub mod open_review;
+pub mod opened_change_set;
 pub mod opened_pr;
 pub mod outline;
 pub mod pick_code_source;

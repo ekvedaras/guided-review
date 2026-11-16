@@ -11,7 +11,8 @@ use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
-use guided_review::opened_pr::OpenedPr;
+use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_pr::{CodeAtTips, OpenedPr};
 use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
@@ -61,11 +62,15 @@ enum Command {
         #[arg(long)]
         done: bool,
     },
-    /// Open the app on the tour of a PR
-    Open { subject: ReviewSubject },
-    /// Quit the running app of this build and open a PR in a new one
+    /// Open the app on the tour of a PR, or of the branch of a clone's folder and its uncommitted files
+    Open {
+        /// A PR link, a `local:` key, or a folder inside a clone
+        target: OpenTarget,
+    },
+    /// Quit the running app of this build and open a PR or a folder's branch in a new one
     Restart {
-        subject: ReviewSubject,
+        /// A PR link, a `local:` key, or a folder inside a clone
+        target: OpenTarget,
         /// The id of the step to show, else the summary
         #[arg(long)]
         at: Option<StepId>,
@@ -122,25 +127,22 @@ fn main() -> anyhow::Result<()> {
         return launch();
     };
     match command {
-        Command::Outline { subject } => outline(&pull_request_of(&subject)?),
+        Command::Outline { subject } => outline(&subject),
         Command::Show {
             subject,
             ids,
             around,
-        } => show(&pull_request_of(&subject)?, &ids, around),
-        Command::TourPath { subject } => tour_path(&pull_request_of(&subject)?),
+        } => show(&subject, &ids, around),
+        Command::TourPath { subject } => tour_path(&subject),
         Command::Check { subject } => check(&pull_request_of(&subject)?),
         Command::Repin { subject } => repin_command(&pull_request_of(&subject)?),
         Command::Refresh { subject, done } => refresh(&pull_request_of(&subject)?, done),
-        Command::Open { subject } => open(&pull_request_of(&subject)?, &Launch::Open),
+        Command::Open { target } => open(&target, &Launch::Open),
         Command::Restart {
-            subject,
+            target,
             at,
             replacing,
-        } => open(
-            &pull_request_of(&subject)?,
-            &Launch::Restart { at, replacing },
-        ),
+        } => open(&target, &Launch::Restart { at, replacing }),
         Command::Settings => settings(),
         Command::InstallApp => install_app(),
         Command::DesktopEntryTemplate { out } => {
@@ -183,7 +185,32 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Until a local review is built, every command that takes a subject works on a PR only.
+/// What `open` and `restart` take: a PR link, a local change set's key, or a folder, which stands for
+/// the branch it is on.
+#[derive(Clone)]
+enum OpenTarget {
+    Subject(ReviewSubject),
+    Folder(std::path::PathBuf),
+}
+
+impl std::str::FromStr for OpenTarget {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> anyhow::Result<Self> {
+        if std::path::Path::new(text).exists() {
+            return Ok(Self::Folder(text.into()));
+        }
+        match text.parse() {
+            Ok(subject) => Ok(Self::Subject(subject)),
+            Err(error) if text.starts_with("local:") || text.starts_with("https://") => Err(error),
+            Err(_not_a_subject) => anyhow::bail!(
+                "{text} is neither a GitHub PR link, a local change set key nor a folder"
+            ),
+        }
+    }
+}
+
+/// Until the later tickets of local review, these commands work on a PR only.
 fn pull_request_of(subject: &ReviewSubject) -> anyhow::Result<PullRequestUrl> {
     match subject {
         ReviewSubject::PullRequest(pr) => Ok(pr.clone()),
@@ -193,12 +220,23 @@ fn pull_request_of(subject: &ReviewSubject) -> anyhow::Result<PullRequestUrl> {
     }
 }
 
-fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
+fn tour_path(subject: &ReviewSubject) -> anyhow::Result<()> {
     println!(
         "{}",
-        Tour::path_for(&AppFolders::running()?, &ReviewSubject::from(pr.clone())).display()
+        Tour::path_for(&AppFolders::running()?, subject).display()
     );
     Ok(())
+}
+
+/// A PR is read at the tips GitHub has now; a local change set at the snapshot its tour is pinned to,
+/// since the folder is not what the reviewer reads.
+fn code_to_read(subject: &ReviewSubject) -> anyhow::Result<CodeAtTips> {
+    match subject {
+        ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_live_tips(),
+        ReviewSubject::Local(change_set) => {
+            OpenedChangeSet::new(change_set, &AppFolders::running()?).at_pinned_tips()
+        }
+    }
 }
 
 /// A config that cannot be read must not stop `outline` or `check`, which work without it.
@@ -213,14 +251,14 @@ fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
     }
 }
 
-fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
+fn outline(subject: &ReviewSubject) -> anyhow::Result<()> {
     let summary_instructions = summary_instructions()?;
-    let code = OpenedPr::new(pr)?.at_live_tips()?;
+    let code = code_to_read(subject)?;
     let (base, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
         Outline {
-            pr,
+            subject,
             base: &base,
             head: &code.tips.head,
             files: &files,
@@ -232,8 +270,8 @@ fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()> {
-    let code = OpenedPr::new(pr)?.at_live_tips()?;
+fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result<()> {
+    let code = code_to_read(subject)?;
     let (_, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
@@ -357,22 +395,31 @@ enum Launch {
     },
 }
 
-fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
+fn open(target: &OpenTarget, launch: &Launch) -> anyhow::Result<()> {
     let folders = &AppFolders::running()?;
-    let tours = ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone()));
+    let subject = match target {
+        OpenTarget::Subject(subject) => subject.clone(),
+        OpenTarget::Folder(path) => ReviewSubject::from(OpenedChangeSet::change_set_at(path)?),
+    };
+    let tours = ToursOnDisk::of(folders, &subject);
     if let Launch::Restart { at: Some(step), .. } = launch
         && tours.opens_basic()
     {
         anyhow::bail!(
-            "{pr} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
+            "{subject} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
         );
     }
     if tours == ToursOnDisk::None {
-        OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?;
+        match &subject {
+            ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?,
+            ReviewSubject::Local(change_set) => {
+                OpenedChangeSet::new(change_set, folders).make_basic_tour_if_no_tour()?
+            }
+        };
     }
     let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {
-        subject: pr.to_string(),
+        subject: subject.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
         terminal: std::env::var("HC_TERMINAL_ID").ok(),
         at_step: match launch {
@@ -403,8 +450,8 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         | Answer::Reloaded { .. }
         | Answer::KeptInBackground { .. } => {
             println!("{answer}");
-            if ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())).opens_basic() {
-                println!("{pr} opened in Basic mode");
+            if ToursOnDisk::of(folders, &subject).opens_basic() {
+                println!("{subject} opened in Basic mode");
             }
         }
         other => anyhow::bail!("{other}"),

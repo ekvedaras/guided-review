@@ -2,7 +2,8 @@ use std::fmt;
 
 use crate::image_facts::ImageChange;
 use crate::pieces::ChangedFile;
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::Sha;
+use crate::review_subject::ReviewSubject;
 use crate::summary_instructions::SummaryInstructions;
 use crate::test_pairing::SubjectCandidates;
 
@@ -10,7 +11,7 @@ const MAX_SIGNATURE_CHARS: usize = 100;
 const SMALL_PR_CHANGED_LINES: usize = 300;
 
 pub struct Outline<'a> {
-    pub pr: &'a PullRequestUrl,
+    pub subject: &'a ReviewSubject,
     pub base: &'a Sha,
     pub head: &'a Sha,
     pub files: &'a [ChangedFile],
@@ -24,7 +25,10 @@ impl fmt::Display for Outline<'_> {
         let pieces: usize = self.files.iter().map(|file| file.pieces.len()).sum();
         let added: usize = self.files.iter().map(|file| file.added).sum();
         let removed: usize = self.files.iter().map(|file| file.removed).sum();
-        writeln!(f, "pr: {}", self.pr)?;
+        match self.subject {
+            ReviewSubject::PullRequest(pr) => writeln!(f, "pr: {pr}")?,
+            ReviewSubject::Local(_) => writeln!(f, "local: {}", self.subject)?,
+        }
         writeln!(f, "base: {}", self.base)?;
         writeln!(f, "head: {}", self.head)?;
         writeln!(
