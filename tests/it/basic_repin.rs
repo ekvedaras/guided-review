@@ -43,6 +43,7 @@ impl Shop {
                 version: 1,
                 pr: PR.to_owned(),
                 local: None,
+                repo: None,
                 base: Sha::new(&shop.base),
                 head: Sha::new(&shop.first_head),
                 previous_head: None,

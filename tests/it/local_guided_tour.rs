@@ -269,6 +269,25 @@ fn check_pins_the_writers_tour_to_the_snapshot_the_reviewer_reads_and_reports() 
 }
 
 #[test]
+fn check_names_the_repo_of_the_clone_so_a_pr_of_the_repo_finds_the_guided_tour_without_git() {
+    let feature = Feature::with_work_in_progress().with_basic_tour();
+    feature.writer_writes_a_tour_of_both_files();
+
+    assert!(feature.run(&["check", &feature.key()]).success);
+    std::fs::remove_file(Tour::basic_path_for(
+        &feature.repo.folders(),
+        &feature.subject,
+    ))
+    .unwrap();
+
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    assert_eq!(
+        guided_review::opened_change_set::local_reviews_of_repo(&feature.repo.folders(), &pr),
+        [feature.subject.local().unwrap().clone()]
+    );
+}
+
+#[test]
 fn check_of_a_tour_pinned_before_an_update_says_the_review_has_a_new_snapshot() {
     let feature = Feature::with_work_in_progress().with_basic_tour();
     feature.writer_writes_a_tour_of_both_files();

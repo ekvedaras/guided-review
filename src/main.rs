@@ -11,6 +11,7 @@ use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
+use guided_review::local_git::LocalGit;
 use guided_review::opened_change_set::OpenedChangeSet;
 use guided_review::opened_pr::{CodeAtTips, OpenedPr};
 use guided_review::outline::Outline;
@@ -274,7 +275,20 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
     Ok(())
 }
 
+/// A local key names no repo; the tour pin keeps its clone's, so a PR of the repo finds the review without git.
+fn with_repo_of_its_clone(subject: &ReviewSubject) -> ReviewSubject {
+    match subject {
+        ReviewSubject::Local(change_set) if change_set.repo().is_none() => ReviewSubject::from(
+            change_set
+                .clone()
+                .in_repo(LocalGit::origin_of(change_set.folder().as_path())),
+        ),
+        _ => subject.clone(),
+    }
+}
+
 fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let subject = &with_repo_of_its_clone(subject);
     let tour_path = Tour::path_for(&AppFolders::running()?, subject);
     let mut tour = GuidedTour::load(&tour_path)?;
 

@@ -53,6 +53,7 @@ impl Pull {
                 version: 1,
                 pr: PR.to_owned(),
                 local: None,
+                repo: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,

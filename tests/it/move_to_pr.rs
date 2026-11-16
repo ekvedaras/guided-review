@@ -800,12 +800,42 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
 
     drive_at(&mut opened, PULL_OF_BRANCH_RETRY + a_second);
     assert_eq!(head_branch_lookups(&feature), 2);
-    feature.focus(&mut opened, &github, opened_at + PULL_OF_BRANCH_RETRY * 2 + a_second);
-    assert_eq!(head_branch_lookups(&feature), 2, "not on focus, nor before the longer wait");
+    feature.focus(
+        &mut opened,
+        &github,
+        opened_at + PULL_OF_BRANCH_RETRY * 2 + a_second,
+    );
+    assert_eq!(
+        head_branch_lookups(&feature),
+        2,
+        "not on focus, nor before the longer wait"
+    );
 
     github.heal(&GitHubFault::ReadsFail);
     drive_at(&mut opened, PULL_OF_BRANCH_RETRY * 3 + a_second * 2);
     assert_eq!(head_branch_lookups(&feature), 3);
+    assert!(opened.review.move_here_offer().is_some());
+}
+
+#[test]
+fn a_pr_review_finds_the_local_review_of_its_repo_by_its_tour_file_without_asking_the_clone() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    // The clone's origin now names another repo; only the local tour file still says acme/shop.
+    feature
+        .repo
+        .git(&["remote", "rename", "origin", "upstream"]);
+    feature.repo.git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/acme/elsewhere",
+    ]);
+
+    let opened = feature.open_the_pr(&github, &pr_head);
+
     assert!(opened.review.move_here_offer().is_some());
 }
 

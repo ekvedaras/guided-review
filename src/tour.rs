@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
 use crate::piece_id::PieceId;
-use crate::pull_request::{ChangeTips, Sha};
+use crate::pull_request::{ChangeTips, RepoName, Sha};
 use crate::review_subject::ReviewSubject;
 
 const VERSION: u32 = 1;
@@ -58,6 +58,9 @@ pub struct TourPin {
     /// The subject key of a local tour, which has no `pr`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<String>,
+    /// The GitHub repo of a local tour's clone, so a PR of that repo finds the local review without git.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<RepoName>,
     #[serde(default)]
     pub base: Sha,
     #[serde(default)]
@@ -361,10 +364,14 @@ impl TourPin {
             ReviewSubject::PullRequest(pr) => {
                 self.pr = pr.to_string();
                 self.local = None;
+                self.repo = None;
             }
-            ReviewSubject::Local(_) => {
+            ReviewSubject::Local(change_set) => {
                 self.pr = String::new();
                 self.local = Some(subject.to_string());
+                if let Some(repo) = change_set.repo() {
+                    self.repo = Some(repo.clone());
+                }
             }
         }
     }
@@ -373,7 +380,12 @@ impl TourPin {
     pub fn subject(&self) -> anyhow::Result<ReviewSubject> {
         match (self.pr.is_empty(), &self.local) {
             (false, None) => self.pr.parse(),
-            (true, Some(key)) => key.parse(),
+            (true, Some(key)) => Ok(match key.parse()? {
+                ReviewSubject::Local(change_set) => {
+                    ReviewSubject::from(change_set.in_repo(self.repo.clone()))
+                }
+                pr @ ReviewSubject::PullRequest(_) => pr,
+            }),
             (false, Some(_)) => anyhow::bail!(
                 "the tour is pinned to both a PR ({}) and a local change set, and must name one",
                 self.pr
