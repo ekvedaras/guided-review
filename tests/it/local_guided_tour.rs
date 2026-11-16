@@ -433,3 +433,22 @@ fn a_tour_written_after_the_local_review_was_moved_or_dropped_is_refused_by_chec
         ToursOnDisk::None
     );
 }
+
+#[test]
+fn a_move_declined_while_the_guided_review_is_built_stays_declined_in_it() {
+    let feature = Feature::with_work_in_progress().with_basic_tour();
+    let mut basic = feature.open().review;
+    basic.pull_of_branch_is(Some(guided_review::viewer::PullOfBranch {
+        pr: "https://github.com/acme/shop/pull/7".parse().unwrap(),
+        title: "Add the cart".to_owned(),
+    }));
+    feature.writer_writes_a_tour_of_both_files();
+    assert!(feature.run(&["check", &feature.key()]).success);
+    let switched = feature.switcher().run().unwrap();
+    basic.decline_move().unwrap();
+    let mut guided = switched.review;
+
+    guided.carry_on_from(basic);
+
+    assert_eq!(guided.move_offer(), None);
+}

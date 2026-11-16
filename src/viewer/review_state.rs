@@ -287,9 +287,12 @@ impl ReviewState {
 
     /// The hand-over of a switch to a guided tour. The basic review stayed on screen while the guided
     /// one was built, so what it holds is the reviewer's latest: ticks, viewed marks, queued
-    /// comments, hand-offs and typed text are all taken from it, and its file reads go into the steps.
+    /// comments, hand-offs, typed text and declined moves are all taken from it, and its file reads go
+    /// into the steps.
     pub(super) fn take_over_from_basic(&mut self, basic: &Self, carried: &CarriedReads) {
         self.take_viewer_sections(basic);
+        self.declined_moves
+            .extend(basic.declined_moves.iter().cloned());
         self.carry_file_reads_into_steps(carried);
     }
 
