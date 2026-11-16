@@ -112,7 +112,7 @@ impl LocalReviewsOnDisk {
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            match Tour::load(&path).and_then(|tour| Ok(tour.pin().subject()?)) {
+            match Tour::load(&path).and_then(|tour| tour.pin().subject()) {
                 Ok(ReviewSubject::Local(change_set)) => {
                     self.change_sets.insert(change_set);
                 }
