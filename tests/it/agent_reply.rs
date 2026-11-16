@@ -1,12 +1,9 @@
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use guided_review::app_link::AppFolder;
 use guided_review::viewer::{CommentId, HandOffState, ReviewState, ReviewStateFile};
 
-use crate::support::fake_app::{CliEnded, accept_before};
+use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::graphql::serve_graphql;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, folders_in};
 
@@ -68,31 +65,12 @@ fn run_agent_reply(
     (run, asked)
 }
 
-/// Answers one request line with `answer`, recording the line.
 fn fake_app(
     home: &Path,
     cli_ended: &CliEnded,
     answer: &str,
 ) -> (std::thread::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
-    let cli_ended = cli_ended.clone();
-    let socket = AppFolder::of(&folders_in(home)).socket();
-    std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-    let listener = UnixListener::bind(socket).unwrap();
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&seen);
-    let line = format!(r#"{{"version":"{BUILD}","answer":{answer}}}"#);
-    let thread = std::thread::spawn(move || {
-        let stream = accept_before(
-            &listener,
-            &cli_ended,
-            "the agent-reply request from the CLI",
-        );
-        let mut request = String::new();
-        BufReader::new(&stream).read_line(&mut request).unwrap();
-        log.lock().unwrap().push(request);
-        (&stream).write_all(format!("{line}\n").as_bytes()).unwrap();
-    });
-    (thread, seen)
+    answering_one_request(home, cli_ended, BUILD, answer)
 }
 
 #[test]

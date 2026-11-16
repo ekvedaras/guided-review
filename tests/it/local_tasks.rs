@@ -1,16 +1,19 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
-use crate::support::{FixtureRepo, file_path};
+use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run, file_path};
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentStatus, Audience, CommentGesture, CommentPlace, CommentResult, HandOffState, LineLocation,
-    PieceDiff, SendMode, TextBox, ThreadView, TourAgentPort, TourAgents, WorkPorts,
+    PieceDiff, ReviewStateFile, SendMode, TextBox, ThreadAction, ThreadHome, ThreadView,
+    TourAgentPort, TourAgents, WorkPorts,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README's second line written and not
@@ -206,5 +209,164 @@ fn send_now_keeps_a_local_thread_and_hands_the_task_to_the_change_sets_agent_wit
         opened.review.hand_offs().all()[0].state(),
         &HandOffState::Delivered
     );
+    assert_eq!(feature.sent.github_calls(), []);
+}
+
+const BUILD: &str = "test-build";
+
+impl Feature {
+    /// `guided-review agent-reply <local key> h0 …`, as the agent runs it in its terminal.
+    fn agent_reply(&self, args: &[&str]) -> Run {
+        let github = ServedGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
+        let key = self.key();
+        let run = GuidedReview::new(&self.repo, &github)
+            .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+            .run(&[&["agent-reply", key.as_str(), "h0"], args].concat());
+        assert!(run.success, "stderr: {}", run.stderr);
+        run
+    }
+
+    /// The review as the app reads it after a restart.
+    fn reopened(&self) -> OpenedReview {
+        self.open()
+    }
+
+    fn hand_off_state_on_disk(&self) -> HandOffState {
+        ReviewStateFile::for_subject(&self.repo.folders(), &self.subject)
+            .load()
+            .unwrap()
+            .hand_offs()
+            .all()[0]
+            .state()
+            .clone()
+    }
+}
+
+fn task_sent(feature: &Feature) -> OpenedReview {
+    let mut opened = feature.open();
+    send_now(feature, &mut opened, "world", "Say who the world is");
+    opened
+}
+
+#[test]
+fn agent_reply_with_the_local_key_says_working_on_it_then_answers_in_its_place_on_the_local_thread()
+{
+    let feature = Feature::with_work_in_progress();
+    drop(task_sent(&feature));
+
+    let working = feature.agent_reply(&["--working"]);
+    let working_shown = threads(&feature.reopened()).remove(0);
+    let answered = feature.agent_reply(&["--body", "It is the cart's world now."]);
+
+    assert!(
+        working.stdout.contains("on its thread in the local review"),
+        "{}",
+        working.stdout
+    );
+    assert_eq!(
+        working_shown.hand_off_line.as_deref(),
+        Some("The agent said it is working on it"),
+        "the line under the thread says it, in place of the reply"
+    );
+    assert!(working_shown.agent_is_working);
+    assert!(
+        answered.stdout.contains("in place of"),
+        "{}",
+        answered.stdout
+    );
+    let reopened = feature.reopened();
+    let shown = threads(&reopened);
+    assert_eq!(
+        said(&shown[0]),
+        [
+            ("You".to_owned(), "Say who the world is".to_owned()),
+            (
+                "Your agent".to_owned(),
+                "It is the cart's world now.".to_owned()
+            ),
+        ]
+    );
+    assert!(shown[0].thread.comments[1].is_by_agent());
+    assert_eq!(feature.hand_off_state_on_disk(), HandOffState::Answered);
+    assert_eq!(
+        shown[0].hand_off_line.as_deref(),
+        Some("The agent answered")
+    );
+}
+
+#[test]
+fn a_running_app_showing_the_local_review_is_told_and_marks_the_hand_off_while_the_answer_is_on_the_thread()
+ {
+    let feature = Feature::with_work_in_progress();
+    drop(task_sent(&feature));
+    let cli_ended = CliEnded::default();
+    let key = feature.key();
+    let (app, seen) = answering_one_request(
+        feature.repo.home(),
+        &cli_ended,
+        BUILD,
+        &format!(r#"{{"hand_off_answered":{{"pr":"{key}"}}}}"#),
+    );
+
+    feature.agent_reply(&["--body", "Done."]);
+
+    cli_ended.mark();
+    app.join().unwrap();
+    let request: serde_json::Value = serde_json::from_str(&seen.lock().unwrap()[0]).unwrap();
+    assert_eq!(request["request"]["agent_replied"]["pr"], key.as_str());
+    assert_eq!(
+        feature.hand_off_state_on_disk(),
+        HandOffState::Delivered,
+        "the app holds the hand-offs and marks them itself"
+    );
+    assert_eq!(
+        said(&threads(&feature.reopened())[0]).last().unwrap().1,
+        "Done."
+    );
+}
+
+/// The app's copy of the review and `agent-reply` both write the state file. Each writes only the
+/// newest thread, so neither loses the other's words, whatever order they come in.
+#[test]
+fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
+    let feature = Feature::with_work_in_progress();
+    let mut app = task_sent(&feature);
+
+    // The app shows the review, so the command writes the thread and the app takes the hand-off.
+    let home = ThreadHome::of(&feature.subject, &app.review.state_file());
+    let state = app.review.state_file().load().unwrap();
+    let first = app.review.hand_offs().all()[0].id();
+    let request = state.hand_offs().agent_working_on_it(&home, first).unwrap();
+    let done = request.run(&feature.github()).unwrap();
+    app.review.hand_off_replied(first, done.replied()).unwrap();
+    feature.run_work(&mut app);
+    // The app saves its own copy of the review after the command wrote.
+    app.review.tick_file(&file_path("README.md")).unwrap();
+    let thread_id = threads(&app)[0].thread.id.clone();
+    app.review
+        .open_box(&TextBox::Reply(thread_id.clone()))
+        .unwrap();
+    app.review
+        .type_in(&TextBox::Reply(thread_id.clone()), "And the cart?")
+        .unwrap();
+    let reply = app.review.thread_action_request(ThreadAction::Reply {
+        thread_id,
+        mode: SendMode::SendNow,
+        audience: Audience::Agent,
+    });
+    app.review.apply_thread_action(reply.run(&feature.github()));
+    // The command answers once more, the app not showing the review now.
+    feature.agent_reply(&["--body", "The world is fine."]);
+
+    let shown = threads(&feature.reopened());
+    assert_eq!(
+        said(&shown[0]),
+        [
+            ("You".to_owned(), "Say who the world is".to_owned()),
+            ("Your agent".to_owned(), "The world is fine.".to_owned()),
+            ("You".to_owned(), "And the cart?".to_owned()),
+        ]
+    );
+    assert_eq!(threads(&app)[0].thread.comments.len(), 3);
     assert_eq!(feature.sent.github_calls(), []);
 }
