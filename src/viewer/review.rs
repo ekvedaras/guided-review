@@ -534,6 +534,10 @@ impl ReviewCore {
             ReviewSubject::PullRequest(pr) => CodeHost::GitHub(pr.repo.clone()),
             ReviewSubject::Local(_) => CodeHost::LocalClone,
         };
+        let viewed_sync = match &subject {
+            ReviewSubject::PullRequest(_) => ViewedSync::default(),
+            ReviewSubject::Local(_) => ViewedSync::without_github_marks(),
+        };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
@@ -605,7 +609,7 @@ impl ReviewCore {
             state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
-            viewed_sync: ViewedSync::default(),
+            viewed_sync,
             problems: {
                 let mut problems = Problems::default();
                 if let Some(reason) = source.fallback_reason() {
@@ -885,6 +889,29 @@ impl ReviewCore {
         }
     }
 
+    /// The window's title.
+    pub fn window_title(&self) -> String {
+        match &self.subject {
+            ReviewSubject::PullRequest(_) => format!("{}: {}", self.subject, self.title()),
+            ReviewSubject::Local(change_set) => match self
+                .local_facts
+                .as_ref()
+                .and_then(|facts| facts.repo.as_ref())
+            {
+                Some(repo) => format!(
+                    "Local changes · {repo} · {}",
+                    change_set.branch().as_str()
+                ),
+                None => format!("Local changes · {}", change_set.branch().as_str()),
+            },
+        }
+    }
+
+    /// Whether the review has a PR page to open.
+    pub fn can_open_on_github(&self) -> bool {
+        self.subject.pull_request().is_some()
+    }
+
     pub fn summary(&self) -> &[String] {
         self.tour.guided().map_or(&[], |guided| &guided.summary)
     }
@@ -905,7 +932,6 @@ impl ReviewCore {
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
     /// `None` for a PR with no description.
     pub fn pr_description(&self) -> Option<Markdown> {
-        self.subject.pull_request()?;
         let body = self.state.pr_description();
         (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
     }
@@ -2145,10 +2171,17 @@ impl ReviewCore {
         })
     }
 
+    /// Only a PR has viewed marks on GitHub to keep in step with the ticks.
+    fn want_viewed_synced(&mut self) {
+        if self.subject.pull_request().is_some() {
+            self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        }
+    }
+
     /// Only files of this tour can be read; a file the tour does not hold is ignored. Viewed
     /// marks follow it one to one.
     pub fn tick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         if !self.reading_order().contains(&Screen::File(path.clone())) {
             return Ok(());
         }
@@ -2161,7 +2194,7 @@ impl ReviewCore {
     }
 
     pub fn untick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         let coverage = self.coverage();
         let subject = ReadSubject::File(path.clone());
         self.state.change(|state| {
@@ -2197,7 +2230,7 @@ impl ReviewCore {
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
     /// Viewed marks sync once no other tick or untick came for `PUSH_DEBOUNCE`.
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
@@ -2211,7 +2244,7 @@ impl ReviewCore {
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         let coverage = self.coverage();
         let subject = ReadSubject::Step(id.clone());
         self.state.change(|state| {

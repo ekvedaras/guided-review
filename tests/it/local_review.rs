@@ -1,3 +1,7 @@
+use std::time::Instant;
+
+use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::code_source::CodeSource;
 use guided_review::config::Config;
@@ -11,7 +15,8 @@ use guided_review::pull_request::{RepoName, Sha};
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    CodeOpener, Destination, IdeCaveat, LocalOverview, NotInIde, Opened, PieceDiff, Review,
+    CodeOpener, Destination, Effect, IdeCaveat, Intent, LocalOverview, NotInIde, Opened, PieceDiff,
+    Review, ReviewVerdict, WindowMoment, WorkKind,
     ReviewStateFile,
     Side, WorkingCopy,
 };
@@ -340,5 +345,108 @@ fn without_an_ide_template_code_cannot_open_and_says_so() {
         Destination::NotOpenable {
             because: NotInIde::NoIdeTemplate
         }
+    );
+}
+
+#[test]
+fn the_window_title_names_the_repo_and_branch() {
+    let feature = Feature::with_work_in_progress();
+
+    assert_eq!(
+        feature.open().window_title(),
+        "Local changes · acme/shop · feature"
+    );
+}
+
+#[test]
+fn a_clone_with_no_remote_leaves_the_repo_out_of_the_title() {
+    let feature = Feature::with_work_in_progress();
+    feature.repo.git(&["remote", "remove", "origin"]);
+
+    assert_eq!(feature.open().window_title(), "Local changes · feature");
+}
+
+#[test]
+fn a_pr_keeps_its_url_and_title_in_the_window_title() {
+    let pull = PullRequest::changing_a_file();
+
+    assert_eq!(
+        pull.open().window_title(),
+        "https://github.com/acme/shop/pull/7: Orders cost two"
+    );
+}
+
+#[test]
+fn only_a_pr_can_be_opened_on_github() {
+    let feature = Feature::with_work_in_progress();
+    let local = feature.open();
+    let pr = PullRequest::changing_a_file().open();
+
+    assert!(!local.can_open_on_github());
+    assert_eq!(
+        local.decide(Intent::OpenOnGitHub, WindowMoment::default()),
+        Effect::Nothing
+    );
+    assert!(pr.can_open_on_github());
+}
+
+#[test]
+fn a_local_review_reads_and_sends_nothing_on_github_whatever_the_reviewer_does() {
+    let feature = Feature::with_work_in_progress();
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
+    let source = feature.source();
+    let mut review = feature.open();
+
+    review.pull_from_github();
+    let ran = drive_without_agents(&mut review, &github, &source, Instant::now());
+    review.tick_file(&file_path("README.md")).unwrap();
+    review.untick_file(&file_path("README.md")).unwrap();
+    review.tick_file(&file_path("notes.txt")).unwrap();
+    review.pull_from_github();
+    let ran_after = drive_without_agents(&mut review, &github, &source, Instant::now());
+    let finishing = review.finish_review_request(ReviewVerdict::Comment, "");
+
+    assert_eq!(ran, [WorkKind::CheckWorkingCopy]);
+    assert_eq!(ran_after, [WorkKind::CheckWorkingCopy]);
+    assert_eq!(review.next_due(), None);
+    assert!(!review.not_synced());
+    assert_eq!(review.sync_banner(), None);
+    assert!(finishing.is_err());
+    assert_eq!(sent.github_calls(), []);
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
+fn a_local_review_has_no_pr_description() {
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+
+    assert_eq!(review.pr_description(), None);
+    assert_eq!(review.overview_page().description, None);
+}
+
+#[test]
+fn file_ticks_are_saved_and_come_back_when_the_review_is_reopened() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+
+    review.tick_file(&file_path("src/cart.rs")).unwrap();
+    let reopened = feature.open();
+
+    let read: Vec<_> = reopened
+        .overview_page()
+        .files
+        .into_iter()
+        .map(|file| (file.path.to_string(), file.is_read))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            ("src/cart.rs".to_owned(), true),
+            ("notes.txt".to_owned(), false),
+            ("old.txt".to_owned(), false),
+            ("README.md".to_owned(), false),
+        ]
     );
 }

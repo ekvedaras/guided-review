@@ -15,15 +15,28 @@ use super::review_state::ReviewState;
 pub(super) struct ViewedSync {
     /// Why sync is switched off for this session; the app shows it as a banner.
     off_because: Option<String>,
+    /// A local review has no PR, so GitHub has no viewed marks of it: ticks stay ticks.
+    without_github_marks: bool,
 }
 
 impl ViewedSync {
+    pub(super) fn without_github_marks() -> Self {
+        Self {
+            off_because: None,
+            without_github_marks: true,
+        }
+    }
+
+    fn wishes_nothing(&self) -> bool {
+        self.without_github_marks || self.off_because.is_some()
+    }
+
     pub(super) fn banner(&self) -> Option<&str> {
         self.off_because.as_deref()
     }
 
     pub(super) fn not_synced(&self, state: &ReviewState) -> bool {
-        self.off_because.is_none() && !state.unsent_viewed().is_empty()
+        !self.wishes_nothing() && !state.unsent_viewed().is_empty()
     }
 
     pub(super) fn wish_after_tick(
@@ -32,7 +45,7 @@ impl ViewedSync {
         coverage: &Coverage,
         subject: &ReadSubject,
     ) {
-        if self.off_because.is_some() {
+        if self.wishes_nothing() {
             return;
         }
         let fully_ticked: Vec<&FilePath> = coverage
@@ -51,7 +64,7 @@ impl ViewedSync {
         coverage: &Coverage,
         subject: &ReadSubject,
     ) {
-        if self.off_because.is_some() {
+        if self.wishes_nothing() {
             return;
         }
         for file in coverage.files_of(subject) {
