@@ -132,24 +132,13 @@ fn space_of(place: &str) -> &str {
         .map_or(place, |(space, _tab)| space)
 }
 
-const PR_LABEL_KEY: &str = "gr.pr";
-const LOCAL_LABEL_KEY: &str = "gr.local";
-
-/// A PR keeps the label it has always had; a local change set is labelled by its subject key.
-fn label_key_of(subject: &ReviewSubject) -> &'static str {
-    match subject {
-        ReviewSubject::PullRequest(_) => PR_LABEL_KEY,
-        ReviewSubject::Local(_) => LOCAL_LABEL_KEY,
-    }
-}
-
 fn label_of(subject: &ReviewSubject) -> String {
-    format!("{}={subject}", label_key_of(subject))
+    format!("{}={subject}", subject.agent_label_key())
 }
 
 /// The subject a terminal is the tour agent of, read from its labels.
 fn subject_labelled_in(terminal: &Value) -> Option<ReviewSubject> {
-    [PR_LABEL_KEY, LOCAL_LABEL_KEY].into_iter().find_map(|key| {
+    ReviewSubject::AGENT_LABEL_KEYS.into_iter().find_map(|key| {
         at(terminal, &format!("/labels/{key}"))
             .as_str()?
             .parse()
@@ -225,7 +214,7 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn release(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
-        let emptied = format!("{}=", label_key_of(subject));
+        let emptied = format!("{}=", subject.agent_label_key());
         self.hc(&["label", terminal.as_str(), &emptied]).map(drop)
     }
 

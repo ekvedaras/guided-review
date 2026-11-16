@@ -88,7 +88,7 @@ impl From<OpenRequest> for OpenRequestOnTheWire {
         let is_a_pr = request
             .subject
             .parse::<ReviewSubject>()
-            .is_ok_and(|subject| subject.pull_request().is_some());
+            .is_ok_and(|subject| subject.has_github_page());
         Self {
             pr: is_a_pr.then(|| request.subject.clone()),
             subject: Some(request.subject),

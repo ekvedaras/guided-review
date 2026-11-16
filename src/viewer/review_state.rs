@@ -791,7 +791,7 @@ pub struct ReviewStateFile {
 impl ReviewStateFile {
     pub fn for_subject(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         Self {
-            local_key: subject.local().map(|_| subject.to_string()),
+            local_key: subject.local_key(),
             local_tours: subject.local().map(|_| {
                 [
                     Tour::basic_path_for(folders, subject),

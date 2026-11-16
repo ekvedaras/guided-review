@@ -32,6 +32,9 @@ pub struct WorkTreeRoot(PathBuf);
 pub struct BranchName(String);
 
 const LOCAL_KEY_PREFIX: &str = "local:";
+/// A PR keeps the label it has always had; a local change set is labelled by its subject key.
+const PR_LABEL_KEY: &str = "gr.pr";
+const LOCAL_LABEL_KEY: &str = "gr.local";
 /// The folder, under the tours folder and the state folder, that holds every local review's files.
 pub const LOCAL_FILES_FOLDER: &str = "local";
 /// Four bytes are the 8 hex characters of the short hash in a local review's folder name.
@@ -49,6 +52,78 @@ impl ReviewSubject {
         match self {
             Self::PullRequest(_) => None,
             Self::Local(change_set) => Some(change_set),
+        }
+    }
+
+    /// Whether the review has a PR page on GitHub to open.
+    pub const fn has_github_page(&self) -> bool {
+        matches!(self, Self::PullRequest(_))
+    }
+
+    /// Whether the review's threads live on GitHub, rather than in the review's state file.
+    pub const fn has_github_threads(&self) -> bool {
+        matches!(self, Self::PullRequest(_))
+    }
+
+    /// Whether a comment can join a pending review on GitHub, and be sent with a reviewer's note.
+    pub const fn has_pending_review(&self) -> bool {
+        matches!(self, Self::PullRequest(_))
+    }
+
+    /// Whether ticks are kept in step with the viewed marks GitHub keeps of a PR's files.
+    pub const fn syncs_viewed_marks(&self) -> bool {
+        matches!(self, Self::PullRequest(_))
+    }
+
+    /// A local review's comments are tasks for the agent that wrote the code, and it finishes by
+    /// sending them.
+    pub const fn comments_are_agent_tasks(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    /// Whether the agent of the review changes the code in its folder, rather than only reading it.
+    pub const fn agent_changes_code(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    /// The repo whose GitHub holds the review; a local change set holds none.
+    pub const fn github_repo(&self) -> Option<&RepoName> {
+        match self {
+            Self::PullRequest(pr) => Some(&pr.repo),
+            Self::Local(_) => None,
+        }
+    }
+
+    /// The key of a local change set, which names its files; `None` for a PR, whose files are named by
+    /// its URL.
+    pub fn local_key(&self) -> Option<String> {
+        self.local().map(|_| self.to_string())
+    }
+
+    /// What the review's agent is called where the reviewer reads it.
+    pub const fn agent_name(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => "Tour agent",
+            Self::Local(_) => "Agent",
+        }
+    }
+
+    /// The herdr label key that claims the review's agent.
+    pub const fn agent_label_key(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => PR_LABEL_KEY,
+            Self::Local(_) => LOCAL_LABEL_KEY,
+        }
+    }
+
+    /// Every herdr label key an agent of a review can be claimed by.
+    pub const AGENT_LABEL_KEYS: [&'static str; 2] = [PR_LABEL_KEY, LOCAL_LABEL_KEY];
+
+    /// Whose changed files a basic tour holds, in the words the reviewer reads.
+    pub const fn owner_of_changed_files(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => "the PR's",
+            Self::Local(_) => "the local change set's",
         }
     }
 

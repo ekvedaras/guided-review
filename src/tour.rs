@@ -398,7 +398,7 @@ impl TourPin {
 
     fn ensure_is_of(&self, subject: &ReviewSubject, path: &Path) -> anyhow::Result<()> {
         match &self.local {
-            Some(held) if subject.local().is_some() && *held != subject.to_string() => {
+            Some(held) if subject.local_key().is_some_and(|key| *held != key) => {
                 anyhow::bail!("{} is the tour of {held}, not of {subject}", path.display())
             }
             _ => Ok(()),

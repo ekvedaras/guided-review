@@ -720,7 +720,7 @@ impl HandOffs {
             reviewer_comment: next
                 .reviewer_comment
                 .clone()
-                .filter(|_| subject.pull_request().is_some()),
+                .filter(|_| subject.has_pending_review()),
             anyway: next.state == HandOffState::SendAnyway,
         })
     }

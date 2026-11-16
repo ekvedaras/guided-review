@@ -265,11 +265,7 @@ impl TourAgentState {
     /// What the sidebar says, in the words of what the subject's agent is: a PR's tour agent, a local
     /// change set's agent.
     pub fn line_for(&self, subject: &ReviewSubject) -> String {
-        let who = match subject {
-            ReviewSubject::PullRequest(_) => "Tour agent",
-            ReviewSubject::Local(_) => "Agent",
-        };
-        self.line_as(who)
+        self.line_as(subject.agent_name())
     }
 
     fn line_as(&self, who: &str) -> String {
@@ -696,7 +692,7 @@ impl TourAgents {
             }
         };
         // A PR's app-started agent only reads the PR; a change set's agent changes the code in its folder.
-        if subject.pull_request().is_some() {
+        if !subject.agent_changes_code() {
             match self.port.app_started() {
                 Ok(by_app) if by_app.iter().any(|agent| agent.terminal == terminal) => {
                     return OwnAgentHandOff::StartedByApp(terminal);
@@ -841,7 +837,7 @@ const NAME_HASH_BYTES: usize = 3;
 /// that wrote the code. A local review always has its basic tour, so its guided tour is written through
 /// `hand_writer_task`, which keeps that agent.
 fn refuse_replacing_the_agent_of_local(subject: &ReviewSubject) -> anyhow::Result<()> {
-    if subject.local().is_some() {
+    if subject.agent_changes_code() {
         bail!("the agent of a local change set is never replaced to write its guided tour");
     }
     Ok(())
@@ -876,7 +872,7 @@ pub enum WriterHandOver {
 /// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
 /// guided tour never replaces it on disk, so the agent writes a whole tour at the guided path.
 fn basic_writer_task(subject: &ReviewSubject) -> String {
-    if subject.local().is_some() {
+    if subject.agent_changes_code() {
         return change_set_writer_task(subject);
     }
     format!(

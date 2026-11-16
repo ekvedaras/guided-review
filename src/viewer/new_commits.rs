@@ -31,7 +31,7 @@ pub fn repin_tour(
     tour.save(tour_path)?;
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
     state_file.update(|state| state.record_repin(record, &result))?;
-    if subject.local().is_some() {
+    if !subject.has_github_threads() {
         LocalThreadStore::in_file(state_file.clone()).follow_to(source, new_head)?;
     }
     Ok((tour, result))

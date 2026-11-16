@@ -567,13 +567,13 @@ impl ReviewCore {
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
-        let code_host = match &subject {
-            ReviewSubject::PullRequest(pr) => CodeHost::GitHub(pr.repo.clone()),
-            ReviewSubject::Local(_) => CodeHost::LocalClone,
-        };
-        let viewed_sync = match &subject {
-            ReviewSubject::PullRequest(_) => ViewedSync::default(),
-            ReviewSubject::Local(_) => ViewedSync::without_github_marks(),
+        let code_host = subject
+            .github_repo()
+            .map_or(CodeHost::LocalClone, |repo| CodeHost::GitHub(repo.clone()));
+        let viewed_sync = if subject.syncs_viewed_marks() {
+            ViewedSync::default()
+        } else {
+            ViewedSync::without_github_marks()
         };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
@@ -737,17 +737,19 @@ impl ReviewCore {
 
     /// The send actions a comment box of this review offers; Ask agent is one more for a PR.
     pub fn send_modes(&self) -> &'static [SendMode] {
-        match &self.subject {
-            ReviewSubject::PullRequest(_) => &[SendMode::AddToReview, SendMode::CommentNow],
-            ReviewSubject::Local(_) => &SendMode::LOCAL,
+        if self.subject.comments_are_agent_tasks() {
+            &SendMode::LOCAL
+        } else {
+            &[SendMode::AddToReview, SendMode::CommentNow]
         }
     }
 
     /// A local review's boxes send tasks for its agent, a PR's send to GitHub.
     pub fn sending(&self) -> Sending {
-        match &self.subject {
-            ReviewSubject::PullRequest(_) => Sending::GitHub,
-            ReviewSubject::Local(_) => Sending::Tasks(&SendMode::LOCAL),
+        if self.subject.comments_are_agent_tasks() {
+            Sending::Tasks(&SendMode::LOCAL)
+        } else {
+            Sending::GitHub
         }
     }
 
@@ -1117,7 +1119,7 @@ impl ReviewCore {
 
     /// Whether the review has a PR page to open.
     pub fn can_open_on_github(&self) -> bool {
-        self.subject.pull_request().is_some()
+        self.subject.has_github_page()
     }
 
     pub fn summary(&self) -> &[String] {
@@ -1361,10 +1363,7 @@ impl ReviewCore {
             Place::Tour | Place::Step { .. } | Place::Piece { .. } | Place::Lines { .. } => None,
         };
         let named_file = file.map_or_else(String::new, |file| format!("\nFile: {file}"));
-        let reviewed = match subject {
-            ReviewSubject::PullRequest(_) => "the PR's",
-            ReviewSubject::Local(_) => "the local change set's",
-        };
+        let reviewed = subject.owner_of_changed_files();
         let basic_place = format!(
             "{place}{named_file}\nThe tour is a basic tour: {reviewed} changed files, with no tour file. \
              Read the changed code with `guided-review outline {subject}` and \
@@ -1891,7 +1890,9 @@ impl ReviewCore {
     /// A local review finishes with Send tasks, never with a review on GitHub: how many tasks it
     /// would send. `None` for a PR.
     pub fn finishes_with_send_tasks(&self) -> Option<usize> {
-        self.subject.local().map(|_| self.queued_tasks())
+        self.subject
+            .comments_are_agent_tasks()
+            .then(|| self.queued_tasks())
     }
 
     /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
@@ -2478,7 +2479,7 @@ impl ReviewCore {
 
     /// Only a PR has viewed marks on GitHub to keep in step with the ticks.
     fn want_viewed_synced(&mut self) {
-        if self.subject.pull_request().is_some() {
+        if self.subject.syncs_viewed_marks() {
             self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         }
     }
