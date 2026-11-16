@@ -58,7 +58,7 @@ fn opened_from_a_shell_the_only_claude_terminal_in_the_folder_or_below_it_is_the
     let fake = Arc::new(
         FakeTourAgent::new()
             .shell_in("t1", "/Users/me/Code/shop")
-            .claude_in("t2", "/Users/me/Code/shop/.claude/worktrees/agent-1")
+            .claude_in("t2", "/Users/me/Code/shop/src/viewer")
             .claude_in("t3", "/Users/me/Code/shop-2")
             .claude_in("t4", "/Users/me/Code"),
     );
@@ -263,19 +263,58 @@ fn an_ask_is_handed_to_the_change_sets_agent_even_when_the_app_started_it() {
         agents(&two_in_the_folder()).hand_to_own_agent(&local(), "do it"),
         OwnAgentHandOff::PickAnAgent
     );
+}
 
-    assert_eq!(
-        agents(&Arc::new(FakeTourAgent::new())).hand_to_own_agent(&local(), "do it"),
-        OwnAgentHandOff::NoAgentInFolder
+#[test]
+fn an_ask_with_no_agent_in_the_folder_starts_one_with_the_ask_as_its_task() {
+    let fake = Arc::new(FakeTourAgent::new());
+
+    let outcome = agents(&fake).hand_to_own_agent(&local(), "rename the discount");
+
+    assert!(
+        matches!(outcome, OwnAgentHandOff::Started(_)),
+        "{outcome:?}"
     );
+    let calls = fake.calls();
+    let [
+        TourAgentCall::Start {
+            folder, first_task, ..
+        },
+    ] = calls.as_slice()
+    else {
+        panic!("one start: {calls:?}");
+    };
+    assert_eq!(folder, std::path::Path::new("/Users/me/Code/shop"));
+    assert!(first_task.contains("rename the discount"), "{first_task}");
+    assert!(first_task.contains("do not push"), "{first_task}");
+}
+
+#[test]
+fn a_claude_in_a_nested_worktree_of_another_branch_is_not_the_folders_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let folder = temp.path().canonicalize().unwrap();
+    let nested = folder.join(".claude/worktrees/agent-1");
+    std::fs::create_dir_all(nested.join("src")).unwrap();
+    std::fs::write(nested.join(".git"), "gitdir: /elsewhere").unwrap();
+    let subject: ReviewSubject = format!("local:{}@feature/discounts", folder.display())
+        .parse()
+        .unwrap();
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .claude_in("t2", nested.join("src").to_str().unwrap())
+            .claude_in("t3", folder.to_str().unwrap()),
+    );
+
+    agents(&fake).claim_for_open(&subject, None).unwrap();
+
+    assert_eq!(fake.agents_of(&subject.to_string()), ["t3"]);
 }
 
 #[test]
 fn the_ask_panel_line_for_a_local_review_says_what_to_do_about_the_agent() {
-    assert!(
-        OwnAgentHandOff::NoAgentInFolder
-            .line()
-            .starts_with("Not handed: no agent works in this review's folder yet")
+    assert_eq!(
+        OwnAgentHandOff::Started(TerminalId::new("t9")).line(),
+        "Started an agent t9 in this review's folder with your Ask"
     );
     assert!(
         OwnAgentHandOff::PickAnAgent

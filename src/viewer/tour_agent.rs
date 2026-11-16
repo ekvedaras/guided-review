@@ -1,6 +1,6 @@
 use std::fmt;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
@@ -296,8 +296,8 @@ pub enum OwnAgentHandOff {
     /// Nothing was typed, for this reason.
     NotSent(String),
     NoAgent,
-    /// A local change set whose folder has no agent yet.
-    NoAgentInFolder,
+    /// A local change set whose folder had no agent, so one was started with the Ask as its task.
+    Started(TerminalId),
     /// A local change set whose folder has several agents and none is picked.
     PickAnAgent,
 }
@@ -314,7 +314,9 @@ impl OwnAgentHandOff {
             ),
             Self::NotSent(reason) => format!("Not handed: {reason}. Try again when it is free"),
             Self::NoAgent => format!("Not handed: this PR has no tour agent. {MAKE_YOURS}"),
-            Self::NoAgentInFolder => "Not handed: no agent works in this review's folder yet. Run `guided-review open` from your own Claude in it, or send a task to start one".to_owned(),
+            Self::Started(terminal) => {
+                format!("Started an agent {terminal} in this review's folder with your Ask")
+            }
             Self::PickAnAgent => "Not handed: several agents work in this review's folder. Pick one with Use this agent in the sidebar".to_owned(),
         }
     }
@@ -645,10 +647,9 @@ impl TourAgents {
             }
             TourAgentState::Choose(_) => return OwnAgentHandOff::PickAnAgent,
             TourAgentState::None | TourAgentState::Unknown => {
-                return if subject.local().is_some() {
-                    OwnAgentHandOff::NoAgentInFolder
-                } else {
-                    OwnAgentHandOff::NoAgent
+                return match subject.local() {
+                    Some(change_set) => self.start_with_ask(subject, change_set, text),
+                    None => OwnAgentHandOff::NoAgent,
                 };
             }
         };
@@ -669,6 +670,22 @@ impl TourAgents {
                 OwnAgentHandOff::NotSent(format!("{terminal} is still starting"))
             }
             Ok(SendOutcome::NoAgent) => OwnAgentHandOff::NoAgent,
+            Err(error) => OwnAgentHandOff::NotSent(format!("{error:#}")),
+        }
+    }
+
+    fn start_with_ask(
+        &self,
+        subject: &ReviewSubject,
+        change_set: &LocalChangeSet,
+        text: &str,
+    ) -> OwnAgentHandOff {
+        let first_task = format!(
+            "{}\n\nThe reviewer's first task:\n{text}",
+            change_set_first_task(subject, change_set)
+        );
+        match self.launch(subject, subject, first_task) {
+            Ok(terminal) => OwnAgentHandOff::Started(terminal),
             Err(error) => OwnAgentHandOff::NotSent(format!("{error:#}")),
         }
     }
@@ -714,9 +731,19 @@ impl TourAgents {
     }
 }
 
+/// Whether a terminal works in the folder itself or a plain subfolder of it. A subfolder that is the root
+/// of another git worktree (`.git` there) belongs to that worktree's branch, not to the folder's.
+fn works_in(cwd: &Path, folder: &Path) -> bool {
+    cwd.starts_with(folder)
+        && cwd
+            .ancestors()
+            .take_while(|ancestor| *ancestor != folder)
+            .all(|ancestor| !ancestor.join(".git").exists())
+}
+
 fn claude_terminals_in(live: &[LiveTerminal], change_set: &LocalChangeSet) -> Vec<TerminalId> {
     live.iter()
-        .filter(|live| live.runs_claude && live.cwd.starts_with(change_set.folder().as_path()))
+        .filter(|live| live.runs_claude && works_in(&live.cwd, change_set.folder().as_path()))
         .map(|live| live.terminal.clone())
         .collect()
 }
