@@ -275,7 +275,7 @@ impl LocalWorkTree {
     /// Compares the files on disk with an index of the snapshot's own, so nothing is written to the
     /// clone's objects, as making a tree of the files would.
     fn files_match(&self, snapshot: &Sha) -> Result<bool, OpenRefusal> {
-        let index = TemporaryIndex::in_git_dir_of(self)?;
+        let index = TemporaryIndex::new();
         let env = [("GIT_INDEX_FILE", index.path().as_os_str())];
         self.git_with(&env, &["read-tree", snapshot.as_str()])?;
         // Stat data first, or every file would count as changed; it fails while files differ, which the
@@ -392,7 +392,7 @@ impl LocalWorkTree {
     /// The tree id of the files on disk: `HEAD`'s tree with every change and every untracked file that
     /// is not ignored, written from an index of its own so the reviewer's index is never opened.
     fn working_tree_id(&self) -> Result<String, OpenRefusal> {
-        let index = TemporaryIndex::in_git_dir_of(self)?;
+        let index = TemporaryIndex::new();
         let env = [("GIT_INDEX_FILE", index.path().as_os_str())];
         self.git_with(&env, &["read-tree", "HEAD"])?;
         self.git_with(&env, &["add", "--all"])?;
@@ -476,19 +476,19 @@ pub fn snapshot_ref(change_set: &LocalChangeSet) -> String {
     )
 }
 
-/// An index file in the clone's own git folder, gone when this is dropped.
+/// An index file in the system's temp folder, gone when this is dropped: the clone's own git folder
+/// is never written to.
 struct TemporaryIndex(PathBuf);
 
 impl TemporaryIndex {
-    fn in_git_dir_of(work_tree: &LocalWorkTree) -> Result<Self, OpenRefusal> {
+    fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let git_dir = work_tree.git(&["rev-parse", "--absolute-git-dir"])?;
         let name = format!(
             "guided-review-index-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         );
-        Ok(Self(Path::new(&git_dir).join(name)))
+        Self(std::env::temp_dir().join(name))
     }
 
     fn path(&self) -> &Path {
@@ -498,7 +498,7 @@ impl TemporaryIndex {
 
 impl Drop for TemporaryIndex {
     fn drop(&mut self) {
-        // A leftover file is only clutter in the git folder, and a drop cannot report it.
+        // A leftover file is only clutter in the temp folder, and a drop cannot report it.
         std::fs::remove_file(&self.0).ok();
     }
 }

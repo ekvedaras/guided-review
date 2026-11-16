@@ -151,6 +151,21 @@ fn a_deleted_branch_says_it_is_gone_and_offers_drop_review() {
     );
 }
 
+#[test]
+fn looking_at_the_folder_writes_nothing_in_its_git_folder() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    feature.repo.write("notes.txt", "a new file\n");
+    let git_folder = feature.repo.path().join(".git");
+    let modified = || std::fs::metadata(&git_folder).unwrap().modified().unwrap();
+    let before = modified();
+
+    check_on_focus(&mut opened, Instant::now());
+
+    assert_eq!(news(&opened.review), Some(changed_on_disk()));
+    assert_eq!(modified(), before, "a file came and went in .git");
+}
+
 fn readme_caveat(opened: &mut OpenedReview, feature: &Feature) -> Option<IdeCaveat> {
     let config = Config::from_text("ide = \"idea://open?file={path}&line={line}\"").unwrap();
     let ide = Ide::for_clone(
