@@ -33,6 +33,7 @@ mod basic_review_finish;
 mod basic_ticks;
 mod basic_tour;
 mod change_set_agent;
+mod changed_on_disk;
 mod check;
 mod clone_offer;
 mod code_links;

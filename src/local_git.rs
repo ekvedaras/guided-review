@@ -8,9 +8,9 @@ use anyhow::{Context, bail};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::file_path::FilePath;
-use crate::local_work_tree::LocalWorkTree;
+use crate::local_work_tree::{LocalWorkTree, OnDisk};
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
-use crate::review_subject::WorkTreeRoot;
+use crate::review_subject::{LocalChangeSet, WorkTreeRoot};
 
 /// Why a folder set as a repo's clone cannot be used as one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,5 +252,18 @@ impl CodeSource for LocalGit {
         let uncommitted = self.git(&["status", "--porcelain", "--untracked-files=no"]);
         checked_out.is_ok_and(|sha| sha == *head)
             && uncommitted.is_ok_and(|status| status.is_empty())
+    }
+
+    fn change_set_on_disk(
+        &self,
+        change_set: &LocalChangeSet,
+        snapshot: &Sha,
+    ) -> anyhow::Result<OnDisk> {
+        match &self.working_tree_rule {
+            WorkingTreeRule::SameTreeAs(work_tree) => Ok(work_tree.on_disk(change_set, snapshot)?),
+            WorkingTreeRule::PinnedHeadCheckedOut => {
+                bail!("the clone of a PR has no local change set")
+            }
+        }
     }
 }

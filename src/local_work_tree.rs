@@ -51,7 +51,20 @@ pub struct Snapshot {
     pub head: Sha,
 }
 
-/// The git adapter of a local review: the one place that runs git in the reviewer's own working tree.
+/// What the folder of a local review is now, against the snapshot the review reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OnDisk {
+    /// On the review's branch, at the `HEAD` the snapshot was made over, with the snapshot's files.
+    Same,
+    /// On the review's branch, but it got commits or its files changed: a new snapshot would differ.
+    Changed,
+    /// On another branch, or on no branch (`None`) after a checkout of a commit.
+    OnAnotherBranch(Option<BranchName>),
+    /// The review's branch, or its whole folder, is no more.
+    BranchGone,
+}
+
+/// The git adapter of a local review:the one place that runs git in the reviewer's own working tree.
 /// It never changes their index, working tree, branches or stash; its only write is the snapshot's ref
 /// and the commit object behind it.
 #[derive(Debug, Clone)]
@@ -199,10 +212,51 @@ impl LocalWorkTree {
     /// Whether the files on disk, untracked ones included and ignored ones left out, are the snapshot's
     /// tree. `false` when git cannot tell, as for any `CodeSource` that cannot open a file in an IDE.
     pub fn working_tree_matches(&self, snapshot: &Sha) -> bool {
-        match (self.working_tree_id(), self.tree_of(snapshot.as_str())) {
-            (Ok(on_disk), Ok(snapshot_tree)) => on_disk == snapshot_tree,
-            _ => false,
+        self.files_match(snapshot).unwrap_or(false)
+    }
+
+    /// Compares the files on disk with an index of the snapshot's own, so nothing is written to the
+    /// clone's objects, as making a tree of the files would.
+    fn files_match(&self, snapshot: &Sha) -> Result<bool, OpenRefusal> {
+        let index = TemporaryIndex::in_git_dir_of(self)?;
+        let env = [("GIT_INDEX_FILE", index.path().as_os_str())];
+        self.git_with(&env, &["read-tree", snapshot.as_str()])?;
+        // Stat data first, or every file would count as changed; it fails while files differ, which the
+        // comparison after it tells.
+        self.git_with(&env, &["update-index", "-q", "--refresh"])
+            .ok();
+        let tracked_same = self.git_says_yes(&env, &["diff-files", "--quiet"])?;
+        let untracked =
+            self.git_with(&env, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+        Ok(tracked_same && untracked.is_empty())
+    }
+
+    /// Where the folder is against `snapshot`, found without writing anything to the clone.
+    pub fn on_disk(
+        &self,
+        change_set: &LocalChangeSet,
+        snapshot: &Sha,
+    ) -> Result<OnDisk, OpenRefusal> {
+        let branch = change_set.branch();
+        let branch_ref = format!("refs/heads/{}", branch.as_str());
+        if !self.root.as_path().is_dir()
+            || self
+                .git(&["rev-parse", "--verify", "--quiet", &branch_ref])
+                .is_err()
+        {
+            return Ok(OnDisk::BranchGone);
         }
+        let checked_out = self
+            .git(&["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .ok()
+            .map(|name| BranchName::new(&name).map_err(|error| self.failed(error)))
+            .transpose()?;
+        if checked_out.as_ref() != Some(branch) {
+            return Ok(OnDisk::OnAnotherBranch(checked_out));
+        }
+        let same = self.head()? == self.branch_head_under(snapshot)?
+            && self.working_tree_matches(snapshot);
+        Ok(if same { OnDisk::Same } else { OnDisk::Changed })
     }
 
     /// What the overview shows, as of the snapshot in `tips`: the branch's commits are those under the
@@ -294,6 +348,26 @@ impl LocalWorkTree {
 
     fn git_with(&self, env: &[(&str, &OsStr)], args: &[&str]) -> Result<String, OpenRefusal> {
         Ok(self.git_run(env, args)?.trim_end_matches('\n').to_owned())
+    }
+
+    /// For a command whose exit status is its answer: 0 is yes, 1 is no, anything else failed.
+    fn git_says_yes(&self, env: &[(&str, &OsStr)], args: &[&str]) -> Result<bool, OpenRefusal> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(self.root.as_path())
+            .args(args)
+            .envs(env.iter().copied())
+            .output()
+            .map_err(|error| self.failed(error))?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(self.failed(format!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))),
+        }
     }
 
     fn git_untrimmed(&self, args: &[&str]) -> Result<String, OpenRefusal> {

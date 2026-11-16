@@ -6,7 +6,9 @@ use std::thread;
 
 use crate::code_source::{BlobInfo, CodeSource, FileAt, FileDiff};
 use crate::file_path::FilePath;
+use crate::local_work_tree::OnDisk;
 use crate::pull_request::Sha;
+use crate::review_subject::LocalChangeSet;
 
 const PARALLEL_READS: usize = 8;
 
@@ -74,6 +76,14 @@ impl CodeSource for CachedCodeSource {
 
     fn working_tree_is_at(&self, head: &Sha) -> bool {
         self.source.working_tree_is_at(head)
+    }
+
+    fn change_set_on_disk(
+        &self,
+        change_set: &LocalChangeSet,
+        snapshot: &Sha,
+    ) -> anyhow::Result<OnDisk> {
+        self.source.change_set_on_disk(change_set, snapshot)
     }
 
     fn local_clone(&self) -> Option<&Path> {

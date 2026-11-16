@@ -7,7 +7,8 @@ use crate::viewer::hand_offs::{AgentReplied, HandOffId};
 use crate::viewer::problems::Read;
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
-    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, Work, WorkKind, WorkOutcome,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
+    WorkKind, WorkOutcome,
 };
 
 impl Review {
@@ -32,7 +33,7 @@ impl Review {
     /// The window came to the front, or the review opened: GitHub and the clone are read again,
     /// and what waits to go to GitHub is sent.
     pub fn pull_from_github(&mut self) {
-        for kind in WorkKind::PULLS_FROM_GITHUB {
+        for kind in WorkKind::READ_AGAIN_ON_FOCUS {
             self.work_mut().want(kind);
         }
     }
@@ -45,7 +46,15 @@ impl ReviewCore {
         let pr = || self.subject.pull_request().cloned();
         Some(match kind {
             WorkKind::CheckPrHead => Job::CheckPrHead(pr()?),
-            WorkKind::CheckWorkingCopy => Job::CheckWorkingCopy(self.head.clone()),
+            WorkKind::CheckWorkingTree => Job::CheckWorkingTree {
+                change_set: self.subject.local()?.clone(),
+                snapshot: self.head.clone(),
+            },
+            // A local review learns it from the look at its folder.
+            WorkKind::CheckWorkingCopy => {
+                pr()?;
+                Job::CheckWorkingCopy(self.head.clone())
+            }
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
@@ -88,6 +97,16 @@ impl ReviewCore {
         match done {
             Done::PrHead(Ok(tips)) => self.pr_head_is(tips.head),
             Done::PrHead(Err(error)) => self.could_not_read(Read::PrHead, &error),
+            Done::WorkingTree(on_disk) => {
+                match on_disk {
+                    Ok(on_disk) => self.working_tree_is(on_disk),
+                    Err(error) => {
+                        eprintln!("could not look at the folder of {}: {error}", self.subject)
+                    }
+                }
+                self.work
+                    .want_in(WorkKind::CheckWorkingTree, WORKING_TREE_RECHECK);
+            }
             Done::WorkingCopy(is_at) => self.working_copy_is(WorkingCopy::of(is_at)),
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();

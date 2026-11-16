@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
+use crate::local_work_tree::OnDisk;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
-use crate::review_subject::ReviewSubject;
+use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
 use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
@@ -26,11 +27,14 @@ pub const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 pub const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 /// How long to wait before looking again at a link to herdr that is off.
 pub const AGENT_LINK_RECHECK: Duration = Duration::from_secs(30);
+/// How often a local review's folder is looked at again while the review is open.
+pub const WORKING_TREE_RECHECK: Duration = Duration::from_secs(30);
 
 /// The kinds of work, in the order due work of several kinds starts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkKind {
     CheckPrHead,
+    CheckWorkingTree,
     CheckWorkingCopy,
     PullPrDescription,
     SyncViewed,
@@ -55,9 +59,11 @@ enum WhileRunning {
 }
 
 impl WorkKind {
-    /// What a window coming to the front reads and sends again.
-    pub(super) const PULLS_FROM_GITHUB: [Self; 9] = [
+    /// What a window coming to the front reads and sends again. A review turns each into work only
+    /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 10] = [
         Self::CheckPrHead,
+        Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
         Self::PullPrDescription,
         Self::SyncViewed,
@@ -76,6 +82,7 @@ impl WorkKind {
             | Self::DeliverHandOff
             | Self::CheckAgentLink => WhileRunning::IsDropped,
             Self::CheckPrHead
+            | Self::CheckWorkingTree
             | Self::CheckWorkingCopy
             | Self::PullPrDescription
             | Self::PullThreads
@@ -205,6 +212,10 @@ pub struct Work {
 
 pub(super) enum Job {
     CheckPrHead(PullRequestUrl),
+    CheckWorkingTree {
+        change_set: LocalChangeSet,
+        snapshot: Sha,
+    },
     CheckWorkingCopy(Sha),
     PullPrDescription(PullRequestUrl),
     SyncViewed(SyncRequest),
@@ -228,6 +239,7 @@ impl Job {
     fn kind(&self) -> WorkKind {
         match self {
             Self::CheckPrHead(_) => WorkKind::CheckPrHead,
+            Self::CheckWorkingTree { .. } => WorkKind::CheckWorkingTree,
             Self::CheckWorkingCopy(_) => WorkKind::CheckWorkingCopy,
             Self::PullPrDescription(_) => WorkKind::PullPrDescription,
             Self::SyncViewed(_) => WorkKind::SyncViewed,
@@ -253,6 +265,15 @@ impl Work {
         let github = ports.github;
         let done = match self.job {
             Job::CheckPrHead(pr) => Done::PrHead(github.pull_request_tips(&pr)),
+            Job::CheckWorkingTree {
+                change_set,
+                snapshot,
+            } => Done::WorkingTree(
+                ports
+                    .source
+                    .change_set_on_disk(&change_set, &snapshot)
+                    .map_err(|error| format!("{error:#}")),
+            ),
             Job::CheckWorkingCopy(head) => {
                 Done::WorkingCopy(ports.source.working_tree_is_at(&head))
             }
@@ -301,6 +322,7 @@ pub struct WorkOutcome {
 
 pub(super) enum Done {
     PrHead(Result<ChangeTips, GitHubError>),
+    WorkingTree(Result<OnDisk, String>),
     WorkingCopy(bool),
     PrDescription(Result<String, GitHubError>),
     SyncViewed(SyncOutcome),

@@ -10,6 +10,7 @@ use std::time::Instant;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::local_facts::{LocalChange, LocalFacts};
+use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
@@ -30,6 +31,7 @@ use super::comments::{
     SendMode,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
+use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
@@ -285,6 +287,8 @@ pub struct ReviewCore {
     head: Sha,
     /// Unknown until GitHub answers.
     pr_head: Option<Sha>,
+    /// A local review's folder against the snapshot it reads; unknown until the folder is looked at.
+    on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
     files: Vec<ChangedFile>,
@@ -606,6 +610,7 @@ impl ReviewCore {
             base,
             head,
             pr_head: None,
+            on_disk: None,
             last_review: None,
             files,
             steps_in_reading_order,
@@ -775,6 +780,18 @@ impl ReviewCore {
                 tour_head: self.head.clone(),
                 pr_head: pr_head.clone(),
             })
+    }
+
+    /// What a local review's folder is against its snapshot, once the folder was looked at.
+    pub fn working_tree_is(&mut self, on_disk: OnDisk) {
+        self.working_copy = WorkingCopy::of(on_disk == OnDisk::Same);
+        self.on_disk = Some(on_disk);
+    }
+
+    /// The line the sidebar shows when a local review's folder is not its snapshot any more.
+    pub fn disk_news(&self) -> Option<DiskNews> {
+        let change_set = self.subject.local()?;
+        DiskNews::of(self.on_disk.as_ref()?, change_set.branch())
     }
 
     /// The overview's facts: the PR's title and description, the counts and the files.

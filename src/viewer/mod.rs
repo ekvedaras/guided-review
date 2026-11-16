@@ -18,6 +18,7 @@ mod comment_desk;
 mod comments;
 mod diff_display;
 mod diff_fence;
+mod disk_news;
 mod display_options;
 mod file_block;
 mod file_tree;
@@ -103,6 +104,7 @@ pub use diff_display::{
     hidden_lines_after, hidden_lines_before,
 };
 pub use diff_fence::{FenceLine, fence_lines};
+pub use disk_news::{DiskNews, DiskOffer};
 pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
@@ -191,6 +193,6 @@ pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
 pub use work_agenda::{
-    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind,
-    WorkOutcome, WorkPorts,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, WORKING_TREE_RECHECK, Work,
+    WorkKind, WorkOutcome, WorkPorts,
 };
