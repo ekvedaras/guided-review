@@ -303,8 +303,8 @@ impl CommentDesk {
         })
     }
 
-    /// The box shows as sending, with no problem, until the outcome is applied. `None` when there
-    /// is no such draft.
+    /// The box shows as sending, with no problem, until the outcome is applied, and the keys go
+    /// back to the page. `None` when there is no such draft.
     pub(super) fn start_sending(
         &mut self,
         state: &ReviewState,
@@ -314,6 +314,7 @@ impl CommentDesk {
         (tour_head, pr): (&Sha, &PullRequestUrl),
     ) -> Option<CommentRequest> {
         let draft = state.draft_at(place)?.clone();
+        self.stop_composing(place);
         self.boxes.sending.insert(place.clone());
         self.boxes.send_problems.remove(place);
         Some(CommentRequest::new(
@@ -360,14 +361,12 @@ impl CommentDesk {
         result
     }
 
-    /// A sent or queued comment closes the box; any other keeps it, with why.
+    /// A sent or queued comment closes the box; any other keeps it, with why, until a click on it
+    /// gives it the keys again.
     fn show_landing(&mut self, place: &CommentPlace, result: &anyhow::Result<CommentResult>) {
         self.boxes.sending.remove(place);
         let problem = match result {
-            Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
-                self.boxes.composing = None;
-                return;
-            }
+            Ok(CommentResult::Sent | CommentResult::Queued(_)) => return,
             Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal.clone()),
             Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.as_str().into()),
             Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
@@ -509,7 +508,7 @@ impl CommentDesk {
     ) -> anyhow::Result<()> {
         match text_box {
             TextBox::Draft(place) => {
-                if state.draft_at(place).is_some() {
+                if state.draft_at(place).is_some() && !self.boxes.sending.contains(place) {
                     self.boxes.composing = Some(place.clone());
                 }
                 Ok(())

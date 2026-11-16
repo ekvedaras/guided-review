@@ -282,6 +282,23 @@ fn a_comment_shows_as_sending_while_it_is_on_its_way_to_github() {
 }
 
 #[test]
+fn a_comment_on_its_way_to_github_gives_the_keys_back_even_to_a_click_on_its_box() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    let place = written_comment_box(&mut review);
+
+    let request = review
+        .start_sending(&place, SendMode::AddToReview, Audience::Author)
+        .unwrap();
+
+    assert_eq!(review.composing(), None);
+    review.open_box(&TextBox::Draft(place)).unwrap();
+    assert_eq!(review.composing(), None);
+    review.apply_comment(request.run(&github)).unwrap();
+}
+
+#[test]
 fn a_sent_or_queued_comment_closes_its_box() {
     for (fault, result) in [
         (None, "sent"),
@@ -305,7 +322,7 @@ fn a_sent_or_queued_comment_closes_its_box() {
 }
 
 #[test]
-fn a_comment_github_rejects_keeps_its_box_with_the_reason() {
+fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_the_keys_stay_with_the_page() {
     let pull = Pull::new();
     let github = pull.github();
     github.inject(GitHubFault::NewThreadsAnswerNull);
@@ -316,10 +333,11 @@ fn a_comment_github_rejects_keeps_its_box_with_the_reason() {
         .send_comment(&place, SendMode::AddToReview, &github)
         .unwrap();
 
-    let Some((BoxState::Composing, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
+    let Some((BoxState::Idle, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
     else {
         panic!("{:?}", state_of(&review, &place));
     };
+    assert_eq!(review.composing(), None);
     assert_eq!(review.text_of(&TextBox::Draft(place)), Some("why ten?"));
 }
 
@@ -337,7 +355,7 @@ fn a_refused_comment_keeps_its_box_with_the_refusal_until_it_is_sent_again() {
     assert_eq!(
         state_of(&review, &place),
         Some((
-            BoxState::Composing,
+            BoxState::Idle,
             Some(CommentProblem::Refused(CommentRefusal::TourIsOld))
         ))
     );

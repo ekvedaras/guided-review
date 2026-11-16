@@ -189,6 +189,7 @@ pub struct OneStepLayout {
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
     _use_as_comment_subscription: Subscription,
+    _keys_back_to_page: Subscription,
 }
 
 impl OneStepLayout {
@@ -237,6 +238,11 @@ impl OneStepLayout {
                 this.reopened(cx);
             }),
         ];
+        // A text box that is sent, given up or saved goes, and with it what had the focus; gpui
+        // then dispatches keys from the window's root, outside this layout's key context.
+        let keys_back_to_page = cx.on_focus_lost(window, |this, window, cx| {
+            window.focus(&this.focus, cx);
+        });
         let diagrams = Self::new_diagrams(cx);
         let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
         let switching = cx.global::<PrSwitching>().clone();
@@ -383,6 +389,7 @@ impl OneStepLayout {
             ide,
             _session_subscriptions: session_subscriptions,
             _use_as_comment_subscription: use_as_comment_subscription,
+            _keys_back_to_page: keys_back_to_page,
         }
     }
 
@@ -747,9 +754,13 @@ impl OneStepLayout {
         };
         let actions = ComposerActions {
             on_focus: self.on_compose(place, cx, |this, place, window, cx| {
-                this.session
-                    .update(cx, |session, cx| session.compose(place, cx));
-                window.focus(&this.composer_focus, cx);
+                let takes_keys = this.session.update(cx, |session, cx| {
+                    session.compose(place.clone(), cx);
+                    session.review().composing() == Some(&place)
+                });
+                if takes_keys {
+                    window.focus(&this.composer_focus, cx);
+                }
             }),
             on_type,
             on_stop: self.on_compose(place, cx, |this, place, window, cx| {
