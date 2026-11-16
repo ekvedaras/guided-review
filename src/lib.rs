@@ -31,6 +31,7 @@ pub mod pieces;
 pub mod platform;
 pub mod pull_request;
 pub mod repin;
+pub mod review_subject;
 pub mod show;
 pub mod summary_instructions;
 pub mod symbols;

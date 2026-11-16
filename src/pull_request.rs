@@ -59,7 +59,7 @@ impl fmt::Display for RepoName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PullRequestUrl {
     pub repo: RepoName,
     pub number: u64,
