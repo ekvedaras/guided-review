@@ -321,16 +321,17 @@ impl ActivePr {
         Some((self.build(pr.clone()), pr))
     }
 
-    /// The window still applies the reply to the session it shows. The reopen's build may have read the
-    /// state file before that session saved it, so the reply is kept to apply again in the new window.
-    /// Applying a reply twice is harmless; it only sets the hand-off's state.
-    pub fn hold_reply_for_reopen(
+    /// The reply is applied where it lands now: to the session on show, or to the state file by the
+    /// command. A build of the PR may have read the state file before that, and its first save would
+    /// write the stale hand-off back, so the reply is kept to apply again in the new window. Applying a
+    /// reply twice is harmless; it only sets the hand-off's state.
+    pub fn hold_reply_while_building(
         &mut self,
         pr: &ReviewSubject,
         hand_off: HandOffId,
         replied: &AgentReplied,
     ) {
-        if !self.is_reopening(pr) {
+        if !self.builds(pr) {
             return;
         }
         if let Some(build) = &mut self.building {
@@ -345,13 +346,16 @@ impl ActivePr {
     }
 
     fn is_reopening(&self, pr: &ReviewSubject) -> bool {
-        self.shown.as_ref() == Some(pr)
-            && self.building.as_ref().is_some_and(|build| &build.pr == pr)
+        self.shown.as_ref() == Some(pr) && self.builds(pr)
     }
 
-    /// A build of the PR that is reopening takes over the replies held for it.
+    fn builds(&self, pr: &ReviewSubject) -> bool {
+        self.building.as_ref().is_some_and(|build| &build.pr == pr)
+    }
+
+    /// A build of the PR that is being built already takes over the replies held for it.
     fn build(&mut self, pr: ReviewSubject) -> BuildTicket {
-        let held_replies = if self.is_reopening(&pr) {
+        let held_replies = if self.builds(&pr) {
             self.building
                 .take()
                 .map_or_default(|build| build.held_replies)

@@ -502,7 +502,7 @@ fn reopen_shown(screen: &SharedScreen, folders: &AppFolders, cx: &mut AsyncApp) 
 }
 
 /// Only the PR in the window is marked here, because its session holds the state it writes back. For
-/// any other PR the command marks the state file.
+/// any other PR the command marks the state file, and a build of it under way gets the reply again.
 fn mark_replied(
     screen: &SharedScreen,
     pr: String,
@@ -517,9 +517,10 @@ fn mark_replied(
     let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
     let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
     let Some(window) = window else {
-        if let Ok(replied) = pr.parse::<ReviewSubject>() {
+        if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
             active.update(cx, |active, cx| {
-                active.agent_replied(&replied);
+                active.agent_replied(&replied_pr);
+                active.hold_reply_while_building(&replied_pr, hand_off, replied);
                 cx.notify();
             });
         }
@@ -536,7 +537,7 @@ fn mark_replied(
         Ok(()) => {
             if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
                 active.update(cx, |active, _| {
-                    active.hold_reply_for_reopen(&replied_pr, hand_off, replied);
+                    active.hold_reply_while_building(&replied_pr, hand_off, replied);
                 });
             }
             Answer::HandOffAnswered { pr }

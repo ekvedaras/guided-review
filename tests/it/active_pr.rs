@@ -442,7 +442,7 @@ fn an_agent_reply_while_the_pr_reopens_is_kept_for_the_window_it_opens_in() {
     shown_after(&mut active, A);
     let (ticket, _) = active.reopen().unwrap();
 
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
 
     assert_eq!(
@@ -453,13 +453,30 @@ fn an_agent_reply_while_the_pr_reopens_is_kept_for_the_window_it_opens_in() {
 }
 
 #[test]
+fn an_agent_reply_while_a_switch_builds_its_review_is_kept_for_the_window_it_opens_in() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let OpenDecision::Build(ticket) = active.request(pr(B), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+
+    active.hold_reply_while_building(&pr(B), hand_off("h1"), &AgentReplied::default());
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(
+        active.take_replies_for_reopened(),
+        [(hand_off("h1"), AgentReplied::default())]
+    );
+}
+
+#[test]
 fn an_agent_reply_is_kept_only_while_its_pr_reopens() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
     let (ticket, _) = active.reopen().unwrap();
 
-    active.hold_reply_for_reopen(&pr(B), hand_off("h2"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(B), hand_off("h2"), &AgentReplied::default());
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
 
     assert_eq!(active.take_replies_for_reopened(), []);
@@ -470,7 +487,7 @@ fn replies_kept_for_a_reopen_go_with_it_when_it_fails() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
     let (failing, _) = active.reopen().unwrap();
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
     active.finished(failing, Err::<(), _>(anyhow::anyhow!("clone is gone")));
 
     let (ticket, _) = active.reopen().unwrap();
@@ -484,7 +501,7 @@ fn replies_kept_for_a_reopen_go_with_it_when_another_pr_wins() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
     active.reopen().unwrap();
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
 
     shown_after(&mut active, B);
 
@@ -496,7 +513,7 @@ fn replies_kept_for_a_reopen_stay_kept_when_the_pr_is_built_again() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
     active.reopen().unwrap();
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
 
     let (ticket, _) = active.reopen().unwrap();
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
