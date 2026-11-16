@@ -581,8 +581,12 @@ impl ReviewSession {
                 this.moving = None;
                 match moved {
                     Ok(()) => {
-                        let switching = cx.global::<PrSwitching>();
-                        (switching.dropped)(this.review.subject().clone());
+                        let switching = cx.global::<PrSwitching>().clone();
+                        let moved_from = this.review.subject().clone();
+                        switching.active.update(cx, |active, cx| {
+                            active.moved_away(&moved_from);
+                            cx.notify();
+                        });
                         (switching.show)(offer.pr.into());
                     }
                     Err(error) => {

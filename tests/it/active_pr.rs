@@ -130,6 +130,18 @@ fn a_dropped_review_is_shown_no_more_and_a_later_open_of_it_builds_it_anew() {
 }
 
 #[test]
+fn a_review_moved_away_from_is_forgotten_but_stays_on_screen_until_the_one_it_moved_to_opens() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.agent_replied(&pr(A));
+
+    active.moved_away(&pr(A));
+
+    assert_eq!(active.shown(), Some(&pr(A)));
+    assert!(!active.has_unseen_reply(&pr(A)));
+}
+
+#[test]
 fn a_drop_of_the_review_on_screen_goes_through_its_open_session_and_any_other_does_not() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);

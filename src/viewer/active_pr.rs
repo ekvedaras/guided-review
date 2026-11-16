@@ -206,16 +206,22 @@ impl ActivePr {
     /// The review's files are gone: it is shown no more, and nothing of it is remembered. True when it
     /// was the one on screen, whose window then shows something else.
     pub fn dropped(&mut self, subject: &ReviewSubject) -> bool {
-        self.forget_writing(subject);
-        if self.has_unseen_reply(subject) {
-            self.unseen_replies.retain(|unseen| unseen != subject);
-            self.remember();
-        }
+        self.moved_away(subject);
         let was_shown = self.shown.as_ref() == Some(subject);
         if was_shown {
             self.shown = None;
         }
         was_shown
+    }
+
+    /// The review moved to another, whose files took its place: nothing of it is remembered, yet it
+    /// stays on screen until the one it moved to opens, so the window never shows the switcher between.
+    pub fn moved_away(&mut self, subject: &ReviewSubject) {
+        self.forget_writing(subject);
+        if self.has_unseen_reply(subject) {
+            self.unseen_replies.retain(|unseen| unseen != subject);
+            self.remember();
+        }
     }
 
     /// True when a writing of the PR was on.
