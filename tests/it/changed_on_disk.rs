@@ -69,14 +69,21 @@ fn changed_on_disk() -> DiskNews {
 }
 
 #[test]
-fn a_folder_left_as_it_was_snapshotted_says_nothing_and_only_it_and_the_local_threads_are_read_on_focus()
+fn a_folder_left_as_it_was_snapshotted_says_nothing_and_only_it_the_branchs_pr_and_the_local_threads_are_read_on_focus()
  {
     let feature = Feature::with_work_in_progress();
     let mut opened = feature.open();
 
     let ran = check_on_focus(&mut opened, Instant::now());
 
-    assert_eq!(ran, [WorkKind::CheckWorkingTree, WorkKind::PullThreads]);
+    assert_eq!(
+        ran,
+        [
+            WorkKind::CheckWorkingTree,
+            WorkKind::LookUpPullOfBranch,
+            WorkKind::PullThreads
+        ]
+    );
     assert_eq!(news(&opened.review), None);
 }
 
