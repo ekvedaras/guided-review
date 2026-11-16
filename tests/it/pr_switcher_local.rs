@@ -390,3 +390,35 @@ fn a_local_row_whose_branch_has_an_open_pr_says_so_and_one_without_says_nothing(
     );
     assert_eq!(the_only_row(&without).local().unwrap().open_pr, None);
 }
+
+#[test]
+fn a_local_review_that_declined_the_move_to_its_open_pr_shows_no_chip_of_it() {
+    let repo = shop_on_feature();
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", "head", &sent).with_open_pull_from(
+        "feature",
+        SHOP_7,
+        "Add the cart",
+    );
+    let mut opened =
+        guided_review::open_review::open_review(&subject_of(&repo), repo.path(), &repo.folders())
+            .unwrap();
+    opened.review.pull_from_github();
+    crate::support::work::drive_without_agents(
+        &mut opened.review,
+        &github,
+        opened.source.as_ref(),
+        std::time::Instant::now(),
+    );
+    opened.review.decline_move().unwrap();
+
+    let rows = find_local_rows(
+        &repo.folders(),
+        &Config::default(),
+        &FakeTourAgent::new(),
+        &github,
+    );
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].open_pr, None);
+}

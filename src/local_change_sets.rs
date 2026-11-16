@@ -33,7 +33,10 @@ pub fn find_local_rows(
             .filter(|row| !reviewed.contains(&row.change_set)),
     );
     for row in &mut rows {
-        row.open_pr = open_pr_of(&row.change_set, pulls);
+        row.open_pr = open_pr_of(&row.change_set, pulls).filter(|pr| {
+            !ReviewStateFile::for_subject(folders, &ReviewSubject::from(row.change_set.clone()))
+                .has_declined_move_to(pr)
+        });
     }
     rows.sort_by_cached_key(|row| ReviewSubject::from(row.change_set.clone()).to_string());
     rows
