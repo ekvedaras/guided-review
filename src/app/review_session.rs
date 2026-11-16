@@ -1072,9 +1072,8 @@ impl ReviewSession {
             cx,
             move || agents.claim(&subject, &terminal),
             |this, claimed, cx| {
-                if let Err(error) = claimed {
-                    eprintln!("could not use the agent: {error:#}");
-                }
+                this.review.use_agent_result(claimed.as_ref().err());
+                this.show_problems(cx);
                 this.follow_tour_agent(cx);
             },
         ));

@@ -41,6 +41,8 @@ pub enum Problem {
     SwitchFailed(String),
     /// Show agent was clicked and the terminal did not come up.
     ShowAgentFailed(String),
+    /// Use this agent was clicked and the terminal could not be made the change set's agent.
+    UseAgentFailed(String),
     /// GitHub refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
     ReviewingMarkNotChanged(String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
@@ -82,6 +84,8 @@ pub enum ProblemKind {
     SwitchFailed,
     /// Cleared by the next Show agent that brings the terminal up.
     ShowAgentFailed,
+    /// Cleared by the next Use this agent that goes through.
+    UseAgentFailed,
     /// Cleared by the next change of the 👀 on the PR that goes through.
     ReviewingMarkNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
@@ -107,6 +111,7 @@ impl Problem {
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
+            Self::UseAgentFailed(_) => ProblemKind::UseAgentFailed,
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
             Self::FilesNotRead(_) => ProblemKind::FilesNotRead,
@@ -289,6 +294,9 @@ impl fmt::Display for Problem {
             Self::SwitchFailed(reason) => write!(formatter, "Not switched: {reason}"),
             Self::ShowAgentFailed(reason) => {
                 write!(formatter, "Could not show the agent: {reason}")
+            }
+            Self::UseAgentFailed(reason) => {
+                write!(formatter, "Could not use that agent: {reason}")
             }
             Self::ReviewingMarkNotChanged(reason) => write!(
                 formatter,

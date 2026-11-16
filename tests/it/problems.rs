@@ -174,3 +174,19 @@ fn a_failed_show_agent_is_listed_with_the_text_the_sidebar_always_gave_it() {
     review.clear_problem(ProblemKind::ShowAgentFailed);
     assert_eq!(review.problems(), []);
 }
+
+#[test]
+fn a_failed_use_this_agent_is_listed_and_the_next_one_that_works_clears_it() {
+    let (_repo, mut review) = open_review();
+
+    review.use_agent_result(Some(&anyhow::anyhow!("no terminal t2")));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(
+        problem.to_string(),
+        "Could not use that agent: no terminal t2"
+    );
+
+    review.use_agent_result(None);
+    assert_eq!(review.problems(), []);
+}

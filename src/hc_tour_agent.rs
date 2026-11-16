@@ -208,6 +208,8 @@ impl TourAgentPort for HcTourAgents {
                     terminal: TerminalId::new(at(terminal, "/address").as_str()?),
                     runs_claude: at(terminal, "/agent") == CLAUDE_AGENT,
                     space: space_of(at(terminal, "/where").as_str()?).to_owned(),
+                    // A terminal herdr gives no cwd is in no folder, so it is never taken for a change
+                    // set's agent: an empty path starts with no folder.
                     cwd: at(terminal, "/cwd").as_str().map_or_default(PathBuf::from),
                 })
             })

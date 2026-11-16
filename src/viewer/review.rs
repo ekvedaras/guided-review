@@ -718,6 +718,13 @@ impl ReviewCore {
         }
     }
 
+    pub fn use_agent_result(&mut self, failure: Option<&anyhow::Error>) {
+        match failure {
+            Some(error) => self.raise_problem(Problem::UseAgentFailed(format!("{error:#}"))),
+            None => self.clear_problem(ProblemKind::UseAgentFailed),
+        }
+    }
+
     pub fn show_agent_failed(&self) -> bool {
         self.problems
             .list()
