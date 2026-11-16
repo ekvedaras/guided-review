@@ -185,6 +185,7 @@ impl OpenedChangeSet {
     /// Makes the change set's basic tour now, from a new snapshot, unless a tour is on disk already; true
     /// when made. A review that exists opens as it is, so reopening never takes a second snapshot.
     pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
+        let _lock = self.lock_tour_and_ref()?;
         if ToursOnDisk::of(&self.folders, &self.subject()) != ToursOnDisk::None {
             return Ok(false);
         }
@@ -251,8 +252,8 @@ impl OpenedChangeSet {
         remove_if_there(&lock_path, std::fs::remove_file(&lock_path))
     }
 
-    /// Held by whatever moves the tour or the snapshot ref: Update in the app, `repin` in the CLI and
-    /// Drop review. Without it a second Update could save its tour between the first one's tour and
+    /// Held by whatever moves the tour or the snapshot ref: the first open, Update in the app, `repin`
+    /// in the CLI and Drop review. Without it a second Update could save its tour between the first one's tour and
     /// ref, and the ref would end on a snapshot the tour does not read.
     fn lock_tour_and_ref(&self) -> anyhow::Result<std::fs::File> {
         let path = self.tour_and_ref_lock_path();

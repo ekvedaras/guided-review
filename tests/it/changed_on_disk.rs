@@ -444,6 +444,43 @@ fn two_updates_at_once_leave_the_ref_on_the_snapshot_the_tour_reads() {
     }
 }
 
+/// Held as Update, `repin` or Drop review of the review hold it, from another process.
+fn hold_pin_lock(feature: &Feature) -> std::fs::File {
+    let path =
+        Tour::path_for(&feature.repo.folders(), &feature.subject()).with_extension("json.pin.lock");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let lock = std::fs::File::create(&path).unwrap();
+    lock.lock().unwrap();
+    lock
+}
+
+/// Two opens of one folder at once, as `guided-review open .` from two terminals: each takes a
+/// snapshot, and the one that saves its tour last must also be the one whose ref stays.
+#[test]
+fn an_open_waits_for_whoever_moves_the_tour_or_ref_so_the_ref_ends_on_the_snapshot_the_tour_reads()
+{
+    let feature = Feature::with_work_in_progress();
+    let held = hold_pin_lock(&feature);
+    let change_set = feature.subject().local().unwrap().clone();
+    let folders = feature.repo.folders();
+    let open = std::thread::spawn(move || {
+        OpenedChangeSet::new(&change_set, &folders)
+            .make_basic_tour_if_no_tour()
+            .unwrap()
+    });
+    std::thread::sleep(Duration::from_millis(500));
+
+    assert_eq!(refs_kept(&feature), Vec::<String>::new());
+    assert_eq!(
+        ToursOnDisk::of(&feature.repo.folders(), &feature.subject()),
+        ToursOnDisk::None
+    );
+
+    drop(held);
+    assert!(open.join().unwrap());
+    assert_eq!(snapshot_ref_target(&feature), tour_head(&feature));
+}
+
 #[test]
 fn update_refuses_a_tour_file_of_another_review_at_its_path_and_moves_nothing() {
     let feature = Feature::with_work_in_progress();
