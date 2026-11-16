@@ -1559,6 +1559,7 @@ impl OneStepLayout {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(
                         icon_label_button(
