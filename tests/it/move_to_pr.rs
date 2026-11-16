@@ -11,7 +11,7 @@ use guided_review::make_basic_tour::make_basic_tour;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::{BranchName, ReviewSubject};
-use guided_review::tour::ToursOnDisk;
+use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
     Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveOffer,
     PULL_OF_BRANCH_RETRY, PieceDiff, PrMover, PullOfBranch, PullsOfBranchPort, Resolution,
@@ -234,7 +234,7 @@ fn pr_state(feature: &Feature) -> guided_review::viewer::ReviewState {
 
 impl Feature {
     fn snapshot_head(&self) -> Sha {
-        guided_review::tour::BasicTour::load(&guided_review::tour::Tour::basic_path_for(
+        guided_review::tour::BasicTour::load(&Tour::basic_path_for(
             &self.repo.folders(),
             &self.subject,
         ))
@@ -279,6 +279,66 @@ fn moving_carries_the_tick_of_a_file_whose_code_is_the_same_and_shows_what_chang
     assert_eq!(
         state.file_read_before(&path("src/cart.rs")).unwrap().head,
         read_at
+    );
+}
+
+impl Feature {
+    /// The writer's guided tour in place of the basic one, pinned to the same snapshot, with a step of
+    /// the README and one of the rest.
+    fn with_a_guided_tour_of_the_readme_and_the_rest(&self) {
+        let folders = self.repo.folders();
+        let basic_path = Tour::basic_path_for(&folders, &self.subject);
+        let pin = guided_review::tour::BasicTour::load(&basic_path)
+            .unwrap()
+            .pin;
+        let mut tour = serde_json::to_value(&pin).unwrap();
+        let steps = serde_json::json!({
+            "title": "Cart",
+            "summary": ["A cart"],
+            "steps": [
+                {"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]},
+                {"id": "cart", "title": "Cart", "why": "w", "pieces": [{"rest": ""}]},
+            ],
+        });
+        tour.as_object_mut()
+            .unwrap()
+            .extend(steps.as_object().unwrap().clone());
+        std::fs::write(Tour::path_for(&folders, &self.subject), tour.to_string()).unwrap();
+        std::fs::remove_file(basic_path).unwrap();
+    }
+}
+
+#[test]
+fn moving_a_guided_local_review_carries_its_step_ticks_as_file_ticks_by_the_same_rule() {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let read_at = feature.snapshot_head();
+    feature.with_a_guided_tour_of_the_readme_and_the_rest();
+    ReviewStateFile::for_subject(&feature.repo.folders(), &feature.subject)
+        .update(|state| {
+            state.tick(&"readme".into(), &read_at);
+            state.tick(&"cart".into(), &read_at);
+        })
+        .unwrap();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+
+    PrMover::for_change_set(&feature.repo.folders(), feature.subject.local().unwrap())
+        .run(&offer_of(SHOP_7, "Add the cart"), &github)
+        .unwrap();
+
+    let state = pr_state(&feature);
+    assert_eq!(
+        state
+            .file_read_tick(&path("README.md"))
+            .map(|tick| &tick.head),
+        Some(&pr_head)
+    );
+    assert_eq!(state.file_read_tick(&path("src/cart.rs")), None);
+    assert_eq!(
+        state
+            .file_read_before(&path("src/cart.rs"))
+            .map(|tick| &tick.head),
+        Some(&read_at)
     );
 }
 

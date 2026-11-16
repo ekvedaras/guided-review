@@ -116,7 +116,11 @@ impl PrMover {
         );
         let files = pieces::cut(source, &pin.base, &pin.head)?;
         let in_the_pr = |path: &FilePath| files.iter().any(|file| file.path == *path);
-        let (kept, changed) = local_state.file_reads_after_repin();
+        let (mut kept, mut changed) = local_state.file_reads_after_repin();
+        let (steps_kept, steps_changed) =
+            local_state.step_reads_as_file_reads_after_repin(&repinned);
+        kept.extend(steps_kept);
+        changed.extend(steps_changed);
         // A file whose code is the same is read at the PR's head from here on, so its tick never needs
         // the snapshot, which nothing keeps once the local review is gone.
         let file_ticks: BTreeMap<FilePath, Sha> = kept

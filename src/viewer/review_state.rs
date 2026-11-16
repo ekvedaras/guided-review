@@ -461,6 +461,54 @@ impl ReviewState {
         )
     }
 
+    /// A guided tour's step reads after a re-pin, as file reads, so they carry by the rule file ticks
+    /// carry by. A file is read only when every step showing a piece of it was read; it stays ticked
+    /// when none of its pieces changed, and shows what changed since the step's read otherwise.
+    pub(super) fn step_reads_as_file_reads_after_repin(
+        &self,
+        repin: &Repin,
+    ) -> (BTreeMap<FilePath, Sha>, BTreeMap<FilePath, Sha>) {
+        #[derive(Default)]
+        struct FileOfSteps {
+            read_at: Option<Sha>,
+            has_unread_step: bool,
+            has_changed_piece: bool,
+        }
+        let mut files: BTreeMap<&FilePath, FileOfSteps> = BTreeMap::new();
+        for step in &repin.steps {
+            let read_at = self
+                .read_tick(&step.step)
+                .or_else(|| self.read_before(&step.step))
+                .map(|tick| tick.head.clone());
+            for piece in step
+                .pieces
+                .iter()
+                .filter(|piece| piece.status != RepinStatus::Gone)
+            {
+                let file = files.entry(piece.id.path()).or_default();
+                file.has_unread_step |= read_at.is_none();
+                file.has_changed_piece |=
+                    matches!(piece.status, RepinStatus::Changed | RepinStatus::New);
+                if file.read_at.is_none() {
+                    file.read_at.clone_from(&read_at);
+                }
+            }
+        }
+        let (mut kept, mut changed) = (BTreeMap::new(), BTreeMap::new());
+        for (path, file) in files {
+            let Some(read_at) = file.read_at.filter(|_| !file.has_unread_step) else {
+                continue;
+            };
+            let reads = if file.has_changed_piece {
+                &mut changed
+            } else {
+                &mut kept
+            };
+            reads.insert(path.clone(), read_at);
+        }
+        (kept, changed)
+    }
+
     /// The hand-over of a local review's move to this PR. The PR's review may have gone on since the
     /// move was worked out, or a first try may have saved already, so a mark the PR's state has is kept
     /// and a draft it has already is never written twice.
