@@ -221,11 +221,15 @@ const BUILD: &str = "test-build";
 impl Feature {
     /// `guided-review agent-reply <local key> h0 …`, as the agent runs it in its terminal.
     fn agent_reply(&self, args: &[&str]) -> Run {
+        self.agent_reply_to("h0", args)
+    }
+
+    fn agent_reply_to(&self, hand_off: &str, args: &[&str]) -> Run {
         let github = ServedGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
         let key = self.key();
         let run = GuidedReview::new(&self.repo, &github)
             .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
-            .run(&[&["agent-reply", key.as_str(), "h0"], args].concat());
+            .run(&[&["agent-reply", key.as_str(), hand_off], args].concat());
         assert!(run.success, "stderr: {}", run.stderr);
         run
     }
@@ -856,4 +860,62 @@ fn send_tasks_hands_every_queued_task_to_the_agent_as_one_message_in_reading_ord
     );
     assert_eq!(opened.review.queued_tasks(), 0);
     assert_eq!(feature.sent.github_calls(), []);
+}
+
+/// The app's review saves its own copy while `agent-reply` writes the threads; Send tasks turns
+/// queued tasks into hand-offs while the agent answers another task. Nothing is lost either way.
+#[test]
+fn sending_tasks_while_the_agent_answers_another_loses_no_task_thread_or_answer() {
+    let feature = Feature::with_work_in_progress();
+    let mut app = task_sent(&feature);
+    opened_on_cart(&mut app);
+    add_to_tasks(&feature, &mut app, "pub fn total() {}", "Return the total");
+
+    answered_while_the_app_shows(&feature, &mut app, 0, "It is the cart's world now.");
+    app.review.tick_file(&file_path("src/cart.rs")).unwrap();
+    send_tasks(&feature, &mut app);
+    answered_while_the_app_shows(&feature, &mut app, 1, "It returns the sum.");
+    app.review.tick_file(&file_path("README.md")).unwrap();
+
+    let mut reopened = feature.reopened();
+    assert_eq!(
+        said(&threads(&reopened)[0]),
+        [
+            ("You".to_owned(), "Say who the world is".to_owned()),
+            (
+                "Your agent".to_owned(),
+                "It is the cart's world now.".to_owned()
+            ),
+        ]
+    );
+    opened_on_cart(&mut reopened);
+    assert_eq!(
+        said(&threads(&reopened)[0]),
+        [
+            ("You".to_owned(), "Return the total".to_owned()),
+            ("Your agent".to_owned(), "It returns the sum.".to_owned()),
+        ]
+    );
+    let typed = feature.typed_into_agent();
+    assert_eq!(typed.len(), 2, "{typed:?}");
+    assert!(typed[1].contains("Task h1"), "{}", typed[1]);
+    assert_eq!(reopened.review.queued_tasks(), 0);
+    assert_eq!(reopened.review.hand_offs().all().len(), 2);
+}
+
+/// `agent-reply` writes the answer on the thread, the running app marks the hand-off, and the
+/// agent is idle again.
+fn answered_while_the_app_shows(feature: &Feature, app: &mut OpenedReview, nth: usize, body: &str) {
+    let home = ThreadHome::of(&feature.subject, &app.review.state_file());
+    let hand_off = app.review.hand_offs().all()[nth].id();
+    let state = app.review.state_file().load().unwrap();
+    let request = state.hand_offs().agent_reply(&home, hand_off, body).unwrap();
+    let done = request.run(&feature.github()).unwrap();
+    app.review.hand_off_replied(hand_off, done.replied()).unwrap();
+    feature.agent.set_status("t1", AgentStatus::Idle);
+    feature.run_work(app);
+}
+
+fn opened_on_cart(opened: &mut OpenedReview) {
+    opened.review.go_to_file(&file_path("src/cart.rs"));
 }
