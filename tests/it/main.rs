@@ -66,6 +66,8 @@ mod jump;
 mod keymap;
 mod line_number;
 mod local_key_commands;
+mod local_open;
+mod local_work_tree;
 mod markdown;
 mod new_commits;
 mod open_app;

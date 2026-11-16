@@ -89,6 +89,12 @@ impl ReviewSubject {
     }
 }
 
+impl From<LocalChangeSet> for ReviewSubject {
+    fn from(change_set: LocalChangeSet) -> Self {
+        Self::Local(change_set)
+    }
+}
+
 impl From<PullRequestUrl> for ReviewSubject {
     fn from(pr: PullRequestUrl) -> Self {
         Self::PullRequest(pr)
@@ -162,6 +168,14 @@ fn unescape(text: &str) -> anyhow::Result<String> {
 }
 
 impl LocalChangeSet {
+    pub const fn new(folder: WorkTreeRoot, branch: BranchName, repo: Option<RepoName>) -> Self {
+        Self {
+            folder,
+            branch,
+            repo,
+        }
+    }
+
     /// `<folder>@<branch>`: the folder's `@` is escaped, so the first `@` ends it.
     fn from_key(key: &str) -> anyhow::Result<Self> {
         let (folder, branch) = key
