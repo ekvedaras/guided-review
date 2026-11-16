@@ -68,6 +68,9 @@ pub struct ReviewSession {
     /// The guided review a snapshot scene put aside to show the PR in Basic mode.
     #[cfg(feature = "snapshots")]
     guided_before_staging: Option<Review>,
+    /// The code source of the PR a snapshot scene put aside to show a local review.
+    #[cfg(feature = "snapshots")]
+    source_before_staging: Option<Arc<dyn CodeSource>>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -167,6 +170,8 @@ impl ReviewSession {
             tour_agent_before_staging: None,
             #[cfg(feature = "snapshots")]
             guided_before_staging: None,
+            #[cfg(feature = "snapshots")]
+            source_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -790,8 +795,35 @@ impl ReviewSession {
         });
     }
 
+    /// A local review of a throwaway clone in place of the PR: one commit ahead of `main`, a changed
+    /// README and cart, and a note git does not know yet. `unstage_basic` puts the PR back.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local(&mut self, cx: &mut Context<Self>) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let opened = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = crate::opened_change_set::OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            crate::open_review::open_review(&subject, &folder, &folders)
+        });
+        let opened = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                eprintln!("could not stage a local review: {error:#}");
+                return;
+            }
+        };
+        let pr_review = std::mem::replace(&mut self.review, opened.review);
+        self.guided_before_staging.get_or_insert(pr_review);
+        let pr_source = std::mem::replace(&mut self.source, opened.source);
+        self.source_before_staging.get_or_insert(pr_source);
+        self.swapped_review(cx);
+    }
+
     #[cfg(feature = "snapshots")]
     pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
+        if let Some(source) = self.source_before_staging.take() {
+            self.source = source;
+        }
         if let Some(guided) = self.guided_before_staging.take() {
             self.review = guided;
             self.swapped_review(cx);

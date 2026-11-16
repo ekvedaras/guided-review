@@ -65,10 +65,12 @@ enum Scene {
     BasicRead,
     BasicGuidedReady,
     SwitchedSummary,
+    LocalOverview,
+    LocalFile,
 }
 
 impl Scene {
-    const ALL: [Self; 36] = [
+    const ALL: [Self; 38] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -105,6 +107,8 @@ impl Scene {
         Self::BasicRead,
         Self::BasicGuidedReady,
         Self::SwitchedSummary,
+        Self::LocalOverview,
+        Self::LocalFile,
     ];
 
     fn file_name(self) -> &'static str {
@@ -145,6 +149,8 @@ impl Scene {
             Self::BasicRead => "55-basic-read",
             Self::BasicGuidedReady => "56-basic-guided-ready",
             Self::SwitchedSummary => "57-switched-summary",
+            Self::LocalOverview => "58-local-overview",
+            Self::LocalFile => "59-local-file",
         }
     }
 }
@@ -546,6 +552,15 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::stage_basic);
                 self.change_review(cx, |review| review.go_forward());
             }
+            Scene::LocalOverview => self.session.update(cx, ReviewSession::stage_local),
+            Scene::LocalFile => {
+                self.session.update(cx, ReviewSession::stage_local);
+                self.change_review(cx, |review| {
+                    if let Ok(path) = FilePath::new("README.md") {
+                        review.go_to_file(&path);
+                    }
+                });
+            }
             Scene::BasicRead => self.session.update(cx, ReviewSession::stage_basic_read),
             Scene::BasicGuidedReady => self
                 .session
@@ -664,7 +679,9 @@ impl OneStepLayout {
             | Scene::BasicOverviewFiles
             | Scene::BasicFile
             | Scene::BasicRead
-            | Scene::BasicGuidedReady => {
+            | Scene::BasicGuidedReady
+            | Scene::LocalOverview
+            | Scene::LocalFile => {
                 self.session.update(cx, ReviewSession::unstage_basic);
                 self.go_to_first_open_code(cx);
             }

@@ -3606,7 +3606,11 @@ fn local_overview_card(colors: &Colors, local: &LocalOverview) -> impl IntoEleme
                     "Commits",
                     div().flex().flex_col().children(commits),
                 ))
-                .child(local_fact(colors, "Working tree", local.uncommitted_label())),
+                .child(local_fact(
+                    colors,
+                    "Working tree",
+                    local.uncommitted_label(),
+                )),
         )
 }
 
