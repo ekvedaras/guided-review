@@ -343,6 +343,70 @@ fn two_updates_of_a_folder_that_did_not_change_pin_the_same_snapshot() {
     assert_eq!(snapshot_ref_target(&feature), first);
 }
 
+fn tour_head(feature: &Feature) -> Sha {
+    let path = Tour::shown_path_for(&feature.repo.folders(), &feature.subject());
+    Tour::load_of(&path, &feature.subject())
+        .unwrap()
+        .pin()
+        .head
+        .clone()
+}
+
+fn update_in_the_background(feature: &Feature) -> std::thread::JoinHandle<()> {
+    let change_set = feature.subject().local().unwrap().clone();
+    let folders = feature.repo.folders();
+    std::thread::spawn(move || {
+        OpenedChangeSet::new(&change_set, &folders)
+            .repin_to_new_snapshot()
+            .unwrap();
+    })
+}
+
+/// The CLI's `repin` and the app's Update of one review, at once: the second saves its tour while the
+/// first has not moved the ref yet, as both wait on the state file someone else holds.
+#[test]
+fn two_updates_at_once_leave_the_ref_on_the_snapshot_the_tour_reads() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let state_file = ReviewStateFile::for_subject(&feature.repo.folders(), &feature.subject());
+    for round in 0..6 {
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (held, is_held) = std::sync::mpsc::channel::<()>();
+        let holder = std::thread::spawn({
+            let state_file = state_file.clone();
+            move || {
+                state_file
+                    .update(|_| {
+                        held.send(()).unwrap();
+                        released.recv().ok();
+                    })
+                    .unwrap();
+            }
+        });
+        is_held.recv().unwrap();
+        let before = tour_head(&feature);
+        feature.repo.write("notes.txt", &format!("round {round}, first\n"));
+        let first = update_in_the_background(&feature);
+        let waited = Instant::now();
+        while tour_head(&feature) == before {
+            assert!(waited.elapsed() < Duration::from_secs(20), "no tour saved");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        feature
+            .repo
+            .write("notes.txt", &format!("round {round}, second\n"));
+        let second = update_in_the_background(&feature);
+        std::thread::sleep(Duration::from_millis(500));
+
+        drop(release);
+        for update in [holder, first, second] {
+            update.join().unwrap();
+        }
+
+        assert_eq!(snapshot_ref_target(&feature), tour_head(&feature), "round {round}");
+    }
+}
+
 #[test]
 fn update_refuses_while_the_folder_is_on_another_branch_and_moves_nothing() {
     let feature = Feature::with_work_in_progress();

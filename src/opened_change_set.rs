@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use anyhow::Context;
+
 use crate::app_folders::{AppFolders, remove_if_there};
 use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
@@ -201,6 +203,7 @@ impl OpenedChangeSet {
     /// another branch, as the review is of its own branch.
     pub fn repin_to_new_snapshot(&self) -> anyhow::Result<(Tour, Repin)> {
         let subject = self.subject();
+        let _lock = self.lock_tour_and_ref()?;
         anyhow::ensure!(
             ToursOnDisk::of(&self.folders, &subject) != ToursOnDisk::None,
             "no tour for {subject}; run `guided-review open <folder>` first"
@@ -226,6 +229,7 @@ impl OpenedChangeSet {
     /// it: a drop that stops part way leaves files to drop again, never a ref nothing will delete.
     pub fn drop_review(&self) -> anyhow::Result<()> {
         let subject = self.subject();
+        let _lock = self.lock_tour_and_ref()?;
         self.work_tree.forget_snapshot(&self.change_set)?;
         for tour in [
             Tour::basic_path_for(&self.folders, &subject),
@@ -235,7 +239,30 @@ impl OpenedChangeSet {
         }
         let tour_files = Tour::files_for(&self.folders, &subject);
         remove_if_there(&tour_files, std::fs::remove_dir_all(&tour_files))?;
-        self.state_file().delete()
+        self.state_file().delete()?;
+        // An Update waiting on the lock still holds the file, and refuses as it finds no tour.
+        let lock_path = self.tour_and_ref_lock_path();
+        remove_if_there(&lock_path, std::fs::remove_file(&lock_path))
+    }
+
+    /// Held by whatever moves the tour or the snapshot ref: Update in the app, `repin` in the CLI and
+    /// Drop review. Without it a second Update could save its tour between the first one's tour and
+    /// ref, and the ref would end on a snapshot the tour does not read.
+    fn lock_tour_and_ref(&self) -> anyhow::Result<std::fs::File> {
+        let path = self.tour_and_ref_lock_path();
+        if let Some(folder) = path.parent() {
+            std::fs::create_dir_all(folder)
+                .with_context(|| format!("could not create {}", folder.display()))?;
+        }
+        let lock = std::fs::File::create(&path)
+            .with_context(|| format!("could not create {}", path.display()))?;
+        lock.lock()
+            .with_context(|| format!("could not lock {}", path.display()))?;
+        Ok(lock)
+    }
+
+    fn tour_and_ref_lock_path(&self) -> PathBuf {
+        self.tour_path().with_extension("json.pin.lock")
     }
 
     fn refuse_when_on_another_branch(&self) -> anyhow::Result<()> {
