@@ -721,12 +721,12 @@ impl ReviewCore {
         }
     }
 
-    /// A local review's comments are tasks for its agent: while the link to the agent is off they
-    /// stay drafts, and say why.
+    /// A local review's comments are tasks for its agent: while the link to the agent is off one
+    /// sent now stays a draft, and says why; one added to tasks waits for Send tasks all the same.
     fn send_refusal(&self, mode: SendMode) -> Option<CommentRefusal> {
         if !self.send_modes().contains(&mode) {
             Some(CommentRefusal::NotOffered)
-        } else if mode.is_task() && self.agent_link_is_off {
+        } else if mode == SendMode::SendNow && self.agent_link_is_off {
             Some(CommentRefusal::AgentLinkOff)
         } else {
             None
@@ -1875,6 +1875,11 @@ impl ReviewCore {
 
     pub fn hand_offs(&self) -> &HandOffs {
         self.state.hand_offs()
+    }
+
+    /// How many tasks wait for Send tasks.
+    pub fn queued_tasks(&self) -> usize {
+        self.state.hand_offs().waiting_for_send_tasks().count()
     }
 
     /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a

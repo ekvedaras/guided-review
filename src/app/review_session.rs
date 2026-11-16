@@ -1310,6 +1310,7 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
         SendMode::AddToReview => "added to your review",
         SendMode::CommentNow => "posted on GitHub",
         SendMode::SendNow => "kept as a task",
+        SendMode::AddToTasks => return format!("{what} queued for Send tasks"),
     };
     match audience {
         Audience::Author => format!("{what} {done}"),

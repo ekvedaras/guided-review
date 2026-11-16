@@ -66,6 +66,8 @@ impl fmt::Display for HandOffId {
 /// Where a hand-off is, as the reviewer sees it under the comment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HandOffState {
+    /// A local review's task added to tasks: it goes to the agent with the others at Send tasks.
+    WaitingForSendTasks,
     Queued,
     Delivered,
     Working,
@@ -86,6 +88,9 @@ impl HandOffState {
     /// What the reviewer reads under the comment.
     pub fn line(&self) -> String {
         match self {
+            Self::WaitingForSendTasks => {
+                "Queued task: goes to the agent with Send tasks".to_owned()
+            }
             Self::Queued => "Waiting for the agent to be free".to_owned(),
             Self::Delivered => "Delivered to the agent".to_owned(),
             Self::Working => "The agent is working on it".to_owned(),
@@ -262,7 +267,9 @@ impl HandOff {
         lines.push(
             match self.mode {
                 SendMode::AddToReview => "Sent: added to the pending review",
-                SendMode::CommentNow | SendMode::SendNow => "Sent: posted at once",
+                SendMode::CommentNow | SendMode::SendNow | SendMode::AddToTasks => {
+                    "Sent: posted at once"
+                }
             }
             .to_owned(),
         );
@@ -396,6 +403,20 @@ impl HandOffs {
         &self.0
     }
 
+    pub(super) fn waiting_for_send_tasks(&self) -> impl Iterator<Item = &HandOff> {
+        self.0
+            .iter()
+            .filter(|hand_off| hand_off.state == HandOffState::WaitingForSendTasks)
+    }
+
+    /// The reviewer deleted the comment of a queued task, so there is no task left to send.
+    pub(super) fn forget_queued_task(&mut self, comment: &CommentId) {
+        self.0.retain(|hand_off| {
+            hand_off.state != HandOffState::WaitingForSendTasks
+                || hand_off.reviewer_comment.as_ref() != Some(comment)
+        });
+    }
+
     /// The comment started a thread, which is the one whose last comment is the text just sent
     /// and that no hand-off holds yet.
     pub(super) fn record_new_thread(
@@ -479,6 +500,12 @@ impl HandOffs {
                 .max()
                 .unwrap_or(0),
         );
+        let state = match state {
+            HandOffState::Queued if sent.mode == SendMode::AddToTasks => {
+                HandOffState::WaitingForSendTasks
+            }
+            other => other,
+        };
         self.0.push(HandOff {
             id,
             place: sent.place.clone(),

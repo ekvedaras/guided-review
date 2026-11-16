@@ -58,6 +58,7 @@ pub struct CommentCapabilities {
 pub fn task_button(mode: SendMode) -> (Icon, &'static str) {
     match mode {
         SendMode::SendNow => (Icon::Send, "Send now"),
+        SendMode::AddToTasks => (Icon::ListChecks, "Add to tasks"),
         SendMode::AddToReview | SendMode::CommentNow => (Icon::Send, "Send"),
     }
 }

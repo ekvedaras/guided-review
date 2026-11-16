@@ -179,11 +179,13 @@ pub enum SendMode {
     CommentNow,
     /// A local review's task: kept as a local thread and handed to the change set's agent at once.
     SendNow,
+    /// A local review's task: kept as a local thread and queued, to go to the agent with Send tasks.
+    AddToTasks,
 }
 
 impl SendMode {
     /// What the comment boxes of a local review send with. Each is a task for the change set's agent.
-    pub const LOCAL: [Self; 1] = [Self::SendNow];
+    pub const LOCAL: [Self; 2] = [Self::AddToTasks, Self::SendNow];
 
     pub fn is_task(self) -> bool {
         Self::LOCAL.contains(&self)
@@ -418,7 +420,9 @@ impl CommentRequest {
                 Ok(true) => return Outcome::Refused(CommentRefusal::PendingReviewExists),
                 Err(error) => return classify(&error),
             },
-            SendMode::SendNow => return Outcome::Refused(CommentRefusal::NotOffered),
+            SendMode::SendNow | SendMode::AddToTasks => {
+                return Outcome::Refused(CommentRefusal::NotOffered);
+            }
         };
         sent.map_or_else(|error| classify(&error), |()| Outcome::Sent)
     }

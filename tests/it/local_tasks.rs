@@ -543,12 +543,15 @@ fn while_the_agent_link_is_off_a_comment_says_why_and_stays_a_draft_until_it_is_
 }
 
 #[test]
-fn a_local_review_offers_only_send_now_and_a_pr_comment_cannot_be_sent_as_a_task() {
+fn a_local_review_offers_only_the_task_send_actions_and_a_pr_comment_cannot_be_sent_as_a_task() {
     let feature = Feature::with_work_in_progress();
     let mut opened = feature.open();
     let place = write_comment(&mut opened, "world", "Say who the world is");
 
-    assert_eq!(opened.review.send_modes(), [SendMode::SendNow]);
+    assert_eq!(
+        opened.review.send_modes(),
+        [SendMode::AddToTasks, SendMode::SendNow]
+    );
     for github_mode in [SendMode::AddToReview, SendMode::CommentNow] {
         assert!(
             opened
@@ -674,4 +677,93 @@ fn a_reviewers_local_comment_that_starts_with_the_robot_is_still_the_reviewers()
     assert!(!comment.is_by_agent());
     assert_eq!(comment.shown_author(), "You");
     assert_eq!(comment.shown_body(), "🤖 is what the label says");
+
+/// The comment box's Add to tasks, as the app runs it.
+fn add_to_tasks(feature: &Feature, opened: &mut OpenedReview, on: &str, text: &str) -> CommentResult {
+    let place = write_comment(opened, on, text);
+    let request = opened
+        .review
+        .start_sending(&place, SendMode::AddToTasks, Audience::Agent)
+        .unwrap();
+    let result = opened
+        .review
+        .apply_comment(request.run(&feature.github()))
+        .unwrap();
+    feature.run_work(opened);
+    result
+}
+
+const QUEUED_LINE: &str = "Queued task: goes to the agent with Send tasks";
+
+#[test]
+fn add_to_tasks_shows_the_task_under_its_lines_as_queued_and_hands_nothing_to_the_agent() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+
+    let result = add_to_tasks(&feature, &mut opened, "world", "Say who the world is");
+
+    assert_eq!(result, CommentResult::Sent);
+    assert_eq!(
+        opened.review.send_modes(),
+        [SendMode::AddToTasks, SendMode::SendNow]
+    );
+    let shown = threads(&opened);
+    let [thread] = shown.as_slice() else {
+        panic!("{shown:?}");
+    };
+    assert_eq!(
+        said(thread),
+        [("You".to_owned(), "Say who the world is".to_owned())]
+    );
+    assert_eq!(
+        thread.anchor.as_ref().map(|at| at.line),
+        Some(row(&opened, "world").line)
+    );
+    assert_eq!(thread.hand_off_line.as_deref(), Some(QUEUED_LINE));
+    assert_eq!(feature.typed_into_agent(), Vec::<String>::new());
+    assert_eq!(opened.review.queued_tasks(), 1);
+    assert_eq!(feature.sent.github_calls(), []);
+}
+
+#[test]
+fn a_queued_task_is_edited_and_deleted_in_place_and_waits_across_a_restart() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    add_to_tasks(&feature, &mut opened, "world", "Say who the world is");
+    let kept = threads(&opened)[0].thread.comments[0].id.clone();
+    opened.review.go_to_file(&file_path("src/cart.rs"));
+    add_to_tasks(&feature, &mut opened, "pub fn total() {}", "Return the total");
+    let dropped = threads(&opened)[0].thread.comments[0].id.clone();
+    opened.review.go_to_file(&file_path("README.md"));
+    let edit = TextBox::Edit(kept.clone());
+    opened.review.open_box(&edit).unwrap();
+    opened.review.type_in(&edit, "Say who the world is, please").unwrap();
+
+    let edited = act(&feature, &mut opened, ThreadAction::EditComment { comment_id: kept });
+    opened.review.ask_to_delete(&dropped);
+    let deleted = act(
+        &feature,
+        &mut opened,
+        ThreadAction::DeleteComment {
+            comment_id: dropped,
+        },
+    );
+    drop(opened);
+    let reopened = feature.reopened();
+
+    assert_eq!(
+        [edited, deleted],
+        [ThreadActionResult::Done, ThreadActionResult::Done]
+    );
+    let shown = threads(&reopened);
+    let [thread] = shown.as_slice() else {
+        panic!("{shown:?}");
+    };
+    assert_eq!(
+        said(thread),
+        [("You".to_owned(), "Say who the world is, please".to_owned())]
+    );
+    assert_eq!(thread.hand_off_line.as_deref(), Some(QUEUED_LINE));
+    assert_eq!(reopened.review.queued_tasks(), 1);
+    assert_eq!(feature.typed_into_agent(), Vec::<String>::new());
 }
