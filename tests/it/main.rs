@@ -65,6 +65,7 @@ mod intents;
 mod jump;
 mod keymap;
 mod line_number;
+mod local_key_commands;
 mod markdown;
 mod new_commits;
 mod open_app;

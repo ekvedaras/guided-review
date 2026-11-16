@@ -38,12 +38,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Print the diff pieces of a PR, grouped by file, without code
-    Outline { pr: PullRequestUrl },
+    Outline { subject: ReviewSubject },
     /// Print where the tour file of a PR lives
-    TourPath { pr: PullRequestUrl },
+    TourPath { subject: ReviewSubject },
     /// Print the diff of the given pieces
     Show {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         /// Piece ids as printed by `outline`: `<file>#<symbol>` or `<file>`
         #[arg(required = true)]
         ids: Vec<String>,
@@ -52,20 +52,20 @@ enum Command {
         around: bool,
     },
     /// Pin the tour file of a PR to its commits, then list its errors and warnings
-    Check { pr: PullRequestUrl },
+    Check { subject: ReviewSubject },
     /// Move the tour to the PR's new head and print what became of each piece
-    Repin { pr: PullRequestUrl },
+    Repin { subject: ReviewSubject },
     /// Print what a Refresh of the tour has to do; `--done` clears the marks once it is done
     Refresh {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         #[arg(long)]
         done: bool,
     },
     /// Open the app on the tour of a PR
-    Open { pr: PullRequestUrl },
+    Open { subject: ReviewSubject },
     /// Quit the running app of this build and open a PR in a new one
     Restart {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         /// The id of the step to show, else the summary
         #[arg(long)]
         at: Option<StepId>,
@@ -82,7 +82,7 @@ enum Command {
     DesktopEntryTemplate { out: std::path::PathBuf },
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         /// The hand-off id from the message, like `h0`
         hand_off: HandOffId,
         /// The answer in GitHub markdown; `-` reads it from stdin, which keeps its line breaks
@@ -122,25 +122,37 @@ fn main() -> anyhow::Result<()> {
         return launch();
     };
     match command {
-        Command::Outline { pr } => outline(&pr),
-        Command::Show { pr, ids, around } => show(&pr, &ids, around),
-        Command::TourPath { pr } => tour_path(&pr),
-        Command::Check { pr } => check(&pr),
-        Command::Repin { pr } => repin_command(&pr),
-        Command::Refresh { pr, done } => refresh(&pr, done),
-        Command::Open { pr } => open(&pr, &Launch::Open),
-        Command::Restart { pr, at, replacing } => open(&pr, &Launch::Restart { at, replacing }),
+        Command::Outline { subject } => outline(&pull_request_of(&subject)?),
+        Command::Show {
+            subject,
+            ids,
+            around,
+        } => show(&pull_request_of(&subject)?, &ids, around),
+        Command::TourPath { subject } => tour_path(&pull_request_of(&subject)?),
+        Command::Check { subject } => check(&pull_request_of(&subject)?),
+        Command::Repin { subject } => repin_command(&pull_request_of(&subject)?),
+        Command::Refresh { subject, done } => refresh(&pull_request_of(&subject)?, done),
+        Command::Open { subject } => open(&pull_request_of(&subject)?, &Launch::Open),
+        Command::Restart {
+            subject,
+            at,
+            replacing,
+        } => open(
+            &pull_request_of(&subject)?,
+            &Launch::Restart { at, replacing },
+        ),
         Command::Settings => settings(),
         Command::InstallApp => install_app(),
         Command::DesktopEntryTemplate { out } => {
             write_desktop_entry_templates(&out, Version::running())
         }
         Command::AgentReply {
-            pr,
+            subject,
             hand_off,
             body,
             working: _,
         } => {
+            let pr = pull_request_of(&subject)?;
             let body = match body.as_deref() {
                 Some("-") => Some(std::io::read_to_string(std::io::stdin())?),
                 _ => body,
@@ -168,6 +180,16 @@ fn main() -> anyhow::Result<()> {
             action: None,
             existing_tours,
         } => eval(existing_tours),
+    }
+}
+
+/// Until a local review is built, every command that takes a subject works on a PR only.
+fn pull_request_of(subject: &ReviewSubject) -> anyhow::Result<PullRequestUrl> {
+    match subject {
+        ReviewSubject::PullRequest(pr) => Ok(pr.clone()),
+        ReviewSubject::Local(_) => {
+            anyhow::bail!("{subject} is a local change set: local review is not built yet")
+        }
     }
 }
 
