@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 
 use super::active_pr::OpenOrigin;
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 
 /// A herdr terminal, as `hc` names it (`t7`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -92,7 +92,7 @@ pub enum SendOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppAgent {
     pub terminal: TerminalId,
-    pub pr: Option<PullRequestUrl>,
+    pub subject: Option<ReviewSubject>,
     pub status: AgentStatus,
     /// Milliseconds since the epoch when the status last changed: for an idle agent, when it last finished.
     pub status_since_ms: u64,
@@ -101,7 +101,7 @@ pub struct AppAgent {
 /// What a new tour agent is started with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TourAgentStart {
-    pub pr: PullRequestUrl,
+    pub subject: ReviewSubject,
     /// Names the terminal after the repo and the PR number.
     pub name: String,
     pub folder: PathBuf,
@@ -162,22 +162,23 @@ impl AgentLinkOff {
     }
 }
 
-/// Herdr behind the viewer: where a PR's tour agent runs and what it does. One adapter, `hc`.
+/// Herdr behind the viewer: where a review subject's tour agent runs and what it does. One adapter,
+/// `hc`, which alone knows how a subject is written as a herdr label.
 pub trait TourAgentPort: Send + Sync {
     /// Whether tour agents can be reached at all; the reason when not.
     fn link(&self) -> Result<(), AgentLinkOff>;
 
-    /// The live terminals labelled as the tour agent of the PR.
-    fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>>;
+    /// The live terminals labelled as the tour agent of the subject.
+    fn terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>>;
 
     /// Every live terminal herdr lists.
     fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>>;
 
-    /// Labels the terminal as the tour agent of the PR. Releasing the others is the caller's job.
-    fn claim(&self, terminal: &TerminalId, pr: &PullRequestUrl) -> anyhow::Result<()>;
+    /// Labels the terminal as the tour agent of the subject. Releasing the others is the caller's job.
+    fn claim(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()>;
 
-    /// Takes the PR label off the terminal.
-    fn release(&self, terminal: &TerminalId) -> anyhow::Result<()>;
+    /// Takes the subject's label off the terminal.
+    fn release(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()>;
 
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus>;
 
@@ -278,7 +279,8 @@ impl OwnAgentHandOff {
     }
 }
 
-/// The tour agents of PRs, found by the herdr label `gr.pr=<url>`, never by a stored terminal id.
+/// The tour agents of review subjects, found by a herdr label (`gr.pr=<url>` for a PR), never by a
+/// stored terminal id.
 #[derive(Clone)]
 pub struct TourAgents {
     port: Arc<dyn TourAgentPort>,
@@ -310,29 +312,31 @@ impl TourAgents {
     /// three live, never the one of `active`. Refuses, naming the busy ones, when none is idle.
     pub fn start(
         &self,
-        pr: &PullRequestUrl,
-        active: &PullRequestUrl,
+        subject: &ReviewSubject,
+        active: &ReviewSubject,
         tour: TourKind,
     ) -> anyhow::Result<()> {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        self.launch(pr, active, first_task(pr, tour)).map(drop)
+        self.launch(subject, active, first_task(subject, tour))
+            .map(drop)
     }
 
     fn launch(
         &self,
-        pr: &PullRequestUrl,
-        active: &PullRequestUrl,
+        subject: &ReviewSubject,
+        active: &ReviewSubject,
         first_task: String,
     ) -> anyhow::Result<TerminalId> {
         let Some(folder) = &self.folder else {
-            bail!("no folder to start a tour agent for {pr} in");
+            bail!("no folder to start a tour agent for {subject} in");
         };
+        let name = terminal_name(subject)?;
         self.make_room(active)?;
         self.port.start(&TourAgentStart {
-            pr: pr.clone(),
-            name: terminal_name(pr),
+            subject: subject.clone(),
+            name,
             folder: folder.clone(),
             first_task,
             summary_skill: self.summary_skill.clone(),
@@ -343,30 +347,31 @@ impl TourAgents {
     /// one the app started is ended, one the reviewer started only loses the PR's label.
     pub fn write_tour(
         &self,
-        pr: &PullRequestUrl,
-        active: &PullRequestUrl,
+        subject: &ReviewSubject,
+        active: &ReviewSubject,
     ) -> anyhow::Result<TerminalId> {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
+        refuse_tour_writing_of_local(subject)?;
         let app_started: Vec<TerminalId> = self
             .port
             .app_started()?
             .into_iter()
             .map(|agent| agent.terminal)
             .collect();
-        for old in self.port.terminals_of(pr)? {
+        for old in self.port.terminals_of(subject)? {
             if app_started.contains(&old) {
-                self.port
-                    .kill(&old)
-                    .with_context(|| format!("could not end the old tour agent {old} of {pr}"))?;
+                self.port.kill(&old).with_context(|| {
+                    format!("could not end the old tour agent {old} of {subject}")
+                })?;
             } else {
                 self.port
-                    .release(&old)
-                    .with_context(|| format!("could not take the label of {pr} off {old}"))?;
+                    .release(&old, subject)
+                    .with_context(|| format!("could not take the label of {subject} off {old}"))?;
             }
         }
-        self.launch(pr, active, writer_task(pr))
+        self.launch(subject, active, writer_task(subject))
     }
 
     /// Hands the writer task of a basic tour's guided tour to the PR's tour agent: typed in when the
@@ -374,14 +379,15 @@ impl TourAgents {
     /// the task. Anything else means the task waits and this is tried again.
     pub fn hand_writer_task(
         &self,
-        pr: &PullRequestUrl,
-        active: &PullRequestUrl,
+        subject: &ReviewSubject,
+        active: &ReviewSubject,
     ) -> anyhow::Result<WriterHandOver> {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        let task = basic_writer_task(pr);
-        match self.lookup(pr) {
+        refuse_tour_writing_of_local(subject)?;
+        let task = basic_writer_task(subject);
+        match self.lookup(subject) {
             TourAgentState::Agent {
                 terminal,
                 status: AgentStatus::Working | AgentStatus::WaitingForYou,
@@ -395,9 +401,9 @@ impl TourAgents {
                 }
             }
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
-            TourAgentState::None | TourAgentState::Unknown => {
-                self.launch(pr, active, task).map(WriterHandOver::Started)
-            }
+            TourAgentState::None | TourAgentState::Unknown => self
+                .launch(subject, active, task)
+                .map(WriterHandOver::Started),
         }
     }
 
@@ -424,20 +430,20 @@ impl TourAgents {
 
     /// Makes the terminal the one tour agent of the PR: every other terminal with the PR's label loses it,
     /// so a terminal reused for another PR's tour stops being this PR's agent.
-    pub fn claim(&self, pr: &PullRequestUrl, terminal: &TerminalId) -> anyhow::Result<()> {
+    pub fn claim(&self, subject: &ReviewSubject, terminal: &TerminalId) -> anyhow::Result<()> {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        for other in self.port.terminals_of(pr)? {
+        for other in self.port.terminals_of(subject)? {
             if &other != terminal {
-                self.port
-                    .release(&other)
-                    .with_context(|| format!("could not take the label of {pr} off {other}"))?;
+                self.port.release(&other, subject).with_context(|| {
+                    format!("could not take the label of {subject} off {other}")
+                })?;
             }
         }
         self.port
-            .claim(terminal, pr)
-            .with_context(|| format!("could not make {terminal} the tour agent of {pr}"))
+            .claim(terminal, subject)
+            .with_context(|| format!("could not make {terminal} the tour agent of {subject}"))
     }
 
     /// What an `open` request does with the terminal it came from. Only a terminal running Claude is ever
@@ -446,7 +452,7 @@ impl TourAgents {
     /// questions into an unrelated session) nothing is claimed. A request from outside herdr claims nothing.
     pub fn claim_for_open(
         &self,
-        pr: &PullRequestUrl,
+        subject: &ReviewSubject,
         terminal: Option<&str>,
     ) -> anyhow::Result<()> {
         let Some(address) = terminal else {
@@ -457,33 +463,33 @@ impl TourAgents {
             return Ok(());
         };
         if origin.runs_claude {
-            return self.claim(pr, &origin.terminal);
+            return self.claim(subject, &origin.terminal);
         }
         let mut beside = live
             .iter()
             .filter(|other| other.runs_claude && other.space == origin.space);
         match (beside.next(), beside.next()) {
-            (Some(only), None) => self.claim(pr, &only.terminal),
+            (Some(only), None) => self.claim(subject, &only.terminal),
             _ => Ok(()),
         }
     }
 
-    fn make_room(&self, active: &PullRequestUrl) -> anyhow::Result<()> {
+    fn make_room(&self, active: &ReviewSubject) -> anyhow::Result<()> {
         let mut agents = self.port.app_started()?;
         if agents.len() < MAX_APP_AGENTS {
             return Ok(());
         }
         agents.sort_by_key(|agent| agent.status_since_ms);
-        let to_end = agents
-            .iter()
-            .find(|agent| agent.status == AgentStatus::Idle && agent.pr.as_ref() != Some(active));
+        let to_end = agents.iter().find(|agent| {
+            agent.status == AgentStatus::Idle && agent.subject.as_ref() != Some(active)
+        });
         let Some(to_end) = to_end else {
             let busy: Vec<String> = agents
                 .iter()
                 .filter(|agent| agent.status != AgentStatus::Idle)
                 .map(|agent| {
                     agent
-                        .pr
+                        .subject
                         .as_ref()
                         .map_or_else(|| agent.terminal.to_string(), ToString::to_string)
                 })
@@ -498,11 +504,11 @@ impl TourAgents {
             .with_context(|| format!("could not end the tour agent {}", to_end.terminal))
     }
 
-    pub fn lookup(&self, pr: &PullRequestUrl) -> TourAgentState {
+    pub fn lookup(&self, subject: &ReviewSubject) -> TourAgentState {
         if let Err(reason) = self.port.link() {
             return TourAgentState::LinkOff(reason);
         }
-        self.find(pr)
+        self.find(subject)
             .unwrap_or_else(|error| TourAgentState::LinkOff(AgentLinkOff::because_of(&error)))
     }
 
@@ -510,10 +516,10 @@ impl TourAgents {
     /// `on_change` breaks when nobody wants the changes any more, which ends the follow.
     pub fn follow(
         &self,
-        pr: &PullRequestUrl,
+        subject: &ReviewSubject,
         on_change: &mut dyn FnMut(TourAgentState) -> ControlFlow<()>,
     ) {
-        let state = self.lookup(pr);
+        let state = self.lookup(subject);
         let followed = match &state {
             TourAgentState::Agent { terminal, .. } => Some(terminal.clone()),
             _ => None,
@@ -538,8 +544,8 @@ impl TourAgents {
 
     /// Types the text into the PR's tour agent only when it is idle: never into a working agent and never
     /// past one that waits for the reviewer.
-    pub fn send_if_idle(&self, pr: &PullRequestUrl, text: &str) -> anyhow::Result<SendOutcome> {
-        match self.lookup(pr) {
+    pub fn send_if_idle(&self, subject: &ReviewSubject, text: &str) -> anyhow::Result<SendOutcome> {
+        match self.lookup(subject) {
             TourAgentState::Agent {
                 terminal,
                 status: AgentStatus::Working,
@@ -558,8 +564,8 @@ impl TourAgents {
 
     /// Types an Ask into the PR's tour agent, but only one the reviewer started: an app-started agent
     /// cannot change files, and the reviewer's own one may.
-    pub fn hand_to_own_agent(&self, pr: &PullRequestUrl, text: &str) -> OwnAgentHandOff {
-        let terminal = match self.lookup(pr) {
+    pub fn hand_to_own_agent(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
+        let terminal = match self.lookup(subject) {
             TourAgentState::Agent { terminal, .. } => terminal,
             TourAgentState::LinkOff(reason) => {
                 return OwnAgentHandOff::NotSent(format!("tour agents are off: {reason}"));
@@ -573,7 +579,7 @@ impl TourAgents {
             Ok(_) => {}
             Err(error) => return OwnAgentHandOff::NotSent(format!("{error:#}")),
         }
-        match self.send_if_idle(pr, text) {
+        match self.send_if_idle(subject, text) {
             Ok(SendOutcome::Delivered) => OwnAgentHandOff::Delivered(terminal),
             Ok(SendOutcome::Refused(reason)) => OwnAgentHandOff::NotSent(reason),
             Ok(SendOutcome::Starting) => {
@@ -584,16 +590,16 @@ impl TourAgents {
         }
     }
 
-    pub fn show(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
-        match self.lookup(pr) {
+    pub fn show(&self, subject: &ReviewSubject) -> anyhow::Result<()> {
+        match self.lookup(subject) {
             TourAgentState::Agent { terminal, .. } => self.port.show(&terminal),
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
-            TourAgentState::None | TourAgentState::Unknown => bail!("no tour agent for {pr}"),
+            TourAgentState::None | TourAgentState::Unknown => bail!("no tour agent for {subject}"),
         }
     }
 
-    fn find(&self, pr: &PullRequestUrl) -> anyhow::Result<TourAgentState> {
-        let Some(terminal) = self.port.terminals_of(pr)?.into_iter().next() else {
+    fn find(&self, subject: &ReviewSubject) -> anyhow::Result<TourAgentState> {
+        let Some(terminal) = self.port.terminals_of(subject)?.into_iter().next() else {
             return Ok(TourAgentState::None);
         };
         let status = self.port.status(&terminal)?;
@@ -602,7 +608,10 @@ impl TourAgents {
 }
 
 /// Herdr names are 1-32 of a-z 0-9 - _, so a long repo name is cut and the PR number stays.
-fn terminal_name(pr: &PullRequestUrl) -> String {
+fn terminal_name(subject: &ReviewSubject) -> anyhow::Result<String> {
+    let Some(pr) = subject.pull_request() else {
+        bail!("starting the agent of a local change set is not built yet");
+    };
     let number = format!("-{}", pr.number);
     let repo: String = format!("tour-{}-{}", pr.repo.owner(), pr.repo.name())
         .to_lowercase()
@@ -616,19 +625,28 @@ fn terminal_name(pr: &PullRequestUrl) -> String {
         })
         .take(32 - number.len())
         .collect();
-    format!("{repo}{number}")
+    Ok(format!("{repo}{number}"))
+}
+
+/// Writing a guided tour of a local change set comes with local review; until then it is refused
+/// before any agent is touched.
+fn refuse_tour_writing_of_local(subject: &ReviewSubject) -> anyhow::Result<()> {
+    if subject.local().is_some() {
+        bail!("writing a guided tour of a local change set is not built yet");
+    }
+    Ok(())
 }
 
 /// The first task of an agent that writes a tour. It starts with the skill, so Claude runs it; the rest
 /// reaches the skill as its arguments. The agent runs with a fixed tool list, under which a chained or
 /// unlisted command is denied without a word (docs/wiki/agent-runs.md).
-fn writer_task(pr: &PullRequestUrl) -> String {
+fn writer_task(subject: &ReviewSubject) -> String {
     format!(
-        "/tour {pr} (you are the tour agent of this PR, started by the guided-review app because the reviewer \
+        "/tour {subject} (you are the tour agent of this PR, started by the guided-review app because the reviewer \
          picked it and it has no tour). Only the listed tools are allowed and anything else is denied, never \
          asked: run one command per Bash call, with the PR url written out, without shell variables, pipes, \
-         `&&`, `;` or `$(...)`. The Write tool makes the tour's folder. When `guided-review check {pr}` is clean, \
-         run `guided-review open {pr}`, which shows the tour to the reviewer. Afterwards the reviewer's comments \
+         `&&`, `;` or `$(...)`. The Write tool makes the tour's folder. When `guided-review check {subject}` is clean, \
+         run `guided-review open {subject}`, which shows the tour to the reviewer. Afterwards the reviewer's comments \
          reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
          wrong, and never change the PR's code."
     )
@@ -647,13 +665,13 @@ pub enum WriterHandOver {
 
 /// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
 /// guided tour never replaces it on disk, so the agent writes a whole tour at the guided path.
-fn basic_writer_task(pr: &PullRequestUrl) -> String {
+fn basic_writer_task(subject: &ReviewSubject) -> String {
     format!(
-        "/tour {pr} (you are the tour agent of this PR. The reviewer reads it as a basic tour in the app, with no \
+        "/tour {subject} (you are the tour agent of this PR. The reviewer reads it as a basic tour in the app, with no \
          tour text, and asked for a guided tour, which they keep reading the basic tour meanwhile. Write a full new \
-         tour at the path `guided-review tour-path {pr}` prints: the basic tour is not a tour file and needs no \
+         tour at the path `guided-review tour-path {subject}` prints: the basic tour is not a tour file and needs no \
          edit.) Run one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, \
-         `;` or `$(...)`. When `guided-review check {pr}` is clean, run `guided-review open {pr}`, which tells the \
+         `;` or `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, which tells the \
          app the guided tour is ready and does not move the reviewer's screen. Afterwards the reviewer's comments \
          reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
          wrong, and never change the PR's code."
@@ -661,18 +679,18 @@ fn basic_writer_task(pr: &PullRequestUrl) -> String {
 }
 
 /// What a tour agent the app started is told first. Hand-offs follow as messages that carry the rest of the protocol.
-fn first_task(pr: &PullRequestUrl, tour: TourKind) -> String {
+fn first_task(subject: &ReviewSubject, tour: TourKind) -> String {
     match tour {
         TourKind::Guided => format!(
-            "You are the tour agent of {pr}: you wrote or know its guided-review tour, and the reviewer's comments on it \
-             reach you here as messages. Find the tour file with `guided-review tour-path {pr}` and read it now, so you \
+            "You are the tour agent of {subject}: you wrote or know its guided-review tour, and the reviewer's comments on it \
+             reach you here as messages. Find the tour file with `guided-review tour-path {subject}` and read it now, so you \
              can answer. Answer each comment as its message says, fix the tour when a comment shows it is wrong, and never \
              change the PR's code. Then wait for the next message."
         ),
         TourKind::Basic => format!(
-            "You are the tour agent of {pr}: the reviewer reads it as a basic tour, its changed files with no tour text, \
+            "You are the tour agent of {subject}: the reviewer reads it as a basic tour, its changed files with no tour text, \
              and their comments on the code reach you here as messages. Read the changed code now with \
-             `guided-review outline {pr}`, and `guided-review show {pr} <piece ids> --around` for more of it, so you can \
+             `guided-review outline {subject}`, and `guided-review show {subject} <piece ids> --around` for more of it, so you can \
              answer. Answer each comment as its message says, and never change the PR's code. Then wait for the next message."
         ),
     }

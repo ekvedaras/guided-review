@@ -266,7 +266,7 @@ fn update_tour_re_pins_the_basic_tour_not_the_guided_one_beside_it_and_the_banne
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
         folders: shop.repo.folders(),
-        pr: shop.pr(),
+        subject: shop.pr().into(),
         pick_code_source: Arc::new(move |_| {
             Ok(Box::new(
                 LocalGit::find(&RepoName::new("acme", "shop"), &clone)?.unwrap(),

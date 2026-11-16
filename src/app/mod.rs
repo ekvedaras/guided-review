@@ -41,7 +41,6 @@ use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::platform::{self, Os};
-use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::viewer::{
@@ -187,14 +186,14 @@ fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
 
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
 /// state file only loses the remembered clone folder.
-fn open_request_of(folders: &AppFolders, pr: &PullRequestUrl) -> OpenRequest {
-    let folder = ReviewStateFile::for_subject(folders, &ReviewSubject::from(pr.clone()))
+fn open_request_of(folders: &AppFolders, subject: &ReviewSubject) -> OpenRequest {
+    let folder = ReviewStateFile::for_subject(folders, subject)
         .opened_from()
         .ok()
         .flatten()
         .unwrap_or_else(|| folders.home().to_path_buf());
     OpenRequest {
-        pr: pr.to_string(),
+        subject: subject.to_string(),
         folder,
         terminal: None,
         at_step: None,
@@ -277,16 +276,17 @@ async fn answer_requests(
                 reply.send(answer).ok();
             }
             Request::Open(open) => {
-                let Ok(pr) = open.pr.parse::<PullRequestUrl>() else {
-                    reply
-                        .send(refused(&format!("{} is not a PR link", open.pr)))
-                        .ok();
-                    continue;
+                let pr = match open.subject.parse::<ReviewSubject>() {
+                    Ok(subject) => subject,
+                    Err(error) => {
+                        reply.send(refused(&format!("{error:#}"))).ok();
+                        continue;
+                    }
                 };
                 claim_terminal(&pr, &open, &folders, cx);
                 let origin = origin_of(&open, &folders, cx).await;
                 let active = screen.borrow().active.clone();
-                let on_disk = ToursOnDisk::of(&folders, &ReviewSubject::from(pr.clone()));
+                let on_disk = ToursOnDisk::of(&folders, &pr);
                 let outcome = active.update(cx, |active, cx| {
                     let outcome = active.open(pr.clone(), origin, on_disk);
                     cx.notify();
@@ -299,19 +299,21 @@ async fn answer_requests(
                         if decision == WriteDecision::StartWriter {
                             cx.update(|cx| tour_writer::start_writer(pr, cx));
                         }
-                        reply.send(Answer::Writing { pr: open.pr }).ok();
+                        reply.send(Answer::Writing { pr: open.subject }).ok();
                         continue;
                     }
                 };
                 match decision {
                     OpenDecision::KeepInBackground => {
-                        reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
+                        reply
+                            .send(Answer::KeptInBackground { pr: open.subject })
+                            .ok();
                     }
                     OpenDecision::GuidedReady => {
-                        reply.send(Answer::GuidedReady { pr: open.pr }).ok();
+                        reply.send(Answer::GuidedReady { pr: open.subject }).ok();
                     }
                     OpenDecision::Reload => {
-                        reply.send(Answer::Reloaded { pr: open.pr }).ok();
+                        reply.send(Answer::Reloaded { pr: open.subject }).ok();
                         let window = screen.borrow().window.review();
                         if let Some(window) = window {
                             show_again(window, cx);
@@ -320,7 +322,7 @@ async fn answer_requests(
                     OpenDecision::Build(ticket) => {
                         reply
                             .send(Answer::Opening {
-                                pr: open.pr.clone(),
+                                pr: open.subject.clone(),
                             })
                             .ok();
                         let (screen, folders) = (Rc::clone(&screen), folders.clone());
@@ -484,7 +486,7 @@ fn mark_replied(
     let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
     let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
     let Some(window) = window else {
-        if let Ok(replied) = pr.parse::<PullRequestUrl>() {
+        if let Ok(replied) = pr.parse::<ReviewSubject>() {
             active.update(cx, |active, cx| {
                 active.agent_replied(&replied);
                 cx.notify();
@@ -501,7 +503,7 @@ fn mark_replied(
     });
     match marked {
         Ok(()) => {
-            if let Ok(replied_pr) = pr.parse::<PullRequestUrl>() {
+            if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
                 active.update(cx, |active, _| {
                     active.hold_reply_for_reopen(&replied_pr, hand_off, replied);
                 });
@@ -514,12 +516,7 @@ fn mark_replied(
 
 /// The terminal an `open` came from becomes the PR's tour agent, whatever the request then does. Slow
 /// (it runs `hc`), so it runs off the UI thread; a failure is for the app's log, as the window may stay.
-fn claim_terminal(
-    pr: &PullRequestUrl,
-    open: &OpenRequest,
-    folders: &AppFolders,
-    cx: &mut AsyncApp,
-) {
+fn claim_terminal(pr: &ReviewSubject, open: &OpenRequest, folders: &AppFolders, cx: &mut AsyncApp) {
     let (pr, terminal) = (pr.clone(), open.terminal.clone());
     let tours = Tour::tours_dir(folders);
     cx.background_executor()
@@ -563,7 +560,7 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
 async fn build_and_show(
     screen: SharedScreen,
     ticket: BuildTicket,
-    pr: PullRequestUrl,
+    pr: ReviewSubject,
     open: OpenRequest,
     folders: AppFolders,
     cx: &mut AsyncApp,
@@ -583,7 +580,7 @@ async fn build_and_show(
         .await;
     let active = screen.borrow().active.clone();
     if let Ok(opened) = &mut built {
-        let on_disk = ToursOnDisk::of(&disk_folders, &ReviewSubject::from(pr.clone()));
+        let on_disk = ToursOnDisk::of(&disk_folders, &pr);
         let progress =
             active.read_with(cx, |active, _| active.guided_tour_progress_of(&pr, on_disk));
         opened.review.guided_tour_is(progress);
@@ -681,7 +678,7 @@ fn apply_replies_held_for_reopen(
 fn switch_window(
     window: WindowHandle<OneStepLayout>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<()> {
     window.update(cx, |layout, window, cx| {
@@ -694,7 +691,7 @@ fn switch_window(
 fn turn_into_review(
     window: WindowHandle<SettingsWindow>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |settings_window, window, cx| {
@@ -755,7 +752,7 @@ fn replace_switcher_with_writing(
 fn turn_writing_into_review(
     window: WindowHandle<WritingWindow>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |_, window, cx| {
@@ -772,7 +769,7 @@ actions!(app, [Quit]);
 fn turn_switcher_into_review(
     window: WindowHandle<SwitcherWindow>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |_, window, cx| {
@@ -853,7 +850,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
 
 fn open_window(
     opened: OpenedReview,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     let options = window_options(window_title(&opened, pr), cx);
@@ -930,7 +927,7 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     }
 }
 
-fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
+fn window_title(opened: &OpenedReview, pr: &ReviewSubject) -> String {
     format!("{pr}: {}", opened.review.title())
 }
 
@@ -945,7 +942,7 @@ fn marked_if_dev(title: String) -> String {
 
 fn new_layout(
     opened: OpenedReview,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     carried_settings: Option<Entity<SettingsPanel>>,
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,

@@ -88,7 +88,6 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
-use crate::review_subject::ReviewSubject;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
@@ -984,12 +983,12 @@ impl OneStepLayout {
         if review.basic_mode_label().is_none() {
             return;
         }
-        let pr = review.pr().clone();
-        let on_disk = ToursOnDisk::of(&switching.folders, &ReviewSubject::from(pr.clone()));
+        let subject = review.subject();
+        let on_disk = ToursOnDisk::of(&switching.folders, subject);
         let progress = switching
             .active
             .read(cx)
-            .guided_tour_progress_of(&pr, on_disk);
+            .guided_tour_progress_of(subject, on_disk);
         if review.guided_tour_progress() != &progress {
             self.session.update(cx, |session, cx| {
                 session.change(cx, |review| review.guided_tour_is(progress));
@@ -1000,12 +999,12 @@ impl OneStepLayout {
     /// Write guided tour, from the overview, the sidebar and the palette: the review takes the
     /// asking, and the app's writer hands the task to the PR's tour agent in the background.
     fn write_guided_tour(&mut self, cx: &mut Context<Self>) {
-        let pr = self.session.read(cx).review().pr().clone();
+        let subject = self.session.read(cx).review().subject().clone();
         let asked = self.session.update(cx, |session, cx| {
             session.change(cx, |review| review.ask_to_write_guided_tour())
         });
         match asked {
-            Ok(()) => crate::app::tour_writer::write_in_background(pr, cx),
+            Ok(()) => crate::app::tour_writer::write_in_background(subject, cx),
             Err(refusal) => post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned()),
         }
     }
@@ -1108,7 +1107,7 @@ impl OneStepLayout {
     /// What the window alone knows when the reader asks for something.
     fn moment(&self, cx: &App) -> WindowMoment {
         let is_reopening = cx.global::<PrSwitching>().active.read(cx).switching_to()
-            == Some(self.session.read(cx).review().pr());
+            == Some(self.session.read(cx).review().subject());
         WindowMoment {
             reopening: if is_reopening {
                 Reopening::Underway
@@ -1918,7 +1917,7 @@ impl OneStepLayout {
     fn title_bar(&self, is_writing_tour: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let review = self.session.read(cx).review();
-        let pr = review.pr().clone();
+        let subject_name = review.subject().short();
         let title = review.title().to_owned();
         let jump = button(
             &colors,
@@ -1976,7 +1975,7 @@ impl OneStepLayout {
                 div()
                     .flex_none()
                     .text_color(colors.muted_text)
-                    .child(pr.short()),
+                    .child(subject_name),
             )
             .child(
                 div()

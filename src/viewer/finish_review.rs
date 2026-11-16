@@ -102,6 +102,8 @@ pub enum FinishRefusal {
     OwnPullRequest,
     BodyNeeded(ReviewVerdict),
     NoAccess(String),
+    /// A local review has no PR to send a review to.
+    NoPullRequest,
 }
 
 impl fmt::Display for FinishRefusal {
@@ -115,6 +117,7 @@ impl fmt::Display for FinishRefusal {
             }
             Self::BodyNeeded(_) => f.write_str("Write something, or add comments to the review"),
             Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
+            Self::NoPullRequest => f.write_str("A local review has no pull request to send to"),
         }
     }
 }

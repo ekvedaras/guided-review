@@ -6,7 +6,7 @@ use gpui::{
 use super::motion::{STATE, busy_dot, busy_sweep, fade_in, rise_in};
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
 use super::title_bar::TITLE_BAR_HEIGHT;
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 
 /// Dims the PR on screen while the picked one opens, so the window plainly says it is busy.
 #[derive(IntoElement)]
@@ -15,7 +15,7 @@ pub struct SwitchingVeil {
 }
 
 impl SwitchingVeil {
-    pub fn to(pr: &PullRequestUrl) -> Self {
+    pub fn to(pr: &ReviewSubject) -> Self {
         Self {
             label: format!("Opening {}...", pr.short()).into(),
         }

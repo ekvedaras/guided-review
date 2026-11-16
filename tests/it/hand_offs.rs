@@ -560,7 +560,7 @@ fn with_no_agent_for_the_pr_one_is_started_and_the_hand_off_goes_once_it_is_idle
     let [
         TourAgentCall::Start {
             name,
-            pr,
+            subject: pr,
             folder,
             first_task,
         },

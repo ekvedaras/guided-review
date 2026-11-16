@@ -8,6 +8,7 @@ use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
 use super::review::{ReadSubject, ReviewCore, Screen};
 use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
 
 /// One thing the reader asks for.
@@ -163,10 +164,10 @@ pub enum SettingsSheet {
     Closed,
 }
 
-/// The arguments of `guided-review restart`, which opens this PR on this screen in a new app.
+/// The arguments of `guided-review restart`, which opens this review subject on this screen in a new app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestartArgs {
-    pr: PullRequestUrl,
+    subject: ReviewSubject,
     at: Option<StepId>,
 }
 
@@ -174,7 +175,7 @@ impl RestartArgs {
     /// `app_build` names the app restarting, which the restart may quit though its binary, reinstalled
     /// or updated, is another build: only a restart the reviewer asked for ends an app of another build.
     pub fn args(&self, app_build: &str) -> Vec<String> {
-        let mut args = vec!["restart".to_owned(), self.pr.to_string()];
+        let mut args = vec!["restart".to_owned(), self.subject.to_string()];
         if let Some(step) = &self.at {
             args.extend(["--at".to_owned(), step.to_string()]);
         }
@@ -271,7 +272,10 @@ impl ReviewCore {
                 Err(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
             },
             Intent::FinishReview => Effect::OpenFinishForm,
-            Intent::OpenOnGitHub => Effect::OpenOnGitHub(self.pr().clone()),
+            Intent::OpenOnGitHub => self
+                .subject()
+                .pull_request()
+                .map_or(Effect::Nothing, |pr| Effect::OpenOnGitHub(pr.clone())),
             Intent::CheckForUpdates => Effect::CheckForUpdates,
             Intent::RestartApp => Effect::Restart(self.restart_args()),
         }
@@ -318,7 +322,7 @@ impl ReviewCore {
     /// Where a new app opens this PR: on this step, or where the PR starts.
     pub fn restart_args(&self) -> RestartArgs {
         RestartArgs {
-            pr: self.pr().clone(),
+            subject: self.subject().clone(),
             at: match self.screen() {
                 Screen::Step(id) => Some(id.clone()),
                 Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,

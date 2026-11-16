@@ -2,7 +2,7 @@ use anyhow::Context;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::pull_request::{ChangeTips, PullRequestUrl};
+use crate::pull_request::ChangeTips;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, Tour, TourPin};
 
@@ -13,24 +13,24 @@ use crate::tour::{BasicTour, Tour, TourPin};
 /// with one opens it.
 pub fn make_basic_tour(
     folders: &AppFolders,
-    pr: &PullRequestUrl,
+    subject: &ReviewSubject,
     source: &dyn CodeSource,
     tips: &ChangeTips,
     pr_title: &str,
 ) -> anyhow::Result<BasicTour> {
-    let guided_path = Tour::path_for(folders, &ReviewSubject::from(pr.clone()));
+    let guided_path = Tour::path_for(folders, subject);
     anyhow::ensure!(
         !guided_path.exists(),
-        "{pr} has a guided tour at {}, so no basic tour is made",
+        "{subject} has a guided tour at {}, so no basic tour is made",
         guided_path.display()
     );
     let base = source
         .merge_base(&tips.base_branch_tip, &tips.head)
-        .with_context(|| format!("could not find where {pr} branched off"))?;
+        .with_context(|| format!("could not find where {subject} branched off"))?;
     let mut pin: TourPin = serde_json::from_value(serde_json::json!({}))?;
-    pin.pin_to(&ReviewSubject::from(pr.clone()), &base, &tips.head);
+    pin.pin_to(subject, &base, &tips.head);
     let tour = BasicTour::new(pin, pr_title.to_owned());
-    let path = Tour::basic_path_for(folders, &ReviewSubject::from(pr.clone()));
+    let path = Tour::basic_path_for(folders, subject);
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder)
             .with_context(|| format!("could not create {}", folder.display()))?;

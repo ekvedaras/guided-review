@@ -1,6 +1,7 @@
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::Sha;
+use crate::review_subject::ReviewSubject;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -138,9 +139,9 @@ impl Ask {
     }
 
     /// What the reviewer's own agent is typed: the whole chat, and leave to change files.
-    pub fn hand_off_text(&self, pr: &PullRequestUrl, place: &str) -> String {
+    pub fn hand_off_text(&self, subject: &ReviewSubject, place: &str) -> String {
         let mut lines = vec![
-            format!("The reviewer hands you an Ask about {pr}"),
+            format!("The reviewer hands you an Ask about {subject}"),
             format!("Place: {place}"),
         ];
         lines.extend(self.messages.iter().map(|message| {

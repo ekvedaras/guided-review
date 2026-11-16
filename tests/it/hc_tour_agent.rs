@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::platform::Os;
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
     TourAgentPort, TourAgentStart,
@@ -14,7 +14,7 @@ use crate::support::write_executable;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
@@ -139,7 +139,7 @@ fn a_terminal_is_claimed_with_both_labels_and_released_by_emptying_the_pr_label(
     let agents = adapter(dir.path());
 
     agents.claim(&TerminalId::new("t7"), &pr()).unwrap();
-    agents.release(&TerminalId::new("t9")).unwrap();
+    agents.release(&TerminalId::new("t9"), &pr()).unwrap();
 
     assert_eq!(
         calls(dir.path(), "calls"),
@@ -147,6 +147,76 @@ fn a_terminal_is_claimed_with_both_labels_and_released_by_emptying_the_pr_label(
             format!("label t7 app=guided-review gr.pr={PR}"),
             "label t9 gr.pr=".to_owned()
         ]
+    );
+}
+
+const LOCAL: &str = "local:/work/shop@feature/cart";
+
+fn local() -> ReviewSubject {
+    LOCAL.parse().unwrap()
+}
+
+#[test]
+fn the_agent_of_a_local_change_set_is_looked_up_by_its_own_label() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[{"address":"t4","state":"live"}]}"#,
+    );
+
+    let terminals = adapter(dir.path()).terminals_of(&local()).unwrap();
+
+    assert_eq!(terminals, [TerminalId::new("t4")]);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [format!(
+            "ls --label app=guided-review --label gr.local={LOCAL} --json"
+        )]
+    );
+}
+
+#[test]
+fn a_terminal_is_claimed_for_a_local_change_set_and_released_by_emptying_its_label() {
+    let dir = TempDir::new().unwrap();
+    let agents = adapter(dir.path());
+
+    agents.claim(&TerminalId::new("t4"), &local()).unwrap();
+    agents.release(&TerminalId::new("t5"), &local()).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            format!("label t4 app=guided-review gr.local={LOCAL}"),
+            "label t5 gr.local=".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn an_app_started_agent_of_a_local_change_set_is_read_back_by_its_label() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[{"address":"t4","state":"live"}]}"#,
+    );
+    answer(
+        dir.path(),
+        "get",
+        &format!(
+            r#"{{"address":"t4","labels":{{"gr.local":"{LOCAL}","gr.started-by":"app"}},"status":{{"state":"idle"}},"status_ms":7}}"#
+        ),
+    );
+
+    let agents = adapter(dir.path()).app_started().unwrap();
+
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent.subject.clone())
+            .collect::<Vec<_>>(),
+        [Some(local())]
     );
 }
 
@@ -495,7 +565,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
     let started = adapter(dir.path())
         .giving_agents_path("/opt/gr/bin:/usr/bin")
         .start(&TourAgentStart {
-            pr: pr(),
+            subject: pr(),
             name: "tour-acme-shop-7".to_owned(),
             folder: PathBuf::from("/clones/shop"),
             first_task: "You are the tour agent".to_owned(),
@@ -531,7 +601,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
 
 fn start_shop_agent(agents: &HcTourAgents) -> anyhow::Result<TerminalId> {
     agents.start(&TourAgentStart {
-        pr: pr(),
+        subject: pr(),
         name: "tour-acme-shop-7".to_owned(),
         folder: PathBuf::from("/clones/shop"),
         first_task: "You are the tour agent".to_owned(),
@@ -544,7 +614,7 @@ fn tools_of_started_agent(summary_skill: Option<&str>) -> Vec<String> {
     answer(dir.path(), "run", r#"{"address":"t9"}"#);
     adapter(dir.path())
         .start(&TourAgentStart {
-            pr: pr(),
+            subject: pr(),
             name: "tour-acme-shop-7".to_owned(),
             folder: PathBuf::from("/clones/shop"),
             first_task: "You are the tour agent".to_owned(),
@@ -735,7 +805,7 @@ fn the_app_started_agents_are_listed_with_their_pr_status_and_when_it_changed() 
         agents,
         [AppAgent {
             terminal: TerminalId::new("t9"),
-            pr: Some(pr()),
+            subject: Some(pr()),
             status: AgentStatus::Idle,
             status_since_ms: 1_793_954_000_972,
         }]

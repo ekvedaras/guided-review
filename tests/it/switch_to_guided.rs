@@ -130,7 +130,7 @@ impl Shop {
         let clone = self.repo.path().to_path_buf();
         TourSwitcher {
             folders: self.repo.folders(),
-            pr: self.pr(),
+            subject: self.pr().into(),
             pick_code_source: Arc::new(move |_| {
                 Ok(Box::new(
                     LocalGit::find(&RepoName::new("acme", "shop"), &clone)?.unwrap(),

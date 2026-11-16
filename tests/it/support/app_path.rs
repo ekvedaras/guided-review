@@ -1,6 +1,7 @@
 //! Drives a `Review` the way the app's review session does: request, run, apply.
 //! The app runs the middle part on a background thread; tests run it in line.
 
+use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
     Audience, CommentPlace, CommentResult, FinishResult, GitHubPort, Read, Review, ReviewVerdict,
     SendMode, ThreadAction, ThreadActionResult,
@@ -34,10 +35,15 @@ pub trait AppPath {
     ) -> FinishResult;
 }
 
+/// The fixtures review PRs only.
+fn pr_of(review: &Review) -> PullRequestUrl {
+    review.subject().pull_request().unwrap().clone()
+}
+
 impl AppPath for Review {
     fn check_pr_head(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
         let tips = github
-            .pull_request_tips(self.pr())
+            .pull_request_tips(&pr_of(self))
             .inspect_err(|error| self.could_not_read(Read::PrHead, error))?;
         self.pr_head_is(tips.head);
         Ok(())
@@ -45,19 +51,19 @@ impl AppPath for Review {
 
     fn pull_pr_description(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
         let body = github
-            .pull_request_description(self.pr())
+            .pull_request_description(&pr_of(self))
             .inspect_err(|error| self.could_not_read(Read::PrDescription, error))?;
         self.set_pr_description(&body)
     }
 
     fn sync(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let outcome = self.sync_request().run(github);
+        let outcome = self.sync_request().unwrap().run(github);
         self.apply_sync(outcome)
     }
 
     fn pull_threads(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
         let threads = github
-            .review_threads(self.pr())
+            .review_threads(&pr_of(self))
             .inspect_err(|error| self.threads_not_read(error))?;
         self.set_threads(&threads);
         Ok(())
@@ -65,7 +71,7 @@ impl AppPath for Review {
 
     fn pull_pending_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
         let exists = github
-            .has_pending_review(self.pr())
+            .has_pending_review(&pr_of(self))
             .inspect_err(|error| self.could_not_read(Read::PendingReview, error))?;
         self.pending_review_is(exists);
         Ok(())
@@ -73,7 +79,7 @@ impl AppPath for Review {
 
     fn pull_last_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
         let last = github
-            .viewer_latest_review(self.pr())
+            .viewer_latest_review(&pr_of(self))
             .inspect_err(|error| self.could_not_read(Read::LastReview, error))?;
         self.last_review_is(last);
         Ok(())
@@ -81,7 +87,7 @@ impl AppPath for Review {
 
     fn pull_viewer_authorship(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
         let authored = github
-            .viewer_authored(self.pr())
+            .viewer_authored(&pr_of(self))
             .inspect_err(|error| self.could_not_read(Read::Authorship, error))?;
         self.viewer_authorship_is(authored);
         Ok(())
@@ -104,7 +110,7 @@ impl AppPath for Review {
         action: ThreadAction,
         github: &dyn GitHubPort,
     ) -> ThreadActionResult {
-        let outcome = self.thread_action_request(action).run(github);
+        let outcome = self.thread_action_request(action).unwrap().run(github);
         self.apply_thread_action(outcome)
     }
 

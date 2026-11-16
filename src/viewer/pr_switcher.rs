@@ -75,9 +75,9 @@ pub enum WritingFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pick {
     /// Switch to the PR's tour.
-    Show(PullRequestUrl),
+    Show(ReviewSubject),
     /// Show the writing of the PR's tour on the loading screen.
-    Write(PullRequestUrl),
+    Write(ReviewSubject),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -228,13 +228,13 @@ impl PrSwitcher {
     /// app knows beyond the disk: tours being written and agent replies not seen.
     pub fn check_tours(&mut self, folders: &AppFolders, active: &ActivePr) {
         for row in &mut self.rows {
-            let pr = &row.pull_request.url;
+            let subject = ReviewSubject::from(row.pull_request.url.clone());
             row.tour = TourFact {
-                on_disk: ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())),
-                writing: active.writing_fact_of(pr),
+                on_disk: ToursOnDisk::of(folders, &subject),
+                writing: active.writing_fact_of(&subject),
             };
-            row.has_unseen_reply = active.has_unseen_reply(pr);
-            row.is_active = active.shown() == Some(pr);
+            row.has_unseen_reply = active.has_unseen_reply(&subject);
+            row.is_active = active.shown() == Some(&subject);
         }
     }
 
@@ -326,11 +326,11 @@ impl PrSwitcher {
     /// What picking the `nth` visible row does.
     pub fn pick(&self, nth: usize) -> Result<Pick, NotPickable> {
         let row = self.visible().nth(nth).ok_or(NotPickable::NoSuchRow)?;
-        let pr = row.pull_request.url.clone();
+        let subject = ReviewSubject::from(row.pull_request.url.clone());
         if row.tour.is_waited_for() {
-            Ok(Pick::Write(pr))
+            Ok(Pick::Write(subject))
         } else {
-            Ok(Pick::Show(pr))
+            Ok(Pick::Show(subject))
         }
     }
 
@@ -373,7 +373,7 @@ impl TourFact {
     /// What the disk says of the PR's tours, with no writing known.
     pub fn on_disk_of(pr: &PullRequestUrl, folders: &AppFolders) -> Self {
         Self {
-            on_disk: ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())),
+            on_disk: ToursOnDisk::of(folders, &pr.clone().into()),
             writing: WritingFact::None,
         }
     }

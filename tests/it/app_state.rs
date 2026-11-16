@@ -1,6 +1,6 @@
 use crate::support::FixtureRepo;
 use crate::support::fake_tour_agent::FakeTourAgent;
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     ActivePr, AgentStatus, AppStateFile, OpenOrigin, TerminalId, WriteDecision, WritingFact,
     WritingStage,
@@ -10,7 +10,7 @@ const SHOWN: &str = "https://github.com/acme/shop/pull/7";
 const REPLIED: &str = "https://github.com/acme/shop/pull/8";
 const WRITTEN: &str = "https://github.com/acme/shop/pull/9";
 
-fn pr(url: &str) -> PullRequestUrl {
+fn pr(url: &str) -> ReviewSubject {
     url.parse().unwrap()
 }
 
@@ -82,4 +82,43 @@ fn a_writing_whose_tour_was_opened_before_a_restart_is_not_brought_back() {
 
     assert_eq!(after.resume_writings(&FakeTourAgent::new()).len(), 0);
     assert!(after.writing_of(&pr(WRITTEN)).is_none());
+}
+
+const LOCAL: &str = "local:/work/shop@feature/cart";
+
+fn app_json(repo: &FixtureRepo) -> std::path::PathBuf {
+    repo.folders().state_files().join("app.json")
+}
+
+#[test]
+fn an_app_state_written_before_local_review_still_names_its_prs() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    std::fs::create_dir_all(repo.folders().state_files()).unwrap();
+    std::fs::write(
+        app_json(&repo),
+        format!(r#"{{"writings": ["{WRITTEN}"], "unseen_replies": ["{REPLIED}"]}}"#),
+    )
+    .unwrap();
+
+    let after = restarted(&repo);
+
+    assert!(after.has_unseen_reply(&pr(REPLIED)));
+    assert!(after.writing_of(&pr(WRITTEN)).is_some());
+}
+
+#[test]
+fn a_local_change_set_is_kept_across_a_restart_by_its_subject_key() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut before = restarted(&repo);
+    before.agent_replied(&pr(LOCAL));
+    assert_eq!(before.write(pr(LOCAL)), WriteDecision::StartWriter);
+
+    let after = restarted(&repo);
+
+    assert!(after.has_unseen_reply(&pr(LOCAL)));
+    assert!(after.writing_of(&pr(LOCAL)).is_some());
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(app_json(&repo)).unwrap()).unwrap();
+    assert_eq!(saved["unseen_replies"], serde_json::json!([LOCAL]));
+    assert_eq!(saved["writings"], serde_json::json!([LOCAL]));
 }

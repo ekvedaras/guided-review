@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::app_folders::AppFolders;
 use crate::coverage;
 use crate::pieces::{ChangedFile, PieceId};
-use crate::pull_request::{ChangeTips, PullRequestUrl};
+use crate::pull_request::ChangeTips;
 use crate::repin::RepinStatus;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
@@ -118,7 +118,7 @@ impl fmt::Display for RefreshBrief {
 /// The Refresh button's work: the local AI rewrites the marked steps, then a fresh `Review` opens on the result.
 pub struct TourRefresher {
     pub folders: AppFolders,
-    pub pr: PullRequestUrl,
+    pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
     pub writer: Arc<dyn RefreshWriter>,
 }
@@ -128,7 +128,7 @@ impl TourRefresher {
     pub fn run(&self, on_activity: &mut dyn FnMut(String)) -> anyhow::Result<RepinnedTour> {
         let mut said = String::new();
         let mut failure = None;
-        self.writer.refresh(&self.pr, &mut |line| {
+        self.writer.refresh(&self.subject, &mut |line| {
             for event in AgentEvent::from_line(line) {
                 match event {
                     AgentEvent::ToolUse { summary } => on_activity(summary),
@@ -143,10 +143,7 @@ impl TourRefresher {
         if let Some(reason) = failure {
             anyhow::bail!("claude stopped: {reason}");
         }
-        let tour = GuidedTour::load(&Tour::path_for(
-            &self.folders,
-            &ReviewSubject::from(self.pr.clone()),
-        ))?;
+        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.subject))?;
         let pinned = ChangeTips {
             base_branch_tip: tour.pin.base.clone(),
             head: tour.pin.head.clone(),
@@ -155,7 +152,7 @@ impl TourRefresher {
         let review = Review::open(
             tour,
             source.as_ref(),
-            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone())),
+            ReviewStateFile::for_subject(&self.folders, &self.subject),
         )?;
         if !review.refresh_brief().is_empty() {
             anyhow::bail!("claude ended without refreshing the tour: {said}");

@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
@@ -27,7 +26,7 @@ fn shop_with_a_tour() -> FixtureRepo {
         "summary": [],
         "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
     });
-    let path = Tour::path_for(&repo.folders(), &ReviewSubject::from(pr()));
+    let path = Tour::path_for(&repo.folders(), &pr());
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, tour.to_string()).unwrap();
     repo
@@ -49,7 +48,7 @@ fn the_reloader_reads_the_tour_file_again() {
     let repo = shop_with_a_tour();
     let opened = open_review(&pr(), repo.path(), &repo.folders()).unwrap();
     assert_eq!(opened.review.title(), "Hello world");
-    let path = Tour::path_for(&repo.folders(), &ReviewSubject::from(pr()));
+    let path = Tour::path_for(&repo.folders(), &pr());
     let rewritten = std::fs::read_to_string(&path)
         .unwrap()
         .replace("Hello world", "Hello again");

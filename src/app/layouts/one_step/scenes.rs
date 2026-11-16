@@ -16,6 +16,7 @@ use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::{Updates, running_build};
 use crate::file_path::FilePath;
+use crate::review_subject::ReviewSubject;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, FileView, LineKind, LineLocation, PageRow, PieceLabels, Problem, ProblemKind,
@@ -424,7 +425,7 @@ impl OneStepLayout {
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
             Scene::AskPanel => self.ask_about_screen(window, cx),
             Scene::SwitchingVeil => {
-                if let Some(other) = sample_pr(OTHER_PR) {
+                if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
                     let active = cx.global::<PrSwitching>().active.clone();
                     active.update(cx, |active, cx| {
                         active.picked(other);
@@ -433,7 +434,7 @@ impl OneStepLayout {
                 }
             }
             Scene::LoadingScreen => {
-                if let Some(other) = sample_pr(OTHER_PR) {
+                if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
                     let active = cx.global::<PrSwitching>().active.clone();
                     active.update(cx, |active, cx| {
                         active.write(other.clone());

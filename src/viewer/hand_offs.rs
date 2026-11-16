@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
 use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 
 use super::comments::SendMode;
 use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
@@ -189,10 +190,10 @@ impl HandOff {
     }
 
     /// What the tour agent is typed: everything it needs to answer without asking back.
-    fn message(&self, pr: &PullRequestUrl) -> String {
+    fn message(&self, subject: &ReviewSubject) -> String {
         let id = self.id;
         let mut lines = vec![
-            format!("Reviewer comment {id} on {pr}"),
+            format!("Reviewer comment {id} on {subject}"),
             format!("Place: {}", self.place),
         ];
         lines.extend(self.step.iter().map(|step| format!("Step: {step}")));
@@ -216,19 +217,19 @@ impl HandOff {
         let tour_note = if self.file.is_some() {
             format!(
                 "The tour is a basic tour: there is no tour file to fix. Read the changed code with \
-                 `guided-review outline {pr}` and `guided-review show {pr} <piece ids> --around`."
+                 `guided-review outline {subject}` and `guided-review show {subject} <piece ids> --around`."
             )
         } else {
             format!(
-                "If the comment shows the tour is wrong, fix the tour file, run `guided-review check {pr}` until it \
-                 is clean, then `guided-review open {pr}`."
+                "If the comment shows the tour is wrong, fix the tour file, run `guided-review check {subject}` until it \
+                 is clean, then `guided-review open {subject}`."
             )
         };
         lines.push(format!(
-            "Answer with `guided-review agent-reply {pr} {id} --body -` and the answer on stdin, in a quoted heredoc \
+            "Answer with `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted heredoc \
              (`<<'EOF'`). Write it in GitHub markdown the reviewer can scan: short paragraphs with a blank line between \
              them, a list for steps or several points, code names in backticks. If the comment asks for a change to the \
-             PR's code, first run `guided-review agent-reply {pr} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
+             PR's code, first run `guided-review agent-reply {subject} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
              the PR's branch with none of the reviewer's own changes in it; else in a new git worktree, or a shallow \
              clone, of the PR's branch. Commit, push to the PR's branch, and name the commit in your answer. {tour_note}"
@@ -240,7 +241,7 @@ impl HandOff {
 /// Sending the oldest queued hand-off to the tour agent, owned so it can run on a background thread.
 pub(super) struct DeliveryRequest {
     id: HandOffId,
-    pr: PullRequestUrl,
+    subject: ReviewSubject,
     text: String,
     /// What a tour agent started for this hand-off has to read.
     tour: TourKind,
@@ -254,11 +255,12 @@ impl DeliveryRequest {
         agents: &TourAgents,
         github: &(impl ReviewThreadsPort + ?Sized),
     ) -> DeliveryOutcome {
-        let how = match agents.send_if_idle(&self.pr, &self.text) {
+        let how = match agents.send_if_idle(&self.subject, &self.text) {
             Ok(SendOutcome::Delivered) => Delivery::Delivered,
             Ok(SendOutcome::Refused(_)) => Delivery::Waiting,
             Ok(SendOutcome::Starting) => Delivery::AgentStarting,
-            Ok(SendOutcome::NoAgent) => match agents.start(&self.pr, &self.pr, self.tour) {
+            Ok(SendOutcome::NoAgent) => match agents.start(&self.subject, &self.subject, self.tour)
+            {
                 Ok(()) => Delivery::AgentStarted,
                 Err(error) => Delivery::Failed(format!("{error:#}")),
             },
@@ -437,15 +439,15 @@ impl HandOffs {
 
     /// The oldest queued hand-off, unless one was delivered and its agent has not started on it:
     /// they go one at a time, in the order they were sent.
-    pub(super) fn delivery_request(&self, pr: &PullRequestUrl) -> Option<DeliveryRequest> {
+    pub(super) fn delivery_request(&self, subject: &ReviewSubject) -> Option<DeliveryRequest> {
         if self.0.iter().any(|h| h.state == HandOffState::Delivered) {
             return None;
         }
         let next = self.0.iter().find(|h| h.state == HandOffState::Queued)?;
         Some(DeliveryRequest {
             id: next.id,
-            pr: pr.clone(),
-            text: next.message(pr),
+            subject: subject.clone(),
+            text: next.message(subject),
             tour: if next.file.is_some() {
                 TourKind::Basic
             } else {

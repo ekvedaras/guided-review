@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, Sha};
 use crate::repin::{Repin, repin};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
@@ -37,7 +37,7 @@ pub type PickCodeSource =
 /// The "Update tour" button's work: what the CLI's `repin` does, then a fresh `Review` on the result.
 pub struct TourRepinner {
     pub folders: AppFolders,
-    pub pr: PullRequestUrl,
+    pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
 }
 
@@ -45,22 +45,19 @@ pub struct TourRepinner {
 /// shows it.
 pub struct TourReloader {
     pub folders: AppFolders,
-    pub pr: PullRequestUrl,
+    pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
 }
 
 impl TourReloader {
     /// Blocks on the code source; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let tour = GuidedTour::load(&Tour::path_for(
-            &self.folders,
-            &ReviewSubject::from(self.pr.clone()),
-        ))?;
+        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.subject))?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
         let review = Review::open(
             tour,
             source.as_ref(),
-            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone())),
+            ReviewStateFile::for_subject(&self.folders, &self.subject),
         )?;
         Ok(RepinnedTour {
             review,
@@ -77,13 +74,15 @@ pub struct RepinnedTour {
 impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
     pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
-        let tips = github.pull_request_tips(&self.pr)?;
+        let Some(pr) = self.subject.pull_request() else {
+            anyhow::bail!("updating the tour of a local change set is not built yet");
+        };
+        let tips = github.pull_request_tips(pr)?;
         let source = (self.pick_code_source)(&tips)?;
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-        let state_file =
-            ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(self.pr.clone()));
+        let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
         let (tour, _) = repin_tour(
-            &Tour::shown_path_for(&self.folders, &ReviewSubject::from(self.pr.clone())),
+            &Tour::shown_path_for(&self.folders, &self.subject),
             &state_file,
             source.as_ref(),
             &base,

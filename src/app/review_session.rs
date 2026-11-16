@@ -156,8 +156,10 @@ impl ReviewSession {
         })
         .detach();
         let rows = PageRows::of(&review, &open_details);
-        let clone_offer =
-            CloneOffer::for_source(review.pr().repo.clone(), source.as_ref(), &folders);
+        let clone_offer = review
+            .subject()
+            .pull_request()
+            .and_then(|pr| CloneOffer::for_source(pr.repo.clone(), source.as_ref(), &folders));
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
@@ -445,7 +447,9 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) {
         let note = thread_action_note(&action);
-        let request = self.review.thread_action_request(action);
+        let Some(request) = self.review.thread_action_request(action) else {
+            return;
+        };
         let github = Arc::clone(&self.github);
         self.run_off_thread(
             cx,
@@ -972,9 +976,9 @@ impl ReviewSession {
     fn follow_tour_agent(&mut self, cx: &mut Context<Self>) {
         let (changes, mut arrived) = futures::channel::mpsc::unbounded();
         let agents = self.tour_work.tour_agents.clone();
-        let pr = self.review.pr().clone();
+        let subject = self.review.subject().clone();
         std::thread::spawn(move || {
-            agents.follow(&pr, &mut |state| match changes.unbounded_send(state) {
+            agents.follow(&subject, &mut |state| match changes.unbounded_send(state) {
                 Ok(()) => ControlFlow::Continue(()),
                 Err(_) => ControlFlow::Break(()),
             });
@@ -1002,10 +1006,10 @@ impl ReviewSession {
     /// Ends with what the Ask panel says of it.
     pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
         let agents = self.tour_work.tour_agents.clone();
-        let pr = self.review.pr().clone();
+        let subject = self.review.subject().clone();
         let text = self.review.ask_hand_off_text(ask, place);
         cx.background_executor()
-            .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
+            .spawn(async move { agents.hand_to_own_agent(&subject, &text).line() })
     }
 
     /// Retry beside the message of an off link.
@@ -1028,10 +1032,10 @@ impl ReviewSession {
 
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
         let agents = self.tour_work.tour_agents.clone();
-        let pr = self.review.pr().clone();
+        let subject = self.review.subject().clone();
         self.show_agent = Some(self.run_off_thread(
             cx,
-            move || agents.show(&pr),
+            move || agents.show(&subject),
             |this, shown, cx| {
                 this.review.show_agent_result(shown.as_ref().err());
                 this.show_problems(cx);

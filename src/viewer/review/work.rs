@@ -39,23 +39,24 @@ impl Review {
 }
 
 impl ReviewCore {
-    /// `None` when there is nothing of the kind to do now.
+    /// `None` when there is nothing of the kind to do now. Work with GitHub is never done for a local
+    /// review, which has no PR.
     fn job_of(&self, kind: WorkKind) -> Option<Job> {
-        let pr = self.pr.clone();
+        let pr = || self.subject.pull_request().cloned();
         Some(match kind {
-            WorkKind::CheckPrHead => Job::CheckPrHead(pr),
+            WorkKind::CheckPrHead => Job::CheckPrHead(pr()?),
             WorkKind::CheckWorkingCopy => Job::CheckWorkingCopy(self.head.clone()),
-            WorkKind::PullPrDescription => Job::PullPrDescription(pr),
-            WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()),
+            WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
+            WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
-                pr,
+                pr: pr()?,
                 head: self.head.clone(),
             },
-            WorkKind::PullPendingReview => Job::PullPendingReview(pr),
-            WorkKind::PullLastReview => Job::PullLastReview(pr),
+            WorkKind::PullPendingReview => Job::PullPendingReview(pr()?),
+            WorkKind::PullLastReview => Job::PullLastReview(pr()?),
             WorkKind::SendQueuedComment => Job::SendQueuedComment(self.queued_comment_request()?),
             WorkKind::ChangeReviewingMark => Job::ChangeReviewingMark {
-                pr,
+                pr: pr()?,
                 change: self.reviewing_mark.change_to_send()?,
             },
             WorkKind::TakeSeenMarksOff => {
@@ -66,13 +67,13 @@ impl ReviewCore {
                 Job::TakeSeenMarksOff(requests)
             }
             WorkKind::DeliverHandOff => {
-                Job::DeliverHandOff(self.state.hand_offs().delivery_request(&self.pr)?)
+                Job::DeliverHandOff(self.state.hand_offs().delivery_request(&self.subject)?)
             }
             WorkKind::CheckAgentLink => {
                 if !self.agent_link_is_off {
                     return None;
                 }
-                Job::CheckAgentLink(pr)
+                Job::CheckAgentLink(self.subject.clone())
             }
         })
     }

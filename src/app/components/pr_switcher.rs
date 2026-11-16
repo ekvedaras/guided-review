@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::app::tour_writer;
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::viewer::{
     ActivePr, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, SwitcherRow, TourAgentPort,
     TourFact, WhyListed, WritingFact,
@@ -36,7 +36,7 @@ const MIN_THUMB_HEIGHT: Pixels = px(20.);
 pub struct PrSwitching {
     pub relevant: Arc<dyn RelevantPullRequestsPort>,
     pub folders: AppFolders,
-    pub show: Arc<dyn Fn(PullRequestUrl) + Send + Sync>,
+    pub show: Arc<dyn Fn(ReviewSubject) + Send + Sync>,
     /// Asks the app to open the PR on screen again, after a save of the settings.
     pub reopen: Arc<dyn Fn() + Send + Sync>,
     /// The PR shown, the tours being written and the agent replies not seen.

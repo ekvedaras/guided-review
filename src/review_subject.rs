@@ -49,6 +49,19 @@ impl ReviewSubject {
             Self::Local(change_set) => Some(change_set),
         }
     }
+
+    /// The name the app shows for it: `owner/repo#number` for a PR, `<folder name>@<branch>` for a
+    /// local change set.
+    pub fn short(&self) -> String {
+        match self {
+            Self::PullRequest(pr) => pr.short(),
+            Self::Local(change_set) => format!(
+                "{}@{}",
+                change_set.folder.name(),
+                change_set.branch.as_str()
+            ),
+        }
+    }
 }
 
 /// Where the subject's files live, relative to the tours folder and the state folder: a folder, and a
@@ -157,9 +170,7 @@ impl LocalChangeSet {
 
     fn files_folder(&self) -> PathBuf {
         let path = self.folder.as_path();
-        let name = path
-            .file_name()
-            .map_or_else(|| "root".into(), |name| name.to_string_lossy());
+        let name = self.folder.name();
         let digest = Sha256::digest(path.to_string_lossy().as_bytes());
         let hash = crate::hex::lower(digest.iter().take(SHORT_HASH_BYTES));
         PathBuf::from(LOCAL_FILES_FOLDER).join(format!("{name}-{hash}"))
@@ -203,6 +214,13 @@ impl WorkTreeRoot {
 
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+
+    /// The folder's own name; `root` for `/`.
+    pub fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.0
+            .file_name()
+            .map_or_else(|| "root".into(), |name| name.to_string_lossy())
     }
 }
 

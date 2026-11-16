@@ -10,6 +10,7 @@ use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::pull_request::{ChangeTips, PullRequestUrl};
+use crate::review_subject::ReviewSubject;
 
 pub trait ChangeTipsPort: Send + Sync {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError>;
@@ -321,5 +322,6 @@ pub trait TurnStopper: Send + Sync {
 pub trait RefreshWriter: Send + Sync {
     /// Passes every stream line of the AI to `on_line` as it arrives. The core reads them, so adapters stay
     /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
-    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
+    fn refresh(&self, subject: &ReviewSubject, on_line: &mut dyn FnMut(&str))
+    -> anyhow::Result<()>;
 }

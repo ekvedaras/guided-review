@@ -587,7 +587,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
         folders: shop.repo.folders(),
-        pr: shop.pr(),
+        subject: shop.pr().into(),
         pick_code_source: Arc::new(move |_| {
             Ok(Box::new(
                 LocalGit::find(&RepoName::new("acme", "shop"), &clone)?.unwrap(),
@@ -688,7 +688,7 @@ fn a_sync_answer_for_the_head_before_a_re_pin_leaves_the_re_pinned_review_s_tick
     let mut before = shop.open();
     before.sync(&github).unwrap();
     github.set_viewed("app/Order.php", ViewedState::Unviewed);
-    let stale = before.sync_request().run(&github);
+    let stale = before.sync_request().unwrap().run(&github);
     drop(before);
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);

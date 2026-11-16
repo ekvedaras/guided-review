@@ -10,7 +10,8 @@ use std::time::Instant;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::{RepoName, Sha};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
 use std::path::{Path, PathBuf};
@@ -272,7 +273,9 @@ pub struct ReviewCore {
     file_tree: FileTree,
     /// Folders the reviewer folded. Not saved: a reopened app shows the tree unfolded.
     folded_folders: BTreeSet<FolderPath>,
-    pr: PullRequestUrl,
+    subject: ReviewSubject,
+    /// The GitHub repo the code links open in.
+    github_repo: RepoName,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -523,12 +526,12 @@ impl ReviewCore {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
-        let pr = tour
-            .pin()
-            .subject()?
-            .pull_request()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("a local change set has no PR yet"))?;
+        let subject = tour.pin().subject()?;
+        let Some(github_repo) = subject.pull_request().map(|pr| pr.repo.clone()) else {
+            anyhow::bail!(
+                "a local review cannot open yet: its code links have no GitHub repo to open in"
+            );
+        };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
@@ -582,7 +585,8 @@ impl ReviewCore {
             tour,
             file_tree,
             folded_folders: BTreeSet::new(),
-            pr,
+            subject,
+            github_repo,
             base,
             head,
             pr_head: None,
@@ -671,8 +675,8 @@ impl ReviewCore {
         &self.screen
     }
 
-    pub fn pr(&self) -> &PullRequestUrl {
-        &self.pr
+    pub fn subject(&self) -> &ReviewSubject {
+        &self.subject
     }
 
     pub(super) fn has_seen_end_of_screen(&self) -> bool {
@@ -809,7 +813,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    pr: &self.pr,
+                    repo: &self.github_repo,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -893,7 +897,8 @@ impl ReviewCore {
         if note.is_in(self.state.pr_description()) {
             return None;
         }
-        self.pr_notes.start(&self.pr, subject, note)
+        self.pr_notes
+            .start(self.subject.pull_request()?, subject, note)
     }
 
     pub fn apply_to_notes(&mut self, outcome: ToNotesOutcome) -> anyhow::Result<()> {
@@ -982,7 +987,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    pr: &self.pr,
+                    repo: &self.github_repo,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1081,9 +1086,9 @@ impl ReviewCore {
     /// What the reviewer's own tour agent is typed for an Ask. In a basic tour it is told so, and which
     /// file the Ask is on, since there is no tour text to find the place in.
     pub fn ask_hand_off_text(&self, ask: &Ask, place: &str) -> String {
-        let pr = &self.pr;
+        let subject = &self.subject;
         let Tour::Basic(_) = &self.tour else {
-            return ask.hand_off_text(pr, place);
+            return ask.hand_off_text(subject, place);
         };
         let file = match &ask.place {
             Place::File { path }
@@ -1096,10 +1101,10 @@ impl ReviewCore {
         let named_file = file.map_or_else(String::new, |file| format!("\nFile: {file}"));
         let basic_place = format!(
             "{place}{named_file}\nThe tour is a basic tour: the PR's changed files, with no tour file. \
-             Read the changed code with `guided-review outline {pr}` and \
-             `guided-review show {pr} <piece ids> --around`."
+             Read the changed code with `guided-review outline {subject}` and \
+             `guided-review show {subject} <piece ids> --around`."
         );
-        ask.hand_off_text(pr, &basic_place)
+        ask.hand_off_text(subject, &basic_place)
     }
 
     /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
@@ -1470,20 +1475,22 @@ impl ReviewCore {
         self.comment_desk.can_comment_now()
     }
 
-    pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
+    /// `None` for a local review: its threads are not on GitHub.
+    pub fn thread_action_request(&self, action: ThreadAction) -> Option<ThreadActionRequest> {
+        let pr = self.subject.pull_request()?;
         let reply_body = match &action {
             ThreadAction::Reply { thread_id, .. } => {
                 self.state.reply_draft(thread_id).map(str::to_owned)
             }
             _ => None,
         };
-        self.comment_desk.thread_action_request(
-            &self.pr,
+        Some(self.comment_desk.thread_action_request(
+            pr,
             &self.pulled_threads,
             action,
             reply_body,
             self.tour_freshness(),
-        )
+        ))
     }
 
     /// Asks the reviewer to confirm deleting one of their own comments, which a deletion needs.
@@ -1612,8 +1619,10 @@ impl ReviewCore {
         verdict: ReviewVerdict,
         body: &str,
     ) -> Result<FinishRequest, FinishRefusal> {
-        self.comment_desk
-            .finish_review_request(&self.pr, verdict, body)
+        let Some(pr) = self.subject.pull_request() else {
+            return Err(FinishRefusal::NoPullRequest);
+        };
+        self.comment_desk.finish_review_request(pr, verdict, body)
     }
 
     /// A sent review is read back, so the finish button shows it.
@@ -1698,8 +1707,13 @@ impl ReviewCore {
         mode: SendMode,
         audience: Audience,
     ) -> Option<CommentRequest> {
-        self.comment_desk
-            .start_sending(&self.state, place, mode, audience, (&self.head, &self.pr))
+        self.comment_desk.start_sending(
+            &self.state,
+            place,
+            mode,
+            audience,
+            (&self.head, self.subject.pull_request()?),
+        )
     }
 
     pub fn hand_offs(&self) -> &HandOffs {
@@ -1717,7 +1731,7 @@ impl ReviewCore {
 
     /// The oldest comment in the queue, to send again.
     pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        CommentDesk::queued_comment_request(&self.state, &self.head, &self.pr)
+        CommentDesk::queued_comment_request(&self.state, &self.head, self.subject.pull_request()?)
     }
 
     /// The window was asked for another PR and could not open it; named until another switch succeeds.
@@ -1769,7 +1783,7 @@ impl ReviewCore {
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
     pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
-        CodeOpener::new(ide, self.working_copy, &self.pr, &self.head)
+        CodeOpener::new(ide, self.working_copy, &self.github_repo, &self.head)
     }
 
     /// Asked of the clone on open and on each focus, not on each click.
@@ -1779,7 +1793,7 @@ impl ReviewCore {
 
     fn links(&self) -> CodeLinks<'_> {
         CodeLinks {
-            pr: &self.pr,
+            repo: &self.github_repo,
             base: &self.base,
             head: &self.head,
         }
@@ -2252,9 +2266,13 @@ impl ReviewCore {
         self.viewed_sync.not_synced(&self.state)
     }
 
-    pub fn sync_request(&self) -> SyncRequest {
-        self.viewed_sync
-            .request(&self.state, &self.coverage(), &self.pr, &self.head)
+    /// `None` for a local review: GitHub has no viewed marks of it.
+    pub fn sync_request(&self) -> Option<SyncRequest> {
+        let pr = self.subject.pull_request()?;
+        Some(
+            self.viewed_sync
+                .request(&self.state, &self.coverage(), pr, &self.head),
+        )
     }
 
     /// An error means something stays queued or unread; the next sync tries again.

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
@@ -16,7 +15,7 @@ const B: &str = "https://github.com/acme/shop/pull/8";
 const NO_TOUR: &str = "https://github.com/acme/shop/pull/9";
 const BROKEN_TOUR: &str = "https://github.com/acme/shop/pull/10";
 
-fn pr(url: &str) -> PullRequestUrl {
+fn pr(url: &str) -> ReviewSubject {
     url.parse().unwrap()
 }
 
@@ -35,7 +34,7 @@ fn shop_with_tours_of_a_and_b() -> FixtureRepo {
             "summary": [],
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
         });
-        let path = Tour::path_for(&repo.folders(), &ReviewSubject::from(pr(url)));
+        let path = Tour::path_for(&repo.folders(), &pr(url));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, tour.to_string()).unwrap();
     }
@@ -43,20 +42,17 @@ fn shop_with_tours_of_a_and_b() -> FixtureRepo {
 }
 
 fn write_broken_tour(repo: &FixtureRepo, url: &str) {
-    let path = Tour::path_for(&repo.folders(), &ReviewSubject::from(pr(url)));
+    let path = Tour::path_for(&repo.folders(), &pr(url));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, "not json").unwrap();
 }
 
 /// A basic tour of `url` pinned where the guided tour of A is.
 fn write_basic_tour_like_a(repo: &FixtureRepo, url: &str) {
-    let pin = GuidedTour::load(&Tour::path_for(
-        &repo.folders(),
-        &ReviewSubject::from(pr(A)),
-    ))
-    .unwrap()
-    .pin;
-    let path = Tour::basic_path_for(&repo.folders(), &ReviewSubject::from(pr(url)));
+    let pin = GuidedTour::load(&Tour::path_for(&repo.folders(), &pr(A)))
+        .unwrap()
+        .pin;
+    let path = Tour::basic_path_for(&repo.folders(), &pr(url));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     BasicTour::new(pin, format!("PR title of {url}"))
         .save(&path)
@@ -254,7 +250,7 @@ fn the_folder_a_pr_was_opened_from_is_remembered_for_a_later_switch() {
     let repo = shop_with_tours_of_a_and_b();
     open_review(&pr(A), repo.path(), &repo.folders()).unwrap();
 
-    let file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr(A)));
+    let file = ReviewStateFile::for_subject(&repo.folders(), &pr(A));
 
     assert_eq!(file.opened_from().unwrap().as_deref(), Some(repo.path()));
 }
@@ -499,7 +495,7 @@ fn a_failed_reopen_keeps_the_pr_on_screen_with_the_reason() {
 #[test]
 fn an_open_of_a_pr_without_a_tour_builds_it_with_no_loading_screen() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
 
     let outcome = active.open(pr, OpenOrigin::Reviewer, ToursOnDisk::None);
 
@@ -511,7 +507,7 @@ fn an_open_of_a_pr_without_a_tour_builds_it_with_no_loading_screen() {
 #[test]
 fn an_open_of_a_pr_whose_tour_is_being_written_watches_that_writing() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     active.write(pr.clone());
 
     let outcome = active.open(pr, OpenOrigin::Reviewer, ToursOnDisk::None);
@@ -538,7 +534,7 @@ fn an_open_of_a_pr_with_a_tour_builds_it() {
 #[test]
 fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_waiting_on_it() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     active.write(pr.clone());
 
     let outcome = active.open(pr, OpenOrigin::AppStartedAgent, ToursOnDisk::Guided);
@@ -550,7 +546,7 @@ fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_wait
 #[test]
 fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to_try_again() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     active.write(pr.clone());
     let OpenOutcome::Tour(OpenDecision::Build(ticket)) =
         active.open(pr.clone(), OpenOrigin::AppStartedAgent, ToursOnDisk::Guided)
@@ -572,7 +568,7 @@ fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to
 #[test]
 fn a_failed_build_of_a_tour_nobody_was_writing_leaves_no_loading_screen() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     let OpenDecision::Build(ticket) = active.request(pr, OpenOrigin::Reviewer) else {
         panic!("builds");
     };

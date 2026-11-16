@@ -350,7 +350,7 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
     }
     let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {
-        pr: pr.to_string(),
+        subject: pr.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
         terminal: std::env::var("HC_TERMINAL_ID").ok(),
         at_step: match launch {

@@ -2,9 +2,9 @@ use crate::support::folders_in;
 use guided_review::review_subject::ReviewSubject;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
-use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::{BasicTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrSwitcher, RelevantPullRequest,
@@ -16,7 +16,8 @@ const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
 const BLOG_7: &str = "https://github.com/acme/blog/pull/7";
 const API_31: &str = "https://github.com/acme/api/pull/31";
 
-fn pr(url: &str) -> PullRequestUrl {
+/// A PR for GitHub's rows, or its review subject for what the switcher hands on.
+fn pr<Read: FromStr<Err = anyhow::Error>>(url: &str) -> Read {
     url.parse().unwrap()
 }
 
@@ -47,7 +48,7 @@ fn three_pull_requests() -> FakeGitHub {
 }
 
 fn write_tour(home: &Path, url: &str) {
-    let path = Tour::path_for(&folders_in(home), &ReviewSubject::from(pr(url)));
+    let path = Tour::path_for(&folders_in(home), &pr::<ReviewSubject>(url));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, "{}").unwrap();
 }
@@ -89,7 +90,7 @@ fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
 }
 
 fn write_basic_tour(home: &Path, url: &str) {
-    let path = Tour::basic_path_for(&folders_in(home), &ReviewSubject::from(pr(url)));
+    let path = Tour::basic_path_for(&folders_in(home), &pr::<ReviewSubject>(url));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let pin = serde_json::from_value(serde_json::json!({})).unwrap();
     BasicTour::new(pin, "A PR".to_owned()).save(&path).unwrap();

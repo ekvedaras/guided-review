@@ -10,7 +10,6 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
 use crate::opened_pr::OpenedPr;
-use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
@@ -34,11 +33,16 @@ pub struct OpenedReview {
     pub tour_agents: TourAgents,
 }
 
-/// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else one
-/// another PR of the repo was opened from, else the clone `config.toml` names, else the reviewer's
-/// home, where the skill reads code through `show`.
-pub fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBuf {
-    let own = ReviewStateFile::for_subject(folders, &ReviewSubject::from(pr.clone()))
+/// Where a tour agent that writes the subject's tour works. A local change set's agent works in its
+/// folder. A PR's works in the clone the PR was last opened from, else one another PR of the repo was
+/// opened from, else the clone `config.toml` names, else the reviewer's home, where the skill reads
+/// code through `show`.
+pub fn writer_folder(subject: &ReviewSubject, folders: &AppFolders) -> PathBuf {
+    let pr = match subject {
+        ReviewSubject::PullRequest(pr) => pr,
+        ReviewSubject::Local(change_set) => return change_set.folder().as_path().to_path_buf(),
+    };
+    let own = ReviewStateFile::for_subject(folders, subject)
         .opened_from()
         .ok()
         .flatten();
@@ -54,21 +58,21 @@ pub fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBuf {
         )
 }
 
-/// Builds the review of `pr` at the commits its tour is pinned to. `clones_from` is the folder a local
-/// clone is searched from. Slow, so the app runs it off the UI thread.
+/// Builds the review of `subject` at the commits its tour is pinned to. `clones_from` is the folder a
+/// local clone is searched from. Slow, so the app runs it off the UI thread.
 pub fn open_review(
-    pr: &PullRequestUrl,
+    subject: &ReviewSubject,
     clones_from: &Path,
     folders: &AppFolders,
 ) -> anyhow::Result<OpenedReview> {
+    let Some(pr) = subject.pull_request() else {
+        anyhow::bail!("opening a local review is not built yet: {subject}");
+    };
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
     opened.make_basic_tour_if_no_tour()?;
     // A basic file with a guided one beside it shows the basic tour.
-    let tour = if ToursOnDisk::of(folders, &ReviewSubject::from(pr.clone())).opens_basic() {
-        Tour::Basic(BasicTour::load(&Tour::basic_path_for(
-            folders,
-            &ReviewSubject::from(pr.clone()),
-        ))?)
+    let tour = if ToursOnDisk::of(folders, subject).opens_basic() {
+        Tour::Basic(BasicTour::load(&Tour::basic_path_for(folders, subject))?)
     } else {
         Tour::Guided(GuidedTour::load(&opened.tour_path())?)
     };
@@ -97,7 +101,7 @@ pub fn open_review(
     };
     let refresher = TourRefresher {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
         writer: Arc::new(ClaudeRefreshWriter::new(
             clone
@@ -108,17 +112,17 @@ pub fn open_review(
     };
     let reloader = TourReloader {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
     };
     let switcher = TourSwitcher {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
     };
     let repinner = TourRepinner {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source,
     };
     Ok(OpenedReview {

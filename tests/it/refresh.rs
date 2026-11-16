@@ -217,8 +217,12 @@ struct SkillStandIn {
 }
 
 impl RefreshWriter for SkillStandIn {
-    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
-        assert_eq!(pr.to_string(), self.pr.to_string());
+    fn refresh(
+        &self,
+        subject: &ReviewSubject,
+        on_line: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<()> {
+        assert_eq!(subject.to_string(), self.pr.to_string());
         match self.writer {
             Writer::Fails => anyhow::bail!("claude stopped"),
             Writer::GivesUp => {
@@ -235,7 +239,7 @@ impl RefreshWriter for SkillStandIn {
             Writer::Refreshes => {
                 on_line(&tool_use_line("Read", "file_path", "app/Pricing.php"));
                 on_line(&tool_use_line("Edit", "file_path", "tour.json"));
-                ReviewStateFile::for_subject(&self.folders, &ReviewSubject::from(pr.clone()))
+                ReviewStateFile::for_subject(&self.folders, subject)
                     .update(guided_review::viewer::ReviewState::finish_refresh)?;
                 on_line(&result_line("Refreshed the tour.", false));
                 Ok(())
@@ -265,7 +269,7 @@ fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
     });
     TourRefresher {
         folders: shop.repo.folders(),
-        pr: shop.pr(),
+        subject: shop.pr().into(),
         pick_code_source: pick,
         writer: Arc::new(SkillStandIn {
             folders: shop.repo.folders(),

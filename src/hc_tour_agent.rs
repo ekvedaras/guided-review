@@ -13,7 +13,7 @@ use serde_json::Value;
 use crate::claude_cli::tour_agent_tools;
 use crate::json::at;
 use crate::platform::{HerdrRaise, Os, RaiseFailed};
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
     TourAgentPort, TourAgentStart,
@@ -131,8 +131,29 @@ fn space_of(place: &str) -> &str {
         .map_or(place, |(space, _tab)| space)
 }
 
-fn label_of(pr: &PullRequestUrl) -> String {
-    format!("gr.pr={pr}")
+const PR_LABEL_KEY: &str = "gr.pr";
+const LOCAL_LABEL_KEY: &str = "gr.local";
+
+/// A PR keeps the label it has always had; a local change set is labelled by its subject key.
+fn label_key_of(subject: &ReviewSubject) -> &'static str {
+    match subject {
+        ReviewSubject::PullRequest(_) => PR_LABEL_KEY,
+        ReviewSubject::Local(_) => LOCAL_LABEL_KEY,
+    }
+}
+
+fn label_of(subject: &ReviewSubject) -> String {
+    format!("{}={subject}", label_key_of(subject))
+}
+
+/// The subject a terminal is the tour agent of, read from its labels.
+fn subject_labelled_in(terminal: &Value) -> Option<ReviewSubject> {
+    [PR_LABEL_KEY, LOCAL_LABEL_KEY].into_iter().find_map(|key| {
+        at(terminal, &format!("/labels/{key}"))
+            .as_str()?
+            .parse()
+            .ok()
+    })
 }
 
 fn state_of(terminal: &Value) -> AgentStatus {
@@ -164,8 +185,8 @@ impl TourAgentPort for HcTourAgents {
         }
     }
 
-    fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>> {
-        let label = label_of(pr);
+    fn terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>> {
+        let label = label_of(subject);
         let listed = self.hc(&["ls", "--label", APP_LABEL, "--label", &label, "--json"])?;
         Ok(at(&listed, "/terminals")
             .as_array()
@@ -192,13 +213,14 @@ impl TourAgentPort for HcTourAgents {
             .collect())
     }
 
-    fn claim(&self, terminal: &TerminalId, pr: &PullRequestUrl) -> anyhow::Result<()> {
-        self.hc(&["label", terminal.as_str(), APP_LABEL, &label_of(pr)])
+    fn claim(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        self.hc(&["label", terminal.as_str(), APP_LABEL, &label_of(subject)])
             .map(drop)
     }
 
-    fn release(&self, terminal: &TerminalId) -> anyhow::Result<()> {
-        self.hc(&["label", terminal.as_str(), "gr.pr="]).map(drop)
+    fn release(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        let emptied = format!("{}=", label_key_of(subject));
+        self.hc(&["label", terminal.as_str(), &emptied]).map(drop)
     }
 
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
@@ -310,9 +332,7 @@ impl TourAgentPort for HcTourAgents {
                 let got = self.hc(&["get", address, "--json"])?;
                 Ok(AppAgent {
                     terminal: TerminalId::new(address),
-                    pr: at(&got, "/labels/gr.pr")
-                        .as_str()
-                        .and_then(|pr| pr.parse().ok()),
+                    subject: subject_labelled_in(&got),
                     status: state_of(&got),
                     status_since_ms: at(&got, "/status_ms").as_u64().unwrap_or(0),
                 })
@@ -322,7 +342,7 @@ impl TourAgentPort for HcTourAgents {
 
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
         let folder = start.folder.display().to_string();
-        let pr_label = label_of(&start.pr);
+        let subject_label = label_of(&start.subject);
         let path = format!("PATH={}", self.agents_path);
         let tab = &start.name;
         let space_label = format!("herdr.space={AGENTS_SPACE}");
@@ -340,7 +360,7 @@ impl TourAgentPort for HcTourAgents {
             "--label",
             APP_LABEL,
             "--label",
-            &pr_label,
+            &subject_label,
             "--label",
             STARTED_BY_APP_LABEL,
             "--label",
@@ -361,7 +381,7 @@ impl TourAgentPort for HcTourAgents {
         let address = at(&started, "/address")
             .as_str()
             .context("`hc run` did not say which terminal it started")?;
-        self.name_place(tab, &start.pr);
+        self.name_place(tab, &start.subject);
         Ok(TerminalId::new(address))
     }
 
@@ -480,26 +500,24 @@ impl HcTourAgents {
         } else {
             return Ok(());
         };
-        if let Some(pr) = at(got, "/labels/gr.pr")
-            .as_str()
-            .and_then(|pr| pr.parse().ok())
-        {
-            self.name_place(tab, &pr);
+        if let Some(subject) = subject_labelled_in(got) {
+            self.name_place(tab, &subject);
         }
         Ok(())
     }
 
     /// Names the agents' space and the agent's tab once herdr-app has taken the terminal up.
-    fn name_place(&self, tab: &str, pr: &PullRequestUrl) {
+    fn name_place(&self, tab: &str, subject: &ReviewSubject) {
         for _ in 0..ADOPTION_TRIES {
-            match self.try_naming(tab, pr) {
+            match self.try_naming(tab, subject) {
                 Naming::Named | Naming::GivenUp => return,
                 Naming::NotTakenUpYet => std::thread::sleep(ADOPTION_WAIT),
             }
         }
     }
 
-    fn try_naming(&self, tab: &str, pr: &PullRequestUrl) -> Naming {
+    fn try_naming(&self, tab: &str, subject: &ReviewSubject) -> Naming {
+        let tab_name = subject.short();
         let renames = [
             [
                 "do",
@@ -509,7 +527,7 @@ impl HcTourAgents {
                 "--name",
                 AGENTS_SPACE_NAME,
             ],
-            ["do", "tab.rename", "--id", tab, "--name", &pr.short()],
+            ["do", "tab.rename", "--id", tab, "--name", &tab_name],
         ];
         for rename in renames {
             let Ok(output) = self.herdr_app(&rename) else {

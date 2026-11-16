@@ -5,7 +5,7 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, IdeLaunch, NoIde};
 use crate::line_number::LineNumber;
 use crate::pieces::ChangedFile;
-use crate::pull_request::{PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{RepoName, Sha};
 
 use super::step_page::{LineLocation, Side};
 
@@ -153,13 +153,13 @@ impl CodeOpener {
     pub(super) fn new(
         ide: Result<Ide, NoIde>,
         working_copy: WorkingCopy,
-        pr: &PullRequestUrl,
+        repo: &RepoName,
         head: &Sha,
     ) -> Self {
         Self {
             ide,
             working_copy,
-            repo: pr.repo.clone(),
+            repo: repo.clone(),
             head: head.clone(),
         }
     }
@@ -269,7 +269,7 @@ fn line_of_fragment(fragment: &str) -> LineNumber {
 /// Links point at the commits the tour is pinned to, so a line stays the same line
 /// even after the PR has moved on.
 pub(super) struct CodeLinks<'a> {
-    pub pr: &'a PullRequestUrl,
+    pub repo: &'a RepoName,
     pub base: &'a Sha,
     pub head: &'a Sha,
 }
@@ -316,7 +316,7 @@ impl CodeLinks<'_> {
     }
 
     fn blob(&self, sha: &Sha, path: &str) -> String {
-        blob_url(&self.pr.repo, sha, path)
+        blob_url(self.repo, sha, path)
     }
 }
 

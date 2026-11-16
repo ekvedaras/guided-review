@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
+use crate::review_subject::ReviewSubject;
 
 use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
@@ -220,7 +221,7 @@ pub(super) enum Job {
     },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
-    CheckAgentLink(PullRequestUrl),
+    CheckAgentLink(ReviewSubject),
 }
 
 impl Job {

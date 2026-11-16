@@ -3,7 +3,8 @@ use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::{drive_until_idle, kinds};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::RepoName;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AGENT_LINK_RECHECK, AfterLanding, AgentLinkOff, AgentStatus, Review, ReviewStateFile,
@@ -69,7 +70,7 @@ impl Pull {
     }
 }
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
