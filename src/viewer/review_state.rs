@@ -627,6 +627,21 @@ impl ReviewStateFile {
             .collect()
     }
 
+    pub fn exists(&self) -> bool {
+        self.path.exists()
+    }
+
+    /// For a dropped review; a file never written is already gone.
+    pub fn delete(&self) -> anyhow::Result<()> {
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => {
+                Err(error).with_context(|| format!("could not delete {}", self.path.display()))
+            }
+        }
+    }
+
     /// A PR not reviewed before has no file yet: that is an empty state, not an error.
     pub fn load(&self) -> anyhow::Result<ReviewState> {
         match self.read_text()? {

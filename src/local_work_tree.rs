@@ -212,6 +212,38 @@ impl LocalWorkTree {
         })
     }
 
+    /// Deletes the change set's ref, when there is one: `git gc` may take its snapshot then.
+    pub fn forget_snapshot(&self, change_set: &LocalChangeSet) -> Result<(), OpenRefusal> {
+        self.delete_snapshot_ref(&snapshot_ref(change_set))
+    }
+
+    /// The refs that keep snapshots in this clone, of any local review; never a PR's fetch ref.
+    pub fn snapshot_refs(&self) -> Result<Vec<String>, OpenRefusal> {
+        Ok(self
+            .git(&[
+                "for-each-ref",
+                "--format=%(refname)",
+                &format!("{SNAPSHOT_REF_PREFIX}*"),
+            ])?
+            .lines()
+            .map(str::to_owned)
+            .collect())
+    }
+
+    /// Deletes one of `snapshot_refs`; any other ref is refused.
+    pub fn delete_snapshot_ref(&self, name: &str) -> Result<(), OpenRefusal> {
+        if !name.starts_with(SNAPSHOT_REF_PREFIX) {
+            return Err(self.failed(format!("{name} is not a snapshot ref")));
+        }
+        let exists = self
+            .git(&["rev-parse", "--verify", "--quiet", name])
+            .is_ok();
+        if exists {
+            self.git(&["update-ref", "-d", name])?;
+        }
+        Ok(())
+    }
+
     /// Points the change set's one ref at `snapshot`, so `git gc` keeps it.
     pub fn keep_snapshot(
         &self,

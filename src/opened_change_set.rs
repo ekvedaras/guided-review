@@ -1,18 +1,80 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use anyhow::Context;
 
 use crate::app_folders::AppFolders;
 use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
 use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
-use crate::local_work_tree::LocalWorkTree;
+use crate::local_work_tree::{LocalWorkTree, snapshot_ref};
 use crate::make_basic_tour::make_basic_tour;
 use crate::opened_pr::CodeAtTips;
 use crate::repin::Repin;
-use crate::review_subject::{LocalChangeSet, ReviewSubject};
+use crate::review_subject::{LOCAL_FILES_FOLDER, LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use crate::tour::{Tour, TourPin, ToursOnDisk};
 use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
+
+/// Deletes the snapshot refs, in the clones of the local reviews on disk, of local reviews that are
+/// on disk no more, as after a crash between deleting a review's files and its ref. PR fetch refs are
+/// never touched. Runs when the app starts; a clone it cannot read keeps its refs.
+pub fn clean_snapshot_refs(folders: &AppFolders) {
+    let mut kept_by_clone: HashMap<WorkTreeRoot, HashSet<String>> = HashMap::new();
+    for change_set in local_reviews_on_disk(folders) {
+        kept_by_clone
+            .entry(change_set.folder().clone())
+            .or_default()
+            .insert(snapshot_ref(&change_set));
+    }
+    for (folder, kept) in kept_by_clone {
+        let work_tree = LocalWorkTree::at(folder);
+        let refs = match work_tree.snapshot_refs() {
+            Ok(refs) => refs,
+            Err(error) => {
+                eprintln!("could not clean the snapshot refs: {error}");
+                continue;
+            }
+        };
+        for stale in refs.iter().filter(|name| !kept.contains(*name)) {
+            if let Err(error) = work_tree.delete_snapshot_ref(stale) {
+                eprintln!("could not delete the snapshot ref {stale}: {error}");
+            }
+        }
+    }
+}
+
+/// The change sets whose tours are on disk, basic or guided. A file that cannot be read names none.
+fn local_reviews_on_disk(folders: &AppFolders) -> HashSet<LocalChangeSet> {
+    let local_tours = Tour::tours_dir(folders).join(LOCAL_FILES_FOLDER);
+    let Ok(clones) = std::fs::read_dir(local_tours) else {
+        return HashSet::new();
+    };
+    clones
+        .filter_map(|clone| std::fs::read_dir(clone.ok()?.path()).ok())
+        .flatten()
+        .filter_map(|tour| {
+            let path = tour.ok()?.path();
+            if path.extension()? != "json" {
+                return None;
+            }
+            match Tour::load(&path).ok()?.pin().subject().ok()? {
+                ReviewSubject::Local(change_set) => Some(change_set),
+                ReviewSubject::PullRequest(_) => None,
+            }
+        })
+        .collect()
+}
+
+/// A file or folder that was never there is already gone.
+fn remove_if_there(path: &Path, removed: std::io::Result<()>) -> anyhow::Result<()> {
+    match removed {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("could not delete {}", path.display())),
+    }
+}
 
 /// What every command needs to work on one local change set: where its files live and its working
 /// tree. The twin of `OpenedPr`, with no GitHub in it.
@@ -107,6 +169,22 @@ impl OpenedChangeSet {
         )?;
         self.work_tree.keep_snapshot(&self.change_set, &snapshot)?;
         Ok(repinned)
+    }
+
+    /// Drop review: the tours, the tour writer's files and the state file go, then the snapshot ref, so
+    /// a failure part way leaves at worst a ref that the clean-up on the next start takes.
+    pub fn drop_review(&self) -> anyhow::Result<()> {
+        let subject = self.subject();
+        for tour in [
+            Tour::basic_path_for(&self.folders, &subject),
+            Tour::path_for(&self.folders, &subject),
+        ] {
+            remove_if_there(&tour, std::fs::remove_file(&tour))?;
+        }
+        let tour_files = Tour::files_for(&self.folders, &subject);
+        remove_if_there(&tour_files, std::fs::remove_dir_all(&tour_files))?;
+        self.state_file().delete()?;
+        Ok(self.work_tree.forget_snapshot(&self.change_set)?)
     }
 
     fn refuse_when_on_another_branch(&self) -> anyhow::Result<()> {

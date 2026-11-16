@@ -32,7 +32,8 @@ pub struct WorkTreeRoot(PathBuf);
 pub struct BranchName(String);
 
 const LOCAL_KEY_PREFIX: &str = "local:";
-const LOCAL_FILES_FOLDER: &str = "local";
+/// The folder, under the tours folder and the state folder, that holds every local review's files.
+pub const LOCAL_FILES_FOLDER: &str = "local";
 /// Four bytes are the 8 hex characters of the short hash in a local review's folder name.
 const SHORT_HASH_BYTES: usize = 4;
 

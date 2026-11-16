@@ -2252,6 +2252,18 @@ impl ReviewCore {
         self.state.start_repin();
     }
 
+    /// Drop review deletes the state file from another thread, and this review is closed when it is
+    /// done, so from now on nothing it holds may write the file again; as during a re-pin.
+    pub fn start_drop(&mut self) {
+        self.state.start_repin();
+    }
+
+    /// The drop failed and the review stays: it takes changes again.
+    pub fn drop_failed(&mut self, error: &anyhow::Error) {
+        self.state.repin_failed();
+        self.raise_problem(Problem::ReviewNotDropped(format!("{error:#}")));
+    }
+
     pub fn refresh_failed(&mut self, error: &anyhow::Error) {
         self.raise_problem(Problem::TourNotRefreshed(format!("{error:#}")));
     }

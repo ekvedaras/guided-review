@@ -35,6 +35,8 @@ pub enum Problem {
     TourNotRefreshed(String),
     /// `open` named the PR shown, and its tour file could not be read again.
     TourNotReloaded(String),
+    /// Drop review of a local review failed part way; the review stays on screen.
+    ReviewNotDropped(String),
     /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
@@ -76,6 +78,8 @@ pub enum ProblemKind {
     TourNotRefreshed,
     /// Stays: a reload that goes through opens a new review.
     TourNotReloaded,
+    /// Stays: a drop that goes through closes the review.
+    ReviewNotDropped,
     /// Raised when the review opens; the old file is kept, so nothing clears it.
     SavedReviewNotRead,
     /// Replaced by the next hand-off, which clears it when that one is sent.
@@ -108,6 +112,7 @@ impl Problem {
             Self::ViewedNotSynced(_) => ProblemKind::ViewedNotSynced,
             Self::TourNotRefreshed(_) => ProblemKind::TourNotRefreshed,
             Self::TourNotReloaded(_) => ProblemKind::TourNotReloaded,
+            Self::ReviewNotDropped(_) => ProblemKind::ReviewNotDropped,
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
@@ -287,6 +292,9 @@ impl fmt::Display for Problem {
                 formatter,
                 "The tour could not be read again, so it shows as it was: {reason}"
             ),
+            Self::ReviewNotDropped(reason) => {
+                write!(formatter, "The review was not dropped: {reason}")
+            }
             Self::HandOffNotSent { comment, reason } => write!(
                 formatter,
                 "The agent will not get your comment \"{comment}\": {reason}"

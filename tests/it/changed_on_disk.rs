@@ -7,10 +7,12 @@ use guided_review::config::Config;
 use guided_review::ide::Ide;
 use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::{OpenedReview, open_review};
+use guided_review::opened_change_set::{OpenedChangeSet, clean_snapshot_refs};
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
+use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, Review, Side, WorkKind,
+    Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, Review, ReviewStateFile, Side, WorkKind,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README changed and not committed.
@@ -339,4 +341,98 @@ fn update_refuses_while_the_folder_is_on_another_branch_and_moves_nothing() {
     assert!(refused.is_err());
     assert_eq!(snapshot_ref_target(&feature), head);
     assert_eq!(feature.open().review.head(), &head);
+}
+
+fn refs_kept(feature: &Feature) -> Vec<String> {
+    feature
+        .repo
+        .git(&["for-each-ref", "--format=%(refname)", "refs/guided-review/"])
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A second local review in the same clone, of the branch `second`, and the fetch ref of a PR.
+fn with_a_second_review_and_a_pr_ref(feature: &Feature) -> ReviewSubject {
+    feature.repo.git(&["checkout", "-q", "-b", "second"]);
+    let second = ReviewSubject::from(
+        LocalWorkTree::containing(feature.repo.path())
+            .unwrap()
+            .change_set()
+            .unwrap(),
+    );
+    open_review(&second, feature.repo.path(), &feature.repo.folders()).unwrap();
+    feature.repo.git(&["checkout", "-q", "feature"]);
+    feature
+        .repo
+        .git(&["update-ref", "refs/guided-review/7", "HEAD"]);
+    second
+}
+
+fn local_ref(subject: &ReviewSubject) -> String {
+    snapshot_ref(subject.local().unwrap())
+}
+
+#[test]
+fn drop_review_deletes_its_tours_state_file_and_ref_and_nothing_of_other_reviews() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    opened.review.tick_file(&file_path("README.md")).unwrap();
+    let second = with_a_second_review_and_a_pr_ref(&feature);
+    let folders = feature.repo.folders();
+
+    OpenedChangeSet::new(feature.subject().local().unwrap(), &folders)
+        .drop_review()
+        .unwrap();
+
+    assert_eq!(
+        ToursOnDisk::of(&folders, &feature.subject()),
+        ToursOnDisk::None
+    );
+    assert!(
+        !ReviewStateFile::for_subject(&folders, &feature.subject()).exists(),
+        "the state file is still there"
+    );
+    assert_eq!(
+        refs_kept(&feature),
+        ["refs/guided-review/7".to_owned(), local_ref(&second)]
+    );
+    assert_ne!(ToursOnDisk::of(&folders, &second), ToursOnDisk::None);
+}
+
+#[test]
+fn a_review_being_dropped_takes_no_change_so_nothing_writes_its_state_file_again() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let folders = feature.repo.folders();
+
+    opened.review.start_drop();
+    OpenedChangeSet::new(feature.subject().local().unwrap(), &folders)
+        .drop_review()
+        .unwrap();
+    let ticked = opened.review.tick_file(&file_path("README.md"));
+
+    assert!(ticked.is_err());
+    assert!(!ReviewStateFile::for_subject(&folders, &feature.subject()).exists());
+}
+
+#[test]
+fn on_start_the_refs_of_local_reviews_no_longer_on_disk_are_deleted() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let second = with_a_second_review_and_a_pr_ref(&feature);
+    let folders = feature.repo.folders();
+    for tour in [
+        Tour::basic_path_for(&folders, &feature.subject()),
+        Tour::path_for(&folders, &feature.subject()),
+    ] {
+        std::fs::remove_file(tour).ok();
+    }
+
+    clean_snapshot_refs(&folders);
+
+    assert_eq!(
+        refs_kept(&feature),
+        ["refs/guided-review/7".to_owned(), local_ref(&second)]
+    );
 }
