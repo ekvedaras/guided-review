@@ -126,20 +126,18 @@ impl ReviewCore {
                     .work
                     .want_in(WorkKind::LookUpPullOfBranch, PULL_OF_BRANCH_RETRY),
             },
-            Done::HeadBranch(found) => match found {
-                Ok(branch) => {
-                    self.head_branch_failures = 0;
-                    self.head_branch_is(branch);
-                }
-                // Silent, as for a local review's look for its PR.
-                Err(_) => {
-                    self.head_branch_failures += 1;
-                    self.work.want_in(
-                        WorkKind::LookUpHeadBranch,
-                        head_branch_retry_after(self.head_branch_failures),
-                    );
-                }
-            },
+            Done::HeadBranch(Ok(branch)) => {
+                self.head_branch_failures = 0;
+                self.head_branch_is(branch);
+            }
+            // Silent, as for a local review's look for its PR.
+            Done::HeadBranch(Err(_)) => {
+                self.head_branch_failures += 1;
+                self.work.want_in(
+                    WorkKind::LookUpHeadBranch,
+                    head_branch_retry_after(self.head_branch_failures),
+                );
+            }
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();
             }
