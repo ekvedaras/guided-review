@@ -445,3 +445,112 @@ fn file_ticks_are_saved_and_come_back_when_the_review_is_reopened() {
         ]
     );
 }
+
+#[test]
+fn a_change_is_named_as_committed_uncommitted_or_both() {
+    assert_eq!(
+        [
+            LocalChange::Committed,
+            LocalChange::Uncommitted,
+            LocalChange::Both
+        ]
+        .map(LocalChange::label),
+        ["committed", "uncommitted", "committed and uncommitted"]
+    );
+}
+
+#[test]
+fn the_overview_counts_its_uncommitted_files_in_words() {
+    let feature = Feature::with_work_in_progress();
+    let local = feature.open().overview_page().local.unwrap();
+
+    assert_eq!(local.uncommitted_label(), "3 files uncommitted");
+    assert_eq!(
+        LocalOverview {
+            uncommitted_files: 1,
+            ..local.clone()
+        }
+        .uncommitted_label(),
+        "1 file uncommitted"
+    );
+    assert_eq!(
+        LocalOverview {
+            uncommitted_files: 0,
+            ..local
+        }
+        .uncommitted_label(),
+        "No uncommitted files"
+    );
+}
+
+#[test]
+fn the_overview_rows_of_a_local_review_hold_its_facts_and_ask_about_the_whole_change() {
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+    let pr = PullRequest::changing_a_file().open();
+
+    let page = review.page();
+    let local = page.overview().unwrap().local.as_ref().unwrap();
+
+    assert_eq!(local.branch.as_str(), "feature");
+    assert_eq!(local.commit_subjects, ["Add the cart"]);
+    assert_eq!(page.screen_ask().unwrap().label, "the whole change");
+    assert_eq!(pr.page().overview().unwrap().local, None);
+    assert_eq!(pr.page().screen_ask().unwrap().label, "the whole PR");
+}
+
+#[test]
+fn a_file_screens_toolbar_names_where_the_files_change_comes_from() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+    let mut pr = PullRequest::changing_a_file().open();
+
+    let marks: Vec<_> = ["README.md", "old.txt", "src/cart.rs"]
+        .into_iter()
+        .map(|path| {
+            review.go_to_file(&file_path(path));
+            review.page().screen_change()
+        })
+        .collect();
+    pr.go_to_file(&file_path("a.txt"));
+
+    assert_eq!(
+        marks,
+        [
+            Some(LocalChange::Uncommitted),
+            Some(LocalChange::Committed),
+            Some(LocalChange::Both)
+        ]
+    );
+    assert_eq!(pr.page().screen_change(), None);
+}
+
+#[test]
+fn a_local_review_leads_its_sidebar_with_the_window_title_and_a_pr_does_not() {
+    let feature = Feature::with_work_in_progress();
+
+    assert_eq!(
+        feature.open().local_heading().as_deref(),
+        Some("Local changes · acme/shop · feature")
+    );
+    assert_eq!(PullRequest::changing_a_file().open().local_heading(), None);
+}
+
+#[test]
+fn a_reloaded_local_review_keeps_what_the_app_read_of_the_clone() {
+    let feature = Feature::with_work_in_progress();
+    let shown = feature.open();
+    let tour =
+        BasicTour::load(&Tour::basic_path_for(&feature.repo.folders(), &feature.subject()))
+            .unwrap();
+    let mut reloaded = Review::open_basic(tour, &feature.source(), feature.state_file()).unwrap();
+    assert_eq!(reloaded.local_facts(), None);
+
+    reloaded.carry_on_from(shown);
+
+    assert_eq!(
+        reloaded.window_title(),
+        "Local changes · acme/shop · feature"
+    );
+    assert_eq!(reloaded.overview_page().local.unwrap().commit_subjects, ["Add the cart"]);
+}

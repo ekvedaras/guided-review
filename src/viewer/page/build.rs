@@ -162,6 +162,7 @@ impl<'a> Builder<'a> {
             full_diff: None,
             ignores_whitespace: None,
             wraps_lines: None,
+            change: None,
         })));
     }
 
@@ -172,13 +173,19 @@ impl<'a> Builder<'a> {
             ask: Some(AskAt {
                 id: "ask-tour".into(),
                 place: Place::Tour,
-                label: "the whole PR".into(),
+                label: if self.review.subject().local().is_some() {
+                    "the whole change"
+                } else {
+                    "the whole PR"
+                }
+                .into(),
             }),
             comment_on_file: None,
             fold: None,
             full_diff: None,
             ignores_whitespace: None,
             wraps_lines: None,
+            change: None,
         })));
     }
 
@@ -201,6 +208,7 @@ impl<'a> Builder<'a> {
             }),
             ignores_whitespace: Some(review.display_options().ignores_whitespace()),
             wraps_lines: Some(review.display_options().wraps_lines()),
+            change: page.change,
         })));
         let shown = if page
             .since_read
@@ -301,6 +309,7 @@ impl<'a> Builder<'a> {
             }),
             ignores_whitespace: has_code.then(|| review.display_options().ignores_whitespace()),
             wraps_lines: has_code.then(|| review.display_options().wraps_lines()),
+            change: None,
         })));
         let footer = screen_footer(
             review,
@@ -352,6 +361,7 @@ impl<'a> Builder<'a> {
             full_diff: None,
             ignores_whitespace: Some(review.display_options().ignores_whitespace()),
             wraps_lines: Some(review.display_options().wraps_lines()),
+            change: None,
         })));
         let after_code = self.hang_threads_and_comments(page.threads);
         for block in FileBlock::group(page.pieces) {

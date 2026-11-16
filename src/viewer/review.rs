@@ -418,6 +418,9 @@ impl Review {
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
+        if self.local_facts.is_none() {
+            self.local_facts = replaced.local_facts;
+        }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
         }
@@ -902,6 +905,11 @@ impl ReviewCore {
                 None => format!("Local changes · {}", change_set.branch().as_str()),
             },
         }
+    }
+
+    /// The line a local review's sidebar leads with, naming what is reviewed; `None` for a PR.
+    pub fn local_heading(&self) -> Option<String> {
+        self.subject.local().map(|_| self.window_title())
     }
 
     /// Whether the review has a PR page to open.

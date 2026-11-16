@@ -25,6 +25,17 @@ pub enum LocalChange {
     Both,
 }
 
+impl LocalChange {
+    /// What the overview and the file screen say of where the change comes from.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Committed => "committed",
+            Self::Uncommitted => "uncommitted",
+            Self::Both => "committed and uncommitted",
+        }
+    }
+}
+
 impl LocalFacts {
     pub fn change_of(&self, path: &FilePath) -> Option<LocalChange> {
         match (

@@ -53,3 +53,14 @@ pub struct OverviewFile {
     /// Where a local review's change to the file comes from; `None` for a PR.
     pub change: Option<LocalChange>,
 }
+
+impl LocalOverview {
+    /// "2 files uncommitted", or that there are none.
+    pub fn uncommitted_label(&self) -> String {
+        match self.uncommitted_files {
+            0 => "No uncommitted files".to_owned(),
+            1 => "1 file uncommitted".to_owned(),
+            count => format!("{count} files uncommitted"),
+        }
+    }
+}

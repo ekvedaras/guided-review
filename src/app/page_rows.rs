@@ -295,6 +295,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             toolbar.full_diff.hash(&mut hasher);
             toolbar.ignores_whitespace.hash(&mut hasher);
             toolbar.wraps_lines.hash(&mut hasher);
+            toolbar.change.hash(&mut hasher);
         }
         PageRow::ScreenFooter(footer) => footer.hash(&mut hasher),
         PageRow::Overview(overview) => overview.hash(&mut hasher),
