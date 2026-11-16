@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::coverage;
 use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
-use crate::tour::GuidedTour;
+use crate::tour::{GuidedTour, Tour};
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
 use super::hand_offs::{HandOffId, HandOffs};
@@ -195,6 +195,7 @@ pub struct ThreadView {
 enum Home {
     Step(StepId),
     SafetyNet,
+    File(FilePath),
 }
 
 /// Which screen holds which thread. Computed once per pull; the reviewer's folds live elsewhere.
@@ -223,6 +224,41 @@ impl Placed<'_> {
 
 impl ThreadPlacement {
     pub fn of(
+        tour: &Tour,
+        files: &[ChangedFile],
+        threads: &[ReviewThread],
+        followed: &BTreeMap<ThreadId, FollowedLines>,
+        display: &DiffDisplay,
+    ) -> Self {
+        match tour {
+            Tour::Guided(guided) => Self::of_steps(guided, files, threads, followed, display),
+            Tour::Basic(_) => Self::of_files(files, threads, followed),
+        }
+    }
+
+    /// A basic tour shows each file whole on a screen of its own, so a thread goes to its file's screen.
+    fn of_files(
+        files: &[ChangedFile],
+        threads: &[ReviewThread],
+        followed: &BTreeMap<ThreadId, FollowedLines>,
+    ) -> Self {
+        let mut homes: BTreeMap<Home, Vec<ReviewThread>> = BTreeMap::new();
+        for thread in threads
+            .iter()
+            .filter(|thread| files.iter().any(|file| file.path == thread.path))
+        {
+            homes
+                .entry(Home::File(thread.path.clone()))
+                .or_default()
+                .push(thread.clone());
+        }
+        Self {
+            homes,
+            followed: followed.clone(),
+        }
+    }
+
+    fn of_steps(
         tour: &GuidedTour,
         files: &[ChangedFile],
         threads: &[ReviewThread],
@@ -261,6 +297,10 @@ impl ThreadPlacement {
 
     pub fn in_step(&self, id: &StepId) -> Placed<'_> {
         self.of_home(&Home::Step(id.clone()))
+    }
+
+    pub fn in_file(&self, path: &FilePath) -> Placed<'_> {
+        self.of_home(&Home::File(path.clone()))
     }
 
     pub fn in_safety_net(&self) -> Placed<'_> {

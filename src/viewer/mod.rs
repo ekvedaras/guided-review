@@ -77,7 +77,7 @@ pub use app_state::AppStateFile;
 pub use app_window::{
     AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
 };
-pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
+pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place, ShownOn};
 pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
 };
@@ -175,7 +175,7 @@ pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff, SendOutcome,
-    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents,
+    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents, TourKind,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;

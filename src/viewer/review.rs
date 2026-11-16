@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::AskSettings;
 
-use super::ask::{Ask, Asks, Place};
+use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
@@ -35,7 +35,7 @@ use super::finish_review::{
     SubmittedReview,
 };
 use super::github_outage::{Affected, OutageCause};
-use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs};
+use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs, SentFrom};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
@@ -87,6 +87,27 @@ pub enum Screen {
     Step(StepId),
     /// After the last step: every change no step shows.
     SafetyNet,
+}
+
+impl Screen {
+    /// What an Ask about lines of this screen records as the screen it was shown on; the
+    /// summary and the overview show no lines.
+    pub fn shown_on(&self) -> Option<ShownOn> {
+        match self {
+            Self::Step(step) => Some(ShownOn::Step { step: step.clone() }),
+            Self::SafetyNet => Some(ShownOn::SafetyNet),
+            Self::File(path) => Some(ShownOn::File { path: path.clone() }),
+            Self::Summary | Self::Overview => None,
+        }
+    }
+
+    fn sent_from(&self) -> SentFrom {
+        match self {
+            Self::Step(step) => SentFrom::Step(step.clone()),
+            Self::File(path) => SentFrom::File(path.clone()),
+            Self::Summary | Self::Overview | Self::SafetyNet => SentFrom::Elsewhere,
+        }
+    }
 }
 
 /// One row of the step tree. Rows come in reading order, so indenting by `depth` draws the tree.
@@ -679,7 +700,16 @@ impl ReviewCore {
         let file = self.files.iter().find(|file| file.path == *path)?;
         let links = self.links();
         let display = self.display(&links);
-        Some(FilePage::of(file, &self.files, &display))
+        let mut page = FilePage::of(file, &self.files, &display);
+        page.threads = threads::views(
+            self.threads.in_file(path),
+            &page.pieces,
+            &self.thread_fold_flipped,
+            self.display_options.files_at_head(),
+            &self.thread_work(),
+            self.state.hand_offs(),
+        );
+        Some(page)
     }
 
     /// What the window shows where a guided tour shows its title and summary.
@@ -913,7 +943,31 @@ impl ReviewCore {
 
     /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
     pub fn ask_context(&self, place: &Place) -> Option<String> {
-        ask_context::context_for(self.tour.guided()?, &self.files, &self.links(), place)
+        ask_context::context_for(&self.tour, &self.files, &self.links(), place)
+    }
+
+    /// What the reviewer's own tour agent is typed for an Ask. In a basic tour it is told so, and which
+    /// file the Ask is on, since there is no tour text to find the place in.
+    pub fn ask_hand_off_text(&self, ask: &Ask, place: &str) -> String {
+        let pr = &self.pr;
+        let Tour::Basic(_) = &self.tour else {
+            return ask.hand_off_text(pr, place);
+        };
+        let file = match &ask.place {
+            Place::File { path }
+            | Place::Lines {
+                shown_on: ShownOn::File { path },
+                ..
+            } => Some(path),
+            Place::Tour | Place::Step { .. } | Place::Piece { .. } | Place::Lines { .. } => None,
+        };
+        let named_file = file.map_or_else(String::new, |file| format!("\nFile: {file}"));
+        let basic_place = format!(
+            "{place}{named_file}\nThe tour is a basic tour: the PR's changed files, with no tour file. \
+             Read the changed code with `guided-review outline {pr}` and \
+             `guided-review show {pr} <piece ids> --around`."
+        );
+        ask.hand_off_text(pr, &basic_place)
     }
 
     /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
@@ -921,13 +975,16 @@ impl ReviewCore {
         if ask.head == self.head {
             return false;
         }
-        let (Some(record), Some(guided)) = (self.repin_record(), self.tour.guided()) else {
+        let Some(record) = self.repin_record() else {
             return false;
         };
         let moved = |piece: &PieceId| record.status_of(piece) != Some(RepinStatus::Same);
         match &ask.place {
             Place::Tour => false,
             Place::Step { step } => {
+                let Some(guided) = self.tour.guided() else {
+                    return false;
+                };
                 record.gone_count(step) > 0
                     || self.step(step).is_some_and(|step| {
                         step.pieces
@@ -936,6 +993,12 @@ impl ReviewCore {
                             .any(|part| moved(&part.piece.id))
                     })
             }
+            Place::File { path } => self
+                .files
+                .iter()
+                .filter(|file| file.path == *path)
+                .flat_map(|file| &file.pieces)
+                .any(|piece| moved(&piece.id)),
             Place::Piece { piece, .. } => moved(piece),
             Place::Lines { pieces, .. } => pieces.iter().any(moved),
         }
@@ -944,7 +1007,10 @@ impl ReviewCore {
     /// Puts the Ask's latest answer into the comment box on its lines, after any text already
     /// there. The reviewer edits and sends it; nothing goes to GitHub here.
     fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
-        if matches!(ask.place, Place::Tour | Place::Step { .. }) {
+        if matches!(
+            ask.place,
+            Place::Tour | Place::Step { .. } | Place::File { .. }
+        ) {
             return Err(CommentRefusal::NoLines);
         }
         if ask.head != self.head {
@@ -964,19 +1030,25 @@ impl ReviewCore {
 
     /// The rows an Ask about lines or a piece is on, in its step at the tour head.
     fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
-        let (step, only_piece) = match place {
-            Place::Tour | Place::Step { .. } => return None,
-            Place::Piece { step, piece } => (Some(step), Some(piece)),
-            Place::Lines { step, .. } => (step.as_ref(), None),
+        let (shown_on, only_piece) = match place {
+            Place::Tour | Place::Step { .. } | Place::File { .. } => return None,
+            Place::Piece { step, piece } => (ShownOn::Step { step: step.clone() }, Some(piece)),
+            Place::Lines { shown_on, .. } => (shown_on.clone(), None),
         };
-        let pieces = match step {
-            Some(id) => {
+        let pieces = match shown_on {
+            ShownOn::Step { step } => {
                 let links = self.links();
                 let display = self.display(&links);
                 let guided = self.tour.guided()?;
-                StepPage::of(self.step(id)?, guided, &self.files, &display, false).pieces
+                StepPage::of(self.step(&step)?, guided, &self.files, &display, false).pieces
             }
-            None => self.safety_net()?.pieces,
+            ShownOn::SafetyNet => self.safety_net()?.pieces,
+            ShownOn::File { path } => {
+                let links = self.links();
+                let display = self.display(&links);
+                let file = self.files.iter().find(|file| file.path == path)?;
+                FilePage::of(file, &self.files, &display).pieces
+            }
         };
         let blocks = FileBlock::group(pieces);
         let shown: Vec<&DiffLine> = match only_piece {
@@ -1186,16 +1258,13 @@ impl ReviewCore {
             ignores_whitespace: false,
             links: &links,
         };
-        // Threads of a basic tour wait for the file screens' homes (ticket #84).
-        self.threads = self.tour.guided().map_or_default(|guided| {
-            ThreadPlacement::of(
-                guided,
-                &self.files,
-                &self.pulled_threads,
-                &self.followed_lines,
-                &display,
-            )
-        });
+        self.threads = ThreadPlacement::of(
+            &self.tour,
+            &self.files,
+            &self.pulled_threads,
+            &self.followed_lines,
+            &display,
+        );
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
@@ -1318,12 +1387,8 @@ impl ReviewCore {
     /// Whatever came of it, the next hand-off may go now.
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
         self.work.want(WorkKind::DeliverHandOff);
-        let step = match &self.screen {
-            Screen::Step(id) => Some(id.clone()),
-            _ => None,
-        };
         self.comment_desk
-            .apply_thread_action(&mut self.state, &outcome, step);
+            .apply_thread_action(&mut self.state, &outcome, self.screen.sent_from());
         self.show_pulled_threads(outcome.threads.as_ref());
         if outcome.result == ThreadActionResult::Done {
             match &outcome.action {
@@ -1534,14 +1599,10 @@ impl ReviewCore {
 
     fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
-        let step = match &self.screen {
-            Screen::Step(id) => Some(id.clone()),
-            _ => None,
-        };
         let hand_offs_before = self.state.hand_offs().all().len();
-        let result = self
-            .comment_desk
-            .apply_comment(&mut self.state, outcome, step);
+        let result =
+            self.comment_desk
+                .apply_comment(&mut self.state, outcome, self.screen.sent_from());
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
         result

@@ -2769,6 +2769,20 @@ impl OneStepLayout {
                 cx,
             ))
         });
+        let comment_on_file = toolbar.comment_on_file.as_ref().map(|path| {
+            let comment_path = path.clone();
+            icon_label_button(
+                &colors,
+                ElementId::from(SharedString::from(format!("comment-on-file-{path}"))),
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::MessageSquare,
+                "Comment on this file",
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_comment_box(CommentGesture::OnFile(&comment_path), window, cx);
+            }))
+        });
         div()
             .w_full()
             .pb_3()
@@ -2779,6 +2793,7 @@ impl OneStepLayout {
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
+            .children(comment_on_file)
             .children(toggles)
             .children(ask.map(|ask| div().pl_1().child(ask)))
     }

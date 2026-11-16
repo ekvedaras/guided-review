@@ -943,7 +943,7 @@ impl ReviewSession {
     pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
         let agents = self.tour_work.tour_agents.clone();
         let pr = self.review.pr().clone();
-        let text = ask.hand_off_text(&pr, place);
+        let text = self.review.ask_hand_off_text(ask, place);
         cx.background_executor()
             .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
     }

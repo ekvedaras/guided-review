@@ -110,6 +110,8 @@ pub struct StepHeading {
 /// The controls over a screen's pieces, in one row.
 pub struct Toolbar {
     pub ask: Option<AskAt>,
+    /// The file a basic tour's screen shows, which the reviewer can comment on as a whole.
+    pub comment_on_file: Option<FilePath>,
     pub fold: Option<FoldControl>,
     pub full_diff: Option<FullDiffControl>,
     /// `None` where no code is shown.

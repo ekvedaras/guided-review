@@ -121,18 +121,15 @@ impl AskDesk {
 
     /// The selected lines with Asks on a screen, which get a marker under their last row.
     pub fn asked_lines_on(&self, screen: &Screen) -> Vec<Place> {
-        let step = match screen {
-            Screen::Step(id) => Some(id),
-            Screen::SafetyNet => None,
-            // Asks of a basic tour's screens come with ticket #84.
-            Screen::Summary | Screen::Overview | Screen::File(_) => return Vec::new(),
+        let Some(shown_on) = screen.shown_on() else {
+            return Vec::new();
         };
         let mut places: Vec<Place> = Vec::new();
         for ask in self.asks.all() {
-            let Place::Lines { step: of, .. } = &ask.place else {
+            let Place::Lines { shown_on: of, .. } = &ask.place else {
                 continue;
             };
-            if of.as_ref() == step && !ask.messages.is_empty() && !places.contains(&ask.place) {
+            if *of == shown_on && !ask.messages.is_empty() && !places.contains(&ask.place) {
                 places.push(ask.place.clone());
             }
         }

@@ -308,11 +308,16 @@ impl TourAgents {
 
     /// Starts the tour agent of a PR that has none, ending the idle app-started agent used longest ago when
     /// three live, never the one of `active`. Refuses, naming the busy ones, when none is idle.
-    pub fn start(&self, pr: &PullRequestUrl, active: &PullRequestUrl) -> anyhow::Result<()> {
+    pub fn start(
+        &self,
+        pr: &PullRequestUrl,
+        active: &PullRequestUrl,
+        tour: TourKind,
+    ) -> anyhow::Result<()> {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        self.launch(pr, active, first_task(pr)).map(drop)
+        self.launch(pr, active, first_task(pr, tour)).map(drop)
     }
 
     fn launch(
@@ -598,11 +603,26 @@ fn writer_task(pr: &PullRequestUrl) -> String {
 }
 
 /// What a tour agent the app started is told first. Hand-offs follow as messages that carry the rest of the protocol.
-fn first_task(pr: &PullRequestUrl) -> String {
-    format!(
-        "You are the tour agent of {pr}: you wrote or know its guided-review tour, and the reviewer's comments on it \
-         reach you here as messages. Find the tour file with `guided-review tour-path {pr}` and read it now, so you \
-         can answer. Answer each comment as its message says, fix the tour when a comment shows it is wrong, and never \
-         change the PR's code. Then wait for the next message."
-    )
+fn first_task(pr: &PullRequestUrl, tour: TourKind) -> String {
+    match tour {
+        TourKind::Guided => format!(
+            "You are the tour agent of {pr}: you wrote or know its guided-review tour, and the reviewer's comments on it \
+             reach you here as messages. Find the tour file with `guided-review tour-path {pr}` and read it now, so you \
+             can answer. Answer each comment as its message says, fix the tour when a comment shows it is wrong, and never \
+             change the PR's code. Then wait for the next message."
+        ),
+        TourKind::Basic => format!(
+            "You are the tour agent of {pr}: the reviewer reads it as a basic tour, its changed files with no tour text, \
+             and their comments on the code reach you here as messages. Read the changed code now with \
+             `guided-review outline {pr}`, and `guided-review show {pr} <piece ids> --around` for more of it, so you can \
+             answer. Answer each comment as its message says, and never change the PR's code. Then wait for the next message."
+        ),
+    }
+}
+
+/// What a tour agent started by the app is told the reviewer reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TourKind {
+    Guided,
+    Basic,
 }

@@ -2,7 +2,7 @@ use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort,
-    TourAgentState, TourAgents,
+    TourAgentState, TourAgents, TourKind,
 };
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -289,7 +289,9 @@ fn a_fourth_app_started_agent_ends_the_idle_one_used_longest_ago_that_is_not_the
             .app_started("t3", PR_10, AgentStatus::Idle, 300),
     );
 
-    starting(&fake).start(&pr(), &url(OTHER_PR)).unwrap();
+    starting(&fake)
+        .start(&pr(), &url(OTHER_PR), TourKind::Guided)
+        .unwrap();
 
     assert_eq!(kills(&fake), [TourAgentCall::Kill(TerminalId::new("t2"))]);
     assert_eq!(fake.agents_of(PR).len(), 1, "a new agent runs for the PR");
@@ -304,7 +306,9 @@ fn a_fourth_app_started_agent_is_refused_naming_the_working_ones_when_none_is_id
             .app_started("t3", PR_10, AgentStatus::Idle, 300),
     );
 
-    let refused = starting(&fake).start(&pr(), &url(PR_10)).unwrap_err();
+    let refused = starting(&fake)
+        .start(&pr(), &url(PR_10), TourKind::Guided)
+        .unwrap_err();
 
     let reason = format!("{refused:#}");
     assert!(
@@ -390,7 +394,9 @@ fn agents_the_reviewer_started_are_neither_counted_nor_ended() {
             .app_started("t1", PR_10, AgentStatus::Idle, 300),
     );
 
-    starting(&fake).start(&pr(), &url(PR_10)).unwrap();
+    starting(&fake)
+        .start(&pr(), &url(PR_10), TourKind::Guided)
+        .unwrap();
 
     assert_eq!(kills(&fake), [], "one of the app's agents is below the cap");
     let full = Arc::new(
@@ -401,7 +407,9 @@ fn agents_the_reviewer_started_are_neither_counted_nor_ended() {
             .app_started("t3", PR_11, AgentStatus::Idle, 500),
     );
 
-    starting(&full).start(&pr(), &url(PR_10)).unwrap();
+    starting(&full)
+        .start(&pr(), &url(PR_10), TourKind::Guided)
+        .unwrap();
 
     assert_eq!(kills(&full), [TourAgentCall::Kill(TerminalId::new("t1"))]);
     assert!(full.live_terminal_addresses().contains(&"mine1".to_owned()));

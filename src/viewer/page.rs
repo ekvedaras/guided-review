@@ -16,7 +16,7 @@ pub use rows::{
     line_count, pluralised,
 };
 
-use super::ask::Place;
+use super::ask::{Place, ShownOn};
 use super::file_block::FileBlock;
 use super::focused_change::PageChange;
 use super::jump::{JumpPlace, JumpTarget};
@@ -79,7 +79,9 @@ impl Page {
         let laid = match &screen {
             Screen::Summary => Some(build::summary(review)),
             Screen::Overview => Some(build::overview(review)),
-            Screen::File(_) => review.file_page().map(|page| build::file(review, page)),
+            Screen::File(path) => review
+                .file_page()
+                .map(|page| build::file(review, path, page)),
             Screen::Step(_) => review.current_step().map(|page| build::step(review, page)),
             Screen::SafetyNet => review
                 .safety_net()
@@ -259,12 +261,8 @@ impl Page {
 
     /// What an Ask about the selected lines is about: the lines and the pieces of this page that hold them.
     pub fn place_of(&self, selected: &SelectedLines) -> Place {
-        let step = match &self.screen {
-            Screen::Step(id) => Some(id.clone()),
-            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
-        };
         Place::Lines {
-            step,
+            shown_on: self.screen.shown_on().unwrap_or(ShownOn::SafetyNet),
             start: selected.first().clone(),
             end: selected.last().clone(),
             pieces: self

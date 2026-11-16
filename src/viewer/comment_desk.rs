@@ -8,8 +8,7 @@ use super::comments::{
 use super::finish_review::{
     FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
 };
-use super::hand_offs::{Audience, SentComment};
-use super::review::StepId;
+use super::hand_offs::{Audience, SentComment, SentFrom};
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
@@ -349,11 +348,11 @@ impl CommentDesk {
         &mut self,
         state: &mut SavedState,
         outcome: CommentOutcome,
-        step: Option<StepId>,
+        from: SentFrom,
     ) -> anyhow::Result<CommentResult> {
         let from_box =
             (outcome.request.origin == Origin::Draft).then(|| outcome.request.draft.place.clone());
-        let result = state.record(|state| self.settle(state, outcome, step));
+        let result = state.record(|state| self.settle(state, outcome, from));
         if let Some(place) = from_box {
             self.show_landing(&place, &result);
         }
@@ -379,7 +378,7 @@ impl CommentDesk {
         &mut self,
         state: &mut ReviewState,
         outcome: CommentOutcome,
-        step: Option<StepId>,
+        from: SentFrom,
     ) -> CommentResult {
         let CommentOutcome {
             request,
@@ -396,7 +395,7 @@ impl CommentDesk {
                         place.path(),
                         &SentComment {
                             place: place.describe(),
-                            step,
+                            from,
                             mode: request.mode,
                             body: &request.draft.body,
                         },
@@ -611,7 +610,7 @@ impl CommentDesk {
         &mut self,
         state: &mut SavedState,
         outcome: &ThreadActionOutcome,
-        step: Option<StepId>,
+        from: SentFrom,
     ) {
         match (&outcome.result, &outcome.action) {
             (
@@ -625,7 +624,7 @@ impl CommentDesk {
                 self.pending_review = PendingReview::exists(*mode == SendMode::AddToReview);
                 let sent = state.record(|state| {
                     if *audience == Audience::Agent {
-                        hand_off_reply(state, thread_id, *mode, step, outcome);
+                        hand_off_reply(state, thread_id, *mode, from, outcome);
                     }
                     state.drop_reply(thread_id);
                 });
@@ -700,7 +699,7 @@ impl CommentOutcome {
     /// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
     pub fn land_in(self, file: &ReviewStateFile) -> anyhow::Result<()> {
         file.update(|state| {
-            CommentDesk::default().settle(state, self, None);
+            CommentDesk::default().settle(state, self, SentFrom::Elsewhere);
         })
     }
 }
@@ -764,14 +763,14 @@ fn hand_off_reply(
     state: &mut ReviewState,
     thread_id: &ThreadId,
     mode: SendMode,
-    step: Option<StepId>,
+    from: SentFrom,
     outcome: &ThreadActionOutcome,
 ) {
     state.hand_offs_mut().record_reply(
         thread_id,
         SentComment {
             place: String::new(),
-            step,
+            from,
             mode,
             body: outcome.reply_body.as_deref().unwrap_or_default(),
         },

@@ -44,9 +44,9 @@ pub(super) fn overview(review: &ReviewCore) -> Laid {
     builder.laid(None)
 }
 
-pub(super) fn file(review: &ReviewCore, page: FilePage) -> Laid {
+pub(super) fn file(review: &ReviewCore, path: &FilePath, page: FilePage) -> Laid {
     let mut builder = Builder::new(review);
-    builder.file_rows(page);
+    builder.file_rows(path, page);
     builder.laid(None)
 }
 
@@ -156,6 +156,7 @@ impl<'a> Builder<'a> {
                 place: Place::Tour,
                 label: "the whole tour".into(),
             }),
+            comment_on_file: None,
             fold: None,
             full_diff: None,
             ignores_whitespace: None,
@@ -166,13 +167,32 @@ impl<'a> Builder<'a> {
     fn overview_rows(&mut self) {
         self.rows
             .push(PageRow::Overview(Arc::new(self.review.overview_page())));
+        self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            ask: Some(AskAt {
+                id: "ask-tour".into(),
+                place: Place::Tour,
+                label: "the whole PR".into(),
+            }),
+            comment_on_file: None,
+            fold: None,
+            full_diff: None,
+            ignores_whitespace: None,
+            wraps_lines: None,
+        })));
     }
 
     /// A file screen is a step page with no text: its toolbar, the file's boxes, the way on.
-    fn file_rows(&mut self, page: FilePage) {
+    fn file_rows(&mut self, path: &FilePath, page: FilePage) {
         let review = self.review;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
-            ask: None,
+            ask: Some(AskAt {
+                id: format!("ask-file-{path}").into(),
+                place: Place::File { path: path.clone() },
+                label: path.to_string(),
+            }),
+            // A picture has its own button for it.
+            comment_on_file: (!page.pieces.iter().any(|piece| piece.is_image))
+                .then(|| path.clone()),
             fold: None,
             full_diff: None,
             ignores_whitespace: Some(review.display_options().ignores_whitespace()),
@@ -180,6 +200,10 @@ impl<'a> Builder<'a> {
         })));
         let after_code = self.hang_threads_and_comments(page.threads);
         for block in FileBlock::group(page.pieces) {
+            if !self.holds_file_comments(&block) {
+                let on_file = self.under_lines.take_whole_file(&block.path);
+                self.hang(on_file);
+            }
             let screen = review.screen().clone();
             let fold = BoxFold {
                 is_folded: review.is_box_folded(&screen, &block.path),
@@ -197,6 +221,14 @@ impl<'a> Builder<'a> {
             review,
             review.file_to_tick_on_screen().map(ReadSubject::File),
         ));
+    }
+
+    /// A picture and a rendered file hold what is said of the whole file under themselves.
+    fn holds_file_comments(&self, block: &FileBlock) -> bool {
+        block.pieces.iter().any(|piece| piece.is_image)
+            || self
+                .view_switch(block)
+                .is_some_and(|switch| switch.view == FileView::Rendered)
     }
 
     /// Returns the diagram the step shows.
@@ -244,6 +276,7 @@ impl<'a> Builder<'a> {
                 place: Place::Step { step: id.clone() },
                 label: step.title.clone(),
             }),
+            comment_on_file: None,
             fold: (folds && has_code).then(|| FoldControl {
                 step: id.clone(),
                 is_folded: page.is_folded,
@@ -301,6 +334,7 @@ impl<'a> Builder<'a> {
         self.rows.push(PageRow::SafetyNetIntro);
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             ask: None,
+            comment_on_file: None,
             fold: None,
             full_diff: None,
             ignores_whitespace: Some(review.display_options().ignores_whitespace()),
