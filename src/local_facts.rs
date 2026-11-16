@@ -18,7 +18,7 @@ pub struct LocalFacts {
 }
 
 /// Where a file's change in a local review comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LocalChange {
     Committed,
     Uncommitted,

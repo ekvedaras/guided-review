@@ -10,6 +10,7 @@ use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
+use crate::local_facts::LocalChange;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::repin::RepinStatus;
@@ -227,6 +228,8 @@ pub struct FilePage {
     pub threads: Vec<ThreadView>,
     /// Set when the file was read at an older head: its pieces then show only what changed since.
     pub since_read: Option<SinceRead>,
+    /// Where a local review's change to this file comes from; `None` for a PR.
+    pub change: Option<LocalChange>,
 }
 
 impl FilePage {
@@ -239,6 +242,7 @@ impl FilePage {
                 .collect(),
             threads: Vec::new(),
             since_read: None,
+            change: None,
         }
     }
 }

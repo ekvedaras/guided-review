@@ -6,9 +6,13 @@ use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::opened_change_set::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
-use guided_review::tour::{BasicTour, Tour};
+use guided_review::local_facts::LocalChange;
+use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::{BranchName, WorkTreeRoot};
+use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    CodeOpener, Destination, IdeCaveat, NotInIde, Opened, PieceDiff, Review, ReviewStateFile,
+    CodeOpener, Destination, IdeCaveat, LocalOverview, NotInIde, Opened, PieceDiff, Review,
+    ReviewStateFile,
     Side, WorkingCopy,
 };
 
@@ -64,7 +68,11 @@ impl Feature {
         .unwrap();
         let source = self.source();
         let head = tour.pin.head.clone();
+        let facts = work_tree
+            .facts(&change_set, &tour.pin.pinned_tips())
+            .unwrap();
         let mut review = Review::open_basic(tour, &source, self.state_file()).unwrap();
+        review.local_facts_are(facts);
         review.working_copy_is(WorkingCopy::of(source.working_tree_is_at(&head)));
         review
     }
@@ -85,6 +93,57 @@ impl Feature {
     }
 }
 
+const PR: &str = "https://github.com/acme/shop/pull/7";
+
+/// A basic review of a PR, to compare with: a clone with one commit past `main`.
+struct PullRequest {
+    repo: FixtureRepo,
+    base: String,
+    head: String,
+}
+
+impl PullRequest {
+    fn changing_a_file() -> Self {
+        let repo = FixtureRepo::cloned_from("acme/shop");
+        repo.write("seed.txt", "seed\n");
+        let base = repo.commit("base");
+        repo.write("a.txt", "changed\n");
+        let head = repo.commit("head");
+        Self { repo, base, head }
+    }
+
+    fn open(&self) -> Review {
+        let tour = BasicTour::new(
+            TourPin {
+                version: 1,
+                pr: PR.to_owned(),
+                local: None,
+                base: Sha::new(&self.base),
+                head: Sha::new(&self.head),
+                previous_head: None,
+            },
+            "Orders cost two".to_owned(),
+        );
+        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+            .unwrap()
+            .unwrap();
+        let state_file = ReviewStateFile::for_subject(
+            &self.repo.folders(),
+            &PR.parse::<ReviewSubject>().unwrap(),
+        );
+        Review::open_basic(tour, &source, state_file).unwrap()
+    }
+}
+
+fn changes_on_the_overview(review: &Review) -> Vec<(String, Option<LocalChange>)> {
+    review
+        .overview_page()
+        .files
+        .into_iter()
+        .map(|file| (file.path.to_string(), file.change))
+        .collect()
+}
+
 fn line_destination(
     review: &mut Review,
     opener: &CodeOpener,
@@ -100,6 +159,75 @@ fn line_destination(
         .find(|line| line.location.side == side)
         .unwrap();
     opener.destination(&line.code_link)
+}
+
+#[test]
+fn the_overview_names_the_repo_folder_branch_default_branch_commits_and_uncommitted_files() {
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+
+    let page = review.overview_page();
+
+    assert_eq!(page.description, None);
+    assert_eq!(page.title, "feature");
+    assert_eq!(
+        page.local,
+        Some(LocalOverview {
+            repo: Some(RepoName::new("acme", "shop")),
+            folder: WorkTreeRoot::new(feature.repo.path().canonicalize().unwrap()).unwrap(),
+            branch: BranchName::new("feature").unwrap(),
+            default_branch: "main".to_owned(),
+            commit_subjects: vec!["Add the cart".to_owned()],
+            uncommitted_files: 3,
+        })
+    );
+}
+
+#[test]
+fn a_pr_review_has_no_local_overview() {
+    let page = PullRequest::changing_a_file().open().overview_page();
+
+    assert_eq!(page.local, None);
+    assert!(page.files.iter().all(|file| file.change.is_none()));
+}
+
+#[test]
+fn each_file_of_the_overview_is_marked_committed_uncommitted_or_both() {
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+
+    assert_eq!(
+        changes_on_the_overview(&review),
+        [
+            ("src/cart.rs".to_owned(), Some(LocalChange::Both)),
+            ("notes.txt".to_owned(), Some(LocalChange::Uncommitted)),
+            ("old.txt".to_owned(), Some(LocalChange::Committed)),
+            ("README.md".to_owned(), Some(LocalChange::Uncommitted)),
+        ]
+    );
+}
+
+#[test]
+fn the_file_page_carries_the_same_mark_as_the_overview() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+
+    let marks: Vec<_> = ["README.md", "old.txt", "src/cart.rs"]
+        .into_iter()
+        .map(|path| {
+            review.go_to_file(&file_path(path));
+            review.file_page().unwrap().change
+        })
+        .collect();
+
+    assert_eq!(
+        marks,
+        [
+            Some(LocalChange::Uncommitted),
+            Some(LocalChange::Committed),
+            Some(LocalChange::Both)
+        ]
+    );
 }
 
 #[test]

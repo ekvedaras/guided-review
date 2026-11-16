@@ -10,7 +10,7 @@ use std::time::Instant;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::local_facts::LocalFacts;
+use crate::local_facts::{LocalChange, LocalFacts};
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
@@ -45,7 +45,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::markdown::Markdown;
 use super::outdated_lines::FollowedLines;
-use super::overview::{OverviewFile, OverviewPage, OverviewStats};
+use super::overview::{LocalOverview, OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
@@ -770,6 +770,7 @@ impl ReviewCore {
                     added_lines: file.added,
                     removed_lines: file.removed,
                     is_read: self.is_file_ticked(&path),
+                    change: self.local_change_of(&path),
                     path,
                 })
             })
@@ -785,7 +786,29 @@ impl ReviewCore {
             },
             files,
             write_guided_tour_refusal: self.write_guided_tour_refusal(),
+            local: self.local_facts.as_ref().map(|facts| LocalOverview {
+                repo: facts.repo.clone(),
+                folder: facts.folder.clone(),
+                branch: facts.branch.clone(),
+                default_branch: facts.default_branch.clone(),
+                commit_subjects: facts.commit_subjects.clone(),
+                uncommitted_files: facts.uncommitted_files.len(),
+            }),
         }
+    }
+
+    fn local_change_of(&self, path: &FilePath) -> Option<LocalChange> {
+        self.local_facts.as_ref()?.change_of(path)
+    }
+
+    /// What the app read of the clone for a local review's overview. Not saved: git tells it again.
+    pub fn local_facts_are(&mut self, facts: LocalFacts) {
+        self.local_facts = Some(facts);
+    }
+
+    /// `None` for a PR, and for a local review until the app has read its clone.
+    pub fn local_facts(&self) -> Option<&LocalFacts> {
+        self.local_facts.as_ref()
     }
 
     /// The open file of a basic tour with every piece of it.
@@ -797,6 +820,7 @@ impl ReviewCore {
         let links = self.links();
         let display = self.display(&links);
         let mut page = FilePage::of(file, &self.files, &display);
+        page.change = self.local_change_of(path);
         page.threads = threads::views(
             self.threads.in_file(path),
             &page.pieces,
@@ -881,6 +905,7 @@ impl ReviewCore {
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
     /// `None` for a PR with no description.
     pub fn pr_description(&self) -> Option<Markdown> {
+        self.subject.pull_request()?;
         let body = self.state.pr_description();
         (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
     }
