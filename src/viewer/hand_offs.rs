@@ -28,6 +28,52 @@ fn shell_word(text: &str) -> String {
 
 const WORKING_ON_IT: &str = "Working on it…";
 
+const LOCAL_REVIEW_NOTE: &str = "This is a local review: the reviewer reads your branch and its \
+     uncommitted files on this machine, and there is no PR.";
+
+/// The tasks one Send tasks sent, in reading order, as one message: the agent sees the whole
+/// review at once and answers each task on its own thread.
+fn tasks_message(
+    tasks: &[&HandOff],
+    subject: &ReviewSubject,
+    change_set: &LocalChangeSet,
+) -> String {
+    let folder = change_set.folder().as_path().display();
+    let branch = change_set.branch().as_str();
+    let key = shell_word(&subject.to_string());
+    let ids: Vec<String> = tasks.iter().map(|task| task.id.to_string()).collect();
+    let mut lines = vec![
+        format!(
+            "Review tasks {} on branch {branch} in {folder}",
+            ids.join(", ")
+        ),
+        LOCAL_REVIEW_NOTE.to_owned(),
+        "The reviewer finished reading and sends these tasks together, in reading order."
+            .to_owned(),
+    ];
+    for task in tasks {
+        let id = task.id;
+        lines.push(String::new());
+        lines.push(format!("Task {id}"));
+        lines.extend(task.task_lines());
+        lines.push(format!(
+            "Answer: `guided-review agent-reply {key} {id} --body -`, after \
+             `guided-review agent-reply {key} {id} --working` if it asks for a change."
+        ));
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "Make the changes in {folder}, on {branch}. Commit only if you normally would, and do not \
+         push for the review: the reviewer sees what changed on disk and updates. Answer each task \
+         on its own, with its own id. `--working` says \"{WORKING_ON_IT}\" on the task's thread, \
+         and your answer replaces it. Give each answer on stdin, in a quoted heredoc (`<<'EOF'`): \
+         short paragraphs, a list for several points, code names in backticks. Read the reviewed \
+         change with `guided-review outline {key}` and `guided-review show {key} <piece \
+         ids> --around`."
+    ));
+    lines.join("\n")
+}
+
 /// Who a comment is for. The plain send actions are for the PR's author; only Ask agent also
 /// reaches the tour agent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,7 +215,13 @@ pub struct HandOff {
     reviewer_comment: Option<CommentId>,
     #[serde(default)]
     seen_mark: SeenMark,
+    /// The tasks one Send tasks sent: they reach the agent together, as one message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    batch: Option<TaskBatch>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct TaskBatch(u32);
 
 impl HandOff {
     pub fn id(&self) -> HandOffId {
@@ -200,6 +252,34 @@ impl HandOff {
         &self.seen_mark
     }
 
+    /// The step of a guided tour it was sent from.
+    pub(super) fn step(&self) -> Option<&StepId> {
+        self.step.as_ref()
+    }
+
+    /// Takes the comment's text and what came before it in its thread as `threads` have them now,
+    /// since the reviewer may have edited a queued task. `None` when they do not show the comment.
+    fn as_in<'a>(&mut self, threads: &'a [ReviewThread]) -> Option<&'a ReviewThread> {
+        let thread = threads
+            .iter()
+            .find(|thread| Some(&thread.id) == self.thread.as_ref())?;
+        let at = thread
+            .comments
+            .iter()
+            .position(|said| Some(&said.id) == self.reviewer_comment.as_ref())?;
+        let (before, from) = thread.comments.split_at_checked(at)?;
+        let comment = from.first()?;
+        self.comment.clone_from(&comment.body);
+        self.thread_so_far = before
+            .iter()
+            .map(|said| ThreadMessage {
+                author: said.author.clone(),
+                body: said.body.clone(),
+            })
+            .collect();
+        Some(thread)
+    }
+
     /// What the reviewer reads under the comment: where it is, and any trouble with its seen mark.
     fn line(&self) -> String {
         let state = self.state.line();
@@ -225,11 +305,25 @@ impl HandOff {
         let key = shell_word(&subject.to_string());
         let mut lines = vec![
             format!("Review task {id} on branch {branch} in {folder}"),
-            "This is a local review: the reviewer reads your branch and its uncommitted files on \
-             this machine, and there is no PR."
-                .to_owned(),
-            format!("Place: {}", self.place),
+            LOCAL_REVIEW_NOTE.to_owned(),
         ];
+        lines.extend(self.task_lines());
+        lines.push(format!(
+            "Make the change in {folder}, on {branch}. Commit only if you normally would, and do not push \
+             for the review: the reviewer sees what changed on disk and updates. If the task asks for a \
+             change, first run `guided-review agent-reply {key} {id} --working`: it says \
+             \"{WORKING_ON_IT}\" on the task's thread, and your answer replaces it. Answer with \
+             `guided-review agent-reply {key} {id} --body -` and the answer on stdin, in a quoted \
+             heredoc (`<<'EOF'`): short paragraphs, a list for several points, code names in \
+             backticks. Read the reviewed change with `guided-review outline {key}` and \
+             `guided-review show {key} <piece ids> --around`."
+        ));
+        lines.join("\n")
+    }
+
+    /// Where the task is and what it asks, without how to answer it.
+    fn task_lines(&self) -> Vec<String> {
+        let mut lines = vec![format!("Place: {}", self.place)];
         lines.extend(self.file.iter().map(|file| format!("File: {file}")));
         if let Some(code) = &self.code {
             lines.push(format!("Code:\n{}", code.trim_end()));
@@ -243,17 +337,7 @@ impl HandOff {
             );
         }
         lines.push(format!("Task: {}", self.comment));
-        lines.push(format!(
-            "Make the change in {folder}, on {branch}. Commit only if you normally would, and do not push \
-             for the review: the reviewer sees what changed on disk and updates. If the task asks for a \
-             change, first run `guided-review agent-reply {key} {id} --working`: it says \
-             \"{WORKING_ON_IT}\" on the task's thread, and your answer replaces it. Answer with \
-             `guided-review agent-reply {key} {id} --body -` and the answer on stdin, in a quoted \
-             heredoc (`<<'EOF'`): short paragraphs, a list for several points, code names in \
-             backticks. Read the reviewed change with `guided-review outline {key}` and \
-             `guided-review show {key} <piece ids> --around`."
-        ));
-        lines.join("\n")
+        lines
     }
 
     fn pull_request_message(&self, subject: &ReviewSubject) -> String {
@@ -308,7 +392,8 @@ impl HandOff {
 
 /// Sending the oldest queued hand-off to the tour agent, owned so it can run on a background thread.
 pub(super) struct DeliveryRequest {
-    id: HandOffId,
+    /// One hand-off, or the tasks of one Send tasks, which go as one message.
+    ids: Vec<HandOffId>,
     subject: ReviewSubject,
     text: String,
     /// What a tour agent started for this hand-off has to read.
@@ -339,7 +424,7 @@ impl DeliveryRequest {
             _ => SeenMark::Off,
         };
         DeliveryOutcome {
-            id: self.id,
+            ids: self.ids,
             how,
             seen_mark,
         }
@@ -347,7 +432,7 @@ impl DeliveryRequest {
 }
 
 pub(super) struct DeliveryOutcome {
-    id: HandOffId,
+    ids: Vec<HandOffId>,
     how: Delivery,
     seen_mark: SeenMark,
 }
@@ -407,6 +492,41 @@ impl HandOffs {
         self.0
             .iter()
             .filter(|hand_off| hand_off.state == HandOffState::WaitingForSendTasks)
+    }
+
+    /// Send tasks: each queued task, with its text and thread as `threads` have them now, goes to
+    /// the agent with the others, ordered by `reading_place`. A task whose comment `threads` do not
+    /// show stays queued: they may be older than the task.
+    pub(super) fn send_queued_tasks<Place: Ord>(
+        &mut self,
+        threads: &[ReviewThread],
+        reading_place: impl Fn(&HandOff, &ReviewThread) -> Place,
+    ) {
+        let batch = TaskBatch(
+            self.0
+                .iter()
+                .filter_map(|hand_off| hand_off.batch)
+                .map(|batch| batch.0 + 1)
+                .max()
+                .unwrap_or(0),
+        );
+        let (queued, others): (Vec<HandOff>, Vec<HandOff>) = std::mem::take(&mut self.0)
+            .into_iter()
+            .partition(|hand_off| hand_off.state == HandOffState::WaitingForSendTasks);
+        self.0 = others;
+        let mut sent = Vec::new();
+        for mut task in queued {
+            match task.as_in(threads) {
+                Some(thread) => {
+                    task.state = HandOffState::Queued;
+                    task.batch = Some(batch);
+                    sent.push((reading_place(&task, thread), task));
+                }
+                None => self.0.push(task),
+            }
+        }
+        sent.sort_by(|(one, _), (other, _)| one.cmp(other));
+        self.0.extend(sent.into_iter().map(|(_, task)| task));
     }
 
     /// The reviewer deleted the comment of a queued task, so there is no task left to send.
@@ -525,6 +645,7 @@ impl HandOffs {
             state,
             reviewer_comment,
             seen_mark: SeenMark::Off,
+            batch: None,
         });
     }
 
@@ -535,10 +656,24 @@ impl HandOffs {
             return None;
         }
         let next = self.0.iter().find(|h| h.state == HandOffState::Queued)?;
+        let (ids, text) = match (next.batch, subject) {
+            (Some(batch), ReviewSubject::Local(change_set)) => {
+                let tasks: Vec<&HandOff> = self
+                    .0
+                    .iter()
+                    .filter(|h| h.state == HandOffState::Queued && h.batch == Some(batch))
+                    .collect();
+                (
+                    tasks.iter().map(|task| task.id).collect(),
+                    tasks_message(&tasks, subject, change_set),
+                )
+            }
+            _ => (vec![next.id], next.message(subject)),
+        };
         Some(DeliveryRequest {
-            id: next.id,
+            ids,
             subject: subject.clone(),
-            text: next.message(subject),
+            text,
             tour: if next.file.is_some() {
                 TourKind::Basic
             } else {
@@ -557,9 +692,9 @@ impl HandOffs {
             Delivery::Waiting | Delivery::AgentStarting | Delivery::AgentStarted => return,
             Delivery::Failed(reason) => HandOffState::Failed(reason),
         };
-        if let Some(hand_off) = self.0.iter_mut().find(|h| h.id == outcome.id) {
-            hand_off.state = state;
-            hand_off.seen_mark = outcome.seen_mark;
+        for hand_off in self.0.iter_mut().filter(|h| outcome.ids.contains(&h.id)) {
+            hand_off.state = state.clone();
+            hand_off.seen_mark = outcome.seen_mark.clone();
         }
     }
 

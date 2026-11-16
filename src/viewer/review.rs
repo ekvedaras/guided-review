@@ -41,7 +41,9 @@ use super::finish_review::{
 };
 use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
-use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs, SentFrom};
+use super::hand_offs::{
+    AgentReplied, Audience, HandOff, HandOffId, HandOffState, HandOffs, SentFrom,
+};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
@@ -1880,6 +1882,24 @@ impl ReviewCore {
     /// How many tasks wait for Send tasks.
     pub fn queued_tasks(&self) -> usize {
         self.state.hand_offs().waiting_for_send_tasks().count()
+    }
+
+    /// The finish of a local review: every queued task goes to the agent in one message, in
+    /// reading order, each with its own hand-off state.
+    pub fn send_tasks(&mut self) -> anyhow::Result<()> {
+        let order = self.reading_order();
+        let threads = self.pulled_threads.clone();
+        let reading_place = |task: &HandOff, thread: &ReviewThread| {
+            let screen = task.step().map_or_else(
+                || Screen::File(thread.path.clone()),
+                |step| Screen::Step(step.clone()),
+            );
+            let nth = order.iter().position(|shown| *shown == screen);
+            (nth.is_none(), nth, thread.original_line)
+        };
+        self.record_hand_offs(|hand_offs| hand_offs.send_queued_tasks(&threads, reading_place))?;
+        self.work.want(WorkKind::DeliverHandOff);
+        Ok(())
     }
 
     /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a

@@ -669,7 +669,8 @@ impl CommentDesk {
                 if outcome.result == ThreadActionResult::Done {
                     self.comment_edits.remove(comment_id);
                     // The comment is gone already; a queue entry that fails to go is dropped by Send tasks.
-                    let _ = state.record(|state| state.hand_offs_mut().forget_queued_task(comment_id));
+                    let _ =
+                        state.record(|state| state.hand_offs_mut().forget_queued_task(comment_id));
                 }
             }
             (
