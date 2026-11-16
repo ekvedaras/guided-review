@@ -160,7 +160,9 @@ fn a_pr_never_looks_in_a_folder_for_its_agent() {
     let fake = Arc::new(FakeTourAgent::new().claude_in("t2", "/clones/shop"));
 
     assert_eq!(
-        agents(&fake).lookup(&PR.parse().unwrap()),
+        agents(&fake)
+            .starting_in("/clones/shop".into())
+            .lookup(&PR.parse().unwrap()),
         TourAgentState::None
     );
 }
