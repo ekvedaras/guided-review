@@ -3,6 +3,7 @@
 //! The window reports what it alone knows (an overlay open, a reopen under way, the end of the
 //! screen on show) and carries out the `Effect`; the rules that pick the effect are here, once.
 
+use super::file_tree::FolderPath;
 use super::jump::PaletteAction;
 use super::review::{ReviewCore, Screen};
 use crate::pull_request::PullRequestUrl;
@@ -89,10 +90,14 @@ pub enum Effect {
 /// A change of the review an intent makes, applied with `ReviewCore::apply`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewChange {
-    GoOn { ticking: Option<StepId> },
+    GoOn {
+        ticking: Option<StepId>,
+    },
     GoBack,
     GoToNextUnread,
     ToggleTick(StepId),
+    /// A folder of a basic tour's sidebar tree folds or unfolds.
+    ToggleFolder(FolderPath),
     ToggleWrapLines,
     ToggleWhitespace,
 }
@@ -216,7 +221,9 @@ impl ReviewCore {
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => Effect::Change(ReviewChange::ToggleTick(id.clone())),
-                Screen::Summary | Screen::SafetyNet => Effect::Nothing,
+                Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => {
+                    Effect::Nothing
+                }
             },
             Intent::ToggleWrapLines => Effect::Change(ReviewChange::ToggleWrapLines),
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
@@ -262,6 +269,10 @@ impl ReviewCore {
                     self.tick(&id)
                 }
             }
+            ReviewChange::ToggleFolder(folder) => {
+                self.toggle_folder(&folder);
+                Ok(())
+            }
             ReviewChange::ToggleWrapLines => {
                 self.display_options_mut().toggle_wrap_lines();
                 Ok(())
@@ -279,7 +290,7 @@ impl ReviewCore {
             pr: self.pr().clone(),
             at: match self.screen() {
                 Screen::Step(id) => Some(id.clone()),
-                Screen::Summary | Screen::SafetyNet => None,
+                Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
             },
         }
     }
@@ -287,7 +298,11 @@ impl ReviewCore {
     fn unread_step_on_screen(&self) -> Option<StepId> {
         match self.screen() {
             Screen::Step(id) if !self.is_ticked(id) => Some(id.clone()),
-            Screen::Summary | Screen::Step(_) | Screen::SafetyNet => None,
+            Screen::Summary
+            | Screen::Overview
+            | Screen::File(_)
+            | Screen::Step(_)
+            | Screen::SafetyNet => None,
         }
     }
 }

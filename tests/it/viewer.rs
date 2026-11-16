@@ -91,7 +91,9 @@ fn read_forward(review: &mut Review) -> Vec<String> {
         match review.screen() {
             Screen::Step(id) => seen.push(id.to_string()),
             Screen::SafetyNet => seen.push("safety net".to_owned()),
-            Screen::Summary => panic!("going forward never reaches to the summary"),
+            Screen::Summary | Screen::Overview | Screen::File(_) => {
+                panic!("going forward in a guided review reaches only steps and the safety net")
+            }
         }
     }
     seen

@@ -77,6 +77,8 @@ impl Page {
         let screen = review.screen().clone();
         let laid = match &screen {
             Screen::Summary => Some(build::summary(review)),
+            // The pages of a basic tour's screens are slice B of ticket #82: empty until then.
+            Screen::Overview | Screen::File(_) => None,
             Screen::Step(_) => review.current_step().map(|page| build::step(review, page)),
             Screen::SafetyNet => review
                 .safety_net()
@@ -258,7 +260,7 @@ impl Page {
     pub fn place_of(&self, selected: &SelectedLines) -> Place {
         let step = match &self.screen {
             Screen::Step(id) => Some(id.clone()),
-            Screen::Summary | Screen::SafetyNet => None,
+            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
         };
         Place::Lines {
             step,

@@ -234,6 +234,21 @@ impl Tour {
             .join(format!("{}.basic.json", pr.number))
     }
 
+    pub const fn pin(&self) -> &TourPin {
+        match self {
+            Self::Basic(tour) => &tour.pin,
+            Self::Guided(tour) => &tour.pin,
+        }
+    }
+
+    /// `None` for a basic tour, which has no steps, summary or reviewer summary.
+    pub const fn guided(&self) -> Option<&GuidedTour> {
+        match self {
+            Self::Basic(_) => None,
+            Self::Guided(tour) => Some(tour),
+        }
+    }
+
     /// Reads a tour file of either kind; a file with no `kind` is a guided tour.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let value = read_json(path)?;

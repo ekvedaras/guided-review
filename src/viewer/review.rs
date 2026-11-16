@@ -10,7 +10,7 @@ use crate::code_source::CodeSource;
 use crate::coverage;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{PullRequestUrl, Sha};
-use crate::tour::{GuidedTour, Step};
+use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
 use std::path::{Path, PathBuf};
 
@@ -29,6 +29,7 @@ use super::comments::{
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
+use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
     SubmittedReview,
@@ -69,6 +70,10 @@ pub use kept::Review;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
     Summary,
+    /// A basic tour's first screen, in place of the summary.
+    Overview,
+    /// One changed file of a basic tour, in place of a step.
+    File(FilePath),
     Step(StepId),
     /// After the last step: every change no step shows.
     SafetyNet,
@@ -192,7 +197,11 @@ pub struct OldHead {
 
 /// What the reviewer reads and does on one PR. Reached through `Review`, which keeps the page built from it.
 pub struct ReviewCore {
-    tour: GuidedTour,
+    tour: Tour,
+    /// The basic sidebar's tree and the reading order of file screens; empty for a guided tour.
+    file_tree: FileTree,
+    /// Folders the reviewer folded. Not saved: a reopened app shows the tree unfolded.
+    folded_folders: BTreeSet<FolderPath>,
     pr: PullRequestUrl,
     base: Sha,
     head: Sha,
@@ -201,8 +210,9 @@ pub struct ReviewCore {
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
     files: Vec<ChangedFile>,
-    /// Summary, then parent, its children, the next parent (from the big picture to the details),
-    /// then the safety net when it holds anything.
+    /// Guided: summary, then parent, its children, the next parent (from the big picture to the
+    /// details), then the safety net when it holds anything. Basic: overview, then the files in
+    /// tree order.
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
@@ -250,7 +260,16 @@ impl Review {
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
-        ReviewCore::open(tour, source, state_file).map(Self::keeping_page_of)
+        ReviewCore::open(Tour::Guided(tour), source, state_file).map(Self::keeping_page_of)
+    }
+
+    /// A review with no steps: it opens on the overview and reads one screen per changed file.
+    pub fn open_basic(
+        tour: BasicTour,
+        source: &dyn CodeSource,
+        state_file: ReviewStateFile,
+    ) -> anyhow::Result<Self> {
+        ReviewCore::open(Tour::Basic(tour), source, state_file).map(Self::keeping_page_of)
     }
 
     /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
@@ -354,28 +373,48 @@ impl Review {
 
 impl ReviewCore {
     fn open(
-        tour: GuidedTour,
+        tour: Tour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
-        let pr: PullRequestUrl = tour.pin.pr.parse()?;
-        let (base, head) = (tour.pin.base.clone(), tour.pin.head.clone());
+        let pr: PullRequestUrl = tour.pin().pr.parse()?;
+        let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
-        let steps = tour
-            .steps()
-            .into_iter()
-            .map(|step| Screen::Step(step.id.clone()));
-        let steps_in_reading_order = std::iter::once(Screen::Summary).chain(steps).collect();
-        let has_uncovered_changes = threads::uncovered(&tour, &files);
+        let (file_tree, steps_in_reading_order, screen) = match &tour {
+            Tour::Guided(guided) => {
+                let steps = guided
+                    .steps()
+                    .into_iter()
+                    .map(|step| Screen::Step(step.id.clone()));
+                (
+                    FileTree::default(),
+                    std::iter::once(Screen::Summary).chain(steps).collect(),
+                    Screen::Summary,
+                )
+            }
+            Tour::Basic(_) => {
+                let file_tree = FileTree::of(files.iter().map(|file| &file.path));
+                let screens = file_tree.reading_order().into_iter().map(Screen::File);
+                (
+                    file_tree,
+                    std::iter::once(Screen::Overview).chain(screens).collect(),
+                    Screen::Overview,
+                )
+            }
+        };
+        let has_uncovered_changes = tour
+            .guided()
+            .is_some_and(|guided| threads::uncovered(guided, &files));
         let read_heads: BTreeSet<&Sha> = tour
-            .steps()
-            .iter()
+            .guided()
+            .into_iter()
+            .flat_map(GuidedTour::steps)
             .filter_map(|step| read_head_of(&state, &step.id.clone()))
-            .filter(|read_head| **read_head != tour.pin.head)
+            .filter(|read_head| **read_head != head)
             .collect();
         let changes_since = read_heads
             .into_iter()
@@ -388,6 +427,8 @@ impl ReviewCore {
         display_options.cut_markdown(&files);
         Ok(Self {
             tour,
+            file_tree,
+            folded_folders: BTreeSet::new(),
             pr,
             base,
             head,
@@ -400,7 +441,7 @@ impl ReviewCore {
             followed_lines: BTreeMap::new(),
             threads: ThreadPlacement::default(),
             thread_fold_flipped: BTreeSet::new(),
-            screen: Screen::Summary,
+            screen,
             state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
@@ -433,12 +474,12 @@ impl ReviewCore {
 
     /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.
     pub fn highlight_request(&self) -> HighlightRequest {
-        HighlightRequest::for_files(&self.files, &self.tour.pin.base, &self.tour.pin.head)
+        HighlightRequest::for_files(&self.files, &self.base, &self.head)
     }
 
     /// Context lines come from the files at head, read off the main thread like the colours.
     pub fn files_at_head_request(&self) -> FilesAtHeadRequest {
-        FilesAtHeadRequest::for_files(&self.files, &self.tour.pin.head)
+        FilesAtHeadRequest::for_files(&self.files, &self.head)
     }
 
     /// Files read at another head, e.g. before a re-pin, are dropped. Says whether they were kept.
@@ -553,19 +594,29 @@ impl ReviewCore {
             })
     }
 
+    /// A basic tour has the PR's own title.
     pub fn title(&self) -> &str {
-        &self.tour.title
+        match &self.tour {
+            Tour::Basic(basic) => &basic.pr_title,
+            Tour::Guided(guided) => &guided.title,
+        }
     }
 
     pub fn summary(&self) -> &[String] {
-        &self.tour.summary
+        self.tour.guided().map_or(&[], |guided| &guided.summary)
     }
 
     /// Under the summary's bullets and above the PR description. `None` when the tour has none.
     pub fn reviewer_summary(&self) -> Option<Markdown> {
-        let body = &self.tour.reviewer_summary;
+        let body = self.reviewer_summary_text();
         let markdown = Markdown::parse_with_files(body, &self.tour_files);
         (!body.trim().is_empty()).then(|| markdown.nested_one_level())
+    }
+
+    fn reviewer_summary_text(&self) -> &str {
+        self.tour
+            .guided()
+            .map_or("", |guided| &guided.reviewer_summary)
     }
 
     /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
@@ -615,7 +666,7 @@ impl ReviewCore {
                 Note::picture(path, alt)
             }
             NoteSubject::ReviewerSummary => {
-                let summary = &self.tour.reviewer_summary;
+                let summary = self.reviewer_summary_text();
                 if summary.trim().is_empty() {
                     return None;
                 }
@@ -646,10 +697,11 @@ impl ReviewCore {
         let Screen::Step(id) = &self.screen else {
             return None;
         };
+        let guided = self.tour.guided()?;
         let step = self.step(id)?;
         let links = self.links();
         let display = self.display(&links);
-        let mut page = StepPage::of(step, &self.tour, &self.files, &display, self.is_folded(id));
+        let mut page = StepPage::of(step, guided, &self.files, &display, self.is_folded(id));
         page.is_ticked = self.is_ticked(id);
         page.threads = threads::views(
             self.threads.in_step(id),
@@ -684,7 +736,7 @@ impl ReviewCore {
                 page.pieces = step
                     .pieces
                     .iter()
-                    .flat_map(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files))
+                    .flat_map(|pointer| coverage::shown_parts(pointer, guided, &self.files))
                     .map(|part| {
                         let pr_file = self
                             .files
@@ -699,8 +751,11 @@ impl ReviewCore {
         Some(page)
     }
 
+    /// Nothing for a basic tour: it has no steps to go stale (ticket #85 re-pins it).
     pub fn refresh_brief(&self) -> RefreshBrief {
-        RefreshBrief::of(&self.tour, &self.files, self.state.last_repin())
+        self.tour
+            .guided()
+            .map_or_default(|guided| RefreshBrief::of(guided, &self.files, self.state.last_repin()))
     }
 
     fn changes_since_read(&self, id: &StepId) -> Option<(Sha, &[ChangedFile])> {
@@ -717,14 +772,14 @@ impl ReviewCore {
     }
 
     fn step(&self, id: &StepId) -> Option<&Step> {
-        self.tour.find_step(id)
+        self.tour.guided()?.find_step(id)
     }
 
     /// A record of a re-pin to another head says nothing about this tour any more.
     fn repin_record(&self) -> Option<&RepinRecord> {
         self.state
             .last_repin()
-            .filter(|record| record.to_head == self.tour.pin.head)
+            .filter(|record| record.to_head == self.head)
     }
 
     fn mark_repin_status(&self, pieces: &mut [PieceDiff]) {
@@ -736,6 +791,9 @@ impl ReviewCore {
     }
 
     fn is_gone(&self, step: &Step) -> bool {
+        let Some(guided) = self.tour.guided() else {
+            return false;
+        };
         let id = step.id.clone();
         step.diagram.is_none()
             && self
@@ -744,24 +802,24 @@ impl ReviewCore {
             && step
                 .pieces
                 .iter()
-                .all(|pointer| coverage::shown_parts(pointer, &self.tour, &self.files).is_empty())
+                .all(|pointer| coverage::shown_parts(pointer, guided, &self.files).is_empty())
     }
 
     pub fn head(&self) -> &Sha {
-        &self.tour.pin.head
+        &self.head
     }
 
     /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
     pub fn ask_context(&self, place: &Place) -> Option<String> {
-        ask_context::context_for(&self.tour, &self.files, &self.links(), place)
+        ask_context::context_for(self.tour.guided()?, &self.files, &self.links(), place)
     }
 
     /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
     pub fn code_changed_since(&self, ask: &Ask) -> bool {
-        if ask.head == self.tour.pin.head {
+        if ask.head == self.head {
             return false;
         }
-        let Some(record) = self.repin_record() else {
+        let (Some(record), Some(guided)) = (self.repin_record(), self.tour.guided()) else {
             return false;
         };
         let moved = |piece: &PieceId| record.status_of(piece) != Some(RepinStatus::Same);
@@ -772,9 +830,7 @@ impl ReviewCore {
                     || self.step(step).is_some_and(|step| {
                         step.pieces
                             .iter()
-                            .flat_map(|pointer| {
-                                coverage::shown_parts(pointer, &self.tour, &self.files)
-                            })
+                            .flat_map(|pointer| coverage::shown_parts(pointer, guided, &self.files))
                             .any(|part| moved(&part.piece.id))
                     })
             }
@@ -789,7 +845,7 @@ impl ReviewCore {
         if matches!(ask.place, Place::Tour | Place::Step { .. }) {
             return Err(CommentRefusal::NoLines);
         }
-        if ask.head != self.tour.pin.head {
+        if ask.head != self.head {
             return Err(CommentRefusal::AskIsOnOlderCode);
         }
         if self.tour_freshness() == TourFreshness::Behind {
@@ -815,7 +871,8 @@ impl ReviewCore {
             Some(id) => {
                 let links = self.links();
                 let display = self.display(&links);
-                StepPage::of(self.step(id)?, &self.tour, &self.files, &display, false).pieces
+                let guided = self.tour.guided()?;
+                StepPage::of(self.step(id)?, guided, &self.files, &display, false).pieces
             }
             None => self.safety_net()?.pieces,
         };
@@ -881,7 +938,7 @@ impl ReviewCore {
             cwd,
             model: settings.model.clone(),
             effort: settings.effort.clone(),
-            system_prompt: ask_context::system_prompt(&self.tour.pin.pr),
+            system_prompt: ask_context::system_prompt(&self.tour.pin().pr),
             resume,
         }
     }
@@ -912,18 +969,37 @@ impl ReviewCore {
         }
         let current = match &self.screen {
             Screen::Step(id) => Some(id),
-            Screen::Summary | Screen::SafetyNet => None,
+            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
         };
         let mut entries = Vec::new();
-        walk(&self.tour.steps, 0, current, self, &mut entries);
+        if let Some(guided) = self.tour.guided() {
+            walk(&guided.steps, 0, current, self, &mut entries);
+        }
         entries
     }
 
-    /// `None` when every change is in a step.
+    /// The rows of a basic tour's file tree; none for a guided tour, whose sidebar lists steps.
+    pub fn basic_sidebar(&self) -> Vec<TreeRow> {
+        let current = match &self.screen {
+            Screen::File(path) => Some(path),
+            _ => None,
+        };
+        self.file_tree.rows(&self.folded_folders, current)
+    }
+
+    /// Folds an open folder of the tree and opens a folded one. Not saved.
+    pub fn toggle_folder(&mut self, folder: &FolderPath) {
+        if !self.folded_folders.remove(folder) {
+            self.folded_folders.insert(folder.clone());
+        }
+    }
+
+    /// `None` when every change is in a step, and always for a basic tour.
     pub fn safety_net(&self) -> Option<SafetyNetPage> {
+        let guided = self.tour.guided()?;
         self.reading_order().contains(&Screen::SafetyNet).then(|| {
             let links = self.links();
-            let mut page = SafetyNetPage::of(&self.tour, &self.files, &self.display(&links));
+            let mut page = SafetyNetPage::of(guided, &self.files, &self.display(&links));
             self.mark_repin_status(&mut page.pieces);
             page.threads = threads::views(
                 self.threads.in_safety_net(),
@@ -939,10 +1015,11 @@ impl ReviewCore {
 
     /// `None` when every change is in a step. Does not build the page.
     pub fn safety_net_size(&self) -> Option<SafetyNetSize> {
+        let guided = self.tour.guided()?;
         self.reading_order()
             .contains(&Screen::SafetyNet)
             .then(|| SafetyNetSize {
-                pieces: coverage::safety_net(&self.tour, &self.files).len(),
+                pieces: coverage::safety_net(guided, &self.files).len(),
                 threads: self.threads.in_safety_net().len(),
             })
     }
@@ -955,7 +1032,7 @@ impl ReviewCore {
     pub fn reading_position(&self, screen: &Screen) -> Option<usize> {
         match screen {
             Screen::SafetyNet => Some(self.steps_in_reading_order.len()),
-            Screen::Summary | Screen::Step(_) => self
+            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::Step(_) => self
                 .steps_in_reading_order
                 .iter()
                 .position(|shown| shown == screen),
@@ -1005,13 +1082,16 @@ impl ReviewCore {
             ignores_whitespace: false,
             links: &links,
         };
-        self.threads = ThreadPlacement::of(
-            &self.tour,
-            &self.files,
-            &self.pulled_threads,
-            &self.followed_lines,
-            &display,
-        );
+        // Threads of a basic tour wait for the file screens' homes (ticket #84).
+        self.threads = self.tour.guided().map_or_default(|guided| {
+            ThreadPlacement::of(
+                guided,
+                &self.files,
+                &self.pulled_threads,
+                &self.followed_lines,
+                &display,
+            )
+        });
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
@@ -1195,11 +1275,13 @@ impl ReviewCore {
     /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
     pub fn approve_warning(&self) -> Option<ApproveWarning> {
         let progress = self.progress();
-        let unread_safety_net_pieces = coverage::safety_net(&self.tour, &self.files)
-            .iter()
-            .map(|part| part.piece.id.to_string())
-            .collect::<BTreeSet<_>>()
-            .len();
+        let unread_safety_net_pieces = self.tour.guided().map_or(0, |guided| {
+            coverage::safety_net(guided, &self.files)
+                .iter()
+                .map(|part| part.piece.id.to_string())
+                .collect::<BTreeSet<_>>()
+                .len()
+        });
         let warning = ApproveWarning {
             unread_steps: progress.total - progress.read,
             unread_safety_net_pieces,
@@ -1396,9 +1478,13 @@ impl ReviewCore {
 
     /// The cmd+k list for what the reviewer has typed so far.
     pub fn jump_targets(&self, query: &str) -> Vec<JumpTarget> {
+        // A basic tour's files join the palette with the file pages (slice B of ticket #82).
+        let Some(guided) = self.tour.guided() else {
+            return Vec::new();
+        };
         let safety_net_files: Vec<&FilePath> = if self.reading_order().contains(&Screen::SafetyNet)
         {
-            coverage::safety_net(&self.tour, &self.files)
+            coverage::safety_net(guided, &self.files)
                 .iter()
                 .map(|part| part.piece.id.path())
                 .collect()
@@ -1406,7 +1492,7 @@ impl ReviewCore {
             Vec::new()
         };
         jump::rank(
-            jump::all_targets(&self.tour, &self.files, &safety_net_files),
+            jump::all_targets(guided, &self.files, &safety_net_files),
             query,
         )
     }
@@ -1435,7 +1521,7 @@ impl ReviewCore {
     ) -> Vec<PaletteAction> {
         let step = match &self.screen {
             Screen::Step(id) => Some(id),
-            Screen::Summary | Screen::SafetyNet => None,
+            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
         };
         let tick = step.map(|id| {
             if self.is_ticked(id) {
@@ -1493,7 +1579,16 @@ impl ReviewCore {
     }
 
     pub fn go_to_summary(&mut self) {
-        self.screen = Screen::Summary;
+        self.go_to_screen(Screen::Summary);
+    }
+
+    pub fn go_to_overview(&mut self) {
+        self.go_to_screen(Screen::Overview);
+    }
+
+    /// Ids of files the tour does not hold are ignored, like ids of steps.
+    pub fn go_to_file(&mut self, path: &FilePath) {
+        self.go_to_screen(Screen::File(path.clone()));
     }
 
     pub fn go_to_safety_net(&mut self) {
@@ -1596,8 +1691,8 @@ impl ReviewCore {
         fn count(steps: &[Step]) -> usize {
             steps.iter().map(|step| 1 + count(&step.children)).sum()
         }
-        self.tour
-            .steps
+        let steps = self.tour.guided().map_or(&[][..], |guided| &guided.steps);
+        steps
             .iter()
             .map(|step| RouteStop {
                 id: step.id.clone(),
@@ -1722,7 +1817,7 @@ impl ReviewCore {
         let reading_order = self.reading_order();
         let steps = reading_order.iter().filter_map(|screen| match screen {
             Screen::Step(id) => Some(id),
-            Screen::Summary | Screen::SafetyNet => None,
+            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
         });
         ReadProgress {
             read: steps.clone().filter(|id| self.is_ticked(id)).count(),
@@ -1783,8 +1878,11 @@ impl ReviewCore {
         }
     }
 
+    /// Nothing for a basic tour: viewed marks follow its file ticks (ticket #83).
     fn coverage(&self) -> Coverage {
-        Coverage::of(&self.tour, &self.files)
+        self.tour
+            .guided()
+            .map_or_default(|guided| Coverage::of(guided, &self.files))
     }
 
     /// Changed code no page can show, by piece id: the reviewer has to read it on GitHub.
@@ -1832,7 +1930,8 @@ impl ReviewCore {
                 title: self.step(id)?.title.clone(),
             }),
             Screen::SafetyNet => Some(NextScreen::SafetyNet),
-            Screen::Summary => None,
+            // The words for the file screens come with their pages (slice B of ticket #82).
+            Screen::Summary | Screen::Overview | Screen::File(_) => None,
         });
         ReadingPlace {
             step_number: match (&self.screen, position) {

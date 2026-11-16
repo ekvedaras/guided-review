@@ -124,7 +124,8 @@ impl AskDesk {
         let step = match screen {
             Screen::Step(id) => Some(id),
             Screen::SafetyNet => None,
-            Screen::Summary => return Vec::new(),
+            // Asks of a basic tour's screens come with ticket #84.
+            Screen::Summary | Screen::Overview | Screen::File(_) => return Vec::new(),
         };
         let mut places: Vec<Place> = Vec::new();
         for ask in self.asks.all() {

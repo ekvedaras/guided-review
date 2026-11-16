@@ -25,6 +25,7 @@ mod ask;
 mod ask_adapters;
 mod ask_lifecycle;
 mod avatars;
+mod basic_tour;
 mod check;
 mod clone_offer;
 mod code_links;
