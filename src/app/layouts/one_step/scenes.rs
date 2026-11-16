@@ -562,7 +562,8 @@ impl OneStepLayout {
                 .session
                 .update(cx, ReviewSession::stage_local_changed_on_disk),
             Scene::LocalFile => {
-                self.session.update(cx, ReviewSession::stage_local);
+                self.session
+                    .update(cx, ReviewSession::stage_local_with_task);
                 self.change_review(cx, |review| {
                     if let Ok(path) = FilePath::new("README.md") {
                         review.go_to_file(&path);

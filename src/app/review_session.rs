@@ -847,6 +847,42 @@ impl ReviewSession {
         self.stage_local_then(cx, |_| Ok(()));
     }
 
+    /// The local review with a task on the README's new line that its agent answered, kept in the
+    /// review's state file as Send now and `agent-reply` keep it.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_with_task(&mut self, cx: &mut Context<Self>) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let staged = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            let opened = crate::open_review::open_review(&subject, &folder, &folders)?;
+            let head = opened.review.head().clone();
+            let store = crate::viewer::LocalThreadStore::in_file(opened.review.state_file());
+            let line = crate::line_number::LineNumber::try_from(3_u32)?;
+            let at = LineLocation {
+                path: FilePath::new("README.md")?,
+                side: crate::viewer::Side::Head,
+                line,
+            };
+            let place = CommentPlace::Lines {
+                start: at.clone(),
+                end: at,
+            };
+            store.stage_answered_task(
+                &place,
+                &head,
+                (
+                    "Say that tax is added on top, so nobody reads the total as the price.",
+                    "Done: the README now says the total is before tax, and `tax` names the rate.",
+                ),
+            )
+        });
+        if let Err(error) = staged {
+            eprintln!("could not stage a task in the local review: {error:#}");
+        }
+        self.stage_local(cx);
+    }
+
     /// The local review with a file written in its folder after it opened, so its look at the folder
     /// says Changed on disk. `unstage_local_changed_on_disk` takes the file away again.
     #[cfg(feature = "snapshots")]
@@ -1273,7 +1309,7 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
         SendMode::CommentNow => "posted on GitHub",
-        SendMode::SendNow => "kept here",
+        SendMode::SendNow => "kept as a task",
     };
     match audience {
         Audience::Author => format!("{what} {done}"),

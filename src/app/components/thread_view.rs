@@ -21,6 +21,7 @@ use super::button::{
 };
 use super::card::card;
 use super::chip::chip;
+use super::comment_composer::task_button;
 use super::icon::{Icon, sized_icon};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, shimmer_text, slide_in, turn_to};
@@ -86,6 +87,7 @@ struct ReplyBox<'a> {
     thread_id: &'a ThreadId,
     can_reply_now: bool,
     can_ask_agent: bool,
+    tasks: &'static [SendMode],
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -100,6 +102,7 @@ pub struct ThreadElement {
     view: Arc<ThreadView>,
     can_reply_now: bool,
     can_ask_agent: bool,
+    tasks: &'static [SendMode],
     reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     edits: BTreeMap<CommentId, String>,
@@ -115,6 +118,9 @@ pub struct ThreadElement {
 pub struct ThreadDrafts {
     pub can_reply_now: bool,
     pub can_ask_agent: bool,
+    /// A local review's thread: a reply is a follow-up task sent with these, and nothing of it is on
+    /// GitHub. Empty for a PR.
+    pub tasks: &'static [SendMode],
     pub reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     pub edits: BTreeMap<CommentId, String>,
@@ -164,6 +170,7 @@ impl ThreadElement {
         let ThreadDrafts {
             can_reply_now,
             can_ask_agent,
+            tasks,
             reply,
             edits,
         } = drafts;
@@ -179,6 +186,7 @@ impl ThreadElement {
             view,
             can_reply_now,
             can_ask_agent,
+            tasks,
             reply,
             edits,
             on_reply_draft,
@@ -460,6 +468,7 @@ impl ThreadElement {
             thread_id,
             can_reply_now,
             can_ask_agent,
+            tasks,
             on_action,
             on_reply_draft,
             ui,
@@ -495,16 +504,13 @@ impl ThreadElement {
             )
             .on_edit(move |text, _, cx| on_edit(ReplyDraftChange::Edit(text), cx))
             .on_submit(move |_, cx| {
-                send_reply(
-                    &ui,
-                    &on_action,
-                    &submitted_thread,
-                    SendMode::AddToReview,
-                    Audience::Author,
-                    cx,
-                );
+                let (mode, audience) = match tasks.first() {
+                    Some(&task) => (task, Audience::Agent),
+                    None => (SendMode::AddToReview, Audience::Author),
+                };
+                send_reply(&ui, &on_action, &submitted_thread, mode, audience, cx);
             })
-            .on_submit_to_agent(can_ask_agent, move |_, cx| {
+            .on_submit_to_agent(can_ask_agent && tasks.is_empty(), move |_, cx| {
                 send_reply(
                     &ask_ui,
                     &ask_action,
@@ -532,7 +538,29 @@ impl ThreadElement {
                 move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
             })
         });
-        let buttons = (!is_busy).then(|| {
+        let task_buttons =
+            (!is_busy && !tasks.is_empty()).then(|| {
+                div().flex().flex_wrap().items_center().gap_2().children(
+                    tasks.iter().enumerate().map(|(index, &mode)| {
+                        let (icon, label) = task_button(mode);
+                        let kind = if index == 0 {
+                            ButtonKind::Primary
+                        } else {
+                            ButtonKind::Secondary
+                        };
+                        icon_label_button(
+                            &colors,
+                            SharedString::from(format!("reply-task-{index}-{id}")),
+                            kind,
+                            ButtonSize::Small,
+                            icon,
+                            label,
+                        )
+                        .on_click(send(mode, Audience::Agent))
+                    }),
+                )
+            });
+        let buttons = (!is_busy && tasks.is_empty()).then(|| {
             let ask_agent = can_ask_agent.then(|| {
                 let mut parts = vec![
                     icon_label_button(
@@ -615,6 +643,7 @@ impl ThreadElement {
                             div().absolute().top(px(4.)).right(px(4.)).child(cancel)
                         })),
                 )
+                .children(task_buttons)
                 .children(buttons),
             SharedString::from(format!("reply-box-{id}")),
             STATE,
@@ -951,18 +980,25 @@ impl RenderOnce for ThreadElement {
             ))
             .children(marks)
             .child(div().min_w_0().truncate().child(summary));
-        let conversation_link = self.view.thread.comments.first().map(|comment| {
-            let url = comment.url.clone();
-            icon_button(
-                &colors,
-                SharedString::from(format!("thread-link-{id}")),
-                ButtonKind::Ghost,
-                ButtonSize::Small,
-                Icon::ExternalLink,
-                "Open on GitHub",
-            )
-            .on_click(move |_, _, cx| open_link(&url, cx))
-        });
+        let on_github = self.tasks.is_empty();
+        let conversation_link =
+            self.view
+                .thread
+                .comments
+                .first()
+                .filter(|_| on_github)
+                .map(|comment| {
+                    let url = comment.url.clone();
+                    icon_button(
+                        &colors,
+                        SharedString::from(format!("thread-link-{id}")),
+                        ButtonKind::Ghost,
+                        ButtonSize::Small,
+                        Icon::ExternalLink,
+                        "Open on GitHub",
+                    )
+                    .on_click(move |_, _, cx| open_link(&url, cx))
+                });
         let (is_busy, saving_edit, problem, focus) = {
             let state = ui.read(cx);
             (
@@ -1033,13 +1069,15 @@ impl RenderOnce for ThreadElement {
                                     })
                                     .flatten(),
                             )
-                            .child(Self::reactions(
-                                &colors,
-                                comment,
-                                &ui,
-                                &reaction_on_action,
-                                cx,
-                            ));
+                            .when(on_github, |row| {
+                                row.child(Self::reactions(
+                                    &colors,
+                                    comment,
+                                    &ui,
+                                    &reaction_on_action,
+                                    cx,
+                                ))
+                            });
                         let content = match being_edited {
                             Some(text) => {
                                 let edit_focus = window
@@ -1081,9 +1119,10 @@ impl RenderOnce for ThreadElement {
         });
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
-        let (can_reply_now, can_ask_agent, on_action) = (
+        let (can_reply_now, can_ask_agent, tasks, on_action) = (
             self.can_reply_now,
             self.can_ask_agent,
+            self.tasks,
             Rc::clone(&self.on_action),
         );
         let resolve = (!self.view.is_folded).then(|| {
@@ -1144,6 +1183,7 @@ impl RenderOnce for ThreadElement {
                             thread_id: &id,
                             can_reply_now,
                             can_ask_agent,
+                            tasks,
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,

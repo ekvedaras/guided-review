@@ -756,6 +756,7 @@ impl OneStepLayout {
             comment_now: review.can_comment_now(),
             suggest_change: review.can_suggest_change(place),
             ask_agent: session.agent_link_is_on(),
+            tasks: task_modes(review),
         };
         let ask_place = review.ask_place_of(place);
         let on_type = {
@@ -819,6 +820,17 @@ impl OneStepLayout {
                 });
                 window.focus(&this.focus, cx);
             }),
+            on_send_task: {
+                let (layout, place) = (cx.entity(), place.clone());
+                Rc::new(move |mode, window: &mut Window, cx: &mut App| {
+                    layout.update(cx, |this, cx| {
+                        this.session.update(cx, |session, cx| {
+                            session.send_comment(&place, mode, Audience::Agent, cx);
+                        });
+                        window.focus(&this.focus, cx);
+                    });
+                })
+            },
         };
         let ask = ask_place.map(|ask_place| {
             let label = ask_place.lines_label().unwrap_or_default();
@@ -927,6 +939,7 @@ impl OneStepLayout {
             ThreadDrafts {
                 can_reply_now: can_comment_now,
                 can_ask_agent,
+                tasks: task_modes(review),
                 reply,
                 edits,
             },
@@ -4532,6 +4545,16 @@ fn scrolled_share(scrolled: Pixels, scrollable: Pixels) -> f32 {
         return 1.;
     }
     (scrolled / scrollable).clamp(0., 1.)
+}
+
+/// A local review's send actions, each a task for its agent; none for a PR, whose boxes offer GitHub's.
+fn task_modes(review: &Review) -> &'static [SendMode] {
+    let modes = review.send_modes();
+    if modes.iter().all(|mode| mode.is_task()) {
+        modes
+    } else {
+        &[]
+    }
 }
 
 #[cfg(test)]

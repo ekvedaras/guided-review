@@ -212,6 +212,14 @@ impl LocalComment {
     }
 }
 
+/// The thread as it was when the task was sent, before the agent answered.
+#[cfg(feature = "snapshots")]
+fn without_last_comment(thread: &ReviewThread) -> ReviewThread {
+    let mut sent = thread.clone();
+    sent.comments.pop();
+    sent
+}
+
 /// The local threads in a review's state file. Each change reads the file again under its lock and
 /// writes only this section back.
 #[derive(Debug, Clone)]
@@ -251,6 +259,43 @@ impl LocalThreadStore {
 
     pub fn set_resolved(&self, thread: &ThreadId, resolution: Resolution) -> anyhow::Result<()> {
         self.change(|threads| threads.set_resolved(thread, resolution))
+    }
+
+    /// A task the agent answered, written as Send now and `agent-reply` would write it, for a snapshot
+    /// scene of a local review. Nothing is written when the review has threads already.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_answered_task(
+        &self,
+        place: &CommentPlace,
+        head: &Sha,
+        (task, answer): (&str, &str),
+    ) -> anyhow::Result<()> {
+        use super::hand_offs::{AgentReplied, SentComment, SentFrom};
+
+        if !self.threads_at(head)?.is_empty() {
+            return Ok(());
+        }
+        let thread = self.start(place, task, head)?;
+        self.reply(&thread, answer, LocalAuthor::Agent)?;
+        let threads = self.threads_at(head)?;
+        let mut answered = Ok(());
+        self.file.update(|state| {
+            let hand_offs = state.hand_offs_mut();
+            hand_offs.record_new_thread(
+                place.path(),
+                &SentComment {
+                    place: place.describe(),
+                    from: SentFrom::File(place.path().clone()),
+                    mode: super::comments::SendMode::SendNow,
+                    body: task,
+                },
+                Some(&Ok(threads.iter().map(without_last_comment).collect())),
+            );
+            if let Some(id) = hand_offs.all().last().map(super::hand_offs::HandOff::id) {
+                answered = hand_offs.replied(id, &AgentReplied::default());
+            }
+        })?;
+        Ok(answered?)
     }
 
     /// Nothing is written when the change is refused.
