@@ -131,7 +131,7 @@ pub use page::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
     Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,
     ScreenFooter, SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
-    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
+    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
 };
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{

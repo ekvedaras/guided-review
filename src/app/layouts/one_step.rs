@@ -95,7 +95,7 @@ use crate::viewer::{
     RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
     ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
-    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment,
+    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1598,7 +1598,6 @@ impl OneStepLayout {
             .flex_col()
             .gap_3()
             .child(match sidebar.basic_mode_label {
-                // Counting files as read comes with their read ticks.
                 Some(label) => div()
                     .flex()
                     .child(chip(&colors, Tone::Accent).child(label))
@@ -2533,8 +2532,6 @@ impl OneStepLayout {
             ))
     }
 
-    /// A basic review's first screen: what the PR is, how big, its own description, the changed files
-    /// to go to, and Write guided tour, which waits for its ticket.
     fn overview(&self, overview: &OverviewPage, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let description = self
@@ -3244,10 +3241,6 @@ fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
             .child(text)
     };
     let dot = || div().size(px(3.)).rounded_full().bg(colors.border);
-    let plural = |count: usize, one: &str, many: &str| match count {
-        1 => format!("1 {one}"),
-        count => format!("{count} {many}"),
-    };
     div()
         .pb_5()
         .flex()
@@ -3258,14 +3251,14 @@ fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
         .text_color(colors.muted_text)
         .child(item(
             Icon::FileText,
-            plural(stats.files, "file changed", "files changed"),
+            pluralised(stats.files, "file changed", "files changed"),
         ))
         .child(dot())
         .child(line_counts(colors, stats.added_lines, stats.removed_lines))
         .children((stats.open_threads > 0).then(|| {
             div().flex().items_center().gap_3().child(dot()).child(item(
                 Icon::MessageSquare,
-                plural(stats.open_threads, "open thread", "open threads"),
+                pluralised(stats.open_threads, "open thread", "open threads"),
             ))
         }))
 }

@@ -157,20 +157,13 @@ pub struct SummaryStatsRow {
 
 impl SummaryStatsRow {
     pub(super) fn of(stats: SummaryStats) -> Self {
-        let count = |count: usize, one: &str, many: &str| -> Arc<str> {
-            if count == 1 {
-                format!("1 {one}").into()
-            } else {
-                format!("{count} {many}").into()
-            }
-        };
         Self {
-            steps: count(stats.steps, "step", "steps"),
-            files: count(stats.files, "file changed", "files changed"),
+            steps: pluralised(stats.steps, "step", "steps").into(),
+            files: pluralised(stats.files, "file changed", "files changed").into(),
             added: format!("+{}", stats.added_lines).into(),
             removed: format!("\u{2212}{}", stats.removed_lines).into(),
             open_threads: (stats.open_threads > 0)
-                .then(|| count(stats.open_threads, "open thread", "open threads")),
+                .then(|| pluralised(stats.open_threads, "open thread", "open threads").into()),
         }
     }
 }
@@ -443,6 +436,14 @@ pub(super) fn box_edges(rows: &[PageRow]) -> Vec<BoxEdges> {
         before = Some(part);
     }
     edges
+}
+
+/// "1 file" or "3 files": the count with the form that fits it.
+pub fn pluralised(count: usize, one: &str, many: &str) -> String {
+    match count {
+        1 => format!("1 {one}"),
+        count => format!("{count} {many}"),
+    }
 }
 
 /// Typing only changes a box's height when its line count changes.
