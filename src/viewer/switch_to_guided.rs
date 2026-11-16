@@ -37,7 +37,7 @@ impl TourSwitcher {
         let mut review = Review::open(guided, source.as_ref(), state_file)?;
         let started_read = review.progress().read;
         review.steps_carried_read_ticks_are(started_read);
-        review.carries_file_reads_made_while_switching_with(carrier);
+        review.takes_over_from_basic_with(carrier);
         self.delete_basic_file()?;
         Ok(RepinnedTour {
             review,

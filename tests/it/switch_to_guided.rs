@@ -1,12 +1,14 @@
-use crate::support::fake_ports::FakeAskProcesses;
-use crate::support::{FixtureRepo, file_path};
+use crate::support::app_path::AppPath;
+use crate::support::fake_ports::{FakeAskProcesses, FakeGitHub, GitHubFault, SentLog};
+use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::tour::{BasicTour, Tour, TourPin};
+use guided_review::tour::{BasicTour, GuidedTour, Tour, TourPin};
 use guided_review::viewer::{
-    Asks, GuidedTourProgress, GuidedTourRefusal, PageRow, Place, Review, ReviewStateFile, Screen,
-    ShownOn, TourSwitcher, repin_tour,
+    Asks, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, GuidedTourProgress,
+    GuidedTourRefusal, PageRow, Place, Review, ReviewStateFile, ReviewThread, Screen, SendMode,
+    ShownOn, Side, TextBox, ThreadComment, ThreadId, TourSwitcher, repin_tour,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -444,4 +446,193 @@ fn files_read_while_the_guided_review_is_being_built_are_carried_into_its_steps(
     );
     assert!(state.file_read_tick(&file_path("a.txt")).is_none());
     assert!(state.file_read_tick(&file_path("b.txt")).is_none());
+}
+
+/// The switch runs while the basic review stays on screen; `meanwhile` is what the reviewer does
+/// on it before the guided review takes over.
+fn switched_while(shop: &Shop, meanwhile: impl FnOnce(&mut Review)) -> Review {
+    let mut basic = shop.basic_review();
+    let third = shop.commit_third(&["c.txt"]);
+    shop.write_guided_tour_at(&third);
+    let switched = shop.switcher().run().unwrap();
+    meanwhile(&mut basic);
+    let mut guided = switched.review;
+    guided.carry_on_from(basic);
+    guided
+}
+
+/// The guided review as a restart opens it from what is saved.
+fn reopened_guided(shop: &Shop) -> Review {
+    let tour = GuidedTour::load(&Tour::path_for(&shop.repo.folders(), &shop.pr())).unwrap();
+    Review::open(tour, &shop.source(), shop.state_file()).unwrap()
+}
+
+fn comment_box_on_first(review: &mut Review) -> CommentPlace {
+    select_first(review);
+    review
+        .open_comment_box(CommentGesture::DragEnded)
+        .unwrap()
+        .unwrap()
+}
+
+fn select_first(review: &mut Review) {
+    on_file_screen(review, "a.txt");
+    let row = review
+        .file_page()
+        .unwrap()
+        .pieces
+        .iter()
+        .flat_map(guided_review::viewer::PieceDiff::lines)
+        .find(|line| line.text == "first")
+        .unwrap()
+        .location
+        .clone();
+    review.begin_selection(row.clone());
+    review.extend_selection(row);
+}
+
+fn mine(body: &str) -> ThreadComment {
+    ThreadComment {
+        avatar_url: None,
+        id: CommentId::new("C1"),
+        reactions: Vec::new(),
+        author: "me".into(),
+        is_bot: false,
+        by_viewer: true,
+        body: body.into(),
+        url: "https://github.com/acme/shop/pull/7#discussion_C1".into(),
+    }
+}
+
+fn thread_on_first(comments: Vec<ThreadComment>) -> ReviewThread {
+    ReviewThread {
+        id: ThreadId::new("T1"),
+        is_resolved: false,
+        is_outdated: false,
+        path: file_path("a.txt"),
+        line: Some(line(1)),
+        start_line: None,
+        side: Side::Head,
+        is_file_comment: false,
+        original_line: Some(line(1)),
+        original_start_line: None,
+        original_commit: None,
+        comments,
+    }
+}
+
+#[test]
+fn a_comment_draft_typed_while_the_guided_review_is_being_built_is_kept() {
+    let shop = Shop::new();
+
+    let guided = switched_while(&shop, |basic| {
+        let place = comment_box_on_first(basic);
+        basic.type_in(&TextBox::Draft(place), "why first?").unwrap();
+        save_typing(basic);
+    });
+
+    assert_eq!(drafts(&guided).len(), 1);
+    assert_eq!(drafts(&guided)[0].body, "why first?");
+    assert_eq!(drafts(&reopened_guided(&shop))[0].body, "why first?");
+}
+
+#[test]
+fn a_review_body_typed_while_the_guided_review_is_being_built_is_kept() {
+    let shop = Shop::new();
+
+    let guided = switched_while(&shop, |basic| {
+        basic.type_in(&TextBox::FinishBody, "looks good").unwrap();
+        save_typing(basic);
+    });
+
+    assert_eq!(guided.text_of(&TextBox::FinishBody), Some("looks good"));
+    assert_eq!(
+        reopened_guided(&shop).text_of(&TextBox::FinishBody),
+        Some("looks good")
+    );
+}
+
+#[test]
+fn a_reply_typed_while_the_guided_review_is_being_built_is_kept() {
+    let shop = Shop::new();
+    let reply = TextBox::Reply(ThreadId::new("T1"));
+
+    let guided = switched_while(&shop, |basic| {
+        basic.set_threads(&[thread_on_first(vec![mine("why?")])]);
+        basic.open_box(&reply).unwrap();
+        basic.type_in(&reply, "because").unwrap();
+        save_typing(basic);
+    });
+
+    assert_eq!(guided.text_of(&reply), Some("because"));
+    assert_eq!(reopened_guided(&shop).text_of(&reply), Some("because"));
+}
+
+#[test]
+fn a_comment_queued_while_the_guided_review_is_being_built_is_kept() {
+    let shop = Shop::new();
+    let github = FakeGitHub::with_pull("main-tip", &shop.second, &SentLog::default());
+    github.inject(GitHubFault::ConnectionLost);
+
+    let guided = switched_while(&shop, |basic| {
+        let place = comment_box_on_first(basic);
+        basic
+            .type_in(&TextBox::Draft(place.clone()), "later")
+            .unwrap();
+        let result = basic.send_comment(&place, SendMode::AddToReview, &github);
+        assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
+    });
+
+    assert_eq!(guided.queued_comments().len(), 1);
+    assert_eq!(reopened_guided(&shop).queued_comments().len(), 1);
+}
+
+#[test]
+fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
+    let shop = Shop::new();
+    let mut github = FakeGitHub::with_pull("main-tip", &shop.second, &SentLog::default());
+    github.threads = vec![thread_on_first(vec![mine("why first?")])];
+
+    let guided = switched_while(&shop, |basic| {
+        let place = comment_box_on_first(basic);
+        basic
+            .type_in(&TextBox::Draft(place.clone()), "why first?")
+            .unwrap();
+        let request = basic
+            .start_sending(&place, SendMode::AddToReview, Audience::Agent)
+            .unwrap();
+        assert_eq!(
+            basic.apply_comment(request.run(&github)).unwrap(),
+            CommentResult::Sent
+        );
+    });
+
+    assert_eq!(guided.hand_offs().all().len(), 1);
+    assert_eq!(reopened_guided(&shop).hand_offs().all().len(), 1);
+}
+
+#[test]
+fn an_ask_made_while_the_guided_review_is_being_built_is_kept() {
+    let shop = Shop::new();
+
+    let guided = switched_while(&shop, |basic| {
+        select_first(basic);
+        let place = basic.place_of_lines(&basic.selected_lines().unwrap());
+        basic.cancel_selection();
+        let mut processes = FakeAskProcesses::default();
+        basic.open_ask(
+            place,
+            "a.txt line 1".to_owned(),
+            &AskSettings::default(),
+            Instant::now(),
+            &mut processes,
+        );
+        basic.change_asks(|desk| desk.send("Why?", Instant::now(), &mut processes));
+    });
+
+    assert_eq!(guided.asks().all().len(), 1);
+    assert_eq!(
+        Asks::load(Arc::new(shop.state_file())).unwrap().all().len(),
+        1
+    );
 }

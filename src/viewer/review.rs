@@ -323,7 +323,7 @@ pub struct ReviewCore {
     /// After a switch from a basic tour: how many steps started read. Not saved.
     steps_started_read: Option<usize>,
     /// After a switch from a basic tour, until the hand-over: what carries the files read on the
-    /// basic review meanwhile into the steps. Not saved.
+    /// basic review into the steps when this review takes over its whole state. Not saved.
     read_carrier: Option<ReadCarrier>,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
@@ -418,7 +418,7 @@ impl Review {
         self.seen_end_of = replaced.seen_end_of;
         self.ask_desk = replaced.ask_desk;
         if switched_to_guided {
-            self.carry_file_reads_made_while_switching(&replaced.state);
+            self.take_over_from_basic(&replaced.state);
             self.follow_file_asks_into_the_guided_tour();
         }
         self.check_asks_for_code_changes();
@@ -445,23 +445,24 @@ impl Review {
         self.change_asks(|desk| desk.open(target, &head, now, processes));
     }
 
-    pub(super) fn carries_file_reads_made_while_switching_with(&mut self, carrier: ReadCarrier) {
+    pub(super) fn takes_over_from_basic_with(&mut self, carrier: ReadCarrier) {
         self.read_carrier = Some(carrier);
     }
 
-    /// The switch carried the reads saved when it started; the basic review stayed on screen and
-    /// may have read more files, and saved its own state over the carried one. Its reads are
-    /// carried again and this review's state is saved over what it wrote.
-    fn carry_file_reads_made_while_switching(&mut self, basic: &ReviewState) {
+    /// The switch carried the state saved when it started; the basic review stayed on screen and
+    /// may have read files, queued comments, handed off and typed since, and saved its own state
+    /// over the carried one. This review takes the basic review's whole state as of now, carries
+    /// its reads again, and saves over what it wrote.
+    fn take_over_from_basic(&mut self, basic: &ReviewState) {
         let Some(carrier) = self.read_carrier.take() else {
             return;
         };
         let carried = carrier.carry(&basic.file_read_heads());
         let saved = self
             .state
-            .record(|state| state.carry_file_reads_into_steps(&carried));
+            .record(|state| state.take_over_from_basic(basic, &carried));
         if let Err(error) = saved {
-            eprintln!("could not save the read ticks carried into the guided tour: {error:#}");
+            eprintln!("could not save the review state handed over to the guided tour: {error:#}");
         }
         self.steps_started_read = Some(self.progress().read);
     }
