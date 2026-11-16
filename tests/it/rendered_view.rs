@@ -314,7 +314,7 @@ fn thread_on_line(number: usize) -> ReviewThread {
             id: CommentId::new("c1"),
             author: "alice".into(),
             is_bot: false,
-            by_agent: false,
+            by_agent: None,
             by_viewer: false,
             body: "Many?".into(),
             url: String::new(),

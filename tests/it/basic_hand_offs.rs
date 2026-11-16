@@ -103,7 +103,7 @@ fn comment(body: &str) -> ThreadComment {
         reactions: Vec::new(),
         author: "me".into(),
         is_bot: false,
-        by_agent: false,
+        by_agent: None,
         by_viewer: true,
         body: body.into(),
         url: "https://github.com/acme/shop/pull/7#discussion_C1".into(),

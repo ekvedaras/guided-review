@@ -90,7 +90,7 @@ impl Shop {
                 id: CommentId::new(&format!("{id}-c")),
                 author: "me".into(),
                 is_bot: false,
-                by_agent: false,
+                by_agent: None,
                 by_viewer: true,
                 body: "hm".into(),
                 url: String::new(),

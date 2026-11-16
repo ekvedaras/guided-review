@@ -274,7 +274,7 @@ impl LocalComment {
             author: self.by.shown_name().to_owned(),
             avatar_url: None,
             is_bot: false,
-            by_agent: self.by == LocalAuthor::Agent,
+            by_agent: Some(self.by == LocalAuthor::Agent),
             by_viewer: self.by == LocalAuthor::Reviewer,
             body: self.body.clone(),
             url: String::new(),

@@ -122,7 +122,7 @@ fn comment(id: &str, author: &str, body: &str) -> ThreadComment {
         id: CommentId::new(id),
         author: author.into(),
         is_bot: false,
-        by_agent: false,
+        by_agent: None,
         body: body.into(),
         url: String::new(),
         reactions: Vec::new(),

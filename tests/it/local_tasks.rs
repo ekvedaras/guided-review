@@ -661,3 +661,17 @@ fn update_moves_every_open_local_thread_to_the_new_snapshot_so_none_needs_the_ol
         Some(false)
     );
 }
+
+#[test]
+fn a_reviewers_local_comment_that_starts_with_the_robot_is_still_the_reviewers() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+
+    send_now(&feature, &mut opened, "world", "🤖 is what the label says");
+
+    let shown = threads(&opened);
+    let comment = &shown[0].thread.comments[0];
+    assert!(!comment.is_by_agent());
+    assert_eq!(comment.shown_author(), "You");
+    assert_eq!(comment.shown_body(), "🤖 is what the label says");
+}

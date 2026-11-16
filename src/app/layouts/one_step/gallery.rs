@@ -116,7 +116,7 @@ fn comment(id: &str, author: &str, body: &str, reactions: Vec<ReactionCount>) ->
         id: CommentId::new(id),
         author: author.to_owned(),
         is_bot: author.ends_with("[bot]"),
-        by_agent: false,
+        by_agent: None,
         by_viewer: author == "you",
         body: body.to_owned(),
         url: "https://example.test".to_owned(),

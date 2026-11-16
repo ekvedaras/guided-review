@@ -33,7 +33,7 @@ fn thread_on_line_ten(body: &str) -> ReviewThread {
             id: CommentId::new("C1"),
             author: "me".into(),
             is_bot: false,
-            by_agent: false,
+            by_agent: None,
             by_viewer: true,
             body: body.into(),
             url: String::new(),
