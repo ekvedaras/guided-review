@@ -388,6 +388,7 @@ impl ReviewSession {
         };
         let github = Arc::clone(&self.github);
         let state_file = self.review.state_file();
+        let place = place.clone();
         cx.spawn(async move |this, cx| {
             let outcome = cx
                 .background_executor()
@@ -396,7 +397,7 @@ impl ReviewSession {
             let mut outcome = Some(outcome);
             let applied = this.update(cx, |this, cx| {
                 if let Some(outcome) = outcome.take() {
-                    this.comment_sent(outcome, (mode, audience), cx);
+                    this.comment_sent(&place, outcome, (mode, audience), cx);
                 }
             });
             // The window switched to another PR while this was in flight; the comment is not lost.
@@ -413,6 +414,7 @@ impl ReviewSession {
     /// shows its own note where the box was.
     fn comment_sent(
         &mut self,
+        place: &CommentPlace,
         outcome: CommentOutcome,
         (mode, audience): (SendMode, Audience),
         cx: &mut Context<Self>,
@@ -421,7 +423,7 @@ impl ReviewSession {
         if matches!(result, Ok(CommentResult::Sent)) {
             post_toast(cx, ToastTone::Success, sent_note("Comment", mode, audience));
         }
-        if self.review.composing().is_some() {
+        if self.review.composing() == Some(place) {
             cx.emit(SessionEvent::CommentBoxTakesKeysAgain);
         }
     }

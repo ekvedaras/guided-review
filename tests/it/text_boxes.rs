@@ -342,6 +342,38 @@ fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_gives_it_the_keys_
 }
 
 #[test]
+fn a_comment_that_did_not_go_leaves_the_keys_with_a_box_the_reviewer_turned_to_meanwhile() {
+    for kind in EVERY_KIND {
+        let pull = Pull::new();
+        let github = pull.github();
+        github.inject(GitHubFault::NewThreadsAnswerNull);
+        let mut review = pull.open();
+        let place = written_comment_box(&mut review);
+        let request = review
+            .start_sending(&place, SendMode::AddToReview, Audience::Author)
+            .unwrap();
+
+        let other = match kind {
+            Kind::Draft => TextBox::Draft(
+                open_by(&mut review, Gesture::CommentOnFile)
+                    .unwrap()
+                    .unwrap(),
+            ),
+            _ => open_box(&mut review, kind),
+        };
+        review.type_in(&other, "meanwhile").unwrap();
+        let other_draft = review.composing().cloned();
+        review.apply_comment(request.run(&github)).unwrap();
+
+        assert_eq!(review.composing().cloned(), other_draft, "{kind:?}");
+        let Some((BoxState::Idle, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
+        else {
+            panic!("{kind:?}: {:?}", state_of(&review, &place));
+        };
+    }
+}
+
+#[test]
 fn a_refused_comment_keeps_its_box_with_the_refusal_until_it_is_sent_again() {
     let pull = Pull::new();
     let mut review = pull.open();
