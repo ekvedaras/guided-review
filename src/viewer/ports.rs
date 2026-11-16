@@ -9,10 +9,10 @@ use super::github_outage::OutageCause;
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
-use crate::pull_request::{PullRequestTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, PullRequestUrl};
 
-pub trait PullRequestTipsPort: Send + Sync {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError>;
+pub trait ChangeTipsPort: Send + Sync {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError>;
 }
 
 pub trait ViewedFilesPort: Send + Sync {
@@ -128,7 +128,7 @@ pub trait ReviewWritesPort: Send + Sync {
 /// Everything the viewer core asks of GitHub, for the app that holds one adapter for all of it.
 /// Core actions take only the port they need, so tests can put a fake behind it.
 pub trait GitHubPort:
-    PullRequestTipsPort
+    ChangeTipsPort
     + PullRequestDescriptionPort
     + PullRequestReactionsPort
     + PictureUploadPort
@@ -139,7 +139,7 @@ pub trait GitHubPort:
 }
 
 impl<T> GitHubPort for T where
-    T: PullRequestTipsPort
+    T: ChangeTipsPort
         + PullRequestDescriptionPort
         + PullRequestReactionsPort
         + PictureUploadPort

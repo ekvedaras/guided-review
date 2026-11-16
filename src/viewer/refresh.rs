@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::app_folders::AppFolders;
 use crate::coverage;
 use crate::pieces::{ChangedFile, PieceId};
-use crate::pull_request::{PullRequestTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, PullRequestUrl};
 use crate::repin::RepinStatus;
 use crate::tour::{GuidedTour, Tour};
 
@@ -143,7 +143,7 @@ impl TourRefresher {
             anyhow::bail!("claude stopped: {reason}");
         }
         let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
-        let pinned = PullRequestTips {
+        let pinned = ChangeTips {
             base_branch_tip: tour.pin.base.clone(),
             head: tour.pin.head.clone(),
         };

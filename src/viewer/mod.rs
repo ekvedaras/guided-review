@@ -139,8 +139,8 @@ pub use page::{
 };
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, RefreshWriter,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort, NoAccess,
+    PictureUploadPort, PullRequestDescriptionPort, PullRequestReactionsPort, RefreshWriter,
     Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile,
     ViewedFilesPort, ViewedState,
 };

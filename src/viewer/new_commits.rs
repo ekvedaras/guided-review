@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::repin::{Repin, repin};
 use crate::tour::{GuidedTour, Tour};
 
-use super::ports::PullRequestTipsPort;
+use super::ports::ChangeTipsPort;
 use super::review::Review;
 use super::review_state::{RepinRecord, ReviewStateFile};
 
@@ -31,7 +31,7 @@ pub fn repin_tour(
 
 /// Finds the code source that can read the given tips, fetching what is missing.
 pub type PickCodeSource =
-    Arc<dyn Fn(&PullRequestTips) -> anyhow::Result<Box<dyn CodeSource>> + Send + Sync>;
+    Arc<dyn Fn(&ChangeTips) -> anyhow::Result<Box<dyn CodeSource>> + Send + Sync>;
 
 /// The "Update tour" button's work: what the CLI's `repin` does, then a fresh `Review` on the result.
 pub struct TourRepinner {
@@ -72,7 +72,7 @@ pub struct RepinnedTour {
 
 impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
-    pub fn run(&self, github: &dyn PullRequestTipsPort) -> anyhow::Result<RepinnedTour> {
+    pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
         let tips = github.pull_request_tips(&self.pr)?;
         let source = (self.pick_code_source)(&tips)?;
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;

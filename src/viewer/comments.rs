@@ -9,7 +9,7 @@ use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::hand_offs::Audience;
-use super::ports::{GitHubError, PullRequestTipsPort, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{ChangeTipsPort, GitHubError, ReviewThreadsPort, ReviewWritesPort};
 use super::row_selection::SelectedLines;
 use super::step_page::{LineLocation, Side};
 use super::threads::ReviewThread;
@@ -311,7 +311,7 @@ impl CommentRequest {
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
     pub fn run(
         self,
-        github: &(impl PullRequestTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
+        github: &(impl ChangeTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
     ) -> CommentOutcome {
         let how = self.send(github);
         let threads = matches!(how, Outcome::Sent).then(|| {
@@ -326,7 +326,7 @@ impl CommentRequest {
         }
     }
 
-    fn send(&self, github: &(impl PullRequestTipsPort + ReviewWritesPort + ?Sized)) -> Outcome {
+    fn send(&self, github: &(impl ChangeTipsPort + ReviewWritesPort + ?Sized)) -> Outcome {
         let pr = &self.pr;
         if !self.draft.is_placed_at(&self.tour_head) {
             return Outcome::Refused(CommentRefusal::CodeMoved);

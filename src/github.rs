@@ -11,11 +11,11 @@ use crate::file_path::FilePath;
 use crate::image_facts;
 use crate::json::at;
 use crate::line_number::LineNumber;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    AvatarPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
+    AvatarPort, ChangeTipsPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause,
+    PictureUploadPort, PullRequestDescriptionPort, PullRequestReactionsPort, Reaction,
     ReactionChange, ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread,
     ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview,
     ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
@@ -433,8 +433,8 @@ impl ReleasesPort for GitHub {
     }
 }
 
-impl PullRequestTipsPort for GitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError> {
+impl ChangeTipsPort for GitHub {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError> {
         let pull: PullJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -442,7 +442,7 @@ impl PullRequestTipsPort for GitHub {
             )
             .and_then(|mut response| Ok(response.body_mut().read_json()?))
             .with_context(|| format!("could not read {pr} from GitHub"))?;
-        Ok(PullRequestTips {
+        Ok(ChangeTips {
             base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })

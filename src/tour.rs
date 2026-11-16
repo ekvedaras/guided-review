@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
 use crate::piece_id::PieceId;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 
 const VERSION: u32 = 1;
 
@@ -347,8 +347,8 @@ impl TourPin {
         !self.base.is_empty() && !self.head.is_empty()
     }
 
-    pub fn pinned_tips(&self) -> PullRequestTips {
-        PullRequestTips {
+    pub fn pinned_tips(&self) -> ChangeTips {
+        ChangeTips {
             base_branch_tip: self.base.clone(),
             head: self.head.clone(),
         }

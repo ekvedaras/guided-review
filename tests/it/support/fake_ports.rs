@@ -5,14 +5,14 @@ use std::sync::{Arc, Mutex};
 
 use super::file_path;
 use guided_review::file_path::FilePath;
-use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, CommentId,
-    CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
-    ReactionChange, ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
+    CommentId, CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
+    PullRequestDescriptionPort, PullRequestReactionsPort, Reaction, ReactionChange, ReactionCount,
+    RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId,
+    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -301,11 +301,11 @@ impl FakeGitHub {
     }
 }
 
-impl PullRequestTipsPort for FakeGitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError> {
+impl ChangeTipsPort for FakeGitHub {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError> {
         self.sent.record(GitHubCall::TipsOf(pr.clone()));
         self.fail_if_reads_fail()?;
-        Ok(PullRequestTips {
+        Ok(ChangeTips {
             base_branch_tip: self.tips.0.clone(),
             head: self.tips.1.clone(),
         })

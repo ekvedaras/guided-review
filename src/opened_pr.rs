@@ -9,9 +9,9 @@ use crate::github::GitHub;
 use crate::make_basic_tour::make_basic_tour;
 use crate::pick_code_source::pick_code_source;
 use crate::pieces::{self, ChangedFile};
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::tour::{Tour, TourPin, ToursOnDisk};
-use crate::viewer::{PickCodeSource, PullRequestTipsPort, ReviewStateFile};
+use crate::viewer::{ChangeTipsPort, PickCodeSource, ReviewStateFile};
 
 /// What every command needs to work on one PR: where its files live, GitHub, and the folder it runs in.
 pub struct OpenedPr {
@@ -85,7 +85,7 @@ impl OpenedPr {
         self.at(pin.pinned_tips())
     }
 
-    fn at(&self, tips: PullRequestTips) -> anyhow::Result<CodeAtTips> {
+    fn at(&self, tips: ChangeTips) -> anyhow::Result<CodeAtTips> {
         let source = pick_code_source(&self.github, &self.pr, &tips, &self.current_dir)?;
         Ok(CodeAtTips { tips, source })
     }
@@ -102,7 +102,7 @@ impl OpenedPr {
 }
 
 pub struct CodeAtTips {
-    pub tips: PullRequestTips,
+    pub tips: ChangeTips,
     pub source: Box<dyn CodeSource>,
 }
 

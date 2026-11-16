@@ -8,7 +8,7 @@ use anyhow::{Context, bail};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::file_path::FilePath;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 
 /// Why a folder set as a repo's clone cannot be used as one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +82,7 @@ impl LocalGit {
     pub fn fetch_missing_commits(
         &self,
         pr: &PullRequestUrl,
-        tips: &PullRequestTips,
+        tips: &ChangeTips,
     ) -> anyhow::Result<()> {
         if !self.has_commit(&tips.head) {
             let pull_ref = format!("+refs/pull/{0}/head:refs/guided-review/{0}", pr.number);

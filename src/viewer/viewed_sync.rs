@@ -6,7 +6,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
-use super::ports::{GitHubError, PullRequestTipsPort, Viewed, ViewedFilesPort};
+use super::ports::{ChangeTipsPort, GitHubError, Viewed, ViewedFilesPort};
 use super::review::ReadSubject;
 use super::review_state::ReviewState;
 
@@ -294,10 +294,7 @@ impl SyncOutcome {
 
 impl SyncRequest {
     /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(
-        self,
-        github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
-    ) -> SyncOutcome {
+    pub fn run(self, github: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized)) -> SyncOutcome {
         let pr = &self.pr;
         if self.is_off {
             return SyncOutcome::nothing(&self.tour_head);
@@ -327,7 +324,7 @@ impl SyncRequest {
 
     /// GitHub is read first, so only wishes it does not already match are pushed.
     fn take_baseline(
-        github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
+        github: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
         tour_head: &Sha,
         wishes: BTreeMap<FilePath, Viewed>,

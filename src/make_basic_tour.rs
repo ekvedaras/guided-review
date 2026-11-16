@@ -2,7 +2,7 @@ use anyhow::Context;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::pull_request::{PullRequestTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, PullRequestUrl};
 use crate::tour::{BasicTour, Tour, TourPin};
 
 /// Makes the PR's basic tour from the code at `tips` and the PR's own title, and writes it beside the
@@ -14,7 +14,7 @@ pub fn make_basic_tour(
     folders: &AppFolders,
     pr: &PullRequestUrl,
     source: &dyn CodeSource,
-    tips: &PullRequestTips,
+    tips: &ChangeTips,
     pr_title: &str,
 ) -> anyhow::Result<BasicTour> {
     let guided_path = Tour::path_for(folders, pr);

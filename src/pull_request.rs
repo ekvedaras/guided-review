@@ -135,7 +135,8 @@ impl fmt::Display for Sha {
     }
 }
 
-pub struct PullRequestTips {
+/// The two tips a change is read between: where its base branch is, and its head.
+pub struct ChangeTips {
     pub base_branch_tip: Sha,
     pub head: Sha,
 }

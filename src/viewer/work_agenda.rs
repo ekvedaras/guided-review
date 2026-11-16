@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 
 use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
@@ -299,7 +299,7 @@ pub struct WorkOutcome {
 }
 
 pub(super) enum Done {
-    PrHead(Result<PullRequestTips, GitHubError>),
+    PrHead(Result<ChangeTips, GitHubError>),
     WorkingCopy(bool),
     PrDescription(Result<String, GitHubError>),
     SyncViewed(SyncOutcome),
