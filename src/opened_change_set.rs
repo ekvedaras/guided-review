@@ -17,52 +17,113 @@ use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
 
 /// Deletes the snapshot refs, in the clones of the local reviews on disk, of local reviews that are
 /// on disk no more, as after a crash between deleting a review's files and its ref. PR fetch refs are
-/// never touched. Runs when the app starts; a clone it cannot read keeps its refs.
-pub fn clean_snapshot_refs(folders: &AppFolders) {
+/// never touched. Runs when the app starts. A clone it cannot read keeps its refs, and so does a clone
+/// with a tour it cannot read, as that tour may be the very review a ref keeps. Says what it left and
+/// why.
+pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
+    let on_disk = LocalReviewsOnDisk::read(folders);
+    let mut not_cleaned: Vec<String> = on_disk
+        .unreadable
+        .iter()
+        .map(|(path, error)| {
+            format!(
+                "{} cannot be read, so the snapshot refs of its clone were kept: {error}",
+                path.display()
+            )
+        })
+        .collect();
     let mut kept_by_clone: HashMap<WorkTreeRoot, HashSet<String>> = HashMap::new();
-    for change_set in local_reviews_on_disk(folders) {
+    for change_set in &on_disk.change_sets {
         kept_by_clone
             .entry(change_set.folder().clone())
             .or_default()
-            .insert(snapshot_ref(&change_set));
+            .insert(snapshot_ref(change_set));
+    }
+    for change_set in &on_disk.change_sets {
+        if on_disk.cannot_tell_all_of(folders, change_set) {
+            kept_by_clone.remove(change_set.folder());
+        }
     }
     for (folder, kept) in kept_by_clone {
         let work_tree = LocalWorkTree::at(folder);
         let refs = match work_tree.snapshot_refs() {
             Ok(refs) => refs,
             Err(error) => {
-                eprintln!("could not clean the snapshot refs: {error}");
+                not_cleaned.push(format!("could not clean the snapshot refs: {error}"));
                 continue;
             }
         };
         for stale in refs.iter().filter(|name| !kept.contains(*name)) {
             if let Err(error) = work_tree.delete_snapshot_ref(stale) {
-                eprintln!("could not delete the snapshot ref {stale}: {error}");
+                not_cleaned.push(format!("could not delete the snapshot ref {stale}: {error}"));
             }
         }
     }
+    not_cleaned
 }
 
-/// The change sets whose tours are on disk, basic or guided. A file that cannot be read names none.
-fn local_reviews_on_disk(folders: &AppFolders) -> HashSet<LocalChangeSet> {
-    let local_tours = Tour::tours_dir(folders).join(LOCAL_FILES_FOLDER);
-    let Ok(clones) = std::fs::read_dir(local_tours) else {
-        return HashSet::new();
-    };
-    clones
-        .filter_map(|clone| std::fs::read_dir(clone.ok()?.path()).ok())
-        .flatten()
-        .filter_map(|tour| {
-            let path = tour.ok()?.path();
-            if path.extension()? != "json" {
-                return None;
+/// The change sets whose tours are on disk, basic or guided, and the tours and folders of local tours
+/// that could not be read, which may be of any review.
+struct LocalReviewsOnDisk {
+    change_sets: HashSet<LocalChangeSet>,
+    unreadable: Vec<(PathBuf, String)>,
+}
+
+impl LocalReviewsOnDisk {
+    fn read(folders: &AppFolders) -> Self {
+        let mut on_disk = Self {
+            change_sets: HashSet::new(),
+            unreadable: Vec::new(),
+        };
+        let local_tours = Tour::tours_dir(folders).join(LOCAL_FILES_FOLDER);
+        let clones = match std::fs::read_dir(&local_tours) {
+            Ok(clones) => clones,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return on_disk,
+            Err(error) => {
+                on_disk.unreadable.push((local_tours, error.to_string()));
+                return on_disk;
             }
-            match Tour::load(&path).ok()?.pin().subject().ok()? {
-                ReviewSubject::Local(change_set) => Some(change_set),
-                ReviewSubject::PullRequest(_) => None,
+        };
+        for clone in clones {
+            match clone.and_then(|clone| Ok((std::fs::read_dir(clone.path())?, clone.path()))) {
+                Ok((tours, folder)) => on_disk.read_tours_in(&folder, tours),
+                Err(error) => on_disk.unreadable.push((local_tours.clone(), error.to_string())),
             }
-        })
-        .collect()
+        }
+        on_disk
+    }
+
+    fn read_tours_in(&mut self, folder: &Path, tours: std::fs::ReadDir) {
+        for tour in tours {
+            let path = match tour {
+                Ok(tour) => tour.path(),
+                Err(error) => {
+                    self.unreadable.push((folder.to_path_buf(), error.to_string()));
+                    continue;
+                }
+            };
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            match Tour::load(&path).and_then(|tour| Ok(tour.pin().subject()?)) {
+                Ok(ReviewSubject::Local(change_set)) => {
+                    self.change_sets.insert(change_set);
+                }
+                Ok(ReviewSubject::PullRequest(_)) => {}
+                Err(error) => self.unreadable.push((path, format!("{error:#}"))),
+            }
+        }
+    }
+
+    /// Whether something unreadable may be a review of the change set's clone: a tour in its folder,
+    /// or a folder holding it.
+    fn cannot_tell_all_of(&self, folders: &AppFolders, change_set: &LocalChangeSet) -> bool {
+        let subject = ReviewSubject::from(change_set.clone());
+        let tours_folder = Tour::tours_dir(folders).join(subject.files_folder());
+        self.unreadable
+            .iter()
+            .any(|(path, _)| path.starts_with(&tours_folder) || tours_folder.starts_with(path))
+    }
 }
 
 /// What every command needs to work on one local change set: where its files live and its working
@@ -160,10 +221,12 @@ impl OpenedChangeSet {
         Ok(repinned)
     }
 
-    /// Drop review: the tours, the tour writer's files and the state file go, then the snapshot ref, so
-    /// a failure part way leaves at worst a ref that the clean-up on the next start takes.
+    /// Drop review: the snapshot ref goes first, then the tours, the tour writer's files and the state
+    /// file. The ref first, as the clean-up on start finds a clone only through a local tour still in
+    /// it: a drop that stops part way leaves files to drop again, never a ref nothing will delete.
     pub fn drop_review(&self) -> anyhow::Result<()> {
         let subject = self.subject();
+        self.work_tree.forget_snapshot(&self.change_set)?;
         for tour in [
             Tour::basic_path_for(&self.folders, &subject),
             Tour::path_for(&self.folders, &subject),
@@ -172,8 +235,7 @@ impl OpenedChangeSet {
         }
         let tour_files = Tour::files_for(&self.folders, &subject);
         remove_if_there(&tour_files, std::fs::remove_dir_all(&tour_files))?;
-        self.state_file().delete()?;
-        Ok(self.work_tree.forget_snapshot(&self.change_set)?)
+        self.state_file().delete()
     }
 
     fn refuse_when_on_another_branch(&self) -> anyhow::Result<()> {

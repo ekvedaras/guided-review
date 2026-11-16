@@ -230,18 +230,16 @@ impl LocalWorkTree {
             .collect())
     }
 
-    /// Deletes one of `snapshot_refs`; any other ref is refused.
+    /// Deletes one of `snapshot_refs`; any other ref is refused. A ref that is not there is already
+    /// gone, as git says; a folder no longer on disk has no git left to delete it from.
     pub fn delete_snapshot_ref(&self, name: &str) -> Result<(), OpenRefusal> {
         if !name.starts_with(SNAPSHOT_REF_PREFIX) {
             return Err(self.failed(format!("{name} is not a snapshot ref")));
         }
-        let exists = self
-            .git(&["rev-parse", "--verify", "--quiet", name])
-            .is_ok();
-        if exists {
-            self.git(&["update-ref", "-d", name])?;
+        if !self.root.as_path().exists() {
+            return Ok(());
         }
-        Ok(())
+        self.git(&["update-ref", "-d", name]).map(drop)
     }
 
     /// Points the change set's one ref at `snapshot`, so `git gc` keeps it.

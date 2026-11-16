@@ -1,15 +1,17 @@
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, GuidedReview, file_path};
+use guided_review::app_folders::AppFolders;
 use guided_review::config::Config;
 use guided_review::ide::Ide;
 use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::opened_change_set::{OpenedChangeSet, clean_snapshot_refs};
 use guided_review::pull_request::Sha;
-use guided_review::review_subject::ReviewSubject;
+use guided_review::review_subject::{ReviewSubject, WorkTreeRoot};
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
     Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, Review, ReviewStateFile, Side, WorkKind,
@@ -416,6 +418,69 @@ fn drop_review_deletes_its_tours_state_file_and_ref_and_nothing_of_other_reviews
 }
 
 #[test]
+fn a_snapshot_ref_git_cannot_reach_is_an_error_and_not_a_ref_already_gone() {
+    let not_a_clone = tempfile::TempDir::new().unwrap();
+    let work_tree =
+        LocalWorkTree::at(WorkTreeRoot::new(not_a_clone.path().to_path_buf()).unwrap());
+
+    let deleted = work_tree.delete_snapshot_ref("refs/guided-review/local-0123456789ab");
+
+    assert!(deleted.is_err(), "{deleted:?}");
+}
+
+#[test]
+fn dropping_the_review_of_a_deleted_folder_deletes_its_files() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let folders = feature.repo.folders();
+    std::fs::remove_dir_all(feature.repo.path()).unwrap();
+
+    OpenedChangeSet::new(feature.subject().local().unwrap(), &folders)
+        .drop_review()
+        .unwrap();
+
+    assert_eq!(
+        ToursOnDisk::of(&folders, &feature.subject()),
+        ToursOnDisk::None
+    );
+}
+
+/// Makes deleting the review's state file fail, as a crash part way through a drop would leave it.
+fn state_files_read_only(folders: &AppFolders, subject: &ReviewSubject) -> impl Drop + use<> {
+    struct Writable(PathBuf);
+    impl Drop for Writable {
+        fn drop(&mut self) {
+            set_read_only(&self.0, false);
+        }
+    }
+    fn set_read_only(folder: &Path, read_only: bool) {
+        let mut permissions = std::fs::metadata(folder).unwrap().permissions();
+        permissions.set_readonly(read_only);
+        std::fs::set_permissions(folder, permissions).unwrap();
+    }
+    let folder = folders.state_files().join(subject.files_folder());
+    set_read_only(&folder, true);
+    Writable(folder)
+}
+
+#[test]
+fn a_drop_that_stops_part_way_leaves_no_snapshot_ref_once_the_app_starts_again() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    opened.review.tick_file(&file_path("README.md")).unwrap();
+    let folders = feature.repo.folders();
+    let read_only = state_files_read_only(&folders, &feature.subject());
+
+    let dropped =
+        OpenedChangeSet::new(feature.subject().local().unwrap(), &folders).drop_review();
+    drop(read_only);
+    clean_snapshot_refs(&folders);
+
+    assert!(dropped.is_err());
+    assert_eq!(refs_kept(&feature), Vec::<String>::new());
+}
+
+#[test]
 fn a_review_being_dropped_takes_no_change_so_nothing_writes_its_state_file_again() {
     let feature = Feature::with_work_in_progress();
     let mut opened = feature.open();
@@ -449,6 +514,34 @@ fn on_start_the_refs_of_local_reviews_no_longer_on_disk_are_deleted() {
     assert_eq!(
         refs_kept(&feature),
         ["refs/guided-review/7".to_owned(), local_ref(&second)]
+    );
+}
+
+#[test]
+fn on_start_a_clone_with_a_tour_that_cannot_be_read_keeps_every_ref_and_names_the_tour() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let second = with_a_second_review_and_a_pr_ref(&feature);
+    let stale = "refs/guided-review/local-0123456789ab";
+    feature.repo.git(&["update-ref", stale, "HEAD"]);
+    let folders = feature.repo.folders();
+    let unreadable = Tour::shown_path_for(&folders, &feature.subject());
+    std::fs::write(&unreadable, "not a tour").unwrap();
+
+    let not_cleaned = clean_snapshot_refs(&folders);
+
+    let mut kept = vec![
+        "refs/guided-review/7".to_owned(),
+        stale.to_owned(),
+        local_ref(&second),
+        local_ref(&feature.subject()),
+    ];
+    kept.sort();
+    assert_eq!(refs_kept(&feature), kept);
+    assert_eq!(not_cleaned.len(), 1, "{not_cleaned:?}");
+    assert!(
+        not_cleaned[0].contains(&unreadable.display().to_string()),
+        "{not_cleaned:?}"
     );
 }
 

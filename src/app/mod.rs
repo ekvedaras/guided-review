@@ -121,7 +121,12 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
         tour_writer::resume(cx);
         let cleaned = folders.clone();
         cx.background_executor()
-            .spawn(async move { clean_snapshot_refs(&cleaned) })
+            .spawn(async move {
+                // Nobody looks at the start's clean-up; a ref it keeps only waits for the next start.
+                for not_cleaned in clean_snapshot_refs(&cleaned) {
+                    eprintln!("{not_cleaned}");
+                }
+            })
             .detach();
         let focus = if takes_focus() {
             platform::Focus::Taken
