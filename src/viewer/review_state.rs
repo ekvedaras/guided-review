@@ -617,7 +617,10 @@ impl ReviewStateFile {
         Self::folders_opened_from_repo(folders, &pr.repo)
     }
 
-    /// The folders any PR of any repo was last opened from, as far as the state files tell.
+    /// The folders any PR of any repo was last opened from, as far as the state files tell. Unreadable
+    /// folders and files are skipped on purpose: this only seeds where to look for clones, a folder
+    /// missed here is still found through the configured clone folders and the reviews on disk, and a
+    /// state file that cannot be read is raised by the review that owns it when it is opened.
     pub fn folders_opened_from_any_repo(folders: &AppFolders) -> Vec<PathBuf> {
         let subfolders = |parent: &Path| -> Vec<String> {
             let mut names: Vec<String> = std::fs::read_dir(parent)

@@ -87,7 +87,7 @@ fn row_of_review(change_set: &LocalChangeSet, folders: &AppFolders) -> LocalRow 
         LocalGit::origin_of(change_set.folder().as_path()),
     );
     let subject = ReviewSubject::from(change_set.clone());
-    let tips = Tour::load(&Tour::shown_path_for(folders, &subject))
+    let tips = Tour::load_of(&Tour::shown_path_for(folders, &subject), &subject)
         .ok()
         .map(|tour| tour.pin().pinned_tips());
     let facts = tips
