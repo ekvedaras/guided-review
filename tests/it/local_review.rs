@@ -1,0 +1,216 @@
+use crate::support::{FixtureRepo, file_path};
+use guided_review::code_source::CodeSource;
+use guided_review::config::Config;
+use guided_review::ide::{Ide, NoIde};
+use guided_review::local_git::LocalGit;
+use guided_review::local_work_tree::LocalWorkTree;
+use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::review_subject::ReviewSubject;
+use guided_review::tour::{BasicTour, Tour};
+use guided_review::viewer::{
+    CodeOpener, Destination, IdeCaveat, NotInIde, Opened, PieceDiff, Review, ReviewStateFile,
+    Side, WorkingCopy,
+};
+
+/// `main` with a README of two lines and a file that goes, then `feature` one commit ahead that adds
+/// the cart and removes `old.txt`, with the README's second line replaced, the cart changed again and
+/// a note added, none of them committed.
+struct Feature {
+    repo: FixtureRepo,
+}
+
+impl Feature {
+    fn with_work_in_progress() -> Self {
+        let repo = FixtureRepo::cloned_from("acme/shop");
+        repo.write("README.md", "hello\nbye\n");
+        repo.write("old.txt", "gone\n");
+        repo.commit("Start the shop");
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.write("src/cart.rs", "pub fn total() {}\n");
+        std::fs::remove_file(repo.path().join("old.txt")).unwrap();
+        repo.commit("Add the cart");
+        repo.write("README.md", "hello\nworld\n");
+        repo.write("src/cart.rs", "pub fn total() {}\npub fn tax() {}\n");
+        repo.write("notes.txt", "draft\n");
+        Self { repo }
+    }
+
+    fn subject(&self) -> ReviewSubject {
+        let work_tree = LocalWorkTree::containing(self.repo.path()).unwrap();
+        ReviewSubject::from(work_tree.change_set().unwrap())
+    }
+
+    fn state_file(&self) -> ReviewStateFile {
+        ReviewStateFile::for_subject(&self.repo.folders(), &self.subject())
+    }
+
+    fn source(&self) -> LocalGit {
+        let work_tree = LocalWorkTree::containing(self.repo.path()).unwrap();
+        LocalGit::at_worktree(work_tree.change_set().unwrap().folder())
+    }
+
+    /// Opened as the app opens a folder: the basic tour is made once, and the clone is asked once
+    /// whether its files are the snapshot's.
+    fn open(&self) -> Review {
+        let work_tree = LocalWorkTree::containing(self.repo.path()).unwrap();
+        let change_set = work_tree.change_set().unwrap();
+        OpenedChangeSet::new(&change_set, &self.repo.folders())
+            .make_basic_tour_if_no_tour()
+            .unwrap();
+        let tour = BasicTour::load(&Tour::basic_path_for(
+            &self.repo.folders(),
+            &self.subject(),
+        ))
+        .unwrap();
+        let source = self.source();
+        let head = tour.pin.head.clone();
+        let mut review = Review::open_basic(tour, &source, self.state_file()).unwrap();
+        review.working_copy_is(WorkingCopy::of(source.working_tree_is_at(&head)));
+        review
+    }
+
+    fn ide(&self) -> Result<Ide, NoIde> {
+        let config = Config::from_text("ide = \"idea://open?file={path}&line={line}\"").unwrap();
+        Ide::for_clone(Some(self.repo.path().to_path_buf()), config.ide_template())
+    }
+
+    fn in_ide(&self, path: &str, line: usize) -> Destination {
+        Destination::Ide {
+            launch: self
+                .ide()
+                .unwrap()
+                .launch(&file_path(path), crate::support::line(line)),
+            caveat: None,
+        }
+    }
+}
+
+fn line_destination(
+    review: &mut Review,
+    opener: &CodeOpener,
+    path: &str,
+    side: Side,
+) -> Destination {
+    review.go_to_file(&file_path(path));
+    let page = review.file_page().unwrap();
+    let line = page
+        .pieces
+        .iter()
+        .flat_map(PieceDiff::lines)
+        .find(|line| line.location.side == side)
+        .unwrap();
+    opener.destination(&line.code_link)
+}
+
+#[test]
+fn a_line_of_an_added_file_opens_in_the_ide_and_never_on_github() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+    let opener = review.code_opener(feature.ide());
+
+    let destination = line_destination(&mut review, &opener, "src/cart.rs", Side::Head);
+
+    assert_eq!(destination, feature.in_ide("src/cart.rs", 1));
+}
+
+#[test]
+fn a_working_tree_that_is_the_snapshot_opens_in_the_ide_with_no_caveat() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+    let opener = review.code_opener(feature.ide());
+
+    let destination = line_destination(&mut review, &opener, "README.md", Side::Head);
+
+    assert_eq!(destination, feature.in_ide("README.md", 2));
+}
+
+#[test]
+fn a_file_changed_on_disk_since_the_snapshot_opens_in_the_ide_with_the_caveat() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+    feature.repo.write("README.md", "changed again\n");
+    let head = review.head().clone();
+    review.working_copy_is(WorkingCopy::of(feature.source().working_tree_is_at(&head)));
+    let opener = review.code_opener(feature.ide());
+
+    assert!(matches!(
+        line_destination(&mut review, &opener, "README.md", Side::Head),
+        Destination::Ide {
+            caveat: Some(IdeCaveat::CloneNotAtTourHead),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_removed_line_cannot_be_opened_and_says_it_exists_only_at_the_branchs_base() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+    let opener = review.code_opener(feature.ide());
+
+    let destination = line_destination(&mut review, &opener, "README.md", Side::Base);
+
+    assert_eq!(
+        destination,
+        Destination::NotOpenable {
+            because: NotInIde::RemovedFromBranch
+        }
+    );
+    assert_eq!(destination.label(), "Cannot open");
+    assert_eq!(
+        destination.explanation(),
+        "Cannot open: removed lines exist only at the branch's base"
+    );
+    let mut opened_urls = Vec::new();
+    assert_eq!(
+        destination.open(|url| opened_urls.push(url.to_owned())),
+        Opened::Nowhere
+    );
+    assert!(opened_urls.is_empty());
+}
+
+#[test]
+fn a_github_link_in_the_text_opens_in_the_browser_as_written() {
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+    let opener = review.code_opener(feature.ide());
+    let url = "https://github.com/acme/shop/blob/main/src/cart.rs#L3";
+
+    assert_eq!(
+        opener.destination_of_url(url),
+        Destination::Browser(url.to_owned())
+    );
+}
+
+#[test]
+fn a_repo_relative_link_opens_in_the_ide_when_the_folder_holds_the_file_and_otherwise_cannot_open()
+{
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+    let opener = review.code_opener(feature.ide());
+
+    assert_eq!(
+        opener.destination_of_url("src/cart.rs#L2"),
+        feature.in_ide("src/cart.rs", 2)
+    );
+    assert_eq!(
+        opener.destination_of_url("src/missing.rs"),
+        Destination::NotOpenable {
+            because: NotInIde::NotInWorkingCopy
+        }
+    );
+}
+
+#[test]
+fn without_an_ide_template_code_cannot_open_and_says_so() {
+    let feature = Feature::with_work_in_progress();
+    let mut review = feature.open();
+    let opener = review.code_opener(Err(NoIde::NoTemplate));
+
+    assert_eq!(
+        line_destination(&mut review, &opener, "src/cart.rs", Side::Head),
+        Destination::NotOpenable {
+            because: NotInIde::NoIdeTemplate
+        }
+    );
+}

@@ -89,7 +89,7 @@ pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use chord::{Chord, Key, KeyCap, Modifier, Modifiers};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
 pub(crate) use code_link::percent_encode_path;
-pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
+pub use code_link::{CodeHost, CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, TourFreshness};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,

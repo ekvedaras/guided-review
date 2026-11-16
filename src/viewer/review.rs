@@ -10,7 +10,8 @@ use std::time::Instant;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::{RepoName, Sha};
+use crate::local_facts::LocalFacts;
+use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
@@ -22,7 +23,7 @@ use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
-use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
+use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
     CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult, QueuedComment,
@@ -274,8 +275,10 @@ pub struct ReviewCore {
     /// Folders the reviewer folded. Not saved: a reopened app shows the tree unfolded.
     folded_folders: BTreeSet<FolderPath>,
     subject: ReviewSubject,
-    /// The GitHub repo the code links open in.
-    github_repo: RepoName,
+    /// Where code the IDE cannot open goes: the PR's repo on GitHub, or nowhere for a local review.
+    code_host: CodeHost,
+    /// What a local review's overview shows; set by the app from the clone, `None` for a PR.
+    local_facts: Option<LocalFacts>,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -527,10 +530,9 @@ impl ReviewCore {
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
-        let Some(github_repo) = subject.pull_request().map(|pr| pr.repo.clone()) else {
-            anyhow::bail!(
-                "a local review cannot open yet: its code links have no GitHub repo to open in"
-            );
+        let code_host = match &subject {
+            ReviewSubject::PullRequest(pr) => CodeHost::GitHub(pr.repo.clone()),
+            ReviewSubject::Local(_) => CodeHost::LocalClone,
         };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
@@ -586,7 +588,8 @@ impl ReviewCore {
             file_tree,
             folded_folders: BTreeSet::new(),
             subject,
-            github_repo,
+            code_host,
+            local_facts: None,
             base,
             head,
             pr_head: None,
@@ -813,7 +816,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    repo: &self.github_repo,
+                    host: &self.code_host,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -987,7 +990,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    repo: &self.github_repo,
+                    host: &self.code_host,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1783,7 +1786,7 @@ impl ReviewCore {
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
     pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
-        CodeOpener::new(ide, self.working_copy, &self.github_repo, &self.head)
+        CodeOpener::new(ide, self.working_copy, &self.code_host, &self.head)
     }
 
     /// Asked of the clone on open and on each focus, not on each click.
@@ -1793,7 +1796,7 @@ impl ReviewCore {
 
     fn links(&self) -> CodeLinks<'_> {
         CodeLinks {
-            repo: &self.github_repo,
+            host: &self.code_host,
             base: &self.base,
             head: &self.head,
         }
