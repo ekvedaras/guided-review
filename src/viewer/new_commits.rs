@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
+use crate::opened_change_set::OpenedChangeSet;
 use crate::pull_request::{ChangeTips, Sha};
 use crate::repin::{Repin, repin};
-use crate::review_subject::ReviewSubject;
+use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::{GuidedTour, Tour};
 
 use super::ports::ChangeTipsPort;
@@ -75,8 +76,9 @@ pub struct RepinnedTour {
 impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
     pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
-        let Some(pr) = self.subject.pull_request() else {
-            anyhow::bail!("updating the tour of a local change set is not built yet");
+        let pr = match &self.subject {
+            ReviewSubject::PullRequest(pr) => pr,
+            ReviewSubject::Local(change_set) => return self.run_local(change_set),
         };
         let tips = github.pull_request_tips(pr)?;
         let source = (self.pick_code_source)(&tips)?;
@@ -93,6 +95,24 @@ impl TourRepinner {
             Tour::Basic(tour) => Review::open_basic(tour, source.as_ref(), state_file)?,
             Tour::Guided(tour) => Review::open(tour, source.as_ref(), state_file)?,
         };
+        Ok(RepinnedTour {
+            review,
+            source: source.into(),
+        })
+    }
+
+    /// Update of a local review: the tour moves to a new snapshot of the folder, and the overview's
+    /// facts are read again for it, as a commit may have made uncommitted files committed.
+    fn run_local(&self, change_set: &LocalChangeSet) -> anyhow::Result<RepinnedTour> {
+        let opened = OpenedChangeSet::new(change_set, &self.folders);
+        let (tour, _) = opened.repin_to_new_snapshot()?;
+        let source = (self.pick_code_source)(&tour.pin().pinned_tips())?;
+        let facts = opened.facts(tour.pin())?;
+        let mut review = match tour {
+            Tour::Basic(tour) => Review::open_basic(tour, source.as_ref(), opened.state_file())?,
+            Tour::Guided(tour) => Review::open(tour, source.as_ref(), opened.state_file())?,
+        };
+        review.local_facts_are(facts);
         Ok(RepinnedTour {
             review,
             source: source.into(),

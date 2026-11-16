@@ -9,9 +9,10 @@ use crate::local_git::LocalGit;
 use crate::local_work_tree::LocalWorkTree;
 use crate::make_basic_tour::make_basic_tour;
 use crate::opened_pr::CodeAtTips;
+use crate::repin::Repin;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::{Tour, TourPin, ToursOnDisk};
-use crate::viewer::{PickCodeSource, ReviewStateFile};
+use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
 
 /// What every command needs to work on one local change set: where its files live and its working
 /// tree. The twin of `OpenedPr`, with no GitHub in it.
@@ -68,14 +69,8 @@ impl OpenedChangeSet {
         if ToursOnDisk::of(&self.folders, &self.subject()) != ToursOnDisk::None {
             return Ok(false);
         }
+        self.refuse_when_on_another_branch()?;
         let live = self.work_tree.change_set()?;
-        anyhow::ensure!(
-            live == self.change_set,
-            "{} is on {} now, not on {}",
-            live.folder().as_path().display(),
-            live.branch().as_str(),
-            self.change_set.branch().as_str()
-        );
         self.work_tree.refuse_when_nothing_to_review(&live)?;
         let snapshot = self.work_tree.snapshot(&live)?;
         let tips = self.work_tree.tips(&snapshot)?;
@@ -87,6 +82,43 @@ impl OpenedChangeSet {
             live.branch().as_str(),
         )?;
         Ok(true)
+    }
+
+    /// Update: re-pins the tour on show to a new snapshot of the folder, and only then moves the snapshot
+    /// ref to it, so the ref never lets go of the commit the tour reads. Refused while the folder is on
+    /// another branch, as the review is of its own branch.
+    pub fn repin_to_new_snapshot(&self) -> anyhow::Result<(Tour, Repin)> {
+        let subject = self.subject();
+        anyhow::ensure!(
+            ToursOnDisk::of(&self.folders, &subject) != ToursOnDisk::None,
+            "no tour for {subject}; run `guided-review open <folder>` first"
+        );
+        self.refuse_when_on_another_branch()?;
+        let snapshot = self.work_tree.make_snapshot()?;
+        let tips = self.work_tree.tips(&snapshot)?;
+        let source = LocalGit::at_worktree(self.change_set.folder());
+        let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
+        let repinned = repin_tour(
+            &Tour::shown_path_for(&self.folders, &subject),
+            &self.state_file(),
+            &source,
+            &base,
+            &tips.head,
+        )?;
+        self.work_tree.keep_snapshot(&self.change_set, &snapshot)?;
+        Ok(repinned)
+    }
+
+    fn refuse_when_on_another_branch(&self) -> anyhow::Result<()> {
+        let live = self.work_tree.change_set()?;
+        anyhow::ensure!(
+            live == self.change_set,
+            "{} is on {} now, not on {}",
+            live.folder().as_path().display(),
+            live.branch().as_str(),
+            self.change_set.branch().as_str()
+        );
+        Ok(())
     }
 
     /// The code at the snapshot the tour on disk is pinned to, however the folder has changed since.

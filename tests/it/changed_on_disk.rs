@@ -5,8 +5,9 @@ use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::config::Config;
 use guided_review::ide::Ide;
-use guided_review::local_work_tree::LocalWorkTree;
+use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::{OpenedReview, open_review};
+use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, Review, Side, WorkKind,
@@ -15,6 +16,7 @@ use guided_review::viewer::{
 /// `feature` one commit past `main` that adds the cart, with the README changed and not committed.
 struct Feature {
     repo: FixtureRepo,
+    subject: ReviewSubject,
 }
 
 impl Feature {
@@ -26,12 +28,14 @@ impl Feature {
         repo.write("src/cart.rs", "pub fn total() {}\n");
         repo.commit("Add the cart");
         repo.write("README.md", "hello\nworld\n");
-        Self { repo }
+        let work_tree = LocalWorkTree::containing(repo.path()).unwrap();
+        let subject = ReviewSubject::from(work_tree.change_set().unwrap());
+        Self { repo, subject }
     }
 
+    /// The review of `feature`, whatever the folder is on now.
     fn subject(&self) -> ReviewSubject {
-        let work_tree = LocalWorkTree::containing(self.repo.path()).unwrap();
-        ReviewSubject::from(work_tree.change_set().unwrap())
+        self.subject.clone()
     }
 
     fn open(&self) -> OpenedReview {
@@ -211,4 +215,128 @@ fn the_folder_is_checked_again_every_thirty_seconds() {
     assert_eq!(before, []);
     assert_eq!(after, [WorkKind::CheckWorkingTree]);
     assert_eq!(news(&opened.review), changed_on_disk());
+}
+
+/// Update, as the sidebar's button runs it: the re-pinned review, with the old one carried into it.
+fn update(opened: &mut OpenedReview) {
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
+    let updated = opened.repinner.run(&github).unwrap();
+    let replaced = std::mem::replace(&mut opened.review, updated.review);
+    opened.review.carry_on_from(replaced);
+    opened.source = updated.source;
+    assert_eq!(sent.github_calls(), []);
+}
+
+fn snapshot_ref_target(feature: &Feature) -> Sha {
+    let change_set = feature.subject().local().unwrap().clone();
+    Sha::new(
+        feature
+            .repo
+            .git(&["rev-parse", &snapshot_ref(&change_set)])
+            .trim(),
+    )
+}
+
+fn ticked(review: &Review) -> Vec<String> {
+    ["README.md", "src/cart.rs", "notes.txt"]
+        .into_iter()
+        .filter(|path| review.is_file_ticked(&file_path(path)))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn update_moves_the_tour_and_its_one_ref_to_a_new_snapshot_with_the_new_facts() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let old_head = opened.review.head().clone();
+    feature.repo.write("notes.txt", "a new file\n");
+
+    update(&mut opened);
+
+    let new_head = opened.review.head().clone();
+    assert_ne!(new_head, old_head);
+    assert_eq!(snapshot_ref_target(&feature), new_head);
+    assert_eq!(
+        feature
+            .repo
+            .git(&["for-each-ref", "--format=%(refname)", "refs/guided-review/"])
+            .lines()
+            .count(),
+        1
+    );
+    let uncommitted = &opened.review.local_facts().unwrap().uncommitted_files;
+    assert!(
+        uncommitted.contains(&file_path("notes.txt")),
+        "{uncommitted:?}"
+    );
+    check_on_focus(&mut opened, Instant::now());
+    assert_eq!(news(&opened.review), None);
+}
+
+#[test]
+fn update_keeps_the_ticks_of_unchanged_files_and_shows_what_changed_since_a_file_was_read() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let read_at = opened.review.head().clone();
+    for path in ["README.md", "src/cart.rs"] {
+        opened.review.tick_file(&file_path(path)).unwrap();
+    }
+    feature.repo.write("README.md", "hello\nworld\nagain\n");
+
+    update(&mut opened);
+
+    assert_eq!(ticked(&opened.review), ["src/cart.rs"]);
+    opened.review.go_to_file(&file_path("README.md"));
+    let since_read = opened.review.file_page().unwrap().since_read.unwrap();
+    assert_eq!(since_read.read_at, read_at);
+}
+
+#[test]
+fn committing_what_was_uncommitted_keeps_every_tick_and_names_it_committed() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    for path in ["README.md", "src/cart.rs"] {
+        opened.review.tick_file(&file_path(path)).unwrap();
+    }
+    feature.repo.commit("Say world");
+
+    update(&mut opened);
+
+    assert_eq!(ticked(&opened.review), ["README.md", "src/cart.rs"]);
+    let facts = opened.review.local_facts().unwrap();
+    assert!(facts.uncommitted_files.is_empty(), "{facts:?}");
+    assert_eq!(facts.commit_subjects, ["Add the cart", "Say world"]);
+}
+
+#[test]
+fn two_updates_of_a_folder_that_did_not_change_pin_the_same_snapshot() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    feature.repo.write("notes.txt", "a new file\n");
+    update(&mut opened);
+    let first = opened.review.head().clone();
+
+    update(&mut opened);
+
+    assert_eq!(opened.review.head(), &first);
+    assert_eq!(snapshot_ref_target(&feature), first);
+}
+
+#[test]
+fn update_refuses_while_the_folder_is_on_another_branch_and_moves_nothing() {
+    let feature = Feature::with_work_in_progress();
+    let opened = feature.open();
+    let head = opened.review.head().clone();
+    feature.repo.git(&["checkout", "-q", "-b", "other"]);
+    let sent = SentLog::default();
+
+    let refused = opened
+        .repinner
+        .run(&FakeGitHub::with_pull("main-tip", "snapshot", &sent));
+
+    assert!(refused.is_err());
+    assert_eq!(snapshot_ref_target(&feature), head);
+    assert_eq!(feature.open().review.head(), &head);
 }

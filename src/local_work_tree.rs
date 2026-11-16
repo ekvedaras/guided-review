@@ -168,37 +168,62 @@ impl LocalWorkTree {
     }
 
     /// Makes the commit of the working tree and keeps it with the change set's ref, moving the ref
-    /// when there was one. The commit has `HEAD` as its parent, from a temporary index; with a clean
-    /// working tree it is `HEAD` itself and nothing is committed.
+    /// when there was one.
     pub fn snapshot(&self, change_set: &LocalChangeSet) -> Result<Snapshot, OpenRefusal> {
+        let snapshot = self.make_snapshot()?;
+        self.keep_snapshot(change_set, &snapshot)?;
+        Ok(snapshot)
+    }
+
+    /// The commit of the working tree, kept by no ref yet. It has `HEAD` as its parent, from a temporary
+    /// index; with a clean working tree it is `HEAD` itself and nothing is committed. It is dated as
+    /// `HEAD` is, so the same files over the same `HEAD` are always the same commit, whoever makes it.
+    pub fn make_snapshot(&self) -> Result<Snapshot, OpenRefusal> {
         let head = self.head()?;
         let tree = self.working_tree_id()?;
-        let commit = if tree == self.tree_of("HEAD")? {
-            head
-        } else {
-            let identity = [
-                ("GIT_AUTHOR_NAME", SNAPSHOT_IDENTITY_NAME),
-                ("GIT_AUTHOR_EMAIL", SNAPSHOT_IDENTITY_EMAIL),
-                ("GIT_COMMITTER_NAME", SNAPSHOT_IDENTITY_NAME),
-                ("GIT_COMMITTER_EMAIL", SNAPSHOT_IDENTITY_EMAIL),
-            ]
-            .map(|(name, value)| (name, OsStr::new(value)));
-            Sha::new(&self.git_with(
-                &identity,
-                &[
-                    "-c",
-                    "commit.gpgsign=false",
-                    "commit-tree",
-                    &tree,
-                    "-p",
-                    head.as_str(),
-                    "-m",
-                    "guided-review snapshot of the working tree",
-                ],
-            )?)
-        };
-        self.git(&["update-ref", &snapshot_ref(change_set), commit.as_str()])?;
-        Ok(Snapshot { head: commit })
+        if tree == self.tree_of("HEAD")? {
+            return Ok(Snapshot { head });
+        }
+        let date = self.git(&["log", "-1", "--format=%cd", "--date=raw", head.as_str()])?;
+        let identity = [
+            ("GIT_AUTHOR_NAME", SNAPSHOT_IDENTITY_NAME),
+            ("GIT_AUTHOR_EMAIL", SNAPSHOT_IDENTITY_EMAIL),
+            ("GIT_AUTHOR_DATE", &date),
+            ("GIT_COMMITTER_NAME", SNAPSHOT_IDENTITY_NAME),
+            ("GIT_COMMITTER_EMAIL", SNAPSHOT_IDENTITY_EMAIL),
+            ("GIT_COMMITTER_DATE", &date),
+        ]
+        .map(|(name, value)| (name, OsStr::new(value)));
+        let commit = self.git_with(
+            &identity,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit-tree",
+                &tree,
+                "-p",
+                head.as_str(),
+                "-m",
+                "guided-review snapshot of the working tree",
+            ],
+        )?;
+        Ok(Snapshot {
+            head: Sha::new(&commit),
+        })
+    }
+
+    /// Points the change set's one ref at `snapshot`, so `git gc` keeps it.
+    pub fn keep_snapshot(
+        &self,
+        change_set: &LocalChangeSet,
+        snapshot: &Snapshot,
+    ) -> Result<(), OpenRefusal> {
+        self.git(&[
+            "update-ref",
+            &snapshot_ref(change_set),
+            snapshot.head.as_str(),
+        ])
+        .map(drop)
     }
 
     /// `(default branch tip, snapshot)`, the tips a PR has too.
