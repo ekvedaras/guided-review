@@ -17,7 +17,8 @@ use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::ports::Viewed;
-use super::review::StepId;
+use super::review::{ReadSubject, StepId};
+use super::switch_to_guided::CarriedReads;
 use super::threads::ThreadId;
 
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
@@ -57,6 +58,12 @@ struct ViewerSections {
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
     #[serde(default)]
     read_before: BTreeMap<StepId, ReadTick>,
+    /// A basic tour's read ticks, per file, apart from the steps' so one never reads as the other.
+    #[serde(default)]
+    file_read_ticks: BTreeMap<FilePath, ReadTick>,
+    /// What a re-pin took from the file ticks, as `read_before` does for steps.
+    #[serde(default)]
+    file_read_before: BTreeMap<FilePath, ReadTick>,
     /// After a re-pin GitHub's viewed state is taken as it is, so its "not viewed" for files
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
@@ -140,6 +147,27 @@ impl RepinRecord {
             .copied()
     }
 
+    /// What the re-pin did to a file as a whole: `New` when all its pieces are new, `Changed` when
+    /// some are changed or new, nothing when it stayed as it was.
+    pub fn status_of_file(&self, path: &FilePath) -> Option<RepinStatus> {
+        let statuses: Vec<RepinStatus> = self
+            .pieces
+            .iter()
+            .filter(|(id, _)| id.path() == path)
+            .map(|(_, status)| *status)
+            .collect();
+        if !statuses.is_empty() && statuses.iter().all(|status| *status == RepinStatus::New) {
+            Some(RepinStatus::New)
+        } else if statuses
+            .iter()
+            .any(|status| matches!(status, RepinStatus::Changed | RepinStatus::New))
+        {
+            Some(RepinStatus::Changed)
+        } else {
+            None
+        }
+    }
+
     pub fn gone_count(&self, step: &StepId) -> usize {
         self.gone_by_step.get(step).map_or(0, BTreeSet::len)
     }
@@ -216,10 +244,56 @@ impl ReviewState {
                 self.viewer.read_before.insert(id, tick);
             }
         }
+        let touched_files: BTreeSet<&FilePath> = repin
+            .pieces
+            .iter()
+            .filter(|piece| matches!(piece.status, RepinStatus::Changed | RepinStatus::New))
+            .map(|piece| piece.id.path())
+            .collect();
+        for path in touched_files {
+            if let Some(tick) = self.viewer.file_read_ticks.remove(path) {
+                self.viewer.file_read_before.insert(path.clone(), tick);
+            }
+        }
         self.last_repin = Some(match self.last_repin.take() {
             Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
             _ => record,
         });
+        self.viewer.github_baseline_due = true;
+    }
+
+    /// The head each file of a basic tour was last read at: its tick, or the tick a re-pin took away.
+    pub(super) fn file_read_heads(&self) -> BTreeMap<FilePath, Sha> {
+        self.viewer
+            .file_read_before
+            .iter()
+            .chain(&self.viewer.file_read_ticks)
+            .map(|(path, tick)| (path.clone(), tick.head.clone()))
+            .collect()
+    }
+
+    /// The hand-over of a switch to a guided tour. The basic review stayed on screen while the guided
+    /// one was built, so what it holds is the reviewer's latest: ticks, viewed marks, queued
+    /// comments, hand-offs and typed text are all taken from it, and its file reads go into the steps.
+    pub(super) fn take_over_from_basic(&mut self, basic: &Self, carried: &CarriedReads) {
+        self.take_viewer_sections(basic);
+        self.carry_file_reads_into_steps(carried);
+    }
+
+    /// Switching to a guided tour: its steps take the reads the files had, and the file sections and
+    /// the re-pin record, which only a basic tour holds, are cleared, as after a Refresh.
+    pub(super) fn carry_file_reads_into_steps(&mut self, carried: &CarriedReads) {
+        for (step, head) in &carried.ticked {
+            self.tick(step, head);
+        }
+        for (step, head) in &carried.read_before {
+            self.viewer
+                .read_before
+                .insert(step.clone(), ReadTick { head: head.clone() });
+        }
+        self.viewer.file_read_ticks.clear();
+        self.viewer.file_read_before.clear();
+        self.last_repin = None;
         self.viewer.github_baseline_due = true;
     }
 
@@ -264,6 +338,46 @@ impl ReviewState {
 
     pub fn untick(&mut self, step: &StepId) {
         self.viewer.read_ticks.remove(step);
+    }
+
+    pub fn file_read_tick(&self, path: &FilePath) -> Option<&ReadTick> {
+        self.viewer.file_read_ticks.get(path)
+    }
+
+    pub fn file_read_before(&self, path: &FilePath) -> Option<&ReadTick> {
+        self.viewer.file_read_before.get(path)
+    }
+
+    pub fn tick_file(&mut self, path: &FilePath, head: &Sha) {
+        self.viewer.file_read_before.remove(path);
+        self.viewer
+            .file_read_ticks
+            .insert(path.clone(), ReadTick { head: head.clone() });
+    }
+
+    pub fn untick_file(&mut self, path: &FilePath) {
+        self.viewer.file_read_ticks.remove(path);
+    }
+
+    pub(super) fn is_read(&self, subject: &ReadSubject) -> bool {
+        match subject {
+            ReadSubject::Step(step) => self.read_tick(step).is_some(),
+            ReadSubject::File(path) => self.file_read_tick(path).is_some(),
+        }
+    }
+
+    pub(super) fn tick_subject(&mut self, subject: &ReadSubject, head: &Sha) {
+        match subject {
+            ReadSubject::Step(step) => self.tick(step, head),
+            ReadSubject::File(path) => self.tick_file(path, head),
+        }
+    }
+
+    pub(super) fn untick_subject(&mut self, subject: &ReadSubject) {
+        match subject {
+            ReadSubject::Step(step) => self.untick(step),
+            ReadSubject::File(path) => self.untick_file(path),
+        }
     }
 
     pub(super) fn was_viewed_on_github(&self, path: &FilePath) -> Viewed {

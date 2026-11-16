@@ -9,7 +9,7 @@ use crate::support::fake_ports::{FakeAgentLauncher, FakeAskProcesses, SentLog};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPool, AskDesk, AskId, Asks, CommentGesture, CommentRefusal,
     LineLocation, Opening, PageRow, Place, QUESTION_NOT_SENT, Question, Review, ReviewStateFile,
@@ -87,7 +87,7 @@ impl Shop {
     }
 
     fn open(&self) -> Review {
-        let tour = Tour::load(&self.tour_path()).unwrap();
+        let tour = GuidedTour::load(&self.tour_path()).unwrap();
         Review::open(tour, &self.source(), self.state_file()).unwrap()
     }
 

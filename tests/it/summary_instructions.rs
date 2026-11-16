@@ -1,7 +1,7 @@
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run};
 use guided_review::config::Config;
 use guided_review::summary_instructions::SummaryInstructions;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -275,7 +275,7 @@ fn the_reviewer_summary_survives_a_read_and_write_of_the_tour_file() {
     shop.tour_with(&json!({"reviewer_summary": "warm-up"}));
     let path = shop.tour_path();
 
-    let tour = Tour::load(&path).unwrap();
+    let tour = GuidedTour::load(&path).unwrap();
     tour.save(&path).unwrap();
 
     assert_eq!(tour.reviewer_summary, "warm-up");

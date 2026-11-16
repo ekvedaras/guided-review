@@ -6,10 +6,11 @@ use anyhow::Context;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::GitHub;
+use crate::make_basic_tour::make_basic_tour;
 use crate::pick_code_source::pick_code_source;
 use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
-use crate::tour::Tour;
+use crate::tour::{Tour, TourPin, ToursOnDisk};
 use crate::viewer::{PickCodeSource, PullRequestTipsPort, ReviewStateFile};
 
 /// What every command needs to work on one PR: where its files live, GitHub, and the folder it runs in.
@@ -43,6 +44,32 @@ impl OpenedPr {
         Tour::path_for(&self.folders, &self.pr)
     }
 
+    /// The tour `repin` moves: the guided tour when there is one, else the basic tour. With neither it is
+    /// the guided path, which is the file the reviewer is told is missing.
+    pub fn tour_to_repin_path(&self) -> PathBuf {
+        match ToursOnDisk::of(&self.folders, &self.pr) {
+            ToursOnDisk::Basic => Tour::basic_path_for(&self.folders, &self.pr),
+            _ => self.tour_path(),
+        }
+    }
+
+    /// Makes the PR's basic tour at the PR's tips now, unless a tour is on disk already; true when made.
+    pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
+        if ToursOnDisk::of(&self.folders, &self.pr) != ToursOnDisk::None {
+            return Ok(false);
+        }
+        let code = self.at_live_tips()?;
+        let title = self.github.pull_request_title(&self.pr)?;
+        make_basic_tour(
+            &self.folders,
+            &self.pr,
+            code.source.as_ref(),
+            &code.tips,
+            &title,
+        )?;
+        Ok(true)
+    }
+
     pub fn state_file(&self) -> ReviewStateFile {
         ReviewStateFile::for_pr(&self.folders, &self.pr)
     }
@@ -54,8 +81,8 @@ impl OpenedPr {
     }
 
     /// The tour is read at the commits it is pinned to, even when the PR has moved on since.
-    pub fn at_pinned_tips(&self, tour: &Tour) -> anyhow::Result<CodeAtTips> {
-        self.at(tour.pinned_tips())
+    pub fn at_pinned_tips(&self, pin: &TourPin) -> anyhow::Result<CodeAtTips> {
+        self.at(pin.pinned_tips())
     }
 
     fn at(&self, tips: PullRequestTips) -> anyhow::Result<CodeAtTips> {

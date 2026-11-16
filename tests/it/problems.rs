@@ -2,7 +2,7 @@ use crate::support::FixtureRepo;
 use guided_review::app_folders::NotRead;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::update::InTheWay;
 use guided_review::viewer::{Problem, ProblemKind, Read, Review, ReviewStateFile};
 use serde_json::json;
@@ -15,7 +15,7 @@ fn open_review() -> (FixtureRepo, Review) {
     let base = repo.commit("base");
     repo.write("a.txt", "new\n");
     let head = repo.commit("head");
-    let tour: Tour = serde_json::from_value(json!({
+    let tour: GuidedTour = serde_json::from_value(json!({
         "pr": PR,
         "base": base,
         "head": head,

@@ -418,3 +418,115 @@ fn restart_asks_even_an_app_of_this_build_to_quit_then_opens_the_pr_on_the_step_
     assert_eq!(requests[1]["request"]["open"]["pr"], PR);
     assert_eq!(requests[1]["request"]["open"]["at_step"], "readme");
 }
+
+fn shop_with_a_pull_of_one_changed_file() -> (FixtureRepo, FakeGitHub) {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("README.md", "hello\n");
+    let base = repo.commit("base");
+    repo.write("README.md", "hello\nworld\n");
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+    (repo, github)
+}
+
+fn basic_tour_file(repo: &FixtureRepo) -> PathBuf {
+    guided_review::tour::Tour::basic_path_for(&repo.folders(), &PR.parse().unwrap())
+}
+
+fn run_open_with_a_fake_app(repo: &FixtureRepo, github: &FakeGitHub) -> crate::support::Run {
+    let cli_ended = CliEnded::default();
+    let app = fake_app(
+        repo.home(),
+        &cli_ended,
+        None,
+        vec![opening_line()],
+        Seen::default(),
+    );
+    let run = GuidedReview::new(repo, github)
+        .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
+        .run(&["open", PR]);
+    cli_ended.mark();
+    app.join().unwrap();
+    run
+}
+
+#[test]
+fn open_of_a_pr_without_a_tour_makes_its_basic_tour_and_says_it_opened_in_basic_mode() {
+    let (repo, github) = shop_with_a_pull_of_one_changed_file();
+
+    let run = run_open_with_a_fake_app(&repo, &github);
+
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(run.stdout.contains("Basic mode"), "stdout: {}", run.stdout);
+    let tour: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(basic_tour_file(&repo)).unwrap()).unwrap();
+    assert_eq!(tour["kind"], "basic");
+    assert_eq!(tour["pr_title"], "Add the cart");
+    assert_eq!(tour["pr"], PR);
+    assert!(tour["base"].as_str().is_some_and(|sha| !sha.is_empty()));
+    assert!(tour["head"].as_str().is_some_and(|sha| !sha.is_empty()));
+}
+
+#[test]
+fn open_of_a_pr_with_a_guided_tour_makes_no_basic_tour_and_does_not_say_basic_mode() {
+    let (repo, github) = shop_with_a_tour_file();
+
+    let run = run_open_with_a_fake_app(&repo, &github);
+
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert!(!basic_tour_file(&repo).exists());
+    assert!(!run.stdout.contains("Basic mode"), "stdout: {}", run.stdout);
+}
+
+#[test]
+fn open_of_a_pr_github_does_not_have_fails_in_the_terminal_and_makes_no_tour() {
+    let (repo, github) = shop_with_a_pull_of_one_changed_file();
+    let other = "https://github.com/acme/shop/pull/8";
+
+    let run = GuidedReview::new(&repo, &github).run(&["open", other]);
+
+    assert!(!run.success);
+    assert!(run.stderr.contains("pull/8"), "stderr: {}", run.stderr);
+    assert!(!run.stdout.contains("Basic mode"));
+}
+
+#[test]
+fn restart_at_a_step_of_a_basic_tour_is_refused_because_it_has_no_steps() {
+    let (repo, github) = shop_with_a_pull_of_one_changed_file();
+    let made = run_open_with_a_fake_app(&repo, &github);
+    assert!(made.success, "stderr: {}", made.stderr);
+
+    let run = GuidedReview::new(&repo, &github).run(&["restart", PR, "--at", "readme"]);
+
+    assert!(!run.success);
+    assert!(run.stderr.contains("no steps"), "stderr: {}", run.stderr);
+}
+
+#[test]
+fn restart_at_a_step_of_a_pr_with_no_tour_is_refused_before_a_basic_tour_is_made() {
+    let (repo, github) = shop_with_a_pull_of_one_changed_file();
+
+    let run = GuidedReview::new(&repo, &github).run(&["restart", PR, "--at", "readme"]);
+
+    assert!(!run.success);
+    assert!(run.stderr.contains("no steps"), "stderr: {}", run.stderr);
+    assert!(!basic_tour_file(&repo).exists());
+}
+
+#[test]
+fn a_basic_tour_does_not_change_the_guided_commands() {
+    let (repo, github) = shop_with_a_pull_of_one_changed_file();
+    let made = run_open_with_a_fake_app(&repo, &github);
+    assert!(made.success, "stderr: {}", made.stderr);
+
+    let path = GuidedReview::new(&repo, &github).run(&["tour-path", PR]);
+    let check = GuidedReview::new(&repo, &github).run(&["check", PR]);
+
+    assert!(
+        path.stdout.trim_end().ends_with("acme/shop/7.json"),
+        "{}",
+        path.stdout
+    );
+    assert!(!check.success);
+    assert!(!Path::new(path.stdout.trim_end()).exists());
+}

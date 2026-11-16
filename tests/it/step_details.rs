@@ -3,7 +3,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use crate::support::{FixtureRepo, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{PieceDiff, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
 
@@ -54,7 +54,7 @@ impl Shop {
         Self { repo, base, head }
     }
 
-    fn tour(&self, steps: Vec<Value>) -> Tour {
+    fn tour(&self, steps: Vec<Value>) -> GuidedTour {
         serde_json::from_value(json!({
             "pr": "https://github.com/acme/shop/pull/7",
             "base": self.base,

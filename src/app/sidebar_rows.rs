@@ -5,7 +5,8 @@ use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{
-    ApproveWarning, Problem, ReadProgress, Review, Screen, StepId, TourAgentState,
+    ApproveWarning, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage,
+    Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -19,6 +20,12 @@ pub struct SidebarStep {
     pub is_gone: bool,
     pub has_check: bool,
     pub is_skim: bool,
+}
+
+/// A basic review's sidebar: the overview, then the changed files as a folder tree.
+pub struct SidebarTree {
+    pub is_overview_current: bool,
+    pub rows: Vec<TreeRow>,
 }
 
 pub struct SidebarSafetyNet {
@@ -45,6 +52,24 @@ pub struct SidebarTourAgent {
     pub can_retry: bool,
 }
 
+/// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
+/// guided tour while nothing is asked, and the banner once it is ready.
+pub struct SidebarGuidedTour {
+    pub stage: Option<GuidedTourStage>,
+    /// Show agent beside the stage, when the tour agent can be shown.
+    pub can_show_agent: bool,
+    /// Write guided tour, offered while nothing is asked; the reason when it is off.
+    pub write: Option<WriteOffer>,
+    pub banner: Option<GuidedTourBanner>,
+}
+
+/// Write guided tour in the sidebar: a button, or the reason it is off.
+#[derive(Clone, Copy)]
+pub enum WriteOffer {
+    Available,
+    Refused(GuidedTourRefusal),
+}
+
 /// A problem as the sidebar lists it: the headline, and under it, quieter, what it leaves out.
 #[derive(Clone)]
 pub struct SidebarProblem {
@@ -65,7 +90,10 @@ impl SidebarProblem {
 
 pub struct SidebarRows {
     pub tour_agent: SidebarTourAgent,
+    /// Only a basic review has one.
+    pub guided_tour: Option<SidebarGuidedTour>,
     pub progress: ReadProgress,
+    pub progress_unit: ReadUnit,
     pub last_review: Option<SidebarLastReview>,
     /// Approve and Request changes show only on someone else's PR.
     pub finishing: Finishing,
@@ -79,6 +107,9 @@ pub struct SidebarRows {
     pub is_summary_current: bool,
     pub steps: Vec<SidebarStep>,
     pub safety_net: Option<SidebarSafetyNet>,
+    /// Only a basic review has one; its steps are then empty.
+    pub tree: Option<SidebarTree>,
+    pub basic_mode_label: Option<&'static str>,
 }
 
 impl SidebarRows {
@@ -112,12 +143,24 @@ impl SidebarRows {
                 can_show: tour_agent.can_show(),
                 can_retry: tour_agent.can_retry(),
             },
+            guided_tour: review.basic_mode_label().map(|_| SidebarGuidedTour {
+                stage: review.guided_tour_stage(),
+                can_show_agent: tour_agent.can_show(),
+                write: (review.guided_tour_progress() == &GuidedTourProgress::NotAsked).then(
+                    || match review.write_guided_tour_refusal() {
+                        None => WriteOffer::Available,
+                        Some(refusal) => WriteOffer::Refused(refusal),
+                    },
+                ),
+                banner: review.guided_tour_banner(),
+            }),
             last_review: review.last_review().map(|last| SidebarLastReview {
                 headline: last.headline(is_old).into(),
                 body: last.body.clone().into(),
                 is_body_long: last.body_is_long(),
                 is_old,
             }),
+            progress_unit: review.read_unit(),
             finishing: Finishing::of(review),
             approve_warning: review.approve_warning(),
             progress,
@@ -134,6 +177,11 @@ impl SidebarRows {
             is_summary_current: review.screen() == &Screen::Summary,
             steps,
             safety_net,
+            tree: review.basic_mode_label().map(|_| SidebarTree {
+                is_overview_current: review.screen() == &Screen::Overview,
+                rows: review.basic_sidebar(),
+            }),
+            basic_mode_label: review.basic_mode_label(),
         }
     }
 }

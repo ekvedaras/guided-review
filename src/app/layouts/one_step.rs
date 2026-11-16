@@ -40,6 +40,7 @@ use crate::app::components::diff_view::{
 };
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
 use crate::app::components::fold_toggle::FoldToggle;
+use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
@@ -81,21 +82,24 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
-use crate::app::sidebar_rows::SidebarTourAgent;
+use crate::app::sidebar_rows::{SidebarGuidedTour, SidebarTourAgent, WriteOffer};
 use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::repin::RepinStatus;
+use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
     FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
-    NoteSubject, NotesButton, Overlay, PageRow, PieceLabels, Place, QueuedComment, ReadProgress,
-    ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, ViewSwitch, WindowMoment,
+    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
+    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal, Reopen, ReopenAfterSave,
+    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
+    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
+    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
+    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
+    WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -248,8 +252,11 @@ impl OneStepLayout {
         let jump = cx.new(|cx| JumpPalette::new(focus.clone(), cx));
         let switching = cx.global::<PrSwitching>().clone();
         let loading = cx.new(|cx| LoadingScreen::new(&switching.active, cx));
-        cx.observe(&switching.active, |_, _, cx| cx.notify())
-            .detach();
+        cx.observe(&switching.active, |this, _, cx| {
+            this.guided_tour_follows_active_pr(cx);
+            cx.notify();
+        })
+        .detach();
         let settings = if let Some(settings) = carried_settings {
             settings.update(cx, |settings, cx| {
                 settings.move_to(focus.clone(), Placement::SheetOverReview, cx);
@@ -968,6 +975,46 @@ impl OneStepLayout {
         }
     }
 
+    /// The app keeps what it knows of the PR's guided tour in `ActivePr`, which outlives the review; the
+    /// review shows it. Nothing here moves the screen.
+    fn guided_tour_follows_active_pr(&mut self, cx: &mut Context<Self>) {
+        let switching = cx.global::<PrSwitching>().clone();
+        let review = self.session.read(cx).review();
+        if review.basic_mode_label().is_none() {
+            return;
+        }
+        let pr = review.pr().clone();
+        let on_disk = ToursOnDisk::of(&switching.folders, &pr);
+        let progress = switching
+            .active
+            .read(cx)
+            .guided_tour_progress_of(&pr, on_disk);
+        if review.guided_tour_progress() != &progress {
+            self.session.update(cx, |session, cx| {
+                session.change(cx, |review| review.guided_tour_is(progress));
+            });
+        }
+    }
+
+    /// Write guided tour, from the overview, the sidebar and the palette: the review takes the
+    /// asking, and the app's writer hands the task to the PR's tour agent in the background.
+    fn write_guided_tour(&mut self, cx: &mut Context<Self>) {
+        let pr = self.session.read(cx).review().pr().clone();
+        let asked = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.ask_to_write_guided_tour())
+        });
+        match asked {
+            Ok(()) => crate::app::tour_writer::write_in_background(pr, cx),
+            Err(refusal) => post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned()),
+        }
+    }
+
+    /// Switch to guided tour, from the banner, the sidebar and the palette: the reviewer's click only.
+    fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
+        self.session
+            .update(cx, ReviewSession::switch_to_guided_tour);
+    }
+
     /// Opens the finish-review form in the sidebar with its body box taking the keys.
     fn open_finish_form(&mut self, cx: &mut Context<Self>) {
         self.finish_form_request = self.finish_form_request.wrapping_add(1);
@@ -1142,6 +1189,11 @@ impl OneStepLayout {
                     "This build does not take updates".to_owned(),
                 ),
             },
+            Effect::WriteGuidedTour => self.write_guided_tour(cx),
+            Effect::SwitchToGuidedTour => self.switch_to_guided_tour(cx),
+            Effect::Refused(Refusal::GuidedTour(refusal)) => {
+                post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
+            }
             Effect::Nothing | Effect::Refused(_) => {}
         }
     }
@@ -1230,6 +1282,106 @@ impl OneStepLayout {
                 .children(show)
                 .children(retry),
         )
+    }
+
+    /// A basic review's guided tour in the sidebar: Write guided tour while nothing is asked, the stage
+    /// of the writing with Show agent and Try again, and the banner once it is ready.
+    fn guided_tour_block(
+        colors: &Colors,
+        guided_tour: &SidebarGuidedTour,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let write = guided_tour.write.map(|offer| {
+            let button = icon_label_button(
+                colors,
+                "sidebar-write-guided-tour",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Sparkles,
+                "Write guided tour",
+            );
+            match offer {
+                WriteOffer::Available => {
+                    div().child(button.on_click(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::WriteGuidedTour, window, cx);
+                    })))
+                }
+                WriteOffer::Refused(refusal) => div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
+                    .child(button.opacity(0.5).cursor_not_allowed())
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(refusal.reason()),
+                    ),
+            }
+        });
+        let stage = guided_tour.stage.as_ref().map(|stage| {
+            let show = guided_tour.can_show_agent.then(|| {
+                icon_label_button(
+                    colors,
+                    "show-writing-agent",
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                    Icon::Terminal,
+                    "Show agent",
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.session.update(cx, ReviewSession::show_tour_agent);
+                }))
+            });
+            let try_again = stage.can_try_again.then(|| {
+                icon_label_button(
+                    colors,
+                    "try-guided-tour-again",
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                    Icon::Refresh,
+                    "Try again",
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.act(Intent::WriteGuidedTour, window, cx);
+                }))
+            });
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(SharedString::from(stage.line.clone())),
+                )
+                .child(div().flex().gap_2().children(show).children(try_again))
+        });
+        let banner = guided_tour.banner.as_ref().map(|banner| {
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_1()
+                .child(div().text_xs().child(banner.text))
+                .child(switch_button(
+                    colors,
+                    "sidebar-switch-to-guided-tour",
+                    banner,
+                    Box::new(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::SwitchToGuidedTour, window, cx);
+                    })),
+                ))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(banner)
+            .children(stage)
+            .children(write)
     }
 
     /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
@@ -1358,9 +1510,23 @@ impl OneStepLayout {
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
         let progress = sidebar.progress;
+        let tree_rows = sidebar.tree.as_ref().map_or(&[][..], |tree| &tree.rows[..]);
+        let is_first_current = sidebar
+            .tree
+            .as_ref()
+            .map_or(sidebar.is_summary_current, |tree| tree.is_overview_current);
         let places = row_places(
-            &std::iter::once(sidebar.is_summary_current)
+            &std::iter::once(is_first_current)
                 .chain(sidebar.steps.iter().map(|step| step.is_current))
+                .chain(tree_rows.iter().map(|row| {
+                    matches!(
+                        row.kind,
+                        TreeRowKind::File {
+                            is_current: true,
+                            ..
+                        }
+                    )
+                }))
                 .chain(
                     sidebar
                         .safety_net
@@ -1378,7 +1544,9 @@ impl OneStepLayout {
         let mut places = places.into_iter();
         let summary_place = places.next().unwrap_or(RowPlace::Apart);
         let step_places: Vec<RowPlace> = places.by_ref().take(sidebar.steps.len()).collect();
+        let tree_places: Vec<RowPlace> = places.by_ref().take(tree_rows.len()).collect();
         let safety_net_place = places.next().unwrap_or(RowPlace::Apart);
+        let is_basic = sidebar.tree.is_some();
         let summary_row = self
             .touching_hover(
                 sidebar_row(
@@ -1393,10 +1561,101 @@ impl OneStepLayout {
                 summary_place,
                 cx,
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to_summary());
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| {
+                    if is_basic {
+                        review.go_to_overview();
+                    } else {
+                        review.go_to_summary();
+                    }
+                });
             }))
-            .child(row_label("Summary"));
+            .child(row_label(if is_basic { "Overview" } else { "Summary" }));
+        let tree_row_elements =
+            tree_rows
+                .iter()
+                .zip(tree_places.into_iter().enumerate())
+                .map(|(row, (offset, place))| {
+                    let index = offset + 1 + sidebar.steps.len();
+                    match &row.kind {
+                        TreeRowKind::Folder {
+                            path,
+                            label,
+                            is_folded,
+                            is_read,
+                        } => {
+                            let folder = path.clone();
+                            self.touching_hover(
+                                sidebar_row(
+                                    &colors,
+                                    SharedString::from(format!("folder-{path}")),
+                                    row.depth,
+                                    place,
+                                    if *is_read {
+                                        RowMark::Read
+                                    } else {
+                                        RowMark::Page
+                                    },
+                                    hovered_touching,
+                                ),
+                                index,
+                                place,
+                                cx,
+                            )
+                            .text_color(colors.muted_text)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.change_review(cx, |review| review.toggle_folder(&folder));
+                            }))
+                            .child(div().flex_none().h(px(22.)).flex().items_center().child(
+                                turn_to(
+                                    sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                                    SharedString::from(format!("folder-chevron-{path}")),
+                                    !is_folded,
+                                    1.,
+                                ),
+                            ))
+                            .child(row_label(SharedString::from(label.clone())))
+                        }
+                        TreeRowKind::File {
+                            path,
+                            label,
+                            is_read,
+                            repin,
+                            ..
+                        } => {
+                            let file = path.clone();
+                            let repin_note = match repin {
+                                Some(RepinStatus::New) => Some("new"),
+                                Some(RepinStatus::Changed) => Some("changed"),
+                                _ => None,
+                            };
+                            self.touching_hover(
+                                sidebar_row(
+                                    &colors,
+                                    SharedString::from(format!("file-{path}")),
+                                    row.depth,
+                                    place,
+                                    if *is_read {
+                                        RowMark::Read
+                                    } else {
+                                        RowMark::Unread
+                                    },
+                                    hovered_touching,
+                                ),
+                                index,
+                                place,
+                                cx,
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.change_review(cx, |review| review.go_to_file(&file));
+                            }))
+                            .child(row_label(SharedString::from(label.clone())))
+                            .children(repin_note.map(|note| {
+                                div().text_xs().text_color(colors.muted_text).child(note)
+                            }))
+                        }
+                    }
+                });
         let sync_notices = sidebar
             .sync_banner
             .clone()
@@ -1429,6 +1688,10 @@ impl OneStepLayout {
             .changes_not_shown
             .clone()
             .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
+        let guided_tour = sidebar
+            .guided_tour
+            .as_ref()
+            .map(|guided_tour| Self::guided_tour_block(&colors, guided_tour, cx));
         let tour_agent = sidebar
             .tour_agent
             .is_shown
@@ -1525,8 +1788,15 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_3()
-            .child(progress_meter(&colors, progress))
+            .child(match sidebar.basic_mode_label {
+                Some(label) => div()
+                    .flex()
+                    .child(chip(&colors, Tone::Accent).child(label))
+                    .into_any_element(),
+                None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
+            })
             .child(finish_dialog)
+            .children(guided_tour)
             .children(tour_agent)
             .children(clone_offer)
             .children(changes_not_shown)
@@ -1567,6 +1837,7 @@ impl OneStepLayout {
                     .gap_px()
                     .child(summary_row)
                     .children(step_rows)
+                    .children(tree_row_elements)
                     .children(safety_net_row),
             )
             .children(update_button(&colors, cx))
@@ -1853,7 +2124,7 @@ impl OneStepLayout {
             ))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| {
-                    review.toggle_box_fold(&fold.step, &fold.path);
+                    review.toggle_box_fold(&fold.screen, &fold.path);
                 });
                 if let Some(row) = header_row {
                     // From the row above, so the step bar does not cover the header.
@@ -2176,6 +2447,18 @@ impl OneStepLayout {
                     TourLead::Finish { steps, can_finish } => Some(
                         finish_card(
                             *steps,
+                            ReadUnit::Steps,
+                            *can_finish,
+                            ReviewAgain::Offered,
+                            "summary-lead",
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                    TourLead::FinishFiles { files, can_finish } => Some(
+                        finish_card(
+                            *files,
+                            ReadUnit::Files,
                             *can_finish,
                             ReviewAgain::Offered,
                             "summary-lead",
@@ -2206,6 +2489,7 @@ impl OneStepLayout {
             } => repin_notes(&colors, gone_pieces, text_may_be_old).into_any_element(),
             PageRow::Toolbar(toolbar) => self.toolbar(&toolbar, cx).into_any_element(),
             PageRow::ScreenFooter(footer) => screen_footer(&footer, cx).into_any_element(),
+            PageRow::Overview(overview) => self.overview(&overview, cx).into_any_element(),
             PageRow::SafetyNetIntro => SafetyNetIntro.into_any_element(),
             PageRow::PieceHeader(heading) => {
                 let open_code = heading.code_link.as_ref().map(|link| {
@@ -2452,6 +2736,136 @@ impl OneStepLayout {
             ))
     }
 
+    fn overview(&self, overview: &OverviewPage, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let description = self
+            .session
+            .read(cx)
+            .rows()
+            .prepared_description()
+            .map(|description| {
+                self.markdown_card(
+                    "PR DESCRIPTION",
+                    MarkdownView::new(DESCRIPTION_KEY, description)
+                        .with_diagrams(self.description_diagrams.clone()),
+                    cx,
+                )
+            });
+        let files = overview.files.iter().map(|file| {
+            let path = file.path.clone();
+            let (folder, name) = match file.path.as_str().rsplit_once('/') {
+                Some((folder, name)) => (Some(format!("{folder}/")), name),
+                None => (None, file.path.as_str()),
+            };
+            div()
+                .id(SharedString::from(format!("overview-file-{}", file.path)))
+                .px_3()
+                .py_1p5()
+                .flex()
+                .items_center()
+                .gap_3()
+                .cursor_pointer()
+                .hover(|row| row.bg(colors.hover))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| review.go_to_file(&path));
+                }))
+                .child(div().flex_none().w(px(14.)).flex().justify_center().child(
+                    if file.is_read {
+                        sized_icon(Icon::Check, colors.success, px(14.)).into_any_element()
+                    } else {
+                        div()
+                            .size(px(8.))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(colors.muted_text)
+                            .into_any_element()
+                    },
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .font_family(*crate::app::components::palette::CODE_FONT)
+                        .text_sm()
+                        .children(folder.map(|folder| {
+                            div()
+                                .flex_none()
+                                .text_color(colors.muted_text)
+                                .child(folder)
+                        }))
+                        .child(div().min_w_0().truncate().child(name.to_owned())),
+                )
+                .child(line_counts(&colors, file.added_lines, file.removed_lines))
+        });
+        let write_guided_tour = Some(overview.write_guided_tour_refusal).map(|refusal| {
+            let button = icon_label_button(
+                &colors,
+                "write-guided-tour",
+                ButtonKind::Secondary,
+                ButtonSize::Regular,
+                Icon::Sparkles,
+                "Write guided tour",
+            );
+            div()
+                .pt_6()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(if refusal.is_none() {
+                    button
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.act(Intent::WriteGuidedTour, window, cx);
+                        }))
+                        .into_any_element()
+                } else {
+                    button.opacity(0.5).cursor_not_allowed().into_any_element()
+                })
+                .children(refusal.map(|refusal| {
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(refusal.reason())
+                }))
+        });
+        div()
+            .pb_8()
+            .w_full()
+            .max_w(READING_WIDTH)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .pb_5()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_2()
+                    .child(tour_place(&colors, "OVERVIEW", TourStop::On))
+                    .child(
+                        div()
+                            .text_2xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(InlineMarkdown::new("overview-title", &overview.title)),
+                    ),
+            )
+            .child(overview_stats(&colors, overview.stats))
+            .children(description)
+            .child(
+                div()
+                    .pb_4()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(note_label("CHANGED FILES").text_color(colors.muted_text))
+                    .child(card(&colors).py_1().flex().flex_col().children(files)),
+            )
+            .children(write_guided_tour)
+    }
+
     fn markdown_card(
         &self,
         label: &'static str,
@@ -2483,7 +2897,7 @@ impl OneStepLayout {
             )
         });
         let full_diff = toolbar.full_diff.as_ref().map(|control| {
-            let step = control.step.clone();
+            let subject = control.subject.clone();
             toggle_button(
                 &colors,
                 "full-diff-toggle",
@@ -2491,7 +2905,7 @@ impl OneStepLayout {
                 ButtonSize::Small,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.change_review(cx, |review| review.toggle_full_diff(&step));
+                this.change_review(cx, |review| review.toggle_full_diff_of(&subject));
             }))
             .child("Full diff, not only the change since your read")
         });
@@ -2537,6 +2951,20 @@ impl OneStepLayout {
                 cx,
             ))
         });
+        let comment_on_file = toolbar.comment_on_file.as_ref().map(|path| {
+            let comment_path = path.clone();
+            icon_label_button(
+                &colors,
+                ElementId::from(SharedString::from(format!("comment-on-file-{path}"))),
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::MessageSquare,
+                "Comment on this file",
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_comment_box(CommentGesture::OnFile(&comment_path), window, cx);
+            }))
+        });
         div()
             .w_full()
             .pb_3()
@@ -2547,6 +2975,7 @@ impl OneStepLayout {
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
+            .children(comment_on_file)
             .children(toggles)
             .children(ask.map(|ask| div().pl_1().child(ask)))
     }
@@ -2625,7 +3054,7 @@ impl OneStepLayout {
     }
 
     fn toggle_tick(&mut self, id: &StepId, cx: &mut Context<Self>) {
-        let change = ReviewChange::ToggleTick(id.clone());
+        let change = ReviewChange::ToggleTick(ReadSubject::Step(id.clone()));
         self.session
             .update(cx, |session, cx| session.apply(change, cx));
     }
@@ -2858,9 +3287,14 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
     });
     let next_label = footer.next.as_ref().map(|next| match next {
         NextScreen::Step { title } => title.clone(),
+        NextScreen::File { path } => path.to_string(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
-    if let Some(TourLead::Finish { steps, can_finish }) = &footer.lead {
+    if let Some((count, unit, can_finish)) = footer.lead.as_ref().and_then(|lead| match lead {
+        TourLead::Finish { steps, can_finish } => Some((*steps, ReadUnit::Steps, *can_finish)),
+        TourLead::FinishFiles { files, can_finish } => Some((*files, ReadUnit::Files, *can_finish)),
+        _ => None,
+    }) {
         return div()
             .pt_8()
             .pb_10()
@@ -2869,8 +3303,9 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .gap_3()
             .children(previous)
             .child(finish_card(
-                *steps,
-                *can_finish,
+                count,
+                unit,
+                can_finish,
                 ReviewAgain::NotOffered,
                 "footer",
                 cx,
@@ -2928,6 +3363,13 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
                     .child(InlineMarkdown::new("footer-up-next", &title)),
             )
     });
+    let file_place = footer.file_place.map(|(number, count)| {
+        div()
+            .flex_none()
+            .text_sm()
+            .text_color(colors.muted_text)
+            .child(format!("File {number} of {count}"))
+    });
     let the_end = (footer.next.is_none()).then(|| {
         div()
             .flex_1()
@@ -2936,6 +3378,8 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .text_color(colors.muted_text)
             .child(if footer.ticks.is_some() {
                 "This is the last step."
+            } else if footer.file_place.is_some() {
+                "That was the last file."
             } else {
                 "That was the last step. Finish the review in the sidebar."
             })
@@ -2957,6 +3401,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
                 .flex()
                 .items_center()
                 .gap_4()
+                .children(file_place)
                 .children(up_next)
                 .children(the_end)
                 .children(lead)
@@ -3012,6 +3457,63 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .child(dot())
                 .child(item(Icon::MessageSquare, SharedString::from(threads)))
         }))
+        .children(stats.started_read.clone().map(|started_read| {
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(dot())
+                .child(item(Icon::Check, SharedString::from(started_read)))
+        }))
+}
+
+/// How big a basic review's PR is, in the numbers the review truly has.
+fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
+    let item = |icon_name: Icon, text: String| {
+        div()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .child(sized_icon(icon_name, colors.muted_text, px(14.)))
+            .child(text)
+    };
+    let dot = || div().size(px(3.)).rounded_full().bg(colors.border);
+    div()
+        .pb_5()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_3()
+        .text_sm()
+        .text_color(colors.muted_text)
+        .child(item(
+            Icon::FileText,
+            pluralised(stats.files, "file changed", "files changed"),
+        ))
+        .child(dot())
+        .child(line_counts(colors, stats.added_lines, stats.removed_lines))
+        .children((stats.open_threads > 0).then(|| {
+            div().flex().items_center().gap_3().child(dot()).child(item(
+                Icon::MessageSquare,
+                pluralised(stats.open_threads, "open thread", "open threads"),
+            ))
+        }))
+}
+
+/// Added lines in green, removed in red.
+fn line_counts(colors: &Colors, added: usize, removed: usize) -> impl IntoElement {
+    div()
+        .flex_none()
+        .flex()
+        .gap_2()
+        .text_sm()
+        .font_family(*crate::app::components::palette::CODE_FONT)
+        .child(div().text_color(colors.success).child(format!("+{added}")))
+        .child(
+            div()
+                .text_color(colors.danger)
+                .child(format!("\u{2212}{removed}")),
+        )
 }
 
 /// One top-level step on the route: its number on the route line, its title and why, and whether
@@ -3140,6 +3642,14 @@ enum LeadLabel {
     Short,
 }
 
+/// The file a lead names.
+fn next_file_screen(lead: &TourLead) -> Screen {
+    match lead {
+        TourLead::StartFile(file) | TourLead::ContinueFile(file) => Screen::File(file.path.clone()),
+        _ => Screen::Overview,
+    }
+}
+
 fn lead_button(
     lead: &TourLead,
     label_kind: LeadLabel,
@@ -3147,19 +3657,40 @@ fn lead_button(
     cx: &mut Context<OneStepLayout>,
 ) -> Option<AnyElement> {
     let colors = Colors::active(cx);
-    let (step, label, command) = match lead {
+    let (place, label, command) = match lead {
         TourLead::Start(first) => (
-            first.id.clone(),
+            Screen::Step(first.id.clone()),
             div().child("Start the tour").into_any_element(),
             Command::NextScreen,
         ),
+        TourLead::StartFile(first) => (
+            Screen::File(first.path.clone()),
+            div().child("Start reading").into_any_element(),
+            Command::NextScreen,
+        ),
         TourLead::Continue(next) if label_kind == LeadLabel::Short => (
-            next.id.clone(),
+            Screen::Step(next.id.clone()),
             div().child("Continue").into_any_element(),
             Command::NextUnreadStep,
         ),
+        TourLead::ContinueFile(_) if label_kind == LeadLabel::Short => (
+            next_file_screen(lead),
+            div().child("Continue").into_any_element(),
+            Command::NextUnreadStep,
+        ),
+        TourLead::ContinueFile(next) => (
+            Screen::File(next.path.clone()),
+            div()
+                .flex()
+                .min_w_0()
+                .gap_1()
+                .child(div().flex_none().child("Continue at"))
+                .child(div().min_w_0().truncate().child(next.path.to_string()))
+                .into_any_element(),
+            Command::NextUnreadStep,
+        ),
         TourLead::Continue(next) => (
-            next.id.clone(),
+            Screen::Step(next.id.clone()),
             div()
                 .flex()
                 .min_w_0()
@@ -3174,7 +3705,7 @@ fn lead_button(
                 .into_any_element(),
             Command::NextUnreadStep,
         ),
-        TourLead::Finish { .. } | TourLead::Nowhere => return None,
+        TourLead::Finish { .. } | TourLead::FinishFiles { .. } | TourLead::Nowhere => return None,
     };
     Some(
         button(&colors, id, ButtonKind::Primary, ButtonSize::Large)
@@ -3182,8 +3713,12 @@ fn lead_button(
             .min_w_0()
             .max_w(px(460.))
             .on_click(cx.listener(move |this, _, _, cx| {
-                let step = step.clone();
-                this.change_review(cx, move |review| review.go_to(&step));
+                let place = place.clone();
+                this.change_review(cx, move |review| match &place {
+                    Screen::Step(id) => review.go_to(id),
+                    Screen::File(path) => review.go_to_file(path),
+                    Screen::Summary | Screen::Overview | Screen::SafetyNet => {}
+                });
             }))
             .child(label)
             .child(button_keys(&colors, ButtonKind::Primary, command, cx))
@@ -3194,17 +3729,18 @@ fn lead_button(
 /// The tour's end once every step is read: a calm success card whose check pops in once, with
 /// Finish review when the PR takes a review from the reader.
 fn finish_card(
-    steps: usize,
+    count: usize,
+    unit: ReadUnit,
     can_finish: bool,
     review_again: ReviewAgain,
     id: &'static str,
     cx: &mut Context<OneStepLayout>,
 ) -> impl IntoElement {
     let colors = Colors::active(cx);
-    let title = if steps == 1 {
-        "The one step is read".to_owned()
-    } else {
-        format!("All {steps} steps read")
+    let title = match (count, unit) {
+        (1, ReadUnit::Steps) => "The one step is read".to_owned(),
+        (1, ReadUnit::Files) => "The one file is read".to_owned(),
+        (count, unit) => format!("All {count} {} read", unit.plural()),
     };
     let finish = can_finish.then(|| {
         icon_label_button(
@@ -3268,16 +3804,18 @@ fn finish_card(
                         .text_color(colors.text)
                         .child(title),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(colors.muted_text)
-                        .child(if can_finish {
+                .child(div().text_sm().text_color(colors.muted_text).child(
+                    match (unit, can_finish) {
+                        (ReadUnit::Steps, true) => {
                             "Every step of the tour is read. Send your review when you are ready."
-                        } else {
-                            "Every step of the tour is read."
-                        }),
-                ),
+                        }
+                        (ReadUnit::Steps, false) => "Every step of the tour is read.",
+                        (ReadUnit::Files, true) => {
+                            "Every changed file is read. Send your review when you are ready."
+                        }
+                        (ReadUnit::Files, false) => "Every changed file is read.",
+                    },
+                )),
         )
         .children(again)
         .children(finish)
@@ -3355,7 +3893,7 @@ fn tick_button(
         .child(button_keys(&colors, kind, Command::ToggleRead, cx).ml_2())
 }
 
-fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
+fn progress_meter(colors: &Colors, progress: ReadProgress, unit: ReadUnit) -> impl IntoElement {
     let share = progress.share();
     div()
         .flex()
@@ -3366,8 +3904,10 @@ fn progress_meter(colors: &Colors, progress: ReadProgress) -> impl IntoElement {
                 .flex()
                 .justify_between()
                 .child(div().font_weight(FontWeight::MEDIUM).child(format!(
-                    "{} of {} steps read",
-                    progress.read, progress.total
+                    "{} of {} {} read",
+                    progress.read,
+                    progress.total,
+                    unit.plural()
                 )))
                 .child(
                     div()
@@ -3463,6 +4003,7 @@ impl Render for OneStepLayout {
                 .and_then(|selection| session.rows().selected_rows(selection)),
         );
         let old_head = session.old_head().cloned();
+        let guided_tour_banner = session.review().guided_tour_banner();
         let repin_progress = session.repin_progress().clone();
         let refresh_brief = session.refresh_brief().clone();
         let refresh_progress = session.refresh_progress().clone();
@@ -3663,6 +4204,14 @@ impl Render for OneStepLayout {
                             repin_progress,
                             cx.listener(|this, _, _, cx| {
                                 this.session.update(cx, ReviewSession::repin);
+                            }),
+                        )
+                    }))
+                    .children(guided_tour_banner.map(|banner| {
+                        GuidedTourReadyBanner::new(
+                            banner,
+                            cx.listener(|this, _, window, cx| {
+                                this.act(Intent::SwitchToGuidedTour, window, cx);
                             }),
                         )
                     }))

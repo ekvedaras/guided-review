@@ -13,7 +13,7 @@ use crate::app::tour_writer;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     ActivePr, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, SwitcherRow, TourAgentPort,
-    TourFact, WhyListed,
+    TourFact, WhyListed, WritingFact,
 };
 
 use super::chip::{chip, notice_band};
@@ -54,17 +54,16 @@ impl PrSwitching {
     /// answers are in, and whoever shows the list is told when they are.
     pub fn refresh(&self, cx: &mut App) {
         self.list.update(cx, |list, _| list.refreshing());
-        let (relevant, agents) = (Arc::clone(&self.relevant), Arc::clone(&self.agents));
+        let relevant = Arc::clone(&self.relevant);
         let (list, active, folders) =
             (self.list.clone(), self.active.clone(), self.folders.clone());
         cx.spawn(async move |cx| {
-            let (answer, link) = cx
+            let answer = cx
                 .background_executor()
-                .spawn(async move { (relevant.relevant_pull_requests(), agents.link()) })
+                .spawn(async move { relevant.relevant_pull_requests() })
                 .await;
             list.update(cx, |list, cx| {
                 list.loaded(answer, &folders);
-                list.agent_link(link.map_err(|off| off.to_string()));
                 list.check_tours(&folders, active.read(cx));
                 cx.notify();
             });
@@ -315,11 +314,11 @@ impl PrSwitcherView {
     fn row(&self, index: usize, shown: &ShownRow, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let is_selected = index == self.switching.list.read(cx).selected();
-        let has_tour = shown.tour == TourFact::Ready;
-        let tour_color = match shown.tour {
-            TourFact::Ready => colors.accent,
-            TourFact::WritingFailed => colors.warning,
-            TourFact::Missing | TourFact::Writing => colors.muted_text,
+        let has_tour = shown.tour.writing == WritingFact::None;
+        let tour_color = match shown.tour.writing {
+            WritingFact::None => colors.accent,
+            WritingFact::Failed => colors.warning,
+            WritingFact::Writing => colors.muted_text,
         };
         picker_row(
             &colors,

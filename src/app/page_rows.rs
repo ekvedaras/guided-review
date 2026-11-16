@@ -36,6 +36,15 @@ struct PreparedSummary {
 
 impl PreparedSummary {
     fn of(page: &Page) -> Self {
+        if let Some(overview) = page.overview() {
+            return Self {
+                reviewer_summary: None,
+                description: overview
+                    .description
+                    .as_ref()
+                    .map(|description| Rc::new(PreparedMarkdown::of(description.clone()))),
+            };
+        }
         let Some(columns) = page.rows().iter().find_map(|row| match row {
             PageRow::SummaryColumns(columns) => Some(columns),
             _ => None,
@@ -281,12 +290,14 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
         PageRow::AskMarker(ask) => ask.id.hash(&mut hasher),
         PageRow::Toolbar(toolbar) => {
             toolbar.ask.as_ref().map(|ask| &ask.id).hash(&mut hasher);
+            toolbar.comment_on_file.hash(&mut hasher);
             toolbar.fold.hash(&mut hasher);
             toolbar.full_diff.hash(&mut hasher);
             toolbar.ignores_whitespace.hash(&mut hasher);
             toolbar.wraps_lines.hash(&mut hasher);
         }
         PageRow::ScreenFooter(footer) => footer.hash(&mut hasher),
+        PageRow::Overview(overview) => overview.hash(&mut hasher),
         PageRow::SummaryStats(stats) => stats.hash(&mut hasher),
         PageRow::RouteStop(stop) => stop.hash(&mut hasher),
         PageRow::TourLead(lead) => lead.hash(&mut hasher),

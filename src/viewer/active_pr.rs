@@ -1,9 +1,11 @@
 use super::app_state::{AppState, AppStateFile};
+use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
-use super::pr_switcher::TourFact;
+use super::pr_switcher::WritingFact;
 use super::tour_agent::{AgentStatus, TerminalId, TourAgentPort};
 use super::tour_writing::TourWriting;
 use crate::pull_request::PullRequestUrl;
+use crate::tour::ToursOnDisk;
 
 /// Which PR the window shows, and what an incoming open request does to it. A PR that is built takes
 /// the screen only when it is the newest request, so the one on screen stays until then. It also keeps
@@ -47,11 +49,11 @@ pub enum OpenOrigin {
     AppStartedAgent,
 }
 
-/// What an open request of a PR comes to, by whether the PR has a tour.
+/// What an open request of a PR comes to.
 pub enum OpenOutcome {
+    /// The PR has a tour, or none and no writing: the build makes its basic tour when none is on disk.
     Tour(OpenDecision),
-    /// No tour yet: the loading screen shows it being written, as when the reviewer picks the PR with no
-    /// tour in the switcher.
+    /// A tour of the PR is being written and nothing is on disk to read yet: the loading screen shows it.
     Writing(WriteDecision),
 }
 
@@ -62,6 +64,9 @@ pub enum OpenDecision {
     Build(BuildTicket),
     /// Not shown now: the switcher marks the PR ready instead.
     KeepInBackground,
+    /// The basic tour on screen has its guided tour written and checked: the review says so and
+    /// nothing is built, reloaded or moved.
+    GuidedReady,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,24 +175,56 @@ impl ActivePr {
         }
     }
 
-    /// The one way in for an open request, whoever sent it: a PR with a tour is requested, a PR without
-    /// one gets its tour written.
-    pub fn open(&mut self, pr: PullRequestUrl, origin: OpenOrigin, tour: TourFact) -> OpenOutcome {
-        match tour {
-            TourFact::Ready => OpenOutcome::Tour(self.request(pr, origin)),
-            TourFact::Missing | TourFact::Writing | TourFact::WritingFailed => {
-                OpenOutcome::Writing(self.write(pr))
-            }
+    /// The one way in for an open request, whoever sent it: a PR with a tour, or with none and no writing,
+    /// is requested, as its basic tour is made by the build; a PR whose tour is being written with nothing
+    /// to read yet shows that writing.
+    pub fn open(
+        &mut self,
+        pr: PullRequestUrl,
+        origin: OpenOrigin,
+        on_disk: ToursOnDisk,
+    ) -> OpenOutcome {
+        if on_disk == ToursOnDisk::None && self.writing_of(&pr).is_some() {
+            OpenOutcome::Writing(self.write(pr))
+        } else if on_disk == ToursOnDisk::BasicWithGuided
+            && self.shown.as_ref() == Some(&pr)
+            && !self.is_reopening(&pr)
+        {
+            self.forget_writing(&pr);
+            OpenOutcome::Tour(OpenDecision::GuidedReady)
+        } else {
+            OpenOutcome::Tour(self.request(pr, origin))
+        }
+    }
+
+    /// True when a writing of the PR was on.
+    fn forget_writing(&mut self, pr: &PullRequestUrl) -> bool {
+        let was_written = self.writings.iter().any(|(writing, _)| writing == pr);
+        self.writings.retain(|(writing, _)| writing != pr);
+        if was_written {
+            self.remember();
+        }
+        was_written
+    }
+
+    /// What the review of the PR starts out knowing of its guided tour. A guided file on disk with no
+    /// writing on means ready, so the banner outlives a restart, a re-pin and a tour written by `/tour`
+    /// from the reviewer's own session; one mid-writing does not, as it is not checked yet.
+    pub fn guided_tour_progress_of(
+        &self,
+        pr: &PullRequestUrl,
+        on_disk: ToursOnDisk,
+    ) -> GuidedTourProgress {
+        match (self.writing_of(pr), on_disk) {
+            (Some(writing), _) => GuidedTourProgress::of_writing(writing),
+            (None, ToursOnDisk::BasicWithGuided) => GuidedTourProgress::Ready,
+            (None, _) => GuidedTourProgress::NotAsked,
         }
     }
 
     /// An open of a PR being written is its writer saying the tour is checked, which ends the writing.
     pub fn request(&mut self, pr: PullRequestUrl, origin: OpenOrigin) -> OpenDecision {
-        let was_written = self.writings.iter().any(|(writing, _)| writing == &pr);
-        self.writings.retain(|(writing, _)| writing != &pr);
-        if was_written {
-            self.remember();
-        }
+        let was_written = self.forget_writing(&pr);
         if self.is_reopening(&pr) {
             return OpenDecision::Build(self.build(pr));
         }
@@ -326,6 +363,21 @@ impl ActivePr {
         WriteDecision::StartWriter
     }
 
+    /// The reviewer asked to write the guided tour of a basic review: the writing is recorded with no
+    /// loading screen, and the review goes on reading. Refused while a writing of the PR is on.
+    pub fn write_in_background(&mut self, pr: PullRequestUrl) -> WriteDecision {
+        if self
+            .writing_of(&pr)
+            .is_some_and(|writing| !writing.has_failed())
+        {
+            return WriteDecision::Watch;
+        }
+        self.writings.retain(|(writing, _)| writing != &pr);
+        self.writings.push((pr, TourWriting::starting()));
+        self.remember();
+        WriteDecision::StartWriter
+    }
+
     /// Starts the PR's writing over, as after a failure.
     pub fn try_again(&mut self, pr: &PullRequestUrl) {
         self.writings.retain(|(writing, _)| writing != pr);
@@ -376,14 +428,12 @@ impl ActivePr {
     }
 
     /// What the switcher says of the PR's tour beyond what the disk says, while it is being written.
-    pub fn tour_fact_of(&self, pr: &PullRequestUrl) -> Option<TourFact> {
-        self.writing_of(pr).map(|writing| {
-            if writing.has_failed() {
-                TourFact::WritingFailed
-            } else {
-                TourFact::Writing
-            }
-        })
+    pub fn writing_fact_of(&self, pr: &PullRequestUrl) -> WritingFact {
+        match self.writing_of(pr) {
+            None => WritingFact::None,
+            Some(writing) if writing.has_failed() => WritingFact::Failed,
+            Some(_) => WritingFact::Writing,
+        }
     }
 
     /// The tour agent answered a hand-off of the PR. Unless the PR is on screen, the switcher marks it.

@@ -4,7 +4,7 @@ use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::{drive_until_idle, kinds};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AGENT_LINK_RECHECK, AfterLanding, AgentLinkOff, AgentStatus, Review, ReviewStateFile,
     TerminalId, TourAgentPort, TourAgentState, TourAgents, WorkKind, WorkPorts,
@@ -39,7 +39,7 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,

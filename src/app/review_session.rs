@@ -32,7 +32,7 @@ use crate::viewer::{
     CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
     OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
     SendMode, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, WorkPorts, announcements, line_count,
+    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -44,6 +44,7 @@ pub struct TourWork {
     pub repinner: Arc<TourRepinner>,
     pub refresher: Arc<TourRefresher>,
     pub reloader: Arc<TourReloader>,
+    pub switcher: Arc<TourSwitcher>,
     pub tour_agents: TourAgents,
 }
 
@@ -64,6 +65,9 @@ pub struct ReviewSession {
     /// What the sidebar said before a snapshot scene staged another line.
     #[cfg(feature = "snapshots")]
     tour_agent_before_staging: Option<TourAgentState>,
+    /// The guided review a snapshot scene put aside to show the PR in Basic mode.
+    #[cfg(feature = "snapshots")]
+    guided_before_staging: Option<Review>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -80,6 +84,8 @@ pub struct ReviewSession {
     image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
     loading_images: HashSet<FilePath>,
     reload: Option<Task<()>>,
+    /// The build of the guided review a click on Switch to guided tour started.
+    switch: Option<Task<()>>,
     clone_offer: Option<CloneOffer>,
     cloning: Option<Task<()>>,
     typing_save: Option<Task<()>>,
@@ -157,6 +163,8 @@ impl ReviewSession {
             tour_agent: TourAgentState::Unknown,
             #[cfg(feature = "snapshots")]
             tour_agent_before_staging: None,
+            #[cfg(feature = "snapshots")]
+            guided_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -174,6 +182,7 @@ impl ReviewSession {
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
             reload: None,
+            switch: None,
             clone_offer,
             cloning: None,
             typing_save: None,
@@ -508,6 +517,31 @@ impl ReviewSession {
         .detach();
     }
 
+    /// Runs only on the reviewer's click. The guided review is built in the background, carrying the
+    /// read ticks; the basic review stays on screen until it is ready.
+    pub fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
+        if self.switch.is_some() {
+            return;
+        }
+        self.save_typing_now();
+        let switcher = Arc::clone(&self.tour_work.switcher);
+        self.switch = Some(self.run_off_thread(
+            cx,
+            move || switcher.run(),
+            |this, switched, cx| {
+                this.switch = None;
+                match switched {
+                    Ok(switched) => this.reopen_on_summary(switched, cx),
+                    Err(error) => post_toast(
+                        cx,
+                        ToastTone::Danger,
+                        format!("Could not switch to the guided tour: {error:#}"),
+                    ),
+                }
+            },
+        ));
+    }
+
     pub fn clone_offer(&self) -> Option<&CloneOffer> {
         self.clone_offer.as_ref()
     }
@@ -695,6 +729,81 @@ impl ReviewSession {
         cx.notify();
     }
 
+    /// The PR opened in Basic mode in place of its guided tour, which `unstage_basic` puts back.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic(&mut self, cx: &mut Context<Self>) {
+        let Ok(basic) = Review::open_basic(
+            self.review.basic_tour_of_same_pin(),
+            self.source.as_ref(),
+            self.review.state_file(),
+        ) else {
+            return;
+        };
+        let guided = std::mem::replace(&mut self.review, basic);
+        self.guided_before_staging.get_or_insert(guided);
+        self.swapped_review(cx);
+    }
+
+    /// The PR in Basic mode with its first two files read. The ticks go into the state file before
+    /// the review opens on it, so no viewed mark is wished for and nothing reaches GitHub.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic_read(&mut self, cx: &mut Context<Self>) {
+        let Ok(probe) = Review::open_basic(
+            self.review.basic_tour_of_same_pin(),
+            self.source.as_ref(),
+            self.review.state_file(),
+        ) else {
+            return;
+        };
+        let head = probe.head().clone();
+        let read: Vec<FilePath> = probe
+            .overview_page()
+            .files
+            .into_iter()
+            .take(2)
+            .map(|file| file.path)
+            .collect();
+        let state_file = probe.state_file();
+        if state_file
+            .update(|state| {
+                for path in &read {
+                    state.tick_file(path, &head);
+                }
+            })
+            .is_err()
+        {
+            return;
+        }
+        self.stage_basic(cx);
+    }
+
+    /// The PR in Basic mode with its guided tour ready: the banner in the page header and the sidebar.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic_guided_ready(&mut self, cx: &mut Context<Self>) {
+        self.stage_basic(cx);
+        self.change(cx, |review| {
+            review.guided_tour_is(crate::viewer::GuidedTourProgress::Ready);
+        });
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
+        if let Some(guided) = self.guided_before_staging.take() {
+            self.review = guided;
+            self.swapped_review(cx);
+        }
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn swapped_review(&mut self, cx: &mut Context<Self>) {
+        self.image_pictures.clear();
+        self.loading_images.clear();
+        self.rows = PageRows::none();
+        self.change(cx, |_| {});
+        cx.emit(SessionEvent::Reopened);
+        self.start_background_work(cx);
+    }
+
     /// Three reads that fail the way a GitHub outage fails them, through the review's own path.
     #[cfg(feature = "snapshots")]
     pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
@@ -797,7 +906,22 @@ impl ReviewSession {
     }
 
     fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
-        let screen = self.review.screen().clone();
+        self.reopen_on(repinned, None, cx);
+    }
+
+    /// Opens the review of the guided tour the reviewer asked for, on its summary.
+    fn reopen_on_summary(&mut self, switched: RepinnedTour, cx: &mut Context<Self>) {
+        self.reopen_on(switched, Some(Screen::Summary), cx);
+    }
+
+    /// `screen` is where the new review opens; `None` keeps the one on show.
+    fn reopen_on(
+        &mut self,
+        repinned: RepinnedTour,
+        screen: Option<Screen>,
+        cx: &mut Context<Self>,
+    ) {
+        let screen = screen.unwrap_or_else(|| self.review.screen().clone());
         self.save_typing_now();
         let replaced = std::mem::replace(&mut self.review, repinned.review);
         self.review.carry_on_from(replaced);
@@ -805,10 +929,10 @@ impl ReviewSession {
         self.image_pictures.clear();
         self.loading_images.clear();
         self.rows = PageRows::none();
-        self.change(cx, |review| {
-            if let Screen::Step(id) = screen {
-                review.go_to(&id);
-            }
+        self.change(cx, |review| match screen {
+            Screen::Step(id) => review.go_to(&id),
+            Screen::File(path) => review.go_to_file(&path),
+            _ => {}
         });
         cx.emit(SessionEvent::Reopened);
         self.start_background_work(cx);
@@ -879,7 +1003,7 @@ impl ReviewSession {
     pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
         let agents = self.tour_work.tour_agents.clone();
         let pr = self.review.pr().clone();
-        let text = ask.hand_off_text(&pr, place);
+        let text = self.review.ask_hand_off_text(ask, place);
         cx.background_executor()
             .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
     }

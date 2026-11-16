@@ -1,4 +1,4 @@
-use guided_review::tour::{StepId, Tour};
+use guided_review::tour::{BasicTour, GuidedTour, StepId, Tour};
 
 const TOUR_JSON: &str = r#"{
   "version": 1,
@@ -59,7 +59,7 @@ fn a_tour_with_every_pointer_kind_is_written_back_byte_identical() {
     let path = dir.path().join("tour.json");
     std::fs::write(&path, TOUR_JSON).unwrap();
 
-    let tour = Tour::load(&path).unwrap();
+    let tour = GuidedTour::load(&path).unwrap();
     tour.save(&path).unwrap();
 
     assert_eq!(std::fs::read_to_string(&path).unwrap(), TOUR_JSON);
@@ -70,7 +70,7 @@ fn a_step_is_found_by_its_id_at_any_depth() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tour.json");
     std::fs::write(&path, TOUR_JSON).unwrap();
-    let tour = Tour::load(&path).unwrap();
+    let tour = GuidedTour::load(&path).unwrap();
 
     assert_eq!(
         tour.find_step(&StepId::from("order-child"))
@@ -126,4 +126,98 @@ fn a_tours_own_files_sit_in_a_folder_beside_it_named_by_the_pr_number() {
         Tour::path_for(&crate::support::folders_in(home), &pr).with_extension("")
     );
     assert!(Tour::files_for(&crate::support::folders_in(home), &pr).ends_with("acme/shop/7"));
+}
+
+fn tour_file(json: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tour.json");
+    std::fs::write(&path, json).unwrap();
+    (dir, path)
+}
+
+const PIN: &str = r#""pr": "https://github.com/acme/shop/pull/7", "base": "aaa", "head": "bbb""#;
+
+#[test]
+fn a_tour_file_with_no_kind_reads_as_a_guided_tour() {
+    let (_dir, path) = tour_file(TOUR_JSON);
+
+    assert!(matches!(Tour::load(&path).unwrap(), Tour::Guided(_)));
+}
+
+#[test]
+fn a_tour_file_that_says_guided_reads_as_a_guided_tour() {
+    let (_dir, path) = tour_file(&format!(r#"{{"kind": "guided", {PIN}, "title": "T"}}"#));
+
+    let Tour::Guided(tour) = Tour::load(&path).unwrap() else {
+        panic!("a file that says guided is a guided tour");
+    };
+    assert_eq!(tour.title, "T");
+}
+
+#[test]
+fn a_basic_tour_file_reads_as_a_basic_tour_with_its_pin_and_the_prs_title() {
+    let (_dir, path) = tour_file(&format!(
+        r#"{{"kind": "basic", {PIN}, "previous_head": "ccc", "pr_title": "Discounts"}}"#
+    ));
+
+    let Tour::Basic(tour) = Tour::load(&path).unwrap() else {
+        panic!("a file that says basic is a basic tour");
+    };
+    assert_eq!(tour.pr_title, "Discounts");
+    assert_eq!(tour.pin.head.to_string(), "bbb");
+    assert_eq!(tour.pin.base.to_string(), "aaa");
+    assert_eq!(tour.pin.previous_head.unwrap().to_string(), "ccc");
+}
+
+#[test]
+fn a_basic_tour_is_written_back_with_its_kind() {
+    let (_dir, path) = tour_file(&format!(
+        r#"{{"kind": "basic", {PIN}, "pr_title": "Discounts"}}"#
+    ));
+
+    let tour = BasicTour::load(&path).unwrap();
+    tour.save(&path).unwrap();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written["kind"], "basic");
+    assert_eq!(written["pr_title"], "Discounts");
+    assert_eq!(written["head"], "bbb");
+}
+
+#[test]
+fn a_basic_tour_file_that_holds_what_only_a_guided_tour_has_is_refused() {
+    for (field, value) in [
+        ("title", r#""A title""#),
+        ("summary", r#"["one"]"#),
+        ("reviewer_summary", r#""Notes""#),
+        ("steps", "[]"),
+    ] {
+        let (_dir, path) = tour_file(&format!(
+            r#"{{"kind": "basic", {PIN}, "pr_title": "T", "{field}": {value}}}"#
+        ));
+
+        let refusal = format!("{:#}", Tour::load(&path).unwrap_err());
+
+        assert!(refusal.contains(field), "{field}: {refusal}");
+    }
+}
+
+#[test]
+fn the_guided_path_refuses_a_basic_tour() {
+    let (_dir, path) = tour_file(&format!(r#"{{"kind": "basic", {PIN}, "pr_title": "T"}}"#));
+
+    assert!(GuidedTour::load(&path).is_err());
+}
+
+#[test]
+fn a_basic_tour_lives_beside_the_guided_tours_file() {
+    let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let folders = crate::support::folders_in(std::path::Path::new("/home/me"));
+
+    let guided = Tour::path_for(&folders, &pr);
+    let basic = Tour::basic_path_for(&folders, &pr);
+
+    assert_eq!(guided.parent(), basic.parent());
+    assert!(basic.ends_with("acme/shop/7.basic.json"));
 }

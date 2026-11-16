@@ -2,7 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_tour_agent::FakeTourAgent;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    ActivePr, AgentStatus, AppStateFile, OpenOrigin, TerminalId, TourFact, WriteDecision,
+    ActivePr, AgentStatus, AppStateFile, OpenOrigin, TerminalId, WriteDecision, WritingFact,
     WritingStage,
 };
 
@@ -50,7 +50,7 @@ fn a_tour_being_written_before_a_restart_is_followed_again_in_its_terminal() {
     let writing = after.writing_of(&pr(WRITTEN)).unwrap();
     assert_eq!(writing.stage, WritingStage::Writing);
     assert_eq!(writing.terminal, Some(TerminalId::new("t1")));
-    assert_eq!(after.tour_fact_of(&pr(WRITTEN)), Some(TourFact::Writing));
+    assert_eq!(after.writing_fact_of(&pr(WRITTEN)), WritingFact::Writing);
 }
 
 #[test]
@@ -67,10 +67,7 @@ fn a_tour_being_written_before_a_restart_fails_with_a_reason_when_its_terminal_i
         panic!("a writing with no terminal has failed");
     };
     assert!(reason.contains("terminal"), "{reason}");
-    assert_eq!(
-        after.tour_fact_of(&pr(WRITTEN)),
-        Some(TourFact::WritingFailed)
-    );
+    assert_eq!(after.writing_fact_of(&pr(WRITTEN)), WritingFact::Failed);
 }
 
 #[test]

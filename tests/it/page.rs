@@ -5,10 +5,10 @@ use std::sync::Arc;
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, PieceLabels,
-    Review, ReviewStateFile, ReviewThread, Side, ThreadComment, ThreadId, ThreadRowPlace,
+    Review, ReviewStateFile, ReviewThread, Screen, Side, ThreadComment, ThreadId, ThreadRowPlace,
 };
 use serde_json::{Value, json};
 
@@ -89,7 +89,7 @@ impl Pull {
 
     /// Opens the tour on its first step, with the files at head read.
     fn open(&self, steps: Value) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR, "base": self.base, "head": self.head, "title": "Notes", "summary": [],
             "steps": steps,
         }))
@@ -140,7 +140,7 @@ fn a_change_of_the_review_builds_its_page_again() {
     let mut review = Pull::new().open(two_steps());
     let page = Arc::clone(review.page());
 
-    review.toggle_box_fold(&"notes".into(), &file_path("notes.txt"));
+    review.toggle_box_fold(&Screen::Step("notes".into()), &file_path("notes.txt"));
 
     assert!(!Arc::ptr_eq(&page, review.page()));
 }
@@ -325,7 +325,7 @@ fn a_folded_box_keeps_its_header_and_the_labels_of_its_pieces() {
     let open = shapes(review.page());
     assert!(open.iter().any(|row| row.starts_with('+')));
 
-    review.toggle_box_fold(&"cart".into(), &file_path("app/Cart.php"));
+    review.toggle_box_fold(&Screen::Step("cart".into()), &file_path("app/Cart.php"));
 
     assert_eq!(
         rows_from(review.page(), "header app/Cart.php", 4),

@@ -20,9 +20,11 @@ mod diff_display;
 mod diff_fence;
 mod display_options;
 mod file_block;
+mod file_tree;
 mod finish_review;
 mod focused_change;
 mod github_outage;
+mod guided_tour;
 mod hand_offs;
 mod highlight;
 mod image_preview;
@@ -33,6 +35,7 @@ mod markdown;
 mod more_lines;
 mod new_commits;
 mod outdated_lines;
+mod overview;
 mod page;
 mod piece_labels;
 mod ports;
@@ -56,6 +59,7 @@ mod settings;
 mod shortcuts;
 mod step_page;
 mod suggestion;
+mod switch_to_guided;
 mod thread_actions;
 mod threads;
 mod toasts;
@@ -75,7 +79,7 @@ pub use app_state::AppStateFile;
 pub use app_window::{
     AfterClose, AppWindow, FailedBuild, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
 };
-pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place};
+pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place, ShownOn};
 pub use ask_desk::{
     AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
 };
@@ -97,12 +101,14 @@ pub use diff_display::{
 pub use diff_fence::{FenceLine, fence_lines};
 pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
+pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
 pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
+pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
     HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, SeenMark, ThreadMessage,
@@ -123,11 +129,12 @@ pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
 pub use outdated_lines::{FollowedLines, follow_outdated};
+pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
     Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,
     ScreenFooter, SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
-    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
+    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
 };
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
@@ -137,7 +144,7 @@ pub use ports::{
     ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
-pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact};
+pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
@@ -151,8 +158,8 @@ pub use reopen_after_save::{
     Departure, InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep,
 };
 pub use review::{
-    NextScreen, OldHead, ReadProgress, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen,
-    SidebarEntry, StepId, SummaryStats, TourLead, UnreadStep,
+    NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop,
+    SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadFile, UnreadStep,
 };
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
@@ -161,8 +168,10 @@ pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};
 pub use step_page::{
-    DiffLine, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead, StepPage,
+    DiffLine, FilePage, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead,
+    StepPage,
 };
+pub use switch_to_guided::TourSwitcher;
 pub use thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
@@ -170,7 +179,8 @@ pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff, SendOutcome,
-    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents,
+    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents, TourKind,
+    WriterHandOver,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;

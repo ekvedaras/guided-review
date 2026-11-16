@@ -20,7 +20,7 @@ use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
-use guided_review::tour::{StepId, Tour};
+use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
 use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
@@ -223,21 +223,21 @@ fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()>
 fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let opened = OpenedPr::new(pr)?;
     let tour_path = opened.tour_path();
-    let mut tour = Tour::load(&tour_path)?;
+    let mut tour = GuidedTour::load(&tour_path)?;
 
     let code = opened.at_live_tips()?;
-    if tour.head.is_empty() {
-        tour.pin(pr, &code.merge_base()?, &code.tips.head);
+    if tour.pin.head.is_empty() {
+        tour.pin.pin_to(pr, &code.merge_base()?, &code.tips.head);
     } else {
-        if tour.pr.is_empty() {
-            tour.pr = pr.to_string();
+        if tour.pin.pr.is_empty() {
+            tour.pin.pr = pr.to_string();
         }
-        if tour.head != code.tips.head {
+        if tour.pin.head != code.tips.head {
             println!("warning: PR has new commits; run `guided-review repin`");
         }
     }
     tour.save(&tour_path)?;
-    let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
+    let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
 
     let report = tour_check::check(&tour, &files, &summary_instructions()?);
     print!("{report}");
@@ -249,7 +249,7 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
 
 fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
     let opened = OpenedPr::new(pr)?;
-    let tour_path = opened.tour_path();
+    let tour_path = opened.tour_to_repin_path();
     // Fails before any network call when there is no tour yet.
     Tour::load(&tour_path)?;
 
@@ -274,9 +274,9 @@ fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
         println!("refresh done: marks cleared");
         return Ok(());
     }
-    let tour = Tour::load(&opened.tour_path())?;
-    let code = opened.at_pinned_tips(&tour)?;
-    let files = pieces::cut(code.source.as_ref(), &tour.base, &tour.head)?;
+    let tour = GuidedTour::load(&opened.tour_path())?;
+    let code = opened.at_pinned_tips(&tour.pin)?;
+    let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
     print!(
         "{}",
         RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())
@@ -325,8 +325,19 @@ enum Launch {
 }
 
 fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
-    let folders = AppFolders::running()?;
-    let folder = AppFolder::of(&folders);
+    let folders = &AppFolders::running()?;
+    let tours = ToursOnDisk::of(folders, pr);
+    if let Launch::Restart { at: Some(step) } = launch
+        && tours.opens_basic()
+    {
+        anyhow::bail!(
+            "{pr} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
+        );
+    }
+    if tours == ToursOnDisk::None {
+        OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?;
+    }
+    let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {
         pr: pr.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
@@ -341,15 +352,19 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         Launch::Open => hand_over(&folder, &request)?,
     };
     match answer {
+        Answer::GuidedReady { .. } => println!("{answer}"),
         Answer::Opening { .. }
         | Answer::Writing { .. }
         | Answer::Reloaded { .. }
         | Answer::KeptInBackground { .. } => {
             println!("{answer}");
-            Ok(())
+            if ToursOnDisk::of(folders, pr).opens_basic() {
+                println!("{pr} opened in Basic mode");
+            }
         }
         other => anyhow::bail!("{other}"),
     }
+    Ok(())
 }
 
 fn settings() -> anyhow::Result<()> {

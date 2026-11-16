@@ -58,10 +58,16 @@ enum Scene {
     SettingsMoreLines,
     PieceLabelsShown,
     PieceLabelsHidden,
+    BasicOverview,
+    BasicOverviewFiles,
+    BasicFile,
+    BasicRead,
+    BasicGuidedReady,
+    SwitchedSummary,
 }
 
 impl Scene {
-    const ALL: [Self; 30] = [
+    const ALL: [Self; 36] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -92,6 +98,12 @@ impl Scene {
         Self::SettingsMoreLines,
         Self::PieceLabelsShown,
         Self::PieceLabelsHidden,
+        Self::BasicOverview,
+        Self::BasicOverviewFiles,
+        Self::BasicFile,
+        Self::BasicRead,
+        Self::BasicGuidedReady,
+        Self::SwitchedSummary,
     ];
 
     fn file_name(self) -> &'static str {
@@ -126,6 +138,12 @@ impl Scene {
             Self::SettingsMoreLines => "49-settings-more-lines",
             Self::PieceLabelsShown => "50-piece-labels",
             Self::PieceLabelsHidden => "51-piece-labels-hidden",
+            Self::BasicOverview => "52-basic-overview",
+            Self::BasicOverviewFiles => "54-basic-overview-files",
+            Self::BasicFile => "53-basic-file",
+            Self::BasicRead => "55-basic-read",
+            Self::BasicGuidedReady => "56-basic-guided-ready",
+            Self::SwitchedSummary => "57-switched-summary",
         }
     }
 }
@@ -288,7 +306,9 @@ impl OneStepLayout {
             }
         });
         if let Some(fold) = fold.filter(|fold| fold.is_folded) {
-            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
+            self.change_review(cx, |review| {
+                review.toggle_box_fold(&fold.screen, &fold.path);
+            });
         }
     }
 
@@ -334,7 +354,9 @@ impl OneStepLayout {
                 .collect()
         };
         for fold in folded {
-            self.change_review(cx, |review| review.toggle_box_fold(&fold.step, &fold.path));
+            self.change_review(cx, |review| {
+                review.toggle_box_fold(&fold.screen, &fold.path);
+            });
         }
     }
 
@@ -514,6 +536,23 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::BasicOverview => self.session.update(cx, ReviewSession::stage_basic),
+            Scene::BasicOverviewFiles => {
+                self.session.update(cx, ReviewSession::stage_basic);
+                self.scroll_to_row(self.screen_list.item_count());
+            }
+            Scene::BasicFile => {
+                self.session.update(cx, ReviewSession::stage_basic);
+                self.change_review(cx, |review| review.go_forward());
+            }
+            Scene::BasicRead => self.session.update(cx, ReviewSession::stage_basic_read),
+            Scene::BasicGuidedReady => self
+                .session
+                .update(cx, ReviewSession::stage_basic_guided_ready),
+            Scene::SwitchedSummary => self.change_review(cx, |review| {
+                review.go_to_summary();
+                review.steps_carried_read_ticks_are(3);
+            }),
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::RefreshRunning => {
@@ -620,6 +659,18 @@ impl OneStepLayout {
             Scene::ReleaseInstallInTheWay => self.change_review(cx, |review| {
                 review.clear_problem(ProblemKind::ReleaseInstallInTheWay);
             }),
+            Scene::BasicOverview
+            | Scene::BasicOverviewFiles
+            | Scene::BasicFile
+            | Scene::BasicRead
+            | Scene::BasicGuidedReady => {
+                self.session.update(cx, ReviewSession::unstage_basic);
+                self.go_to_first_open_code(cx);
+            }
+            Scene::SwitchedSummary => {
+                self.change_review(cx, |review| review.steps_carried_read_ticks_are(0));
+                self.go_to_first_open_code(cx);
+            }
             Scene::AgentLinkOff => self
                 .session
                 .update(cx, ReviewSession::unstage_agent_link_off),

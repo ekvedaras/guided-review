@@ -1,6 +1,14 @@
 # Glossary
 
-**Tour**: A guided review of one PR. It shows the changes in top-down order: main flow first, details later.
+**Tour**: A reading route through one PR: a guided tour or a basic tour. Both are pinned to the same base and head.
+
+**Guided tour**: A tour the tour writer wrote with the `tour` skill: summary, steps and safety net, top-down: main flow first, details later. A tour file with no `kind` is guided. Avoid: AI tour, full tour.
+
+**Basic tour**: A tour made with no AI: every changed file of the PR with its diff, one screen per file, the sidebar a file tree like an IDE. It has no steps, no summary and no safety net; its file says `"kind": "basic"`, holds the pin and the PR's own title (`pr_title`), and sits beside the guided tour's (`<number>.basic.json`). A PR with no tour opens as one. The window names it Basic mode and offers Write guided tour. Avoid: empty tour, plain tour, quick tour.
+
+**Guided tour ready**: A guided tour its writer finished while the reviewer reads the PR's basic tour. The viewer holds that fact and shows it in a lasting banner; it never reloads or switches by itself, only when the reviewer asks, and then the basic tour goes. Avoid: reload, auto-switch.
+
+**Overview**: The first screen of a basic tour: the PR's title and description, its counts, its changed files with their read ticks, and Write guided tour. Avoid: summary (that is the guided tour's).
 
 **Summary**: The short text at the start of a tour. At most three bullets that say what the PR does.
 
@@ -36,17 +44,17 @@
 
 **Viewer**: A thing that shows a tour file to the reviewer and tracks which steps were read.
 
-**Read tick**: A mark that says the reviewer has read a step. The viewer owns it. A step can get a read tick or lose it when the reviewer marks its files as viewed, or not viewed, on GitHub.
+**Read tick**: A mark that says the reviewer has read a step, or in a basic tour a whole changed file. The viewer owns it. A step can get a read tick or lose it when the reviewer marks its files as viewed, or not viewed, on GitHub. On the switch to a guided tour, a step whose files were all read starts with a read tick.
 
 **Safety net**: The last screen of a tour. It shows every diff piece no step points to, so nothing in the PR goes unseen. It is computed from the tour and the diff, never stored.
 
-**Screen**: What the viewer shows now: the summary, one step, or the safety net.
+**Screen**: What the viewer shows now: in a guided tour the summary, one step, or the safety net; in a basic tour the overview or one changed file.
 
 **Page**: The content of one screen, laid out for reading: the summary page holds the summary, the route and the PR description; a step page holds the step's text, its pieces and their threads; the safety net page holds the uncovered pieces. Under a line it shows, in this order: threads, queued comments, comment boxes and the ask marker of lines with Asks.
 
 **Code link**: A link to a file or a line of the PR's code: a diff line, a piece, or a link in the tour's text. The viewer opens it in the reviewer's IDE when the file is in the working copy of a local clone, else on GitHub, and says why. When the clone is not checked out clean at the tour's head, it still opens in the IDE, with a note that the lines may differ. Removed lines and deleted files always open on GitHub, at base.
 
-**Re-pin**: Moving a tour to the PR's new head after new commits, with no AI. Each diff piece becomes same, changed, gone or new. Steps with changed pieces lose their read tick.
+**Re-pin**: Moving a tour to the PR's new head after new commits, with no AI. Each diff piece becomes same, changed, gone or new. Steps with changed pieces lose their read tick. In a basic tour, files with changed or new pieces lose their read tick.
 
 **Refresh**: An AI pass on a re-pinned tour. It rewrites only the steps whose pieces changed and places new pieces into steps.
 

@@ -7,10 +7,10 @@ use crate::support::{FixtureRepo, file_path};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentLauncher, AgentPort, AskTarget, Asks, Author, LineLocation, Place, Review,
-    ReviewStateFile, Side, StepId, Unavailable,
+    ReviewStateFile, ShownOn, Side, StepId, Unavailable,
 };
 use serde_json::json;
 
@@ -36,7 +36,7 @@ fn shop() -> Shop {
         "<?php\n\nclass Order\n{\n    public function total(): int\n    {\n        return 2;\n    }\n}\n",
     );
     let head = repo.commit("head");
-    let tour: Tour = serde_json::from_value(json!({
+    let tour: GuidedTour = serde_json::from_value(json!({
         "pr": "https://github.com/acme/shop/pull/7",
         "base": base,
         "head": head,
@@ -304,7 +304,7 @@ fn lines_place(start: usize, end: usize) -> Place {
         line: line(line_number),
     };
     Place::Lines {
-        step: None,
+        shown_on: ShownOn::SafetyNet,
         start: at(start),
         end: at(end),
         pieces: vec![],

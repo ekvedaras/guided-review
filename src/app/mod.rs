@@ -42,12 +42,12 @@ use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::platform::{self, Os};
 use crate::pull_request::PullRequestUrl;
-use crate::tour::Tour;
+use crate::tour::{Tour, ToursOnDisk};
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
     RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
-    ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, TourFact, WriteDecision,
+    ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, WriteDecision,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -274,9 +274,9 @@ async fn answer_requests(
                 claim_terminal(&pr, &open, &folders, cx);
                 let origin = origin_of(&open, &folders, cx).await;
                 let active = screen.borrow().active.clone();
-                let tour = TourFact::of(&pr, &folders);
+                let on_disk = ToursOnDisk::of(&folders, &pr);
                 let outcome = active.update(cx, |active, cx| {
-                    let outcome = active.open(pr.clone(), origin, tour);
+                    let outcome = active.open(pr.clone(), origin, on_disk);
                     cx.notify();
                     outcome
                 });
@@ -294,6 +294,9 @@ async fn answer_requests(
                 match decision {
                     OpenDecision::KeepInBackground => {
                         reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
+                    }
+                    OpenDecision::GuidedReady => {
+                        reply.send(Answer::GuidedReady { pr: open.pr }).ok();
                     }
                     OpenDecision::Reload => {
                         reply.send(Answer::Reloaded { pr: open.pr }).ok();
@@ -525,7 +528,8 @@ async fn build_and_show(
     cx: &mut AsyncApp,
 ) {
     let (build_pr, folder, at_step) = (pr.clone(), open.folder.clone(), open.at_step.clone());
-    let built = cx
+    let disk_folders = folders.clone();
+    let mut built = cx
         .background_executor()
         .spawn(async move {
             open_review(&build_pr, &folder, &folders).map(|mut opened| {
@@ -537,6 +541,12 @@ async fn build_and_show(
         })
         .await;
     let active = screen.borrow().active.clone();
+    if let Ok(opened) = &mut built {
+        let on_disk = ToursOnDisk::of(&disk_folders, &pr);
+        let progress =
+            active.read_with(cx, |active, _| active.guided_tour_progress_of(&pr, on_disk));
+        opened.review.guided_tour_is(progress);
+    }
     let finished = active.update(cx, |active, cx| {
         let finished = active.finished(ticket, built);
         cx.notify();
@@ -907,6 +917,7 @@ fn new_layout(
             repinner: Arc::new(opened.repinner),
             refresher: Arc::new(opened.refresher),
             reloader: Arc::new(opened.reloader),
+            switcher: Arc::new(opened.switcher),
             tour_agents: opened.tour_agents,
         },
     };

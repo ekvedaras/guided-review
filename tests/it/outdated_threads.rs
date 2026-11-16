@@ -2,7 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CommentId, FollowedLines, LineLocation, Review, ReviewStateFile, ReviewThread, Side,
     ThreadComment, ThreadId, follow_outdated,
@@ -51,7 +51,7 @@ impl Shop {
     }
 
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.commented,
             "head": self.head,

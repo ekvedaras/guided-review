@@ -2,7 +2,7 @@ use crate::support::{FixtureRepo, file_path, line, svg_of};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     BlockChange, CommentGesture, CommentId, FileView, ImageCache, LineLocation, PageRow, Review,
     ReviewStateFile, ReviewThread, Side, ThreadComment, ThreadId,
@@ -63,7 +63,7 @@ impl Pull {
             .iter()
             .map(|path| json!({"file": path}))
             .collect();
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR, "base": self.base, "head": self.head, "title": "Docs", "summary": [],
             "steps": [{"id": "docs", "title": "Docs", "why": "because", "pieces": pieces,
                 "children": []}],

@@ -13,10 +13,14 @@ use super::components::pr_switcher::PrSwitching;
 use crate::open_review::writer_folder;
 use crate::pull_request::PullRequestUrl;
 use crate::summary_instructions::SummaryInstructions;
-use crate::viewer::{ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision};
+use crate::viewer::{
+    ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision, WriterHandOver,
+};
 
 const SCREEN_LINES: usize = 20;
 const SCREEN_EVERY: Duration = Duration::from_secs(2);
+/// How long a writer task waits for a busy tour agent before it is handed over again.
+const HAND_OVER_RETRY: Duration = Duration::from_secs(3);
 
 /// Shows the PR's writing on the loading screen, starting it when none is on.
 pub fn write(pr: PullRequestUrl, cx: &mut App) {
@@ -29,6 +33,81 @@ pub fn write(pr: PullRequestUrl, cx: &mut App) {
     if decision == WriteDecision::StartWriter {
         start(&switching, pr, cx);
     }
+}
+
+/// Writes the guided tour of the PR on screen while the reviewer keeps reading its basic tour: no
+/// loading screen. The task goes to the PR's tour agent once it is idle, and one is started when the PR
+/// has none.
+pub fn write_in_background(pr: PullRequestUrl, cx: &mut App) {
+    let switching = cx.global::<PrSwitching>().clone();
+    let decision = switching.active.update(cx, |active, cx| {
+        let decision = active.write_in_background(pr.clone());
+        cx.notify();
+        decision
+    });
+    if decision == WriteDecision::StartWriter {
+        hand_over(&switching, pr, cx);
+    }
+}
+
+fn hand_over(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
+    let active = switching.active.clone();
+    let shown = active
+        .read(cx)
+        .shown()
+        .cloned()
+        .unwrap_or_else(|| pr.clone());
+    let (port, folders) = (Arc::clone(&switching.agents), switching.folders.clone());
+    cx.spawn(async move |cx| {
+        loop {
+            let (task_pr, task_shown, task_port, task_folders) = (
+                pr.clone(),
+                shown.clone(),
+                Arc::clone(&port),
+                folders.clone(),
+            );
+            let handed = cx
+                .background_executor()
+                .spawn(async move {
+                    TourAgents::new(task_port)
+                        .with_summary_skill(SummaryInstructions::skill_for_launch(&task_folders))
+                        .starting_in(writer_folder(&task_pr, &task_folders))
+                        .hand_writer_task(&task_pr, &task_shown)
+                })
+                .await;
+            let terminal = match handed {
+                Ok(WriterHandOver::Delivered(terminal) | WriterHandOver::Started(terminal)) => {
+                    terminal
+                }
+                Ok(WriterHandOver::Waiting(_)) => {
+                    let is_still_wanted = active.read_with(cx, |active, _| {
+                        active.writing_of(&pr).is_some_and(|writing| {
+                            writing.terminal.is_none() && !writing.has_failed()
+                        })
+                    });
+                    if !is_still_wanted {
+                        return;
+                    }
+                    cx.background_executor().timer(HAND_OVER_RETRY).await;
+                    continue;
+                }
+                Err(error) => {
+                    active.update(cx, |active, cx| {
+                        active.writer_started(&pr, Err(error));
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            active.update(cx, |active, cx| {
+                active.writer_started(&pr, Ok(terminal.clone()));
+                cx.notify();
+            });
+            follow(&active, port, &pr, terminal, cx).await;
+            return;
+        }
+    })
+    .detach();
 }
 
 /// Starts the writer of a PR whose writing `ActivePr` just began.

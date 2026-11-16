@@ -2,7 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     NoteSubject, NotesButton, Review, ReviewStateFile, StepId, with_diagram_in_notes,
 };
@@ -62,7 +62,7 @@ impl Shop {
     }
 
     fn open_tour(&self, reviewer_summary: &str) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,

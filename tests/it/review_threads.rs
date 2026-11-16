@@ -4,7 +4,7 @@ use crate::support::line;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CommentId, Review, ReviewStateFile, ReviewThread, SafetyNetSize, Screen, Side, ThreadComment,
     ThreadId, ThreadView,
@@ -61,7 +61,7 @@ impl Shop {
     }
 
     fn open(&self, steps: Vec<Value>) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": "https://github.com/acme/shop/pull/7",
             "base": self.base,
             "head": self.head,

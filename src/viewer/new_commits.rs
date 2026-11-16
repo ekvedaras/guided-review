@@ -5,7 +5,7 @@ use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
 use crate::repin::{Repin, repin};
-use crate::tour::Tour;
+use crate::tour::{GuidedTour, Tour};
 
 use super::ports::PullRequestTipsPort;
 use super::review::Review;
@@ -21,7 +21,7 @@ pub fn repin_tour(
     new_head: &Sha,
 ) -> anyhow::Result<(Tour, Repin)> {
     let mut tour = Tour::load(tour_path)?;
-    let (old_base, old_head) = (tour.base.clone(), tour.head.clone());
+    let (old_base, old_head) = (tour.pin().base.clone(), tour.pin().head.clone());
     let result = repin(&mut tour, source, new_base, new_head)?;
     tour.save(tour_path)?;
     let record = RepinRecord::new(&old_base, &old_head, new_base, new_head, &result);
@@ -51,8 +51,8 @@ pub struct TourReloader {
 impl TourReloader {
     /// Blocks on the code source; the app runs it off the main thread.
     pub fn run(&self) -> anyhow::Result<RepinnedTour> {
-        let tour = Tour::load(&Tour::path_for(&self.folders, &self.pr))?;
-        let source = (self.pick_code_source)(&tour.pinned_tips())?;
+        let tour = GuidedTour::load(&Tour::path_for(&self.folders, &self.pr))?;
+        let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
         let review = Review::open(
             tour,
             source.as_ref(),
@@ -78,13 +78,16 @@ impl TourRepinner {
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
         let state_file = ReviewStateFile::for_pr(&self.folders, &self.pr);
         let (tour, _) = repin_tour(
-            &Tour::path_for(&self.folders, &self.pr),
+            &Tour::shown_path_for(&self.folders, &self.pr),
             &state_file,
             source.as_ref(),
             &base,
             &tips.head,
         )?;
-        let review = Review::open(tour, source.as_ref(), state_file)?;
+        let review = match tour {
+            Tour::Basic(tour) => Review::open_basic(tour, source.as_ref(), state_file)?,
+            Tour::Guided(tour) => Review::open(tour, source.as_ref(), state_file)?,
+        };
         Ok(RepinnedTour {
             review,
             source: source.into(),

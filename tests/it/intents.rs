@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Effect, Intent, Overlay, PaletteAction, Refusal, Reopening, Review, ReviewStateFile, Screen,
     SettingsSheet, WindowMoment,
@@ -13,7 +13,7 @@ fn three_step_review(repo: &FixtureRepo) -> Review {
     let base = repo.commit("base");
     repo.write("README.md", "hello\nworld\n");
     let head = repo.commit("head");
-    let tour: Tour = serde_json::from_value(json!({
+    let tour: GuidedTour = serde_json::from_value(json!({
         "pr": "https://github.com/acme/shop/pull/7",
         "base": base,
         "head": head,

@@ -11,7 +11,7 @@ use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review::StepId;
 use super::threads::{AGENT_MARK, CommentId, ReviewThread, ThreadId};
-use super::tour_agent::{AgentStatus, SendOutcome, TourAgents};
+use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
 const WORKING_ON_IT: &str = "Working on it…";
 
@@ -133,6 +133,9 @@ pub struct HandOff {
     id: HandOffId,
     place: String,
     step: Option<StepId>,
+    /// The file screen of a basic tour the comment was sent from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<FilePath>,
     mode: SendMode,
     comment: String,
     /// `None` when the threads read after the send did not show it.
@@ -193,6 +196,7 @@ impl HandOff {
             format!("Place: {}", self.place),
         ];
         lines.extend(self.step.iter().map(|step| format!("Step: {step}")));
+        lines.extend(self.file.iter().map(|file| format!("File: {file}")));
         lines.push(
             match self.mode {
                 SendMode::AddToReview => "Sent: added to the pending review",
@@ -209,6 +213,17 @@ impl HandOff {
             );
         }
         lines.push(format!("Comment: {}", self.comment));
+        let tour_note = if self.file.is_some() {
+            format!(
+                "The tour is a basic tour: there is no tour file to fix. Read the changed code with \
+                 `guided-review outline {pr}` and `guided-review show {pr} <piece ids> --around`."
+            )
+        } else {
+            format!(
+                "If the comment shows the tour is wrong, fix the tour file, run `guided-review check {pr}` until it \
+                 is clean, then `guided-review open {pr}`."
+            )
+        };
         lines.push(format!(
             "Answer with `guided-review agent-reply {pr} {id} --body -` and the answer on stdin, in a quoted heredoc \
              (`<<'EOF'`). Write it in GitHub markdown the reviewer can scan: short paragraphs with a blank line between \
@@ -216,9 +231,7 @@ impl HandOff {
              PR's code, first run `guided-review agent-reply {pr} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
              the PR's branch with none of the reviewer's own changes in it; else in a new git worktree, or a shallow \
-             clone, of the PR's branch. Commit, push to the PR's branch, and name the commit in your answer. If the \
-             comment shows the tour is wrong, fix the tour file, run `guided-review check {pr}` until it is clean, then \
-             `guided-review open {pr}`."
+             clone, of the PR's branch. Commit, push to the PR's branch, and name the commit in your answer. {tour_note}"
         ));
         lines.join("\n")
     }
@@ -229,6 +242,8 @@ pub(super) struct DeliveryRequest {
     id: HandOffId,
     pr: PullRequestUrl,
     text: String,
+    /// What a tour agent started for this hand-off has to read.
+    tour: TourKind,
     reviewer_comment: Option<CommentId>,
 }
 
@@ -243,7 +258,7 @@ impl DeliveryRequest {
             Ok(SendOutcome::Delivered) => Delivery::Delivered,
             Ok(SendOutcome::Refused(_)) => Delivery::Waiting,
             Ok(SendOutcome::Starting) => Delivery::AgentStarting,
-            Ok(SendOutcome::NoAgent) => match agents.start(&self.pr, &self.pr) {
+            Ok(SendOutcome::NoAgent) => match agents.start(&self.pr, &self.pr, self.tour) {
                 Ok(()) => Delivery::AgentStarted,
                 Err(error) => Delivery::Failed(format!("{error:#}")),
             },
@@ -290,10 +305,19 @@ enum Delivery {
     Failed(String),
 }
 
+/// The screen a comment was sent from, as far as the tour agent needs to know it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum SentFrom {
+    Step(StepId),
+    /// A basic tour's file screen.
+    File(FilePath),
+    Elsewhere,
+}
+
 /// What a hand-off is made from: the comment as GitHub has it now, in the threads read right after the send.
 pub(super) struct SentComment<'a> {
     pub place: String,
-    pub step: Option<StepId>,
+    pub from: SentFrom,
     pub mode: SendMode,
     pub body: &'a str,
 }
@@ -393,7 +417,14 @@ impl HandOffs {
         self.0.push(HandOff {
             id,
             place: sent.place.clone(),
-            step: sent.step.clone(),
+            step: match &sent.from {
+                SentFrom::Step(step) => Some(step.clone()),
+                SentFrom::File(_) | SentFrom::Elsewhere => None,
+            },
+            file: match &sent.from {
+                SentFrom::File(path) => Some(path.clone()),
+                SentFrom::Step(_) | SentFrom::Elsewhere => None,
+            },
             mode: sent.mode,
             comment: sent.body.to_owned(),
             thread,
@@ -415,6 +446,11 @@ impl HandOffs {
             id: next.id,
             pr: pr.clone(),
             text: next.message(pr),
+            tour: if next.file.is_some() {
+                TourKind::Basic
+            } else {
+                TourKind::Guided
+            },
             reviewer_comment: next.reviewer_comment.clone(),
         })
     }

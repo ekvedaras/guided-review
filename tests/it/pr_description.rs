@@ -2,7 +2,7 @@ use crate::support::FixtureRepo;
 use guided_review::github::GitHub;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Block, PullRequestDescriptionPort, Review, ReviewStateFile};
 use serde_json::json;
 
@@ -40,7 +40,7 @@ impl Shop {
         tour.as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
-        let tour: Tour = serde_json::from_value(tour).unwrap();
+        let tour: GuidedTour = serde_json::from_value(tour).unwrap();
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();

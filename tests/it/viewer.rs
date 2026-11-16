@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{NextScreen, ReadingPlace, Review, ReviewStateFile, Screen, Side};
 use serde_json::{Value, json};
 
@@ -30,7 +30,7 @@ impl Shop {
     }
 
     fn open(&self, steps: Vec<Value>) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": "https://github.com/acme/shop/pull/7",
             "base": self.base,
             "head": self.head,
@@ -91,7 +91,9 @@ fn read_forward(review: &mut Review) -> Vec<String> {
         match review.screen() {
             Screen::Step(id) => seen.push(id.to_string()),
             Screen::SafetyNet => seen.push("safety net".to_owned()),
-            Screen::Summary => panic!("going forward never reaches to the summary"),
+            Screen::Summary | Screen::Overview | Screen::File(_) => {
+                panic!("going forward in a guided review reaches only steps and the safety net")
+            }
         }
     }
     seen
@@ -141,6 +143,8 @@ fn the_reading_place_numbers_the_step_and_names_the_screen_after_it() {
         ReadingPlace {
             step_number: None,
             step_count: 5,
+            file_number: None,
+            file_count: 0,
             has_previous: false,
             next: next_step("checkout"),
         }
@@ -152,6 +156,8 @@ fn the_reading_place_numbers_the_step_and_names_the_screen_after_it() {
         ReadingPlace {
             step_number: Some(2),
             step_count: 5,
+            file_number: None,
+            file_count: 0,
             has_previous: true,
             next: next_step("rounding"),
         }

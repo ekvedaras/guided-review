@@ -13,13 +13,14 @@ pub use rows::{
     AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
     PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter, ShownLine,
     StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
-    line_count,
+    line_count, pluralised,
 };
 
-use super::ask::Place;
+use super::ask::{Place, ShownOn};
 use super::file_block::FileBlock;
 use super::focused_change::PageChange;
 use super::jump::{JumpPlace, JumpTarget};
+use super::overview::OverviewPage;
 use super::review::{ReviewCore, Screen};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::step_page::{DiffLine, LineLocation};
@@ -77,6 +78,10 @@ impl Page {
         let screen = review.screen().clone();
         let laid = match &screen {
             Screen::Summary => Some(build::summary(review)),
+            Screen::Overview => Some(build::overview(review)),
+            Screen::File(path) => review
+                .file_page()
+                .map(|page| build::file(review, path, page)),
             Screen::Step(_) => review.current_step().map(|page| build::step(review, page)),
             Screen::SafetyNet => review
                 .safety_net()
@@ -220,7 +225,7 @@ impl Page {
     /// file's piece labels are hidden), else the top.
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
         let piece = match &target.place {
-            JumpPlace::StepTop => None,
+            JumpPlace::StepTop | JumpPlace::Overview => None,
             JumpPlace::File(path) => self.pieces.iter().find(|piece| piece.path == *path),
             JumpPlace::Piece(id) => self
                 .pieces
@@ -256,12 +261,8 @@ impl Page {
 
     /// What an Ask about the selected lines is about: the lines and the pieces of this page that hold them.
     pub fn place_of(&self, selected: &SelectedLines) -> Place {
-        let step = match &self.screen {
-            Screen::Step(id) => Some(id.clone()),
-            Screen::Summary | Screen::SafetyNet => None,
-        };
         Place::Lines {
-            step,
+            shown_on: self.screen.shown_on().unwrap_or(ShownOn::SafetyNet),
             start: selected.first().clone(),
             end: selected.last().clone(),
             pieces: self
@@ -303,6 +304,14 @@ impl Page {
             .position(|row| matches!(row, PageRow::StepIntro(intro) if intro.diagram.is_some()))
     }
 
+    /// The overview of a basic tour, when this is its page.
+    pub fn overview(&self) -> Option<&OverviewPage> {
+        self.rows.iter().find_map(|row| match row {
+            PageRow::Overview(overview) => Some(overview.as_ref()),
+            _ => None,
+        })
+    }
+
     /// The row of the summary that holds the PR description, and the description.
     pub fn description(&self) -> Option<(usize, &crate::viewer::Markdown)> {
         self.rows
@@ -313,6 +322,10 @@ impl Page {
                     .description
                     .as_ref()
                     .map(|description| (index, description.as_ref())),
+                PageRow::Overview(overview) => overview
+                    .description
+                    .as_ref()
+                    .map(|description| (index, description)),
                 _ => None,
             })
     }
@@ -393,6 +406,7 @@ impl Page {
                         ticks: None,
                         has_previous: footer.has_previous,
                         next: footer.next.clone(),
+                        file_place: footer.file_place,
                         lead: Some(crate::viewer::TourLead::Finish {
                             steps,
                             can_finish: true,

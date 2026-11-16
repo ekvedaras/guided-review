@@ -3,16 +3,17 @@ use std::sync::Arc;
 use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::tour::Tour;
+use guided_review::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, AgentReplied, Finished, HandOffId, OpenDecision, OpenOrigin, OpenOutcome, Problem,
-    ReviewStateFile, TourFact, WriteDecision,
+    ReviewStateFile, WriteDecision, WritingFact,
 };
 use serde_json::json;
 
 const A: &str = "https://github.com/acme/shop/pull/7";
 const B: &str = "https://github.com/acme/shop/pull/8";
 const NO_TOUR: &str = "https://github.com/acme/shop/pull/9";
+const BROKEN_TOUR: &str = "https://github.com/acme/shop/pull/10";
 
 fn pr(url: &str) -> PullRequestUrl {
     url.parse().unwrap()
@@ -38,6 +39,24 @@ fn shop_with_tours_of_a_and_b() -> FixtureRepo {
         std::fs::write(path, tour.to_string()).unwrap();
     }
     repo
+}
+
+fn write_broken_tour(repo: &FixtureRepo, url: &str) {
+    let path = Tour::path_for(&repo.folders(), &pr(url));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, "not json").unwrap();
+}
+
+/// A basic tour of `url` pinned where the guided tour of A is.
+fn write_basic_tour_like_a(repo: &FixtureRepo, url: &str) {
+    let pin = GuidedTour::load(&Tour::path_for(&repo.folders(), &pr(A)))
+        .unwrap()
+        .pin;
+    let path = Tour::basic_path_for(&repo.folders(), &pr(url));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    BasicTour::new(pin, format!("PR title of {url}"))
+        .save(&path)
+        .unwrap();
 }
 
 /// What the app's window does with a request, without the window.
@@ -190,21 +209,23 @@ fn state_is_as_it_was_when_switching_back() {
 #[test]
 fn a_failed_build_keeps_the_pr_on_screen_and_gives_the_reason() {
     let repo = shop_with_tours_of_a_and_b();
+    write_broken_tour(&repo, BROKEN_TOUR);
     let mut window = Window::new(&repo);
     window.open(A);
 
-    let reason = window.open(NO_TOUR).unwrap();
+    let reason = window.open(BROKEN_TOUR).unwrap();
 
-    assert!(reason.contains("no tour for"), "{reason}");
+    assert!(reason.contains("could not open"), "{reason}");
     assert_eq!(window.title(), format!("Tour of {A}"));
 }
 
 #[test]
 fn a_failed_switch_is_named_as_a_problem_of_the_pr_still_shown() {
     let repo = shop_with_tours_of_a_and_b();
+    write_broken_tour(&repo, BROKEN_TOUR);
     let mut window = Window::new(&repo);
     window.open(A);
-    let reason = window.open(NO_TOUR).unwrap();
+    let reason = window.open(BROKEN_TOUR).unwrap();
 
     let review = &mut window.shown.as_mut().unwrap().review;
     review.switch_failed(reason.clone());
@@ -472,27 +493,24 @@ fn a_failed_reopen_keeps_the_pr_on_screen_with_the_reason() {
 }
 
 #[test]
-fn an_open_of_a_pr_without_a_tour_shows_its_tour_being_written() {
+fn an_open_of_a_pr_without_a_tour_builds_it_with_no_loading_screen() {
     let mut active = ActivePr::default();
     let pr: PullRequestUrl = A.parse().unwrap();
 
-    let outcome = active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+    let outcome = active.open(pr, OpenOrigin::Reviewer, ToursOnDisk::None);
 
-    assert!(matches!(
-        outcome,
-        OpenOutcome::Writing(WriteDecision::StartWriter)
-    ));
-    assert_eq!(active.loading().map(|(loading, _)| loading), Some(&pr));
-    assert!(!active.is_building());
+    assert!(matches!(outcome, OpenOutcome::Tour(OpenDecision::Build(_))));
+    assert!(active.loading().is_none());
+    assert!(active.is_building());
 }
 
 #[test]
 fn an_open_of_a_pr_whose_tour_is_being_written_watches_that_writing() {
     let mut active = ActivePr::default();
     let pr: PullRequestUrl = A.parse().unwrap();
-    active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+    active.write(pr.clone());
 
-    let outcome = active.open(pr, OpenOrigin::Reviewer, TourFact::Writing);
+    let outcome = active.open(pr, OpenOrigin::Reviewer, ToursOnDisk::None);
 
     assert!(matches!(
         outcome,
@@ -504,7 +522,11 @@ fn an_open_of_a_pr_whose_tour_is_being_written_watches_that_writing() {
 fn an_open_of_a_pr_with_a_tour_builds_it() {
     let mut active = ActivePr::default();
 
-    let outcome = active.open(A.parse().unwrap(), OpenOrigin::Reviewer, TourFact::Ready);
+    let outcome = active.open(
+        A.parse().unwrap(),
+        OpenOrigin::Reviewer,
+        ToursOnDisk::Guided,
+    );
 
     assert!(matches!(outcome, OpenOutcome::Tour(OpenDecision::Build(_))));
 }
@@ -513,9 +535,9 @@ fn an_open_of_a_pr_with_a_tour_builds_it() {
 fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_waiting_on_it() {
     let mut active = ActivePr::default();
     let pr: PullRequestUrl = A.parse().unwrap();
-    active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+    active.write(pr.clone());
 
-    let outcome = active.open(pr, OpenOrigin::AppStartedAgent, TourFact::Ready);
+    let outcome = active.open(pr, OpenOrigin::AppStartedAgent, ToursOnDisk::Guided);
 
     assert!(matches!(outcome, OpenOutcome::Tour(OpenDecision::Build(_))));
     assert!(active.loading().is_none());
@@ -525,9 +547,9 @@ fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_wait
 fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to_try_again() {
     let mut active = ActivePr::default();
     let pr: PullRequestUrl = A.parse().unwrap();
-    active.open(pr.clone(), OpenOrigin::Reviewer, TourFact::Missing);
+    active.write(pr.clone());
     let OpenOutcome::Tour(OpenDecision::Build(ticket)) =
-        active.open(pr.clone(), OpenOrigin::AppStartedAgent, TourFact::Ready)
+        active.open(pr.clone(), OpenOrigin::AppStartedAgent, ToursOnDisk::Guided)
     else {
         panic!("the writer's open builds the tour");
     };
@@ -538,7 +560,7 @@ fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to
     let (loading, writing) = active.loading().expect("the loading screen stays");
     assert_eq!(loading, &pr);
     assert!(writing.has_failed());
-    assert_eq!(active.tour_fact_of(&pr), Some(TourFact::WritingFailed));
+    assert_eq!(active.writing_fact_of(&pr), WritingFact::Failed);
     active.try_again(&pr);
     assert!(!active.writing_of(&pr).unwrap().has_failed());
 }
@@ -554,4 +576,41 @@ fn a_failed_build_of_a_tour_nobody_was_writing_leaves_no_loading_screen() {
     active.finished::<()>(ticket, Err(anyhow::anyhow!("no clone")));
 
     assert!(active.loading().is_none());
+}
+
+#[test]
+fn a_pr_with_only_a_basic_tour_opens_as_a_basic_review() {
+    let repo = shop_with_tours_of_a_and_b();
+    write_basic_tour_like_a(&repo, NO_TOUR);
+    let mut window = Window::new(&repo);
+
+    let failure = window.open(NO_TOUR);
+
+    assert_eq!(failure, None);
+    let review = &window.shown.as_ref().unwrap().review;
+    assert_eq!(review.basic_mode_label(), Some("Basic mode"));
+    assert_eq!(review.title(), format!("PR title of {NO_TOUR}"));
+}
+
+#[test]
+fn a_pr_with_both_tour_files_opens_as_a_basic_review() {
+    let repo = shop_with_tours_of_a_and_b();
+    write_basic_tour_like_a(&repo, A);
+    let mut window = Window::new(&repo);
+
+    window.open(A);
+
+    let review = &window.shown.as_ref().unwrap().review;
+    assert_eq!(review.basic_mode_label(), Some("Basic mode"));
+}
+
+#[test]
+fn a_pr_with_only_a_guided_tour_opens_as_a_guided_review() {
+    let repo = shop_with_tours_of_a_and_b();
+    let mut window = Window::new(&repo);
+
+    window.open(A);
+
+    let review = &window.shown.as_ref().unwrap().review;
+    assert_eq!(review.basic_mode_label(), None);
 }

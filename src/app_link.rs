@@ -111,6 +111,11 @@ pub enum Answer {
     KeptInBackground {
         pr: String,
     },
+    /// The basic tour on screen now has a guided tour ready; the window did not move, and the
+    /// reviewer switches when they choose.
+    GuidedReady {
+        pr: String,
+    },
     /// The hand-off is marked answered and the threads are read again.
     HandOffAnswered {
         pr: String,
@@ -142,6 +147,10 @@ impl std::fmt::Display for Answer {
             Self::KeptInBackground { pr } => write!(
                 f,
                 "guided-review app has {pr} ready; the reviewer reads another PR, so it shows in the PR switcher"
+            ),
+            Self::GuidedReady { pr } => write!(
+                f,
+                "guided-review app shows the guided tour of {pr} as ready; the reviewer switches to it when they choose"
             ),
             Self::HandOffAnswered { pr } => {
                 write!(f, "guided-review app marked the hand-off answered on {pr}")

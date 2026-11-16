@@ -13,7 +13,7 @@ use crate::line_number::LineNumber;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
 use crate::pull_request::Sha;
 use crate::repin::RepinStatus;
-use crate::tour::{Step, Tour};
+use crate::tour::{GuidedTour, Step};
 
 use super::threads::ThreadView;
 
@@ -178,7 +178,7 @@ pub struct SinceRead {
 impl<'a> StepPage<'a> {
     pub(super) fn of(
         step: &'a Step,
-        tour: &Tour,
+        tour: &GuidedTour,
         files: &[ChangedFile],
         display: &DiffDisplay,
         is_folded: bool,
@@ -210,13 +210,35 @@ pub struct SafetyNetPage {
 }
 
 impl SafetyNetPage {
-    pub(super) fn of(tour: &Tour, files: &[ChangedFile], display: &DiffDisplay) -> Self {
+    pub(super) fn of(tour: &GuidedTour, files: &[ChangedFile], display: &DiffDisplay) -> Self {
         Self {
             pieces: coverage::safety_net(tour, files)
                 .into_iter()
                 .filter_map(|part| PieceDiff::of(&part, files, display))
                 .collect(),
             threads: Vec::new(),
+        }
+    }
+}
+
+/// One changed file of a basic tour, every piece of it whole.
+pub struct FilePage {
+    pub pieces: Vec<PieceDiff>,
+    pub threads: Vec<ThreadView>,
+    /// Set when the file was read at an older head: its pieces then show only what changed since.
+    pub since_read: Option<SinceRead>,
+}
+
+impl FilePage {
+    pub(super) fn of(file: &ChangedFile, files: &[ChangedFile], display: &DiffDisplay) -> Self {
+        Self {
+            pieces: file
+                .pieces
+                .iter()
+                .filter_map(|piece| PieceDiff::of(&PiecePart::whole(piece), files, display))
+                .collect(),
+            threads: Vec::new(),
+            since_read: None,
         }
     }
 }
@@ -296,21 +318,7 @@ impl PieceDiff {
         else {
             return diff;
         };
-        let added_range = piece.added_lines.first().zip(piece.added_lines.last());
-        let changed_since: Vec<&Piece> = file
-            .pieces
-            .iter()
-            .filter(|since| match (piece.id.symbol_path(), piece.kind) {
-                (None, _) => true,
-                (Some(_), PieceKind::Hunk) => added_range.is_some_and(|(first, last)| {
-                    since
-                        .added_lines
-                        .iter()
-                        .any(|line| (first.number..=last.number).contains(&line.number))
-                }),
-                (Some(_), _) => since.id == piece.id,
-            })
-            .collect();
+        let changed_since = pieces_changed_since(piece, file);
         let removed: Vec<&Line> = changed_since
             .iter()
             .flat_map(|since| &since.removed_lines)
@@ -348,8 +356,35 @@ impl PieceDiff {
     }
 }
 
+/// The pieces of `since_file`, a file's changes between a read head and the tour's head, that
+/// change what `piece` shows.
+pub(super) fn pieces_changed_since<'a>(
+    piece: &Piece,
+    since_file: &'a ChangedFile,
+) -> Vec<&'a Piece> {
+    let added_range = piece.added_lines.first().zip(piece.added_lines.last());
+    since_file
+        .pieces
+        .iter()
+        .filter(|since| match (piece.id.symbol_path(), piece.kind) {
+            (None, _) => true,
+            (Some(_), PieceKind::Hunk) => added_range.is_some_and(|(first, last)| {
+                since
+                    .added_lines
+                    .iter()
+                    .any(|line| (first.number..=last.number).contains(&line.number))
+            }),
+            (Some(_), _) => since.id == piece.id,
+        })
+        .collect()
+}
+
 /// The pieces a step shows, in pointer order.
-pub(super) fn pieces_of<'a>(step: &Step, tour: &Tour, files: &'a [ChangedFile]) -> Vec<&'a Piece> {
+pub(super) fn pieces_of<'a>(
+    step: &Step,
+    tour: &GuidedTour,
+    files: &'a [ChangedFile],
+) -> Vec<&'a Piece> {
     step.pieces
         .iter()
         .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))

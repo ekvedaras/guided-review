@@ -4,7 +4,7 @@ use crate::coverage;
 use crate::language::Language;
 use crate::pieces::ChangedFile;
 use crate::summary_instructions::SummaryInstructions;
-use crate::tour::{PieceRef, Step, StepId, Tour};
+use crate::tour::{GuidedTour, PieceRef, Step, StepId};
 
 pub const MAX_SUMMARY_BULLETS: usize = 3;
 pub const MAX_WORDS_PER_BULLET: usize = 12;
@@ -55,7 +55,7 @@ pub struct Report {
 }
 
 pub fn check(
-    tour: &Tour,
+    tour: &GuidedTour,
     files: &[ChangedFile],
     summary_instructions: &SummaryInstructions,
 ) -> Report {

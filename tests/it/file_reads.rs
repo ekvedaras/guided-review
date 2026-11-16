@@ -9,7 +9,7 @@ use guided_review::code_source::{BlobInfo, CodeSource, FileAt, FileDiff, parse_u
 use guided_review::file_path::FilePath;
 use guided_review::pieces;
 use guided_review::pull_request::Sha;
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Review, ReviewStateFile};
 use serde_json::json;
 use tempfile::TempDir;
@@ -286,7 +286,7 @@ fn the_review_reads_every_changed_file_at_head_for_context_at_the_same_time() {
             .reading_together(&["docs/a.txt", "docs/b.txt"]),
     );
     let cache = cached(&source);
-    let tour: Tour = serde_json::from_value(json!({
+    let tour: GuidedTour = serde_json::from_value(json!({
         "pr": "https://github.com/acme/shop/pull/7",
         "base": "base",
         "head": "head",
@@ -340,7 +340,7 @@ fn an_unchanged_line_whose_base_line_does_not_add_up_is_still_shown() {
             .with_file("head", "docs/a.txt", "new 1\nnew 2\nkept\n"),
     );
     let cache = cached(&source);
-    let tour: Tour = serde_json::from_value(json!({
+    let tour: GuidedTour = serde_json::from_value(json!({
         "pr": "https://github.com/acme/shop/pull/7",
         "base": "base",
         "head": "head",

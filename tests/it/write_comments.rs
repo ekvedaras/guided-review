@@ -5,7 +5,7 @@ use crate::support::work::drive_without_agents;
 use crate::support::{drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Audience, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
     CommentResult, LineLocation, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
@@ -110,7 +110,7 @@ impl Pull {
     }
 
     fn open_at(&self, head: &str) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": head,

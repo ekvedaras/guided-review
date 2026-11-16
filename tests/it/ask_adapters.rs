@@ -274,7 +274,10 @@ fn a_state_file_written_with_text_piece_ids_loads_and_saves_back_unchanged() {
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved["last_repin"], written["last_repin"]);
     assert_eq!(saved["asks"][0]["place"], written["asks"][0]["place"]);
-    assert_eq!(saved["asks"][1]["place"], written["asks"][1]["place"]);
+    let lines = &saved["asks"][1]["place"];
+    assert_eq!(lines["shown_on"], json!({"kind": "step", "step": "order"}));
+    assert_eq!(lines["pieces"], written["asks"][1]["place"]["pieces"]);
+    assert_eq!(lines["start"], written["asks"][1]["place"]["start"]);
     let reloaded = Asks::load(Arc::new(ReviewStateFile::for_pr(
         &folders_in(home.path()),
         &pr,

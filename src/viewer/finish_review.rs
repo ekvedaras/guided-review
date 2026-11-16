@@ -90,6 +90,8 @@ pub struct SubmittedReview {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApproveWarning {
     pub unread_steps: usize,
+    /// A basic tour's unread files; a guided tour has none.
+    pub unread_files: usize,
     /// Pieces no step shows. Nothing marks them read, so all of them count.
     pub unread_safety_net_pieces: usize,
 }

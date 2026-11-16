@@ -4,10 +4,10 @@ use std::path::Path;
 
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use guided_review::pull_request::PullRequestUrl;
-use guided_review::tour::Tour;
+use guided_review::tour::{BasicTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrSwitcher, RelevantPullRequest,
-    RelevantPullRequests, RelevantPullRequestsPort, TourFact, WhyListed,
+    RelevantPullRequests, RelevantPullRequestsPort, WhyListed, WritingFact,
 };
 use tempfile::TempDir;
 
@@ -87,16 +87,24 @@ fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
     assert_eq!(limits.pull_request.author, "dave");
 }
 
+fn write_basic_tour(home: &Path, url: &str) {
+    let path = Tour::basic_path_for(&folders_in(home), &pr(url));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let pin = serde_json::from_value(serde_json::json!({})).unwrap();
+    BasicTour::new(pin, "A PR".to_owned()).save(&path).unwrap();
+}
+
 #[test]
-fn a_row_says_whether_the_pull_request_has_a_tour() {
+fn a_row_says_which_tours_the_pull_request_has_on_disk() {
     let home = home_with_tour_of(API_31);
+    write_basic_tour(home.path(), SHOP_7);
 
     let switcher = loaded(&three_pull_requests(), home.path());
 
-    let tours: Vec<_> = switcher.visible().map(|row| row.tour).collect();
+    let tours: Vec<_> = switcher.visible().map(|row| row.tour.on_disk).collect();
     assert_eq!(
         tours,
-        [TourFact::Missing, TourFact::Ready, TourFact::Missing]
+        [ToursOnDisk::None, ToursOnDisk::Guided, ToursOnDisk::Basic]
     );
 }
 
@@ -108,10 +116,10 @@ fn a_tour_written_since_the_list_loaded_shows_when_the_tours_are_checked_again()
 
     switcher.check_tours(&folders_in(home.path()), &ActivePr::default());
 
-    let tours: Vec<_> = switcher.visible().map(|row| row.tour).collect();
+    let tours: Vec<_> = switcher.visible().map(|row| row.tour.on_disk).collect();
     assert_eq!(
         tours,
-        [TourFact::Missing, TourFact::Missing, TourFact::Ready]
+        [ToursOnDisk::None, ToursOnDisk::None, ToursOnDisk::Guided]
     );
 }
 
@@ -142,36 +150,31 @@ fn picking_a_pull_request_with_a_tour_switches_to_it() {
 }
 
 #[test]
-fn picking_a_pull_request_with_no_tour_writes_it() {
+fn picking_a_pull_request_with_no_tour_shows_it_as_a_basic_tour() {
     let home = TempDir::new().unwrap();
     let switcher = loaded(&three_pull_requests(), home.path());
 
-    assert_eq!(switcher.pick(0).unwrap(), Pick::Write(pr(BLOG_7)));
+    assert_eq!(switcher.pick(0).unwrap(), Pick::Show(pr(BLOG_7)));
     assert_eq!(
         switcher.tour_label(switcher.visible().next().unwrap()),
-        "no tour yet"
+        "basic"
     );
 }
 
 #[test]
-fn without_herdr_a_pull_request_with_no_tour_says_writing_one_needs_herdr() {
+fn a_row_labels_the_tour_it_opens_basic_guided_or_guided_ready() {
     let home = home_with_tour_of(API_31);
-    let mut switcher = loaded(&three_pull_requests(), home.path());
+    write_basic_tour(home.path(), BLOG_7);
+    write_basic_tour(home.path(), SHOP_7);
+    write_tour(home.path(), SHOP_7);
 
-    switcher.agent_link(Err("`hc` is not on PATH".to_owned()));
+    let switcher = loaded(&three_pull_requests(), home.path());
 
-    let refusal = switcher.pick(0).unwrap_err().to_string();
-    assert!(
-        refusal.contains("needs herdr") && refusal.contains("not on PATH"),
-        "{refusal}"
-    );
-    assert_eq!(switcher.pick(1).unwrap(), Pick::Show(pr(API_31)));
-    let rows: Vec<_> = switcher.visible().collect();
-    let [no_tour, with_tour, _] = rows.as_slice() else {
-        panic!("three rows");
-    };
-    assert_eq!(switcher.tour_label(no_tour), "needs herdr");
-    assert_eq!(switcher.tour_label(with_tour), "tour");
+    let labels: Vec<_> = switcher
+        .visible()
+        .map(|row| switcher.tour_label(row))
+        .collect();
+    assert_eq!(labels, ["basic", "guided", "guided ready"]);
 }
 
 #[test]
@@ -189,11 +192,12 @@ fn rows_say_which_tours_are_being_written_failed_or_have_an_unseen_agent_reply()
     let rows: Vec<_> = switcher.visible().collect();
     let tours: Vec<_> = rows.iter().map(|row| row.tour).collect();
     assert_eq!(
-        tours,
-        [TourFact::Writing, TourFact::Ready, TourFact::WritingFailed]
+        tours.iter().map(|tour| tour.writing).collect::<Vec<_>>(),
+        [WritingFact::Writing, WritingFact::None, WritingFact::Failed]
     );
+    assert_eq!(tours[1].on_disk, ToursOnDisk::Guided);
     let labels: Vec<_> = rows.iter().map(|row| switcher.tour_label(row)).collect();
-    assert_eq!(labels, ["writing", "tour", "writing failed"]);
+    assert_eq!(labels, ["writing", "guided", "writing failed"]);
     let unseen: Vec<_> = rows.iter().map(|row| row.has_unseen_reply).collect();
     assert_eq!(unseen, [false, true, false]);
     assert_eq!(

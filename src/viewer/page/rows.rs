@@ -11,12 +11,14 @@ use crate::pieces::PieceId;
 use crate::tour::Step;
 use crate::viewer::{
     Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LabelSwitch, LineKind,
-    LineLocation, Markdown, NextScreen, NotesButton, Place, QueuedComment, RenderedBlock, StepId,
-    SummaryStats, ThreadView, TourLead, ViewSwitch,
+    LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place, QueuedComment,
+    ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead, ViewSwitch,
 };
 
 #[derive(Clone)]
 pub enum PageRow {
+    /// A basic tour's first screen, all of it.
+    Overview(Arc<OverviewPage>),
     SummaryTitle(Arc<str>),
     SummaryStats(Arc<SummaryStatsRow>),
     SummaryBullet(Arc<str>),
@@ -108,6 +110,8 @@ pub struct StepHeading {
 /// The controls over a screen's pieces, in one row.
 pub struct Toolbar {
     pub ask: Option<AskAt>,
+    /// The file a basic tour's screen shows, which the reviewer can comment on as a whole.
+    pub comment_on_file: Option<FilePath>,
     pub fold: Option<FoldControl>,
     pub full_diff: Option<FullDiffControl>,
     /// `None` where no code is shown.
@@ -125,7 +129,7 @@ pub struct FoldControl {
 
 #[derive(Hash)]
 pub struct FullDiffControl {
-    pub step: StepId,
+    pub subject: ReadSubject,
     pub is_showing_full_diff: bool,
 }
 
@@ -133,9 +137,11 @@ pub struct FullDiffControl {
 #[derive(Hash)]
 pub struct ScreenFooter {
     /// The step that is ticked on the way on: the open step, if not read yet.
-    pub ticks: Option<StepId>,
+    pub ticks: Option<ReadSubject>,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
+    /// A basic tour's file screen: its number among the files, and how many files there are.
+    pub file_place: Option<(usize, usize)>,
     /// On the last screen once every step is read: the end of the tour.
     pub lead: Option<TourLead>,
 }
@@ -149,24 +155,22 @@ pub struct SummaryStatsRow {
     pub removed: Arc<str>,
     /// `None` when no thread is open.
     pub open_threads: Option<Arc<str>>,
+    /// After a switch from a basic tour: how many steps start read.
+    pub started_read: Option<Arc<str>>,
 }
 
 impl SummaryStatsRow {
-    pub(super) fn of(stats: SummaryStats) -> Self {
-        let count = |count: usize, one: &str, many: &str| -> Arc<str> {
-            if count == 1 {
-                format!("1 {one}").into()
-            } else {
-                format!("{count} {many}").into()
-            }
-        };
+    pub(super) fn of(stats: SummaryStats, started_read: Option<usize>) -> Self {
         Self {
-            steps: count(stats.steps, "step", "steps"),
-            files: count(stats.files, "file changed", "files changed"),
+            steps: pluralised(stats.steps, "step", "steps").into(),
+            files: pluralised(stats.files, "file changed", "files changed").into(),
             added: format!("+{}", stats.added_lines).into(),
             removed: format!("\u{2212}{}", stats.removed_lines).into(),
             open_threads: (stats.open_threads > 0)
-                .then(|| count(stats.open_threads, "open thread", "open threads")),
+                .then(|| pluralised(stats.open_threads, "open thread", "open threads").into()),
+            started_read: started_read
+                .filter(|steps| *steps > 0)
+                .map(|steps| pluralised(steps, "step starts read", "steps start read").into()),
         }
     }
 }
@@ -186,10 +190,10 @@ pub struct RouteStopRow {
     pub is_last: bool,
 }
 
-/// The fold of one file box of a step.
+/// The fold of one file box of a step or of a file screen.
 #[derive(Clone, Hash)]
 pub struct BoxFold {
-    pub step: StepId,
+    pub screen: Screen,
     pub path: FilePath,
     pub is_folded: bool,
 }
@@ -439,6 +443,14 @@ pub(super) fn box_edges(rows: &[PageRow]) -> Vec<BoxEdges> {
         before = Some(part);
     }
     edges
+}
+
+/// "1 file" or "3 files": the count with the form that fits it.
+pub fn pluralised(count: usize, one: &str, many: &str) -> String {
+    match count {
+        1 => format!("1 {one}"),
+        count => format!("{count} {many}"),
+    }
 }
 
 /// Typing only changes a box's height when its line count changes.

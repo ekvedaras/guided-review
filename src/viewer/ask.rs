@@ -1,3 +1,4 @@
+use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, Sha};
 use std::sync::Arc;
@@ -22,14 +23,58 @@ pub enum Place {
         step: StepId,
         piece: PieceId,
     },
-    /// Rows the reviewer selected, top to bottom, in a step or (`step: None`) the safety net.
+    /// A changed file of a basic tour, as its screen shows it.
+    File {
+        path: FilePath,
+    },
+    /// Rows the reviewer selected, top to bottom, on the screen they were shown on.
     Lines {
-        step: Option<StepId>,
+        #[serde(alias = "step")]
+        shown_on: ShownOn,
         start: LineLocation,
         end: LineLocation,
         /// The pieces the rows belong to, to tell when a re-pin changed them.
         pieces: Vec<PieceId>,
     },
+}
+
+/// The screen an Ask about lines was shown on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "StoredShownOn")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ShownOn {
+    Step { step: StepId },
+    SafetyNet,
+    File { path: FilePath },
+}
+
+/// What a state file holds for the screen of an Ask about lines: the value, or what builds before it
+/// saved there, the step's id or `null` for the safety net.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredShownOn {
+    Current(CurrentShownOn),
+    BeforeShownOn(Option<StepId>),
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CurrentShownOn {
+    Step { step: StepId },
+    SafetyNet,
+    File { path: FilePath },
+}
+
+impl From<StoredShownOn> for ShownOn {
+    fn from(stored: StoredShownOn) -> Self {
+        match stored {
+            StoredShownOn::Current(CurrentShownOn::Step { step })
+            | StoredShownOn::BeforeShownOn(Some(step)) => Self::Step { step },
+            StoredShownOn::Current(CurrentShownOn::SafetyNet)
+            | StoredShownOn::BeforeShownOn(None) => Self::SafetyNet,
+            StoredShownOn::Current(CurrentShownOn::File { path }) => Self::File { path },
+        }
+    }
 }
 
 impl Place {
@@ -278,6 +323,40 @@ impl Asks {
 
     fn ask_mut(&mut self, id: AskId) -> Option<&mut Ask> {
         self.asks.iter_mut().find(|ask| ask.id == id)
+    }
+
+    /// Asks about lines of a file screen are shown on another screen from now on, where `moved`
+    /// says so; saved once when any moved.
+    pub(super) fn move_lines_asks(
+        &mut self,
+        moved: impl Fn(&[PieceId]) -> Option<ShownOn>,
+    ) -> anyhow::Result<()> {
+        let mut any_moved = false;
+        for ask in &mut self.asks {
+            let Place::Lines {
+                shown_on, pieces, ..
+            } = &mut ask.place
+            else {
+                continue;
+            };
+            let ShownOn::File { .. } = &*shown_on else {
+                continue;
+            };
+            if let Some(now) = moved(pieces) {
+                *shown_on = now;
+                any_moved = true;
+            }
+        }
+        if !any_moved {
+            return Ok(());
+        }
+        let kept: Vec<Ask> = self
+            .asks
+            .iter()
+            .filter(|ask| !ask.messages.is_empty())
+            .cloned()
+            .collect();
+        self.store.save(&kept)
     }
 
     fn save(&mut self, id: AskId) {

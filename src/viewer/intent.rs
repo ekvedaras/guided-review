@@ -3,8 +3,10 @@
 //! The window reports what it alone knows (an overlay open, a reopen under way, the end of the
 //! screen on show) and carries out the `Effect`; the rules that pick the effect are here, once.
 
+use super::file_tree::FolderPath;
+use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
-use super::review::{ReviewCore, Screen};
+use super::review::{ReadSubject, ReviewCore, Screen};
 use crate::pull_request::PullRequestUrl;
 use crate::tour::StepId;
 
@@ -34,6 +36,9 @@ pub enum Intent {
     ShowSettings,
     ToggleShortcuts,
     AskAboutScreen,
+    /// Write guided tour, from the overview, the sidebar or the palette.
+    WriteGuidedTour,
+    SwitchToGuidedTour,
     FinishReview,
     OpenOnGitHub,
     CheckForUpdates,
@@ -45,7 +50,10 @@ impl From<PaletteAction> for Intent {
     fn from(action: PaletteAction) -> Self {
         match action {
             PaletteAction::NextUnreadStep => Self::NextUnreadStep,
-            PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => Self::ToggleRead,
+            PaletteAction::MarkStepRead
+            | PaletteAction::MarkStepUnread
+            | PaletteAction::MarkFileRead
+            | PaletteAction::MarkFileUnread => Self::ToggleRead,
             PaletteAction::WrapLines | PaletteAction::StopWrappingLines => Self::ToggleWrapLines,
             PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => Self::ToggleWhitespace,
             PaletteAction::ShowPieceLabels | PaletteAction::HidePieceLabels => {
@@ -53,6 +61,8 @@ impl From<PaletteAction> for Intent {
             }
             PaletteAction::ShowRendered | PaletteAction::ShowCode => Self::ToggleRenderedView,
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
+            PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
+            PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
@@ -77,6 +87,10 @@ pub enum Effect {
     /// Opens the PR switcher, or leaves it open.
     OpenPrSwitcher,
     AskAboutScreen,
+    /// Starts the guided tour's writing: the review took it and the app hands the task to the agent.
+    WriteGuidedTour,
+    /// The reviewer asked to switch to a ready guided tour.
+    SwitchToGuidedTour,
     OpenFinishForm,
     OpenOnGitHub(PullRequestUrl),
     Restart(RestartArgs),
@@ -89,10 +103,14 @@ pub enum Effect {
 /// A change of the review an intent makes, applied with `ReviewCore::apply`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewChange {
-    GoOn { ticking: Option<StepId> },
+    GoOn {
+        ticking: Option<ReadSubject>,
+    },
     GoBack,
     GoToNextUnread,
-    ToggleTick(StepId),
+    ToggleTick(ReadSubject),
+    /// A folder of a basic tour's sidebar tree folds or unfolds.
+    ToggleFolder(FolderPath),
     ToggleWrapLines,
     ToggleWhitespace,
 }
@@ -119,6 +137,8 @@ pub enum Refusal {
     Reopening,
     /// Settings is a modal sheet: while it is open, the other overlays wait.
     SettingsOpen,
+    /// A guided-tour action that does not apply now.
+    GuidedTour(GuidedTourRefusal),
 }
 
 /// What only the window knows when an intent comes.
@@ -179,6 +199,8 @@ impl Intent {
             | Self::TogglePrSwitcher
             | Self::ShowPrSwitcher
             | Self::AskAboutScreen
+            | Self::WriteGuidedTour
+            | Self::SwitchToGuidedTour
             | Self::FinishReview
             | Self::OpenOnGitHub
             | Self::CheckForUpdates
@@ -206,17 +228,22 @@ impl ReviewCore {
         match intent {
             Intent::NextScreen => Effect::Change(ReviewChange::GoOn {
                 ticking: self
-                    .unread_step_on_screen()
+                    .unread_subject_on_screen()
                     .filter(|_| self.has_seen_end_of_screen()),
             }),
             Intent::MarkReadAndGoOn => Effect::Change(ReviewChange::GoOn {
-                ticking: self.unread_step_on_screen(),
+                ticking: self.unread_subject_on_screen(),
             }),
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
             Intent::ToggleRead => match self.screen() {
-                Screen::Step(id) => Effect::Change(ReviewChange::ToggleTick(id.clone())),
-                Screen::Summary | Screen::SafetyNet => Effect::Nothing,
+                Screen::Step(id) => {
+                    Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))
+                }
+                Screen::File(path) => {
+                    Effect::Change(ReviewChange::ToggleTick(ReadSubject::File(path.clone())))
+                }
+                Screen::Summary | Screen::Overview | Screen::SafetyNet => Effect::Nothing,
             },
             Intent::ToggleWrapLines => Effect::Change(ReviewChange::ToggleWrapLines),
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
@@ -232,6 +259,14 @@ impl ReviewCore {
             },
             Intent::ToggleShortcuts => Effect::Toggle(Overlay::Shortcuts),
             Intent::AskAboutScreen => Effect::AskAboutScreen,
+            Intent::WriteGuidedTour => match self.write_guided_tour_refusal() {
+                None => Effect::WriteGuidedTour,
+                Some(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
+            },
+            Intent::SwitchToGuidedTour => match self.switch_to_guided_tour() {
+                Ok(()) => Effect::SwitchToGuidedTour,
+                Err(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
+            },
             Intent::FinishReview => Effect::OpenFinishForm,
             Intent::OpenOnGitHub => Effect::OpenOnGitHub(self.pr().clone()),
             Intent::CheckForUpdates => Effect::CheckForUpdates,
@@ -243,7 +278,7 @@ impl ReviewCore {
     pub fn apply(&mut self, change: ReviewChange) -> anyhow::Result<()> {
         match change {
             ReviewChange::GoOn { ticking } => {
-                let ticked = ticking.map_or(Ok(()), |id| self.tick(&id));
+                let ticked = ticking.map_or(Ok(()), |subject| self.tick_subject(&subject));
                 self.go_on();
                 ticked
             }
@@ -255,12 +290,16 @@ impl ReviewCore {
                 self.go_to_next_unread();
                 Ok(())
             }
-            ReviewChange::ToggleTick(id) => {
-                if self.is_ticked(&id) {
-                    self.untick(&id)
+            ReviewChange::ToggleTick(subject) => {
+                if self.is_read(&subject) {
+                    self.untick_subject(&subject)
                 } else {
-                    self.tick(&id)
+                    self.tick_subject(&subject)
                 }
+            }
+            ReviewChange::ToggleFolder(folder) => {
+                self.toggle_folder(&folder);
+                Ok(())
             }
             ReviewChange::ToggleWrapLines => {
                 self.display_options_mut().toggle_wrap_lines();
@@ -279,15 +318,36 @@ impl ReviewCore {
             pr: self.pr().clone(),
             at: match self.screen() {
                 Screen::Step(id) => Some(id.clone()),
-                Screen::Summary | Screen::SafetyNet => None,
+                Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
             },
         }
     }
 
-    fn unread_step_on_screen(&self) -> Option<StepId> {
+    fn tick_subject(&mut self, subject: &ReadSubject) -> anyhow::Result<()> {
+        match subject {
+            ReadSubject::Step(id) => self.tick(id),
+            ReadSubject::File(path) => self.tick_file(path),
+        }
+    }
+
+    fn untick_subject(&mut self, subject: &ReadSubject) -> anyhow::Result<()> {
+        match subject {
+            ReadSubject::Step(id) => self.untick(id),
+            ReadSubject::File(path) => self.untick_file(path),
+        }
+    }
+
+    fn unread_subject_on_screen(&self) -> Option<ReadSubject> {
         match self.screen() {
-            Screen::Step(id) if !self.is_ticked(id) => Some(id.clone()),
-            Screen::Summary | Screen::Step(_) | Screen::SafetyNet => None,
+            Screen::Step(id) if !self.is_ticked(id) => Some(ReadSubject::Step(id.clone())),
+            Screen::File(path) if !self.is_file_ticked(path) => {
+                Some(ReadSubject::File(path.clone()))
+            }
+            Screen::Summary
+            | Screen::Overview
+            | Screen::File(_)
+            | Screen::Step(_)
+            | Screen::SafetyNet => None,
         }
     }
 }

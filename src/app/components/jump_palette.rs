@@ -74,7 +74,9 @@ impl ShownEntry {
         let (label, detail) = match &entry {
             PaletteEntry::Place(target) => (
                 match &target.place {
-                    JumpPlace::StepTop => ShownLabel::Step(target.label().into_owned().into()),
+                    JumpPlace::StepTop | JumpPlace::Overview => {
+                        ShownLabel::Step(target.label().into_owned().into())
+                    }
                     JumpPlace::File(path) => {
                         ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(path.clone())))
                     }
@@ -94,7 +96,7 @@ impl ShownEntry {
     fn icon(&self) -> Icon {
         match &self.entry {
             PaletteEntry::Place(target) => match target.place {
-                JumpPlace::StepTop => Icon::Milestone,
+                JumpPlace::StepTop | JumpPlace::Overview => Icon::Milestone,
                 JumpPlace::File(_) => Icon::FileText,
                 JumpPlace::Piece(_) => Icon::Braces,
             },
@@ -106,13 +108,17 @@ impl ShownEntry {
 fn action_icon(action: PaletteAction) -> Icon {
     match action {
         PaletteAction::NextUnreadStep => Icon::CircleDot,
-        PaletteAction::MarkStepRead | PaletteAction::MarkStepUnread => Icon::Check,
+        PaletteAction::MarkStepRead
+        | PaletteAction::MarkStepUnread
+        | PaletteAction::MarkFileRead
+        | PaletteAction::MarkFileUnread => Icon::Check,
         PaletteAction::WrapLines | PaletteAction::StopWrappingLines => Icon::WrapText,
         PaletteAction::HideWhitespace | PaletteAction::ShowWhitespace => Icon::Space,
         PaletteAction::ShowPieceLabels | PaletteAction::HidePieceLabels => Icon::Milestone,
         PaletteAction::ShowRendered => Icon::FileText,
         PaletteAction::ShowCode => Icon::Code,
-        PaletteAction::AskAboutStep => Icon::Sparkles,
+        PaletteAction::AskAboutStep | PaletteAction::WriteGuidedTour => Icon::Sparkles,
+        PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview => Icon::ListChecks,
         PaletteAction::OpenOnGitHub => Icon::ExternalLink,
         PaletteAction::SwitchPr => Icon::PullRequest,

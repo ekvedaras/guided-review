@@ -16,9 +16,9 @@ use crate::repin::RepinStatus;
 use crate::viewer::focused_change::ChangeFile;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
-    BoxState, CommentPlace, FileBlock, LineLocation, Markdown, NoteSubject, NotesButton, PieceDiff,
-    Place, QueuedComment, SafetyNetPage, StepId, StepPage, ThreadView, TourLead,
-    hidden_lines_after, hidden_lines_before,
+    BoxState, CommentPlace, FileBlock, FilePage, LineLocation, Markdown, NoteSubject, NotesButton,
+    PieceDiff, Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, StepPage, ThreadView,
+    TourLead, hidden_lines_after, hidden_lines_before,
 };
 use crate::viewer::{FileView, LabelSwitch, PageChange, PieceLabels, Rendering, ViewSwitch};
 
@@ -35,6 +35,18 @@ pub(super) struct Laid {
 pub(super) fn summary(review: &ReviewCore) -> Laid {
     let mut builder = Builder::new(review);
     builder.summary_rows();
+    builder.laid(None)
+}
+
+pub(super) fn overview(review: &ReviewCore) -> Laid {
+    let mut builder = Builder::new(review);
+    builder.overview_rows();
+    builder.laid(None)
+}
+
+pub(super) fn file(review: &ReviewCore, path: &FilePath, page: FilePage) -> Laid {
+    let mut builder = Builder::new(review);
+    builder.file_rows(path, page);
     builder.laid(None)
 }
 
@@ -97,6 +109,7 @@ impl<'a> Builder<'a> {
         rows.push(PageRow::SummaryTitle(review.title().into()));
         rows.push(PageRow::SummaryStats(Arc::new(SummaryStatsRow::of(
             review.summary_stats(),
+            review.steps_that_started_read(),
         ))));
         rows.extend(
             review
@@ -144,11 +157,91 @@ impl<'a> Builder<'a> {
                 place: Place::Tour,
                 label: "the whole tour".into(),
             }),
+            comment_on_file: None,
             fold: None,
             full_diff: None,
             ignores_whitespace: None,
             wraps_lines: None,
         })));
+    }
+
+    fn overview_rows(&mut self) {
+        self.rows
+            .push(PageRow::Overview(Arc::new(self.review.overview_page())));
+        self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            ask: Some(AskAt {
+                id: "ask-tour".into(),
+                place: Place::Tour,
+                label: "the whole PR".into(),
+            }),
+            comment_on_file: None,
+            fold: None,
+            full_diff: None,
+            ignores_whitespace: None,
+            wraps_lines: None,
+        })));
+    }
+
+    /// A file screen is a step page with no text: its toolbar, the file's boxes, the way on.
+    fn file_rows(&mut self, path: &FilePath, page: FilePage) {
+        let review = self.review;
+        self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            ask: Some(AskAt {
+                id: format!("ask-file-{path}").into(),
+                place: Place::File { path: path.clone() },
+                label: path.to_string(),
+            }),
+            // A picture has its own button for it.
+            comment_on_file: (!page.pieces.iter().any(|piece| piece.is_image))
+                .then(|| path.clone()),
+            fold: None,
+            full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
+                subject: ReadSubject::File(path.clone()),
+                is_showing_full_diff: since.showing_full_diff,
+            }),
+            ignores_whitespace: Some(review.display_options().ignores_whitespace()),
+            wraps_lines: Some(review.display_options().wraps_lines()),
+        })));
+        let shown = if page
+            .since_read
+            .as_ref()
+            .is_some_and(|since| !since.showing_full_diff)
+        {
+            DiffShown::ChangeSinceRead
+        } else {
+            DiffShown::Full
+        };
+        let after_code = self.hang_threads_and_comments(page.threads);
+        for block in FileBlock::group(page.pieces) {
+            if !self.holds_file_comments(&block) {
+                let on_file = self.under_lines.take_whole_file(&block.path);
+                self.hang(on_file);
+            }
+            let screen = review.screen().clone();
+            let fold = BoxFold {
+                is_folded: review.is_box_folded(&screen, &block.path),
+                screen,
+                path: block.path.clone(),
+            };
+            self.block_rows(block, None, Some(fold), shown);
+        }
+        self.rows.extend(
+            after_code
+                .into_iter()
+                .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
+        );
+        self.rows.push(screen_footer(
+            review,
+            review.file_to_tick_on_screen().map(ReadSubject::File),
+        ));
+    }
+
+    /// A picture and a rendered file hold what is said of the whole file under themselves.
+    fn holds_file_comments(&self, block: &FileBlock) -> bool {
+        block.pieces.iter().any(|piece| piece.is_image)
+            || self
+                .view_switch(block)
+                .is_some_and(|switch| switch.view == FileView::Rendered)
     }
 
     /// Returns the diagram the step shows.
@@ -196,19 +289,23 @@ impl<'a> Builder<'a> {
                 place: Place::Step { step: id.clone() },
                 label: step.title.clone(),
             }),
+            comment_on_file: None,
             fold: (folds && has_code).then(|| FoldControl {
                 step: id.clone(),
                 is_folded: page.is_folded,
                 piece_count: page.pieces.len(),
             }),
             full_diff: page.since_read.as_ref().map(|since| FullDiffControl {
-                step: id.clone(),
+                subject: ReadSubject::Step(id.clone()),
                 is_showing_full_diff: since.showing_full_diff,
             }),
             ignores_whitespace: has_code.then(|| review.display_options().ignores_whitespace()),
             wraps_lines: has_code.then(|| review.display_options().wraps_lines()),
         })));
-        let footer = screen_footer(review, (!page.is_ticked).then(|| id.clone()));
+        let footer = screen_footer(
+            review,
+            (!page.is_ticked).then(|| ReadSubject::Step(id.clone())),
+        );
         let shown = if page
             .since_read
             .as_ref()
@@ -228,9 +325,10 @@ impl<'a> Builder<'a> {
             label: piece.id.to_string(),
         };
         for block in FileBlock::group(page.pieces) {
+            let screen = Screen::Step(id.clone());
             let fold = BoxFold {
-                step: id.clone(),
-                is_folded: review.is_box_folded(&id, &block.path),
+                is_folded: review.is_box_folded(&screen, &block.path),
+                screen,
                 path: block.path.clone(),
             };
             self.block_rows(block, Some(&ask_of), Some(fold), shown);
@@ -249,6 +347,7 @@ impl<'a> Builder<'a> {
         self.rows.push(PageRow::SafetyNetIntro);
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             ask: None,
+            comment_on_file: None,
             fold: None,
             full_diff: None,
             ignores_whitespace: Some(review.display_options().ignores_whitespace()),
@@ -582,15 +681,17 @@ fn reviewer_summary_row(review: &ReviewCore, summary: Markdown) -> ReviewerSumma
     }
 }
 
-fn screen_footer(review: &ReviewCore, ticks: Option<StepId>) -> PageRow {
+fn screen_footer(review: &ReviewCore, ticks: Option<ReadSubject>) -> PageRow {
     let place = review.reading_place();
     let lead = review.tour_lead();
-    let leads_on =
-        matches!(lead, TourLead::Finish { .. }) && place.next.is_none() && ticks.is_none();
+    let leads_on = matches!(lead, TourLead::Finish { .. } | TourLead::FinishFiles { .. })
+        && place.next.is_none()
+        && ticks.is_none();
     PageRow::ScreenFooter(Arc::new(ScreenFooter {
         ticks,
         has_previous: place.has_previous,
         next: place.next,
+        file_place: place.file_number.map(|number| (number, place.file_count)),
         lead: leads_on.then_some(lead),
     }))
 }

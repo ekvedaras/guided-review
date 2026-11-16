@@ -3,7 +3,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use crate::support::{FixtureRepo, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
-use guided_review::tour::Tour;
+use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     ApproveWarning, FinishRefusal, FinishResult, Review, ReviewOutcome, ReviewStateFile,
     ReviewVerdict, SubmittedReview, TextBox,
@@ -44,7 +44,7 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
-        let tour: Tour = serde_json::from_value(json!({
+        let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": self.head,
@@ -79,6 +79,7 @@ fn approve_warns_with_the_unread_steps_and_unread_safety_net_pieces() {
         review.approve_warning(),
         Some(ApproveWarning {
             unread_steps: 1,
+            unread_files: 0,
             unread_safety_net_pieces: 1
         })
     );
@@ -87,7 +88,7 @@ fn approve_warns_with_the_unread_steps_and_unread_safety_net_pieces() {
 #[test]
 fn nothing_unread_means_no_warning() {
     let pull = Pull::new();
-    let tour: Tour = serde_json::from_value(json!({
+    let tour: GuidedTour = serde_json::from_value(json!({
         "pr": PR, "base": pull.base, "head": pull.head, "title": "Letters", "summary": [],
         "steps": [{"id": "all", "title": "All", "why": "because", "pieces": [{"file": "a.txt"}, {"file": "b.txt"}, {"file": "c.txt"}], "children": []}],
     }))

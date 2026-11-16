@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::pieces::PieceId;
 use crate::pull_request::Sha;
 
 use super::agent_event::AgentEvent;
 use super::agent_pool::{AgentPool, Opening};
-use super::ask::{Ask, AskId, Asks, Place};
+use super::ask::{Ask, AskId, Asks, Place, ShownOn};
 use super::ask_target::AskTarget;
 use super::ports::{AgentLaunch, TurnStopper};
 use super::review::Screen;
@@ -97,6 +98,13 @@ impl AskDesk {
         }
     }
 
+    pub(super) fn move_lines_asks(
+        &mut self,
+        moved: impl Fn(&[PieceId]) -> Option<ShownOn>,
+    ) -> anyhow::Result<()> {
+        self.asks.move_lines_asks(moved)
+    }
+
     pub fn clone_folder(&self) -> Option<&PathBuf> {
         self.clone.as_ref()
     }
@@ -121,17 +129,15 @@ impl AskDesk {
 
     /// The selected lines with Asks on a screen, which get a marker under their last row.
     pub fn asked_lines_on(&self, screen: &Screen) -> Vec<Place> {
-        let step = match screen {
-            Screen::Step(id) => Some(id),
-            Screen::SafetyNet => None,
-            Screen::Summary => return Vec::new(),
+        let Some(shown_on) = screen.shown_on() else {
+            return Vec::new();
         };
         let mut places: Vec<Place> = Vec::new();
         for ask in self.asks.all() {
-            let Place::Lines { step: of, .. } = &ask.place else {
+            let Place::Lines { shown_on: of, .. } = &ask.place else {
                 continue;
             };
-            if of.as_ref() == step && !ask.messages.is_empty() && !places.contains(&ask.place) {
+            if *of == shown_on && !ask.messages.is_empty() && !places.contains(&ask.place) {
                 places.push(ask.place.clone());
             }
         }

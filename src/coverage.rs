@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::code_source::Line;
 use crate::line_number::LineNumber;
 use crate::pieces::{ChangedFile, Piece, PieceId};
-use crate::tour::{PieceRef, Tour};
+use crate::tour::{GuidedTour, PieceRef};
 
 /// The pieces this pointer names directly; `None` when it names something that did not change.
 /// `rest` names nothing directly, it only mops up what is left.
@@ -39,7 +39,7 @@ pub fn named_pieces<'a>(pointer: &PieceRef, files: &'a [ChangedFile]) -> Option<
 /// What a step shows for this pointer: whole pieces, or for a line range only the lines inside it.
 pub fn shown_parts<'a>(
     pointer: &PieceRef,
-    tour: &Tour,
+    tour: &GuidedTour,
     files: &'a [ChangedFile],
 ) -> Vec<PiecePart<'a>> {
     match pointer {
@@ -170,7 +170,7 @@ impl<'a> Seen<'a> {
 
 /// Everything the tour leaves unseen: pieces no step shows, and the lines of a piece
 /// that line ranges cut through but do not reach. Computed by the viewer, never stored.
-pub fn safety_net<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
+pub fn safety_net<'a>(tour: &GuidedTour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
     let seen = Seen::of(
         tour.steps()
             .iter()
@@ -186,7 +186,7 @@ pub fn safety_net<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a
 
 /// Changes no step covers. A `rest` pointer covers everything under its folder
 /// that is not already covered, so it only matters for what no other pointer names.
-pub fn uncovered<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
+pub fn uncovered<'a>(tour: &GuidedTour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>> {
     let steps = tour.steps();
     let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
     let seen = Seen::named_by(&pointers, files);
@@ -212,7 +212,7 @@ pub fn uncovered<'a>(tour: &Tour, files: &'a [ChangedFile]) -> Vec<PiecePart<'a>
 
 /// What a `rest` pointer stands for: the changes under its folder that no other pointer names.
 pub fn left_for_rest<'a>(
-    tour: &Tour,
+    tour: &GuidedTour,
     files: &'a [ChangedFile],
     folder: &str,
 ) -> Vec<PiecePart<'a>> {
@@ -243,7 +243,7 @@ pub struct RestTaken<'a> {
     pub files: Vec<&'a str>,
 }
 
-pub fn rest_taken<'a>(tour: &'a Tour, files: &'a [ChangedFile]) -> Vec<RestTaken<'a>> {
+pub fn rest_taken<'a>(tour: &'a GuidedTour, files: &'a [ChangedFile]) -> Vec<RestTaken<'a>> {
     let steps = tour.steps();
     let pointers: Vec<&PieceRef> = steps.iter().flat_map(|step| &step.pieces).collect();
     let seen = Seen::named_by(&pointers, files);
