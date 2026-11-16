@@ -2,17 +2,20 @@ use crate::app_folders::AppFolders;
 use crate::review_subject::ReviewSubject;
 
 use super::active_pr::ActivePr;
+use super::local_row::LocalRow;
 use super::ports::GitHubError;
 use super::relevant_prs::{RelevantPullRequest, RelevantPullRequests};
 use super::remembered_prs::RememberedPullRequestsFile;
-use crate::pull_request::PullRequestUrl;
 use crate::tour::ToursOnDisk;
 
 /// The list behind the PR title: the reviewer's relevant PRs, what each has, and what was typed
 /// to narrow it. It loads in the background, so it starts out loading.
 pub struct PrSwitcher {
-    rows: Vec<SwitcherRow>,
-    /// Indexes into `rows` that match the filter, in list order.
+    /// What GitHub listed, newest update first.
+    pull_requests: Vec<SwitcherRow>,
+    /// The local change sets found on disk, after the PRs.
+    local: Vec<SwitcherRow>,
+    /// Indexes into the PRs followed by the local rows that match the filter, in list order.
     visible: Vec<usize>,
     filter: String,
     /// Nth visible row.
@@ -33,9 +36,9 @@ pub struct PrSwitcher {
 /// the pointer: the selected PR stays selected, and the hovered PR, or the selected one when none
 /// is, stays on its row of the screen.
 struct Place {
-    selected: Option<PullRequestUrl>,
-    /// The PR to keep on screen, and its row counted from the top of the screen.
-    pinned: Option<(PullRequestUrl, usize)>,
+    selected: Option<ReviewSubject>,
+    /// The row to keep on screen, and its place counted from the top of the screen.
+    pinned: Option<(ReviewSubject, usize)>,
     first_shown: usize,
 }
 
@@ -46,13 +49,21 @@ enum LoadState {
 }
 
 pub struct SwitcherRow {
-    pub pull_request: RelevantPullRequest,
+    pub subject: ReviewSubject,
+    pub kind: RowKind,
     pub tour: TourFact,
     /// The PR's tour agent answered while another PR was shown.
     pub has_unseen_reply: bool,
     /// The PR under review.
     pub is_active: bool,
     haystack: String,
+}
+
+/// What a row is: a PR GitHub listed, or a local change set found on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowKind {
+    PullRequest(RelevantPullRequest),
+    Local(LocalRow),
 }
 
 /// What the PR has to read: the tours on disk, and apart from them what the app is writing.
@@ -89,7 +100,8 @@ pub enum NotPickable {
 impl Default for PrSwitcher {
     fn default() -> Self {
         Self {
-            rows: Vec::new(),
+            pull_requests: Vec::new(),
+            local: Vec::new(),
             visible: Vec::new(),
             filter: String::new(),
             selected: 0,
@@ -112,9 +124,9 @@ impl PrSwitcher {
         match memory.load() {
             Ok(remembered) if remembered.is_empty() => {}
             Ok(remembered) => {
-                switcher.rows = remembered
+                switcher.pull_requests = remembered
                     .into_iter()
-                    .map(|pull_request| SwitcherRow::new(pull_request, folders))
+                    .map(|pull_request| SwitcherRow::of_pull_request(pull_request, folders))
                     .collect();
                 switcher.state = LoadState::Loaded {
                     teams_left_out: Vec::new(),
@@ -167,10 +179,10 @@ impl PrSwitcher {
                     });
                 }
                 let place = self.place();
-                self.rows = relevant
+                self.pull_requests = relevant
                     .pull_requests
                     .into_iter()
-                    .map(|pull_request| SwitcherRow::new(pull_request, folders))
+                    .map(|pull_request| SwitcherRow::of_pull_request(pull_request, folders))
                     .collect();
                 self.state = LoadState::Loaded {
                     teams_left_out: relevant.teams_left_out,
@@ -188,33 +200,29 @@ impl PrSwitcher {
     }
 
     fn place(&self) -> Place {
-        let url_of = |nth: usize| {
-            self.visible()
-                .nth(nth)
-                .map(|row| row.pull_request.url.clone())
-        };
+        let subject_of = |nth: usize| self.visible().nth(nth).map(|row| row.subject.clone());
         let selected_screen_row = self
             .selected
             .checked_sub(self.first_shown)
             .filter(|&row| row < Self::ROWS_SHOWN);
         let pinned_screen_row = self.hovered_screen_row.or(selected_screen_row);
         Place {
-            selected: url_of(self.selected),
+            selected: subject_of(self.selected),
             pinned: pinned_screen_row.and_then(|screen_row| {
-                url_of(self.first_shown + screen_row).map(|url| (url, screen_row))
+                subject_of(self.first_shown + screen_row).map(|subject| (subject, screen_row))
             }),
             first_shown: self.first_shown,
         }
     }
 
-    /// A pinned PR that left the list leaves the rows where they were.
+    /// A pinned row that left the list leaves the rows where they were.
     fn keep(&mut self, place: Place) {
         let nth_of =
-            |url: &PullRequestUrl| self.visible().position(|row| &row.pull_request.url == url);
-        let selected = place.selected.and_then(|url| nth_of(&url));
-        let pinned_first_shown = place
-            .pinned
-            .and_then(|(url, screen_row)| nth_of(&url).map(|nth| nth.saturating_sub(screen_row)));
+            |subject: &ReviewSubject| self.visible().position(|row| &row.subject == subject);
+        let selected = place.selected.and_then(|subject| nth_of(&subject));
+        let pinned_first_shown = place.pinned.and_then(|(subject, screen_row)| {
+            nth_of(&subject).map(|nth| nth.saturating_sub(screen_row))
+        });
         if let Some(nth) = selected {
             self.selected = nth;
         }
@@ -227,15 +235,42 @@ impl PrSwitcher {
     /// Looks for tours again, as one may have been written since the list loaded, and takes what the
     /// app knows beyond the disk: tours being written and agent replies not seen.
     pub fn check_tours(&mut self, folders: &AppFolders, active: &ActivePr) {
-        for row in &mut self.rows {
-            let subject = ReviewSubject::from(row.pull_request.url.clone());
+        for row in self.pull_requests.iter_mut().chain(&mut self.local) {
             row.tour = TourFact {
-                on_disk: ToursOnDisk::of(folders, &subject),
-                writing: active.writing_fact_of(&subject),
+                on_disk: ToursOnDisk::of(folders, &row.subject),
+                writing: active.writing_fact_of(&row.subject),
             };
-            row.has_unseen_reply = active.has_unseen_reply(&subject);
-            row.is_active = active.shown() == Some(&subject);
+            row.has_unseen_reply = active.has_unseen_reply(&row.subject);
+            row.is_active = active.shown() == Some(&row.subject);
         }
+    }
+
+    /// Takes the local change sets found off the UI thread, after the PRs: they replace the local
+    /// rows listed before, and the PR rows stay as they are.
+    pub fn local_found(&mut self, found: Vec<LocalRow>, folders: &AppFolders) {
+        let place = self.place();
+        self.local = found
+            .into_iter()
+            .map(|row| SwitcherRow::of_local(row, folders))
+            .collect();
+        self.apply_filter();
+        self.keep(place);
+    }
+
+    /// A local review was dropped: its row is no more.
+    pub fn dropped(&mut self, subject: &ReviewSubject) {
+        let place = self.place();
+        self.local.retain(|row| &row.subject != subject);
+        self.apply_filter();
+        self.keep(place);
+    }
+
+    /// The local review to drop when the `nth` visible row offers it, as its branch is gone.
+    pub fn drop_offer(&self, nth: usize) -> Option<ReviewSubject> {
+        let row = self.visible().nth(nth)?;
+        row.local()?
+            .offers_drop_review()
+            .then(|| row.subject.clone())
     }
 
     /// What the row says of the PR's tour.
@@ -318,15 +353,19 @@ impl PrSwitcher {
 
     /// The rows the filter lets through, newest update first.
     pub fn visible(&self) -> impl Iterator<Item = &SwitcherRow> {
-        self.visible
-            .iter()
-            .filter_map(|&index| self.rows.get(index))
+        self.visible.iter().filter_map(|&index| self.row_at(index))
+    }
+
+    fn row_at(&self, index: usize) -> Option<&SwitcherRow> {
+        self.pull_requests
+            .get(index)
+            .or_else(|| self.local.get(index.checked_sub(self.pull_requests.len())?))
     }
 
     /// What picking the `nth` visible row does.
     pub fn pick(&self, nth: usize) -> Result<Pick, NotPickable> {
         let row = self.visible().nth(nth).ok_or(NotPickable::NoSuchRow)?;
-        let subject = ReviewSubject::from(row.pull_request.url.clone());
+        let subject = row.subject.clone();
         if row.tour.is_waited_for() {
             Ok(Pick::Write(subject))
         } else {
@@ -338,8 +377,9 @@ impl PrSwitcher {
         let lowered = self.filter.to_lowercase();
         let words: Vec<&str> = lowered.split_whitespace().collect();
         self.visible = self
-            .rows
+            .pull_requests
             .iter()
+            .chain(&self.local)
             .enumerate()
             .filter(|(_, row)| words.iter().all(|word| row.haystack.contains(word)))
             .map(|(index, _)| index)
@@ -351,29 +391,64 @@ impl PrSwitcher {
 }
 
 impl SwitcherRow {
-    fn new(pull_request: RelevantPullRequest, folders: &AppFolders) -> Self {
+    fn of_pull_request(pull_request: RelevantPullRequest, folders: &AppFolders) -> Self {
         let haystack = format!(
             "{} {} {}",
             pull_request.url.short(),
             pull_request.title,
             pull_request.author
+        );
+        Self::new(
+            ReviewSubject::from(pull_request.url.clone()),
+            RowKind::PullRequest(pull_request),
+            &haystack,
+            folders,
         )
-        .to_lowercase();
+    }
+
+    fn of_local(local: LocalRow, folders: &AppFolders) -> Self {
+        let subject = ReviewSubject::from(local.change_set.clone());
+        let repo = local.change_set.repo().map(ToString::to_string);
+        let haystack = format!(
+            "local {} {} {}",
+            subject.short(),
+            repo.unwrap_or_default(),
+            local.change_set.branch().as_str()
+        );
+        Self::new(subject, RowKind::Local(local), &haystack, folders)
+    }
+
+    fn new(subject: ReviewSubject, kind: RowKind, haystack: &str, folders: &AppFolders) -> Self {
         Self {
-            tour: TourFact::on_disk_of(&pull_request.url, folders),
+            tour: TourFact::on_disk_of(&subject, folders),
             has_unseen_reply: false,
             is_active: false,
-            pull_request,
-            haystack,
+            subject,
+            kind,
+            haystack: haystack.to_lowercase(),
+        }
+    }
+
+    pub const fn pull_request(&self) -> Option<&RelevantPullRequest> {
+        match &self.kind {
+            RowKind::PullRequest(pull_request) => Some(pull_request),
+            RowKind::Local(_) => None,
+        }
+    }
+
+    pub const fn local(&self) -> Option<&LocalRow> {
+        match &self.kind {
+            RowKind::Local(local) => Some(local),
+            RowKind::PullRequest(_) => None,
         }
     }
 }
 
 impl TourFact {
-    /// What the disk says of the PR's tours, with no writing known.
-    pub fn on_disk_of(pr: &PullRequestUrl, folders: &AppFolders) -> Self {
+    /// What the disk says of the subject's tours, with no writing known.
+    pub fn on_disk_of(subject: &ReviewSubject, folders: &AppFolders) -> Self {
         Self {
-            on_disk: ToursOnDisk::of(folders, &pr.clone().into()),
+            on_disk: ToursOnDisk::of(folders, subject),
             writing: WritingFact::None,
         }
     }

@@ -208,11 +208,14 @@ fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
 /// state file only loses the remembered clone folder.
 fn open_request_of(folders: &AppFolders, subject: &ReviewSubject) -> OpenRequest {
-    let folder = ReviewStateFile::for_subject(folders, subject)
-        .opened_from()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| folders.home().to_path_buf());
+    let folder = match subject {
+        ReviewSubject::Local(change_set) => change_set.folder().as_path().to_path_buf(),
+        ReviewSubject::PullRequest(_) => ReviewStateFile::for_subject(folders, subject)
+            .opened_from()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| folders.home().to_path_buf()),
+    };
     OpenRequest {
         subject: subject.to_string(),
         folder,

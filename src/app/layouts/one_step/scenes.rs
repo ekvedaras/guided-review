@@ -418,9 +418,11 @@ impl OneStepLayout {
                 self.jump
                     .update(cx, |palette, cx| palette.open(groups, window, cx));
             }
-            Scene::PrSwitcher => self
-                .pr_switcher
-                .update(cx, |switcher, cx| switcher.open(window, cx)),
+            Scene::PrSwitcher => {
+                ReviewSession::stage_local_review_on_disk(cx);
+                self.pr_switcher
+                    .update(cx, |switcher, cx| switcher.open(window, cx));
+            }
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
                     session.type_in(

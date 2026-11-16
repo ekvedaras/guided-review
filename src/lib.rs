@@ -20,6 +20,7 @@ pub mod image_facts;
 pub mod json;
 pub mod language;
 pub mod line_number;
+pub mod local_change_sets;
 pub mod local_facts;
 pub mod local_git;
 pub mod local_work_tree;

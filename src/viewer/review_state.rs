@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::{PullRequestUrl, RepoName, Sha};
 use crate::repin::{Repin, RepinStatus};
-use crate::review_subject::ReviewSubject;
+use crate::review_subject::{LOCAL_FILES_FOLDER, ReviewSubject};
 use crate::timestamp::UtcTimestamp;
 use crate::tour::Tour;
 
@@ -614,7 +614,35 @@ impl ReviewStateFile {
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
     /// and folders count for nothing: this only looks for a clone to work in.
     pub fn folders_opened_from_in(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<PathBuf> {
-        let Ok(files) = std::fs::read_dir(folders.state_files().join(pr.repo.to_string())) else {
+        Self::folders_opened_from_repo(folders, &pr.repo)
+    }
+
+    /// The folders any PR of any repo was last opened from, as far as the state files tell.
+    pub fn folders_opened_from_any_repo(folders: &AppFolders) -> Vec<PathBuf> {
+        let subfolders = |parent: &Path| -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(parent)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                .collect();
+            names.sort_unstable();
+            names
+        };
+        let state_files = folders.state_files();
+        subfolders(&state_files)
+            .into_iter()
+            .filter(|owner| owner != LOCAL_FILES_FOLDER)
+            .flat_map(|owner| {
+                subfolders(&state_files.join(&owner))
+                    .into_iter()
+                    .map(move |name| RepoName::new(&owner, &name))
+            })
+            .flat_map(|repo| Self::folders_opened_from_repo(folders, &repo))
+            .collect()
+    }
+
+    fn folders_opened_from_repo(folders: &AppFolders, repo: &RepoName) -> Vec<PathBuf> {
+        let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.to_string())) else {
             return Vec::new();
         };
         let mut numbers: Vec<u64> = files
@@ -625,7 +653,7 @@ impl ReviewStateFile {
             .into_iter()
             .filter_map(|number| {
                 let other = PullRequestUrl {
-                    repo: pr.repo.clone(),
+                    repo: repo.clone(),
                     number,
                 };
                 Self::for_subject(folders, &ReviewSubject::from(other))

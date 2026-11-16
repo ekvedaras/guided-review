@@ -37,7 +37,7 @@ fn opened(home: &Path) -> PrSwitcher {
 fn visible_numbers(switcher: &PrSwitcher) -> Vec<u64> {
     switcher
         .visible()
-        .map(|row| row.pull_request.url.number)
+        .map(|row| row.pull_request().unwrap().url.number)
         .collect()
 }
 
@@ -46,7 +46,8 @@ fn number_on_screen_row(switcher: &PrSwitcher, screen_row: usize) -> u64 {
         .visible()
         .nth(switcher.first_shown() + screen_row)
         .unwrap()
-        .pull_request
+        .pull_request()
+        .unwrap()
         .url
         .number
 }
@@ -61,7 +62,7 @@ fn the_list_read_before_a_restart_shows_at_once_after_it_while_it_refreshes() {
 
     assert_eq!(visible_numbers(&after), vec![3, 2, 1]);
     let draft = after.visible().nth(1).unwrap();
-    assert_eq!(draft.pull_request, relevant(2));
+    assert_eq!(draft.pull_request(), Some(&relevant(2)));
     assert!(!after.is_loading());
     assert!(after.is_refreshing());
 }
@@ -135,7 +136,7 @@ fn with_no_hover_the_selected_pull_request_keeps_its_place_on_screen_and_stays_s
 
     assert_eq!(number_on_screen_row(&switcher, 2), selected);
     let now_selected = switcher.visible().nth(switcher.selected()).unwrap();
-    assert_eq!(now_selected.pull_request.url.number, selected);
+    assert_eq!(now_selected.pull_request().unwrap().url.number, selected);
 }
 
 #[test]
@@ -154,7 +155,7 @@ fn the_selection_follows_its_pull_request_while_the_hovered_one_keeps_its_place(
 
     assert_eq!(number_on_screen_row(&switcher, 5), hovered);
     let now_selected = switcher.visible().nth(switcher.selected()).unwrap();
-    assert_eq!(now_selected.pull_request.url.number, selected);
+    assert_eq!(now_selected.pull_request().unwrap().url.number, selected);
 }
 
 #[test]

@@ -67,6 +67,12 @@ pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
     not_cleaned
 }
 
+/// The change sets whose tours are on disk, basic or guided, for a list of them. A file that cannot be
+/// read names none; the clean-up, which must not take that for absent, reads `LocalReviewsOnDisk`.
+pub fn local_reviews_on_disk(folders: &AppFolders) -> HashSet<LocalChangeSet> {
+    LocalReviewsOnDisk::read(folders).change_sets
+}
+
 /// The local tours, or folders of them, that could not be read. Each may be the review a snapshot ref
 /// keeps, so the clean-up keeps every ref of its clone, and the reviewer is told.
 pub fn unreadable_local_tours(folders: &AppFolders) -> Vec<UnreadableLocalTour> {

@@ -10,12 +10,16 @@ use gpui::{
 };
 
 use crate::app::tour_writer;
+use crate::config::Config;
+use crate::local_change_sets::find_local_rows;
+use crate::opened_change_set::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    ActivePr, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, SwitcherRow, TourAgentPort,
-    TourFact, WhyListed, WritingFact,
+    ActivePr, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, RowKind, SwitcherRow,
+    TourAgentPort, TourFact, WhyListed, WritingFact,
 };
 
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{chip, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
@@ -57,8 +61,12 @@ impl PrSwitching {
     pub fn refresh(&self, cx: &mut App) {
         self.list.update(cx, |list, _| list.refreshing());
         let relevant = Arc::clone(&self.relevant);
-        let (list, active, folders) =
-            (self.list.clone(), self.active.clone(), self.folders.clone());
+        let (list, active, folders, agents) = (
+            self.list.clone(),
+            self.active.clone(),
+            self.folders.clone(),
+            Arc::clone(&self.agents),
+        );
         cx.spawn(async move |cx| {
             let answer = cx
                 .background_executor()
@@ -66,6 +74,21 @@ impl PrSwitching {
                 .await;
             list.update(cx, |list, cx| {
                 list.loaded(answer, &folders);
+                list.check_tours(&folders, active.read(cx));
+                cx.notify();
+            });
+            // After the PRs, so a slow disk never holds their rows back.
+            let looked_in = folders.clone();
+            let found = cx
+                .background_executor()
+                .spawn(async move {
+                    // A config that cannot be read is Settings' to report; here it only names no clones.
+                    let config = Config::load_from(&looked_in).unwrap_or_default();
+                    find_local_rows(&looked_in, &config, agents.as_ref())
+                })
+                .await;
+            list.update(cx, |list, cx| {
+                list.local_found(found, &folders);
                 list.check_tours(&folders, active.read(cx));
                 cx.notify();
             });
@@ -114,27 +137,66 @@ struct ShownRow {
     tour_label: &'static str,
     has_unseen_reply: bool,
     is_active: bool,
+    /// What the folder of a local review is now, when it is no longer the snapshot.
+    disk_label: Option<&'static str>,
+    offers_drop_review: bool,
 }
 
 impl ShownRow {
     fn of(row: &SwitcherRow, switcher: &PrSwitcher) -> Self {
-        let pull_request = &row.pull_request;
+        let (pr, title, author, why, is_draft) = match &row.kind {
+            RowKind::PullRequest(pull_request) => (
+                pull_request.url.short().into(),
+                pull_request.title.clone().into(),
+                pull_request.author.clone().into(),
+                match pull_request.why_listed {
+                    WhyListed::Mine => "mine",
+                    WhyListed::ReviewRequested => "review requested",
+                    WhyListed::Involved => "involved",
+                },
+                pull_request.is_draft,
+            ),
+            RowKind::Local(local) => (
+                local.change_set.repo().map_or_else(
+                    || local.change_set.folder().name().into_owned().into(),
+                    |repo| repo.to_string().into(),
+                ),
+                local.change_set.branch().as_str().to_owned().into(),
+                changes_of(local).into(),
+                "Local",
+                false,
+            ),
+        };
         Self {
-            pr: pull_request.url.short().into(),
-            title: pull_request.title.clone().into(),
-            author: pull_request.author.clone().into(),
-            why: match pull_request.why_listed {
-                WhyListed::Mine => "mine",
-                WhyListed::ReviewRequested => "review requested",
-                WhyListed::Involved => "involved",
-            },
-            is_draft: pull_request.is_draft,
+            pr,
+            title,
+            author,
+            why,
+            is_draft,
             tour: row.tour,
             tour_label: switcher.tour_label(row),
             has_unseen_reply: row.has_unseen_reply,
             is_active: row.is_active,
+            disk_label: row.local().and_then(LocalRow::disk_label),
+            offers_drop_review: row.local().is_some_and(LocalRow::offers_drop_review),
         }
     }
+}
+
+/// "1 commit, 2 uncommitted files": what the reviewer would find in the folder.
+fn changes_of(local: &LocalRow) -> String {
+    let plural =
+        |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
+    [
+        local.commits_ahead.map(|commits| plural(commits, "commit")),
+        local
+            .uncommitted_files
+            .map(|files| format!("{} uncommitted", plural(files, "file"))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ")
 }
 
 impl EventEmitter<SwitcherDismissed> for PrSwitcherView {}
@@ -269,6 +331,40 @@ impl PrSwitcherView {
         }
     }
 
+    /// Drop review of the `nth` row, whose branch is gone: its files go off the UI thread, then its row.
+    fn drop_review(&mut self, nth: usize, cx: &mut Context<Self>) {
+        let Some(subject) = self.switching.list.read(cx).drop_offer(nth) else {
+            return;
+        };
+        let Some(change_set) = subject.local().cloned() else {
+            return;
+        };
+        let (folders, list, dropped) = (
+            self.switching.folders.clone(),
+            self.switching.list.clone(),
+            Arc::clone(&self.switching.dropped),
+        );
+        cx.spawn(async move |this, cx| {
+            let dropping = change_set.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { OpenedChangeSet::new(&dropping, &folders).drop_review() })
+                .await;
+            this.update(cx, |this, cx| match result {
+                Ok(()) => {
+                    list.update(cx, |list, cx| {
+                        list.dropped(&subject);
+                        cx.notify();
+                    });
+                    dropped(subject);
+                }
+                Err(error) => this.refuse(format!("Could not drop the review: {error:#}"), cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
             "down" => self.switching.list.update(cx, |list, _| list.select_next()),
@@ -391,6 +487,27 @@ impl PrSwitcherView {
         })
         .when(shown.has_unseen_reply, |row| {
             row.child(chip(&colors, Tone::Accent).child("agent replied"))
+        })
+        .children(
+            shown
+                .disk_label
+                .map(|label| chip(&colors, Tone::Warning).child(label)),
+        )
+        .when(shown.offers_drop_review, |row| {
+            row.child(
+                icon_label_button(
+                    &colors,
+                    SharedString::from(format!("pr-switcher-drop-{index}")),
+                    ButtonKind::Secondary,
+                    ButtonSize::Small,
+                    Icon::Trash,
+                    "Drop review",
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.drop_review(index, cx);
+                })),
+            )
         })
         .child(
             div()

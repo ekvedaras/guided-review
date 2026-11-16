@@ -51,6 +51,19 @@ pub struct Snapshot {
     pub head: Sha,
 }
 
+/// What a folder's branch has to review, before any review of it exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Glance {
+    pub commits_ahead: usize,
+    pub uncommitted_files: usize,
+}
+
+impl Glance {
+    pub const fn is_nothing_to_review(self) -> bool {
+        self.commits_ahead == 0 && self.uncommitted_files == 0
+    }
+}
+
 /// What the folder of a local review is now, against the snapshot the review reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OnDisk {
@@ -164,6 +177,28 @@ impl LocalWorkTree {
             folder: self.folder(),
             branch: change_set.branch().clone(),
             default_branch: default.name,
+        })
+    }
+
+    /// How much there is to review in the folder now, for a list of folders: no snapshot is made and no ref
+    /// is written, as with `refuse_when_nothing_to_review`.
+    pub fn glance(&self) -> Result<Glance, OpenRefusal> {
+        let default = self.default_branch()?;
+        let head = self.head()?;
+        let base = self.git(&["merge-base", default.tip.as_str(), head.as_str()])?;
+        let commits_ahead = self
+            .git(&["rev-list", "--count", &format!("{base}..{head}")])?
+            .parse()
+            .map_err(|error| self.failed(error))?;
+        let uncommitted_files = self
+            .changed_files(
+                &Sha::new(&self.tree_of("HEAD")?),
+                &Sha::new(&self.working_tree_id()?),
+            )?
+            .len();
+        Ok(Glance {
+            commits_ahead,
+            uncommitted_files,
         })
     }
 

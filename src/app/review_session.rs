@@ -827,6 +827,21 @@ impl ReviewSession {
         });
     }
 
+    /// The local review of the throwaway clone on disk, as `open <folder>` leaves it, so the switcher
+    /// lists it; the review on screen stays.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_review_on_disk(cx: &App) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let made = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            crate::open_review::open_review(&subject, &folder, &folders).map(drop)
+        });
+        if let Err(error) = made {
+            eprintln!("could not stage a local review on disk: {error:#}");
+        }
+    }
+
     /// A local review of a throwaway clone in place of the PR: one commit ahead of `main`, a changed
     /// README and cart, and a note git does not know yet. `unstage_basic` puts the PR back.
     #[cfg(feature = "snapshots")]

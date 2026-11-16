@@ -68,7 +68,7 @@ fn loaded(github: &FakeGitHub, home: &Path) -> PrSwitcher {
 fn visible_urls(switcher: &PrSwitcher) -> Vec<String> {
     switcher
         .visible()
-        .map(|row| row.pull_request.url.to_string())
+        .map(|row| row.pull_request().unwrap().url.to_string())
         .collect()
 }
 
@@ -82,11 +82,11 @@ fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
     let [feed, limits, _] = rows.as_slice() else {
         panic!("expected three rows");
     };
-    assert_eq!(feed.pull_request.url.short(), "acme/blog#7");
-    assert_eq!(feed.pull_request.title, "Fix feed");
-    assert!(feed.pull_request.is_draft);
-    assert_eq!(feed.pull_request.why_listed, WhyListed::Mine);
-    assert_eq!(limits.pull_request.author, "dave");
+    assert_eq!(feed.pull_request().unwrap().url.short(), "acme/blog#7");
+    assert_eq!(feed.pull_request().unwrap().title, "Fix feed");
+    assert!(feed.pull_request().unwrap().is_draft);
+    assert_eq!(feed.pull_request().unwrap().why_listed, WhyListed::Mine);
+    assert_eq!(limits.pull_request().unwrap().author, "dave");
 }
 
 fn write_basic_tour(home: &Path, url: &str) {
@@ -440,7 +440,7 @@ fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected()
     let marked: Vec<_> = switcher
         .visible()
         .filter(|row| row.is_active)
-        .map(|row| row.pull_request.url.short())
+        .map(|row| row.pull_request().unwrap().url.short())
         .collect();
     assert_eq!(marked, ["acme/shop#11"]);
     assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
