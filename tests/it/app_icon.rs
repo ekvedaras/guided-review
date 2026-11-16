@@ -1,4 +1,4 @@
-use guided_review::app_icon::{AppIcon, Look};
+use guided_review::app_icon::{self, AppIcon, Look};
 use image::Rgba;
 
 const SIZE: u16 = 64;
@@ -41,4 +41,13 @@ fn a_dev_build_wears_a_badge_the_release_does_not() {
     let release = AppIcon::release(Look::Light).png(SIZE).unwrap();
     let dev = AppIcon::dev(Look::Light).png(SIZE).unwrap();
     assert_ne!(release, dev);
+}
+
+#[test]
+fn the_pictures_are_exported_from_the_icon_composer_icon_as_it_is() {
+    assert_eq!(
+        app_icon::icon_composer_digest(),
+        app_icon::digest_the_pictures_were_exported_from(),
+        "AppIcon.icon changed after its pictures were exported: run scripts/app-icon-pictures"
+    );
 }

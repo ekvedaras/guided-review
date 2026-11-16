@@ -1,6 +1,7 @@
 //! The app's icon as pictures: for the Dock while the app runs, and for the bundle's `.icns`.
 
-use resvg::tiny_skia::{Pixmap, Transform};
+use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppIcon {
@@ -37,6 +38,20 @@ pub const ICON_COMPOSER_FILES: [(&str, &str); 3] = [
     ("Assets/trail-dark.svg", TRAIL_DARK),
 ];
 
+/// The SHA-256 of [`ICON_COMPOSER_FILES`]' contents, in order, as `scripts/app-icon-pictures` takes it.
+pub fn icon_composer_digest() -> String {
+    let mut digest = Sha256::new();
+    for (_, content) in ICON_COMPOSER_FILES {
+        digest.update(content.as_bytes());
+    }
+    crate::hex::lower(&digest.finalize())
+}
+
+/// What `scripts/app-icon-pictures` noted beside the pictures it exported.
+pub fn digest_the_pictures_were_exported_from() -> &'static str {
+    include_str!("../assets/app-icon-pictures.sha256").trim()
+}
+
 impl AppIcon {
     pub const fn release(look: Look) -> Self {
         Self {
@@ -61,18 +76,12 @@ impl AppIcon {
         }
     }
 
-    /// The rounded square Icon Composer draws from `icon.json`'s fill, for a picture made without it.
-    fn ground(self) -> &'static str {
+    /// The look as Icon Composer draws it, exported by `scripts/app-icon-pictures`: the glass, corners
+    /// and shine macOS gives the bundle's icon, which a picture of the app's own would not match.
+    const fn exported(self) -> &'static [u8] {
         match self.look {
-            Look::Light => include_str!("../assets/app-icon-ground-light.svg"),
-            Look::Dark => include_str!("../assets/app-icon-ground-dark.svg"),
-        }
-    }
-
-    fn trail(self) -> &'static str {
-        match self.look {
-            Look::Light => TRAIL_LIGHT,
-            Look::Dark => TRAIL_DARK,
+            Look::Light => include_bytes!("../assets/app-icon-light.png"),
+            Look::Dark => include_bytes!("../assets/app-icon-dark.png"),
         }
     }
 
@@ -80,9 +89,7 @@ impl AppIcon {
     pub fn png(self, size: u16) -> anyhow::Result<Vec<u8>> {
         let mut pixmap = Pixmap::new(u32::from(size), u32::from(size))
             .ok_or_else(|| anyhow::anyhow!("no picture can be {size} pixels wide"))?;
-        let options = usvg::Options::default();
-        paint(self.ground(), &options, &mut pixmap)?;
-        paint(self.trail(), &options, &mut pixmap)?;
+        place_on_icon_grid(&Pixmap::decode_png(self.exported())?, &mut pixmap);
         if self.build == Build::Dev {
             let mut options = usvg::Options::default();
             options.fontdb_mut().load_system_fonts();
@@ -90,6 +97,29 @@ impl AppIcon {
         }
         Ok(pixmap.encode_png()?)
     }
+}
+
+/// macOS draws an icon's shape 824 of 1024 pixels wide, centred; the export fills its whole picture.
+fn place_on_icon_grid(exported: &Pixmap, pixmap: &mut Pixmap) {
+    const SHAPE_SHARE: f32 = 824. / 1024.;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "an icon is at most a few thousand pixels wide"
+    )]
+    let (width, exported_width) = (pixmap.width() as f32, exported.width() as f32);
+    let scale = width * SHAPE_SHARE / exported_width;
+    let margin = width * (1. - SHAPE_SHARE) / 2.;
+    pixmap.draw_pixmap(
+        0,
+        0,
+        exported.as_ref(),
+        &PixmapPaint {
+            quality: FilterQuality::Bicubic,
+            ..PixmapPaint::default()
+        },
+        Transform::from_row(scale, 0., 0., scale, margin, margin),
+        None,
+    );
 }
 
 fn paint(svg: &str, options: &usvg::Options, pixmap: &mut Pixmap) -> anyhow::Result<()> {
