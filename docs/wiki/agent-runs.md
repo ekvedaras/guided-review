@@ -138,3 +138,27 @@ The sidebar once said "Tour agent is off, it needs herdr (`hc`) and its server r
 - `AgentLinkOff` names the cases: `hc` missing, server not running (`hc server status` fails), and herdr running but a command failed (`HerdrFailed`, with the reason herdr gave and no command line, plus a hint to `hc server restart`, which may pause running terminals). The hc adapter raises `HerdrRefused` for a failed command so the viewer can take the reason out.
 - While the link is off the work agenda holds `WorkKind::CheckAgentLink`, due `AGENT_LINK_RECHECK` (30 s) after the last news and at once on the sidebar's Retry. It runs `TourAgents::lookup`, not only `link()`, because the incident had `server status` answering and `ls` failing. Still off: checked again. Back: `AfterLanding::TourAgentIs` makes the app follow the tour agent again, which clears the message.
 - Not done: a restart of herdr is never run by the app, it is only suggested.
+
+## 2026-11-16: the agent ran the wrong `guided-review`, and an app with no window
+
+Found by the maintainer on a trial build in `~/.cargo/bin`, with `~/.local/bin` (the release install) before it on `PATH`.
+
+- `path_for_agents` put the running binary's folder in front only when `PATH` lacked it. With `~/.cargo/bin` already on it behind `~/.local/bin`, the agent's `guided-review open` ran the release install, not the build that started it. Now the folder always moves to the front, once.
+- That `open` started the release app, which had nothing on screen. `ActivePr::request` keeps an app-started agent's open in the background (`KeepInBackground`) whatever is shown, so the app opened no window and stayed in the Dock. A click on the Dock icon did nothing: macOS sends a running app a reopen event, not a new launch, and the app had no handler. Now `AppWindow::relaunched` decides: with no window the switcher opens alone; a window out of sight (minimized) comes back as it was. On Linux gpui never fires reopen; the launcher starts a new process, which hands `show_switcher` to the running app as before.
+- Open: the CLI still answers "the reviewer reads another PR" when nothing is on screen.
+
+## 2026-11-16: a command never quits an app of another build
+
+The same day a tour agent's `guided-review open`, of another build than the maintainer's running trial build, quit that app and its session: `hand_over` answered an app of another build by sending it a quit and starting its own build's app.
+
+The maintainer decided: a CLI command from another build than the running app never tells it to quit. It asks the app to do the job when the request is understood across builds, else it stops with a message naming both builds and how to go on, and the app keeps running. Only a start the reviewer makes ends an app of another build.
+
+How it is built (`src/app_link.rs`):
+
+- A request line says whether an app of another build may act on it (`AcrossBuilds`), and a quit may name the build of the app it ends (`replacing`). `RequestLine::is_taken_by` is the app's side: its own build always; another build's quit only when it names this build; another build's other request only when marked `any_build`. A request the app cannot read, of another version, is answered `other_build`, as is an unmarked one, so a CLI from before this change gets `other_build`, sends a blind quit, which is refused, and fails with "the app of another build did not quit".
+- `Caller::on_other_build` is the command's side. `Command` (anything run in a terminal, by the reviewer or an agent, which cannot be told apart) stops with `OtherBuildRuns`. `Launcher` (the OS launcher, told by `launched_app_variable`) replaces the app, as before. `AppRestart` replaces only the build named by the hidden `restart --replacing <build>`, which the app's Restart and its update pass with their own build.
+- `restart` first asks which build runs with a request whose version is no build's, which every app so far answers `other_build` with its own build, acting on nothing. It quits an app of its own build, or one `Caller` may end.
+
+Flows that relied on the swap: `restart` and `open` typed after a `cargo install` or a manual install no longer replace the running app; the reviewer quits it, or uses Restart app here, which runs the binary now at the app's path. The Dock icon of a running app and the OS launcher are unchanged.
+
+Open: an app from before this change runs `restart` without `--replacing`, so its update to the first release with this change installs but cannot restart into it; the reviewer quits and starts the app once. The OS launcher is told by an environment variable that the app's own children (such as a refresh writer) inherit on macOS; only a bare `guided-review` of theirs would count as a launch.

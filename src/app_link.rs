@@ -70,10 +70,25 @@ pub enum Request {
     Quit,
 }
 
+/// Whether an app of another build may act on a request it can read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcrossBuilds {
+    /// Requests of builds before 2026-11-16 carry no mark, and their CLI quits an app that refuses.
+    #[default]
+    ThisBuildOnly,
+    AnyBuild,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestLine {
     pub version: String,
     pub request: Request,
+    #[serde(default)]
+    pub across_builds: AcrossBuilds,
+    /// For a quit: the build of the app it ends, which the sender learnt from that app's answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacing: Option<String>,
 }
 
 impl RequestLine {
@@ -81,6 +96,48 @@ impl RequestLine {
         Self {
             version: build(),
             request,
+            across_builds: AcrossBuilds::ThisBuildOnly,
+            replacing: None,
+        }
+    }
+
+    pub fn for_any_build(request: Request) -> Self {
+        Self {
+            across_builds: AcrossBuilds::AnyBuild,
+            ..Self::new(request)
+        }
+    }
+
+    /// A request no app acts on, whose answer names the running app's build: its version is no build's,
+    /// and apps of every build so far answer another build's request with their own build, acting on
+    /// nothing but a quit.
+    fn asking_which_build() -> Self {
+        Self {
+            version: "which-build".to_owned(),
+            ..Self::new(Request::ShowSwitcher)
+        }
+    }
+
+    pub fn quit_replacing(running: &str) -> Self {
+        Self {
+            replacing: Some(running.to_owned()),
+            ..Self::new(Request::Quit)
+        }
+    }
+
+    /// Whether the app of `build` acts on this request: always for its own build; for another build,
+    /// a quit only when it names `build` as the one it ends, any other request only when it says any
+    /// build may take it.
+    pub fn is_taken_by(&self, build: &str) -> bool {
+        if self.version == build {
+            return true;
+        }
+        match self.request {
+            Request::Quit => self.replacing.as_deref() == Some(build),
+            Request::Open(_)
+            | Request::AgentReplied { .. }
+            | Request::ShowSettings
+            | Request::ShowSwitcher => self.across_builds == AcrossBuilds::AnyBuild,
         }
     }
 
@@ -162,6 +219,59 @@ impl std::fmt::Display for Answer {
             Self::OtherBuild => write!(f, "guided-review app is another build"),
         }
     }
+}
+
+/// Who runs a command that reaches the app, which decides whether it may end an app of another build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Caller {
+    /// Run in a terminal, by the reviewer or by an agent, which cannot be told apart.
+    Command,
+    /// The reviewer launched the app from the OS launcher.
+    Launcher,
+    /// The app's Restart, or its update, ran this build to take over from the app of `replacing`.
+    AppRestart { replacing: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OnOtherBuild {
+    /// Quit the running app and start this build's.
+    Replace,
+    Stop(OtherBuildRuns),
+}
+
+impl Caller {
+    /// What to do about a running app of the `running` build, another than this one, that did not take
+    /// the request. Only the reviewer ends their app: a command from another build once ended the
+    /// reviewer's trial build and its session, run by a tour agent.
+    pub fn on_other_build(&self, running: &str) -> OnOtherBuild {
+        match self {
+            Self::Launcher => OnOtherBuild::Replace,
+            Self::AppRestart { replacing } if replacing == running => OnOtherBuild::Replace,
+            Self::Command | Self::AppRestart { .. } => OnOtherBuild::Stop(OtherBuildRuns {
+                running: running.to_owned(),
+                this: build(),
+            }),
+        }
+    }
+
+    fn across_builds(&self) -> AcrossBuilds {
+        match self {
+            Self::Command | Self::AppRestart { .. } => AcrossBuilds::AnyBuild,
+            Self::Launcher => AcrossBuilds::ThisBuildOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the running guided-review app is build {running} and this guided-review is build {this}; the app \
+     does not take this request from another build, and it was left running. Run the command with \
+     the guided-review the app runs, or let the reviewer quit the app (Primary+Q, or Restart app \
+     here to start the build its binary is now) and run it again"
+)]
+pub struct OtherBuildRuns {
+    pub running: String,
+    pub this: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -266,29 +376,35 @@ fn answer_one(stream: &UnixStream, handle: &impl Fn(Request) -> Answer) -> anyho
     BufReader::new(stream)
         .read_line(&mut line)
         .context("could not read the request")?;
-    let request: RequestLine =
-        serde_json::from_str(&line).context("the request is not a request line")?;
-    let answer = if request.version != build() && request.request != Request::Quit {
-        Answer::OtherBuild
-    } else {
-        handle(request.request)
+    let this = build();
+    let answer = match serde_json::from_str::<RequestLine>(&line) {
+        Ok(request) if request.is_taken_by(&this) => handle(request.request),
+        Ok(_) => Answer::OtherBuild,
+        Err(error) => match serde_json::from_str::<VersionOnly>(&line) {
+            Ok(sent) if sent.version != this => Answer::OtherBuild,
+            _ => return Err(error).context("the request is not a request line"),
+        },
     };
     let reply = serde_json::to_string(&AnswerLine {
-        version: build(),
+        version: this,
         answer,
     })?;
     let mut stream = stream;
     writeln!(stream, "{reply}").context("could not write the answer")
 }
 
+#[derive(Deserialize)]
+struct VersionOnly {
+    version: String,
+}
+
 /// One request and its answer. `None` when no app is behind the socket.
-fn exchange(socket: &Path, request: &Request) -> anyhow::Result<Option<AnswerLine>> {
+fn exchange(socket: &Path, request: &RequestLine) -> anyhow::Result<Option<AnswerLine>> {
     let Ok(mut stream) = UnixStream::connect(socket) else {
         return Ok(None);
     };
     stream.set_read_timeout(Some(QUIT_WAIT))?;
-    writeln!(stream, "{}", RequestLine::new(request.clone()).to_line()?)
-        .context("could not send the request")?;
+    writeln!(stream, "{}", request.to_line()?).context("could not send the request")?;
     let mut reply = String::new();
     BufReader::new(stream)
         .read_line(&mut reply)
@@ -298,33 +414,62 @@ fn exchange(socket: &Path, request: &Request) -> anyhow::Result<Option<AnswerLin
         .context("the app's answer is not an answer line")
 }
 
-/// Tells the running app a hand-off was answered. `None` when no app runs, or one of another build,
-/// which would not act on it.
+/// Tells the running app a hand-off was answered. `None` when no app runs.
 pub fn tell_app(folder: &AppFolder, request: &Request) -> anyhow::Result<Option<Answer>> {
-    Ok(exchange(&folder.socket(), request)?
-        .filter(|line| line.version == build())
-        .map(|line| line.answer))
+    Ok(exchange(
+        &folder.socket(),
+        &RequestLine::for_any_build(request.clone()),
+    )?
+    .map(|line| line.answer))
 }
 
-/// Hands the request to the running app, starting one when none answers and replacing one of another
-/// build.
-pub fn hand_over(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
+/// Hands the request to the running app, starting one when none answers. An app of another build that
+/// does not take it is replaced only when `caller` may end it.
+pub fn hand_over(folder: &AppFolder, request: &Request, caller: &Caller) -> anyhow::Result<Answer> {
     let socket = folder.socket();
-    match exchange(&socket, request)? {
-        Some(answer) if answer.version == build() => return Ok(answer.answer),
-        Some(_) => {
-            exchange(&socket, &Request::Quit)?;
-            wait_until(QUIT_WAIT, || !is_answering(&socket))
-                .context("the app of another build did not quit")?;
+    let line = RequestLine {
+        across_builds: caller.across_builds(),
+        ..RequestLine::new(request.clone())
+    };
+    match exchange(&socket, &line)? {
+        Some(answer) if answer.answer == Answer::OtherBuild && answer.version != build() => {
+            replace(&socket, &answer.version, caller)?;
         }
+        Some(answer) => return Ok(answer.answer),
         None => {}
     }
-    start_and_hand(folder, request)
+    start_and_hand(folder, &line)
+}
+
+/// Quits the running app, of this build or of one `caller` may end, then starts one and hands it the
+/// request: the way the app's Restart picks up a reinstalled binary.
+pub fn restart(folder: &AppFolder, request: &Request, caller: &Caller) -> anyhow::Result<Answer> {
+    let socket = folder.socket();
+    if let Some(running) = exchange(&socket, &RequestLine::asking_which_build())? {
+        if running.version == build() {
+            exchange(&socket, &RequestLine::new(Request::Quit))?;
+            wait_until(QUIT_WAIT, || !is_answering(&socket)).context("the app did not quit")?;
+        } else {
+            replace(&socket, &running.version, caller)?;
+        }
+    }
+    start_and_hand(folder, &RequestLine::new(request.clone()))
+}
+
+fn replace(socket: &Path, running: &str, caller: &Caller) -> anyhow::Result<()> {
+    match caller.on_other_build(running) {
+        OnOtherBuild::Stop(stop) => Err(stop.into()),
+        OnOtherBuild::Replace => {
+            exchange(socket, &RequestLine::quit_replacing(running))?;
+            wait_until(QUIT_WAIT, || !is_answering(socket))
+                .context("the app of another build did not quit")
+        }
+    }
 }
 
 /// An app of an earlier version may have kept `~/.guided-review` from moving; with it gone the move is
 /// tried again first, so this start and the app it starts use the same folders.
-fn start_and_hand(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
+fn start_and_hand(folder: &AppFolder, request: &RequestLine) -> anyhow::Result<Answer> {
     let folder = &AppFolder::of(&folder.folders.settle_again()?);
     let socket = folder.socket();
     start_app(folder)?;
@@ -337,16 +482,6 @@ fn start_and_hand(folder: &AppFolder, request: &Request) -> anyhow::Result<Answe
     answer
         .map(|line| line.answer)
         .context("the app did not answer")
-}
-
-/// Asks the running app to quit, whatever its build, then starts one and hands it the request: the way
-/// to pick up a reinstalled binary without quitting by hand.
-pub fn restart(folder: &AppFolder, request: &Request) -> anyhow::Result<Answer> {
-    let socket = folder.socket();
-    if exchange(&socket, &Request::Quit)?.is_some() {
-        wait_until(QUIT_WAIT, || !is_answering(&socket)).context("the app did not quit")?;
-    }
-    start_and_hand(folder, request)
 }
 
 fn is_answering(socket: &Path) -> bool {

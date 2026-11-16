@@ -258,12 +258,14 @@ fn restart_opens_the_pr_at_the_step_on_screen() {
     };
 
     assert_eq!(
-        restart.args(),
+        restart.args("0.1.0+7"),
         [
             "restart",
             "https://github.com/acme/shop/pull/7",
             "--at",
-            "two"
+            "two",
+            "--replacing",
+            "0.1.0+7"
         ]
     );
 }
@@ -274,8 +276,13 @@ fn restart_on_the_summary_opens_the_pr_where_it_starts() {
     let review = three_step_review(&repo);
 
     assert_eq!(
-        review.restart_args().args(),
-        ["restart", "https://github.com/acme/shop/pull/7"]
+        review.restart_args().args("0.1.0+7"),
+        [
+            "restart",
+            "https://github.com/acme/shop/pull/7",
+            "--replacing",
+            "0.1.0+7"
+        ]
     );
 }
 

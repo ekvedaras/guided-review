@@ -78,6 +78,16 @@ pub enum FailedBuild<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
     ShowInReview(Review),
 }
 
+/// The app was launched again while it runs with no window in sight, as by a click on its Dock icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relaunched<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
+    /// The app is never left with no way back to a window, such as after an agent's open kept its PR in
+    /// the background with nothing on screen.
+    OpenSwitcherOnly,
+    /// A window out of sight, such as one minimized, comes back holding what it held.
+    Raise(AppWindow<SettingsOnly, SwitcherOnly, WritingOnly, Review>),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterClose {
     EndApp,
@@ -95,6 +105,16 @@ impl<SettingsOnly: Copy, SwitcherOnly: Copy, WritingOnly: Copy, Review: Copy>
             Self::SettingsOnly(window) => ShowSwitcher::RaiseSettings(window),
             Self::WritingOnly(window) => ShowSwitcher::RaiseWriting(window),
             Self::Review(window) => ShowSwitcher::OverReview(window),
+        }
+    }
+
+    pub fn relaunched(&self) -> Relaunched<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
+        match self {
+            Self::Closed => Relaunched::OpenSwitcherOnly,
+            Self::SettingsOnly(_)
+            | Self::SwitcherOnly(_)
+            | Self::WritingOnly(_)
+            | Self::Review(_) => Relaunched::Raise(*self),
         }
     }
 

@@ -948,7 +948,7 @@ impl OneStepLayout {
             return;
         }
         let started = std::process::Command::new(program)
-            .args(restart.args())
+            .args(restart.args(&crate::app_link::build()))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

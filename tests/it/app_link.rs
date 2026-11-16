@@ -2,7 +2,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
 use guided_review::app_link::{
-    Answer, AnswerLine, AppFolder, AppListener, BindError, OpenRequest, Request, RequestLine, build,
+    Answer, AnswerLine, AppFolder, AppListener, BindError, Caller, OnOtherBuild, OpenRequest,
+    OtherBuildRuns, Request, RequestLine, build,
 };
 
 use crate::support::FixtureRepo;
@@ -89,24 +90,128 @@ fn the_listener_answers_each_request_line_through_the_handler() {
     );
 }
 
-#[test]
-fn a_request_of_another_build_is_not_acted_on_but_a_quit_is() {
-    let repo = FixtureRepo::cloned_from("acme/shop");
+fn of_older_build(mut line: RequestLine) -> RequestLine {
+    line.version = "0.0.0-older".to_owned();
+    line
+}
+
+fn listening_app(repo: &FixtureRepo) -> AppFolder {
     let folder = AppFolder::of(&repo.folders());
     AppListener::bind(&folder)
         .unwrap()
-        .serve(|_| Answer::Quitting);
-    let mut older_open = RequestLine::new(Request::Open(open_request()));
-    older_open.version = "0.0.0-older".to_owned();
-    let mut older_quit = RequestLine::new(Request::Quit);
-    older_quit.version = "0.0.0-older".to_owned();
+        .serve(|request| match request {
+            Request::Quit => Answer::Quitting,
+            _ => Answer::ShowingSwitcher,
+        });
+    folder
+}
 
-    let open = ask(&folder, &older_open);
-    let quit = ask(&folder, &older_quit);
+#[test]
+fn a_request_of_another_build_is_acted_on_only_when_it_says_any_build_may_take_it() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let folder = listening_app(&repo);
 
-    assert_eq!(open.answer, Answer::OtherBuild);
-    assert_eq!(open.version, build());
-    assert_eq!(quit.answer, Answer::Quitting);
+    let unmarked = ask(
+        &folder,
+        &of_older_build(RequestLine::new(Request::ShowSwitcher)),
+    );
+    let marked = ask(
+        &folder,
+        &of_older_build(RequestLine::for_any_build(Request::ShowSwitcher)),
+    );
+
+    assert_eq!(unmarked.answer, Answer::OtherBuild);
+    assert_eq!(unmarked.version, build());
+    assert_eq!(marked.answer, Answer::ShowingSwitcher);
+}
+
+#[test]
+fn a_quit_of_another_build_is_acted_on_only_when_it_names_this_build_as_the_one_it_ends() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let folder = listening_app(&repo);
+
+    let blind = ask(&folder, &of_older_build(RequestLine::new(Request::Quit)));
+    let for_any_build = ask(
+        &folder,
+        &of_older_build(RequestLine::for_any_build(Request::Quit)),
+    );
+    let of_another_app = ask(
+        &folder,
+        &of_older_build(RequestLine::quit_replacing("0.0.0-elsewhere")),
+    );
+    let of_this_app = ask(
+        &folder,
+        &of_older_build(RequestLine::quit_replacing(&build())),
+    );
+
+    assert_eq!(blind.answer, Answer::OtherBuild);
+    assert_eq!(for_any_build.answer, Answer::OtherBuild);
+    assert_eq!(of_another_app.answer, Answer::OtherBuild);
+    assert_eq!(of_this_app.answer, Answer::Quitting);
+}
+
+#[test]
+fn a_request_this_build_cannot_read_is_answered_as_another_builds() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let folder = listening_app(&repo);
+    let mut stream = UnixStream::connect(folder.socket()).unwrap();
+    writeln!(
+        stream,
+        r#"{{"version":"9.9.9-newer","request":{{"from_the_future":{{}}}}}}"#
+    )
+    .unwrap();
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply).unwrap();
+
+    let answer: AnswerLine = serde_json::from_str(&reply).unwrap();
+
+    assert_eq!(answer.answer, Answer::OtherBuild);
+    assert_eq!(answer.version, build());
+}
+
+#[test]
+fn a_command_never_ends_an_app_of_another_build() {
+    assert_eq!(
+        Caller::Command.on_other_build("0.0.0-older"),
+        OnOtherBuild::Stop(OtherBuildRuns {
+            running: "0.0.0-older".to_owned(),
+            this: build(),
+        })
+    );
+}
+
+#[test]
+fn a_launch_from_the_os_launcher_replaces_an_app_of_another_build() {
+    assert_eq!(
+        Caller::Launcher.on_other_build("0.0.0-older"),
+        OnOtherBuild::Replace
+    );
+}
+
+#[test]
+fn the_apps_restart_ends_only_the_app_that_ran_it() {
+    let restart = Caller::AppRestart {
+        replacing: "0.0.0-older".to_owned(),
+    };
+
+    assert_eq!(restart.on_other_build("0.0.0-older"), OnOtherBuild::Replace);
+    assert!(matches!(
+        restart.on_other_build("0.0.0-elsewhere"),
+        OnOtherBuild::Stop(_)
+    ));
+}
+
+#[test]
+fn the_stop_names_both_builds_and_says_the_app_was_left_running() {
+    let message = OtherBuildRuns {
+        running: "0.0.0-older".to_owned(),
+        this: "0.0.0-newer".to_owned(),
+    }
+    .to_string();
+
+    assert!(message.contains("0.0.0-older"), "{message}");
+    assert!(message.contains("0.0.0-newer"), "{message}");
+    assert!(message.contains("left running"), "{message}");
 }
 
 /// Other tests fork child processes, and a child holds a copy of the lock until it has exec'd.

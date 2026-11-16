@@ -30,8 +30,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Window, WindowBounds,
-    WindowHandle, WindowOptions, actions, px, size,
+    AnyWindowHandle, App, AppContext, AsyncApp, Bounds, Context, Entity, KeyBinding, Window,
+    WindowBounds, WindowHandle, WindowOptions, actions, px, size,
 };
 use gpui_platform::application;
 
@@ -46,7 +46,7 @@ use crate::tour::{Tour, ToursOnDisk};
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
-    RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
+    Relaunched, RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
     ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, WriteDecision,
 };
 use components::ask_panel::AskPanel;
@@ -74,6 +74,8 @@ use writing_window::WritingWindow;
 enum Asked {
     Request(Request, std::sync::mpsc::Sender<Answer>),
     ReopenShown,
+    /// The OS launched the running app again, as a click on its Dock icon with no window in sight.
+    Relaunched,
 }
 
 /// The one running app. It blocks until a quit request comes or the window closes with no build left to
@@ -95,41 +97,46 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
             .recv_timeout(Duration::from_secs(10))
             .unwrap_or_else(|_| refused("the app did not answer in time"))
     });
-    application()
-        .with_assets(assets::Assets)
-        .run(move |cx: &mut App| {
-            // A picture is taken once the window holds still, which an endless animation never does.
-            #[cfg(feature = "snapshots")]
-            if snapshots::is_on() {
-                cx.set_reduce_motion(true);
-            }
-            let remembered = AppStateFile::in_folders(&folders);
-            let active = cx.new(|_| ActivePr::remembering_in(remembered));
-            let switching = pr_switching(&requests_to_self, &folders, active.clone(), cx);
-            switching.refresh(cx);
-            cx.set_global(switching);
-            tour_writer::resume(cx);
-            let focus = if takes_focus() {
-                platform::Focus::Taken
-            } else {
-                platform::Focus::LeftAlone
-            };
-            let appearance = Appearance::of_system(cx);
-            cx.set_global(appearance);
-            platform::start(focus, appearance.look(), Quit, cx);
-            cx.on_action(|_: &Quit, cx| cx.quit());
-            components::toast_stack::Toaster::install(cx);
-            let configured = keymap::configured_keymap();
-            if let Some(notice) = configured.notice() {
-                components::toast_stack::post_toast(cx, ToastTone::Danger, notice);
-            }
-            apply_keymap(configured.keymap, cx);
-            avatar_pictures::AvatarPictures::install(cx);
-            prose_selection::ProseSelections::install(cx);
-            updater::Updates::install(folders.home(), cx);
-            cx.spawn(async move |cx| answer_requests(asked, active, folders, cx).await)
-                .detach();
-        });
+    let app = application().with_assets(assets::Assets);
+    let relaunches = requests_to_self.clone();
+    app.on_reopen(move |_| {
+        if relaunches.unbounded_send(Asked::Relaunched).is_err() {
+            eprintln!("could not bring the window back: the app is closing");
+        }
+    });
+    app.run(move |cx: &mut App| {
+        // A picture is taken once the window holds still, which an endless animation never does.
+        #[cfg(feature = "snapshots")]
+        if snapshots::is_on() {
+            cx.set_reduce_motion(true);
+        }
+        let remembered = AppStateFile::in_folders(&folders);
+        let active = cx.new(|_| ActivePr::remembering_in(remembered));
+        let switching = pr_switching(&requests_to_self, &folders, active.clone(), cx);
+        switching.refresh(cx);
+        cx.set_global(switching);
+        tour_writer::resume(cx);
+        let focus = if takes_focus() {
+            platform::Focus::Taken
+        } else {
+            platform::Focus::LeftAlone
+        };
+        let appearance = Appearance::of_system(cx);
+        cx.set_global(appearance);
+        platform::start(focus, appearance.look(), Quit, cx);
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        components::toast_stack::Toaster::install(cx);
+        let configured = keymap::configured_keymap();
+        if let Some(notice) = configured.notice() {
+            components::toast_stack::post_toast(cx, ToastTone::Danger, notice);
+        }
+        apply_keymap(configured.keymap, cx);
+        avatar_pictures::AvatarPictures::install(cx);
+        prose_selection::ProseSelections::install(cx);
+        updater::Updates::install(folders.home(), cx);
+        cx.spawn(async move |cx| answer_requests(asked, active, folders, cx).await)
+            .detach();
+    });
 }
 
 /// Picking a PR in the switcher is an open request the app makes of itself, so it takes the same path
@@ -242,6 +249,10 @@ async fn answer_requests(
                 reopen_shown(&screen, &folders, cx);
                 continue;
             }
+            Asked::Relaunched => {
+                bring_window_back(&screen, cx);
+                continue;
+            }
         };
         match request {
             Request::Quit => {
@@ -320,6 +331,35 @@ async fn answer_requests(
                 }
             }
         }
+    }
+}
+
+fn bring_window_back(screen: &SharedScreen, cx: &mut AsyncApp) {
+    let window = screen.borrow().window;
+    let brought_back = cx.update(|cx| {
+        bring_app_to_front(cx);
+        match window.relaunched() {
+            Relaunched::OpenSwitcherOnly => open_switcher_window(cx).map(AppWindow::SwitcherOnly),
+            Relaunched::Raise(window) => any_handle(window)
+                .map_or(Ok(()), |handle| {
+                    handle.update(cx, |_, window, _| raise(window))
+                })
+                .map(|()| window),
+        }
+    });
+    match brought_back {
+        Ok(window) => screen.borrow_mut().window = window,
+        Err(error) => eprintln!("could not bring the window back: {error:#}"),
+    }
+}
+
+fn any_handle(window: OneWindow) -> Option<AnyWindowHandle> {
+    match window {
+        AppWindow::Closed => None,
+        AppWindow::SettingsOnly(window) => Some(window.into()),
+        AppWindow::SwitcherOnly(window) => Some(window.into()),
+        AppWindow::WritingOnly(window) => Some(window.into()),
+        AppWindow::Review(window) => Some(window.into()),
     }
 }
 

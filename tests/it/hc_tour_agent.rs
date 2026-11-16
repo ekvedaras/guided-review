@@ -649,10 +649,10 @@ fn agents_get_a_path_that_finds_the_running_guided_review_before_the_rest_of_the
     assert_eq!(
         HcTourAgents::path_for_agents(
             Path::new("/Users/me/.cargo/bin/guided-review"),
-            Some("/usr/bin:/Users/me/.cargo/bin".as_ref())
+            Some("/Users/me/.local/bin:/usr/bin:/Users/me/.cargo/bin".as_ref())
         ),
-        "/usr/bin:/Users/me/.cargo/bin",
-        "already on it"
+        "/Users/me/.cargo/bin:/Users/me/.local/bin:/usr/bin",
+        "already on it behind another guided-review: moved to the front, not repeated"
     );
     assert_eq!(
         HcTourAgents::path_for_agents(Path::new("/Users/me/.cargo/bin/guided-review"), None),
