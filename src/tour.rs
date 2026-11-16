@@ -350,6 +350,13 @@ impl TourPin {
     /// The facts the tool owns; the tour writer never guesses them.
     pub fn pin_to(&mut self, subject: &ReviewSubject, base: &Sha, head: &Sha) {
         self.version = VERSION;
+        self.name_subject(subject);
+        self.base = base.clone();
+        self.head = head.clone();
+    }
+
+    /// Fills in which PR or local change set the pin is for, leaving its version, base and head as they are.
+    pub fn name_subject(&mut self, subject: &ReviewSubject) {
         match subject {
             ReviewSubject::PullRequest(pr) => {
                 self.pr = pr.to_string();
@@ -360,8 +367,6 @@ impl TourPin {
                 self.local = Some(subject.to_string());
             }
         }
-        self.base = base.clone();
-        self.head = head.clone();
     }
 
     /// The subject the tour is pinned to: a tour names a PR or a local change set, never both.

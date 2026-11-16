@@ -295,8 +295,7 @@ fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
             .pin_to(subject, &code.merge_base()?, &code.tips.head);
     } else {
         if tour.pin.pr.is_empty() && tour.pin.local.is_none() {
-            tour.pin
-                .pin_to(subject, &tour.pin.base.clone(), &tour.pin.head.clone());
+            tour.pin.name_subject(subject);
         }
         if tour.pin.head != code.tips.head {
             match subject {
