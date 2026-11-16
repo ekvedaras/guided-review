@@ -1267,22 +1267,43 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::retry_agent_link);
             }))
         });
-        div().flex().flex_col().gap_1().child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_xs()
-                        .text_color(colors.muted_text)
-                        .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
-                )
-                .children(show)
-                .children(retry),
-        )
+        let choices = agent.choices.iter().map(|terminal| {
+            let chosen = terminal.clone();
+            icon_label_button(
+                colors,
+                SharedString::from(format!("use-agent-{terminal}")),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Terminal,
+                format!("Use this agent: {terminal}"),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let chosen = chosen.clone();
+                this.session
+                    .update(cx, |session, cx| session.use_tour_agent(chosen, cx));
+            }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                    )
+                    .children(show)
+                    .children(retry),
+            )
+            .children(choices)
     }
 
     /// A basic review's guided tour in the sidebar: Write guided tour while nothing is asked, the stage

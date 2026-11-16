@@ -1163,8 +1163,12 @@ impl ReviewCore {
             Place::Tour | Place::Step { .. } | Place::Piece { .. } | Place::Lines { .. } => None,
         };
         let named_file = file.map_or_else(String::new, |file| format!("\nFile: {file}"));
+        let reviewed = match subject {
+            ReviewSubject::PullRequest(_) => "the PR's",
+            ReviewSubject::Local(_) => "the local change set's",
+        };
         let basic_place = format!(
-            "{place}{named_file}\nThe tour is a basic tour: the PR's changed files, with no tour file. \
+            "{place}{named_file}\nThe tour is a basic tour: {reviewed} changed files, with no tour file. \
              Read the changed code with `guided-review outline {subject}` and \
              `guided-review show {subject} <piece ids> --around`."
         );

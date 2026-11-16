@@ -6,7 +6,7 @@ use gpui::SharedString;
 
 use crate::viewer::{
     ApproveWarning, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage,
-    Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TourAgentState, TreeRow,
+    Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -50,6 +50,8 @@ pub struct SidebarTourAgent {
     pub line: SharedString,
     pub can_show: bool,
     pub can_retry: bool,
+    /// Several agents work in a local review's folder: Use this agent for each.
+    pub choices: Vec<TerminalId>,
 }
 
 /// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
@@ -141,9 +143,10 @@ impl SidebarRows {
         Self {
             tour_agent: SidebarTourAgent {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
-                line: tour_agent.to_string().into(),
+                line: tour_agent.line_for(review.subject()).into(),
                 can_show: tour_agent.can_show(),
                 can_retry: tour_agent.can_retry(),
+                choices: tour_agent.choices().to_vec(),
             },
             guided_tour: review.basic_mode_label().map(|_| SidebarGuidedTour {
                 stage: review.guided_tour_stage(),

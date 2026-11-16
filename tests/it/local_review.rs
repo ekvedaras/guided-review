@@ -628,3 +628,21 @@ fn a_local_reviews_github_port_refuses_every_call() {
 
     assert!(tips.is_err());
 }
+
+#[test]
+fn an_ask_handed_to_the_agent_of_a_local_review_names_the_change_set_not_a_pr() {
+    let feature = Feature::with_work_in_progress();
+    let review = feature.open();
+    let mut asks = guided_review::viewer::Asks::load(std::sync::Arc::new(
+        crate::support::fake_ports::FakeAskStore::default(),
+    ))
+    .unwrap();
+    let id = asks.start(guided_review::viewer::Place::Tour, review.head());
+    let ask = asks.get(id).unwrap().clone();
+
+    let text = review.ask_hand_off_text(&ask, "the whole change");
+
+    assert!(text.contains(&feature.subject().to_string()), "{text}");
+    assert!(text.contains("guided-review outline"), "{text}");
+    assert!(!text.contains("PR"), "{text}");
+}

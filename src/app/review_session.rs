@@ -31,8 +31,8 @@ use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
     CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
     OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
-    SendMode, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    SendMode, TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState,
+    TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -1060,6 +1060,23 @@ impl ReviewSession {
         if let Err(error) = self.change(cx, |review| review.try_hand_off_again(hand_off)) {
             eprintln!("could not queue hand-off {hand_off} again: {error:#}");
         }
+    }
+
+    /// Makes the terminal the change set's agent, then looks for the agent again so the sidebar and the
+    /// hand-offs follow it.
+    pub fn use_tour_agent(&mut self, terminal: TerminalId, cx: &mut Context<Self>) {
+        let agents = self.tour_work.tour_agents.clone();
+        let subject = self.review.subject().clone();
+        self.show_agent = Some(self.run_off_thread(
+            cx,
+            move || agents.claim(&subject, &terminal),
+            |this, claimed, cx| {
+                if let Err(error) = claimed {
+                    eprintln!("could not use the agent: {error:#}");
+                }
+                this.follow_tour_agent(cx);
+            },
+        ));
     }
 
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
