@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Exports the light and dark looks of assets/AppIcon.icon as Icon Composer draws them, for the Dock
+# icon the app paints when no bundle names an icon for it, and the Linux desktop entry's icons. Run it
+# after every change to AppIcon.icon; a test fails until the pictures match it again.
+# macOS only: ictool ships inside Xcode's Icon Composer (Xcode 26 or newer).
+# Usage: scripts/app-icon-pictures
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+ictool="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+if [ ! -x "$ictool" ]; then
+    echo "scripts/app-icon-pictures: no ictool at $ictool; it needs Xcode 26 or newer on macOS" >&2
+    exit 1
+fi
+
+icon=assets/AppIcon.icon
+size=512
+
+for look in light dark; do
+    case "$look" in
+        light) rendition=Default ;;
+        dark) rendition=Dark ;;
+    esac
+    "$ictool" "$icon" --export-image --output-file "assets/app-icon-$look.png" \
+        --platform macOS --rendition "$rendition" --width "$size" --height "$size" --scale 1 >/dev/null
+done
+
+# The same files in the same order as app_icon::ICON_COMPOSER_FILES.
+cat "$icon/icon.json" "$icon/Assets/trail-light.svg" "$icon/Assets/trail-dark.svg" \
+    | shasum -a 256 | cut -d' ' -f1 > assets/app-icon-pictures.sha256
+
+echo "assets/app-icon-light.png, assets/app-icon-dark.png and assets/app-icon-pictures.sha256 are written"

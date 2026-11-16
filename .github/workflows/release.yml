@@ -11,7 +11,8 @@ permissions:
 jobs:
   verify:
     # The tag names the release, Cargo.toml names the binary's --version: they must agree.
-    runs-on: macos-15
+    # macos-26: its Xcode's actool compiles the Icon Composer icon (AppIcon.icon).
+    runs-on: macos-26
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -42,8 +43,12 @@ jobs:
         # holds the Linux entry's icons (icons/), for a Linux archive.
         run: |
           cargo run --locked --quiet -- desktop-entry-template dist/bundle
-          iconutil -c icns dist/bundle/AppIcon.iconset -o "dist/bundle/Guided Review.app/Contents/Resources/AppIcon.icns"
-          rm -r dist/bundle/AppIcon.iconset
+          xcrun actool dist/bundle/AppIcon.icon --compile "dist/bundle/Guided Review.app/Contents/Resources" \
+            --app-icon AppIcon --platform macosx --target-device mac --minimum-deployment-target 11.0 \
+            --output-partial-info-plist "$RUNNER_TEMP/app-icon.plist"
+          test -f "dist/bundle/Guided Review.app/Contents/Resources/Assets.car"
+          test -f "dist/bundle/Guided Review.app/Contents/Resources/AppIcon.icns"
+          rm -r dist/bundle/AppIcon.icon
       - uses: actions/upload-artifact@v4
         with:
           name: app-bundle

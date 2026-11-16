@@ -28,6 +28,11 @@ fn template(dir: &Path, version_text: &str) -> PathBuf {
         format!("icon {version_text}"),
     )
     .unwrap();
+    fs::write(
+        app.join("Contents/Resources/Assets.car"),
+        format!("assets {version_text}"),
+    )
+    .unwrap();
     dir.to_path_buf()
 }
 
@@ -53,6 +58,7 @@ fn the_info_plist_names_the_app_its_version_its_icon_and_the_binary_it_runs() {
         "<key>CFBundleIdentifier</key>\n\t<string>io.github.ekvedaras.guided-review</string>",
         "<key>CFBundleExecutable</key>\n\t<string>guided-review</string>",
         "<key>CFBundleIconFile</key>\n\t<string>AppIcon</string>",
+        "<key>CFBundleIconName</key>\n\t<string>AppIcon</string>",
         "<key>CFBundleShortVersionString</key>\n\t<string>0.7.0</string>",
         "<key>CFBundleVersion</key>\n\t<string>0.7.0</string>",
         "<key>CFBundlePackageType</key>\n\t<string>APPL</string>",
@@ -64,7 +70,7 @@ fn the_info_plist_names_the_app_its_version_its_icon_and_the_binary_it_runs() {
 }
 
 #[test]
-fn the_template_holds_the_info_plist_and_every_picture_iconutil_needs() {
+fn the_template_holds_the_info_plist_and_the_icon_actool_compiles() {
     let out = TempDir::new().unwrap();
 
     write_desktop_entry_templates(out.path(), version("0.7.0")).unwrap();
@@ -73,28 +79,13 @@ fn the_template_holds_the_info_plist_and_every_picture_iconutil_needs() {
         fs::read_to_string(out.path().join("Guided Review.app/Contents/Info.plist")).unwrap(),
         info_plist(version("0.7.0"))
     );
-    let mut pictures: Vec<String> = fs::read_dir(out.path().join("AppIcon.iconset"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    pictures.sort();
-    assert_eq!(
-        pictures,
-        [
-            "icon_128x128.png",
-            "icon_128x128@2x.png",
-            "icon_16x16.png",
-            "icon_16x16@2x.png",
-            "icon_256x256.png",
-            "icon_256x256@2x.png",
-            "icon_32x32.png",
-            "icon_32x32@2x.png",
-            "icon_512x512.png",
-            "icon_512x512@2x.png",
-        ]
-    );
-    let picture = fs::read(out.path().join("AppIcon.iconset/icon_512x512@2x.png")).unwrap();
-    assert!(picture.starts_with(b"\x89PNG"));
+    let icon = out.path().join("AppIcon.icon");
+    let manifest = fs::read_to_string(icon.join("icon.json")).unwrap();
+    for layer in ["trail-light.svg", "trail-dark.svg"] {
+        assert!(manifest.contains(layer), "icon.json names {layer}");
+        let picture = fs::read_to_string(icon.join("Assets").join(layer)).unwrap();
+        assert!(picture.starts_with("<svg"), "{layer} is a picture");
+    }
 }
 
 #[test]
@@ -111,6 +102,10 @@ fn placing_the_bundle_makes_a_real_app_folder_whose_binary_is_the_bin_link() {
     assert_eq!(
         fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap(),
         info_plist(version("0.7.0"))
+    );
+    assert_eq!(
+        fs::read_to_string(bundle.join("Contents/Resources/Assets.car")).unwrap(),
+        "assets 0.7.0"
     );
     assert_eq!(
         fs::read_to_string(bundle.join("Contents/Resources/AppIcon.icns")).unwrap(),

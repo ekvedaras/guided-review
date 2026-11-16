@@ -18,7 +18,7 @@ impl WritingWindow {
     pub fn new(active: &Entity<ActivePr>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let loading = cx.new(|cx| LoadingScreen::new(active, cx));
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            cx.set_global(Appearance::of(window));
+            Appearance::follow(window, cx);
             cx.notify();
         });
         Self {

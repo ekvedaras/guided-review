@@ -1,0 +1,22 @@
+{
+  "fill-specializations" : [
+    { "value" : { "linear-gradient" : [ "srgb:1.00000,1.00000,1.00000,1.00000", "srgb:0.90196,0.92157,0.94902,1.00000" ] } },
+    { "appearance" : "dark", "value" : { "linear-gradient" : [ "srgb:0.12157,0.16078,0.21569,1.00000", "srgb:0.04314,0.06667,0.12549,1.00000" ] } }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name-specializations" : [
+            { "value" : "trail-light.svg" },
+            { "appearance" : "dark", "value" : "trail-dark.svg" }
+          ],
+          "name" : "trail"
+        }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : { "squares" : [ "macOS" ] }
+}

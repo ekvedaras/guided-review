@@ -114,7 +114,9 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
             } else {
                 platform::Focus::LeftAlone
             };
-            platform::start(focus, Quit, cx);
+            let appearance = Appearance::of_system(cx);
+            cx.set_global(appearance);
+            platform::start(focus, appearance.look(), Quit, cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             components::toast_stack::Toaster::install(cx);
             let configured = keymap::configured_keymap();
@@ -805,7 +807,7 @@ fn open_window(
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     let options = window_options(window_title(&opened, pr), cx);
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of(window));
+        Appearance::follow(window, cx);
         cx.new(|cx| new_layout(opened, pr, None, window, cx))
     })
 }
@@ -817,7 +819,7 @@ fn open_settings_window(
     let options = window_options("Settings".to_owned(), cx);
     let folders = folders.clone();
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of(window));
+        Appearance::follow(window, cx);
         cx.new(|cx| SettingsWindow::new(folders, window, cx))
     })
 }
@@ -826,7 +828,7 @@ fn open_switcher_window(cx: &mut App) -> anyhow::Result<WindowHandle<SwitcherWin
     let options = window_options("Pick a pull request".to_owned(), cx);
     let switching = cx.global::<PrSwitching>().clone();
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of(window));
+        Appearance::follow(window, cx);
         cx.new(|cx| SwitcherWindow::new(switching, window, cx))
     })
 }
@@ -838,7 +840,7 @@ fn open_writing_window(
     let options = window_options("Writing a tour".to_owned(), cx);
     let active = active.clone();
     cx.open_window(options, |window, cx| {
-        cx.set_global(Appearance::of(window));
+        Appearance::follow(window, cx);
         cx.new(|cx| WritingWindow::new(&active, window, cx))
     })
 }
@@ -919,7 +921,7 @@ fn new_layout(
         cx,
     );
     cx.observe_window_appearance(window, |_, window, cx| {
-        cx.set_global(Appearance::of(window));
+        Appearance::follow(window, cx);
         cx.notify();
     })
     .detach();

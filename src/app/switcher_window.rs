@@ -36,7 +36,7 @@ impl SwitcherWindow {
             window.remove_window();
         });
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            cx.set_global(Appearance::of(window));
+            Appearance::follow(window, cx);
             cx.notify();
         });
         Self {
