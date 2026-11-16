@@ -238,12 +238,15 @@ fn progress_counts_files_and_the_lead_goes_start_continue_finish() {
 fn next_unread_walks_to_the_first_unread_file_after_the_open_one_and_wraps() {
     let shop = Shop::changing(&["a.txt", "b.txt", "c.txt"]);
     let mut review = shop.open();
-    review.tick_file(&file_path("a.txt")).unwrap();
-    review.tick_file(&file_path("c.txt")).unwrap();
+    review.tick_file(&file_path("b.txt")).unwrap();
+    review.go_to_file(&file_path("a.txt"));
 
     assert!(review.go_to_next_unread());
-    assert_eq!(review.screen(), &file("b.txt"));
-    review.tick_file(&file_path("b.txt")).unwrap();
+    assert_eq!(review.screen(), &file("c.txt"));
+    assert!(review.go_to_next_unread());
+    assert_eq!(review.screen(), &file("a.txt"), "wraps to the start");
+    review.tick_file(&file_path("a.txt")).unwrap();
+    review.tick_file(&file_path("c.txt")).unwrap();
     assert!(!review.go_to_next_unread());
 }
 
