@@ -138,6 +138,8 @@ pub struct ScreenFooter {
     pub ticks: Option<StepId>,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
+    /// A basic tour's file screen: its number among the files, and how many files there are.
+    pub file_place: Option<(usize, usize)>,
     /// On the last screen once every step is read: the end of the tour.
     pub lead: Option<TourLead>,
 }

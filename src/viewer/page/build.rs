@@ -637,6 +637,7 @@ fn screen_footer(review: &ReviewCore, ticks: Option<StepId>) -> PageRow {
         ticks,
         has_previous: place.has_previous,
         next: place.next,
+        file_place: place.file_number.map(|number| (number, place.file_count)),
         lead: leads_on.then_some(lead),
     }))
 }

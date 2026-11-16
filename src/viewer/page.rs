@@ -324,6 +324,10 @@ impl Page {
                     .description
                     .as_ref()
                     .map(|description| (index, description.as_ref())),
+                PageRow::Overview(overview) => overview
+                    .description
+                    .as_ref()
+                    .map(|description| (index, description)),
                 _ => None,
             })
     }
@@ -404,6 +408,7 @@ impl Page {
                         ticks: None,
                         has_previous: footer.has_previous,
                         next: footer.next.clone(),
+                        file_place: footer.file_place,
                         lead: Some(crate::viewer::TourLead::Finish {
                             steps,
                             can_finish: true,

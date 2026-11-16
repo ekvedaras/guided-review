@@ -5,7 +5,7 @@ use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{
-    ApproveWarning, Problem, ReadProgress, Review, Screen, StepId, TourAgentState,
+    ApproveWarning, Problem, ReadProgress, Review, Screen, StepId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -19,6 +19,12 @@ pub struct SidebarStep {
     pub is_gone: bool,
     pub has_check: bool,
     pub is_skim: bool,
+}
+
+/// A basic review's sidebar: the overview, then the changed files as a folder tree.
+pub struct SidebarTree {
+    pub is_overview_current: bool,
+    pub rows: Vec<TreeRow>,
 }
 
 pub struct SidebarSafetyNet {
@@ -79,6 +85,9 @@ pub struct SidebarRows {
     pub is_summary_current: bool,
     pub steps: Vec<SidebarStep>,
     pub safety_net: Option<SidebarSafetyNet>,
+    /// Only a basic review has one; its steps are then empty.
+    pub tree: Option<SidebarTree>,
+    pub basic_mode_label: Option<&'static str>,
 }
 
 impl SidebarRows {
@@ -134,6 +143,11 @@ impl SidebarRows {
             is_summary_current: review.screen() == &Screen::Summary,
             steps,
             safety_net,
+            tree: review.basic_mode_label().map(|_| SidebarTree {
+                is_overview_current: review.screen() == &Screen::Overview,
+                rows: review.basic_sidebar(),
+            }),
+            basic_mode_label: review.basic_mode_label(),
         }
     }
 }

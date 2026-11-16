@@ -654,6 +654,12 @@ impl ReviewCore {
         }
     }
 
+    /// A basic tour of the same pin and title, for a snapshot scene to show the PR in Basic mode.
+    #[cfg(feature = "snapshots")]
+    pub fn basic_tour_of_same_pin(&self) -> BasicTour {
+        BasicTour::new(self.tour.pin().clone(), self.title().to_owned())
+    }
+
     /// A basic tour has the PR's own title.
     pub fn title(&self) -> &str {
         match &self.tour {

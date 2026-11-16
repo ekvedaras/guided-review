@@ -275,6 +275,7 @@ fn a_file_screen_shows_the_whole_file_in_a_box_that_folds_by_its_screen() {
         })
     );
     assert!(footer.has_previous);
+    assert_eq!(footer.file_place, Some((1, 2)));
 
     review.toggle_box_fold(&fold.screen, &fold.path);
 

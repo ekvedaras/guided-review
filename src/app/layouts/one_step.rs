@@ -90,12 +90,12 @@ use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
     CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
     FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
-    NoteSubject, NotesButton, Overlay, PageRow, PieceLabels, Place, QueuedComment, ReadProgress,
-    ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, ViewSwitch, WindowMoment,
+    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
+    QueuedComment, ReadProgress, ReadStep, Reopen, ReopenAfterSave, Reopening, RestartArgs,
+    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
+    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
+    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
+    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1346,9 +1346,23 @@ impl OneStepLayout {
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
         let progress = sidebar.progress;
+        let tree_rows = sidebar.tree.as_ref().map_or(&[][..], |tree| &tree.rows[..]);
+        let is_first_current = sidebar
+            .tree
+            .as_ref()
+            .map_or(sidebar.is_summary_current, |tree| tree.is_overview_current);
         let places = row_places(
-            &std::iter::once(sidebar.is_summary_current)
+            &std::iter::once(is_first_current)
                 .chain(sidebar.steps.iter().map(|step| step.is_current))
+                .chain(tree_rows.iter().map(|row| {
+                    matches!(
+                        row.kind,
+                        TreeRowKind::File {
+                            is_current: true,
+                            ..
+                        }
+                    )
+                }))
                 .chain(
                     sidebar
                         .safety_net
@@ -1366,7 +1380,9 @@ impl OneStepLayout {
         let mut places = places.into_iter();
         let summary_place = places.next().unwrap_or(RowPlace::Apart);
         let step_places: Vec<RowPlace> = places.by_ref().take(sidebar.steps.len()).collect();
+        let tree_places: Vec<RowPlace> = places.by_ref().take(tree_rows.len()).collect();
         let safety_net_place = places.next().unwrap_or(RowPlace::Apart);
+        let is_basic = sidebar.tree.is_some();
         let summary_row = self
             .touching_hover(
                 sidebar_row(
@@ -1381,10 +1397,78 @@ impl OneStepLayout {
                 summary_place,
                 cx,
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.change_review(cx, |review| review.go_to_summary());
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change_review(cx, |review| {
+                    if is_basic {
+                        review.go_to_overview();
+                    } else {
+                        review.go_to_summary();
+                    }
+                });
             }))
-            .child(row_label("Summary"));
+            .child(row_label(if is_basic { "Overview" } else { "Summary" }));
+        let tree_row_elements =
+            tree_rows
+                .iter()
+                .zip(tree_places.into_iter().enumerate())
+                .map(|(row, (offset, place))| {
+                    let index = offset + 1 + sidebar.steps.len();
+                    match &row.kind {
+                        TreeRowKind::Folder {
+                            path,
+                            label,
+                            is_folded,
+                        } => {
+                            let folder = path.clone();
+                            self.touching_hover(
+                                sidebar_row(
+                                    &colors,
+                                    SharedString::from(format!("folder-{path}")),
+                                    row.depth,
+                                    place,
+                                    RowMark::Page,
+                                    hovered_touching,
+                                ),
+                                index,
+                                place,
+                                cx,
+                            )
+                            .text_color(colors.muted_text)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.change_review(cx, |review| review.toggle_folder(&folder));
+                            }))
+                            .child(div().flex_none().h(px(22.)).flex().items_center().child(
+                                turn_to(
+                                    sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
+                                    SharedString::from(format!("folder-chevron-{path}")),
+                                    !is_folded,
+                                    1.,
+                                ),
+                            ))
+                            .child(row_label(SharedString::from(label.clone())))
+                        }
+                        TreeRowKind::File { path, label, .. } => {
+                            let file = path.clone();
+                            self.touching_hover(
+                                sidebar_row(
+                                    &colors,
+                                    SharedString::from(format!("file-{path}")),
+                                    row.depth,
+                                    place,
+                                    RowMark::Page,
+                                    hovered_touching,
+                                ),
+                                index,
+                                place,
+                                cx,
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.change_review(cx, |review| review.go_to_file(&file));
+                            }))
+                            .child(row_label(SharedString::from(label.clone())))
+                        }
+                    }
+                });
         let sync_notices = sidebar
             .sync_banner
             .clone()
@@ -1513,7 +1597,14 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_3()
-            .child(progress_meter(&colors, progress))
+            .child(match sidebar.basic_mode_label {
+                // Counting files as read comes with their read ticks.
+                Some(label) => div()
+                    .flex()
+                    .child(chip(&colors, Tone::Accent).child(label))
+                    .into_any_element(),
+                None => progress_meter(&colors, progress).into_any_element(),
+            })
             .child(finish_dialog)
             .children(tour_agent)
             .children(clone_offer)
@@ -1555,6 +1646,7 @@ impl OneStepLayout {
                     .gap_px()
                     .child(summary_row)
                     .children(step_rows)
+                    .children(tree_row_elements)
                     .children(safety_net_row),
             )
             .children(update_button(&colors, cx))
@@ -2194,8 +2286,7 @@ impl OneStepLayout {
             } => repin_notes(&colors, gone_pieces, text_may_be_old).into_any_element(),
             PageRow::Toolbar(toolbar) => self.toolbar(&toolbar, cx).into_any_element(),
             PageRow::ScreenFooter(footer) => screen_footer(&footer, cx).into_any_element(),
-            // The window draws a basic tour's overview with ticket #82's app slice.
-            PageRow::Overview(_) => div().into_any_element(),
+            PageRow::Overview(overview) => self.overview(&overview, cx).into_any_element(),
             PageRow::SafetyNetIntro => SafetyNetIntro.into_any_element(),
             PageRow::PieceHeader(heading) => {
                 let open_code = heading.code_link.as_ref().map(|link| {
@@ -2440,6 +2531,133 @@ impl OneStepLayout {
                 self.session.clone(),
                 NoteSubject::ReviewerSummary,
             ))
+    }
+
+    /// A basic review's first screen: what the PR is, how big, its own description, the changed files
+    /// to go to, and Write guided tour, which waits for its ticket.
+    fn overview(&self, overview: &OverviewPage, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = Colors::active(cx);
+        let description = self
+            .session
+            .read(cx)
+            .rows()
+            .prepared_description()
+            .map(|description| {
+                self.markdown_card(
+                    "PR DESCRIPTION",
+                    MarkdownView::new(DESCRIPTION_KEY, description)
+                        .with_diagrams(self.description_diagrams.clone()),
+                    cx,
+                )
+            });
+        let files = overview.files.iter().map(|file| {
+            let path = file.path.clone();
+            let (folder, name) = match file.path.as_str().rsplit_once('/') {
+                Some((folder, name)) => (Some(format!("{folder}/")), name),
+                None => (None, file.path.as_str()),
+            };
+            div()
+                .id(SharedString::from(format!("overview-file-{}", file.path)))
+                .px_3()
+                .py_1p5()
+                .flex()
+                .items_center()
+                .gap_3()
+                .cursor_pointer()
+                .hover(|row| row.bg(colors.hover))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.change_review(cx, |review| review.go_to_file(&path));
+                }))
+                .child(div().flex_none().w(px(14.)).flex().justify_center().child(
+                    if file.is_read {
+                        sized_icon(Icon::Check, colors.success, px(14.)).into_any_element()
+                    } else {
+                        div()
+                            .size(px(8.))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(colors.muted_text)
+                            .into_any_element()
+                    },
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .font_family(*crate::app::components::palette::CODE_FONT)
+                        .text_sm()
+                        .children(folder.map(|folder| {
+                            div()
+                                .flex_none()
+                                .text_color(colors.muted_text)
+                                .child(folder)
+                        }))
+                        .child(div().min_w_0().truncate().child(name.to_owned())),
+                )
+                .child(line_counts(&colors, file.added_lines, file.removed_lines))
+        });
+        let write_guided_tour = overview.write_guided_tour_refusal.map(|refusal| {
+            div()
+                .pt_6()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(
+                    icon_label_button(
+                        &colors,
+                        "write-guided-tour",
+                        ButtonKind::Secondary,
+                        ButtonSize::Regular,
+                        Icon::Sparkles,
+                        "Write guided tour",
+                    )
+                    .opacity(0.5)
+                    .cursor_not_allowed(),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(refusal.reason()),
+                )
+        });
+        div()
+            .pb_8()
+            .w_full()
+            .max_w(READING_WIDTH)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .pb_5()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_2()
+                    .child(tour_place(&colors, "OVERVIEW", TourStop::On))
+                    .child(
+                        div()
+                            .text_2xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(InlineMarkdown::new("overview-title", &overview.title)),
+                    ),
+            )
+            .child(overview_stats(&colors, overview.stats))
+            .children(description)
+            .child(
+                div()
+                    .pb_4()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(note_label("CHANGED FILES").text_color(colors.muted_text))
+                    .child(card(&colors).py_1().flex().flex_col().children(files)),
+            )
+            .children(write_guided_tour)
     }
 
     fn markdown_card(
@@ -2919,6 +3137,13 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
                     .child(InlineMarkdown::new("footer-up-next", &title)),
             )
     });
+    let file_place = footer.file_place.map(|(number, count)| {
+        div()
+            .flex_none()
+            .text_sm()
+            .text_color(colors.muted_text)
+            .child(format!("File {number} of {count}"))
+    });
     let the_end = (footer.next.is_none()).then(|| {
         div()
             .flex_1()
@@ -2927,6 +3152,8 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .text_color(colors.muted_text)
             .child(if footer.ticks.is_some() {
                 "This is the last step."
+            } else if footer.file_place.is_some() {
+                "That was the last file."
             } else {
                 "That was the last step. Finish the review in the sidebar."
             })
@@ -2948,6 +3175,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
                 .flex()
                 .items_center()
                 .gap_4()
+                .children(file_place)
                 .children(up_next)
                 .children(the_end)
                 .children(lead)
@@ -3003,6 +3231,59 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .child(dot())
                 .child(item(Icon::MessageSquare, SharedString::from(threads)))
         }))
+}
+
+/// How big a basic review's PR is, in the numbers the review truly has.
+fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
+    let item = |icon_name: Icon, text: String| {
+        div()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .child(sized_icon(icon_name, colors.muted_text, px(14.)))
+            .child(text)
+    };
+    let dot = || div().size(px(3.)).rounded_full().bg(colors.border);
+    let plural = |count: usize, one: &str, many: &str| match count {
+        1 => format!("1 {one}"),
+        count => format!("{count} {many}"),
+    };
+    div()
+        .pb_5()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_3()
+        .text_sm()
+        .text_color(colors.muted_text)
+        .child(item(
+            Icon::FileText,
+            plural(stats.files, "file changed", "files changed"),
+        ))
+        .child(dot())
+        .child(line_counts(colors, stats.added_lines, stats.removed_lines))
+        .children((stats.open_threads > 0).then(|| {
+            div().flex().items_center().gap_3().child(dot()).child(item(
+                Icon::MessageSquare,
+                plural(stats.open_threads, "open thread", "open threads"),
+            ))
+        }))
+}
+
+/// Added lines in green, removed in red.
+fn line_counts(colors: &Colors, added: usize, removed: usize) -> impl IntoElement {
+    div()
+        .flex_none()
+        .flex()
+        .gap_2()
+        .text_sm()
+        .font_family(*crate::app::components::palette::CODE_FONT)
+        .child(div().text_color(colors.success).child(format!("+{added}")))
+        .child(
+            div()
+                .text_color(colors.danger)
+                .child(format!("\u{2212}{removed}")),
+        )
 }
 
 /// One top-level step on the route: its number on the route line, its title and why, and whether

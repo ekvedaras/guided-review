@@ -62,6 +62,9 @@ pub struct ReviewSession {
     /// What the sidebar said before a snapshot scene staged another line.
     #[cfg(feature = "snapshots")]
     tour_agent_before_staging: Option<TourAgentState>,
+    /// The guided review a snapshot scene put aside to show the PR in Basic mode.
+    #[cfg(feature = "snapshots")]
+    guided_before_staging: Option<Review>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -155,6 +158,8 @@ impl ReviewSession {
             tour_agent: TourAgentState::Unknown,
             #[cfg(feature = "snapshots")]
             tour_agent_before_staging: None,
+            #[cfg(feature = "snapshots")]
+            guided_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -686,6 +691,39 @@ impl ReviewSession {
         self.rows.stage_all_read(total, &self.open_details);
         self.screen_list.reset(self.rows.len());
         cx.notify();
+    }
+
+    /// The PR opened in Basic mode in place of its guided tour, which `unstage_basic` puts back.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic(&mut self, cx: &mut Context<Self>) {
+        let Ok(basic) = Review::open_basic(
+            self.review.basic_tour_of_same_pin(),
+            self.source.as_ref(),
+            self.review.state_file(),
+        ) else {
+            return;
+        };
+        let guided = std::mem::replace(&mut self.review, basic);
+        self.guided_before_staging.get_or_insert(guided);
+        self.swapped_review(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
+        if let Some(guided) = self.guided_before_staging.take() {
+            self.review = guided;
+            self.swapped_review(cx);
+        }
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn swapped_review(&mut self, cx: &mut Context<Self>) {
+        self.image_pictures.clear();
+        self.loading_images.clear();
+        self.rows = PageRows::none();
+        self.change(cx, |_| {});
+        cx.emit(SessionEvent::Reopened);
+        self.start_background_work(cx);
     }
 
     /// Three reads that fail the way a GitHub outage fails them, through the review's own path.

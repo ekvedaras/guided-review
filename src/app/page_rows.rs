@@ -36,6 +36,15 @@ struct PreparedSummary {
 
 impl PreparedSummary {
     fn of(page: &Page) -> Self {
+        if let Some(overview) = page.overview() {
+            return Self {
+                reviewer_summary: None,
+                description: overview
+                    .description
+                    .as_ref()
+                    .map(|description| Rc::new(PreparedMarkdown::of(description.clone()))),
+            };
+        }
         let Some(columns) = page.rows().iter().find_map(|row| match row {
             PageRow::SummaryColumns(columns) => Some(columns),
             _ => None,
