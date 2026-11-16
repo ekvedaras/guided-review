@@ -215,6 +215,15 @@ fn step_heading(text: &mut String, title: &str, why: &str, kind: &str) -> Option
     .ok()
 }
 
+/// The lines as the AI is told them, one per line: `+ path:side:line: text`.
+pub(super) fn code_lines(lines: &[DiffLine]) -> String {
+    let mut text = String::new();
+    for line in lines {
+        diff_line(&mut text, line);
+    }
+    text
+}
+
 fn piece_lines(text: &mut String, piece: &PieceDiff) -> Option<()> {
     writeln!(text, "\nPiece {}", piece.id).ok()?;
     for line in piece.lines() {

@@ -288,6 +288,7 @@ impl LocalThreadStore {
                     from: SentFrom::File(place.path().clone()),
                     mode: super::comments::SendMode::SendNow,
                     body: task,
+                    code: None,
                 },
                 Some(&Ok(threads.iter().map(without_last_comment).collect())),
             );

@@ -139,6 +139,9 @@ pub struct HandOff {
     /// The file screen of a basic tour the comment was sent from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     file: Option<FilePath>,
+    /// The lines the comment is on, as the diff shows them; only a task of a local review carries them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
     mode: SendMode,
     comment: String,
     /// `None` when the threads read after the send did not show it.
@@ -212,6 +215,9 @@ impl HandOff {
             format!("Place: {}", self.place),
         ];
         lines.extend(self.file.iter().map(|file| format!("File: {file}")));
+        if let Some(code) = &self.code {
+            lines.push(format!("Code:\n{}", code.trim_end()));
+        }
         if !self.thread_so_far.is_empty() {
             lines.push("Thread so far:".to_owned());
             lines.extend(
@@ -366,6 +372,8 @@ pub(super) struct SentComment<'a> {
     pub from: SentFrom,
     pub mode: SendMode,
     pub body: &'a str,
+    /// The lines the comment is on, for a task of a local review.
+    pub code: Option<String>,
 }
 
 /// The hand-offs of one PR, oldest first. Kept in the review state.
@@ -471,6 +479,7 @@ impl HandOffs {
                 SentFrom::File(path) => Some(path.clone()),
                 SentFrom::Step(_) | SentFrom::Elsewhere => None,
             },
+            code: sent.code.clone(),
             mode: sent.mode,
             comment: sent.body.to_owned(),
             thread,

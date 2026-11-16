@@ -582,3 +582,18 @@ fn suggest_change_puts_the_lines_in_the_task_the_agent_gets() {
         typed[0]
     );
 }
+
+#[test]
+fn the_task_carries_the_code_the_comment_is_on() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+
+    send_now(&feature, &mut opened, "world", "Say who the world is");
+
+    let typed = feature.typed_into_agent();
+    assert!(
+        typed[0].contains("Code:\n+ README.md:head:2: world"),
+        "{}",
+        typed[0]
+    );
+}

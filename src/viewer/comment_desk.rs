@@ -364,11 +364,11 @@ impl CommentDesk {
         &mut self,
         state: &mut SavedState,
         outcome: CommentOutcome,
-        from: SentFrom,
+        (from, code): (SentFrom, Option<String>),
     ) -> anyhow::Result<CommentResult> {
         let from_box =
             (outcome.request.origin == Origin::Draft).then(|| outcome.request.draft.place.clone());
-        let result = state.record(|state| self.settle(state, outcome, from));
+        let result = state.record(|state| self.settle(state, outcome, (from, code)));
         if let Some(place) = from_box {
             self.show_landing(&place, &result);
         }
@@ -397,7 +397,7 @@ impl CommentDesk {
         &mut self,
         state: &mut ReviewState,
         outcome: CommentOutcome,
-        from: SentFrom,
+        (from, code): (SentFrom, Option<String>),
     ) -> CommentResult {
         let CommentOutcome {
             request,
@@ -420,6 +420,7 @@ impl CommentDesk {
                             from,
                             mode: request.mode,
                             body: &request.draft.body,
+                            code,
                         },
                         threads.as_ref(),
                     );
@@ -726,7 +727,7 @@ impl CommentOutcome {
     /// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
     pub fn land_in(self, file: &ReviewStateFile) -> anyhow::Result<()> {
         file.update(|state| {
-            CommentDesk::default().settle(state, self, SentFrom::Elsewhere);
+            CommentDesk::default().settle(state, self, (SentFrom::Elsewhere, None));
         })
     }
 }
@@ -800,6 +801,7 @@ fn hand_off_reply(
             from,
             mode,
             body: outcome.reply_body.as_deref().unwrap_or_default(),
+            code: None,
         },
         outcome.threads.as_ref(),
     );

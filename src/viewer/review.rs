@@ -1902,12 +1902,23 @@ impl ReviewCore {
     fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
         let hand_offs_before = self.state.hand_offs().all().len();
-        let result =
-            self.comment_desk
-                .apply_comment(&mut self.state, outcome, self.screen.sent_from());
+        let code = self.code_commented_on(&outcome);
+        let result = self.comment_desk.apply_comment(
+            &mut self.state,
+            outcome,
+            (self.screen.sent_from(), code),
+        );
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
         result
+    }
+
+    /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.
+    fn code_commented_on(&self, outcome: &CommentOutcome) -> Option<String> {
+        self.subject.local()?;
+        let place = &outcome.request.draft.place;
+        let selected = Page::of(self).selected(&RowSelection::of(place)?)?;
+        Some(ask_context::code_lines(selected.lines()))
     }
 
     fn note_new_hand_off(&mut self, hand_offs_before: usize) {
