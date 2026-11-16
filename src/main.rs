@@ -207,16 +207,6 @@ impl std::str::FromStr for OpenTarget {
     }
 }
 
-/// Until the later tickets of local review, these commands work on a PR only.
-fn pull_request_of(subject: &ReviewSubject) -> anyhow::Result<PullRequestUrl> {
-    match subject {
-        ReviewSubject::PullRequest(pr) => Ok(pr.clone()),
-        ReviewSubject::Local(_) => {
-            anyhow::bail!("{subject} is a local change set: local review is not built yet")
-        }
-    }
-}
-
 fn tour_path(subject: &ReviewSubject) -> anyhow::Result<()> {
     println!(
         "{}",
