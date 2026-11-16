@@ -15,6 +15,7 @@ On 2026-11-16 the maintainer decided that a PR can be read in the app with no AI
 
 - `tour::Tour` is `Basic(BasicTour)` or `Guided(GuidedTour)`; both hold one `TourPin` (pr, base, head, previous head, version). A basic file that holds `title`, `summary`, `reviewer_summary` or `steps` is refused. `Tour::load` reads either kind; `GuidedTour::load` refuses a basic file.
 - Code that reads steps, the summary or the reviewer summary takes `GuidedTour`, so the compiler lists every place that assumed steps exist. Until the later tickets of the spec, the viewer holds only the guided kind.
+- The switch (`viewer::TourSwitcher`) builds the guided review off the main thread while the basic review stays on screen and can still tick files and save its whole state over the carried one. So the switcher also finds, with git, what the carry needs for the basic tour's head (`ReadCarrier`), and `Review::carry_on_from` carries the basic review's reads again at the hand-over and saves, with no git on the main thread (2026-11-16).
 
 ## Decided for the later review of local changes
 

@@ -420,3 +420,28 @@ fn the_switched_review_does_not_say_the_guided_tour_is_ready() {
     );
     assert_eq!(switched.guided_tour_banner(), None);
 }
+
+#[test]
+fn files_read_while_the_guided_review_is_being_built_are_carried_into_its_steps() {
+    let shop = Shop::new();
+    shop.read_in_basic_mode("a.txt", &shop.first);
+    let mut basic = shop.basic_review();
+    let third = shop.commit_third(&["c.txt"]);
+    shop.write_guided_tour_at(&third);
+    let switched = shop.switcher().run().unwrap();
+    basic.tick_file(&file_path("b.txt")).unwrap();
+    let mut guided = switched.review;
+
+    guided.carry_on_from(basic);
+
+    assert!(guided.is_ticked(&"ab".into()));
+    assert_eq!(guided.steps_that_started_read(), Some(1));
+    let state = shop.state_file().load().unwrap();
+    assert_eq!(
+        state.read_tick(&"ab".into()).unwrap().head,
+        Sha::new(&shop.first),
+        "saved at the oldest head its files were read at"
+    );
+    assert!(state.file_read_tick(&file_path("a.txt")).is_none());
+    assert!(state.file_read_tick(&file_path("b.txt")).is_none());
+}

@@ -262,6 +262,16 @@ impl ReviewState {
         self.viewer.github_baseline_due = true;
     }
 
+    /// The head each file of a basic tour was last read at: its tick, or the tick a re-pin took away.
+    pub(super) fn file_read_heads(&self) -> BTreeMap<FilePath, Sha> {
+        self.viewer
+            .file_read_before
+            .iter()
+            .chain(&self.viewer.file_read_ticks)
+            .map(|(path, tick)| (path.clone(), tick.head.clone()))
+            .collect()
+    }
+
     /// Switching to a guided tour: its steps take the reads the files had, and the file sections and
     /// the re-pin record, which only a basic tour holds, are cleared, as after a Refresh.
     pub(super) fn carry_file_reads_into_steps(&mut self, carried: &CarriedReads) {

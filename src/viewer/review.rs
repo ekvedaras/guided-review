@@ -57,6 +57,7 @@ use super::saved_state::SavedState;
 use super::step_page::{
     DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
 };
+use super::switch_to_guided::ReadCarrier;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
@@ -321,6 +322,9 @@ pub struct ReviewCore {
     guided_tour: GuidedTourProgress,
     /// After a switch from a basic tour: how many steps started read. Not saved.
     steps_started_read: Option<usize>,
+    /// After a switch from a basic tour, until the hand-over: what carries the files read on the
+    /// basic review meanwhile into the steps. Not saved.
+    read_carrier: Option<ReadCarrier>,
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
     seen_end_of: Option<Screen>,
@@ -414,6 +418,7 @@ impl Review {
         self.seen_end_of = replaced.seen_end_of;
         self.ask_desk = replaced.ask_desk;
         if switched_to_guided {
+            self.carry_file_reads_made_while_switching(&replaced.state);
             self.follow_file_asks_into_the_guided_tour();
         }
         self.check_asks_for_code_changes();
@@ -438,6 +443,27 @@ impl Review {
         let head = self.head().clone();
         self.check_asks_for_code_changes();
         self.change_asks(|desk| desk.open(target, &head, now, processes));
+    }
+
+    pub(super) fn carries_file_reads_made_while_switching_with(&mut self, carrier: ReadCarrier) {
+        self.read_carrier = Some(carrier);
+    }
+
+    /// The switch carried the reads saved when it started; the basic review stayed on screen and
+    /// may have read more files, and saved its own state over the carried one. Its reads are
+    /// carried again and this review's state is saved over what it wrote.
+    fn carry_file_reads_made_while_switching(&mut self, basic: &ReviewState) {
+        let Some(carrier) = self.read_carrier.take() else {
+            return;
+        };
+        let carried = carrier.carry(&basic.file_read_heads());
+        let saved = self
+            .state
+            .record(|state| state.carry_file_reads_into_steps(&carried));
+        if let Err(error) = saved {
+            eprintln!("could not save the read ticks carried into the guided tour: {error:#}");
+        }
+        self.steps_started_read = Some(self.progress().read);
     }
 
     /// An Ask about lines of a file screen finds its rows in the first step that shows all its
@@ -590,6 +616,7 @@ impl ReviewCore {
             agent_link_is_off: false,
             guided_tour: GuidedTourProgress::NotAsked,
             steps_started_read: None,
+            read_carrier: None,
             seen_end_of: None,
             tour_files,
         })
@@ -2366,7 +2393,7 @@ impl ReviewCore {
 }
 
 /// The head a basic tour's file was last read at: its tick, or the tick a re-pin took away.
-pub(super) fn read_head_of_file<'a>(state: &'a ReviewState, path: &FilePath) -> Option<&'a Sha> {
+fn read_head_of_file<'a>(state: &'a ReviewState, path: &FilePath) -> Option<&'a Sha> {
     state
         .file_read_tick(path)
         .or_else(|| state.file_read_before(path))
