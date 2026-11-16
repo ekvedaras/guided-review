@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::app_icon::AppIcon;
+use crate::app_icon::{AppIcon, Look};
 use crate::platform::desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, put_file};
 
 /// Linux launchers name no app they start, so the desktop file's Exec sets this to the app id.
@@ -126,7 +126,7 @@ pub fn write_template(out: &Path) -> anyhow::Result<()> {
         let folder = path.parent().context("an icon has no folder")?;
         fs::create_dir_all(folder)
             .with_context(|| format!("could not make {}", folder.display()))?;
-        fs::write(&path, AppIcon::Release.png(size)?)
+        fs::write(&path, AppIcon::release(Look::Dark).png(size)?)
             .with_context(|| format!("could not write {}", path.display()))?;
     }
     Ok(())

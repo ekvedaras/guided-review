@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
+use crate::app_icon::Look;
 
 mod desktop_entry;
 mod linux;
@@ -272,6 +273,17 @@ pub enum TextEdit {
     Paste,
 }
 
+/// The Dock icon of the look macOS turned to, on macOS; nothing on Linux, whose launcher shows the
+/// desktop entry's icon.
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(unused_variables, reason = "only the macOS adapter needs it")
+)]
+pub fn show_look(look: Look) {
+    #[cfg(target_os = "macos")]
+    macos::dock_icon::show(look);
+}
+
 /// What the OS gets from the app as it starts. On macOS: the Dock icon a binary with no app
 /// bundle lacks, or no Dock icon and no turn at the front when the app must not take the focus;
 /// Option with an arrow or backspace, taken before macOS swallows it on some layouts; and the app
@@ -284,11 +296,11 @@ pub enum TextEdit {
         reason = "only the macOS adapter needs these"
     )
 )]
-pub fn start(focus: Focus, quit: impl gpui::Action, cx: &mut gpui::App) {
+pub fn start(focus: Focus, look: Look, quit: impl gpui::Action, cx: &mut gpui::App) {
     #[cfg(target_os = "macos")]
     {
         match focus {
-            Focus::Taken => macos::dock_icon::show(),
+            Focus::Taken => macos::dock_icon::show(look),
             Focus::LeftAlone => macos::dock_icon::stay_in_background(),
         }
         macos::word_keys::take(cx);

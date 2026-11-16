@@ -1,7 +1,7 @@
 //! A binary run straight from `cargo install` has no app bundle, so macOS shows a blank Dock icon
 //! unless the app hands it one while it runs.
 
-use crate::app_icon::AppIcon;
+use crate::app_icon::{AppIcon, Look};
 
 const SIZE: u16 = 512;
 
@@ -9,13 +9,14 @@ const SIZE: u16 = 512;
     unsafe_code,
     reason = "objc2 marks the Cocoa call unsafe; it runs on the main thread, proved by the marker, with an image made just above"
 )]
-pub fn show() {
+/// Also called again when macOS turns light or dark, so the Dock icon matches it.
+pub fn show(look: Look) {
     use objc2::AllocAnyThread;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
-    let Some(png) = picture() else {
+    let Some(png) = picture(look) else {
         return;
     };
     let Some(main_thread) = MainThreadMarker::new() else {
@@ -29,8 +30,8 @@ pub fn show() {
     unsafe { app.setApplicationIconImage(Some(&image)) };
 }
 
-fn picture() -> Option<Vec<u8>> {
-    AppIcon::RUNNING
+fn picture(look: Look) -> Option<Vec<u8>> {
+    AppIcon::running(look)
         .png(SIZE)
         .inspect_err(|error| eprintln!("could not draw the Dock icon: {error:#}"))
         .ok()

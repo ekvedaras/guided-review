@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::app_icon::AppIcon;
+use crate::app_icon::{AppIcon, Look};
 use crate::platform::desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, put_file, replace};
 use crate::update::Version;
 
@@ -151,7 +151,7 @@ pub fn write_template(out: &Path, version: Version) -> anyhow::Result<()> {
         .with_context(|| format!("could not make {}", iconset.display()))?;
     for size in [16, 32, 128, 256, 512] {
         for (scale, suffix) in [(1, ""), (2, "@2x")] {
-            let picture = AppIcon::Release.png(size * scale)?;
+            let picture = AppIcon::release(Look::Dark).png(size * scale)?;
             let name = format!("icon_{size}x{size}{suffix}.png");
             fs::write(iconset.join(&name), picture)
                 .with_context(|| format!("could not write {name}"))?;

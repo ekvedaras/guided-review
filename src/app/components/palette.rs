@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 
 use usvg::fontdb::{Database, Family, Source};
 
+use crate::app_icon::Look;
 use crate::platform::Os;
 
 use gpui::{
@@ -79,6 +80,27 @@ impl Global for Appearance {}
 impl Appearance {
     pub fn active(cx: &App) -> Self {
         *cx.global::<Self>()
+    }
+
+    /// Sets the active appearance from `window`, and turns the Dock icon to match when it changed.
+    pub fn follow(window: &Window, cx: &mut App) {
+        let appearance = Self::of(window);
+        if cx.try_global::<Self>() != Some(&appearance) {
+            crate::platform::show_look(appearance.look());
+        }
+        cx.set_global(appearance);
+    }
+
+    /// What macOS shows before the app has a window.
+    pub fn of_system(cx: &App) -> Self {
+        Self::of_window(cx.window_appearance())
+    }
+
+    pub const fn look(self) -> Look {
+        match self {
+            Self::Light => Look::Light,
+            Self::Dark => Look::Dark,
+        }
     }
 
     pub fn of(window: &Window) -> Self {
