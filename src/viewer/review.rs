@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
-use crate::pieces::{self, ChangedFile, PieceId};
 use crate::local_facts::{LocalChange, LocalFacts};
+use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
@@ -898,10 +898,7 @@ impl ReviewCore {
                 .as_ref()
                 .and_then(|facts| facts.repo.as_ref())
             {
-                Some(repo) => format!(
-                    "Local changes · {repo} · {}",
-                    change_set.branch().as_str()
-                ),
+                Some(repo) => format!("Local changes · {repo} · {}", change_set.branch().as_str()),
                 None => format!("Local changes · {}", change_set.branch().as_str()),
             },
         }

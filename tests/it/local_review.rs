@@ -6,19 +6,17 @@ use crate::support::{FixtureRepo, file_path};
 use guided_review::code_source::CodeSource;
 use guided_review::config::Config;
 use guided_review::ide::{Ide, NoIde};
+use guided_review::local_facts::LocalChange;
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::opened_change_set::OpenedChangeSet;
-use guided_review::review_subject::ReviewSubject;
-use guided_review::local_facts::LocalChange;
 use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
     CodeOpener, Destination, Effect, IdeCaveat, Intent, LocalOverview, NotInIde, Opened, PieceDiff,
-    Review, ReviewVerdict, WindowMoment, WorkKind,
-    ReviewStateFile,
-    Side, WorkingCopy,
+    Review, ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
 };
 
 /// `main` with a README of two lines and a file that goes, then `feature` one commit ahead that adds
@@ -66,11 +64,8 @@ impl Feature {
         OpenedChangeSet::new(&change_set, &self.repo.folders())
             .make_basic_tour_if_no_tour()
             .unwrap();
-        let tour = BasicTour::load(&Tour::basic_path_for(
-            &self.repo.folders(),
-            &self.subject(),
-        ))
-        .unwrap();
+        let tour =
+            BasicTour::load(&Tour::basic_path_for(&self.repo.folders(), &self.subject())).unwrap();
         let source = self.source();
         let head = tour.pin.head.clone();
         let facts = work_tree

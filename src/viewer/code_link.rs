@@ -48,9 +48,7 @@ impl fmt::Display for NotInIde {
             }
             Self::NotInWorkingCopy => f.write_str("the clone's working copy has no such file"),
             Self::RemovedLine => f.write_str("removed lines exist only at the PR's base"),
-            Self::RemovedFromBranch => {
-                f.write_str("removed lines exist only at the branch's base")
-            }
+            Self::RemovedFromBranch => f.write_str("removed lines exist only at the branch's base"),
             Self::NoLocalFolder => f.write_str("no ide is set for the review's folder"),
         }
     }
@@ -265,8 +263,8 @@ impl CodeOpener {
             segments.next()?,
             segments.next()?,
         );
-        let is_this_repo = owner.eq_ignore_ascii_case(repo.owner())
-            && name.eq_ignore_ascii_case(repo.name());
+        let is_this_repo =
+            owner.eq_ignore_ascii_case(repo.owner()) && name.eq_ignore_ascii_case(repo.name());
         if !(is_this_repo && kind == "blob") {
             return None;
         }
