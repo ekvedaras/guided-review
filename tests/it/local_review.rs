@@ -16,8 +16,8 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    CodeOpener, Destination, Effect, IdeCaveat, Intent, NotInIde, Opened, PieceDiff,
-    Review, ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
+    CodeOpener, Destination, Effect, IdeCaveat, Intent, NotInIde, Opened, PieceDiff, Review,
+    ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
 };
 
 /// `main` with a README of two lines and a file that goes, then `feature` one commit ahead that adds
@@ -466,7 +466,8 @@ fn the_overview_counts_its_uncommitted_files_in_words() {
 
     assert_eq!(local.uncommitted_label(), "3 files uncommitted");
     let mut one = local.clone();
-    one.uncommitted_files.retain(|path| path.as_str() == "notes.txt");
+    one.uncommitted_files
+        .retain(|path| path.as_str() == "notes.txt");
     assert_eq!(one.uncommitted_label(), "1 file uncommitted");
     let mut none = local;
     none.uncommitted_files.clear();

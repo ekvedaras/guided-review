@@ -39,4 +39,3 @@ pub struct OverviewFile {
     /// Where a local review's change to the file comes from; `None` for a PR.
     pub change: Option<LocalChange>,
 }
-
