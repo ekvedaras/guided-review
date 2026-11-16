@@ -34,6 +34,7 @@ mod keymap;
 mod markdown;
 mod more_lines;
 mod new_commits;
+mod no_github;
 mod outdated_lines;
 mod overview;
 mod page;
@@ -131,6 +132,7 @@ pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
+pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{LocalOverview, OverviewFile, OverviewPage, OverviewStats};
 pub use page::{

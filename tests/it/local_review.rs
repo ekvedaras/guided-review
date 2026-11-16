@@ -9,6 +9,7 @@ use guided_review::ide::{Ide, NoIde};
 use guided_review::local_facts::LocalChange;
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
+use guided_review::open_review::open_review;
 use guided_review::opened_change_set::OpenedChangeSet;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
@@ -540,9 +541,11 @@ fn a_local_review_leads_its_sidebar_with_the_window_title_and_a_pr_does_not() {
 fn a_reloaded_local_review_keeps_what_the_app_read_of_the_clone() {
     let feature = Feature::with_work_in_progress();
     let shown = feature.open();
-    let tour =
-        BasicTour::load(&Tour::basic_path_for(&feature.repo.folders(), &feature.subject()))
-            .unwrap();
+    let tour = BasicTour::load(&Tour::basic_path_for(
+        &feature.repo.folders(),
+        &feature.subject(),
+    ))
+    .unwrap();
     let mut reloaded = Review::open_basic(tour, &feature.source(), feature.state_file()).unwrap();
     assert_eq!(reloaded.local_facts(), None);
 
@@ -552,5 +555,86 @@ fn a_reloaded_local_review_keeps_what_the_app_read_of_the_clone() {
         reloaded.window_title(),
         "Local changes · acme/shop · feature"
     );
-    assert_eq!(reloaded.overview_page().local.unwrap().commit_subjects, ["Add the cart"]);
+    assert_eq!(
+        reloaded.overview_page().local.unwrap().commit_subjects,
+        ["Add the cart"]
+    );
+}
+
+fn opened_by_the_app(feature: &Feature) -> guided_review::open_review::OpenedReview {
+    open_review(
+        &feature.subject(),
+        feature.repo.path(),
+        &feature.repo.folders(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_app_opens_a_local_review_with_its_facts_title_and_the_clone_to_open_code_in() {
+    let feature = Feature::with_work_in_progress();
+
+    let opened = opened_by_the_app(&feature);
+
+    assert_eq!(
+        opened.review.window_title(),
+        "Local changes · acme/shop · feature"
+    );
+    assert_eq!(
+        changes_on_the_overview(&opened.review)
+            .into_iter()
+            .map(|(_, change)| change)
+            .collect::<Vec<_>>(),
+        [
+            Some(LocalChange::Both),
+            Some(LocalChange::Uncommitted),
+            Some(LocalChange::Committed),
+            Some(LocalChange::Uncommitted)
+        ]
+    );
+    let mut review = opened.review;
+    let opener = review.code_opener(feature.ide());
+    assert_eq!(
+        line_destination(&mut review, &opener, "README.md", Side::Head),
+        feature.in_ide("README.md", 2)
+    );
+    assert_eq!(
+        opened.source.local_clone(),
+        Some(feature.subject().local().unwrap().folder().as_path())
+    );
+}
+
+#[test]
+fn opening_a_local_review_again_reads_the_same_snapshot_even_when_the_folder_moved_on() {
+    let feature = Feature::with_work_in_progress();
+    let first = opened_by_the_app(&feature);
+    feature.repo.write("later.txt", "after the snapshot\n");
+
+    let again = opened_by_the_app(&feature);
+
+    assert_eq!(
+        changes_on_the_overview(&again.review),
+        changes_on_the_overview(&first.review)
+    );
+    let mut review = again.review;
+    let opener = review.code_opener(feature.ide());
+    assert!(matches!(
+        line_destination(&mut review, &opener, "README.md", Side::Head),
+        Destination::Ide {
+            caveat: Some(IdeCaveat::CloneNotAtTourHead),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_local_reviews_github_port_refuses_every_call() {
+    let feature = Feature::with_work_in_progress();
+    let opened = opened_by_the_app(&feature);
+
+    let tips = opened
+        .github
+        .pull_request_tips(&"https://github.com/acme/shop/pull/7".parse().unwrap());
+
+    assert!(tips.is_err());
 }

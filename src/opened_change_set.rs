@@ -4,12 +4,14 @@ use std::sync::Arc;
 use crate::app_folders::AppFolders;
 use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
+use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
 use crate::local_work_tree::LocalWorkTree;
 use crate::make_basic_tour::make_basic_tour;
 use crate::opened_pr::CodeAtTips;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
-use crate::tour::{Tour, ToursOnDisk};
+use crate::tour::{Tour, TourPin, ToursOnDisk};
+use crate::viewer::{PickCodeSource, ReviewStateFile};
 
 /// What every command needs to work on one local change set: where its files live and its working
 /// tree. The twin of `OpenedPr`, with no GitHub in it.
@@ -31,6 +33,25 @@ impl OpenedChangeSet {
     /// The change set of the branch a folder inside a clone is on now.
     pub fn change_set_at(folder: &Path) -> anyhow::Result<LocalChangeSet> {
         Ok(LocalWorkTree::containing(folder)?.change_set()?)
+    }
+
+    pub fn state_file(&self) -> ReviewStateFile {
+        ReviewStateFile::for_subject(&self.folders, &self.subject())
+    }
+
+    /// Picks the code source again for any tips, as the app does when the tour moves: a local review
+    /// always reads its own folder, whose git holds the snapshot.
+    pub fn code_source_picker(&self) -> PickCodeSource {
+        let folder = self.change_set.folder().clone();
+        Arc::new(move |_tips| {
+            let source: Arc<dyn CodeSource> = Arc::new(LocalGit::at_worktree(&folder));
+            Ok(Box::new(CachedCodeSource::wrapping(source)) as Box<dyn CodeSource>)
+        })
+    }
+
+    /// What the overview shows, as of the snapshot the tour is pinned to.
+    pub fn facts(&self, pin: &TourPin) -> anyhow::Result<LocalFacts> {
+        Ok(self.work_tree.facts(&self.change_set, &pin.pinned_tips())?)
     }
 
     fn subject(&self) -> ReviewSubject {
