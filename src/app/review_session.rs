@@ -50,6 +50,8 @@ pub struct TourWork {
 pub enum SessionEvent {
     /// A re-pin or a Refresh replaced the review: what the layout keeps about the old one is stale.
     Reopened,
+    /// A comment did not go, and its box takes the keys again.
+    CommentBoxTakesKeysAgain,
 }
 
 /// Every change of the review goes through `change`, which rebuilds the rows and the sidebar and tells the
@@ -386,6 +388,7 @@ impl ReviewSession {
         };
         let github = Arc::clone(&self.github);
         let state_file = self.review.state_file();
+        let place = place.clone();
         cx.spawn(async move |this, cx| {
             let outcome = cx
                 .background_executor()
@@ -394,7 +397,7 @@ impl ReviewSession {
             let mut outcome = Some(outcome);
             let applied = this.update(cx, |this, cx| {
                 if let Some(outcome) = outcome.take() {
-                    this.comment_sent(outcome, (mode, audience), cx);
+                    this.comment_sent(&place, outcome, (mode, audience), cx);
                 }
             });
             // The window switched to another PR while this was in flight; the comment is not lost.
@@ -411,6 +414,7 @@ impl ReviewSession {
     /// shows its own note where the box was.
     fn comment_sent(
         &mut self,
+        place: &CommentPlace,
         outcome: CommentOutcome,
         (mode, audience): (SendMode, Audience),
         cx: &mut Context<Self>,
@@ -418,6 +422,9 @@ impl ReviewSession {
         let result = self.change(cx, |review| review.apply_comment(outcome));
         if matches!(result, Ok(CommentResult::Sent)) {
             post_toast(cx, ToastTone::Success, sent_note("Comment", mode, audience));
+        }
+        if self.review.composing() == Some(place) {
+            cx.emit(SessionEvent::CommentBoxTakesKeysAgain);
         }
     }
 

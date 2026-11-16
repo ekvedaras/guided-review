@@ -48,8 +48,21 @@ struct BoxActivity {
     composing: Option<CommentPlace>,
     /// Comment boxes whose text is on its way to GitHub.
     sending: HashSet<CommentPlace>,
+    /// Sending comment boxes whose keys another box took meanwhile; one that does not go leaves
+    /// them there.
+    keys_taken_while_sending: HashSet<CommentPlace>,
     /// Why the last send from a comment box did not go, until it is sent again or given up.
     send_problems: HashMap<CommentPlace, CommentProblem>,
+}
+
+impl BoxActivity {
+    fn takes_keys(&mut self, text_box: &TextBox) {
+        let others = self
+            .sending
+            .iter()
+            .filter(|sending| !matches!(text_box, TextBox::Draft(place) if place == *sending));
+        self.keys_taken_while_sending.extend(others.cloned());
+    }
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +250,7 @@ impl CommentDesk {
                 }
             })
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
+        self.boxes.takes_keys(&TextBox::Draft(place.clone()));
         self.boxes.composing = Some(place.clone());
         Ok(())
     }
@@ -303,8 +317,8 @@ impl CommentDesk {
         })
     }
 
-    /// The box shows as sending, with no problem, until the outcome is applied. `None` when there
-    /// is no such draft.
+    /// The box shows as sending, with no problem, until the outcome is applied, and the keys go
+    /// back to the page. `None` when there is no such draft.
     pub(super) fn start_sending(
         &mut self,
         state: &ReviewState,
@@ -314,6 +328,7 @@ impl CommentDesk {
         (tour_head, pr): (&Sha, &PullRequestUrl),
     ) -> Option<CommentRequest> {
         let draft = state.draft_at(place)?.clone();
+        self.stop_composing(place);
         self.boxes.sending.insert(place.clone());
         self.boxes.send_problems.remove(place);
         Some(CommentRequest::new(
@@ -360,19 +375,22 @@ impl CommentDesk {
         result
     }
 
-    /// A sent or queued comment closes the box; any other keeps it, with why.
+    /// A sent or queued comment closes the box; any other keeps it, with why, and gives it the
+    /// keys again, so the reviewer can fix the text and send it again, unless another box took
+    /// them while it was sending.
     fn show_landing(&mut self, place: &CommentPlace, result: &anyhow::Result<CommentResult>) {
         self.boxes.sending.remove(place);
+        let keys_taken = self.boxes.keys_taken_while_sending.remove(place);
         let problem = match result {
-            Ok(CommentResult::Sent | CommentResult::Queued(_)) => {
-                self.boxes.composing = None;
-                return;
-            }
+            Ok(CommentResult::Sent | CommentResult::Queued(_)) => return,
             Ok(CommentResult::Refused(refusal)) => CommentProblem::Refused(refusal.clone()),
             Ok(CommentResult::Rejected(reason)) => CommentProblem::Rejected(reason.as_str().into()),
             Err(error) => CommentProblem::Failed(format!("{error:#}").into()),
         };
         self.boxes.send_problems.insert(place.clone(), problem);
+        if !keys_taken && self.boxes.composing.is_none() {
+            self.boxes.composing = Some(place.clone());
+        }
     }
 
     fn settle(
@@ -507,9 +525,10 @@ impl CommentDesk {
         threads: &[ReviewThread],
         text_box: &TextBox,
     ) -> anyhow::Result<()> {
+        self.boxes.takes_keys(text_box);
         match text_box {
             TextBox::Draft(place) => {
-                if state.draft_at(place).is_some() {
+                if state.draft_at(place).is_some() && !self.boxes.sending.contains(place) {
                     self.boxes.composing = Some(place.clone());
                 }
                 Ok(())
@@ -531,6 +550,7 @@ impl CommentDesk {
         text_box: &TextBox,
         text: &str,
     ) -> anyhow::Result<()> {
+        self.boxes.takes_keys(text_box);
         match text_box {
             TextBox::Draft(place) => state.type_in(|state| state.write_draft(place, text)),
             TextBox::Reply(thread_id) => state.type_in(|state| state.write_reply(thread_id, text)),
