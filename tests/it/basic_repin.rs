@@ -306,6 +306,23 @@ fn the_cli_re_pins_the_basic_tour_of_a_pr_with_no_guided_tour() {
 }
 
 #[test]
+fn the_cli_re_pin_of_a_pr_with_no_tour_names_the_guided_tour_file_it_could_not_read() {
+    let shop = Shop::with_basic_tour_at_first_head();
+    std::fs::remove_file(shop.tour_path()).unwrap();
+    let second_head = shop.commit_second_head();
+
+    let run = cli_repin(&shop, &second_head);
+
+    assert!(!run.success);
+    let guided_path = Tour::path_for(&shop.repo.folders(), &shop.pr());
+    assert!(
+        run.stderr.contains(&guided_path.display().to_string()),
+        "{}",
+        run.stderr
+    );
+}
+
+#[test]
 fn the_cli_re_pins_the_guided_tour_and_leaves_the_basic_one_when_both_exist() {
     let shop = Shop::with_basic_tour_at_first_head();
     let guided_path = Tour::path_for(&shop.repo.folders(), &shop.pr());
