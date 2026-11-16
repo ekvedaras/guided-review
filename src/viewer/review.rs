@@ -52,7 +52,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
-use super::move_offer::{MoveHereOffer, MoveOffer};
+use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
@@ -920,6 +920,40 @@ impl ReviewCore {
         self.state
             .file()
             .update(|state| state.decline_move_to(&offer.pr))
+    }
+
+    /// The move the button asks for, whichever review it is pressed in; the review then takes no
+    /// changes until `move_failed` or until the window shows the other review.
+    pub fn start_move(&mut self) -> Option<StartedMove> {
+        let (from, change_set, offer) = if let Some(here) = self.move_here_offer() {
+            (MoveFrom::ThePr, here.change_set, here.offer)
+        } else {
+            let offer = self.move_offer()?;
+            (
+                MoveFrom::TheLocalReview,
+                self.subject.local()?.clone(),
+                offer,
+            )
+        };
+        self.start_drop().then_some(StartedMove {
+            from,
+            change_set,
+            offer,
+        })
+    }
+
+    /// Not now, on either side's offer. A decline that could not be written to the state file is a
+    /// problem, as the offer then comes back at the next open.
+    pub fn decline_the_move(&mut self) {
+        let declined = if self.move_here_offer().is_some() {
+            self.decline_move_here()
+        } else {
+            self.decline_move()
+        };
+        match declined {
+            Ok(()) => self.clear_problem(ProblemKind::MoveNotDeclined),
+            Err(error) => self.raise_problem(Problem::MoveNotDeclined(format!("{error:#}"))),
+        }
     }
 
     /// What a local review's folder is against its snapshot, once the folder was looked at.

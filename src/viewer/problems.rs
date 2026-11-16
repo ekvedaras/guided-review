@@ -41,6 +41,8 @@ pub enum Problem {
     /// git could not say how a local review's folder stands against its snapshot, so the sidebar
     /// says what the last look that went through found.
     FolderNotLookedAt(String),
+    /// Not now was clicked on a move offer and the choice could not be written, so the offer comes back.
+    MoveNotDeclined(String),
     /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
@@ -91,6 +93,8 @@ pub enum ProblemKind {
     FolderNotLookedAt,
     /// Raised when the review opens; the old file is kept, so nothing clears it.
     SavedReviewNotRead,
+    /// Cleared by the next Not now or Keep local review that is written.
+    MoveNotDeclined,
     /// Replaced by the next hand-off, which clears it when that one is sent.
     HandOffNotSent,
     /// Stays: a switch that goes through opens another review.
@@ -125,6 +129,7 @@ impl Problem {
             Self::TourNotReloaded(_) => ProblemKind::TourNotReloaded,
             Self::ReviewNotDropped(_) => ProblemKind::ReviewNotDropped,
             Self::FolderNotLookedAt(_) => ProblemKind::FolderNotLookedAt,
+            Self::MoveNotDeclined(_) => ProblemKind::MoveNotDeclined,
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
@@ -311,6 +316,10 @@ impl fmt::Display for Problem {
             Self::FolderNotLookedAt(reason) => write!(
                 formatter,
                 "The folder could not be looked at, so the sidebar may not say how it changed: {reason}"
+            ),
+            Self::MoveNotDeclined(reason) => write!(
+                formatter,
+                "Your choice not to move was not kept, so the offer will come back: {reason}"
             ),
             Self::HandOffNotSent { comment, reason } => write!(
                 formatter,

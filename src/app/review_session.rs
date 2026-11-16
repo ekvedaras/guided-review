@@ -31,7 +31,7 @@ use crate::opened_change_set::OpenedChangeSet;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
     CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, LineLocation,
-    NoteSubject, OldHead, OwnAgentHandOff, PrMover, Problem, RefreshBrief, RepinnedTour, Review,
+    MoveFrom, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, Review,
     ReviewChange, ReviewVerdict, Screen, SendMode, TerminalId, TextBox, ThreadAction,
     ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
     TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
@@ -50,8 +50,6 @@ pub struct TourWork {
     pub refresher: Arc<TourRefresher>,
     pub reloader: Arc<TourReloader>,
     pub switcher: Arc<TourSwitcher>,
-    /// Only a local review has one.
-    pub mover: Option<Arc<PrMover>>,
     pub tour_agents: TourAgents,
 }
 
@@ -556,25 +554,23 @@ impl ReviewSession {
         .detach();
     }
 
-    /// Move to <pr>, on the button only. The review takes no changes from here on, as its state file is
-    /// carried to the PR's and deleted; the PR's review takes the window when the move is done.
+    /// The move button, in either review. The review takes no changes from here on, as its state file
+    /// is carried to the PR's and the local review deleted. The PR's review takes the window when the
+    /// move is done: from the local review it is shown, from the PR's review it is opened again from
+    /// disk, as after Save in Settings, since its copy of the state is stale once the move saved the PR's.
     pub fn move_to_pr(&mut self, cx: &mut Context<Self>) {
-        if let Some(here) = self.review.move_here_offer() {
-            self.move_here(here, cx);
-            return;
-        }
-        let (Some(offer), Some(mover)) = (self.review.move_offer(), self.tour_work.mover.clone())
-        else {
+        self.save_typing_now();
+        let Some(started) = self.change(cx, |review| review.start_move()) else {
             return;
         };
-        self.save_typing_now();
-        if !self.change(cx, |review| review.start_drop()) {
-            return;
-        }
+        let mover = crate::open_review::mover_of(
+            &self.tour_work.repinner.folders.clone(),
+            &started.change_set,
+        );
         self.moving = Some(self.run_off_thread(
             cx,
             {
-                let offer = offer.clone();
+                let offer = started.offer.clone();
                 move || mover.run(&offer, &GitHub::from_env())
             },
             move |this, moved, cx| {
@@ -582,62 +578,24 @@ impl ReviewSession {
                 match moved {
                     Ok(()) => {
                         let switching = cx.global::<PrSwitching>().clone();
-                        let moved_from = this.review.subject().clone();
-                        switching.active.update(cx, |active, cx| {
-                            active.moved_away(&moved_from);
-                            cx.notify();
-                        });
-                        (switching.show)(offer.pr.into());
+                        match started.from {
+                            MoveFrom::TheLocalReview => {
+                                let moved_from = this.review.subject().clone();
+                                switching.active.update(cx, |active, cx| {
+                                    active.moved_away(&moved_from);
+                                    cx.notify();
+                                });
+                                (switching.show)(started.offer.pr.into());
+                            }
+                            MoveFrom::ThePr => {
+                                (switching.dropped)(started.change_set.into());
+                                (switching.reopen)();
+                            }
+                        }
                     }
                     Err(error) => {
                         this.review.move_failed();
-                        post_toast(
-                            cx,
-                            ToastTone::Danger,
-                            format!("Could not move to {}: {error:#}", offer.pr.short()),
-                        );
-                    }
-                }
-            },
-        ));
-    }
-
-    /// The PR's review takes over a local review. This review's copy of the state is stale once the move
-    /// has saved the PR's, so it takes no more changes and the window opens the PR again from disk, as
-    /// after Save in Settings.
-    fn move_here(&mut self, here: crate::viewer::MoveHereOffer, cx: &mut Context<Self>) {
-        let folders = cx.global::<PrSwitching>().folders.clone();
-        self.save_typing_now();
-        if !self.change(cx, |review| review.start_drop()) {
-            return;
-        }
-        self.moving = Some(self.run_off_thread(
-            cx,
-            {
-                let here = here.clone();
-                move || {
-                    crate::open_review::mover_of(&folders, &here.change_set)
-                        .run(&here.offer, &GitHub::from_env())
-                }
-            },
-            move |this, moved, cx| {
-                this.moving = None;
-                match moved {
-                    Ok(()) => {
-                        let switching = cx.global::<PrSwitching>();
-                        (switching.dropped)(here.change_set.into());
-                        (switching.reopen)();
-                    }
-                    Err(error) => {
-                        this.review.move_failed();
-                        post_toast(
-                            cx,
-                            ToastTone::Danger,
-                            format!(
-                                "Could not move {} here: {error:#}",
-                                here.change_set.branch().as_str()
-                            ),
-                        );
+                        post_toast(cx, ToastTone::Danger, started.failure_text(&error));
                     }
                 }
             },
@@ -649,16 +607,8 @@ impl ReviewSession {
         if self.moving.is_some() {
             return;
         }
-        self.change(cx, |review| {
-            let declined = if review.move_here_offer().is_some() {
-                review.decline_move_here()
-            } else {
-                review.decline_move()
-            };
-            if let Err(error) = declined {
-                eprintln!("could not keep that the move was declined: {error:#}");
-            }
-        });
+        self.change(cx, |review| review.decline_the_move());
+        self.show_problems(cx);
     }
 
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.

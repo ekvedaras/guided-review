@@ -1011,7 +1011,6 @@ fn new_layout(
             refresher: Arc::new(opened.refresher),
             reloader: Arc::new(opened.reloader),
             switcher: Arc::new(opened.switcher),
-            mover: opened.mover.map(Arc::new),
             tour_agents: opened.tour_agents,
         },
     };

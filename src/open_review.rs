@@ -34,8 +34,6 @@ pub struct OpenedReview {
     pub reloader: TourReloader,
     pub switcher: TourSwitcher,
     pub tour_agents: TourAgents,
-    /// Only a local review has one: the move to the PR opened from its branch.
-    pub mover: Option<PrMover>,
 }
 
 /// Where a tour agent that writes the subject's tour works. A local change set's agent works in its
@@ -209,9 +207,6 @@ fn assemble(
         subject: subject.clone(),
         pick_code_source,
     };
-    let mover = subject
-        .local()
-        .map(|change_set| mover_of(folders, change_set));
     Ok(OpenedReview {
         review,
         source: source.into(),
@@ -225,7 +220,6 @@ fn assemble(
         tour_agents: TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
             .starting_in(agent_folder)
             .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
-        mover,
     })
 }
 

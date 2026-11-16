@@ -15,9 +15,9 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveOffer,
-    PULL_OF_BRANCH_RETRY, PieceDiff, PrMover, PullOfBranch, PullsOfBranchPort, Resolution,
-    ReviewStateFile, SendMode, Side, TextBox,
+    Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveFrom,
+    MoveOffer, PULL_OF_BRANCH_RETRY, PieceDiff, PrMover, Problem, PullOfBranch, PullsOfBranchPort,
+    Resolution, ReviewStateFile, SendMode, Side, TextBox,
 };
 
 const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
@@ -270,7 +270,10 @@ fn moving_carries_the_tick_of_a_file_whose_code_is_the_same_and_shows_what_chang
     feature.focus(&mut opened, &github, Instant::now());
     let offer = opened.review.move_offer().unwrap();
 
-    opened.mover.as_ref().unwrap().run(&offer, &github).unwrap();
+    feature
+        .mover_of(feature.subject.local().unwrap())
+        .run(&offer, &github)
+        .unwrap();
 
     let state = pr_state(&feature);
     assert_eq!(
@@ -437,7 +440,10 @@ fn moving_makes_drafts_of_open_threads_and_queued_tasks_none_of_resolved_ones_an
     feature.focus(&mut opened, &github, Instant::now());
     let offer = opened.review.move_offer().unwrap();
 
-    opened.mover.as_ref().unwrap().run(&offer, &github).unwrap();
+    feature
+        .mover_of(feature.subject.local().unwrap())
+        .run(&offer, &github)
+        .unwrap();
 
     assert_eq!(
         drafts_of_the_pr(&feature),
@@ -487,7 +493,7 @@ fn the_local_review_and_its_ref_go_only_once_the_prs_state_is_saved() {
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
     let offer = opened.review.move_offer().unwrap();
-    let mover = opened.mover.as_ref().unwrap();
+    let mover = feature.mover_of(feature.subject.local().unwrap());
     assert!(local_review_is_on_disk(&feature));
 
     mover.carry(&offer, &github).unwrap();
@@ -526,7 +532,9 @@ fn a_pr_state_that_cannot_be_saved_keeps_the_local_review_whole() {
     std::fs::create_dir_all(pr_state_path(&feature).parent().unwrap()).unwrap();
     std::fs::write(pr_state_path(&feature), "{ not json").unwrap();
 
-    let moved = opened.mover.as_ref().unwrap().run(&offer, &github);
+    let moved = feature
+        .mover_of(feature.subject.local().unwrap())
+        .run(&offer, &github);
 
     assert!(moved.is_err());
     assert!(local_review_is_on_disk(&feature));
@@ -557,7 +565,7 @@ fn a_move_that_crashed_after_saving_carries_again_without_doubling_drafts_or_und
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
     let offer = opened.review.move_offer().unwrap();
-    let mover = opened.mover.as_ref().unwrap();
+    let mover = feature.mover_of(feature.subject.local().unwrap());
     mover.carry(&offer, &github).unwrap();
     assert!(
         pr_state(&feature)
@@ -623,7 +631,10 @@ fn a_thread_follows_its_lines_to_the_prs_head_and_one_whose_file_is_gone_becomes
     feature.focus(&mut opened, &github, Instant::now());
     let offer = opened.review.move_offer().unwrap();
 
-    opened.mover.as_ref().unwrap().run(&offer, &github).unwrap();
+    feature
+        .mover_of(feature.subject.local().unwrap())
+        .run(&offer, &github)
+        .unwrap();
 
     assert_eq!(
         drafts_of_the_pr(&feature),
@@ -952,4 +963,97 @@ fn a_local_tour_pinned_to_another_folder_is_refused_by_the_move_and_nothing_is_c
     let refused = format!("{:#}", moved.unwrap_err());
     assert!(refused.contains(other), "{refused}");
     assert!(!pr_state_path(&feature).exists());
+}
+
+#[test]
+fn the_move_button_starts_the_move_the_review_offers_and_the_review_takes_no_changes_from_then() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &github, Instant::now());
+
+    let started = local.review.start_move().unwrap();
+
+    assert_eq!(started.from, MoveFrom::TheLocalReview);
+    assert_eq!(started.offer.pr, SHOP_7.parse().unwrap());
+    assert_eq!(started.change_set, *feature.subject.local().unwrap());
+    assert!(local.review.tick_file(&path("README.md")).is_err());
+
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
+
+    let started = in_the_pr.review.start_move().unwrap();
+
+    assert_eq!(started.from, MoveFrom::ThePr);
+    assert_eq!(started.change_set, *feature.subject.local().unwrap());
+    assert!(in_the_pr.review.tick_file(&path("README.md")).is_err());
+}
+
+#[test]
+fn the_move_button_starts_nothing_without_an_offer() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+
+    assert_eq!(local.review.start_move(), None);
+    local.review.tick_file(&path("README.md")).unwrap();
+}
+
+#[test]
+fn a_failed_move_says_which_move_it_was_and_why() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &github, Instant::now());
+    let error = anyhow::anyhow!("no network");
+
+    assert_eq!(
+        local.review.start_move().unwrap().failure_text(&error),
+        "Could not move to acme/shop#7: no network"
+    );
+
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
+    assert_eq!(
+        in_the_pr.review.start_move().unwrap().failure_text(&error),
+        "Could not move feature here: no network"
+    );
+}
+
+#[test]
+fn a_decline_that_could_not_be_kept_is_a_problem_the_reviewer_sees_and_one_that_was_kept_is_not() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let (github, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &github, Instant::now());
+    let state_path = feature
+        .repo
+        .folders()
+        .state_files()
+        .join(feature.subject.files_folder())
+        .join(format!("{}.json", feature.subject.file_stem()));
+    std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+    std::fs::write(&state_path, "{ not json").unwrap();
+
+    opened.review.decline_the_move();
+
+    assert!(
+        opened
+            .review
+            .problems()
+            .iter()
+            .any(|problem| matches!(problem, Problem::MoveNotDeclined(_))),
+        "{:?}",
+        opened.review.problems()
+    );
+
+    std::fs::remove_file(&state_path).unwrap();
+    opened.review.decline_the_move();
+
+    assert!(
+        !opened
+            .review
+            .problems()
+            .iter()
+            .any(|problem| matches!(problem, Problem::MoveNotDeclined(_)))
+    );
 }
