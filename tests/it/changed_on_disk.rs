@@ -642,7 +642,7 @@ fn a_review_being_dropped_takes_no_change_so_nothing_writes_its_state_file_again
     let mut opened = feature.open();
     let folders = feature.repo.folders();
 
-    opened.review.start_drop();
+    assert!(opened.review.start_drop());
     OpenedChangeSet::new(feature.subject().local().unwrap(), &folders)
         .drop_review()
         .unwrap();

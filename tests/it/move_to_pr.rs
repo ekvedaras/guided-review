@@ -702,7 +702,7 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
     opened.review.tick_file(&path("src/cart.rs")).unwrap();
     let offer = opened.review.move_here_offer().unwrap();
 
-    opened.review.start_drop();
+    assert!(opened.review.start_drop());
     PrMover::for_change_set(&feature.repo.folders(), &offer.change_set)
         .run(&offer.offer, &github)
         .unwrap();

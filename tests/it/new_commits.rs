@@ -613,7 +613,7 @@ fn ticks_on_the_open_review_are_refused_while_a_re_pin_runs_so_they_cannot_overw
     let second_head = shop.commit_second_head();
     let mut review = shop.open();
 
-    review.start_repin();
+    assert!(review.start_repin());
     shop.repin_onto(&second_head);
     let refused = [review.tick(&"total".into()), review.untick(&"keep".into())];
 
@@ -634,7 +634,7 @@ fn text_typed_while_a_re_pin_runs_is_named_as_not_kept_until_the_re_pin_ends() {
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
         .unwrap();
 
-    review.start_repin();
+    assert!(review.start_repin());
     assert!(
         review
             .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
@@ -651,7 +651,7 @@ fn ticks_count_again_once_a_re_pin_failed() {
     let shop = Shop::with_tour_at_first_head();
     let mut review = shop.open();
 
-    review.start_repin();
+    assert!(review.start_repin());
     review.repin_failed();
     review.tick(&"total".into()).unwrap();
 

@@ -64,7 +64,7 @@ use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
-use super::saved_state::SavedState;
+use super::saved_state::{SavedState, WriterElsewhere};
 use super::step_page::{
     DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
 };
@@ -2473,19 +2473,28 @@ impl ReviewCore {
 
     /// The re-pin writes the state file from another thread and this review is replaced when it
     /// is done, so from now on nothing it holds may be saved over the re-pin's record.
-    pub fn start_repin(&mut self) {
-        self.state.start_repin();
+    /// `false` while a drop or a move runs, which the re-pin would write over: it does not start.
+    #[must_use]
+    pub fn start_repin(&mut self) -> bool {
+        self.state.start_writing_elsewhere(WriterElsewhere::Repin)
     }
 
-    /// Drop review deletes the state file from another thread, and this review is closed when it is
-    /// done, so from now on nothing it holds may write the file again; as during a re-pin.
-    pub fn start_drop(&mut self) {
-        self.state.start_repin();
+    /// Drop review, or a move to a PR, deletes the state file from another thread, and this review is
+    /// closed when it is done, so from now on nothing it holds may write the file again; as during a
+    /// re-pin. `false` while a re-pin or another drop runs: it does not start.
+    #[must_use]
+    pub fn start_drop(&mut self) -> bool {
+        self.state.start_writing_elsewhere(WriterElsewhere::Drop)
+    }
+
+    /// The move failed and the review stays: it takes changes again.
+    pub fn move_failed(&mut self) {
+        self.state.failed_elsewhere(WriterElsewhere::Drop);
     }
 
     /// The drop failed and the review stays: it takes changes again.
     pub fn drop_failed(&mut self, error: &anyhow::Error) {
-        self.state.repin_failed();
+        self.state.failed_elsewhere(WriterElsewhere::Drop);
         self.raise_problem(Problem::ReviewNotDropped(format!("{error:#}")));
     }
 
@@ -2499,7 +2508,7 @@ impl ReviewCore {
     }
 
     pub fn repin_failed(&mut self) {
-        self.state.repin_failed();
+        self.state.failed_elsewhere(WriterElsewhere::Repin);
     }
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.

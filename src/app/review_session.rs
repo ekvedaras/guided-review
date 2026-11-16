@@ -534,14 +534,13 @@ impl ReviewSession {
     /// changes from here on, so nothing writes its state file again once it is deleted; the app then
     /// shows the switcher in its place.
     pub fn drop_review(&mut self, cx: &mut Context<Self>) {
-        if self.repin_progress == RepinProgress::Running {
-            return;
-        }
         let Some(change_set) = self.review.subject().local().cloned() else {
             return;
         };
         self.save_typing_now();
-        self.change(cx, |review| review.start_drop());
+        if !self.change(cx, |review| review.start_drop()) {
+            return;
+        }
         let folders = self.tour_work.repinner.folders.clone();
         self.run_off_thread(
             cx,
@@ -568,11 +567,10 @@ impl ReviewSession {
         else {
             return;
         };
-        if self.moving.is_some() {
+        self.save_typing_now();
+        if !self.change(cx, |review| review.start_drop()) {
             return;
         }
-        self.save_typing_now();
-        self.change(cx, |review| review.start_drop());
         self.moving = Some(self.run_off_thread(
             cx,
             {
@@ -584,7 +582,7 @@ impl ReviewSession {
                 match moved {
                     Ok(()) => (cx.global::<PrSwitching>().show)(offer.pr.into()),
                     Err(error) => {
-                        this.review.repin_failed();
+                        this.review.move_failed();
                         post_toast(
                             cx,
                             ToastTone::Danger,
@@ -600,12 +598,11 @@ impl ReviewSession {
     /// has saved the PR's, so it takes no more changes and the window opens the PR again from disk, as
     /// after Save in Settings.
     fn move_here(&mut self, here: crate::viewer::MoveHereOffer, cx: &mut Context<Self>) {
-        if self.moving.is_some() {
-            return;
-        }
         let folders = cx.global::<PrSwitching>().folders.clone();
         self.save_typing_now();
-        self.change(cx, |review| review.start_drop());
+        if !self.change(cx, |review| review.start_drop()) {
+            return;
+        }
         self.moving = Some(self.run_off_thread(
             cx,
             {
@@ -620,7 +617,7 @@ impl ReviewSession {
                 match moved {
                     Ok(()) => (cx.global::<PrSwitching>().reopen)(),
                     Err(error) => {
-                        this.review.repin_failed();
+                        this.review.move_failed();
                         post_toast(
                             cx,
                             ToastTone::Danger,
@@ -654,12 +651,11 @@ impl ReviewSession {
 
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
     pub fn repin(&mut self, cx: &mut Context<Self>) {
-        if self.repin_progress == RepinProgress::Running {
+        self.save_typing_now();
+        if !self.change(cx, |review| review.start_repin()) {
             return;
         }
         self.repin_progress = RepinProgress::Running;
-        self.save_typing_now();
-        self.change(cx, |review| review.start_repin());
         let (repinner, github) = (
             Arc::clone(&self.tour_work.repinner),
             Arc::clone(&self.github),
