@@ -82,6 +82,7 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
+use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -97,12 +98,12 @@ use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
-    CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
-    HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Merging, NextScreen, NoteSubject,
-    NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place, PrStatus,
-    PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness, Refusal,
-    Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    CheckState, Checks, Chord, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
+    CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
+    GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Merging, NextScreen,
+    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
+    PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness,
+    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
     ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
     SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
     SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
@@ -3548,42 +3549,11 @@ impl ChecksHover {
 const CHIP_HEIGHT: f32 = 22.;
 const CHECKS_LIST_WIDTH: f32 = 340.;
 /// What the PR's name and title keep of the bar: its icon, the name and a stretch of the title.
-/// Past it the status button gives way. Fixed, not counted from the text: the title is cut with an
-/// ellipsis, so any width shows something.
+/// Past it the title is cut with an ellipsis and the status button keeps its width.
 const PR_TITLE_MIN_WIDTH: f32 = 340.;
-/// The PR's name and title shrink this many times faster than the status button, so they give up
-/// room down to their minimum before the button loses any.
+/// The PR's name and title shrink this many times faster than the status chip, so they give up
+/// room down to their minimum before the chip loses any.
 const TITLE_SHRINKS_FIRST: f32 = 10_000.;
-
-/// A button of the title bar that gives way once the PR's title has shrunk to its minimum. It is
-/// one line tall and clips what does not fit, and its parts are flex items that wrap: the parts
-/// that no longer fit wrap to a second line, last first, and the clip hides them whole. The empty
-/// first item takes the first line alone once even the first part does not fit, so no part shows
-/// cut in two.
-fn giving_way(button: Stateful<Div>) -> Stateful<Div> {
-    button
-        .flex_shrink(1.)
-        .min_w_0()
-        .flex_wrap()
-        .content_start()
-        .justify_start()
-        .overflow_hidden()
-        .px_0()
-        .gap_0()
-        .child(div().flex_none().w_0().h(px(1.)))
-}
-
-/// One part of a `giving_way` button, with the room around it that the button's own padding would give.
-fn part_of_button(left: f32, right: f32) -> Div {
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(6.))
-        .h(ButtonSize::Small.height() - px(2.))
-        .pl(px(left))
-        .pr(px(right))
-}
 
 /// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
 /// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.
@@ -3601,26 +3571,26 @@ fn merge_button(
         AutoMerge::On(method) => Some(method.label()),
         AutoMerge::Off => None,
     };
+    let key = keymap(cx)
+        .first_chord(Command::ToggleAutoMerge)
+        .map(Chord::spelled);
     Some(
-        giving_way(button(colors, "title-bar-merge", kind, ButtonSize::Small))
-            .child(
-                part_of_button(10., 10.)
-                    .child(button_icon(colors, kind, ButtonSize::Small, Icon::Clock))
-                    .child(label),
-            )
-            .children(method.map(|method| {
-                part_of_button(0., 10.).child(div().text_color(colors.muted_text).child(method))
-            }))
-            .child(part_of_button(0., 10.).child(button_keys(
-                colors,
-                kind,
-                Command::ToggleAutoMerge,
-                cx,
-            )))
-            .tooltip(tooltip(|_| "Click twice to confirm".into()))
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.act(Intent::ToggleAutoMerge, window, cx);
-            })),
+        icon_label_button(
+            colors,
+            "title-bar-merge",
+            kind,
+            ButtonSize::Small,
+            Icon::Clock,
+            label,
+        )
+        .children(method.map(|method| div().text_color(colors.muted_text).child(method)))
+        .tooltip(tooltip(move |_| match &key {
+            Some(key) => format!("{key}. Click twice to confirm").into(),
+            None => "Click twice to confirm".into(),
+        }))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.act(Intent::ToggleAutoMerge, window, cx);
+        })),
     )
 }
 
