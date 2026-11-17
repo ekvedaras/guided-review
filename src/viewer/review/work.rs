@@ -83,6 +83,10 @@ impl ReviewCore {
                 pr: pr()?,
                 readiness: self.readiness_to_send()?,
             },
+            WorkKind::ChangeMerging => Job::ChangeMerging {
+                pr: pr()?,
+                change: self.merging_to_send()?,
+            },
             WorkKind::TakeSeenMarksOff => {
                 let requests = self.state.hand_offs().seen_marks_to_take_off();
                 if requests.is_empty() {
@@ -171,6 +175,7 @@ impl ReviewCore {
             Done::PrStatus(Err(error)) => self.could_not_read(Read::PrStatus, &error),
             Done::ReviewingMark { change, result } => self.reviewing_mark_landed(change, result),
             Done::PrReadiness { readiness, result } => self.readiness_landed(readiness, result),
+            Done::Merging { change, result } => self.merging_landed(change, result),
             Done::QueuedComment(outcome) => {
                 if matches!(self.land_comment(outcome), Ok(CommentResult::Sent)) {
                     self.work.want(WorkKind::SendQueuedComment);

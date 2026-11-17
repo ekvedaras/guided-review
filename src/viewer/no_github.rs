@@ -2,6 +2,7 @@ use std::path::Path;
 
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
+use super::merging::MergeChange;
 use super::ports::{
     ChangeTipsPort, GitHubError, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
@@ -103,6 +104,14 @@ impl PullRequestStatusPort for NoGitHub {
         &self,
         _pr: &PullRequestUrl,
         _readiness: Readiness,
+    ) -> Result<(), GitHubError> {
+        refused()
+    }
+
+    fn change_merging(
+        &self,
+        _pr: &PullRequestUrl,
+        _change: MergeChange,
     ) -> Result<(), GitHubError> {
         refused()
     }

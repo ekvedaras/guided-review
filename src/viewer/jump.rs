@@ -210,6 +210,12 @@ pub enum PaletteAction {
     ConvertToDraft,
     /// Offered only where the PR is a draft and the viewer may change it.
     MarkReadyForReview,
+    /// Offered only where GitHub lets the viewer turn it on and something blocks the merge.
+    EnableAutoMerge,
+    /// Offered only while auto-merge is on and GitHub lets the viewer turn it off.
+    DisableAutoMerge,
+    /// Offered only where nothing blocks the merge and the viewer may merge.
+    MergeNow,
     SwitchPr,
     Settings,
     Shortcuts,
@@ -246,6 +252,9 @@ impl PaletteAction {
             Self::OpenChecksOnGitHub => "Open checks on GitHub",
             Self::ConvertToDraft => "Convert to draft",
             Self::MarkReadyForReview => "Mark as ready for review",
+            Self::EnableAutoMerge => "Enable auto-merge",
+            Self::DisableAutoMerge => "Disable auto-merge",
+            Self::MergeNow => "Merge now",
             Self::SwitchPr => "Switch pull request",
             Self::Settings => "Settings",
             Self::Shortcuts => "Keyboard shortcuts",
@@ -267,6 +276,9 @@ impl PaletteAction {
             Self::ShowRendered | Self::ShowCode => Some(Command::ToggleRenderedView),
             Self::OpenAllPieces | Self::FoldAllPieces => Some(Command::ToggleFold),
             Self::ConvertToDraft | Self::MarkReadyForReview => Some(Command::ToggleDraft),
+            Self::EnableAutoMerge | Self::DisableAutoMerge | Self::MergeNow => {
+                Some(Command::ToggleAutoMerge)
+            }
             Self::Settings => Some(Command::Settings),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),

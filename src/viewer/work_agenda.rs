@@ -14,6 +14,7 @@ use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_threads::ThreadHome;
+use super::merging::MergeChange;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
 use super::pr_status::{PrStatus, Readiness};
@@ -51,6 +52,7 @@ pub enum WorkKind {
     SendQueuedComment,
     ChangeReviewingMark,
     ChangePrReadiness,
+    ChangeMerging,
     TakeSeenMarksOff,
     DeliverHandOff,
     CheckAgentLink,
@@ -92,6 +94,7 @@ impl WorkKind {
             | Self::TakeSeenMarksOff
             | Self::DeliverHandOff
             | Self::ChangePrReadiness
+            | Self::ChangeMerging
             | Self::CheckAgentLink => WhileRunning::IsDropped,
             Self::CheckPrHead
             | Self::CheckWorkingTree
@@ -255,6 +258,10 @@ pub(super) enum Job {
         pr: PullRequestUrl,
         readiness: Readiness,
     },
+    ChangeMerging {
+        pr: PullRequestUrl,
+        change: MergeChange,
+    },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
     CheckAgentLink(ReviewSubject),
@@ -277,6 +284,7 @@ impl Job {
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
             Self::ChangeReviewingMark { .. } => WorkKind::ChangeReviewingMark,
             Self::ChangePrReadiness { .. } => WorkKind::ChangePrReadiness,
+            Self::ChangeMerging { .. } => WorkKind::ChangeMerging,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
             Self::DeliverHandOff(_) => WorkKind::DeliverHandOff,
             Self::CheckAgentLink(_) => WorkKind::CheckAgentLink,
@@ -337,6 +345,10 @@ impl Work {
                 readiness,
                 result: github.set_pull_request_readiness(&pr, readiness),
             },
+            Job::ChangeMerging { pr, change } => Done::Merging {
+                change,
+                result: github.change_merging(&pr, change),
+            },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
                 requests
                     .into_iter()
@@ -383,6 +395,10 @@ pub(super) enum Done {
     },
     PrReadiness {
         readiness: Readiness,
+        result: Result<(), GitHubError>,
+    },
+    Merging {
+        change: MergeChange,
         result: Result<(), GitHubError>,
     },
     SeenMarksOff(Vec<SeenMarkOffOutcome>),

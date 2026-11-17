@@ -18,6 +18,8 @@ const J: Chord = key('j');
 const K: Chord = key('k');
 const N: Chord = key('n');
 const M: Chord = key('m');
+/// Shift as a merge is weightier than marking a step read.
+const SHIFT_M: Chord = M.with(Modifier::Shift);
 const W: Chord = key('w');
 const R: Chord = key('r');
 const L: Chord = key('l');
@@ -130,12 +132,13 @@ pub enum Command {
     Shortcuts,
     OpenOnGitHub,
     ToggleDraft,
+    ToggleAutoMerge,
     CloseWindow,
     Quit,
 }
 
 impl Command {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -161,6 +164,7 @@ impl Command {
         Self::Shortcuts,
         Self::OpenOnGitHub,
         Self::ToggleDraft,
+        Self::ToggleAutoMerge,
         Self::CloseWindow,
         Self::Quit,
     ];
@@ -193,6 +197,7 @@ impl Command {
             Self::Shortcuts => &[QUESTION],
             Self::OpenOnGitHub => &[G],
             Self::ToggleDraft => &[D],
+            Self::ToggleAutoMerge => &[SHIFT_M],
             Self::CloseWindow => &[PRIMARY_W],
             Self::Quit => &[PRIMARY_Q],
         }
@@ -226,6 +231,7 @@ impl Command {
             Self::Shortcuts => "shortcuts",
             Self::OpenOnGitHub => "open_on_github",
             Self::ToggleDraft => "toggle_draft",
+            Self::ToggleAutoMerge => "toggle_auto_merge",
             Self::CloseWindow => "close_window",
             Self::Quit => "quit",
         }
@@ -257,7 +263,8 @@ impl Command {
             | Self::ToggleFold
             | Self::Shortcuts
             | Self::OpenOnGitHub
-            | Self::ToggleDraft => KeyScope::Page,
+            | Self::ToggleDraft
+            | Self::ToggleAutoMerge => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
@@ -288,6 +295,7 @@ impl Command {
             | Self::Shortcuts
             | Self::OpenOnGitHub
             | Self::ToggleDraft
+            | Self::ToggleAutoMerge
             | Self::CloseWindow
             | Self::Quit => ShortcutGroup::App,
         }
@@ -322,6 +330,9 @@ impl Command {
             Self::OpenOnGitHub => "Open the pull request on GitHub",
             Self::ToggleDraft => {
                 "Convert the pull request to a draft, or mark it ready; press again to confirm"
+            }
+            Self::ToggleAutoMerge => {
+                "Turn auto-merge on or off, or merge now when nothing blocks it; press again to confirm"
             }
             Self::CloseWindow => "Close the window and quit",
             Self::Quit => "Quit",

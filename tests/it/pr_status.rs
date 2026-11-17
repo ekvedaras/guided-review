@@ -15,17 +15,18 @@ use guided_review::viewer::{
 };
 use serde_json::json;
 
-const PR: &str = "https://github.com/acme/shop/pull/7";
+pub(crate) const PR: &str = "https://github.com/acme/shop/pull/7";
 
-struct Pull {
+/// A one-step PR review whose GitHub is a fake, for the PR status and the keys that change it.
+pub(crate) struct Pull {
     repo: FixtureRepo,
     base: String,
     head: String,
-    sent: SentLog,
+    pub(crate) sent: SentLog,
 }
 
 impl Pull {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let repo = FixtureRepo::cloned_from("acme/shop");
         repo.write("a.txt", "one\n");
         let base = repo.commit("base");
@@ -39,17 +40,17 @@ impl Pull {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
+    pub(crate) fn github(&self) -> FakeGitHub {
         FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
     }
 
-    fn source(&self) -> LocalGit {
+    pub(crate) fn source(&self) -> LocalGit {
         LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap()
     }
 
-    fn open(&self) -> Review {
+    pub(crate) fn open(&self) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -65,7 +66,7 @@ impl Pull {
         Review::open(tour, &self.source(), state_file).unwrap()
     }
 
-    fn read(&self, review: &mut Review, github: &FakeGitHub, now: Instant) {
+    pub(crate) fn read(&self, review: &mut Review, github: &FakeGitHub, now: Instant) {
         review.pull_from_github();
         drive_without_agents(review, github, &self.source(), now);
     }

@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::file_path;
-use guided_review::viewer::{AutoMerge, MergeMethod, MergeMethods, Mergeability, Merging};
+use guided_review::viewer::{
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+};
 
 /// A PR that checks or reviews still hold back, in a repo that allows every merge method and
 /// auto-merge, read by someone with write access.
@@ -108,6 +110,10 @@ pub enum GitHubCall {
     SetReadiness {
         pr: PullRequestUrl,
         readiness: Readiness,
+    },
+    ChangeMerging {
+        pr: PullRequestUrl,
+        change: MergeChange,
     },
 }
 
@@ -475,6 +481,21 @@ impl PullRequestStatusPort for FakeGitHub {
         });
         self.fail_if_connection_lost()?;
         self.status.lock().unwrap().readiness = readiness;
+        Ok(())
+    }
+
+    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), GitHubError> {
+        self.sent.record(GitHubCall::ChangeMerging {
+            pr: pr.clone(),
+            change,
+        });
+        self.fail_if_connection_lost()?;
+        let merging = &mut self.status.lock().unwrap().merging;
+        match change {
+            MergeChange::EnableAutoMerge(method) => merging.auto_merge = AutoMerge::On(method),
+            MergeChange::DisableAutoMerge => merging.auto_merge = AutoMerge::Off,
+            MergeChange::MergeNow(_) => merging.mergeability = Mergeability::NotOpen,
+        }
         Ok(())
     }
 }

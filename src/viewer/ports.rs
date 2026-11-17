@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::github_outage::OutageCause;
+use super::merging::MergeChange;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
@@ -70,6 +71,9 @@ pub trait PullRequestStatusPort: Send + Sync {
         pr: &PullRequestUrl,
         readiness: Readiness,
     ) -> Result<(), GitHubError>;
+
+    /// Turns auto-merge on or off, or merges the PR now.
+    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), GitHubError>;
 }
 
 pub trait PullRequestReactionsPort: Send + Sync {

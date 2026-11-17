@@ -50,6 +50,9 @@ pub enum Intent {
     OpenChecksOnGitHub,
     /// `D`: asks, and on the same press again soon after, converts the PR to a draft or marks it ready.
     ToggleDraft,
+    /// `Shift+M`: asks, and on the same press again soon after, turns auto-merge on or off, or
+    /// merges now when nothing blocks the PR.
+    ToggleAutoMerge,
     CheckForUpdates,
     RestartApp,
 }
@@ -78,6 +81,9 @@ impl From<PaletteAction> for Intent {
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
             PaletteAction::OpenChecksOnGitHub => Self::OpenChecksOnGitHub,
             PaletteAction::ConvertToDraft | PaletteAction::MarkReadyForReview => Self::ToggleDraft,
+            PaletteAction::EnableAutoMerge
+            | PaletteAction::DisableAutoMerge
+            | PaletteAction::MergeNow => Self::ToggleAutoMerge,
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
             PaletteAction::Settings => Self::ToggleSettings,
             PaletteAction::Shortcuts => Self::ToggleShortcuts,
@@ -113,6 +119,8 @@ pub enum Effect {
     OpenChecksOnGitHub(PullRequestUrl),
     /// The window asks the review to change the PR between draft and ready, and says what it answers.
     ChangeReadiness,
+    /// The window asks the review to turn auto-merge on or off or merge now, and says what it answers.
+    ChangeMerging,
     Restart(RestartArgs),
     /// Asks GitHub for a newer release now.
     CheckForUpdates,
@@ -215,6 +223,7 @@ impl Intent {
             | Self::TogglePieceLabels
             | Self::ToggleFold
             | Self::ToggleDraft
+            | Self::ToggleAutoMerge
             | Self::ToggleJump
             | Self::ToggleSettings
             | Self::ShowSettings
@@ -309,6 +318,7 @@ impl ReviewCore {
                 .pull_request()
                 .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnGitHub(pr.clone())),
             Intent::ToggleDraft => Effect::ChangeReadiness,
+            Intent::ToggleAutoMerge => Effect::ChangeMerging,
             Intent::CheckForUpdates => Effect::CheckForUpdates,
             Intent::RestartApp => Effect::Restart(self.restart_args()),
         }

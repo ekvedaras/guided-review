@@ -8,6 +8,7 @@ use crate::opened_change_set::UnreadableLocalTour;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
+use super::merging::MergeChange;
 use super::pr_status::Readiness;
 use super::saved_state::RepinRunning;
 use super::toasts::ToastTone;
@@ -56,6 +57,8 @@ pub enum Problem {
     ReviewingMarkNotChanged(String),
     /// GitHub did not take the change of the PR between draft and ready.
     ReadinessNotChanged(Readiness, String),
+    /// GitHub did not turn auto-merge on or off, or did not merge the PR.
+    MergingNotChanged(MergeChange, String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
     ReleaseInstallInTheWay(InTheWay),
     /// Files the app keeps that lie in the app folders it does not use: what a move from
@@ -110,6 +113,8 @@ pub enum ProblemKind {
     ReviewingMarkNotChanged,
     /// Cleared by the next change of the PR between draft and ready that goes through.
     ReadinessNotChanged,
+    /// Cleared by the next auto-merge change or merge that goes through.
+    MergingNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
     ReleaseInstallInTheWay,
     /// Raised when the review opens; a review opened once the files are gone has none.
@@ -141,6 +146,7 @@ impl Problem {
             Self::UseAgentFailed(_) => ProblemKind::UseAgentFailed,
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReadinessNotChanged(..) => ProblemKind::ReadinessNotChanged,
+            Self::MergingNotChanged(..) => ProblemKind::MergingNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
             Self::FilesNotRead(_) => ProblemKind::FilesNotRead,
             Self::LocalToursNotRead(_) => ProblemKind::LocalToursNotRead,
@@ -355,6 +361,15 @@ impl fmt::Display for Problem {
                     formatter,
                     "The PR was not marked ready for review: {reason}"
                 )
+            }
+            Self::MergingNotChanged(MergeChange::EnableAutoMerge(_), reason) => {
+                write!(formatter, "Auto-merge was not turned on: {reason}")
+            }
+            Self::MergingNotChanged(MergeChange::DisableAutoMerge, reason) => {
+                write!(formatter, "Auto-merge was not turned off: {reason}")
+            }
+            Self::MergingNotChanged(MergeChange::MergeNow(_), reason) => {
+                write!(formatter, "The PR was not merged: {reason}")
             }
             Self::ReleaseInstallInTheWay(InTheWay::FirstOnPath { binary, .. }) => write!(
                 formatter,

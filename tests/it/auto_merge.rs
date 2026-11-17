@@ -1,8 +1,298 @@
-use crate::support::fake_ports::blocked_merging;
+use std::time::{Duration, Instant};
+
+use crate::pr_status::{PR, Pull};
+use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, blocked_merging};
+use crate::support::work::drive_without_agents;
+use guided_review::update::Build;
 use guided_review::viewer::{
-    AutoMerge, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal, Mergeability,
-    Merging,
+    AutoMerge, Checks, Command, Effect, Intent, MergeChange, MergeMethod, MergeMethods, MergeOffer,
+    MergeRefusal, Mergeability, Merging, PaletteAction, PrStatus, PressStep, Problem, Readiness,
+    Review, WindowMoment,
 };
+
+fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeGitHub, Instant) {
+    let mut review = pull.open();
+    let github = pull.github().with_status(PrStatus {
+        readiness: Readiness::Ready,
+        checks: Checks::Running,
+        viewer_may_change_readiness: true,
+        merging,
+    });
+    let now = Instant::now();
+    pull.read(&mut review, &github, now);
+    (review, github, now)
+}
+
+fn merging_calls(pull: &Pull) -> Vec<MergeChange> {
+    pull.sent
+        .github_calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GitHubCall::ChangeMerging { change, .. } => Some(change),
+            _ => None,
+        })
+        .collect()
+}
+
+fn asked(step: PressStep) -> String {
+    let PressStep::Ask(note) = step else {
+        panic!("not asked: {step:?}");
+    };
+    note
+}
+
+#[test]
+fn the_first_press_says_it_turns_on_auto_merge_with_a_merge_commit_and_sends_nothing() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+
+    let note = asked(review.ask_to_change_merging(now));
+
+    assert!(note.contains("turn on auto-merge"), "{note}");
+    assert!(note.contains("merge commit"), "{note}");
+    assert!(note.contains("again within 10 s"), "{note}");
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+    assert_eq!(merging_calls(&pull), []);
+}
+
+#[test]
+fn the_same_press_again_within_ten_seconds_turns_auto_merge_on() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    review.ask_to_change_merging(now);
+
+    let later = now + Duration::from_secs(10);
+    assert_eq!(review.ask_to_change_merging(later), PressStep::Sent);
+    drive_without_agents(&mut review, &github, &pull.source(), later);
+
+    assert!(
+        pull.sent
+            .github_calls()
+            .contains(&GitHubCall::ChangeMerging {
+                pr: PR.parse().unwrap(),
+                change: MergeChange::EnableAutoMerge(MergeMethod::Merge),
+            })
+    );
+    assert_eq!(
+        merging_calls(&pull),
+        [MergeChange::EnableAutoMerge(MergeMethod::Merge)]
+    );
+    assert_eq!(
+        review.pr_status().map(|status| status.merging.auto_merge),
+        Some(AutoMerge::On(MergeMethod::Merge))
+    );
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
+fn a_repo_that_does_not_allow_the_chosen_method_gets_its_first_allowed_one_and_the_toast_says_so() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(
+        &pull,
+        Merging {
+            methods: MergeMethods::only(&[MergeMethod::Squash, MergeMethod::Rebase]),
+            ..blocked_merging()
+        },
+    );
+
+    let note = asked(review.ask_to_change_merging(now));
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+
+    assert!(note.contains("squash"), "{note}");
+    assert!(note.contains("does not allow merge commit"), "{note}");
+    assert_eq!(
+        merging_calls(&pull),
+        [MergeChange::EnableAutoMerge(MergeMethod::Squash)]
+    );
+}
+
+#[test]
+fn the_merge_method_from_settings_is_used_where_the_repo_allows_it() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    review.prefer_merge_method(MergeMethod::Rebase);
+
+    review.ask_to_change_merging(now);
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+
+    assert_eq!(
+        merging_calls(&pull),
+        [MergeChange::EnableAutoMerge(MergeMethod::Rebase)]
+    );
+}
+
+#[test]
+fn with_auto_merge_on_the_same_key_turns_it_off() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(
+        &pull,
+        Merging {
+            auto_merge: AutoMerge::On(MergeMethod::Squash),
+            viewer_may_disable_auto_merge: true,
+            ..blocked_merging()
+        },
+    );
+
+    let note = asked(review.ask_to_change_merging(now));
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+
+    assert!(note.contains("turn off auto-merge"), "{note}");
+    assert_eq!(merging_calls(&pull), [MergeChange::DisableAutoMerge]);
+    assert_eq!(
+        review.pr_status().map(|status| status.merging.auto_merge),
+        Some(AutoMerge::Off)
+    );
+}
+
+#[test]
+fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(
+        &pull,
+        Merging {
+            mergeability: Mergeability::Now,
+            ..blocked_merging()
+        },
+    );
+
+    let note = asked(review.ask_to_change_merging(now));
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+
+    assert!(note.contains("merge the PR now"), "{note}");
+    assert!(note.contains("merge commit"), "{note}");
+    assert_eq!(
+        merging_calls(&pull),
+        [MergeChange::MergeNow(MergeMethod::Merge)]
+    );
+    assert_eq!(
+        review.pr_status().map(|status| status.merging.mergeability),
+        Some(Mergeability::NotOpen)
+    );
+}
+
+#[test]
+fn a_press_after_ten_seconds_only_asks_again() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    review.ask_to_change_merging(now);
+
+    let step = review.ask_to_change_merging(now + Duration::from_secs(11));
+
+    assert!(matches!(step, PressStep::Ask(_)), "{step:?}");
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+    assert_eq!(merging_calls(&pull), []);
+}
+
+#[test]
+fn a_press_github_would_refuse_says_why_and_one_before_github_is_read_does_nothing() {
+    let pull = Pull::new();
+    let (mut read_only, _github, now) = read_merging(
+        &pull,
+        Merging {
+            repo_allows_auto_merge: false,
+            viewer_may_enable_auto_merge: false,
+            ..blocked_merging()
+        },
+    );
+
+    assert_eq!(
+        read_only.ask_to_change_merging(now),
+        PressStep::Refused(MergeRefusal::RepoDisallowsAutoMerge.to_string())
+    );
+    assert_eq!(pull.open().ask_to_change_merging(now), PressStep::Nothing);
+}
+
+#[test]
+fn a_change_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    github.inject(GitHubFault::ConnectionLost);
+    review.ask_to_change_merging(now);
+    review.ask_to_change_merging(now);
+
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+
+    assert_eq!(
+        review.pr_status().map(|status| status.merging.auto_merge),
+        Some(AutoMerge::Off)
+    );
+    assert_eq!(
+        review.problems(),
+        [Problem::MergingNotChanged(
+            MergeChange::EnableAutoMerge(MergeMethod::Merge),
+            "network is down".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn the_palette_offers_the_one_change_that_applies_and_nothing_where_github_would_refuse() {
+    let offered = |review: &Review| -> Vec<PaletteAction> {
+        review
+            .palette_actions(Build::Local)
+            .into_iter()
+            .filter(|action| action.command() == Some(Command::ToggleAutoMerge))
+            .collect()
+    };
+    let pull = Pull::new();
+    let blocked = blocked_merging();
+
+    let (off, ..) = read_merging(&pull, blocked);
+    let (on, ..) = read_merging(
+        &pull,
+        Merging {
+            auto_merge: AutoMerge::On(MergeMethod::Merge),
+            viewer_may_disable_auto_merge: true,
+            ..blocked
+        },
+    );
+    let (clean, ..) = read_merging(
+        &pull,
+        Merging {
+            mergeability: Mergeability::Now,
+            ..blocked
+        },
+    );
+    let (refused, ..) = read_merging(
+        &pull,
+        Merging {
+            viewer_may_enable_auto_merge: false,
+            ..blocked
+        },
+    );
+
+    assert_eq!(offered(&off), [PaletteAction::EnableAutoMerge]);
+    assert_eq!(offered(&on), [PaletteAction::DisableAutoMerge]);
+    assert_eq!(offered(&clean), [PaletteAction::MergeNow]);
+    assert_eq!(offered(&refused), []);
+    assert_eq!(offered(&pull.open()), []);
+}
+
+#[test]
+fn the_key_the_button_and_the_palette_ask_for_the_same_thing() {
+    let pull = Pull::new();
+    let review = pull.open();
+
+    assert_eq!(
+        review.decide(Intent::ToggleAutoMerge, WindowMoment::default()),
+        Effect::ChangeMerging
+    );
+    for action in [
+        PaletteAction::EnableAutoMerge,
+        PaletteAction::DisableAutoMerge,
+        PaletteAction::MergeNow,
+    ] {
+        assert_eq!(Intent::from(action), Intent::ToggleAutoMerge);
+    }
+    assert_eq!(
+        Command::ToggleAutoMerge.default_chords()[0].keystroke(),
+        "shift-m"
+    );
+}
 
 #[test]
 fn a_blocked_pr_offers_auto_merge_and_one_with_auto_merge_on_offers_to_turn_it_off() {

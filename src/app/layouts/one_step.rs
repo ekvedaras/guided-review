@@ -134,6 +134,7 @@ actions!(
         TogglePieceLabels,
         ToggleFold,
         ToggleDraft,
+        ToggleAutoMerge,
         ToggleRead,
         ToggleShortcuts,
         OpenPrOnGitHub,
@@ -1088,6 +1089,15 @@ impl OneStepLayout {
         tell_press(step, cx);
     }
 
+    /// `Shift+M`, the title bar's button and the palette's actions: the first ask says what asking
+    /// again does.
+    fn change_merging(&mut self, cx: &mut Context<Self>) {
+        let step = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.ask_to_change_merging(Instant::now()))
+        });
+        tell_press(step, cx);
+    }
+
     /// Switch to guided tour, from the banner, the sidebar and the palette: the reviewer's click only.
     fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
         self.session
@@ -1260,6 +1270,7 @@ impl OneStepLayout {
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
             Effect::ChangeReadiness => self.change_readiness(cx),
+            Effect::ChangeMerging => self.change_merging(cx),
             Effect::Restart(restart) => match crate::platform::running_binary() {
                 Ok(exe) => self.restart_app_with(exe, &restart, cx),
                 Err(error) => {
@@ -4583,6 +4594,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &ToggleDraft, window, cx| {
                 this.act(Intent::ToggleDraft, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleAutoMerge, window, cx| {
+                this.act(Intent::ToggleAutoMerge, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleFold, window, cx| {
                 this.act(Intent::ToggleFold, window, cx);

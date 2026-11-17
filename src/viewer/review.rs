@@ -1,5 +1,6 @@
 mod guided_tour;
 mod kept;
+mod merging;
 mod status;
 mod work;
 
@@ -53,6 +54,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
+use super::merging::{MergeChange, MergeMethod};
 use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
@@ -317,6 +319,12 @@ pub struct ReviewCore {
     readiness_asked: PressAgain<Readiness>,
     /// What the confirmed press changed the PR to, until GitHub answers.
     readiness_to_send: Option<Readiness>,
+    /// The reviewer's merge method for this PR's repo, from Settings.
+    merge_method: MergeMethod,
+    /// The first press of the auto-merge key, waiting for the same press again.
+    merging_asked: PressAgain<MergeChange>,
+    /// What the confirmed press asked of GitHub, until GitHub answers.
+    merging_to_send: Option<MergeChange>,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -655,6 +663,9 @@ impl ReviewCore {
             pr_status: None,
             readiness_asked: PressAgain::default(),
             readiness_to_send: None,
+            merge_method: MergeMethod::default(),
+            merging_asked: PressAgain::default(),
+            merging_to_send: None,
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -2258,6 +2269,7 @@ impl ReviewCore {
             .chain(page_toggles)
             .chain(finish)
             .chain(self.readiness_palette_action())
+            .chain(self.merging_palette_action())
             .chain([PaletteAction::OpenOnGitHub])
             .chain(
                 self.subject

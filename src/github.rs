@@ -15,7 +15,7 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    AutoMerge, MergeMethod, MergeMethods, Mergeability, Merging, PrStatus, Readiness,
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, PrStatus, Readiness,
 };
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, Checks, CommentId, CommentPlace, GitHubError, NoAccess,
@@ -667,6 +667,38 @@ impl PullRequestStatusPort for GitHub {
                 capitalized(mutation)
             ),
             &serde_json::json!({"input": {"pullRequestId": id}}),
+        )
+        .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
+        Ok(())
+    }
+
+    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), GitHubError> {
+        let id = self.pull_request_id(pr)?;
+        let (mutation, method, doing) = match change {
+            MergeChange::EnableAutoMerge(method) => (
+                "enablePullRequestAutoMerge",
+                Some(method),
+                "turn on auto-merge for",
+            ),
+            MergeChange::DisableAutoMerge => (
+                "disablePullRequestAutoMerge",
+                None,
+                "turn off auto-merge for",
+            ),
+            MergeChange::MergeNow(method) => ("mergePullRequest", Some(method), "merge"),
+        };
+        let input = match method {
+            Some(method) => {
+                serde_json::json!({"pullRequestId": id, "mergeMethod": method.github_name()})
+            }
+            None => serde_json::json!({"pullRequestId": id}),
+        };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            &serde_json::json!({ "input": input }),
         )
         .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
         Ok(())
