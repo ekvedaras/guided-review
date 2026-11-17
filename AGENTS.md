@@ -31,7 +31,7 @@ The snapshot scripts work on macOS only, and say so elsewhere: pictures need gpu
 
 `scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]` puts each scene side by side, before left. Markers number spots on the after picture, in its pixels: `{ "21-jump-palette": [{ "x": 640, "y": 260, "n": 1 }] }`.
 
-A PR that changes what the app shows puts before and after pictures in its Evidence: snapshot `main` and the branch, run `snapshot-compare`, and upload with `gh attach`. When the change is a small part of the window, crop both pictures to that part and a little around it before comparing (`sips -c <h> <w> --cropOffset <y> <x>`), one picture per changed spot. When no scene shows the change, stage one in `scenes.rs` in the same PR, so the next change to it has a picture too.
+A PR that changes what the app shows puts before and after pictures in its Evidence: snapshot `main` and the branch, run `snapshot-compare`, and upload with `gh attach`. When the change is a small part of the window, crop both pictures to that part and a little around it before comparing (`sips -c <h> <w> --cropOffset <y> <x>`), one picture per changed spot. Open every picture with the Read tool before you upload it: on 2026-11-17 six crops with a wrong offset showed a file header instead of the title bar and went into a PR. When no scene shows the change, stage one in `scenes.rs` in the same PR, so the next change to it has a picture too.
 
 ## Change notes
 
