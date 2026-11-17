@@ -122,15 +122,51 @@ impl Setup {
             return Err("no Mermaid diagram found".to_owned());
         };
         let text: Arc<str> = svg.svg().into();
-        let size = usvg::Tree::from_data(text.as_bytes(), &SVG_OPTIONS)
-            .map_err(|e| e.to_string())?
-            .size();
+        let tree =
+            usvg::Tree::from_data(text.as_bytes(), &SVG_OPTIONS).map_err(|e| e.to_string())?;
+        let (width, height) = drawn_size(&tree);
         Ok(Svg {
             text,
-            width: size.width(),
-            height: size.height(),
+            width,
+            height,
         })
     }
+}
+
+/// Merman can leave an invisible dot far below or right of the shapes, and sizes the SVG to reach
+/// it: the page then shows an empty band under the diagram. The size ends at the shapes instead,
+/// with merman's own margin; drawing at this size cuts the band off.
+fn drawn_size(tree: &usvg::Tree) -> (f32, f32) {
+    let size = tree.size();
+    let everything = tree.root().abs_stroke_bounding_box();
+    let Some((right, bottom)) = far_corner_of_shapes(tree.root()) else {
+        return (size.width(), size.height());
+    };
+    let margin_right = (size.width() - everything.right()).max(0.);
+    let margin_bottom = (size.height() - everything.bottom()).max(0.);
+    (
+        (right + margin_right).min(size.width()),
+        (bottom + margin_bottom).min(size.height()),
+    )
+}
+
+const SMALLEST_SHAPE: f32 = 1.;
+
+fn far_corner_of_shapes(group: &usvg::Group) -> Option<(f32, f32)> {
+    group
+        .children()
+        .iter()
+        .filter_map(|node| {
+            if let usvg::Node::Group(group) = node {
+                return far_corner_of_shapes(group);
+            }
+            let bounds = node.abs_stroke_bounding_box();
+            (bounds.width().max(bounds.height()) >= SMALLEST_SHAPE)
+                .then(|| (bounds.right(), bounds.bottom()))
+        })
+        .reduce(|(right, bottom), (other_right, other_bottom)| {
+            (right.max(other_right), bottom.max(other_bottom))
+        })
 }
 
 /// Merman places boxes around the text it measures; with any other font the labels overflow them.

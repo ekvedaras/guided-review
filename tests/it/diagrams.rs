@@ -428,3 +428,37 @@ fn a_zoomed_diagram_too_big_for_one_texture_is_drawn_smaller() {
     assert!(scale < 10_000.0);
     assert!(picture.width().max(picture.height()) <= 4096);
 }
+
+#[test]
+fn a_diagram_is_as_tall_as_what_it_draws_not_a_dot_merman_leaves_below_it() {
+    let svg = svg(
+        Appearance::Dark,
+        "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Reopening: saved\n  Idle --> Waiting: busy\n  Waiting --> Waiting: still busy\n  Waiting --> Reopening: work ends\n",
+    );
+    let tree = usvg::Tree::from_data(svg.text().as_bytes(), &usvg::Options::default()).unwrap();
+    let lowest_shape = lowest_visible_shape(tree.root());
+
+    assert!(
+        svg.height() - lowest_shape < 10.,
+        "{} tall, its lowest shape ends at {lowest_shape}",
+        svg.height()
+    );
+}
+
+fn lowest_visible_shape(group: &usvg::Group) -> f32 {
+    group
+        .children()
+        .iter()
+        .map(|node| {
+            if let usvg::Node::Group(group) = node {
+                return lowest_visible_shape(group);
+            }
+            let bounds = node.abs_stroke_bounding_box();
+            if bounds.width().max(bounds.height()) < 1. {
+                0.
+            } else {
+                bounds.bottom()
+            }
+        })
+        .fold(0., f32::max)
+}
