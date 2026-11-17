@@ -85,6 +85,11 @@ pub struct LocalWorkTree {
     root: WorkTreeRoot,
 }
 
+/// The `.git` folder of a repository's main working tree, canonical, which all its linked worktrees
+/// share: one per repository, however many worktrees it has.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SharedGitFolder(PathBuf);
+
 const SNAPSHOT_REF_PREFIX: &str = "refs/guided-review/local-";
 /// Six bytes are the 12 hex characters that tell one local review's ref from another's.
 const SNAPSHOT_REF_HASH_BYTES: usize = 6;
@@ -255,7 +260,18 @@ impl LocalWorkTree {
         self.delete_snapshot_ref(&snapshot_ref(change_set))
     }
 
-    /// The refs that keep snapshots in this clone, of any local review; never a PR's fetch ref.
+    /// The git folder this working tree shares with every linked worktree of its repository, and with
+    /// it the refs: a snapshot ref written from one worktree is in all of them.
+    pub fn shared_git_folder(&self) -> Result<SharedGitFolder, OpenRefusal> {
+        let named = self.git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+        let canonical = Path::new(&named)
+            .canonicalize()
+            .map_err(|error| self.failed(error))?;
+        Ok(SharedGitFolder(canonical))
+    }
+
+    /// The refs that keep snapshots in this working tree's repository, of any local review in any of
+    /// its linked worktrees; never a PR's fetch ref.
     pub fn snapshot_refs(&self) -> Result<Vec<String>, OpenRefusal> {
         Ok(self
             .git(&[

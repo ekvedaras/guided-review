@@ -692,6 +692,59 @@ fn on_start_the_refs_of_local_reviews_no_longer_on_disk_are_deleted() {
     );
 }
 
+/// A review of the branch `other` in a linked worktree of the feature's clone, which shares its refs.
+/// The worktree lives as long as the returned folder.
+fn with_a_review_in_a_linked_worktree(feature: &Feature) -> (tempfile::TempDir, ReviewSubject) {
+    let parent = tempfile::TempDir::new().unwrap();
+    let linked = parent.path().canonicalize().unwrap().join("linked");
+    feature.repo.git(&[
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "other",
+        linked.to_str().unwrap(),
+        "main",
+    ]);
+    std::fs::write(linked.join("README.md"), "hello\nthere\n").unwrap();
+    let other = ReviewSubject::from(
+        LocalWorkTree::containing(&linked)
+            .unwrap()
+            .change_set()
+            .unwrap(),
+    );
+    open_review(&other, &linked, &feature.repo.folders()).unwrap();
+    (parent, other)
+}
+
+#[test]
+fn on_start_the_refs_of_a_review_in_a_linked_worktree_of_the_same_clone_are_kept() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let (_linked, other) = with_a_review_in_a_linked_worktree(&feature);
+
+    clean_snapshot_refs(&feature.repo.folders());
+
+    let mut kept = vec![local_ref(&other), local_ref(&feature.subject())];
+    kept.sort();
+    assert_eq!(refs_kept(&feature), kept);
+}
+
+#[test]
+fn on_start_a_linked_worktree_whose_only_tour_cannot_be_read_keeps_its_ref() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let (_linked, other) = with_a_review_in_a_linked_worktree(&feature);
+    let folders = feature.repo.folders();
+    std::fs::write(Tour::shown_path_for(&folders, &other), "not a tour").unwrap();
+
+    clean_snapshot_refs(&folders);
+
+    let mut kept = vec![local_ref(&other), local_ref(&feature.subject())];
+    kept.sort();
+    assert_eq!(refs_kept(&feature), kept);
+}
+
 #[test]
 fn on_start_a_clone_with_a_tour_that_cannot_be_read_keeps_every_ref_and_names_the_tour() {
     let feature = Feature::with_work_in_progress();
