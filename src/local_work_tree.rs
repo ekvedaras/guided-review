@@ -210,14 +210,6 @@ impl LocalWorkTree {
         })
     }
 
-    /// Makes the commit of the working tree and keeps it with the change set's ref, moving the ref
-    /// when there was one.
-    pub fn snapshot(&self, change_set: &LocalChangeSet) -> Result<Snapshot, OpenRefusal> {
-        let snapshot = self.make_snapshot()?;
-        self.keep_snapshot(change_set, &snapshot)?;
-        Ok(snapshot)
-    }
-
     /// The commit of the working tree, kept by no ref yet. It has `HEAD` as its parent, from a temporary
     /// index; with a clean working tree it is `HEAD` itself and nothing is committed. It is dated as
     /// `HEAD` is, so the same files over the same `HEAD` are always the same commit, whoever makes it.
@@ -255,8 +247,9 @@ impl LocalWorkTree {
         })
     }
 
-    /// Deletes the change set's ref, when there is one: `git gc` may take its snapshot then.
-    pub fn forget_snapshot(&self, change_set: &LocalChangeSet) -> Result<(), OpenRefusal> {
+    /// Deletes the change set's ref, when there is one: `git gc` may take its snapshot then. Only the
+    /// local adapter of `opened_subject` calls it, under the tour-and-ref lock.
+    pub(crate) fn forget_snapshot(&self, change_set: &LocalChangeSet) -> Result<(), OpenRefusal> {
         self.delete_snapshot_ref(&snapshot_ref(change_set))
     }
 
@@ -296,8 +289,10 @@ impl LocalWorkTree {
         self.git(&["update-ref", "-d", name]).map(drop)
     }
 
-    /// Points the change set's one ref at `snapshot`, so `git gc` keeps it.
-    pub fn keep_snapshot(
+    /// Points the change set's one ref at `snapshot`, so `git gc` keeps it. Only the local adapter of
+    /// `opened_subject` calls it, under the tour-and-ref lock, so the ref never moves off the snapshot
+    /// the tour on disk reads.
+    pub(crate) fn keep_snapshot(
         &self,
         change_set: &LocalChangeSet,
         snapshot: &Snapshot,

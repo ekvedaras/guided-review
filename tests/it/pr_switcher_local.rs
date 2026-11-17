@@ -7,7 +7,7 @@ use guided_review::app_folders::AppFolders;
 use guided_review::config::Config;
 use guided_review::local_change_sets::find_local_rows;
 use guided_review::local_work_tree::{LocalWorkTree, OnDisk};
-use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{

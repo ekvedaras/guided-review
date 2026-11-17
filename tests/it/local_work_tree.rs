@@ -1,12 +1,14 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use guided_review::app_folders::AppFolders;
 use guided_review::code_source::CodeSource;
 use guided_review::local_facts::LocalChange;
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::{LocalWorkTree, OpenRefusal, snapshot_ref};
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::pull_request::Sha;
-use guided_review::review_subject::ReviewSubject;
+use guided_review::review_subject::{LocalChangeSet, ReviewSubject};
 
 use crate::support::{FixtureRepo, file_path};
 
@@ -32,9 +34,19 @@ fn work_tree(repo: &FixtureRepo) -> LocalWorkTree {
 
 fn snapshot_of(repo: &FixtureRepo) -> (LocalWorkTree, Sha) {
     let work_tree = work_tree(repo);
-    let change_set = work_tree.change_set().unwrap();
-    let snapshot = work_tree.snapshot(&change_set).unwrap();
+    let snapshot = work_tree.make_snapshot().unwrap();
     (work_tree, snapshot.head)
+}
+
+/// Only an opened change set moves a snapshot ref, under the lock that keeps it on the tour's snapshot.
+/// A snapshot of the same files over the same `HEAD` is the same commit, so `make_snapshot` names the
+/// one the ref keeps.
+fn open_review_of(folders: &AppFolders, work_tree: &LocalWorkTree) -> (LocalChangeSet, Sha) {
+    let change_set = work_tree.change_set().unwrap();
+    OpenedChangeSet::new(&change_set, folders)
+        .make_basic_tour_if_no_tour()
+        .unwrap();
+    (change_set, work_tree.make_snapshot().unwrap().head)
 }
 
 fn files_of(repo: &FixtureRepo, commit: &Sha) -> BTreeSet<String> {
@@ -209,15 +221,13 @@ fn a_snapshot_of_a_clean_working_tree_is_head_itself() {
 #[test]
 fn a_snapshot_is_kept_by_a_ref_under_guided_review_whose_name_is_never_a_pr_number() {
     let repo = shop_with_work_in_progress();
-    let work_tree = work_tree(&repo);
-    let change_set = work_tree.change_set().unwrap();
 
-    let snapshot = work_tree.snapshot(&change_set).unwrap();
+    let (change_set, snapshot) = open_review_of(&repo.folders(), &work_tree(&repo));
 
     let name = snapshot_ref(&change_set);
     let leaf = name.strip_prefix("refs/guided-review/").unwrap();
     assert!(!leaf.chars().all(|c| c.is_ascii_digit()), "{name}");
-    assert_eq!(repo.git(&["rev-parse", &name]), snapshot.head.as_str());
+    assert_eq!(repo.git(&["rev-parse", &name]), snapshot.as_str());
     assert!(
         !repo
             .git(&["for-each-ref", "refs/heads", "refs/tags"])
@@ -228,12 +238,15 @@ fn a_snapshot_is_kept_by_a_ref_under_guided_review_whose_name_is_never_a_pr_numb
 #[test]
 fn a_snapshot_moves_its_ref_and_leaves_one_ref_per_change_set() {
     let repo = shop_with_work_in_progress();
-    let (work_tree, first) = snapshot_of(&repo);
+    let work_tree = work_tree(&repo);
+    let (change_set, first) = open_review_of(&repo.folders(), &work_tree);
     repo.write("notes.txt", "more drafts\n");
 
-    let change_set = work_tree.change_set().unwrap();
-    let second = work_tree.snapshot(&change_set).unwrap().head;
+    OpenedChangeSet::new(&change_set, &repo.folders())
+        .repin_to_new_snapshot()
+        .unwrap();
 
+    let second = work_tree.make_snapshot().unwrap().head;
     assert_ne!(first, second);
     let refs = repo.git(&[
         "for-each-ref",
@@ -252,7 +265,7 @@ fn making_a_snapshot_touches_nothing_of_the_reviewers() {
     repo.write("README.md", "hello\nworld\n");
     let before = reviewers_state(&repo);
 
-    snapshot_of(&repo);
+    open_review_of(&repo.folders(), &work_tree(&repo));
 
     assert_eq!(reviewers_state(&repo), before);
     assert_ne!(before[1], "");
@@ -326,7 +339,7 @@ fn the_facts_list_the_commits_and_mark_each_file_committed_uncommitted_or_both()
     repo.write("src/cart.rs", "pub fn total() -> u32 { 1 }\n");
     let work_tree = work_tree(&repo);
     let change_set = work_tree.change_set().unwrap();
-    let snapshot = work_tree.snapshot(&change_set).unwrap();
+    let snapshot = work_tree.make_snapshot().unwrap();
     let tips = work_tree.tips(&snapshot).unwrap();
 
     let facts = work_tree.facts(&change_set, &tips).unwrap();
@@ -360,7 +373,7 @@ fn the_facts_of_a_snapshot_stay_as_they_were_when_the_branch_moves_on() {
     let repo = shop_with_work_in_progress();
     let work_tree = work_tree(&repo);
     let change_set = work_tree.change_set().unwrap();
-    let snapshot = work_tree.snapshot(&change_set).unwrap();
+    let snapshot = work_tree.make_snapshot().unwrap();
     let tips = work_tree.tips(&snapshot).unwrap();
     let before = work_tree.facts(&change_set, &tips).unwrap();
     repo.commit("Commit it all");
@@ -435,20 +448,20 @@ fn two_worktrees_on_different_branches_are_two_change_sets_with_their_own_snapsh
     ]);
     std::fs::write(linked_folder.join("fix.txt"), "fix\n").unwrap();
 
-    let first = work_tree(&repo);
-    let second = LocalWorkTree::containing(&linked_folder).unwrap();
-    let (first_set, second_set) = (first.change_set().unwrap(), second.change_set().unwrap());
-    let first_snapshot = first.snapshot(&first_set).unwrap();
-    let second_snapshot = second.snapshot(&second_set).unwrap();
+    let (first_set, first_snapshot) = open_review_of(&repo.folders(), &work_tree(&repo));
+    let (second_set, second_snapshot) = open_review_of(
+        &repo.folders(),
+        &LocalWorkTree::containing(&linked_folder).unwrap(),
+    );
 
     assert_ne!(snapshot_ref(&first_set), snapshot_ref(&second_set));
     assert_eq!(
         repo.git(&["rev-parse", &snapshot_ref(&first_set)]),
-        first_snapshot.head.as_str()
+        first_snapshot.as_str()
     );
     assert_eq!(
         repo.git(&["rev-parse", &snapshot_ref(&second_set)]),
-        second_snapshot.head.as_str()
+        second_snapshot.as_str()
     );
-    assert!(files_of(&repo, &second_snapshot.head).contains("fix.txt"));
+    assert!(files_of(&repo, &second_snapshot).contains("fix.txt"));
 }

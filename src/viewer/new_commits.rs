@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::opened_change_set::OpenedChangeSet;
+use crate::opened_subject::update_shown_tour;
 use crate::pull_request::{ChangeTips, Sha};
 use crate::repin::{Repin, repin};
-use crate::review_subject::{LocalChangeSet, ReviewSubject};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
 use super::local_threads::LocalThreadStore;
@@ -79,33 +79,8 @@ pub struct RepinnedTour {
 impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
     pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
-        let pr = match &self.subject {
-            ReviewSubject::PullRequest(pr) => pr,
-            ReviewSubject::Local(change_set) => return self.run_local(change_set),
-        };
-        let tips = github.pull_request_tips(pr)?;
-        let source = (self.pick_code_source)(&tips)?;
-        let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
-        let (tour, _) = repin_tour(
-            &self.subject,
-            &Tour::shown_path_for(&self.folders, &self.subject),
-            &ReviewStateFile::for_subject(&self.folders, &self.subject),
-            source.as_ref(),
-            &base,
-            &tips.head,
-        )?;
-        let review =
-            ReviewBuilder::new(&self.folders, &self.subject).build(tour, source.as_ref())?;
-        Ok(RepinnedTour {
-            review,
-            source: source.into(),
-        })
-    }
-
-    /// Update of a local review: the tour moves to a new snapshot of the folder.
-    fn run_local(&self, change_set: &LocalChangeSet) -> anyhow::Result<RepinnedTour> {
-        let (tour, _) = OpenedChangeSet::new(change_set, &self.folders).repin_to_new_snapshot()?;
-        let source = (self.pick_code_source)(&tour.pin().pinned_tips())?;
+        let (tour, source) =
+            update_shown_tour(&self.subject, &self.folders, github, &self.pick_code_source)?;
         let review =
             ReviewBuilder::new(&self.folders, &self.subject).build(tour, source.as_ref())?;
         Ok(RepinnedTour {

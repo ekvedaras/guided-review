@@ -25,7 +25,7 @@ use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::{GhCloner, GitHub};
-use crate::opened_change_set::OpenedChangeSet;
+use crate::opened_subject::OpenedChangeSet;
 use crate::viewer::{
     AfterJob, AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
     CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome,

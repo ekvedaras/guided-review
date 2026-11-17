@@ -13,7 +13,7 @@ use crate::app::tour_writer;
 use crate::config::Config;
 use crate::github::GitHub;
 use crate::local_change_sets::find_local_rows;
-use crate::opened_change_set::OpenedChangeSet;
+use crate::opened_subject::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
     ActivePr, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, RowKind, SwitcherRow,

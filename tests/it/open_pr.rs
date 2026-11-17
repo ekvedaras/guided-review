@@ -9,7 +9,7 @@ use crate::support::work::drive_without_agents;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{StepId, Tour};
 use guided_review::update::Build;

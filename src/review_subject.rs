@@ -127,6 +127,20 @@ impl ReviewSubject {
         }
     }
 
+    /// What has happened when the review's code moved on from the head its tour is pinned to.
+    pub const fn moved_on(&self) -> &'static str {
+        match self {
+            Self::PullRequest(_) => "PR has new commits",
+            Self::Local(_) => "the review has a new snapshot of its folder",
+        }
+    }
+
+    /// The folder the subject's code lives in, where its agent works: a local change set's own. A PR
+    /// has none, so its agents work in a clone found for it.
+    pub fn own_folder(&self) -> Option<&Path> {
+        self.local().map(|change_set| change_set.folder().as_path())
+    }
+
     /// What a question about the review as a whole is about, in the words the reviewer reads.
     pub const fn whole_change(&self) -> &'static str {
         match self {

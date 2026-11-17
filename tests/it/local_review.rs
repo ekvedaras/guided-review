@@ -10,7 +10,7 @@ use guided_review::local_facts::LocalChange;
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
-use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};

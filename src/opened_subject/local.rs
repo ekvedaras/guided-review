@@ -12,12 +12,13 @@ use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
 use crate::local_work_tree::{LocalWorkTree, SharedGitFolder, snapshot_ref};
 use crate::make_basic_tour::make_basic_tour;
-use crate::opened_pr::CodeAtTips;
 use crate::pull_request::PullRequestUrl;
 use crate::repin::Repin;
 use crate::review_subject::{LOCAL_FILES_FOLDER, LocalChangeSet, ReviewSubject};
 use crate::tour::{Tour, TourPin, ToursOnDisk};
 use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
+
+use super::CodeAtTips;
 
 /// Deletes the snapshot refs, in the repositories of the local reviews on disk, of local reviews that
 /// are on disk no more, as after a crash between deleting a review's files and its ref. Linked worktrees
@@ -226,8 +227,8 @@ pub fn local_reviews_of_repo(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<L
         .collect()
 }
 
-/// What every command needs to work on one local change set: where its files live and its working
-/// tree. The twin of `OpenedPr`, with no GitHub in it.
+/// The local adapter: a local change set's code is its folder's git, read at the snapshot the tour is
+/// pinned to, and no GitHub. It alone moves the snapshot ref, under the tour-and-ref lock.
 pub struct OpenedChangeSet {
     change_set: LocalChangeSet,
     folders: AppFolders,
@@ -267,8 +268,12 @@ impl OpenedChangeSet {
         Ok(self.work_tree.facts(&self.change_set, &pin.pinned_tips())?)
     }
 
-    fn subject(&self) -> ReviewSubject {
+    pub(super) fn subject(&self) -> ReviewSubject {
         ReviewSubject::from(self.change_set.clone())
+    }
+
+    pub(super) const fn folders(&self) -> &AppFolders {
+        &self.folders
     }
 
     pub fn tour_path(&self) -> PathBuf {
@@ -285,7 +290,8 @@ impl OpenedChangeSet {
         self.refuse_when_on_another_branch()?;
         let live = self.work_tree.change_set()?;
         self.work_tree.refuse_when_nothing_to_review(&live)?;
-        let snapshot = self.work_tree.snapshot(&live)?;
+        let snapshot = self.work_tree.make_snapshot()?;
+        self.work_tree.keep_snapshot(&live, &snapshot)?;
         let tips = self.work_tree.tips(&snapshot)?;
         make_basic_tour(
             &self.folders,
@@ -389,6 +395,12 @@ impl OpenedChangeSet {
         self.refuse_when_gone()?;
         let tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &subject), &subject)?;
         Ok(self.code_at(tour.pin()))
+    }
+
+    /// The code the shown tour reads, once its snapshot is known to be kept.
+    pub(super) fn code_of_shown(&self, pin: &TourPin) -> anyhow::Result<CodeAtTips> {
+        self.refuse_when_gone()?;
+        Ok(self.code_at(pin))
     }
 
     /// A tour with no snapshot ref beside it is one of two things. After a drop or a move had deleted the

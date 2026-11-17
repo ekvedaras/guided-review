@@ -82,6 +82,7 @@ mod new_commits;
 mod open_app;
 mod open_pr;
 mod open_review;
+mod opened_subject;
 mod outdated_threads;
 mod outline;
 mod outline_extras;

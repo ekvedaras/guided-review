@@ -23,6 +23,7 @@ mod updater;
 mod writing_window;
 
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,7 +41,7 @@ use crate::app_link::{Answer, AppListener, BUILD_WAIT, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
-use crate::opened_change_set::clean_snapshot_refs;
+use crate::opened_subject::clean_snapshot_refs;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, ToursOnDisk};
@@ -215,17 +216,20 @@ fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
     Arc::new(GitHub::from_env())
 }
 
-/// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
-/// state file only loses the remembered clone folder.
+/// The open of a review the app makes of itself, from the folder a PR's clone is searched from: the
+/// one its state file remembers, which need not be a clone, else home. A local change set opens from
+/// its own folder. An unreadable state file only loses the remembered folder.
 fn open_request_of(folders: &AppFolders, subject: &ReviewSubject) -> OpenRequest {
-    let folder = match subject {
-        ReviewSubject::Local(change_set) => change_set.folder().as_path().to_path_buf(),
-        ReviewSubject::PullRequest(_) => ReviewStateFile::for_subject(folders, subject)
-            .opened_from()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| folders.home().to_path_buf()),
-    };
+    let folder = subject.own_folder().map_or_else(
+        || {
+            ReviewStateFile::for_subject(folders, subject)
+                .opened_from()
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| folders.home().to_path_buf())
+        },
+        Path::to_path_buf,
+    );
     OpenRequest {
         subject: subject.to_string(),
         folder,

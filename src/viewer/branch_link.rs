@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::app_folders::AppFolders;
-use crate::opened_change_set::local_reviews_of_repo;
+use crate::opened_subject::local_reviews_of_repo;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 

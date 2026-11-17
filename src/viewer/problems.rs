@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::app_folders::NotRead;
-use crate::opened_change_set::UnreadableLocalTour;
+use crate::opened_subject::UnreadableLocalTour;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};

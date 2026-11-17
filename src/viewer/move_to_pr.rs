@@ -10,7 +10,7 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::local_work_tree::LocalWorkTree;
 use crate::make_basic_tour::make_basic_tour;
-use crate::opened_change_set::OpenedChangeSet;
+use crate::opened_subject::OpenedChangeSet;
 use crate::pieces;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::repin::repin;

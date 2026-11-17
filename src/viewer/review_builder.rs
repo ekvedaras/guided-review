@@ -1,7 +1,7 @@
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::config::Config;
-use crate::opened_change_set::{OpenedChangeSet, unreadable_local_tours};
+use crate::opened_subject::{OpenedChangeSet, unreadable_local_tours};
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 

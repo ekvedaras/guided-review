@@ -374,7 +374,8 @@ impl OwnAgentHandOff {
 #[derive(Clone)]
 pub struct TourAgents {
     port: Arc<dyn TourAgentPort>,
-    /// Where a tour agent the app starts works. `None`: the app starts none.
+    /// Where a PR's tour agent the app starts works, as a PR has no folder of its own. `None`: the app
+    /// starts none for a PR. A local change set's agent always works in its own folder.
     folder: Option<PathBuf>,
     summary_skill: Option<String>,
 }
@@ -419,11 +420,11 @@ impl TourAgents {
         active: &ReviewSubject,
         first_task: String,
     ) -> anyhow::Result<TerminalId> {
-        let folder = match subject {
-            ReviewSubject::Local(change_set) => Some(change_set.folder().as_path().to_owned()),
-            ReviewSubject::PullRequest(_) => self.folder.clone(),
-        };
-        let Some(folder) = folder else {
+        let Some(folder) = subject
+            .own_folder()
+            .map(Path::to_path_buf)
+            .or_else(|| self.folder.clone())
+        else {
             bail!("no folder to start a tour agent for {subject} in");
         };
         let name = terminal_name(subject);
