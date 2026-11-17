@@ -67,8 +67,8 @@ pub enum ShowReview<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailedBuild<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
-    /// Nothing is on screen to keep.
-    EndApp,
+    /// Nothing is on screen: the app opens its one window as the switcher, with the reason under the query.
+    OpenSwitcherWithReason,
     /// Settings stays as it is, with the reason above it.
     ShowInSettings(SettingsOnly),
     /// The switcher stays open, with the reason under the query, to pick another PR.
@@ -91,7 +91,7 @@ pub enum Relaunched<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterClose {
     EndApp,
-    /// The app stays with no window, and the build opens one for its review, or ends the app if it fails.
+    /// The app stays with no window, and the build opens one for its review, or, if it fails, opens the switcher with the reason.
     WaitForBuild,
 }
 
@@ -150,7 +150,7 @@ impl<SettingsOnly: Copy, SwitcherOnly: Copy, WritingOnly: Copy, Review: Copy>
 
     pub fn build_failed(&self) -> FailedBuild<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
         match *self {
-            Self::Closed => FailedBuild::EndApp,
+            Self::Closed => FailedBuild::OpenSwitcherWithReason,
             Self::SwitcherOnly(window) => FailedBuild::ShowInSwitcher(window),
             Self::WritingOnly(window) => FailedBuild::ShowInWriting(window),
             Self::SettingsOnly(window) => FailedBuild::ShowInSettings(window),

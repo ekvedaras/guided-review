@@ -63,8 +63,11 @@ fn a_review_built_while_another_shows_switches_the_window_to_it() {
 }
 
 #[test]
-fn a_failed_build_with_no_window_ends_the_app() {
-    assert_eq!(Window::Closed.build_failed(), FailedBuild::EndApp);
+fn a_failed_build_with_no_window_opens_the_switcher_with_the_reason() {
+    assert_eq!(
+        Window::Closed.build_failed(),
+        FailedBuild::OpenSwitcherWithReason
+    );
 }
 
 #[test]

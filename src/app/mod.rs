@@ -587,9 +587,9 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
     });
 }
 
-/// The review is built off the UI thread while the PR on screen stays. When a build fails with no window
-/// open, the app ends with the reason in its log; otherwise the reason is also shown in the window, over
-/// Settings or the PR on screen, whichever it holds.
+/// The review is built off the UI thread while the PR on screen stays. The reason a build fails is also
+/// shown in the window, over Settings or the PR on screen, whichever it holds, and in a switcher the app
+/// opens when it has no window.
 async fn build_and_show(
     screen: SharedScreen,
     ticket: BuildTicket,
@@ -629,7 +629,22 @@ async fn build_and_show(
         Finished::Stay { reason } => {
             eprintln!("{reason}");
             match window.build_failed() {
-                FailedBuild::EndApp => std::process::exit(1),
+                FailedBuild::OpenSwitcherWithReason => {
+                    let opened = cx.update(|cx| {
+                        let window = open_switcher_window(cx)?;
+                        window.update(cx, |switcher_window, _, cx| {
+                            switcher_window.build_failed(reason, cx);
+                        })?;
+                        Ok::<_, anyhow::Error>(window)
+                    });
+                    match opened {
+                        Ok(window) => screen.borrow_mut().window = AppWindow::SwitcherOnly(window),
+                        Err(error) => {
+                            eprintln!("could not show the reason in a window: {error:#}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 FailedBuild::ShowInSettings(window) => cx.update(|cx| {
                     window
                         .update(cx, |settings_window, _, cx| {
