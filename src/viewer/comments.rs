@@ -9,7 +9,8 @@ use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::hand_offs::Audience;
-use super::ports::{GitHubError, PullRequestTipsPort, ReviewThreadsPort, ReviewWritesPort};
+use super::local_threads::{LocalThreadStore, ThreadHome};
+use super::ports::{ChangeTipsPort, GitHubError, ReviewThreadsPort, ReviewWritesPort};
 use super::row_selection::SelectedLines;
 use super::step_page::{LineLocation, Side};
 use super::threads::ReviewThread;
@@ -149,12 +150,46 @@ impl CommentDraft {
     }
 }
 
+/// How a review's boxes send: to GitHub, with its own actions, or as tasks for a local review's agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sending {
+    GitHub,
+    /// These send actions replace every GitHub one; the first is what Enter does.
+    Tasks(&'static [SendMode]),
+}
+
+impl Sending {
+    pub fn on_github(self) -> bool {
+        matches!(self, Self::GitHub)
+    }
+
+    pub fn tasks(self) -> &'static [SendMode] {
+        match self {
+            Self::GitHub => &[],
+            Self::Tasks(modes) => modes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SendMode {
     /// Goes into the pending review, to be sent with the others.
     AddToReview,
     /// Posts at once, as a review of its own.
     CommentNow,
+    /// A local review's task: kept as a local thread and handed to the change set's agent at once.
+    SendNow,
+    /// A local review's task: kept as a local thread and queued, to go to the agent with Send tasks.
+    AddToTasks,
+}
+
+impl SendMode {
+    /// What the comment boxes of a local review send with. Each is a task for the change set's agent.
+    pub const LOCAL: [Self; 2] = [Self::AddToTasks, Self::SendNow];
+
+    pub fn is_task(self) -> bool {
+        Self::LOCAL.contains(&self)
+    }
 }
 
 /// A comment GitHub did not take yet. It is sent again when GitHub can be reached.
@@ -195,6 +230,11 @@ pub enum CommentRefusal {
     /// An Ask still waiting for its first answer has nothing to put in a comment.
     NoAnswerYet,
     NoAccess(String),
+    /// The send action is not one this review offers: a task in a PR's review, or a GitHub
+    /// comment in a local review.
+    NotOffered,
+    /// A local review's comment is a task for its agent, which cannot be reached now.
+    AgentLinkOff,
 }
 
 impl CommentRefusal {
@@ -217,6 +257,10 @@ impl CommentRefusal {
             Self::NotYourComment => "Only your own comments can be deleted",
             Self::DeleteNotConfirmed => "Confirm the deletion first",
             Self::NoAnswerYet => "This Ask has no answer yet",
+            Self::NotOffered => "This review does not send comments that way",
+            Self::AgentLinkOff => {
+                "The agent cannot be reached now: the comment stays here until it can"
+            }
             Self::NoAccess(reason) => return Cow::Owned(format!("No access to GitHub: {reason}")),
         })
     }
@@ -271,7 +315,7 @@ pub struct CommentRequest {
     pub(super) mode: SendMode,
     pub(super) audience: Audience,
     tour_head: Sha,
-    pr: PullRequestUrl,
+    home: ThreadHome,
 }
 
 pub struct CommentOutcome {
@@ -296,7 +340,7 @@ impl CommentRequest {
         mode: SendMode,
         audience: Audience,
         tour_head: Sha,
-        pr: PullRequestUrl,
+        home: ThreadHome,
     ) -> Self {
         Self {
             origin,
@@ -304,21 +348,36 @@ impl CommentRequest {
             mode,
             audience,
             tour_head,
-            pr,
+            home,
         }
     }
 
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
+    /// A local review's comment never reaches GitHub: it becomes a thread in the state file.
     pub fn run(
         self,
-        github: &(impl PullRequestTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
+        github: &(impl ChangeTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
     ) -> CommentOutcome {
-        let how = self.send(github);
-        let threads = matches!(how, Outcome::Sent).then(|| {
-            github
-                .review_threads(&self.pr)
-                .map_err(|error| format!("{error:#}"))
-        });
+        let (how, threads) = match &self.home {
+            ThreadHome::GitHub(pr) => {
+                let how = self.send(github, pr);
+                let threads = matches!(how, Outcome::Sent).then(|| {
+                    github
+                        .review_threads(pr)
+                        .map_err(|error| format!("{error:#}"))
+                });
+                (how, threads)
+            }
+            ThreadHome::StateFile(store) => {
+                let how = self.keep_locally(store);
+                let threads = matches!(how, Outcome::Sent).then(|| {
+                    store
+                        .threads_at(&self.tour_head)
+                        .map_err(|error| format!("{error:#}"))
+                });
+                (how, threads)
+            }
+        };
         CommentOutcome {
             request: self,
             how,
@@ -326,8 +385,24 @@ impl CommentRequest {
         }
     }
 
-    fn send(&self, github: &(impl PullRequestTipsPort + ReviewWritesPort + ?Sized)) -> Outcome {
-        let pr = &self.pr;
+    fn keep_locally(&self, store: &LocalThreadStore) -> Outcome {
+        if !self.draft.is_placed_at(&self.tour_head) {
+            return Outcome::Refused(CommentRefusal::CodeMoved);
+        }
+        if !self.mode.is_task() {
+            return Outcome::Refused(CommentRefusal::NotOffered);
+        }
+        match store.start(&self.draft.place, &self.draft.body, &self.tour_head) {
+            Ok(_) => Outcome::Sent,
+            Err(error) => Outcome::Failed(format!("{error:#}")),
+        }
+    }
+
+    fn send(
+        &self,
+        github: &(impl ChangeTipsPort + ReviewWritesPort + ?Sized),
+        pr: &PullRequestUrl,
+    ) -> Outcome {
         if !self.draft.is_placed_at(&self.tour_head) {
             return Outcome::Refused(CommentRefusal::CodeMoved);
         }
@@ -345,6 +420,9 @@ impl CommentRequest {
                 Ok(true) => return Outcome::Refused(CommentRefusal::PendingReviewExists),
                 Err(error) => return classify(&error),
             },
+            SendMode::SendNow | SendMode::AddToTasks => {
+                return Outcome::Refused(CommentRefusal::NotOffered);
+            }
         };
         sent.map_or_else(|error| classify(&error), |()| Outcome::Sent)
     }

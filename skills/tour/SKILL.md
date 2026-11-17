@@ -1,9 +1,11 @@
 ---
 name: tour
-description: Write a top-down guided-review tour of a GitHub PR with the guided-review CLI. Use when the user types /tour <pr-url> or asks for a guided review of a PR.
+description: Write a top-down guided-review tour of a GitHub PR or of a local change set with the guided-review CLI. Use when the user types /tour <pr-url> or /tour <local-key>, or asks for a guided review of a PR or of local changes.
 ---
 
 # /tour <pr-url> [--redo]
+
+`<pr-url>` is a PR URL or a local key, `local:<folder>@<branch>`: the branch's commits not on the default branch plus the uncommitted files, which every command below takes alike. Write the key out as given.
 
 Write a **tour file**: the PR's changes as **steps**, main flow first, details later. Run each command as its own Bash call, with no `&&`, `;`, pipes or shell variables. The `guided-review` CLI owns the facts (piece ids, shas); you own the story: order, nesting, text, diagrams, skim flags, summary. Terms: `GLOSSARY.md` in the guided-review repo.
 
@@ -16,7 +18,7 @@ The tour is done when `guided-review check <pr-url>` prints `0 errors` and you h
 
 ## Steps
 
-1. Intent: `gh pr view <pr-url> --json title,body`.
+1. Intent: `gh pr view <pr-url> --json title,body`. A local key has no PR: take the intent from the work you know of and from the outline.
 2. Outline: `guided-review outline <pr-url>`. It is the plan; start from it, not from the full diff.
    - `small PR` hint: read the whole diff with `guided-review show <pr-url> <every piece id>` and skip step 3.
    - A `summary instructions: run the skill <name>` line at the end means: call the Skill tool with that name, follow what it says, and write the result as Markdown in `reviewer_summary`. Otherwise a `summary instructions:` block at the end holds the reviewer's own instructions for an extra summary. Follow its text and write the result as Markdown in the tour's `reviewer_summary` field, next to `summary`. It has no length limit, and `summary` stays at most 3 bullets. Without the block, leave `reviewer_summary` out. A `warning:` line there means the instructions file could not be read: write no `reviewer_summary` and mention the warning in your reply.

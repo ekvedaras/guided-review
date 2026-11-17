@@ -26,7 +26,7 @@ fn open_review() -> (FixtureRepo, Review) {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let state_file = ReviewStateFile::for_pr(&repo.folders(), &PR.parse().unwrap());
+    let state_file = ReviewStateFile::for_subject(&repo.folders(), &PR.parse().unwrap());
     let review = Review::open(tour, &source, state_file).unwrap();
     (repo, review)
 }
@@ -172,5 +172,21 @@ fn a_failed_show_agent_is_listed_with_the_text_the_sidebar_always_gave_it() {
     assert_eq!(problem.to_string(), "Could not show the agent: no terminal");
 
     review.clear_problem(ProblemKind::ShowAgentFailed);
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
+fn a_failed_use_this_agent_is_listed_and_the_next_one_that_works_clears_it() {
+    let (_repo, mut review) = open_review();
+
+    review.use_agent_result(Some(&anyhow::anyhow!("no terminal t2")));
+
+    let [problem] = review.problems().try_into().unwrap();
+    assert_eq!(
+        problem.to_string(),
+        "Could not use that agent: no terminal t2"
+    );
+
+    review.use_agent_result(None);
     assert_eq!(review.problems(), []);
 }

@@ -11,11 +11,14 @@ use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
-use guided_review::opened_pr::OpenedPr;
+use guided_review::local_git::LocalGit;
+use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_pr::{CodeAtTips, OpenedPr};
 use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::show::Show;
 use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
@@ -23,7 +26,7 @@ use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
-use guided_review::viewer::{HandOffId, RefreshBrief, repin_tour};
+use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile, repin_tour};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
@@ -37,12 +40,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Print the diff pieces of a PR, grouped by file, without code
-    Outline { pr: PullRequestUrl },
+    Outline { subject: ReviewSubject },
     /// Print where the tour file of a PR lives
-    TourPath { pr: PullRequestUrl },
+    TourPath { subject: ReviewSubject },
     /// Print the diff of the given pieces
     Show {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         /// Piece ids as printed by `outline`: `<file>#<symbol>` or `<file>`
         #[arg(required = true)]
         ids: Vec<String>,
@@ -51,20 +54,24 @@ enum Command {
         around: bool,
     },
     /// Pin the tour file of a PR to its commits, then list its errors and warnings
-    Check { pr: PullRequestUrl },
+    Check { subject: ReviewSubject },
     /// Move the tour to the PR's new head and print what became of each piece
-    Repin { pr: PullRequestUrl },
+    Repin { subject: ReviewSubject },
     /// Print what a Refresh of the tour has to do; `--done` clears the marks once it is done
     Refresh {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         #[arg(long)]
         done: bool,
     },
-    /// Open the app on the tour of a PR
-    Open { pr: PullRequestUrl },
-    /// Quit the running app of this build and open a PR in a new one
+    /// Open the app on the tour of a PR, or of the branch of a clone's folder and its uncommitted files
+    Open {
+        /// A PR link, a `local:` key, or a folder inside a clone
+        target: OpenTarget,
+    },
+    /// Quit the running app of this build and open a PR or a folder's branch in a new one
     Restart {
-        pr: PullRequestUrl,
+        /// A PR link, a `local:` key, or a folder inside a clone
+        target: OpenTarget,
         /// The id of the step to show, else the summary
         #[arg(long)]
         at: Option<StepId>,
@@ -81,7 +88,7 @@ enum Command {
     DesktopEntryTemplate { out: std::path::PathBuf },
     /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
     AgentReply {
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         /// The hand-off id from the message, like `h0`
         hand_off: HandOffId,
         /// The answer in GitHub markdown; `-` reads it from stdin, which keeps its line breaks
@@ -121,21 +128,29 @@ fn main() -> anyhow::Result<()> {
         return launch();
     };
     match command {
-        Command::Outline { pr } => outline(&pr),
-        Command::Show { pr, ids, around } => show(&pr, &ids, around),
-        Command::TourPath { pr } => tour_path(&pr),
-        Command::Check { pr } => check(&pr),
-        Command::Repin { pr } => repin_command(&pr),
-        Command::Refresh { pr, done } => refresh(&pr, done),
-        Command::Open { pr } => open(&pr, &Launch::Open),
-        Command::Restart { pr, at, replacing } => open(&pr, &Launch::Restart { at, replacing }),
+        Command::Outline { subject } => outline(&subject),
+        Command::Show {
+            subject,
+            ids,
+            around,
+        } => show(&subject, &ids, around),
+        Command::TourPath { subject } => tour_path(&subject),
+        Command::Check { subject } => check(&subject),
+        Command::Repin { subject } => repin_command(&subject),
+        Command::Refresh { subject, done } => refresh(&subject, done),
+        Command::Open { target } => open(&target, &Launch::Open),
+        Command::Restart {
+            target,
+            at,
+            replacing,
+        } => open(&target, &Launch::Restart { at, replacing }),
         Command::Settings => settings(),
         Command::InstallApp => install_app(),
         Command::DesktopEntryTemplate { out } => {
             write_desktop_entry_templates(&out, Version::running())
         }
         Command::AgentReply {
-            pr,
+            subject,
             hand_off,
             body,
             working: _,
@@ -151,7 +166,7 @@ fn main() -> anyhow::Result<()> {
             let said = agent_reply(
                 &GitHub::from_env(),
                 &AppFolders::running()?,
-                &pr,
+                &subject,
                 hand_off,
                 &reply,
             )?;
@@ -170,9 +185,46 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn tour_path(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    println!("{}", Tour::path_for(&AppFolders::running()?, pr).display());
+/// What `open` and `restart` take: a PR link, a local change set's key, or a folder, which stands for
+/// the branch it is on.
+#[derive(Clone)]
+enum OpenTarget {
+    Subject(ReviewSubject),
+    Folder(std::path::PathBuf),
+}
+
+impl std::str::FromStr for OpenTarget {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> anyhow::Result<Self> {
+        if std::path::Path::new(text).exists() {
+            return Ok(Self::Folder(text.into()));
+        }
+        text.parse().map(Self::Subject).map_err(|error: anyhow::Error| {
+            anyhow::anyhow!(
+                "{text} is neither a GitHub PR link, a local change set key nor a folder ({error:#})"
+            )
+        })
+    }
+}
+
+fn tour_path(subject: &ReviewSubject) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        Tour::path_for(&AppFolders::running()?, subject).display()
+    );
     Ok(())
+}
+
+/// A PR is read at the tips GitHub has now; a local change set at the snapshot its tour is pinned to,
+/// since the folder is not what the reviewer reads.
+fn code_to_read(subject: &ReviewSubject) -> anyhow::Result<CodeAtTips> {
+    match subject {
+        ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_live_tips(),
+        ReviewSubject::Local(change_set) => {
+            OpenedChangeSet::new(change_set, &AppFolders::running()?).at_pinned_tips()
+        }
+    }
 }
 
 /// A config that cannot be read must not stop `outline` or `check`, which work without it.
@@ -187,14 +239,14 @@ fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
     }
 }
 
-fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
+fn outline(subject: &ReviewSubject) -> anyhow::Result<()> {
     let summary_instructions = summary_instructions()?;
-    let code = OpenedPr::new(pr)?.at_live_tips()?;
+    let code = code_to_read(subject)?;
     let (base, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
         Outline {
-            pr,
+            subject,
             base: &base,
             head: &code.tips.head,
             files: &files,
@@ -206,8 +258,8 @@ fn outline(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()> {
-    let code = OpenedPr::new(pr)?.at_live_tips()?;
+fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result<()> {
+    let code = code_to_read(subject)?;
     let (_, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
@@ -223,20 +275,40 @@ fn show(pr: &PullRequestUrl, ids: &[String], around: bool) -> anyhow::Result<()>
     Ok(())
 }
 
-fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
-    let opened = OpenedPr::new(pr)?;
-    let tour_path = opened.tour_path();
-    let mut tour = GuidedTour::load(&tour_path)?;
+/// A local key names no repo; the tour pin keeps its clone's, so a PR of the repo finds the review without git.
+fn with_repo_of_its_clone(subject: &ReviewSubject) -> ReviewSubject {
+    match subject {
+        ReviewSubject::Local(change_set) if change_set.repo().is_none() => ReviewSubject::from(
+            change_set
+                .clone()
+                .in_repo(LocalGit::origin_of(change_set.folder().as_path())),
+        ),
+        _ => subject.clone(),
+    }
+}
 
-    let code = opened.at_live_tips()?;
+fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let subject = &with_repo_of_its_clone(subject);
+    let tour_path = Tour::path_for(&AppFolders::running()?, subject);
+    let mut tour = GuidedTour::load_of(&tour_path, subject)?;
+
+    let code = code_to_read(subject)?;
     if tour.pin.head.is_empty() {
-        tour.pin.pin_to(pr, &code.merge_base()?, &code.tips.head);
+        tour.pin
+            .pin_to(subject, &code.merge_base()?, &code.tips.head);
     } else {
-        if tour.pin.pr.is_empty() {
-            tour.pin.pr = pr.to_string();
+        if tour.pin.pr.is_empty() && tour.pin.local.is_none() {
+            tour.pin.name_subject(subject);
         }
         if tour.pin.head != code.tips.head {
-            println!("warning: PR has new commits; run `guided-review repin`");
+            match subject {
+                ReviewSubject::PullRequest(_) => {
+                    println!("warning: PR has new commits; run `guided-review repin`");
+                }
+                ReviewSubject::Local(_) => println!(
+                    "warning: the review has a new snapshot of its folder; run `guided-review repin`"
+                ),
+            }
         }
     }
     tour.save(&tour_path)?;
@@ -250,15 +322,26 @@ fn check(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
+/// A PR's tour moves to the PR's head on GitHub; a local review's to a new snapshot of its folder.
+fn repin_command(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let pr = match subject {
+        ReviewSubject::PullRequest(pr) => pr,
+        ReviewSubject::Local(change_set) => {
+            let (_, result) = OpenedChangeSet::new(change_set, &AppFolders::running()?)
+                .repin_to_new_snapshot()?;
+            print!("{result}");
+            return Ok(());
+        }
+    };
     let opened = OpenedPr::new(pr)?;
     let tour_path = opened.tour_to_repin_path();
     // Fails before any network call when there is no tour yet.
-    Tour::load(&tour_path)?;
+    Tour::load_of(&tour_path, subject)?;
 
     let code = opened.at_live_tips()?;
     let base = code.merge_base()?;
     let (_, result) = repin_tour(
+        subject,
         &tour_path,
         &opened.state_file(),
         code.source.as_ref(),
@@ -269,16 +352,21 @@ fn repin_command(pr: &PullRequestUrl) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn refresh(pr: &PullRequestUrl, done: bool) -> anyhow::Result<()> {
-    let opened = OpenedPr::new(pr)?;
-    let state_file = opened.state_file();
+fn refresh(subject: &ReviewSubject, done: bool) -> anyhow::Result<()> {
+    let folders = AppFolders::running()?;
+    let state_file = ReviewStateFile::for_subject(&folders, subject);
     if done {
         state_file.update(guided_review::viewer::ReviewState::finish_refresh)?;
         println!("refresh done: marks cleared");
         return Ok(());
     }
-    let tour = GuidedTour::load(&opened.tour_path())?;
-    let code = opened.at_pinned_tips(&tour.pin)?;
+    let tour = GuidedTour::load_of(&Tour::path_for(&folders, subject), subject)?;
+    let code = match subject {
+        ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_pinned_tips(&tour.pin)?,
+        ReviewSubject::Local(change_set) => {
+            OpenedChangeSet::new(change_set, &folders).code_at(&tour.pin)
+        }
+    };
     let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
     print!(
         "{}",
@@ -329,22 +417,31 @@ enum Launch {
     },
 }
 
-fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
+fn open(target: &OpenTarget, launch: &Launch) -> anyhow::Result<()> {
     let folders = &AppFolders::running()?;
-    let tours = ToursOnDisk::of(folders, pr);
+    let subject = match target {
+        OpenTarget::Subject(subject) => subject.clone(),
+        OpenTarget::Folder(path) => ReviewSubject::from(OpenedChangeSet::change_set_at(path)?),
+    };
+    let tours = ToursOnDisk::of(folders, &subject);
     if let Launch::Restart { at: Some(step), .. } = launch
         && tours.opens_basic()
     {
         anyhow::bail!(
-            "{pr} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
+            "{subject} opens in Basic mode, which has no steps, so there is no step `{step}` to restart at"
         );
     }
     if tours == ToursOnDisk::None {
-        OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?;
+        match &subject {
+            ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?,
+            ReviewSubject::Local(change_set) => {
+                OpenedChangeSet::new(change_set, folders).make_basic_tour_if_no_tour()?
+            }
+        };
     }
     let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {
-        pr: pr.to_string(),
+        subject: subject.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
         terminal: std::env::var("HC_TERMINAL_ID").ok(),
         at_step: match launch {
@@ -375,8 +472,8 @@ fn open(pr: &PullRequestUrl, launch: &Launch) -> anyhow::Result<()> {
         | Answer::Reloaded { .. }
         | Answer::KeptInBackground { .. } => {
             println!("{answer}");
-            if ToursOnDisk::of(folders, pr).opens_basic() {
-                println!("{pr} opened in Basic mode");
+            if ToursOnDisk::of(folders, &subject).opens_basic() {
+                println!("{subject} opened in Basic mode");
             }
         }
         other => anyhow::bail!("{other}"),

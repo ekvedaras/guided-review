@@ -11,14 +11,16 @@ use crate::file_path::FilePath;
 use crate::image_facts;
 use crate::json::at;
 use crate::line_number::LineNumber;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    AvatarPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
-    ReactionChange, ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview,
-    ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
+    AvatarPort, ChangeTipsPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause,
+    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RepoCloner, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -433,8 +435,8 @@ impl ReleasesPort for GitHub {
     }
 }
 
-impl PullRequestTipsPort for GitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError> {
+impl ChangeTipsPort for GitHub {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError> {
         let pull: PullJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -442,11 +444,80 @@ impl PullRequestTipsPort for GitHub {
             )
             .and_then(|mut response| Ok(response.body_mut().read_json()?))
             .with_context(|| format!("could not read {pr} from GitHub"))?;
-        Ok(PullRequestTips {
+        Ok(ChangeTips {
             base_branch_tip: Sha::new(&pull.base.sha),
             head: Sha::new(&pull.head.sha),
         })
     }
+}
+
+#[derive(Deserialize)]
+struct PullListedJson {
+    number: u64,
+    title: String,
+}
+
+impl PullsOfBranchPort for GitHub {
+    fn open_pull_of_branch(
+        &self,
+        repo: &RepoName,
+        branch: &BranchName,
+    ) -> Result<Option<PullOfBranch>, GitHubError> {
+        let head = percent_encode_path(&format!("{}:{}", repo.owner(), branch.as_str()));
+        let pulls: Vec<PullListedJson> = self
+            .get(
+                &format!("repos/{repo}/pulls?head={head}&state=open"),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not look for a PR of {} in {repo}", branch.as_str()))?;
+        Ok(pulls.into_iter().next().map(|pull| PullOfBranch {
+            pr: PullRequestUrl {
+                repo: repo.clone(),
+                number: pull.number,
+            },
+            title: pull.title,
+        }))
+    }
+
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<BranchName>, GitHubError> {
+        let pull: PullHeadJson = self
+            .get(
+                &format!("repos/{}/pulls/{}", pr.repo, pr.number),
+                "application/vnd.github+json",
+            )
+            .and_then(|mut response| Ok(response.body_mut().read_json()?))
+            .with_context(|| format!("could not read the branch of {pr} from GitHub"))?;
+        let from_the_repo_itself = pull.head.repo.is_some_and(|repo| {
+            RepoName::from_github_remote(&format!("https://github.com/{}", repo.full_name))
+                .is_some_and(|head_repo| head_repo == pr.repo)
+        });
+        Ok(if from_the_repo_itself {
+            Some(BranchName::new(&pull.head.branch)?)
+        } else {
+            None
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct PullHeadJson {
+    head: HeadJson,
+}
+
+#[derive(Deserialize)]
+struct HeadJson {
+    #[serde(rename = "ref")]
+    branch: String,
+    repo: Option<HeadRepoJson>,
+}
+
+#[derive(Deserialize)]
+struct HeadRepoJson {
+    full_name: String,
 }
 
 impl GitHub {
@@ -1232,6 +1303,7 @@ pub(crate) fn parse_review_threads(
                             .author
                             .as_ref()
                             .is_some_and(|author| author.kind == "Bot"),
+                        by_agent: None,
                         author: comment
                             .author
                             .map_or_else(|| "ghost".to_owned(), |author| author.login),

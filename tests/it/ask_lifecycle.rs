@@ -1,5 +1,6 @@
 use crate::support::drafts;
 use crate::support::line;
+use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,8 +13,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPool, AskDesk, AskId, Asks, CommentGesture, CommentRefusal,
-    LineLocation, Opening, PageRow, Place, QUESTION_NOT_SENT, Question, Review, ReviewStateFile,
-    StepId, TextBox,
+    LineLocation, Opening, OwnAgentHandOff, PageRow, Place, QUESTION_NOT_SENT, Question, Review,
+    ReviewStateFile, StepId, TerminalId, TextBox,
 };
 use serde_json::json;
 
@@ -73,11 +74,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.repo.folders(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {
@@ -97,6 +98,7 @@ impl Shop {
 
     fn repin_onto(&self, head: &str) {
         guided_review::viewer::repin_tour(
+            &ReviewSubject::from(self.pr()),
             &self.tour_path(),
             &self.state_file(),
             &self.source(),
@@ -583,6 +585,30 @@ fn ask_markers(review: &Review) -> Vec<Place> {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn an_ask_held_back_from_an_agent_that_does_not_report_its_state_offers_send_anyway_until_it_goes()
+{
+    let shop = Shop::with_tour_at_first_head();
+    let mut review = shop.open();
+    let mut processes = FakeAskProcesses::default();
+    let id = open_ask(&mut review, &total_step(), &mut processes);
+    let held = OwnAgentHandOff::Unreported(TerminalId::new("t1"));
+
+    review.change_asks(|desk| desk.hand_off_started(id));
+    review.change_asks(|desk| desk.hand_off_ended(id, &held));
+
+    assert_eq!(review.asks().hand_off(id), Some(&Arc::from(held.line())));
+    assert!(review.asks().can_send_anyway(id));
+
+    review.change_asks(|desk| desk.hand_off_started(id));
+
+    assert!(!review.asks().can_send_anyway(id), "while it is handed");
+    review.change_asks(|desk| {
+        desk.hand_off_ended(id, &OwnAgentHandOff::Delivered(TerminalId::new("t1")));
+    });
+    assert!(!review.asks().can_send_anyway(id));
 }
 
 #[test]

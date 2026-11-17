@@ -49,7 +49,7 @@ impl Pull {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file = ReviewStateFile::for_pr(
+        let state_file = ReviewStateFile::for_subject(
             &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7".parse().unwrap(),
         );

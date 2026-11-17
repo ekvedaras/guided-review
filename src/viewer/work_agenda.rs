@@ -6,13 +6,16 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::local_work_tree::OnDisk;
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
+use super::local_threads::ThreadHome;
 use super::outdated_lines::{FollowedLines, follow_outdated};
-use super::ports::{GitHubError, GitHubPort};
+use super::ports::{GitHubError, GitHubPort, PullOfBranch};
 use super::reactions::ReactionChange;
 use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
@@ -25,12 +28,19 @@ pub const PUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 pub const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 /// How long to wait before looking again at a link to herdr that is off.
 pub const AGENT_LINK_RECHECK: Duration = Duration::from_secs(30);
+/// How often a local review's folder is looked at again while the review is open.
+pub const WORKING_TREE_RECHECK: Duration = Duration::from_secs(30);
+/// How long to wait before looking again for the PR of a local review's branch after GitHub did not answer.
+pub const PULL_OF_BRANCH_RETRY: Duration = Duration::from_secs(60);
 
 /// The kinds of work, in the order due work of several kinds starts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkKind {
     CheckPrHead,
+    CheckWorkingTree,
     CheckWorkingCopy,
+    LookUpPullOfBranch,
+    LookUpHeadBranch,
     PullPrDescription,
     SyncViewed,
     PullThreads,
@@ -54,10 +64,14 @@ enum WhileRunning {
 }
 
 impl WorkKind {
-    /// What a window coming to the front reads and sends again.
-    pub(super) const PULLS_FROM_GITHUB: [Self; 9] = [
+    /// What a window coming to the front reads and sends again. A review turns each into work only
+    /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
+    /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 11] = [
         Self::CheckPrHead,
+        Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
+        Self::LookUpPullOfBranch,
         Self::PullPrDescription,
         Self::SyncViewed,
         Self::PullThreads,
@@ -75,7 +89,10 @@ impl WorkKind {
             | Self::DeliverHandOff
             | Self::CheckAgentLink => WhileRunning::IsDropped,
             Self::CheckPrHead
+            | Self::CheckWorkingTree
             | Self::CheckWorkingCopy
+            | Self::LookUpPullOfBranch
+            | Self::LookUpHeadBranch
             | Self::PullPrDescription
             | Self::PullThreads
             | Self::PullPendingReview
@@ -204,11 +221,20 @@ pub struct Work {
 
 pub(super) enum Job {
     CheckPrHead(PullRequestUrl),
+    CheckWorkingTree {
+        change_set: LocalChangeSet,
+        snapshot: Sha,
+    },
     CheckWorkingCopy(Sha),
+    LookUpPullOfBranch {
+        repo: RepoName,
+        branch: BranchName,
+    },
+    LookUpHeadBranch(PullRequestUrl),
     PullPrDescription(PullRequestUrl),
     SyncViewed(SyncRequest),
     PullThreads {
-        pr: PullRequestUrl,
+        home: ThreadHome,
         head: Sha,
     },
     PullPendingReview(PullRequestUrl),
@@ -220,14 +246,17 @@ pub(super) enum Job {
     },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
-    CheckAgentLink(PullRequestUrl),
+    CheckAgentLink(ReviewSubject),
 }
 
 impl Job {
     fn kind(&self) -> WorkKind {
         match self {
             Self::CheckPrHead(_) => WorkKind::CheckPrHead,
+            Self::CheckWorkingTree { .. } => WorkKind::CheckWorkingTree,
             Self::CheckWorkingCopy(_) => WorkKind::CheckWorkingCopy,
+            Self::LookUpPullOfBranch { .. } => WorkKind::LookUpPullOfBranch,
+            Self::LookUpHeadBranch(_) => WorkKind::LookUpHeadBranch,
             Self::PullPrDescription(_) => WorkKind::PullPrDescription,
             Self::SyncViewed(_) => WorkKind::SyncViewed,
             Self::PullThreads { .. } => WorkKind::PullThreads,
@@ -252,18 +281,34 @@ impl Work {
         let github = ports.github;
         let done = match self.job {
             Job::CheckPrHead(pr) => Done::PrHead(github.pull_request_tips(&pr)),
+            Job::CheckWorkingTree {
+                change_set,
+                snapshot,
+            } => Done::WorkingTree(
+                ports
+                    .source
+                    .change_set_on_disk(&change_set, &snapshot)
+                    .map_err(|error| format!("{error:#}")),
+            ),
             Job::CheckWorkingCopy(head) => {
                 Done::WorkingCopy(ports.source.working_tree_is_at(&head))
             }
+            Job::LookUpPullOfBranch { repo, branch } => {
+                Done::PullOfBranch(github.open_pull_of_branch(&repo, &branch))
+            }
+            Job::LookUpHeadBranch(pr) => Done::HeadBranch(github.pull_request_head_branch(&pr)),
             Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
-            Job::PullThreads { pr, head } => {
-                Done::Threads(github.review_threads(&pr).map(|threads| {
+            Job::PullThreads { home, head } => Done::Threads(match &home {
+                ThreadHome::GitHub(pr) => github.review_threads(pr).map(|threads| {
                     let followed = follow_outdated(&threads, ports.source, &head);
                     (threads, followed)
-                }))
-            }
+                }),
+                ThreadHome::StateFile(store) => store
+                    .threads_and_followed_at(ports.source, &head)
+                    .map_err(GitHubError::Other),
+            }),
             Job::PullPendingReview(pr) => Done::PendingReview {
                 exists: github.has_pending_review(&pr),
                 authored: github.viewer_authored(&pr),
@@ -299,8 +344,11 @@ pub struct WorkOutcome {
 }
 
 pub(super) enum Done {
-    PrHead(Result<PullRequestTips, GitHubError>),
+    PrHead(Result<ChangeTips, GitHubError>),
+    WorkingTree(Result<OnDisk, String>),
     WorkingCopy(bool),
+    PullOfBranch(Result<Option<PullOfBranch>, GitHubError>),
+    HeadBranch(Result<Option<BranchName>, GitHubError>),
     PrDescription(Result<String, GitHubError>),
     SyncViewed(SyncOutcome),
     Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), GitHubError>),

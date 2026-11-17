@@ -198,6 +198,8 @@ pub enum PaletteAction {
     WriteGuidedTour,
     SwitchToGuidedTour,
     FinishReview,
+    /// A local review's finish: its queued tasks go to the change set's agent.
+    SendTasks,
     OpenOnGitHub,
     SwitchPr,
     Settings,
@@ -228,6 +230,7 @@ impl PaletteAction {
             Self::WriteGuidedTour => "Write guided tour",
             Self::SwitchToGuidedTour => "Switch to guided tour",
             Self::FinishReview => "Finish review",
+            Self::SendTasks => "Send tasks",
             Self::OpenOnGitHub => "Open on GitHub",
             Self::SwitchPr => "Switch pull request",
             Self::Settings => "Settings",
@@ -255,6 +258,7 @@ impl PaletteAction {
             Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
             | Self::FinishReview
+            | Self::SendTasks
             | Self::OpenOnGitHub
             | Self::SwitchPr
             | Self::CheckForUpdates

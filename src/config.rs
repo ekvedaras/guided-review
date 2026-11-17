@@ -215,6 +215,14 @@ impl Config {
         )
     }
 
+    /// Every clone Settings names, whatever its repo.
+    pub fn clone_folders(&self) -> Vec<PathBuf> {
+        self.clones
+            .values()
+            .map(|path| expand_env_home(Path::new(path)))
+            .collect()
+    }
+
     pub fn clone_of(&self, repo: &RepoName) -> Option<PathBuf> {
         self.clones
             .iter()

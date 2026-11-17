@@ -5,21 +5,47 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::app_folders::AppFolders;
+use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::{PullRequestUrl, RepoName, Sha};
 use crate::repin::{Repin, RepinStatus};
+use crate::review_subject::{LOCAL_FILES_FOLDER, ReviewSubject};
 use crate::timestamp::UtcTimestamp;
 use crate::tour::Tour;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
+use super::local_threads::LocalThreads;
+use super::move_to_pr::MovedReview;
 use super::ports::Viewed;
 use super::review::{ReadSubject, StepId};
 use super::switch_to_guided::CarriedReads;
 use super::threads::ThreadId;
+
+/// PR links in the state file stay the strings an earlier build wrote.
+mod pull_request_links {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::pull_request::PullRequestUrl;
+
+    pub fn serialize<S: Serializer>(prs: &[PullRequestUrl], to: S) -> Result<S::Ok, S::Error> {
+        prs.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .serialize(to)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        from: D,
+    ) -> Result<Vec<PullRequestUrl>, D::Error> {
+        Vec::<String>::deserialize(from)?
+            .iter()
+            .map(|link| link.parse().map_err(serde::de::Error::custom))
+            .collect()
+    }
+}
 
 /// What the viewer remembers about one PR, apart from the tour: everything that is the reviewer's,
 /// not the tour writer's. Every section defaults to empty, so a file written before a section
@@ -32,11 +58,29 @@ pub struct ReviewState {
     typed: TypedText,
     #[serde(default)]
     asks: Vec<Ask>,
+    /// The key of the local review the file belongs to. Its path holds only a short hash of the folder, so
+    /// the key is what tells a file of another review that landed on the same path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
     #[serde(default)]
     last_repin: Option<RepinRecord>,
     /// The folder the PR was last opened from, so a switch back to it finds the same clone.
     #[serde(default)]
     opened_from: Option<PathBuf>,
+    /// The PRs whose offer to move this local review to them was declined, written as their links.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "pull_request_links"
+    )]
+    declined_moves: Vec<PullRequestUrl>,
+    /// A local review's threads, written only through `LocalThreadStore`, never with the viewer's sections.
+    #[serde(default, skip_serializing_if = "LocalThreads::is_empty")]
+    local_threads: LocalThreads,
+    /// The clone whose refs keep the snapshots a moved local review was read at, while this review
+    /// still reads a file or step at one of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    read_heads_kept_in: Option<PathBuf>,
     /// Sections this build does not know, written by a newer one. Kept so saving does not drop them.
     #[serde(flatten)]
     unknown_sections: serde_json::Map<String, serde_json::Value>,
@@ -274,9 +318,13 @@ impl ReviewState {
 
     /// The hand-over of a switch to a guided tour. The basic review stayed on screen while the guided
     /// one was built, so what it holds is the reviewer's latest: ticks, viewed marks, queued
-    /// comments, hand-offs and typed text are all taken from it, and its file reads go into the steps.
+    /// comments, hand-offs, typed text and declined moves are all taken from it, and its file reads go
+    /// into the steps.
     pub(super) fn take_over_from_basic(&mut self, basic: &Self, carried: &CarriedReads) {
         self.take_viewer_sections(basic);
+        for pr in &basic.declined_moves {
+            self.decline_move_to(pr);
+        }
         self.carry_file_reads_into_steps(carried);
     }
 
@@ -428,6 +476,164 @@ impl ReviewState {
         &mut self.viewer.hand_offs
     }
 
+    /// The file ticks after a re-pin: those that stayed, and those a re-pin took away, each with the head
+    /// the file was read at.
+    pub(super) fn file_reads_after_repin(
+        &self,
+    ) -> (BTreeMap<FilePath, Sha>, BTreeMap<FilePath, Sha>) {
+        let heads = |ticks: &BTreeMap<FilePath, ReadTick>| {
+            ticks
+                .iter()
+                .map(|(path, tick)| (path.clone(), tick.head.clone()))
+                .collect()
+        };
+        (
+            heads(&self.viewer.file_read_ticks),
+            heads(&self.viewer.file_read_before),
+        )
+    }
+
+    /// A guided tour's step reads after a re-pin, as file reads, so they carry by the rule file ticks
+    /// carry by. A file is read only when every step showing a piece of it was read; it stays ticked
+    /// when none of its pieces changed, and shows what changed since the step's read otherwise.
+    pub(super) fn step_reads_as_file_reads_after_repin(
+        &self,
+        repin: &Repin,
+    ) -> (BTreeMap<FilePath, Sha>, BTreeMap<FilePath, Sha>) {
+        #[derive(Default)]
+        struct FileOfSteps {
+            read_at: Option<Sha>,
+            has_unread_step: bool,
+            has_changed_piece: bool,
+        }
+        let mut files: BTreeMap<&FilePath, FileOfSteps> = BTreeMap::new();
+        for step in &repin.steps {
+            let read_at = self
+                .read_tick(&step.step)
+                .or_else(|| self.read_before(&step.step))
+                .map(|tick| tick.head.clone());
+            for piece in step
+                .pieces
+                .iter()
+                .filter(|piece| piece.status != RepinStatus::Gone)
+            {
+                let file = files.entry(piece.id.path()).or_default();
+                file.has_unread_step |= read_at.is_none();
+                file.has_changed_piece |=
+                    matches!(piece.status, RepinStatus::Changed | RepinStatus::New);
+                if file.read_at.is_none() {
+                    file.read_at.clone_from(&read_at);
+                }
+            }
+        }
+        let (mut kept, mut changed) = (BTreeMap::new(), BTreeMap::new());
+        for (path, file) in files {
+            let Some(read_at) = file.read_at.filter(|_| !file.has_unread_step) else {
+                continue;
+            };
+            let reads = if file.has_changed_piece {
+                &mut changed
+            } else {
+                &mut kept
+            };
+            reads.insert(path.clone(), read_at);
+        }
+        (kept, changed)
+    }
+
+    /// The hand-over of a local review's move to this PR. The PR's review may have gone on since the
+    /// move was worked out, or a first try may have saved already, so a mark the PR's state has is kept
+    /// and a draft it has already is never written twice.
+    pub(super) fn take_moved_review(&mut self, moved: &MovedReview) {
+        for (path, head) in &moved.file_ticks {
+            if !self.viewer.file_read_ticks.contains_key(path) {
+                self.tick_file(path, head);
+            }
+        }
+        keep_read_before(
+            &mut self.viewer.file_read_before,
+            &self.viewer.file_read_ticks,
+            &moved.file_read_before,
+        );
+        for (step, head) in &moved.steps.ticked {
+            if !self.viewer.read_ticks.contains_key(step) {
+                self.tick(step, head);
+            }
+        }
+        keep_read_before(
+            &mut self.viewer.read_before,
+            &self.viewer.read_ticks,
+            moved
+                .steps
+                .read_before
+                .iter()
+                .map(|(step, head)| (step, head)),
+        );
+        for comment in &moved.comments {
+            self.take_moved_comment(&comment.place, &comment.body, &moved.head);
+        }
+    }
+
+    fn take_moved_comment(&mut self, place: &CommentPlace, body: &str, head: &Sha) {
+        self.open_draft(place.clone(), Some(head));
+        let Some(draft) = self
+            .typed
+            .comment_drafts
+            .iter_mut()
+            .find(|d| &d.place == place)
+        else {
+            return;
+        };
+        if draft.body.is_empty() {
+            body.clone_into(&mut draft.body);
+        } else if !draft.body.contains(body) {
+            draft.body = format!("{}\n\n{body}", draft.body);
+        }
+    }
+
+    /// Every head a tick or a read-before mark names.
+    pub(super) fn read_heads(&self) -> BTreeSet<Sha> {
+        let viewer = &self.viewer;
+        viewer
+            .read_ticks
+            .values()
+            .chain(viewer.read_before.values())
+            .chain(viewer.file_read_ticks.values())
+            .chain(viewer.file_read_before.values())
+            .map(|tick| tick.head.clone())
+            .collect()
+    }
+
+    pub(super) fn read_heads_kept_in(&self) -> Option<&Path> {
+        self.read_heads_kept_in.as_deref()
+    }
+
+    pub(super) fn keep_read_heads_in(&mut self, clone: &Path) {
+        self.read_heads_kept_in = Some(clone.to_path_buf());
+    }
+
+    pub(super) fn read_heads_kept_nowhere(&mut self) {
+        self.read_heads_kept_in = None;
+    }
+
+    pub(super) fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {
+        self.declined_moves.contains(pr)
+    }
+
+    pub(super) fn decline_move_to(&mut self, pr: &PullRequestUrl) {
+        if !self.has_declined_move_to(pr) {
+            self.declined_moves.push(pr.clone());
+        }
+    }
+
+    pub(super) fn local_threads(&self) -> &LocalThreads {
+        &self.local_threads
+    }
+
+    pub(super) fn local_threads_mut(&mut self) -> &mut LocalThreads {
+        &mut self.local_threads
+    }
+
     pub(super) fn pr_description(&self) -> &str {
         &self.viewer.pr_description
     }
@@ -572,20 +778,31 @@ pub struct TypedText {
 }
 
 /// `<owner>/<repo>/<pr>.json` in the state files folder
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ReviewStateFile {
     path: PathBuf,
+    local_key: Option<String>,
+    /// A local review's tour files. With none of them on disk the review was dropped, and its state is
+    /// never written again.
+    local_tours: Option<[PathBuf; 2]>,
     tour_files: PathBuf,
 }
 
 impl ReviewStateFile {
-    pub fn for_pr(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
+    pub fn for_subject(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         Self {
+            local_key: subject.local_key(),
+            local_tours: subject.local().map(|_| {
+                [
+                    Tour::basic_path_for(folders, subject),
+                    Tour::path_for(folders, subject),
+                ]
+            }),
             path: folders
                 .state_files()
-                .join(pr.repo.to_string())
-                .join(format!("{}.json", pr.number)),
-            tour_files: Tour::files_for(folders, pr),
+                .join(subject.files_folder())
+                .join(format!("{}.json", subject.file_stem())),
+            tour_files: Tour::files_for(folders, subject),
         }
     }
 
@@ -598,7 +815,38 @@ impl ReviewStateFile {
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
     /// and folders count for nothing: this only looks for a clone to work in.
     pub fn folders_opened_from_in(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<PathBuf> {
-        let Ok(files) = std::fs::read_dir(folders.state_files().join(pr.repo.to_string())) else {
+        Self::folders_opened_from_repo(folders, &pr.repo)
+    }
+
+    /// The folders any PR of any repo was last opened from, as far as the state files tell. Unreadable
+    /// folders and files are skipped on purpose: this only seeds where to look for clones, a folder
+    /// missed here is still found through the configured clone folders and the reviews on disk, and a
+    /// state file that cannot be read is raised by the review that owns it when it is opened.
+    pub fn folders_opened_from_any_repo(folders: &AppFolders) -> Vec<PathBuf> {
+        let subfolders = |parent: &Path| -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(parent)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                .collect();
+            names.sort_unstable();
+            names
+        };
+        let state_files = folders.state_files();
+        subfolders(&state_files)
+            .into_iter()
+            .filter(|owner| owner != LOCAL_FILES_FOLDER)
+            .flat_map(|owner| {
+                subfolders(&state_files.join(&owner))
+                    .into_iter()
+                    .map(move |name| RepoName::new(&owner, &name))
+            })
+            .flat_map(|repo| Self::folders_opened_from_repo(folders, &repo))
+            .collect()
+    }
+
+    fn folders_opened_from_repo(folders: &AppFolders, repo: &RepoName) -> Vec<PathBuf> {
+        let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.to_string())) else {
             return Vec::new();
         };
         let mut numbers: Vec<u64> = files
@@ -609,18 +857,42 @@ impl ReviewStateFile {
             .into_iter()
             .filter_map(|number| {
                 let other = PullRequestUrl {
-                    repo: pr.repo.clone(),
+                    repo: repo.clone(),
                     number,
                 };
-                Self::for_pr(folders, &other).opened_from().ok().flatten()
+                Self::for_subject(folders, &ReviewSubject::from(other))
+                    .opened_from()
+                    .ok()
+                    .flatten()
             })
             .collect()
+    }
+
+    /// Whether the move of this review to the PR was declined. An unreadable file declines nothing, which
+    /// is safe: the offer only shows again, a move reads the same file and fails with its error before it
+    /// changes anything, and opening the review raises the unreadable file as a problem of its own.
+    pub fn has_declined_move_to(&self, pr: &PullRequestUrl) -> bool {
+        self.load()
+            .is_ok_and(|state| state.has_declined_move_to(pr))
+    }
+
+    pub fn exists(&self) -> bool {
+        self.path.exists()
+    }
+
+    /// For a dropped review; a file never written is already gone.
+    /// Under the writers' lock, so a save that began before it ends before the file goes.
+    pub fn delete(&self) -> anyhow::Result<()> {
+        let _lock = self.lock()?;
+        remove_if_there(&self.path, std::fs::remove_file(&self.path))
     }
 
     /// A PR not reviewed before has no file yet: that is an empty state, not an error.
     pub fn load(&self) -> anyhow::Result<ReviewState> {
         match self.read_text()? {
-            Some(text) => self.parse(&text),
+            Some(text) => self
+                .parse(&text)
+                .and_then(|state| self.of_this_review(state)),
             None => Ok(ReviewState::default()),
         }
     }
@@ -642,7 +914,7 @@ impl ReviewStateFile {
             return Ok((ReviewState::default(), None));
         };
         match self.parse(&text) {
-            Ok(state) => Ok((state, None)),
+            Ok(state) => Ok((self.of_this_review(state)?, None)),
             Err(not_valid) => {
                 let backup = self
                     .set_aside()
@@ -665,6 +937,17 @@ impl ReviewStateFile {
     fn parse(&self, text: &str) -> anyhow::Result<ReviewState> {
         serde_json::from_str(text)
             .with_context(|| format!("{} is not a valid review state file", self.path.display()))
+    }
+
+    /// A file of another review is not this review's to read, nor to set aside.
+    fn of_this_review(&self, state: ReviewState) -> anyhow::Result<ReviewState> {
+        match (&self.local_key, &state.subject) {
+            (Some(wanted), Some(held)) if wanted != held => anyhow::bail!(
+                "{} holds the review of {held}, not of {wanted}",
+                self.path.display()
+            ),
+            _ => Ok(state),
+        }
     }
 
     /// A hard link fails when the name is taken, so an earlier backup is never overwritten.
@@ -709,10 +992,23 @@ impl ReviewStateFile {
     /// Reads the file again before changing it: the viewer and the Asks each keep their own
     /// copy in memory, and neither may write the other's section back stale.
     pub fn update(&self, change: impl FnOnce(&mut ReviewState)) -> anyhow::Result<()> {
+        self.update_if(|state| {
+            change(state);
+            true
+        })
+    }
+
+    /// `update` that writes only when `change` says it changed something.
+    pub(super) fn update_if(
+        &self,
+        change: impl FnOnce(&mut ReviewState) -> bool,
+    ) -> anyhow::Result<()> {
         let _lock = self.lock()?;
         let mut state = self.load()?;
-        change(&mut state);
-        self.write(&state)
+        if change(&mut state) {
+            self.write(&state)?;
+        }
+        Ok(())
     }
 
     pub fn save(&self, state: &ReviewState) -> anyhow::Result<()> {
@@ -745,8 +1041,20 @@ impl ReviewStateFile {
     }
 
     /// Written to a temp file of its own first, so a crash mid-write never leaves half a file behind.
+    /// Drop review deletes the tours before the state file, so a writer that finds no tour never puts
+    /// back the state of a review that is gone.
     fn write(&self, state: &ReviewState) -> anyhow::Result<()> {
-        let text = serde_json::to_string_pretty(state)? + "\n";
+        if let (Some(key), Some(tours)) = (&self.local_key, &self.local_tours) {
+            anyhow::ensure!(
+                tours.iter().any(|tour| tour.exists()),
+                "the review of {key} was dropped, so nothing of it is saved"
+            );
+        }
+        let mut value = serde_json::to_value(state)?;
+        if let (Some(key), Some(object)) = (&self.local_key, value.as_object_mut()) {
+            object.insert("subject".into(), key.clone().into());
+        }
+        let text = serde_json::to_string_pretty(&value)? + "\n";
         let temp = self.unique_temp_path();
         std::fs::write(&temp, text)
             .with_context(|| format!("could not write {}", temp.display()))?;
@@ -762,5 +1070,19 @@ impl AskStore for ReviewStateFile {
 
     fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {
         self.update(|state| state.asks = asks.to_vec())
+    }
+}
+
+/// What a move marks as read before its change, but not where the PR's review has a tick or a mark of
+/// its own.
+fn keep_read_before<'a, K: Ord + Clone + 'a>(
+    marks: &mut BTreeMap<K, ReadTick>,
+    ticks: &BTreeMap<K, ReadTick>,
+    moved: impl IntoIterator<Item = (&'a K, &'a Sha)>,
+) {
+    for (key, head) in moved {
+        if !ticks.contains_key(key) && !marks.contains_key(key) {
+            marks.insert(key.clone(), ReadTick { head: head.clone() });
+        }
     }
 }

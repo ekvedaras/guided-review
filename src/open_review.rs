@@ -6,16 +6,20 @@ use crate::app_folders::AppFolders;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
 use crate::config::Config;
+use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
+use crate::opened_change_set::{OpenedChangeSet, local_reviews_of_repo, unreadable_local_tours};
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
+use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use crate::viewer::{
-    GitHubPort, Review, ReviewStateFile, TourAgents, TourRefresher, TourReloader, TourRepinner,
-    TourSwitcher, WorkingCopy,
+    GitHubPort, NoGitHub, PickCodeSource, PrMover, Problem, Review, ReviewStateFile, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkingCopy,
+    let_go_of_unread_snapshots,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -33,11 +37,16 @@ pub struct OpenedReview {
     pub tour_agents: TourAgents,
 }
 
-/// Where a tour agent that writes the PR's tour works: the clone the PR was last opened from, else one
-/// another PR of the repo was opened from, else the clone `config.toml` names, else the reviewer's
-/// home, where the skill reads code through `show`.
-pub fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBuf {
-    let own = ReviewStateFile::for_pr(folders, pr)
+/// Where a tour agent that writes the subject's tour works. A local change set's agent works in its
+/// folder. A PR's works in the clone the PR was last opened from, else one another PR of the repo was
+/// opened from, else the clone `config.toml` names, else the reviewer's home, where the skill reads
+/// code through `show`.
+pub fn writer_folder(subject: &ReviewSubject, folders: &AppFolders) -> PathBuf {
+    let pr = match subject {
+        ReviewSubject::PullRequest(pr) => pr,
+        ReviewSubject::Local(change_set) => return change_set.folder().as_path().to_path_buf(),
+    };
+    let own = ReviewStateFile::for_subject(folders, subject)
         .opened_from()
         .ok()
         .flatten();
@@ -53,20 +62,48 @@ pub fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBuf {
         )
 }
 
-/// Builds the review of `pr` at the commits its tour is pinned to. `clones_from` is the folder a local
-/// clone is searched from. Slow, so the app runs it off the UI thread.
+/// What the two kinds of subject build differently; the rest of the review is the same.
+struct Built {
+    review: Review,
+    source: Box<dyn CodeSource>,
+    pick_code_source: PickCodeSource,
+    github: Arc<dyn GitHubPort>,
+}
+
+/// Builds the review of `subject` at the commits its tour is pinned to. `clones_from` is the folder a
+/// local clone is searched from. Slow, so the app runs it off the UI thread.
 pub fn open_review(
-    pr: &PullRequestUrl,
+    subject: &ReviewSubject,
     clones_from: &Path,
     folders: &AppFolders,
 ) -> anyhow::Result<OpenedReview> {
+    let built = match subject {
+        ReviewSubject::PullRequest(pr) => build_pull_request(pr, clones_from, folders)?,
+        ReviewSubject::Local(change_set) => build_local(change_set, folders)?,
+    };
+    assemble(subject, folders, built)
+}
+
+fn build_pull_request(
+    pr: &PullRequestUrl,
+    clones_from: &Path,
+    folders: &AppFolders,
+) -> anyhow::Result<Built> {
+    let subject = ReviewSubject::from(pr.clone());
     let opened = OpenedPr::in_folders(pr, folders, clones_from);
     opened.make_basic_tour_if_no_tour()?;
+    if let Err(error) = let_go_of_unread_snapshots(folders, pr) {
+        // A ref kept too long only waits for the next open; the review reads the same either way.
+        eprintln!("could not let go of the snapshots {pr} no longer reads: {error:#}");
+    }
     // A basic file with a guided one beside it shows the basic tour.
-    let tour = if ToursOnDisk::of(folders, pr).opens_basic() {
-        Tour::Basic(BasicTour::load(&Tour::basic_path_for(folders, pr))?)
+    let tour = if ToursOnDisk::of(folders, &subject).opens_basic() {
+        Tour::Basic(BasicTour::load_of(
+            &Tour::basic_path_for(folders, &subject),
+            &subject,
+        )?)
     } else {
-        Tour::Guided(GuidedTour::load(&opened.tour_path())?)
+        Tour::Guided(GuidedTour::load_of(&opened.tour_path(), &subject)?)
     };
     let code = opened.at_pinned_tips(tour.pin())?;
     let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin().head);
@@ -75,14 +112,72 @@ pub fn open_review(
         Tour::Guided(tour) => Review::open(tour, code.source.as_ref(), opened.state_file())?,
     };
     review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
+    review.local_reviews_of_repo_are(folders, local_reviews_of_repo(folders, pr));
     opened.state_file().remember_folder(clones_from)?;
+    Ok(Built {
+        review,
+        source: code.source,
+        pick_code_source: opened.code_source_picker(),
+        github: Arc::new(opened.github),
+    })
+}
 
-    let clone = code.source.local_clone().map(Path::to_path_buf);
+/// A local review reads the snapshot its tour is pinned to from its own folder, and has no GitHub to
+/// ask: the port it holds refuses every call.
+fn build_local(change_set: &LocalChangeSet, folders: &AppFolders) -> anyhow::Result<Built> {
+    let change_set = &change_set
+        .clone()
+        .in_repo(LocalGit::origin_of(change_set.folder().as_path()));
+    let subject = ReviewSubject::from(change_set.clone());
+    let opened = OpenedChangeSet::new(change_set, folders);
+    opened.make_basic_tour_if_no_tour()?;
+    let tour = if ToursOnDisk::of(folders, &subject).opens_basic() {
+        Tour::Basic(BasicTour::load_of(
+            &Tour::basic_path_for(folders, &subject),
+            &subject,
+        )?)
+    } else {
+        Tour::Guided(GuidedTour::load_of(&opened.tour_path(), &subject)?)
+    };
+    let code = opened.at_pinned_tips()?;
+    let facts = opened.facts(tour.pin())?;
+    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin().head);
+    let mut review = match tour {
+        Tour::Basic(tour) => Review::open_basic(tour, code.source.as_ref(), opened.state_file())?,
+        Tour::Guided(tour) => Review::open(tour, code.source.as_ref(), opened.state_file())?,
+    };
+    review.local_facts_are(facts);
+    review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
+    Ok(Built {
+        review,
+        source: code.source,
+        pick_code_source: opened.code_source_picker(),
+        github: Arc::new(NoGitHub::looking_up_branches_with(Arc::new(
+            GitHub::from_env(),
+        ))),
+    })
+}
+
+fn assemble(
+    subject: &ReviewSubject,
+    folders: &AppFolders,
+    built: Built,
+) -> anyhow::Result<OpenedReview> {
+    let Built {
+        mut review,
+        source,
+        pick_code_source,
+        github,
+    } = built;
+    let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(folders)?;
     review
         .display_options_mut()
         .use_more_lines(config.more_lines());
-    let pick_code_source = opened.code_source_picker();
+    let unreadable = unreadable_local_tours(folders);
+    if !unreadable.is_empty() {
+        review.raise_problem(Problem::LocalToursNotRead(unreadable));
+    }
 
     let agent_folder = clone
         .clone()
@@ -93,7 +188,7 @@ pub fn open_review(
     };
     let refresher = TourRefresher {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
         writer: Arc::new(ClaudeRefreshWriter::new(
             clone
@@ -104,25 +199,25 @@ pub fn open_review(
     };
     let reloader = TourReloader {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
     };
     let switcher = TourSwitcher {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
     };
     let repinner = TourRepinner {
         folders: folders.clone(),
-        pr: pr.clone(),
+        subject: subject.clone(),
         pick_code_source,
     };
     Ok(OpenedReview {
         review,
-        source: code.source.into(),
+        source: source.into(),
         ask,
         ide: Ide::for_clone(clone, config.ide_template()),
-        github: Arc::new(opened.github),
+        github,
         repinner,
         refresher,
         reloader,
@@ -131,4 +226,16 @@ pub fn open_review(
             .starting_in(agent_folder)
             .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
     })
+}
+
+/// The move of a local review to a PR, reading the PR's commits from the review's own folder.
+pub fn mover_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PrMover {
+    let folder = change_set.folder().as_path().to_path_buf();
+    PrMover {
+        folders: folders.clone(),
+        change_set: change_set.clone(),
+        pick_code_source: Arc::new(move |pr, tips| {
+            crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
+        }),
+    }
 }

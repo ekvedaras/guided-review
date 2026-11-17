@@ -6,7 +6,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
-use super::ports::{GitHubError, PullRequestTipsPort, Viewed, ViewedFilesPort};
+use super::ports::{ChangeTipsPort, GitHubError, Viewed, ViewedFilesPort};
 use super::review::ReadSubject;
 use super::review_state::ReviewState;
 
@@ -15,15 +15,28 @@ use super::review_state::ReviewState;
 pub(super) struct ViewedSync {
     /// Why sync is switched off for this session; the app shows it as a banner.
     off_because: Option<String>,
+    /// A local review has no PR, so GitHub has no viewed marks of it: ticks stay ticks.
+    without_github_marks: bool,
 }
 
 impl ViewedSync {
+    pub(super) fn without_github_marks() -> Self {
+        Self {
+            off_because: None,
+            without_github_marks: true,
+        }
+    }
+
+    fn wishes_nothing(&self) -> bool {
+        self.without_github_marks || self.off_because.is_some()
+    }
+
     pub(super) fn banner(&self) -> Option<&str> {
         self.off_because.as_deref()
     }
 
     pub(super) fn not_synced(&self, state: &ReviewState) -> bool {
-        self.off_because.is_none() && !state.unsent_viewed().is_empty()
+        !self.wishes_nothing() && !state.unsent_viewed().is_empty()
     }
 
     pub(super) fn wish_after_tick(
@@ -32,7 +45,7 @@ impl ViewedSync {
         coverage: &Coverage,
         subject: &ReadSubject,
     ) {
-        if self.off_because.is_some() {
+        if self.wishes_nothing() {
             return;
         }
         let fully_ticked: Vec<&FilePath> = coverage
@@ -51,7 +64,7 @@ impl ViewedSync {
         coverage: &Coverage,
         subject: &ReadSubject,
     ) {
-        if self.off_because.is_some() {
+        if self.wishes_nothing() {
             return;
         }
         for file in coverage.files_of(subject) {
@@ -294,10 +307,7 @@ impl SyncOutcome {
 
 impl SyncRequest {
     /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(
-        self,
-        github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
-    ) -> SyncOutcome {
+    pub fn run(self, github: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized)) -> SyncOutcome {
         let pr = &self.pr;
         if self.is_off {
             return SyncOutcome::nothing(&self.tour_head);
@@ -327,7 +337,7 @@ impl SyncRequest {
 
     /// GitHub is read first, so only wishes it does not already match are pushed.
     fn take_baseline(
-        github: &(impl PullRequestTipsPort + ViewedFilesPort + ?Sized),
+        github: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
         tour_head: &Sha,
         wishes: BTreeMap<FilePath, Viewed>,

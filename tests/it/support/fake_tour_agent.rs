@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ops::ControlFlow;
 use std::sync::Mutex;
 
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
 
 use guided_review::viewer::{
@@ -15,13 +15,13 @@ use guided_review::viewer::{
 pub enum TourAgentCall {
     Claim {
         terminal: TerminalId,
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
     },
     Release(TerminalId),
     Show(TerminalId),
     Start {
         name: String,
-        pr: PullRequestUrl,
+        subject: ReviewSubject,
         folder: PathBuf,
         first_task: String,
     },
@@ -38,7 +38,7 @@ pub struct FakeTourAgent {
     link: Mutex<Result<(), AgentLinkOff>>,
     /// Herdr answers `server status` but refuses to list terminals, with this reason.
     refusing: Mutex<Option<String>>,
-    terminals: Mutex<BTreeMap<TerminalId, (Option<PullRequestUrl>, AgentStatus)>>,
+    terminals: Mutex<BTreeMap<TerminalId, (Option<ReviewSubject>, AgentStatus)>>,
     /// What `follow` reports, in order, before its stream ends.
     coming: Mutex<VecDeque<AgentStatus>>,
     calls: Mutex<Vec<TourAgentCall>>,
@@ -145,11 +145,26 @@ impl FakeTourAgent {
         self.running(terminal, false, space)
     }
 
+    /// A live terminal running Claude in a folder; it can be the change set's agent of a local review.
+    pub fn claude_in(self, terminal: &str, cwd: &str) -> Self {
+        self.running_in(terminal, true, "herdr", cwd)
+    }
+
+    /// A live terminal running a plain shell in a folder.
+    pub fn shell_in(self, terminal: &str, cwd: &str) -> Self {
+        self.running_in(terminal, false, "herdr", cwd)
+    }
+
     fn running(self, terminal: &str, runs_claude: bool, space: &str) -> Self {
+        self.running_in(terminal, runs_claude, space, "/")
+    }
+
+    fn running_in(self, terminal: &str, runs_claude: bool, space: &str, cwd: &str) -> Self {
         self.live.lock().unwrap().push(LiveTerminal {
             terminal: TerminalId::new(terminal),
             runs_claude,
             space: space.to_owned(),
+            cwd: PathBuf::from(cwd),
         });
         self.with_terminal(terminal, None, AgentStatus::Unreported)
     }
@@ -165,7 +180,7 @@ impl FakeTourAgent {
 
     /// The terminals that carry the PR's label now.
     pub fn agents_of(&self, pr: &str) -> Vec<String> {
-        let pr: PullRequestUrl = pr.parse().unwrap();
+        let pr: ReviewSubject = pr.parse().unwrap();
         self.terminals
             .lock()
             .unwrap()
@@ -185,7 +200,7 @@ impl TourAgentPort for FakeTourAgent {
         self.link.lock().unwrap().clone()
     }
 
-    fn terminals_of(&self, pr: &PullRequestUrl) -> anyhow::Result<Vec<TerminalId>> {
+    fn terminals_of(&self, pr: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>> {
         if let Some(reason) = self.refusing.lock().unwrap().clone() {
             return Err(HerdrRefused {
                 command: "ls --json".to_owned(),
@@ -207,10 +222,10 @@ impl TourAgentPort for FakeTourAgent {
         Ok(self.live.lock().unwrap().clone())
     }
 
-    fn claim(&self, terminal: &TerminalId, pr: &PullRequestUrl) -> anyhow::Result<()> {
+    fn claim(&self, terminal: &TerminalId, pr: &ReviewSubject) -> anyhow::Result<()> {
         self.record(TourAgentCall::Claim {
             terminal: terminal.clone(),
-            pr: pr.clone(),
+            subject: pr.clone(),
         });
         let mut terminals = self.terminals.lock().unwrap();
         let (labelled, _) = terminals
@@ -220,7 +235,7 @@ impl TourAgentPort for FakeTourAgent {
         Ok(())
     }
 
-    fn release(&self, terminal: &TerminalId) -> anyhow::Result<()> {
+    fn release(&self, terminal: &TerminalId, _subject: &ReviewSubject) -> anyhow::Result<()> {
         self.record(TourAgentCall::Release(terminal.clone()));
         if let Some((labelled, _)) = self.terminals.lock().unwrap().get_mut(terminal) {
             *labelled = None;
@@ -258,18 +273,31 @@ impl TourAgentPort for FakeTourAgent {
         let (_, status) = terminals
             .get_mut(terminal)
             .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
+        if *status == AgentStatus::Unreported {
+            return Ok(SendOutcome::Unreported(terminal.clone()));
+        }
         if *status != AgentStatus::Idle {
             return Ok(SendOutcome::Refused(format!(
                 "{terminal} is {status}, not idle"
             )));
         }
+        drop(terminals);
+        self.send(terminal, text)?;
+        Ok(SendOutcome::Delivered)
+    }
+
+    fn send(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<()> {
+        let mut terminals = self.terminals.lock().unwrap();
+        let (_, status) = terminals
+            .get_mut(terminal)
+            .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
         *status = AgentStatus::Working;
         drop(terminals);
         self.record(TourAgentCall::Send {
             terminal: terminal.clone(),
             text: text.to_owned(),
         });
-        Ok(SendOutcome::Delivered)
+        Ok(())
     }
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {
@@ -288,7 +316,7 @@ impl TourAgentPort for FakeTourAgent {
                 let (pr, status) = terminals.get(terminal)?;
                 Some(AppAgent {
                     terminal: terminal.clone(),
-                    pr: pr.clone(),
+                    subject: pr.clone(),
                     status: *status,
                     status_since_ms: *since,
                 })
@@ -299,7 +327,7 @@ impl TourAgentPort for FakeTourAgent {
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
         self.record(TourAgentCall::Start {
             name: start.name.clone(),
-            pr: start.pr.clone(),
+            subject: start.subject.clone(),
             folder: start.folder.clone(),
             first_task: start.first_task.clone(),
         });
@@ -307,7 +335,7 @@ impl TourAgentPort for FakeTourAgent {
         let terminal = TerminalId::new(format!("t{}", 100 + terminals.len()));
         terminals.insert(
             terminal.clone(),
-            (Some(start.pr.clone()), AgentStatus::Working),
+            (Some(start.subject.clone()), AgentStatus::Working),
         );
         self.started_by_app
             .lock()

@@ -1,9 +1,10 @@
 use crate::support::folders_in;
+use guided_review::review_subject::ReviewSubject;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
-use guided_review::pull_request::PullRequestUrl;
 use guided_review::tour::{BasicTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrSwitcher, RelevantPullRequest,
@@ -15,7 +16,8 @@ const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
 const BLOG_7: &str = "https://github.com/acme/blog/pull/7";
 const API_31: &str = "https://github.com/acme/api/pull/31";
 
-fn pr(url: &str) -> PullRequestUrl {
+/// A PR for GitHub's rows, or its review subject for what the switcher hands on.
+fn pr<Read: FromStr<Err = anyhow::Error>>(url: &str) -> Read {
     url.parse().unwrap()
 }
 
@@ -46,7 +48,7 @@ fn three_pull_requests() -> FakeGitHub {
 }
 
 fn write_tour(home: &Path, url: &str) {
-    let path = Tour::path_for(&folders_in(home), &pr(url));
+    let path = Tour::path_for(&folders_in(home), &pr::<ReviewSubject>(url));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, "{}").unwrap();
 }
@@ -66,7 +68,7 @@ fn loaded(github: &FakeGitHub, home: &Path) -> PrSwitcher {
 fn visible_urls(switcher: &PrSwitcher) -> Vec<String> {
     switcher
         .visible()
-        .map(|row| row.pull_request.url.to_string())
+        .map(|row| row.pull_request().unwrap().url.to_string())
         .collect()
 }
 
@@ -80,15 +82,15 @@ fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
     let [feed, limits, _] = rows.as_slice() else {
         panic!("expected three rows");
     };
-    assert_eq!(feed.pull_request.url.short(), "acme/blog#7");
-    assert_eq!(feed.pull_request.title, "Fix feed");
-    assert!(feed.pull_request.is_draft);
-    assert_eq!(feed.pull_request.why_listed, WhyListed::Mine);
-    assert_eq!(limits.pull_request.author, "dave");
+    assert_eq!(feed.pull_request().unwrap().url.short(), "acme/blog#7");
+    assert_eq!(feed.pull_request().unwrap().title, "Fix feed");
+    assert!(feed.pull_request().unwrap().is_draft);
+    assert_eq!(feed.pull_request().unwrap().why_listed, WhyListed::Mine);
+    assert_eq!(limits.pull_request().unwrap().author, "dave");
 }
 
 fn write_basic_tour(home: &Path, url: &str) {
-    let path = Tour::basic_path_for(&folders_in(home), &pr(url));
+    let path = Tour::basic_path_for(&folders_in(home), &pr::<ReviewSubject>(url));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let pin = serde_json::from_value(serde_json::json!({})).unwrap();
     BasicTour::new(pin, "A PR".to_owned()).save(&path).unwrap();
@@ -438,7 +440,7 @@ fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected()
     let marked: Vec<_> = switcher
         .visible()
         .filter(|row| row.is_active)
-        .map(|row| row.pull_request.url.short())
+        .map(|row| row.pull_request().unwrap().url.short())
         .collect();
     assert_eq!(marked, ["acme/shop#11"]);
     assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));

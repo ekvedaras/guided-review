@@ -18,6 +18,7 @@ mod comment_desk;
 mod comments;
 mod diff_display;
 mod diff_fence;
+mod disk_news;
 mod display_options;
 mod file_block;
 mod file_tree;
@@ -31,9 +32,14 @@ mod image_preview;
 mod intent;
 mod jump;
 mod keymap;
+mod local_row;
+mod local_threads;
 mod markdown;
 mod more_lines;
+mod move_offer;
+mod move_to_pr;
 mod new_commits;
+mod no_github;
 mod outdated_lines;
 mod overview;
 mod page;
@@ -89,30 +95,34 @@ pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use chord::{Chord, Key, KeyCap, Modifier, Modifiers};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
 pub(crate) use code_link::percent_encode_path;
-pub use code_link::{CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy};
+pub use code_link::{
+    CodeHost, CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
+};
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, TourFreshness};
 pub use comments::{
     CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
-    CommentResult, QueuedComment, SendMode,
+    CommentResult, QueuedComment, SendMode, Sending,
 };
 pub use diff_display::{
     ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,
     hidden_lines_after, hidden_lines_before,
 };
 pub use diff_fence::{FenceLine, fence_lines};
+pub use disk_news::{DiskNews, DiskOffer};
 pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
 pub use finish_review::{
-    ApproveWarning, CLAMPED_BODY_LINES, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
-    ReviewOutcome, ReviewVerdict, SubmittedReview,
+    ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
+    FinishResult, ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
 pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
-    HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, SeenMark, ThreadMessage,
+    HandOffButton, HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, Reviewed,
+    SeenMark, ThreadMessage,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{
@@ -126,9 +136,14 @@ pub use jump::{
     JumpPlace, JumpTarget, PaletteAction, PaletteEntry, PaletteGroup, PaletteGroupKind,
 };
 pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
+pub use local_row::LocalRow;
+pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use more_lines::{MoreLines, MoreLinesEntry};
+pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
+pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
+pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
@@ -139,13 +154,13 @@ pub use page::{
 };
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, GitHubError, GitHubPort, NoAccess, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, RefreshWriter,
-    Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile,
-    ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort, NoAccess,
+    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
+    PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
-pub use pr_switcher::{NotPickable, Pick, PrSwitcher, SwitcherRow, TourFact, WritingFact};
+pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
@@ -187,6 +202,6 @@ pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
 pub use work_agenda::{
-    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PUSH_DEBOUNCE, Work, WorkKind,
-    WorkOutcome, WorkPorts,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PULL_OF_BRANCH_RETRY, PUSH_DEBOUNCE,
+    WORKING_TREE_RECHECK, Work, WorkKind, WorkOutcome, WorkPorts,
 };

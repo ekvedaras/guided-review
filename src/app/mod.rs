@@ -40,8 +40,9 @@ use crate::app_link::{Answer, AppListener, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
+use crate::opened_change_set::clean_snapshot_refs;
 use crate::platform::{self, Os};
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
@@ -76,6 +77,8 @@ enum Asked {
     ReopenShown,
     /// The OS launched the running app again, as a click on its Dock icon with no window in sight.
     Relaunched,
+    /// Drop review deleted the review's files; the window shows the switcher in its place.
+    Dropped(ReviewSubject),
 }
 
 /// The one running app. It blocks until a quit request comes or the window closes with no build left to
@@ -116,6 +119,15 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
         switching.refresh(cx);
         cx.set_global(switching);
         tour_writer::resume(cx);
+        let cleaned = folders.clone();
+        cx.background_executor()
+            .spawn(async move {
+                // Nobody looks at the start's clean-up; a ref it keeps only waits for the next start.
+                for not_cleaned in clean_snapshot_refs(&cleaned) {
+                    eprintln!("{not_cleaned}");
+                }
+            })
+            .detach();
         let focus = if takes_focus() {
             platform::Focus::Taken
         } else {
@@ -149,6 +161,7 @@ fn pr_switching(
 ) -> PrSwitching {
     let requests = requests.clone();
     let reopen_requests = requests.clone();
+    let drop_requests = requests.clone();
     let all_folders = folders.clone();
     PrSwitching {
         relevant: relevant_pull_requests(),
@@ -173,6 +186,14 @@ fn pr_switching(
                 eprintln!("could not reopen the PR: the app is closing");
             }
         }),
+        dropped: Arc::new(move |subject| {
+            if drop_requests
+                .unbounded_send(Asked::Dropped(subject))
+                .is_err()
+            {
+                eprintln!("could not close the dropped review: the app is closing");
+            }
+        }),
     }
 }
 
@@ -186,14 +207,17 @@ fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
 
 /// The open of a PR the app makes of itself, from the folder its state file remembers. An unreadable
 /// state file only loses the remembered clone folder.
-fn open_request_of(folders: &AppFolders, pr: &PullRequestUrl) -> OpenRequest {
-    let folder = ReviewStateFile::for_pr(folders, pr)
-        .opened_from()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| folders.home().to_path_buf());
+fn open_request_of(folders: &AppFolders, subject: &ReviewSubject) -> OpenRequest {
+    let folder = match subject {
+        ReviewSubject::Local(change_set) => change_set.folder().as_path().to_path_buf(),
+        ReviewSubject::PullRequest(_) => ReviewStateFile::for_subject(folders, subject)
+            .opened_from()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| folders.home().to_path_buf()),
+    };
     OpenRequest {
-        pr: pr.to_string(),
+        subject: subject.to_string(),
         folder,
         terminal: None,
         at_step: None,
@@ -253,6 +277,10 @@ async fn answer_requests(
                 bring_window_back(&screen, cx);
                 continue;
             }
+            Asked::Dropped(subject) => {
+                close_dropped(&screen, &subject, cx);
+                continue;
+            }
         };
         match request {
             Request::Quit => {
@@ -276,11 +304,15 @@ async fn answer_requests(
                 reply.send(answer).ok();
             }
             Request::Open(open) => {
-                let Ok(pr) = open.pr.parse::<PullRequestUrl>() else {
-                    reply
-                        .send(refused(&format!("{} is not a PR link", open.pr)))
-                        .ok();
-                    continue;
+                let pr = match open.subject.parse::<ReviewSubject>() {
+                    Ok(subject) => subject,
+                    Err(error) => {
+                        eprintln!("refused to open {}: {error:#}", open.subject);
+                        reply
+                            .send(refused(&ReviewSubject::not_a_subject(&open.subject)))
+                            .ok();
+                        continue;
+                    }
                 };
                 claim_terminal(&pr, &open, &folders, cx);
                 let origin = origin_of(&open, &folders, cx).await;
@@ -298,19 +330,21 @@ async fn answer_requests(
                         if decision == WriteDecision::StartWriter {
                             cx.update(|cx| tour_writer::start_writer(pr, cx));
                         }
-                        reply.send(Answer::Writing { pr: open.pr }).ok();
+                        reply.send(Answer::Writing { pr: open.subject }).ok();
                         continue;
                     }
                 };
                 match decision {
                     OpenDecision::KeepInBackground => {
-                        reply.send(Answer::KeptInBackground { pr: open.pr }).ok();
+                        reply
+                            .send(Answer::KeptInBackground { pr: open.subject })
+                            .ok();
                     }
                     OpenDecision::GuidedReady => {
-                        reply.send(Answer::GuidedReady { pr: open.pr }).ok();
+                        reply.send(Answer::GuidedReady { pr: open.subject }).ok();
                     }
                     OpenDecision::Reload => {
-                        reply.send(Answer::Reloaded { pr: open.pr }).ok();
+                        reply.send(Answer::Reloaded { pr: open.subject }).ok();
                         let window = screen.borrow().window.review();
                         if let Some(window) = window {
                             show_again(window, cx);
@@ -319,7 +353,7 @@ async fn answer_requests(
                     OpenDecision::Build(ticket) => {
                         reply
                             .send(Answer::Opening {
-                                pr: open.pr.clone(),
+                                pr: open.subject.clone(),
                             })
                             .ok();
                         let (screen, folders) = (Rc::clone(&screen), folders.clone());
@@ -468,7 +502,7 @@ fn reopen_shown(screen: &SharedScreen, folders: &AppFolders, cx: &mut AsyncApp) 
 }
 
 /// Only the PR in the window is marked here, because its session holds the state it writes back. For
-/// any other PR the command marks the state file.
+/// any other PR the command marks the state file, and a build of it under way gets the reply again.
 fn mark_replied(
     screen: &SharedScreen,
     pr: String,
@@ -483,9 +517,10 @@ fn mark_replied(
     let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
     let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
     let Some(window) = window else {
-        if let Ok(replied) = pr.parse::<PullRequestUrl>() {
+        if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
             active.update(cx, |active, cx| {
-                active.agent_replied(&replied);
+                active.agent_replied(&replied_pr);
+                active.hold_reply_while_building(&replied_pr, hand_off, replied);
                 cx.notify();
             });
         }
@@ -500,9 +535,9 @@ fn mark_replied(
     });
     match marked {
         Ok(()) => {
-            if let Ok(replied_pr) = pr.parse::<PullRequestUrl>() {
+            if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
                 active.update(cx, |active, _| {
-                    active.hold_reply_for_reopen(&replied_pr, hand_off, replied);
+                    active.hold_reply_while_building(&replied_pr, hand_off, replied);
                 });
             }
             Answer::HandOffAnswered { pr }
@@ -513,12 +548,7 @@ fn mark_replied(
 
 /// The terminal an `open` came from becomes the PR's tour agent, whatever the request then does. Slow
 /// (it runs `hc`), so it runs off the UI thread; a failure is for the app's log, as the window may stay.
-fn claim_terminal(
-    pr: &PullRequestUrl,
-    open: &OpenRequest,
-    folders: &AppFolders,
-    cx: &mut AsyncApp,
-) {
+fn claim_terminal(pr: &ReviewSubject, open: &OpenRequest, folders: &AppFolders, cx: &mut AsyncApp) {
     let (pr, terminal) = (pr.clone(), open.terminal.clone());
     let tours = Tour::tours_dir(folders);
     cx.background_executor()
@@ -562,7 +592,7 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
 async fn build_and_show(
     screen: SharedScreen,
     ticket: BuildTicket,
-    pr: PullRequestUrl,
+    pr: ReviewSubject,
     open: OpenRequest,
     folders: AppFolders,
     cx: &mut AsyncApp,
@@ -626,16 +656,16 @@ async fn build_and_show(
             let shown = cx.update(|cx| {
                 let shown = match window.show_review() {
                     ShowReview::Switch(window) => {
-                        switch_window(window, opened, &pr, cx).map(|()| window)
+                        switch_window(window, opened, cx).map(|()| window)
                     }
-                    ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, &pr, cx),
+                    ShowReview::TurnIntoReview(window) => turn_into_review(window, opened, cx),
                     ShowReview::TurnSwitcherIntoReview(window) => {
-                        turn_switcher_into_review(window, opened, &pr, cx)
+                        turn_switcher_into_review(window, opened, cx)
                     }
                     ShowReview::TurnWritingIntoReview(window) => {
-                        turn_writing_into_review(window, opened, &pr, cx)
+                        turn_writing_into_review(window, opened, cx)
                     }
-                    ShowReview::OpenWindow => open_window(opened, &pr, cx),
+                    ShowReview::OpenWindow => open_window(opened, cx),
                 };
                 bring_app_to_front(cx);
                 shown
@@ -680,26 +710,56 @@ fn apply_replies_held_for_reopen(
 fn switch_window(
     window: WindowHandle<OneStepLayout>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
     cx: &mut App,
 ) -> anyhow::Result<()> {
     window.update(cx, |layout, window, cx| {
         layout.flush_typing(cx);
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })
+}
+
+/// A dropped review's window holds only the switcher instead, for the reviewer to pick another review.
+fn close_dropped(screen: &SharedScreen, subject: &ReviewSubject, cx: &mut AsyncApp) {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let was_shown = active.update(cx, |active, cx| {
+        let was_shown = active.dropped(subject);
+        cx.notify();
+        was_shown
+    });
+    let Some(window) = window.filter(|_| was_shown) else {
+        return;
+    };
+    match cx.update(|cx| replace_review_with_switcher(window, cx)) {
+        Ok(switcher) => screen.borrow_mut().window = AppWindow::SwitcherOnly(switcher),
+        Err(error) => eprintln!("could not close the dropped review {subject}: {error:#}"),
+    }
+}
+
+fn replace_review_with_switcher(
+    window: WindowHandle<OneStepLayout>,
+    cx: &mut App,
+) -> anyhow::Result<WindowHandle<SwitcherWindow>> {
+    let switching = cx.global::<PrSwitching>().clone();
+    window.update(cx, |_, window, cx| {
+        window.set_window_title(&marked_if_dev("Pick a pull request".to_owned()));
+        window.replace_root(cx, |window, cx| SwitcherWindow::new(switching, window, cx));
+    })?;
+    Ok(WindowHandle::new(window.window_id()))
 }
 
 /// The window that held only Settings becomes the review's, with Settings still open over it.
 fn turn_into_review(
     window: WindowHandle<SettingsWindow>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |settings_window, window, cx| {
         let settings = settings_window.panel();
         window.replace_root(cx, |window, cx| {
-            new_layout(opened, pr, Some(settings), window, cx)
+            new_layout(opened, Some(settings), window, cx)
         });
     })?;
     Ok(WindowHandle::new(window.window_id()))
@@ -754,11 +814,10 @@ fn replace_switcher_with_writing(
 fn turn_writing_into_review(
     window: WindowHandle<WritingWindow>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |_, window, cx| {
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -771,11 +830,10 @@ actions!(app, [Quit]);
 fn turn_switcher_into_review(
     window: WindowHandle<SwitcherWindow>,
     opened: OpenedReview,
-    pr: &PullRequestUrl,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<OneStepLayout>> {
     window.update(cx, |_, window, cx| {
-        window.replace_root(cx, |window, cx| new_layout(opened, pr, None, window, cx));
+        window.replace_root(cx, |window, cx| new_layout(opened, None, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
 }
@@ -850,15 +908,11 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
     cx.bind_keys(bindings);
 }
 
-fn open_window(
-    opened: OpenedReview,
-    pr: &PullRequestUrl,
-    cx: &mut App,
-) -> anyhow::Result<WindowHandle<OneStepLayout>> {
-    let options = window_options(window_title(&opened, pr), cx);
+fn open_window(opened: OpenedReview, cx: &mut App) -> anyhow::Result<WindowHandle<OneStepLayout>> {
+    let options = window_options(window_title(&opened), cx);
     cx.open_window(options, |window, cx| {
         Appearance::follow(window, cx);
-        cx.new(|cx| new_layout(opened, pr, None, window, cx))
+        cx.new(|cx| new_layout(opened, None, window, cx))
     })
 }
 
@@ -929,8 +983,8 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     }
 }
 
-fn window_title(opened: &OpenedReview, pr: &PullRequestUrl) -> String {
-    format!("{pr}: {}", opened.review.title())
+fn window_title(opened: &OpenedReview) -> String {
+    opened.review.window_title()
 }
 
 /// A debug build names itself in its title, which the Window menu and Mission Control show.
@@ -944,12 +998,11 @@ fn marked_if_dev(title: String) -> String {
 
 fn new_layout(
     opened: OpenedReview,
-    pr: &PullRequestUrl,
     carried_settings: Option<Entity<SettingsPanel>>,
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,
 ) -> OneStepLayout {
-    window.set_window_title(&marked_if_dev(window_title(&opened, pr)));
+    window.set_window_title(&marked_if_dev(window_title(&opened)));
     let collaborators = Collaborators {
         github: opened.github,
         ide: opened.ide,

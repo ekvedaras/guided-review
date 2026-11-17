@@ -1,9 +1,14 @@
 //! The socket side of a fake running app.
 
-use std::io::ErrorKind;
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::Arc;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use guided_review::app_link::AppFolder;
+
+use super::folders_in;
 use std::thread;
 use std::time::Duration;
 
@@ -23,6 +28,31 @@ impl CliEnded {
 }
 
 const POLL: Duration = Duration::from_millis(10);
+
+/// An app of `build` on the socket of `home` that answers one request line with `answer`, recording
+/// the line.
+pub fn answering_one_request(
+    home: &Path,
+    cli_ended: &CliEnded,
+    build: &str,
+    answer: &str,
+) -> (thread::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
+    let cli_ended = cli_ended.clone();
+    let socket = AppFolder::of(&folders_in(home)).socket();
+    std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+    let listener = UnixListener::bind(socket).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    let line = format!(r#"{{"version":"{build}","answer":{answer}}}"#);
+    let thread = thread::spawn(move || {
+        let stream = accept_before(&listener, &cli_ended, "the request from the CLI");
+        let mut request = String::new();
+        BufReader::new(&stream).read_line(&mut request).unwrap();
+        log.lock().unwrap().push(request);
+        (&stream).write_all(format!("{line}\n").as_bytes()).unwrap();
+    });
+    (thread, seen)
+}
 
 /// The next connection, or a panic naming `waiting_for` once the CLI ended without making it.
 pub fn accept_before(

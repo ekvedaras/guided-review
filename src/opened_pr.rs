@@ -9,9 +9,10 @@ use crate::github::GitHub;
 use crate::make_basic_tour::make_basic_tour;
 use crate::pick_code_source::pick_code_source;
 use crate::pieces::{self, ChangedFile};
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin, ToursOnDisk};
-use crate::viewer::{PickCodeSource, PullRequestTipsPort, ReviewStateFile};
+use crate::viewer::{ChangeTipsPort, PickCodeSource, ReviewStateFile};
 
 /// What every command needs to work on one PR: where its files live, GitHub, and the folder it runs in.
 pub struct OpenedPr {
@@ -40,29 +41,34 @@ impl OpenedPr {
         }
     }
 
+    fn subject(&self) -> ReviewSubject {
+        ReviewSubject::from(self.pr.clone())
+    }
+
     pub fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.folders, &self.pr)
+        Tour::path_for(&self.folders, &self.subject())
     }
 
     /// The tour `repin` moves: the guided tour when there is one, else the basic tour. With neither it is
     /// the guided path, which is the file the reviewer is told is missing.
     pub fn tour_to_repin_path(&self) -> PathBuf {
-        match ToursOnDisk::of(&self.folders, &self.pr) {
-            ToursOnDisk::Basic => Tour::basic_path_for(&self.folders, &self.pr),
+        match ToursOnDisk::of(&self.folders, &self.subject()) {
+            ToursOnDisk::Basic => Tour::basic_path_for(&self.folders, &self.subject()),
             _ => self.tour_path(),
         }
     }
 
     /// Makes the PR's basic tour at the PR's tips now, unless a tour is on disk already; true when made.
     pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
-        if ToursOnDisk::of(&self.folders, &self.pr) != ToursOnDisk::None {
+        let subject = self.subject();
+        if ToursOnDisk::of(&self.folders, &subject) != ToursOnDisk::None {
             return Ok(false);
         }
         let code = self.at_live_tips()?;
         let title = self.github.pull_request_title(&self.pr)?;
         make_basic_tour(
             &self.folders,
-            &self.pr,
+            &subject,
             code.source.as_ref(),
             &code.tips,
             &title,
@@ -71,7 +77,7 @@ impl OpenedPr {
     }
 
     pub fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.folders, &self.pr)
+        ReviewStateFile::for_subject(&self.folders, &self.subject())
     }
 
     /// The PR as GitHub has it now.
@@ -85,7 +91,7 @@ impl OpenedPr {
         self.at(pin.pinned_tips())
     }
 
-    fn at(&self, tips: PullRequestTips) -> anyhow::Result<CodeAtTips> {
+    fn at(&self, tips: ChangeTips) -> anyhow::Result<CodeAtTips> {
         let source = pick_code_source(&self.github, &self.pr, &tips, &self.current_dir)?;
         Ok(CodeAtTips { tips, source })
     }
@@ -102,7 +108,7 @@ impl OpenedPr {
 }
 
 pub struct CodeAtTips {
-    pub tips: PullRequestTips,
+    pub tips: ChangeTips,
     pub source: Box<dyn CodeSource>,
 }
 

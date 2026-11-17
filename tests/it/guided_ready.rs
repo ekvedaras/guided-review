@@ -1,4 +1,4 @@
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::ToursOnDisk;
 use guided_review::viewer::{
     ActivePr, GuidedTourProgress, OpenDecision, OpenOrigin, OpenOutcome, WriteDecision, WritingFact,
@@ -7,7 +7,7 @@ use guided_review::viewer::{
 const A: &str = "https://github.com/acme/shop/pull/7";
 const B: &str = "https://github.com/acme/shop/pull/8";
 
-fn pr(url: &str) -> PullRequestUrl {
+fn pr(url: &str) -> ReviewSubject {
     url.parse().unwrap()
 }
 

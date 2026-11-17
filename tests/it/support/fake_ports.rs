@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex};
 
 use super::file_path;
 use guided_review::file_path::FilePath;
-use guided_review::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, CommentId,
-    CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestTipsPort, Reaction,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
+    CommentId, CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullsOfBranchPort, Reaction,
     ReactionChange, ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
     ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
     SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
@@ -22,6 +22,8 @@ pub struct SentLog(Arc<Mutex<Sent>>);
 #[derive(Default)]
 struct Sent {
     github: Vec<GitHubCall>,
+    /// The looks for a PR of a branch, kept apart: a local review makes them and no other call.
+    branch_lookups: Vec<String>,
     agent: Vec<String>,
 }
 
@@ -91,6 +93,11 @@ pub enum GitHubCall {
 impl SentLog {
     pub fn github_calls(&self) -> Vec<GitHubCall> {
         self.0.lock().unwrap().github.clone()
+    }
+
+    /// `owner/repo:branch` of each look for the open PR of a branch.
+    pub fn branch_lookups(&self) -> Vec<String> {
+        self.0.lock().unwrap().branch_lookups.clone()
     }
 
     pub fn agent_lines(&self) -> Vec<String> {
@@ -167,6 +174,8 @@ pub struct FakeGitHub {
     edited_now: Mutex<BTreeMap<CommentId, String>>,
     deleted_now: Mutex<BTreeSet<CommentId>>,
     description: Mutex<String>,
+    pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
+    head_branches: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeGitHub {
@@ -186,7 +195,30 @@ impl FakeGitHub {
             edited_now: Mutex::default(),
             deleted_now: Mutex::default(),
             description: Mutex::default(),
+            pulls_of_branches: Mutex::default(),
+            head_branches: Mutex::default(),
         }
+    }
+
+    /// The PR is opened from `branch` of its own repo.
+    pub fn with_head_branch(self, pr: &str, branch: &str) -> Self {
+        self.head_branches
+            .lock()
+            .unwrap()
+            .push((pr.to_owned(), branch.to_owned()));
+        self
+    }
+
+    /// An open PR whose head is `branch`.
+    pub fn with_open_pull_from(self, branch: &str, pr: &str, title: &str) -> Self {
+        self.pulls_of_branches.lock().unwrap().push((
+            branch.to_owned(),
+            PullOfBranch {
+                pr: pr.parse().unwrap(),
+                title: title.to_owned(),
+            },
+        ));
+        self
     }
 
     /// The PR's body as it is on GitHub.
@@ -301,11 +333,64 @@ impl FakeGitHub {
     }
 }
 
-impl PullRequestTipsPort for FakeGitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError> {
+impl PullsOfBranchPort for FakeGitHub {
+    fn open_pull_of_branch(
+        &self,
+        repo: &guided_review::pull_request::RepoName,
+        branch: &guided_review::review_subject::BranchName,
+    ) -> Result<Option<PullOfBranch>, GitHubError> {
+        self.sent
+            .0
+            .lock()
+            .unwrap()
+            .branch_lookups
+            .push(format!("{repo}:{}", branch.as_str()));
+        self.fail_if_reads_fail()?;
+        Ok(self
+            .pulls_of_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(head, pull)| head == branch.as_str() && &pull.pr.repo == repo)
+            .map(|(_, pull)| pull.clone()))
+    }
+
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<guided_review::review_subject::BranchName>, GitHubError> {
+        self.head_branch_of(pr)
+    }
+}
+
+impl FakeGitHub {
+    fn head_branch_of(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<guided_review::review_subject::BranchName>, GitHubError> {
+        self.sent
+            .0
+            .lock()
+            .unwrap()
+            .branch_lookups
+            .push(format!("head of {}", pr.short()));
+        self.fail_if_reads_fail()?;
+        let found = self
+            .head_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(url, _)| *url == pr.to_string())
+            .map(|(_, branch)| branch.clone());
+        Ok(found.map(|branch| guided_review::review_subject::BranchName::new(&branch).unwrap()))
+    }
+}
+
+impl ChangeTipsPort for FakeGitHub {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError> {
         self.sent.record(GitHubCall::TipsOf(pr.clone()));
         self.fail_if_reads_fail()?;
-        Ok(PullRequestTips {
+        Ok(ChangeTips {
             base_branch_tip: self.tips.0.clone(),
             head: self.tips.1.clone(),
         })

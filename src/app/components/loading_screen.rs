@@ -10,7 +10,7 @@ use super::motion::{OVERLAY, busy_dot, busy_sweep, fade_in};
 use super::palette::{CARD_RADIUS, CODE_FONT, Colors, SIDEBAR_WIDTH, TEXT_FONT};
 use super::title_bar::TITLE_BAR_HEIGHT;
 use crate::app::tour_writer;
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::viewer::{ActivePr, AgentStatus, TourWriting, WritingStage};
 
 /// What the window shows while a tour agent writes the tour of the PR the reviewer picked: its status,
@@ -21,7 +21,7 @@ pub struct LoadingScreen {
 
 /// The texts, made when the writing changes, not every frame.
 struct Shown {
-    pr: PullRequestUrl,
+    pr: ReviewSubject,
     title: SharedString,
     status: SharedString,
     failure: Option<SharedString>,

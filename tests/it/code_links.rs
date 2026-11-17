@@ -3,7 +3,8 @@ use guided_review::code_source::CodeSource;
 use guided_review::config::Config;
 use guided_review::ide::{Ide, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CodeOpener, Destination, IdeCaveat, NotInIde, Review, ReviewStateFile, Side, WorkingCopy,
@@ -46,10 +47,10 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file = ReviewStateFile::for_pr(
+        let state_file = ReviewStateFile::for_subject(
             &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7"
-                .parse::<PullRequestUrl>()
+                .parse::<ReviewSubject>()
                 .unwrap(),
         );
         let mut review = Review::open(tour, &source, state_file).unwrap();

@@ -6,6 +6,7 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     FinishResult, Reaction, ReactionChange, Review, ReviewOutcome, ReviewStateFile, ReviewVerdict,
@@ -51,6 +52,8 @@ impl Pull {
             TourPin {
                 version: 1,
                 pr: PR.to_owned(),
+                local: None,
+                repo: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
@@ -61,7 +64,7 @@ impl Pull {
         Review::open_basic(
             tour,
             &self.source(),
-            ReviewStateFile::for_pr(&self.repo.folders(), &pr),
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
         )
         .unwrap()
     }

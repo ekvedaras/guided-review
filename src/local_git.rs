@@ -8,7 +8,9 @@ use anyhow::{Context, bail};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::file_path::FilePath;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use crate::local_work_tree::{LocalWorkTree, OnDisk};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::review_subject::{LocalChangeSet, WorkTreeRoot};
 
 /// Why a folder set as a repo's clone cannot be used as one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,13 +31,35 @@ impl fmt::Display for CloneProblem {
 /// Reads git objects only, never the working tree, so uncommitted work never leaks into a tour.
 pub struct LocalGit {
     repo: PathBuf,
+    working_tree_rule: WorkingTreeRule,
+}
+
+/// What it takes for the checked-out files to be "at" a head.
+enum WorkingTreeRule {
+    /// A PR's head: that commit is checked out and nothing tracked has changed.
+    PinnedHeadCheckedOut,
+    /// A local review's snapshot: the files, untracked ones included, make the snapshot's tree.
+    SameTreeAs(LocalWorkTree),
 }
 
 impl LocalGit {
+    fn pr_clone(folder: &Path) -> Self {
+        Self {
+            repo: folder.to_path_buf(),
+            working_tree_rule: WorkingTreeRule::PinnedHeadCheckedOut,
+        }
+    }
+
+    /// Reads a local change set's working tree, which has no PR and so needs no repo name.
+    pub fn at_worktree(root: &WorkTreeRoot) -> Self {
+        Self {
+            repo: root.as_path().to_path_buf(),
+            working_tree_rule: WorkingTreeRule::SameTreeAs(LocalWorkTree::at(root.clone())),
+        }
+    }
+
     pub fn find(repo: &RepoName, current_dir: &Path) -> anyhow::Result<Option<Self>> {
-        let current = Self {
-            repo: current_dir.to_path_buf(),
-        };
+        let current = Self::pr_clone(current_dir);
         if current.is_clone_of(repo) {
             return Ok(Some(current));
         }
@@ -56,9 +80,7 @@ impl LocalGit {
         if !folder.is_dir() {
             return Err(CloneProblem::FolderGone);
         }
-        let clone = Self {
-            repo: folder.to_path_buf(),
-        };
+        let clone = Self::pr_clone(folder);
         if !clone.is_clone_of(repo) {
             return Err(CloneProblem::NoRemoteOfRepo);
         }
@@ -67,9 +89,7 @@ impl LocalGit {
 
     /// The GitHub repo the folder's `origin` remote points at.
     pub fn origin_of(folder: &Path) -> Option<RepoName> {
-        let clone = Self {
-            repo: folder.to_path_buf(),
-        };
+        let clone = Self::pr_clone(folder);
         let url = clone.git(&["config", "--get", "remote.origin.url"]).ok()?;
         RepoName::from_github_remote(url.trim())
     }
@@ -82,7 +102,7 @@ impl LocalGit {
     pub fn fetch_missing_commits(
         &self,
         pr: &PullRequestUrl,
-        tips: &PullRequestTips,
+        tips: &ChangeTips,
     ) -> anyhow::Result<()> {
         if !self.has_commit(&tips.head) {
             let pull_ref = format!("+refs/pull/{0}/head:refs/guided-review/{0}", pr.number);
@@ -225,9 +245,25 @@ impl CodeSource for LocalGit {
     }
 
     fn working_tree_is_at(&self, head: &Sha) -> bool {
+        if let WorkingTreeRule::SameTreeAs(work_tree) = &self.working_tree_rule {
+            return work_tree.working_tree_matches(head);
+        }
         let checked_out = self.git(&["rev-parse", "HEAD"]).map(|sha| Sha::new(&sha));
         let uncommitted = self.git(&["status", "--porcelain", "--untracked-files=no"]);
         checked_out.is_ok_and(|sha| sha == *head)
             && uncommitted.is_ok_and(|status| status.is_empty())
+    }
+
+    fn change_set_on_disk(
+        &self,
+        change_set: &LocalChangeSet,
+        snapshot: &Sha,
+    ) -> anyhow::Result<OnDisk> {
+        match &self.working_tree_rule {
+            WorkingTreeRule::SameTreeAs(work_tree) => Ok(work_tree.on_disk(change_set, snapshot)?),
+            WorkingTreeRule::PinnedHeadCheckedOut => {
+                bail!("the clone of a PR has no local change set")
+            }
+        }
     }
 }

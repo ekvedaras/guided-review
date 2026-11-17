@@ -5,13 +5,13 @@ use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
 use crate::github::GitHub;
 use crate::local_git::LocalGit;
-use crate::pull_request::{PullRequestTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, PullRequestUrl};
 
 /// Run at the start of every command, so a clone made mid-review is used from the next command on.
 pub fn pick_code_source(
     github: &GitHub,
     pr: &PullRequestUrl,
-    tips: &PullRequestTips,
+    tips: &ChangeTips,
     current_dir: &Path,
 ) -> anyhow::Result<Box<dyn CodeSource>> {
     let source = pick_uncached_code_source(github, pr, tips, current_dir)?;
@@ -21,7 +21,7 @@ pub fn pick_code_source(
 fn pick_uncached_code_source(
     github: &GitHub,
     pr: &PullRequestUrl,
-    tips: &PullRequestTips,
+    tips: &ChangeTips,
     current_dir: &Path,
 ) -> anyhow::Result<Arc<dyn CodeSource>> {
     let code_source = github.code_source(&pr.repo);

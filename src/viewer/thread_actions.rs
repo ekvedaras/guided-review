@@ -1,4 +1,6 @@
-use crate::pull_request::PullRequestUrl;
+use crate::pull_request::{PullRequestUrl, Sha};
+
+use super::local_threads::{LocalAuthor, LocalThreadStore, ThreadHome};
 
 use super::comment_desk::TourFreshness;
 use super::comments::{CommentRefusal, SendMode};
@@ -50,7 +52,9 @@ pub enum ThreadActionResult {
 
 /// Everything one thread action needs, owned, so it can run on a background thread.
 pub struct ThreadActionRequest {
-    pub(super) pr: PullRequestUrl,
+    pub(super) home: ThreadHome,
+    /// The head the review reads, which a local thread's lines are seen from.
+    pub(super) head: Sha,
     pub(super) action: ThreadAction,
     /// The reply draft of the thread a `Reply` is for, or the edit draft of the comment an
     /// `EditComment` is for.
@@ -76,14 +80,22 @@ impl ThreadActionRequest {
         self,
         github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     ) -> ThreadActionOutcome {
-        let result = match self.perform(github) {
-            Ok(result) => result,
-            Err(error) => classify(&error),
+        let result = match &self.home {
+            ThreadHome::GitHub(pr) => match self.perform(github, pr) {
+                Ok(result) => result,
+                Err(error) => classify(&error),
+            },
+            ThreadHome::StateFile(store) => self
+                .perform_locally(store)
+                .unwrap_or_else(|error| ThreadActionResult::Failed(format!("{error:#}"))),
         };
-        let threads = (result == ThreadActionResult::Done).then(|| {
-            github
-                .review_threads(&self.pr)
-                .map_err(|error| format!("{error:#}"))
+        let threads = (result == ThreadActionResult::Done).then(|| match &self.home {
+            ThreadHome::GitHub(pr) => github
+                .review_threads(pr)
+                .map_err(|error| format!("{error:#}")),
+            ThreadHome::StateFile(store) => store
+                .threads_at(&self.head)
+                .map_err(|error| format!("{error:#}")),
         });
         let reply_body = matches!(self.action, ThreadAction::Reply { .. })
             .then_some(self.draft_body)
@@ -96,44 +108,80 @@ impl ThreadActionRequest {
         }
     }
 
-    fn perform(
-        &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> Result<ThreadActionResult, GitHubError> {
+    /// What the review knows already, or the text, stops the action before it goes anywhere.
+    fn refusal_before_sending(&self) -> Option<CommentRefusal> {
         if let Some(refusal) = &self.refusal {
-            return Ok(ThreadActionResult::Refused(refusal.clone()));
+            return Some(refusal.clone());
         }
         match &self.action {
             ThreadAction::Reply { .. } if self.freshness == TourFreshness::Behind => {
-                return Ok(ThreadActionResult::Refused(CommentRefusal::TourIsOld));
+                Some(CommentRefusal::TourIsOld)
+            }
+            ThreadAction::Reply { .. } if self.text().is_none() => Some(CommentRefusal::EmptyReply),
+            ThreadAction::EditComment { .. } if self.text().is_none() => {
+                Some(CommentRefusal::EmptyComment)
+            }
+            _ => None,
+        }
+    }
+
+    fn text(&self) -> Option<&str> {
+        self.draft_body
+            .as_deref()
+            .filter(|body| !body.trim().is_empty())
+    }
+
+    fn perform_locally(&self, store: &LocalThreadStore) -> anyhow::Result<ThreadActionResult> {
+        if let Some(refusal) = self.refusal_before_sending() {
+            return Ok(ThreadActionResult::Refused(refusal));
+        }
+        let text = self.text().unwrap_or_default();
+        match &self.action {
+            ThreadAction::Reply { mode, .. } if !mode.is_task() => {
+                return Ok(ThreadActionResult::Refused(CommentRefusal::NotOffered));
+            }
+            ThreadAction::Reply { thread_id, .. } => {
+                store.reply(thread_id, text, LocalAuthor::Reviewer)?;
+            }
+            ThreadAction::EditComment { comment_id } => store.edit(comment_id, text)?,
+            ThreadAction::DeleteComment { comment_id } => store.delete(comment_id)?,
+            ThreadAction::Resolve { thread_id } => {
+                store.set_resolved(thread_id, Resolution::Resolved)?;
+            }
+            ThreadAction::Unresolve { thread_id } => {
+                store.set_resolved(thread_id, Resolution::Unresolved)?;
+            }
+            ThreadAction::SetReaction { .. } => {
+                return Ok(ThreadActionResult::Refused(CommentRefusal::NotOffered));
+            }
+        }
+        Ok(ThreadActionResult::Done)
+    }
+
+    fn perform(
+        &self,
+        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        pr: &PullRequestUrl,
+    ) -> Result<ThreadActionResult, GitHubError> {
+        if let Some(refusal) = self.refusal_before_sending() {
+            return Ok(ThreadActionResult::Refused(refusal));
+        }
+        let text = self.text().unwrap_or_default();
+        match &self.action {
+            ThreadAction::Reply { mode, .. } if mode.is_task() => {
+                return Ok(ThreadActionResult::Refused(CommentRefusal::NotOffered));
             }
             ThreadAction::Reply {
                 thread_id, mode, ..
             } => {
-                let Some(body) = self
-                    .draft_body
-                    .as_deref()
-                    .filter(|body| !body.trim().is_empty())
-                else {
-                    return Ok(ThreadActionResult::Refused(CommentRefusal::EmptyReply));
-                };
-                if *mode == SendMode::CommentNow && github.has_pending_review(&self.pr)? {
+                if *mode == SendMode::CommentNow && github.has_pending_review(pr)? {
                     return Ok(ThreadActionResult::Refused(
                         CommentRefusal::PendingReviewExists,
                     ));
                 }
-                github.reply_to_thread(&self.pr, thread_id, body, *mode)?;
+                github.reply_to_thread(pr, thread_id, text, *mode)?;
             }
-            ThreadAction::EditComment { comment_id } => {
-                let Some(body) = self
-                    .draft_body
-                    .as_deref()
-                    .filter(|body| !body.trim().is_empty())
-                else {
-                    return Ok(ThreadActionResult::Refused(CommentRefusal::EmptyComment));
-                };
-                github.edit_comment(comment_id, body)?;
-            }
+            ThreadAction::EditComment { comment_id } => github.edit_comment(comment_id, text)?,
             ThreadAction::DeleteComment { comment_id } => github.delete_comment(comment_id)?,
             ThreadAction::Resolve { thread_id } => {
                 github.set_thread_resolved(thread_id, Resolution::Resolved)?;

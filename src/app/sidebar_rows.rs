@@ -5,8 +5,9 @@ use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{
-    ApproveWarning, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage,
-    Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TourAgentState, TreeRow,
+    ApproveWarning, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal,
+    GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId,
+    TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -50,6 +51,8 @@ pub struct SidebarTourAgent {
     pub line: SharedString,
     pub can_show: bool,
     pub can_retry: bool,
+    /// Several agents work in a local review's folder: Use this agent for each.
+    pub choices: Vec<TerminalId>,
 }
 
 /// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
@@ -110,6 +113,24 @@ pub struct SidebarRows {
     /// Only a basic review has one; its steps are then empty.
     pub tree: Option<SidebarTree>,
     pub basic_mode_label: Option<&'static str>,
+    /// What a local review is of, leading the sidebar where a PR has no such line.
+    pub local_heading: Option<SharedString>,
+    /// A local review's folder is not its snapshot any more: Changed on disk, another branch, or gone.
+    pub disk_news: Option<SidebarDiskNews>,
+    /// A local review's branch has an open PR, which the review offers to move to.
+    pub move_offer: Option<SidebarMoveOffer>,
+}
+
+/// The lasting line that offers to move a local review to its PR, seen from either side.
+pub struct SidebarMoveOffer {
+    pub heading: SharedString,
+    pub button: SharedString,
+    pub keep: &'static str,
+}
+
+pub struct SidebarDiskNews {
+    pub line: SharedString,
+    pub offer: Option<DiskOffer>,
 }
 
 impl SidebarRows {
@@ -139,9 +160,10 @@ impl SidebarRows {
         Self {
             tour_agent: SidebarTourAgent {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
-                line: tour_agent.to_string().into(),
+                line: tour_agent.line_for(review.subject()).into(),
                 can_show: tour_agent.can_show(),
                 can_retry: tour_agent.can_retry(),
+                choices: tour_agent.choices().to_vec(),
             },
             guided_tour: review.basic_mode_label().map(|_| SidebarGuidedTour {
                 stage: review.guided_tour_stage(),
@@ -182,6 +204,31 @@ impl SidebarRows {
                 rows: review.basic_sidebar(),
             }),
             basic_mode_label: review.basic_mode_label(),
+            local_heading: review.local_heading().map(Into::into),
+            move_offer: review
+                .move_offer()
+                .map(|offer| SidebarMoveOffer {
+                    heading: format!("{} is open from this branch", offer.pr.short()).into(),
+                    button: offer.label().into(),
+                    keep: "Keep local review",
+                })
+                .or_else(|| {
+                    review.move_here_offer().map(|offer| SidebarMoveOffer {
+                        heading: format!(
+                            "A local review of {} is on this machine",
+                            offer.change_set.branch().as_str()
+                        )
+                        .into(),
+                        button: offer.label().into(),
+                        keep: "Keep it separate",
+                    })
+                }),
+            disk_news: review
+                .disk_news()
+                .map(|DiskNews { line, offer }| SidebarDiskNews {
+                    line: line.into(),
+                    offer,
+                }),
         }
     }
 }

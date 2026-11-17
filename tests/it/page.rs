@@ -97,7 +97,7 @@ impl Pull {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse().unwrap());
+        let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -235,6 +235,7 @@ fn thread_on(id: &str, line_at: Option<usize>) -> ReviewThread {
             id: CommentId::new(&format!("{id}-1")),
             author: "alice".into(),
             is_bot: false,
+            by_agent: None,
             by_viewer: false,
             body: "why?".into(),
             url: String::new(),

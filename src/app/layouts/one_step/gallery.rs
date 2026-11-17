@@ -19,7 +19,8 @@ use crate::line_number::LineNumber;
 use crate::pull_request::Sha;
 use crate::viewer::{
     Audience, CommentDraft, CommentId, CommentPlace, LineLocation, OldHead, QueuedComment,
-    Reaction, ReactionCount, ReviewThread, SendMode, Side, ThreadComment, ThreadId, ThreadView,
+    Reaction, ReactionCount, ReviewThread, SendMode, Sending, Side, ThreadComment, ThreadId,
+    ThreadView,
 };
 
 const SAMPLE_MARKDOWN: &str = "A note with `inline code`, a [link](https://example.test) and a list:\n\n\
@@ -116,6 +117,7 @@ fn comment(id: &str, author: &str, body: &str, reactions: Vec<ReactionCount>) ->
         id: CommentId::new(id),
         author: author.to_owned(),
         is_bot: author.ends_with("[bot]"),
+        by_agent: None,
         by_viewer: author == "you",
         body: body.to_owned(),
         url: "https://example.test".to_owned(),
@@ -177,13 +179,14 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         delete_asked: is_open.then(|| CommentId::new("c4")),
         hand_off_line: is_open.then(|| Arc::from("The agent is working on it")),
         agent_is_working: is_open,
-        failed_hand_off: None,
+        hand_off_button: None,
     };
     ThreadElement::new(
         Arc::new(view),
         ThreadDrafts {
             can_reply_now: true,
             can_ask_agent: true,
+            sending: Sending::GitHub,
             reply: is_open.then(|| "Agreed, and the test names it.".to_owned()),
             edits: BTreeMap::new(),
         },
@@ -193,7 +196,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
             on_delete_question: Rc::new(|_, _, _| {}),
             on_toggle: Box::new(|_, _, _| {}),
             on_action: Rc::new(|_, _, _| {}),
-            on_try_hand_off_again: Rc::new(|_, _| {}),
+            on_hand_off_button: Rc::new(|_, _| {}),
         },
     )
 }

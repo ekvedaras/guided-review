@@ -7,7 +7,8 @@ use crate::support::fake_ports::{FakeAgentLauncher, FakeAskProcesses, FakeAskSto
 use crate::support::{FixtureRepo, drafts, file_path, line};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     AgentLauncher, Ask, AskTarget, Asks, CommentGesture, CommentPlace, CommentRefusal,
@@ -42,6 +43,8 @@ impl Shop {
             TourPin {
                 version: 1,
                 pr: PR.to_owned(),
+                local: None,
+                repo: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
@@ -51,15 +54,17 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file =
-            ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap());
+        let state_file = ReviewStateFile::for_subject(
+            &self.repo.folders(),
+            &PR.parse::<ReviewSubject>().unwrap(),
+        );
         Review::open_basic(tour, &source, state_file).unwrap()
     }
 
     fn asks(&self) -> Asks {
-        Asks::load(Arc::new(ReviewStateFile::for_pr(
+        Asks::load(Arc::new(ReviewStateFile::for_subject(
             &self.repo.folders(),
-            &PR.parse::<PullRequestUrl>().unwrap(),
+            &PR.parse::<ReviewSubject>().unwrap(),
         )))
         .unwrap()
     }

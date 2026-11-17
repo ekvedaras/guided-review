@@ -1,13 +1,14 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{Review, ReviewCore};
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
-use crate::viewer::hand_offs::{AgentReplied, HandOffId};
-use crate::viewer::problems::Read;
+use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
+use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
-    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, Work, WorkKind, WorkOutcome,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, PULL_OF_BRANCH_RETRY,
+    WORKING_TREE_RECHECK, Work, WorkKind, WorkOutcome,
 };
 
 impl Review {
@@ -32,30 +33,49 @@ impl Review {
     /// The window came to the front, or the review opened: GitHub and the clone are read again,
     /// and what waits to go to GitHub is sent.
     pub fn pull_from_github(&mut self) {
-        for kind in WorkKind::PULLS_FROM_GITHUB {
+        for kind in WorkKind::READ_AGAIN_ON_FOCUS {
             self.work_mut().want(kind);
         }
     }
 }
 
 impl ReviewCore {
-    /// `None` when there is nothing of the kind to do now.
+    /// `None` when there is nothing of the kind to do now. Work with GitHub is never done for a local
+    /// review, which has no PR.
     fn job_of(&self, kind: WorkKind) -> Option<Job> {
-        let pr = self.pr.clone();
+        let pr = || self.subject.pull_request().cloned();
         Some(match kind {
-            WorkKind::CheckPrHead => Job::CheckPrHead(pr),
-            WorkKind::CheckWorkingCopy => Job::CheckWorkingCopy(self.head.clone()),
-            WorkKind::PullPrDescription => Job::PullPrDescription(pr),
-            WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()),
+            WorkKind::CheckPrHead => Job::CheckPrHead(pr()?),
+            WorkKind::CheckWorkingTree => Job::CheckWorkingTree {
+                change_set: self.subject.local()?.clone(),
+                snapshot: self.head.clone(),
+            },
+            // A local review learns it from the look at its folder.
+            WorkKind::CheckWorkingCopy => {
+                pr()?;
+                Job::CheckWorkingCopy(self.head.clone())
+            }
+            WorkKind::LookUpPullOfBranch => Job::LookUpPullOfBranch {
+                repo: self.local_facts.as_ref()?.repo.clone()?,
+                branch: self.subject.local()?.branch().clone(),
+            },
+            WorkKind::LookUpHeadBranch => {
+                if self.local_reviews_of_repo.is_empty() {
+                    return None;
+                }
+                Job::LookUpHeadBranch(pr()?)
+            }
+            WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
+            WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
-                pr,
+                home: self.thread_home(),
                 head: self.head.clone(),
             },
-            WorkKind::PullPendingReview => Job::PullPendingReview(pr),
-            WorkKind::PullLastReview => Job::PullLastReview(pr),
+            WorkKind::PullPendingReview => Job::PullPendingReview(pr()?),
+            WorkKind::PullLastReview => Job::PullLastReview(pr()?),
             WorkKind::SendQueuedComment => Job::SendQueuedComment(self.queued_comment_request()?),
             WorkKind::ChangeReviewingMark => Job::ChangeReviewingMark {
-                pr,
+                pr: pr()?,
                 change: self.reviewing_mark.change_to_send()?,
             },
             WorkKind::TakeSeenMarksOff => {
@@ -66,13 +86,13 @@ impl ReviewCore {
                 Job::TakeSeenMarksOff(requests)
             }
             WorkKind::DeliverHandOff => {
-                Job::DeliverHandOff(self.state.hand_offs().delivery_request(&self.pr)?)
+                Job::DeliverHandOff(self.state.hand_offs().delivery_request(&self.subject)?)
             }
             WorkKind::CheckAgentLink => {
                 if !self.agent_link_is_off {
                     return None;
                 }
-                Job::CheckAgentLink(pr)
+                Job::CheckAgentLink(self.subject.clone())
             }
         })
     }
@@ -87,7 +107,37 @@ impl ReviewCore {
         match done {
             Done::PrHead(Ok(tips)) => self.pr_head_is(tips.head),
             Done::PrHead(Err(error)) => self.could_not_read(Read::PrHead, &error),
+            Done::WorkingTree(on_disk) => {
+                match on_disk {
+                    Ok(on_disk) => {
+                        self.clear_problem(ProblemKind::FolderNotLookedAt);
+                        self.working_tree_is(on_disk);
+                    }
+                    Err(error) => self.raise_problem(Problem::FolderNotLookedAt(error)),
+                }
+                self.work
+                    .want_in(WorkKind::CheckWorkingTree, WORKING_TREE_RECHECK);
+            }
             Done::WorkingCopy(is_at) => self.working_copy_is(WorkingCopy::of(is_at)),
+            Done::PullOfBranch(found) => match found {
+                Ok(found) => self.pull_of_branch_is(found),
+                // Silent: a look for a PR is a convenience, so a failure is only tried again later.
+                Err(_) => self
+                    .work
+                    .want_in(WorkKind::LookUpPullOfBranch, PULL_OF_BRANCH_RETRY),
+            },
+            Done::HeadBranch(Ok(branch)) => {
+                self.head_branch_failures = 0;
+                self.head_branch_is(branch);
+            }
+            // Silent, as for a local review's look for its PR.
+            Done::HeadBranch(Err(_)) => {
+                self.head_branch_failures += 1;
+                self.work.want_in(
+                    WorkKind::LookUpHeadBranch,
+                    head_branch_retry_after(self.head_branch_failures),
+                );
+            }
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();
             }
@@ -197,10 +247,28 @@ impl ReviewCore {
         Ok(())
     }
 
+    pub fn press_hand_off_button(&mut self, button: HandOffButton) -> anyhow::Result<()> {
+        match button {
+            HandOffButton::TryAgain(id) => self.try_hand_off_again(id),
+            HandOffButton::SendAnyway(id) => {
+                self.work.want(WorkKind::DeliverHandOff);
+                self.record_hand_offs(|hand_offs| hand_offs.send_anyway(id))
+                    .and_then(|sent| sent)
+            }
+        }
+    }
+
     /// Queues a failed hand-off again and lets the next hand-off go, whether it was queued or not.
     pub fn try_hand_off_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
         self.work.want(WorkKind::DeliverHandOff);
         self.record_hand_offs(|hand_offs| hand_offs.try_again(id))
             .and_then(|tried| tried)
     }
+}
+
+/// Each failed look for a PR's head branch doubles the wait for the next, up to a cap, since nothing
+/// but the move offer waits on it.
+fn head_branch_retry_after(failures: u32) -> Duration {
+    const LONGEST_WAIT_DOUBLINGS: u32 = 5;
+    PULL_OF_BRANCH_RETRY * 2_u32.pow(failures.saturating_sub(1).min(LONGEST_WAIT_DOUBLINGS))
 }

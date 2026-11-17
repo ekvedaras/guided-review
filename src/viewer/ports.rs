@@ -9,10 +9,33 @@ use super::github_outage::OutageCause;
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
-use crate::pull_request::{PullRequestTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
+use crate::review_subject::{BranchName, ReviewSubject};
 
-pub trait PullRequestTipsPort: Send + Sync {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<PullRequestTips, GitHubError>;
+pub trait ChangeTipsPort: Send + Sync {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError>;
+}
+
+/// An open PR whose head is a branch of the repo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullOfBranch {
+    pub pr: PullRequestUrl,
+    pub title: String,
+}
+
+pub trait PullsOfBranchPort: Send + Sync {
+    /// The open PR whose head is `branch` of `repo` itself, when there is one.
+    fn open_pull_of_branch(
+        &self,
+        repo: &RepoName,
+        branch: &BranchName,
+    ) -> Result<Option<PullOfBranch>, GitHubError>;
+
+    /// The branch of the PR's own repo that the PR is opened from; `None` for a PR from a fork.
+    fn pull_request_head_branch(
+        &self,
+        pr: &PullRequestUrl,
+    ) -> Result<Option<BranchName>, GitHubError>;
 }
 
 pub trait ViewedFilesPort: Send + Sync {
@@ -128,7 +151,8 @@ pub trait ReviewWritesPort: Send + Sync {
 /// Everything the viewer core asks of GitHub, for the app that holds one adapter for all of it.
 /// Core actions take only the port they need, so tests can put a fake behind it.
 pub trait GitHubPort:
-    PullRequestTipsPort
+    ChangeTipsPort
+    + PullsOfBranchPort
     + PullRequestDescriptionPort
     + PullRequestReactionsPort
     + PictureUploadPort
@@ -139,7 +163,8 @@ pub trait GitHubPort:
 }
 
 impl<T> GitHubPort for T where
-    T: PullRequestTipsPort
+    T: ChangeTipsPort
+        + PullsOfBranchPort
         + PullRequestDescriptionPort
         + PullRequestReactionsPort
         + PictureUploadPort
@@ -321,5 +346,6 @@ pub trait TurnStopper: Send + Sync {
 pub trait RefreshWriter: Send + Sync {
     /// Passes every stream line of the AI to `on_line` as it arrives. The core reads them, so adapters stay
     /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
-    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
+    fn refresh(&self, subject: &ReviewSubject, on_line: &mut dyn FnMut(&str))
+    -> anyhow::Result<()>;
 }

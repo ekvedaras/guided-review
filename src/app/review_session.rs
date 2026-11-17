@@ -26,18 +26,23 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::GhCloner;
+use crate::github::{GhCloner, GitHub};
+use crate::opened_change_set::OpenedChangeSet;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
-    CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
-    OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
-    SendMode, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, LineLocation,
+    MoveFrom, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, Review,
+    ReviewChange, ReviewVerdict, Screen, SendMode, TerminalId, TextBox, ThreadAction,
+    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
+    TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Rows laid out beyond the visible part, so a fast scroll does not show a blank edge.
 const LIST_OVERDRAW: f32 = 300.;
+/// The file the Changed on disk scene writes into the staged local review's folder.
+#[cfg(feature = "snapshots")]
+const CHANGED_ON_DISK_FILE: &str = "later.txt";
 
 /// The two buttons that move a tour on: Re-pin (no AI) and Refresh (the local `claude`).
 pub struct TourWork {
@@ -68,6 +73,9 @@ pub struct ReviewSession {
     /// The guided review a snapshot scene put aside to show the PR in Basic mode.
     #[cfg(feature = "snapshots")]
     guided_before_staging: Option<Review>,
+    /// The code source of the PR a snapshot scene put aside to show a local review.
+    #[cfg(feature = "snapshots")]
+    source_before_staging: Option<Arc<dyn CodeSource>>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -86,6 +94,8 @@ pub struct ReviewSession {
     reload: Option<Task<()>>,
     /// The build of the guided review a click on Switch to guided tour started.
     switch: Option<Task<()>>,
+    /// The move of a local review to its PR a click on Move to <pr> started.
+    moving: Option<Task<()>>,
     clone_offer: Option<CloneOffer>,
     cloning: Option<Task<()>>,
     typing_save: Option<Task<()>>,
@@ -156,8 +166,10 @@ impl ReviewSession {
         })
         .detach();
         let rows = PageRows::of(&review, &open_details);
-        let clone_offer =
-            CloneOffer::for_source(review.pr().repo.clone(), source.as_ref(), &folders);
+        let clone_offer = review
+            .subject()
+            .pull_request()
+            .and_then(|pr| CloneOffer::for_source(pr.repo.clone(), source.as_ref(), &folders));
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
@@ -165,6 +177,8 @@ impl ReviewSession {
             tour_agent_before_staging: None,
             #[cfg(feature = "snapshots")]
             guided_before_staging: None,
+            #[cfg(feature = "snapshots")]
+            source_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -183,6 +197,7 @@ impl ReviewSession {
             loading_images: HashSet::new(),
             reload: None,
             switch: None,
+            moving: None,
             clone_offer,
             cloning: None,
             typing_save: None,
@@ -226,6 +241,10 @@ impl ReviewSession {
     /// The scroll state of the screen's rows; it follows every rebuild of the rows.
     pub fn screen_list(&self) -> &ListState {
         &self.screen_list
+    }
+
+    pub const fn is_moving(&self) -> bool {
+        self.moving.is_some()
     }
 
     pub fn repin_progress(&self) -> &RepinProgress {
@@ -461,6 +480,27 @@ impl ReviewSession {
         .detach();
     }
 
+    /// A local review's finish: the queued tasks go to the agent as the hand-offs deliver them.
+    pub fn send_tasks(&mut self, cx: &mut Context<Self>) {
+        let queued = self.review.queued_tasks();
+        match self.change(cx, |review| review.send_tasks()) {
+            Ok(()) if queued > 0 => {
+                let tasks = if queued == 1 { "task" } else { "tasks" };
+                post_toast(
+                    cx,
+                    ToastTone::Success,
+                    format!("{queued} {tasks} handed to your agent"),
+                );
+            }
+            Ok(()) => {}
+            Err(error) => post_toast(
+                cx,
+                ToastTone::Danger,
+                format!("Could not send the tasks: {error:#}"),
+            ),
+        }
+    }
+
     /// Sends the review in the background; `on_done` gets the answer.
     pub fn finish_review(
         &mut self,
@@ -488,14 +528,96 @@ impl ReviewSession {
         .detach();
     }
 
+    /// Drop review of a local review whose branch is gone, on the button only. The review takes no
+    /// changes from here on, so nothing writes its state file again once it is deleted; the app then
+    /// shows the switcher in its place.
+    pub fn drop_review(&mut self, cx: &mut Context<Self>) {
+        let Some(change_set) = self.review.subject().local().cloned() else {
+            return;
+        };
+        self.save_typing_now();
+        if !self.change(cx, |review| review.start_drop()) {
+            return;
+        }
+        let folders = self.tour_work.repinner.folders.clone();
+        self.run_off_thread(
+            cx,
+            move || OpenedChangeSet::new(&change_set, &folders).drop_review(),
+            |this, dropped, cx| match dropped {
+                Ok(()) => (cx.global::<PrSwitching>().dropped)(this.review.subject().clone()),
+                Err(error) => {
+                    this.review.drop_failed(&error);
+                    this.show_problems(cx);
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// The move button, in either review. The review takes no changes from here on, as its state file
+    /// is carried to the PR's and the local review deleted. The PR's review takes the window when the
+    /// move is done: from the local review it is shown, from the PR's review it is opened again from
+    /// disk, as after Save in Settings, since its copy of the state is stale once the move saved the PR's.
+    pub fn move_to_pr(&mut self, cx: &mut Context<Self>) {
+        self.save_typing_now();
+        let Some(started) = self.change(cx, |review| review.start_move()) else {
+            return;
+        };
+        let mover = crate::open_review::mover_of(
+            &self.tour_work.repinner.folders.clone(),
+            &started.change_set,
+        );
+        self.moving = Some(self.run_off_thread(
+            cx,
+            {
+                let offer = started.offer.clone();
+                move || mover.run(&offer, &GitHub::from_env())
+            },
+            move |this, moved, cx| {
+                this.moving = None;
+                match moved {
+                    Ok(()) => {
+                        let switching = cx.global::<PrSwitching>().clone();
+                        match started.from {
+                            MoveFrom::TheLocalReview => {
+                                let moved_from = this.review.subject().clone();
+                                switching.active.update(cx, |active, cx| {
+                                    active.moved_away(&moved_from);
+                                    cx.notify();
+                                });
+                                (switching.show)(started.offer.pr.into());
+                            }
+                            MoveFrom::ThePr => {
+                                (switching.dropped)(started.change_set.into());
+                                (switching.reopen)();
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        this.review.move_failed();
+                        post_toast(cx, ToastTone::Danger, started.failure_text(&error));
+                    }
+                }
+            },
+        ));
+    }
+
+    /// Not now: the offer goes for that PR and the local review stays.
+    pub fn decline_move(&mut self, cx: &mut Context<Self>) {
+        if self.moving.is_some() {
+            return;
+        }
+        self.change(cx, |review| review.decline_the_move());
+        self.show_problems(cx);
+    }
+
     /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
     pub fn repin(&mut self, cx: &mut Context<Self>) {
-        if self.repin_progress == RepinProgress::Running {
+        self.save_typing_now();
+        if !self.change(cx, |review| review.start_repin()) {
             return;
         }
         self.repin_progress = RepinProgress::Running;
-        self.save_typing_now();
-        self.change(cx, |review| review.start_repin());
         let (repinner, github) = (
             Arc::clone(&self.tour_work.repinner),
             Arc::clone(&self.github),
@@ -786,8 +908,172 @@ impl ReviewSession {
         });
     }
 
+    /// The local review of the throwaway clone on disk, as `open <folder>` leaves it, so the switcher
+    /// lists it; the review on screen stays.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_review_on_disk(cx: &App) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let made = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            crate::open_review::open_review(&subject, &folder, &folders).map(drop)
+        });
+        if let Err(error) = made {
+            eprintln!("could not stage a local review on disk: {error:#}");
+        }
+    }
+
+    /// A local review of a throwaway clone in place of the PR: one commit ahead of `main`, a changed
+    /// README and cart, and a note git does not know yet. `unstage_basic` puts the PR back.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local(&mut self, cx: &mut Context<Self>) {
+        self.stage_local_then(cx, |_| Ok(()));
+    }
+
+    /// The local review with a task on the README's new line that its agent answered, kept in the
+    /// review's state file as Send now and `agent-reply` keep it, and a task on the README added to
+    /// tasks, waiting for Send tasks.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_with_task(&mut self, cx: &mut Context<Self>) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let staged = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            let opened = crate::open_review::open_review(&subject, &folder, &folders)?;
+            let head = opened.review.head().clone();
+            let store = crate::viewer::LocalThreadStore::in_file(opened.review.state_file());
+            let line = crate::line_number::LineNumber::try_from(3_u32)?;
+            let at = LineLocation {
+                path: FilePath::new("README.md")?,
+                side: crate::viewer::Side::Head,
+                line,
+            };
+            let place = CommentPlace::Lines {
+                start: at.clone(),
+                end: at,
+            };
+            store.stage_answered_task(
+                &place,
+                &head,
+                (
+                    "Say that tax is added on top, so nobody reads the total as the price.",
+                    "Done: the README now says the total is before tax, and `tax` names the rate.",
+                ),
+            )?;
+            store.stage_queued_task(
+                &CommentPlace::File(FilePath::new("README.md")?),
+                &head,
+                "Add a line on how to run the shop's tests.",
+            )
+        });
+        if let Err(error) = staged {
+            eprintln!("could not stage a task in the local review: {error:#}");
+        }
+        self.stage_local(cx);
+    }
+
+    /// The local review with a task held back from an agent that does not report its state, which offers
+    /// Send anyway.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_with_held_back_task(&mut self, cx: &mut Context<Self>) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let staged = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            let opened = crate::open_review::open_review(&subject, &folder, &folders)?;
+            let head = opened.review.head().clone();
+            let at = LineLocation {
+                path: FilePath::new("README.md")?,
+                side: crate::viewer::Side::Head,
+                line: crate::line_number::LineNumber::try_from(3_u32)?,
+            };
+            crate::viewer::LocalThreadStore::in_file(opened.review.state_file())
+                .stage_held_back_task(
+                    &CommentPlace::Lines {
+                        start: at.clone(),
+                        end: at,
+                    },
+                    &head,
+                    "Name the currency next to every price in the README.",
+                )
+        });
+        if let Err(error) = staged {
+            eprintln!("could not stage a held back task in the local review: {error:#}");
+        }
+        self.stage_local(cx);
+    }
+
+    /// The local review whose branch has an open PR, so its sidebar offers Move to the PR. Looking for
+    /// the PR on GitHub would answer nothing for the sample repo, so the answer is given here.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_move_offer(&mut self, cx: &mut Context<Self>) {
+        self.stage_local(cx);
+        let Ok(pr) = "https://github.com/acme/shop/pull/7".parse() else {
+            return;
+        };
+        self.change(cx, |review| {
+            review.pull_of_branch_is(Some(crate::viewer::PullOfBranch {
+                pr,
+                title: "Add the cart".to_owned(),
+            }));
+        });
+    }
+
+    /// The local review with a file written in its folder after it opened, so its look at the folder
+    /// says Changed on disk. `unstage_local_changed_on_disk` takes the file away again.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_local_changed_on_disk(&mut self, cx: &mut Context<Self>) {
+        self.stage_local_then(cx, |folder| {
+            Ok(std::fs::write(
+                folder.join(CHANGED_ON_DISK_FILE),
+                "written after the snapshot\n",
+            )?)
+        });
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_local_changed_on_disk(&mut self, cx: &mut Context<Self>) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        if let Ok(folder) = crate::app::snapshots::local_repo_in(folders.home()) {
+            // Only a later scene of the same run could see it.
+            std::fs::remove_file(folder.join(CHANGED_ON_DISK_FILE)).ok();
+        }
+        self.unstage_basic(cx);
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn stage_local_then(
+        &mut self,
+        cx: &mut Context<Self>,
+        after_open: impl FnOnce(&std::path::Path) -> anyhow::Result<()>,
+    ) {
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let opened = crate::app::snapshots::local_repo_in(folders.home()).and_then(|folder| {
+            let change_set = OpenedChangeSet::change_set_at(&folder)?;
+            let subject = crate::review_subject::ReviewSubject::from(change_set);
+            let opened = crate::open_review::open_review(&subject, &folder, &folders)?;
+            after_open(&folder)?;
+            Ok(opened)
+        });
+        let opened = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                eprintln!("could not stage a local review: {error:#}");
+                return;
+            }
+        };
+        let pr_review = std::mem::replace(&mut self.review, opened.review);
+        self.guided_before_staging.get_or_insert(pr_review);
+        let pr_source = std::mem::replace(&mut self.source, opened.source);
+        self.source_before_staging.get_or_insert(pr_source);
+        self.swapped_review(cx);
+    }
+
     #[cfg(feature = "snapshots")]
     pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
+        if let Some(source) = self.source_before_staging.take() {
+            self.source = source;
+        }
         if let Some(guided) = self.guided_before_staging.take() {
             self.review = guided;
             self.swapped_review(cx);
@@ -972,9 +1258,9 @@ impl ReviewSession {
     fn follow_tour_agent(&mut self, cx: &mut Context<Self>) {
         let (changes, mut arrived) = futures::channel::mpsc::unbounded();
         let agents = self.tour_work.tour_agents.clone();
-        let pr = self.review.pr().clone();
+        let subject = self.review.subject().clone();
         std::thread::spawn(move || {
-            agents.follow(&pr, &mut |state| match changes.unbounded_send(state) {
+            agents.follow(&subject, &mut |state| match changes.unbounded_send(state) {
                 Ok(()) => ControlFlow::Continue(()),
                 Err(_) => ControlFlow::Break(()),
             });
@@ -1000,12 +1286,23 @@ impl ReviewSession {
 
     /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
     /// Ends with what the Ask panel says of it.
-    pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
+    pub fn hand_ask_to_agent(
+        &self,
+        ask: &Ask,
+        place: &str,
+        anyway: bool,
+        cx: &App,
+    ) -> Task<OwnAgentHandOff> {
         let agents = self.tour_work.tour_agents.clone();
-        let pr = self.review.pr().clone();
+        let subject = self.review.subject().clone();
         let text = self.review.ask_hand_off_text(ask, place);
-        cx.background_executor()
-            .spawn(async move { agents.hand_to_own_agent(&pr, &text).line() })
+        cx.background_executor().spawn(async move {
+            if anyway {
+                agents.hand_to_own_agent_anyway(&subject, &text)
+            } else {
+                agents.hand_to_own_agent(&subject, &text)
+            }
+        })
     }
 
     /// Retry beside the message of an off link.
@@ -1018,20 +1315,36 @@ impl ReviewSession {
         !matches!(self.tour_agent, TourAgentState::LinkOff(_))
     }
 
-    /// The button is offered only for a failed hand-off in a thread, so an error other than a save
-    /// the sidebar names is a bug.
-    pub fn try_hand_off_again(&mut self, hand_off: HandOffId, cx: &mut Context<Self>) {
-        if let Err(error) = self.change(cx, |review| review.try_hand_off_again(hand_off)) {
-            eprintln!("could not queue hand-off {hand_off} again: {error:#}");
+    /// The button is offered only for a hand-off in a thread that can take it, so an error other than a
+    /// save the sidebar names is a bug.
+    pub fn press_hand_off_button(&mut self, button: HandOffButton, cx: &mut Context<Self>) {
+        if let Err(error) = self.change(cx, |review| review.press_hand_off_button(button)) {
+            eprintln!("could not {} for {button:?}: {error:#}", button.label());
         }
+    }
+
+    /// Makes the terminal the change set's agent, then looks for the agent again so the sidebar and the
+    /// hand-offs follow it.
+    pub fn use_tour_agent(&mut self, terminal: TerminalId, cx: &mut Context<Self>) {
+        let agents = self.tour_work.tour_agents.clone();
+        let subject = self.review.subject().clone();
+        self.show_agent = Some(self.run_off_thread(
+            cx,
+            move || agents.claim(&subject, &terminal),
+            |this, claimed, cx| {
+                this.review.use_agent_result(claimed.as_ref().err());
+                this.show_problems(cx);
+                this.follow_tour_agent(cx);
+            },
+        ));
     }
 
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
         let agents = self.tour_work.tour_agents.clone();
-        let pr = self.review.pr().clone();
+        let subject = self.review.subject().clone();
         self.show_agent = Some(self.run_off_thread(
             cx,
-            move || agents.show(&pr),
+            move || agents.show(&subject),
             |this, shown, cx| {
                 this.review.show_agent_result(shown.as_ref().err());
                 this.show_problems(cx);
@@ -1143,6 +1456,8 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
         SendMode::CommentNow => "posted on GitHub",
+        SendMode::SendNow => "kept as a task",
+        SendMode::AddToTasks => return format!("{what} queued for Send tasks"),
     };
     match audience {
         Audience::Author => format!("{what} {done}"),

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
+use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
 use crate::tour::Step;
 use crate::viewer::{
@@ -118,6 +119,8 @@ pub struct Toolbar {
     pub ignores_whitespace: Option<bool>,
     /// `None` where no code is shown.
     pub wraps_lines: Option<bool>,
+    /// Where a local review's change to the shown file comes from; `None` for a PR and off a file screen.
+    pub change: Option<LocalChange>,
 }
 
 #[derive(Hash)]

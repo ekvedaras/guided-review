@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
 use crate::piece_id::PieceId;
-use crate::pull_request::{PullRequestTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, RepoName, Sha};
+use crate::review_subject::ReviewSubject;
 
 const VERSION: u32 = 1;
 
@@ -34,10 +35,10 @@ impl ToursOnDisk {
         self != Self::Guided
     }
 
-    pub fn of(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
+    pub fn of(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         match (
-            Tour::basic_path_for(folders, pr).exists(),
-            Tour::path_for(folders, pr).exists(),
+            Tour::basic_path_for(folders, subject).exists(),
+            Tour::path_for(folders, subject).exists(),
         ) {
             (false, false) => Self::None,
             (true, false) => Self::Basic,
@@ -54,6 +55,12 @@ pub struct TourPin {
     pub version: u32,
     #[serde(default)]
     pub pr: String,
+    /// The subject key of a local tour, which has no `pr`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<String>,
+    /// The GitHub repo of a local tour's clone, so a PR of that repo finds the local review without git.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<RepoName>,
     #[serde(default)]
     pub base: Sha,
     #[serde(default)]
@@ -234,43 +241,43 @@ impl Tour {
 
     /// Where the guided tour lives. This is the path `tour-path` prints: the tour writer, `check`
     /// and `refresh` only ever see this file.
-    pub fn path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
-        Self::path_in(&Self::tours_dir(folders), pr)
+    pub fn path_for(folders: &AppFolders, subject: &ReviewSubject) -> PathBuf {
+        Self::path_in(&Self::tours_dir(folders), subject)
     }
 
     /// Where the basic tour lives, beside the guided tour's file.
-    pub fn basic_path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
-        Self::basic_path_in(&Self::tours_dir(folders), pr)
+    pub fn basic_path_for(folders: &AppFolders, subject: &ReviewSubject) -> PathBuf {
+        Self::basic_path_in(&Self::tours_dir(folders), subject)
     }
 
     /// The tour file the app shows and a re-pin moves: the basic tour while there is one, else the
     /// guided tour. With both files the guided one waits to be switched to.
-    pub fn shown_path_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
-        let basic = Self::basic_path_for(folders, pr);
+    pub fn shown_path_for(folders: &AppFolders, subject: &ReviewSubject) -> PathBuf {
+        let basic = Self::basic_path_for(folders, subject);
         if basic.exists() {
             basic
         } else {
-            Self::path_for(folders, pr)
+            Self::path_for(folders, subject)
         }
     }
 
     /// Where the tour writer keeps files the tour shows, like the pictures of its summary.
-    pub fn files_for(folders: &AppFolders, pr: &PullRequestUrl) -> PathBuf {
+    pub fn files_for(folders: &AppFolders, subject: &ReviewSubject) -> PathBuf {
         Self::tours_dir(folders)
-            .join(pr.repo.to_string())
-            .join(pr.number.to_string())
+            .join(subject.files_folder())
+            .join(subject.file_stem())
     }
 
-    pub fn path_in(tours_dir: &Path, pr: &PullRequestUrl) -> PathBuf {
+    pub fn path_in(tours_dir: &Path, subject: &ReviewSubject) -> PathBuf {
         tours_dir
-            .join(pr.repo.to_string())
-            .join(format!("{}.json", pr.number))
+            .join(subject.files_folder())
+            .join(format!("{}.json", subject.file_stem()))
     }
 
-    pub fn basic_path_in(tours_dir: &Path, pr: &PullRequestUrl) -> PathBuf {
+    pub fn basic_path_in(tours_dir: &Path, subject: &ReviewSubject) -> PathBuf {
         tours_dir
-            .join(pr.repo.to_string())
-            .join(format!("{}.basic.json", pr.number))
+            .join(subject.files_folder())
+            .join(format!("{}.basic.json", subject.file_stem()))
     }
 
     pub const fn pin(&self) -> &TourPin {
@@ -309,6 +316,14 @@ impl Tour {
         .with_context(invalid)
     }
 
+    /// Loads the tour file of `subject`, refusing one pinned to another subject: a local review's path
+    /// holds only a short hash of its folder, so two reviews could share it.
+    pub fn load_of(path: &Path, subject: &ReviewSubject) -> anyhow::Result<Self> {
+        let tour = Self::load(path)?;
+        tour.pin().ensure_is_of(subject, path)?;
+        Ok(tour)
+    }
+
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         match self {
             Self::Basic(tour) => tour.save(path),
@@ -336,19 +351,71 @@ fn write_json(value: &impl Serialize, path: &Path) -> anyhow::Result<()> {
 
 impl TourPin {
     /// The facts the tool owns; the tour writer never guesses them.
-    pub fn pin_to(&mut self, pr: &PullRequestUrl, base: &Sha, head: &Sha) {
+    pub fn pin_to(&mut self, subject: &ReviewSubject, base: &Sha, head: &Sha) {
         self.version = VERSION;
-        self.pr = pr.to_string();
+        self.name_subject(subject);
         self.base = base.clone();
         self.head = head.clone();
+    }
+
+    /// Fills in which PR or local change set the pin is for, leaving its version, base and head as they are.
+    pub fn name_subject(&mut self, subject: &ReviewSubject) {
+        match subject {
+            ReviewSubject::PullRequest(pr) => {
+                self.pr = pr.to_string();
+                self.local = None;
+                self.repo = None;
+            }
+            ReviewSubject::Local(change_set) => {
+                self.pr = String::new();
+                self.local = Some(subject.to_string());
+                if let Some(repo) = change_set.repo() {
+                    self.repo = Some(repo.clone());
+                }
+            }
+        }
+    }
+
+    /// The subject the tour is pinned to: a tour names a PR or a local change set, never both.
+    pub fn subject(&self) -> anyhow::Result<ReviewSubject> {
+        match (self.pr.is_empty(), &self.local) {
+            (false, None) => self.pr.parse(),
+            (true, Some(key)) => Ok(match key.parse()? {
+                ReviewSubject::Local(change_set) => {
+                    ReviewSubject::from(change_set.in_repo(self.repo.clone()))
+                }
+                pr @ ReviewSubject::PullRequest(_) => pr,
+            }),
+            (false, Some(_)) => anyhow::bail!(
+                "the tour is pinned to both a PR ({}) and a local change set, and must name one",
+                self.pr
+            ),
+            (true, None) => {
+                anyhow::bail!("the tour is pinned to neither a PR nor a local change set")
+            }
+        }
+    }
+
+    fn ensure_is_of(&self, subject: &ReviewSubject, path: &Path) -> anyhow::Result<()> {
+        match &self.local {
+            Some(held) if subject.local_key().is_some_and(|key| *held != key) => {
+                anyhow::bail!("{} is the tour of {held}, not of {subject}", path.display())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// The subject's key as text, for prompts that print it; a PR's key is its URL.
+    pub fn subject_key(&self) -> &str {
+        self.local.as_deref().unwrap_or(&self.pr)
     }
 
     pub fn is_pinned(&self) -> bool {
         !self.base.is_empty() && !self.head.is_empty()
     }
 
-    pub fn pinned_tips(&self) -> PullRequestTips {
-        PullRequestTips {
+    pub fn pinned_tips(&self) -> ChangeTips {
+        ChangeTips {
             base_branch_tip: self.base.clone(),
             head: self.head.clone(),
         }
@@ -356,6 +423,12 @@ impl TourPin {
 }
 
 impl BasicTour {
+    pub fn load_of(path: &Path, subject: &ReviewSubject) -> anyhow::Result<Self> {
+        let tour = Self::load(path)?;
+        tour.pin.ensure_is_of(subject, path)?;
+        Ok(tour)
+    }
+
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         Self::try_from(read_json(path)?)
             .with_context(|| format!("{} is not a valid basic tour file", path.display()))
@@ -367,6 +440,12 @@ impl BasicTour {
 }
 
 impl GuidedTour {
+    pub fn load_of(path: &Path, subject: &ReviewSubject) -> anyhow::Result<Self> {
+        let tour = Self::load(path)?;
+        tour.pin.ensure_is_of(subject, path)?;
+        Ok(tour)
+    }
+
     /// Reads the guided tour's file: no `kind`, or `"kind": "guided"`.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         match Tour::load(path)? {

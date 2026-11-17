@@ -47,7 +47,9 @@ fn basic_context(
     let mut text = format!(
         "PR: {}\nBase commit: {}\nHead commit: {}\n\
          The reviewer reads this PR as a basic tour: its changed files one by one, with no written walkthrough.\n",
-        tour.pin.pr, tour.pin.base, tour.pin.head
+        tour.pin.subject_key(),
+        tour.pin.base,
+        tour.pin.head
     );
     let plain = ChangedLinesOnly::default();
     let display = plain.display(links);
@@ -199,7 +201,9 @@ fn selected_lines(
 fn pointers(tour: &GuidedTour) -> String {
     format!(
         "PR: {}\nBase commit: {}\nHead commit: {}\n",
-        tour.pin.pr, tour.pin.base, tour.pin.head
+        tour.pin.subject_key(),
+        tour.pin.base,
+        tour.pin.head
     )
 }
 
@@ -209,6 +213,15 @@ fn step_heading(text: &mut String, title: &str, why: &str, kind: &str) -> Option
         "Place: a {kind} of the tour\nStep title: {title}\nWhy: {why}"
     )
     .ok()
+}
+
+/// The lines as the AI is told them, one per line: `+ path:side:line: text`.
+pub(super) fn code_lines(lines: &[DiffLine]) -> String {
+    let mut text = String::new();
+    for line in lines {
+        diff_line(&mut text, line);
+    }
+    text
 }
 
 fn piece_lines(text: &mut String, piece: &PieceDiff) -> Option<()> {

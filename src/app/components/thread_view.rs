@@ -12,7 +12,7 @@ use gpui::{
 use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    Audience, CommentId, HandOffId, Reaction, ReactionChange, ReactionCount, SendMode,
+    Audience, CommentId, HandOffButton, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
     ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadView,
 };
 
@@ -21,6 +21,7 @@ use super::button::{
 };
 use super::card::card;
 use super::chip::chip;
+use super::comment_composer::task_button;
 use super::icon::{Icon, sized_icon};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, shimmer_text, slide_in, turn_to};
@@ -45,7 +46,7 @@ pub enum ReplyDraftChange {
 pub type OnReplyDraft = Rc<dyn Fn(ReplyDraftChange, &mut App)>;
 
 /// Queues a failed hand-off again.
-pub type OnTryHandOffAgain = Rc<dyn Fn(HandOffId, &mut App)>;
+pub type OnHandOffButton = Rc<dyn Fn(HandOffButton, &mut App)>;
 
 /// What happened to the edit of one comment; the core keeps its text, so it survives scrolling away.
 pub type OnCommentEdit = Rc<dyn Fn(&CommentId, ReplyDraftChange, &mut App)>;
@@ -86,6 +87,7 @@ struct ReplyBox<'a> {
     thread_id: &'a ThreadId,
     can_reply_now: bool,
     can_ask_agent: bool,
+    sending: Sending,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -100,6 +102,7 @@ pub struct ThreadElement {
     view: Arc<ThreadView>,
     can_reply_now: bool,
     can_ask_agent: bool,
+    sending: Sending,
     reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     edits: BTreeMap<CommentId, String>,
@@ -108,13 +111,15 @@ pub struct ThreadElement {
     on_delete_question: OnDeleteQuestion,
     on_toggle: OnToggle,
     on_action: OnThreadAction,
-    on_try_hand_off_again: OnTryHandOffAgain,
+    on_hand_off_button: OnHandOffButton,
 }
 
 /// What the review holds about one thread: what the reviewer may do and what they have typed.
 pub struct ThreadDrafts {
     pub can_reply_now: bool,
     pub can_ask_agent: bool,
+    /// A local review's thread: a reply is a follow-up task, and nothing of it is on GitHub.
+    pub sending: Sending,
     pub reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
     pub edits: BTreeMap<CommentId, String>,
@@ -127,7 +132,7 @@ pub struct ThreadChanges {
     pub on_delete_question: OnDeleteQuestion,
     pub on_toggle: OnToggle,
     pub on_action: OnThreadAction,
-    pub on_try_hand_off_again: OnTryHandOffAgain,
+    pub on_hand_off_button: OnHandOffButton,
 }
 
 /// What an outdated thread's lines were when it was written, since the code under it shows what they are now.
@@ -164,6 +169,7 @@ impl ThreadElement {
         let ThreadDrafts {
             can_reply_now,
             can_ask_agent,
+            sending,
             reply,
             edits,
         } = drafts;
@@ -173,12 +179,13 @@ impl ThreadElement {
             on_delete_question,
             on_toggle,
             on_action,
-            on_try_hand_off_again,
+            on_hand_off_button,
         } = changes;
         Self {
             view,
             can_reply_now,
             can_ask_agent,
+            sending,
             reply,
             edits,
             on_reply_draft,
@@ -186,7 +193,7 @@ impl ThreadElement {
             on_delete_question,
             on_toggle,
             on_action,
-            on_try_hand_off_again,
+            on_hand_off_button,
         }
     }
 
@@ -460,6 +467,7 @@ impl ThreadElement {
             thread_id,
             can_reply_now,
             can_ask_agent,
+            sending,
             on_action,
             on_reply_draft,
             ui,
@@ -495,16 +503,13 @@ impl ThreadElement {
             )
             .on_edit(move |text, _, cx| on_edit(ReplyDraftChange::Edit(text), cx))
             .on_submit(move |_, cx| {
-                send_reply(
-                    &ui,
-                    &on_action,
-                    &submitted_thread,
-                    SendMode::AddToReview,
-                    Audience::Author,
-                    cx,
-                );
+                let (mode, audience) = match sending.tasks().first() {
+                    Some(&task) => (task, Audience::Agent),
+                    None => (SendMode::AddToReview, Audience::Author),
+                };
+                send_reply(&ui, &on_action, &submitted_thread, mode, audience, cx);
             })
-            .on_submit_to_agent(can_ask_agent, move |_, cx| {
+            .on_submit_to_agent(can_ask_agent && sending.on_github(), move |_, cx| {
                 send_reply(
                     &ask_ui,
                     &ask_action,
@@ -532,7 +537,28 @@ impl ThreadElement {
                 move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
             })
         });
-        let buttons = (!is_busy).then(|| {
+        let task_buttons = (!is_busy && !sending.on_github()).then(|| {
+            div().flex().flex_wrap().items_center().gap_2().children(
+                sending.tasks().iter().enumerate().map(|(index, &mode)| {
+                    let (icon, label) = task_button(mode);
+                    let kind = if index == 0 {
+                        ButtonKind::Primary
+                    } else {
+                        ButtonKind::Secondary
+                    };
+                    icon_label_button(
+                        &colors,
+                        SharedString::from(format!("reply-task-{index}-{id}")),
+                        kind,
+                        ButtonSize::Small,
+                        icon,
+                        label,
+                    )
+                    .on_click(send(mode, Audience::Agent))
+                }),
+            )
+        });
+        let buttons = (!is_busy && sending.on_github()).then(|| {
             let ask_agent = can_ask_agent.then(|| {
                 let mut parts = vec![
                     icon_label_button(
@@ -615,6 +641,7 @@ impl ThreadElement {
                             div().absolute().top(px(4.)).right(px(4.)).child(cancel)
                         })),
                 )
+                .children(task_buttons)
                 .children(buttons),
             SharedString::from(format!("reply-box-{id}")),
             STATE,
@@ -951,18 +978,25 @@ impl RenderOnce for ThreadElement {
             ))
             .children(marks)
             .child(div().min_w_0().truncate().child(summary));
-        let conversation_link = self.view.thread.comments.first().map(|comment| {
-            let url = comment.url.clone();
-            icon_button(
-                &colors,
-                SharedString::from(format!("thread-link-{id}")),
-                ButtonKind::Ghost,
-                ButtonSize::Small,
-                Icon::ExternalLink,
-                "Open on GitHub",
-            )
-            .on_click(move |_, _, cx| open_link(&url, cx))
-        });
+        let on_github = self.sending.on_github();
+        let conversation_link =
+            self.view
+                .thread
+                .comments
+                .first()
+                .filter(|_| on_github)
+                .map(|comment| {
+                    let url = comment.url.clone();
+                    icon_button(
+                        &colors,
+                        SharedString::from(format!("thread-link-{id}")),
+                        ButtonKind::Ghost,
+                        ButtonSize::Small,
+                        Icon::ExternalLink,
+                        "Open on GitHub",
+                    )
+                    .on_click(move |_, _, cx| open_link(&url, cx))
+                });
         let (is_busy, saving_edit, problem, focus) = {
             let state = ui.read(cx);
             (
@@ -1033,13 +1067,15 @@ impl RenderOnce for ThreadElement {
                                     })
                                     .flatten(),
                             )
-                            .child(Self::reactions(
-                                &colors,
-                                comment,
-                                &ui,
-                                &reaction_on_action,
-                                cx,
-                            ));
+                            .when(on_github, |row| {
+                                row.child(Self::reactions(
+                                    &colors,
+                                    comment,
+                                    &ui,
+                                    &reaction_on_action,
+                                    cx,
+                                ))
+                            });
                         let content = match being_edited {
                             Some(text) => {
                                 let edit_focus = window
@@ -1081,9 +1117,10 @@ impl RenderOnce for ThreadElement {
         });
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
-        let (can_reply_now, can_ask_agent, on_action) = (
+        let (can_reply_now, can_ask_agent, sending, on_action) = (
             self.can_reply_now,
             self.can_ask_agent,
+            self.sending,
             Rc::clone(&self.on_action),
         );
         let resolve = (!self.view.is_folded).then(|| {
@@ -1144,6 +1181,7 @@ impl RenderOnce for ThreadElement {
                             thread_id: &id,
                             can_reply_now,
                             can_ask_agent,
+                            sending,
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,
@@ -1185,26 +1223,30 @@ impl RenderOnce for ThreadElement {
             )
             .children(comments)
             .children(self.view.hand_off_line.as_ref().map(|line| {
-                let try_again = self.view.failed_hand_off.map(|hand_off| {
-                    let on_try_again = Rc::clone(&self.on_try_hand_off_again);
+                let button = self.view.hand_off_button.map(|button| {
+                    let on_press = Rc::clone(&self.on_hand_off_button);
+                    let icon = match button {
+                        HandOffButton::TryAgain(_) => Icon::Refresh,
+                        HandOffButton::SendAnyway(_) => Icon::Send,
+                    };
                     small_button(
                         &colors,
-                        SharedString::from(format!("try-hand-off-again-{id}")),
+                        SharedString::from(format!("hand-off-button-{id}")),
                         ButtonKind::Secondary,
-                        Icon::Refresh,
-                        "Try again",
+                        icon,
+                        button.label(),
                     )
-                    .on_click(move |_, _, cx| on_try_again(hand_off, cx))
+                    .on_click(move |_, _, cx| on_press(button, cx))
                 });
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
                     .text_sm()
-                    .text_color(if try_again.is_some() {
-                        colors.danger
-                    } else {
-                        colors.muted_text
+                    .text_color(match self.view.hand_off_button {
+                        Some(HandOffButton::TryAgain(_)) => colors.danger,
+                        Some(HandOffButton::SendAnyway(_)) => colors.text,
+                        None => colors.muted_text,
                     })
                     .child(if self.view.agent_is_working {
                         shimmer_text(
@@ -1217,7 +1259,7 @@ impl RenderOnce for ThreadElement {
                     } else {
                         SharedString::from(Arc::clone(line)).into_any_element()
                     })
-                    .children(try_again)
+                    .children(button)
             }))
             .children(actions)
     }

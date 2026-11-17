@@ -5,6 +5,7 @@ use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     PUSH_DEBOUNCE, Problem, Review, ReviewStateFile, TourAgents, ViewedState, Work, WorkKind,
@@ -73,7 +74,8 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &self.pr());
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()));
         Review::open(tour, &source, state_file).unwrap()
     }
 

@@ -5,7 +5,7 @@ use crate::file_path::FilePath;
 use crate::ide::{Ide, IdeLaunch, NoIde};
 use crate::line_number::LineNumber;
 use crate::pieces::ChangedFile;
-use crate::pull_request::{PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{RepoName, Sha};
 
 use super::step_page::{LineLocation, Side};
 
@@ -13,7 +13,8 @@ use super::step_page::{LineLocation, Side};
 /// `CodeOpener`'s call, so it holds no URL a view could open on its own.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CodeLink {
-    on_github: String,
+    /// `None` for a local review: its code is on no GitHub.
+    on_github: Option<String>,
     /// `Err` when the working copy cannot have this line.
     in_working_copy: Result<WorkingCopyLine, NotInIde>,
 }
@@ -32,6 +33,10 @@ pub enum NotInIde {
     NotInWorkingCopy,
     /// A removed line, or a line of a deleted file: only the base has it.
     RemovedLine,
+    /// As `RemovedLine`, in a local review, whose base is the branch's base and which has no PR.
+    RemovedFromBranch,
+    /// The review's own folder, which no IDE was pointed at.
+    NoLocalFolder,
 }
 
 impl fmt::Display for NotInIde {
@@ -43,6 +48,8 @@ impl fmt::Display for NotInIde {
             }
             Self::NotInWorkingCopy => f.write_str("the clone's working copy has no such file"),
             Self::RemovedLine => f.write_str("removed lines exist only at the PR's base"),
+            Self::RemovedFromBranch => f.write_str("removed lines exist only at the branch's base"),
+            Self::NoLocalFolder => f.write_str("no ide is set for the review's folder"),
         }
     }
 }
@@ -75,6 +82,8 @@ pub enum Destination {
     GitHub { url: String, because: NotInIde },
     /// A link that is not to the PR's code.
     Browser(String),
+    /// Code of a local review that the IDE cannot open, and that has no GitHub to open on.
+    NotOpenable { because: NotInIde },
 }
 
 /// What opening a destination came to, for the IDE's failure to reach the reviewer.
@@ -83,6 +92,8 @@ pub enum Opened {
     InIde,
     IdeNotStarted(String),
     Elsewhere,
+    /// Nothing could open it: the destination says why.
+    Nowhere,
 }
 
 impl Destination {
@@ -97,6 +108,7 @@ impl Destination {
                 open_url(url);
                 Opened::Elsewhere
             }
+            Self::NotOpenable { .. } => Opened::Nowhere,
         }
     }
 
@@ -105,6 +117,7 @@ impl Destination {
             Self::Ide { .. } => "Open in IDE",
             Self::GitHub { .. } => "Open on GitHub",
             Self::Browser(_) => "Open link",
+            Self::NotOpenable { .. } => "Cannot open",
         }
     }
 
@@ -116,9 +129,17 @@ impl Destination {
                 ..
             } => format!("{} ({caveat})", self.label()),
             Self::GitHub { because, .. } => format!("Opens on GitHub: {because}"),
+            Self::NotOpenable { because } => format!("Cannot open: {because}"),
             Self::Ide { caveat: None, .. } | Self::Browser(_) => self.label().to_owned(),
         }
     }
+}
+
+/// Where code that the IDE cannot open goes: a PR's repo on GitHub, or nowhere for a local review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeHost {
+    GitHub(RepoName),
+    LocalClone,
 }
 
 /// Which commit the local clone has checked out, compared with the tour's head.
@@ -145,7 +166,7 @@ impl WorkingCopy {
 pub struct CodeOpener {
     ide: Result<Ide, NoIde>,
     working_copy: WorkingCopy,
-    repo: RepoName,
+    host: CodeHost,
     head: Sha,
 }
 
@@ -153,35 +174,38 @@ impl CodeOpener {
     pub(super) fn new(
         ide: Result<Ide, NoIde>,
         working_copy: WorkingCopy,
-        pr: &PullRequestUrl,
+        host: &CodeHost,
         head: &Sha,
     ) -> Self {
         Self {
             ide,
             working_copy,
-            repo: pr.repo.clone(),
+            host: host.clone(),
             head: head.clone(),
         }
     }
 
     pub fn destination(&self, link: &CodeLink) -> Destination {
-        self.code_destination(link.in_working_copy.clone(), &link.on_github)
+        self.code_destination(link.in_working_copy.clone(), link.on_github.as_deref())
     }
 
     /// For links in markdown text: a GitHub link to a file of this repo, or a repo-relative path,
     /// is a code link; every other link opens as it is written.
     pub fn destination_of_url(&self, url: &str) -> Destination {
         if let Some(at) = self.github_blob(url) {
-            return self.code_destination(Ok(at), url);
+            return self.code_destination(Ok(at), Some(url));
         }
         match repo_relative(url) {
             Some(at) => {
-                let on_github = format!(
-                    "{}#L{}",
-                    blob_url(&self.repo, &self.head, at.path.as_str()),
-                    at.line
-                );
-                self.code_destination(Ok(at), &on_github)
+                let on_github = match &self.host {
+                    CodeHost::GitHub(repo) => Some(format!(
+                        "{}#L{}",
+                        blob_url(repo, &self.head, at.path.as_str()),
+                        at.line
+                    )),
+                    CodeHost::LocalClone => None,
+                };
+                self.code_destination(Ok(at), on_github.as_deref())
             }
             None => Destination::Browser(url.to_owned()),
         }
@@ -190,7 +214,7 @@ impl CodeOpener {
     fn code_destination(
         &self,
         in_working_copy: Result<WorkingCopyLine, NotInIde>,
-        on_github: &str,
+        on_github: Option<&str>,
     ) -> Destination {
         match in_working_copy.and_then(|at| self.ide_launch(&at)) {
             Ok(launch) => Destination::Ide {
@@ -198,18 +222,25 @@ impl CodeOpener {
                 caveat: (self.working_copy == WorkingCopy::Elsewhere)
                     .then_some(IdeCaveat::CloneNotAtTourHead),
             },
-            Err(because) => Destination::GitHub {
-                url: on_github.to_owned(),
-                because,
+            Err(because) => match on_github {
+                Some(url) => Destination::GitHub {
+                    url: url.to_owned(),
+                    because,
+                },
+                None => Destination::NotOpenable { because },
             },
         }
     }
 
     fn ide_launch(&self, at: &WorkingCopyLine) -> Result<IdeLaunch, NotInIde> {
-        let ide = self.ide.as_ref().map_err(|missing| match missing {
-            NoIde::NoTemplate => NotInIde::NoIdeTemplate,
-            NoIde::NoClone => NotInIde::NoClone(self.repo.clone()),
-        })?;
+        let ide = self
+            .ide
+            .as_ref()
+            .map_err(|missing| match (missing, &self.host) {
+                (NoIde::NoTemplate, _) => NotInIde::NoIdeTemplate,
+                (NoIde::NoClone, CodeHost::GitHub(repo)) => NotInIde::NoClone(repo.clone()),
+                (NoIde::NoClone, CodeHost::LocalClone) => NotInIde::NoLocalFolder,
+            })?;
         if !ide.holds(&at.path) {
             return Err(NotInIde::NotInWorkingCopy);
         }
@@ -219,6 +250,9 @@ impl CodeOpener {
     /// `https://github.com/{owner}/{repo}/blob/{ref}/{path}#L{n}`; a ref with a slash in it is
     /// read as its first segment, as GitHub cannot tell those apart either.
     fn github_blob(&self, url: &str) -> Option<WorkingCopyLine> {
+        let CodeHost::GitHub(repo) = &self.host else {
+            return None;
+        };
         let rest = url.strip_prefix("https://github.com/")?;
         let (address, fragment) = rest.split_once('#').unwrap_or((rest, ""));
         let mut segments = address.splitn(5, '/');
@@ -229,8 +263,8 @@ impl CodeOpener {
             segments.next()?,
             segments.next()?,
         );
-        let is_this_repo = owner.eq_ignore_ascii_case(self.repo.owner())
-            && name.eq_ignore_ascii_case(self.repo.name());
+        let is_this_repo =
+            owner.eq_ignore_ascii_case(repo.owner()) && name.eq_ignore_ascii_case(repo.name());
         if !(is_this_repo && kind == "blob") {
             return None;
         }
@@ -269,20 +303,20 @@ fn line_of_fragment(fragment: &str) -> LineNumber {
 /// Links point at the commits the tour is pinned to, so a line stays the same line
 /// even after the PR has moved on.
 pub(super) struct CodeLinks<'a> {
-    pub pr: &'a PullRequestUrl,
+    pub host: &'a CodeHost,
     pub base: &'a Sha,
     pub head: &'a Sha,
 }
 
 impl CodeLinks<'_> {
     pub fn to_line(&self, file: &ChangedFile, location: &LineLocation) -> CodeLink {
-        let (at, in_working_copy) = match location.side {
+        let (on_github, in_working_copy) = match location.side {
             Side::Base => (
                 self.blob(
                     self.base,
                     file.old_path.as_ref().unwrap_or(&file.path).as_str(),
                 ),
-                Err(NotInIde::RemovedLine),
+                Err(self.removed_line()),
             ),
             Side::Head => (
                 self.blob(self.head, file.path.as_str()),
@@ -293,7 +327,7 @@ impl CodeLinks<'_> {
             ),
         };
         CodeLink {
-            on_github: format!("{at}#L{}", location.line),
+            on_github: on_github.map(|at| format!("{at}#L{}", location.line)),
             in_working_copy,
         }
     }
@@ -303,7 +337,7 @@ impl CodeLinks<'_> {
         match file.status {
             FileStatus::Deleted => CodeLink {
                 on_github: self.blob(self.base, file.path.as_str()),
-                in_working_copy: Err(NotInIde::RemovedLine),
+                in_working_copy: Err(self.removed_line()),
             },
             _ => CodeLink {
                 on_github: self.blob(self.head, file.path.as_str()),
@@ -315,8 +349,18 @@ impl CodeLinks<'_> {
         }
     }
 
-    fn blob(&self, sha: &Sha, path: &str) -> String {
-        blob_url(&self.pr.repo, sha, path)
+    fn removed_line(&self) -> NotInIde {
+        match self.host {
+            CodeHost::GitHub(_) => NotInIde::RemovedLine,
+            CodeHost::LocalClone => NotInIde::RemovedFromBranch,
+        }
+    }
+
+    fn blob(&self, sha: &Sha, path: &str) -> Option<String> {
+        match self.host {
+            CodeHost::GitHub(repo) => Some(blob_url(repo, sha, path)),
+            CodeHost::LocalClone => None,
+        }
     }
 }
 

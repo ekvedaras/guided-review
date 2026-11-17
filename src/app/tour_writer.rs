@@ -11,7 +11,7 @@ use gpui::{App, AsyncApp, Entity};
 
 use super::components::pr_switcher::PrSwitching;
 use crate::open_review::writer_folder;
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::summary_instructions::SummaryInstructions;
 use crate::viewer::{
     ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision, WriterHandOver,
@@ -23,7 +23,7 @@ const SCREEN_EVERY: Duration = Duration::from_secs(2);
 const HAND_OVER_RETRY: Duration = Duration::from_secs(3);
 
 /// Shows the PR's writing on the loading screen, starting it when none is on.
-pub fn write(pr: PullRequestUrl, cx: &mut App) {
+pub fn write(pr: ReviewSubject, cx: &mut App) {
     let switching = cx.global::<PrSwitching>().clone();
     let decision = switching.active.update(cx, |active, cx| {
         let decision = active.write(pr.clone());
@@ -38,7 +38,7 @@ pub fn write(pr: PullRequestUrl, cx: &mut App) {
 /// Writes the guided tour of the PR on screen while the reviewer keeps reading its basic tour: no
 /// loading screen. The task goes to the PR's tour agent once it is idle, and one is started when the PR
 /// has none.
-pub fn write_in_background(pr: PullRequestUrl, cx: &mut App) {
+pub fn write_in_background(pr: ReviewSubject, cx: &mut App) {
     let switching = cx.global::<PrSwitching>().clone();
     let decision = switching.active.update(cx, |active, cx| {
         let decision = active.write_in_background(pr.clone());
@@ -50,7 +50,7 @@ pub fn write_in_background(pr: PullRequestUrl, cx: &mut App) {
     }
 }
 
-fn hand_over(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
+fn hand_over(switching: &PrSwitching, pr: ReviewSubject, cx: &mut App) {
     let active = switching.active.clone();
     let shown = active
         .read(cx)
@@ -111,7 +111,7 @@ fn hand_over(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
 }
 
 /// Starts the writer of a PR whose writing `ActivePr` just began.
-pub fn start_writer(pr: PullRequestUrl, cx: &mut App) {
+pub fn start_writer(pr: ReviewSubject, cx: &mut App) {
     let switching = cx.global::<PrSwitching>().clone();
     start(&switching, pr, cx);
 }
@@ -133,7 +133,7 @@ pub fn resume(cx: &mut App) {
     }
 }
 
-pub fn try_again(pr: PullRequestUrl, cx: &mut App) {
+pub fn try_again(pr: ReviewSubject, cx: &mut App) {
     let switching = cx.global::<PrSwitching>().clone();
     switching.active.update(cx, |active, cx| {
         active.try_again(&pr);
@@ -152,7 +152,7 @@ pub fn stop_waiting(cx: &mut App) {
 }
 
 /// Brings the writer's terminal up in herdr. Slow (it runs `herdr-app`), so it runs off the UI thread.
-pub fn show_agent(pr: PullRequestUrl, cx: &mut App) {
+pub fn show_agent(pr: ReviewSubject, cx: &mut App) {
     let agents = TourAgents::new(Arc::clone(&cx.global::<PrSwitching>().agents));
     cx.background_executor()
         .spawn(async move {
@@ -163,7 +163,7 @@ pub fn show_agent(pr: PullRequestUrl, cx: &mut App) {
         .detach();
 }
 
-fn start(switching: &PrSwitching, pr: PullRequestUrl, cx: &mut App) {
+fn start(switching: &PrSwitching, pr: ReviewSubject, cx: &mut App) {
     let active = switching.active.clone();
     let shown = active
         .read(cx)
@@ -207,7 +207,7 @@ enum WriterEvent {
 async fn follow(
     active: &Entity<ActivePr>,
     port: Arc<dyn TourAgentPort>,
-    pr: &PullRequestUrl,
+    pr: &ReviewSubject,
     terminal: TerminalId,
     cx: &mut AsyncApp,
 ) {

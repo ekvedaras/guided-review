@@ -3,7 +3,8 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use crate::support::line;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::RepoName;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CommentId, Review, ReviewStateFile, ReviewThread, SafetyNetSize, Screen, Side, ThreadComment,
@@ -71,10 +72,10 @@ impl Shop {
         }))
         .unwrap();
         let source = self.source();
-        let state_file = ReviewStateFile::for_pr(
+        let state_file = ReviewStateFile::for_subject(
             &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7"
-                .parse::<PullRequestUrl>()
+                .parse::<ReviewSubject>()
                 .unwrap(),
         );
         Review::open(tour, &source, state_file).unwrap()
@@ -92,6 +93,7 @@ fn comment(author: &str, is_bot: bool, body: &str) -> ThreadComment {
         reactions: Vec::new(),
         author: author.into(),
         is_bot,
+        by_agent: None,
         by_viewer: false,
         body: body.into(),
         url: format!("https://github.com/acme/shop/pull/7#discussion_{body}"),

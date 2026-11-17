@@ -1,5 +1,5 @@
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort,
     TourAgentState, TourAgents, TourKind,
@@ -10,7 +10,7 @@ use std::sync::Arc;
 const PR: &str = "https://github.com/acme/shop/pull/7";
 const OTHER_PR: &str = "https://github.com/acme/shop/pull/8";
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
@@ -60,7 +60,7 @@ fn claiming_a_terminal_makes_it_the_only_agent_of_the_pr() {
             TourAgentCall::Release(TerminalId::new("t1")),
             TourAgentCall::Claim {
                 terminal: TerminalId::new("t2"),
-                pr: pr()
+                subject: pr()
             }
         ]
     );
@@ -83,7 +83,7 @@ fn claiming_the_terminal_that_already_is_the_agent_releases_nothing() {
 #[test]
 fn a_terminal_reused_for_another_pr_stops_being_the_agent_of_the_first() {
     let fake = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
-    let other: PullRequestUrl = OTHER_PR.parse().unwrap();
+    let other: ReviewSubject = OTHER_PR.parse().unwrap();
 
     agents(&fake).claim(&other, &TerminalId::new("t1")).unwrap();
 
@@ -276,7 +276,7 @@ fn kills(fake: &FakeTourAgent) -> Vec<TourAgentCall> {
         .collect()
 }
 
-fn url(pr: &str) -> PullRequestUrl {
+fn url(pr: &str) -> ReviewSubject {
     pr.parse().unwrap()
 }
 
@@ -330,7 +330,7 @@ fn writing_a_tour_starts_the_prs_one_tour_agent_in_its_folder_on_the_tour_skill(
     let [
         TourAgentCall::Start {
             name,
-            pr: started_for,
+            subject: started_for,
             folder,
             first_task,
         },

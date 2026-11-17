@@ -16,6 +16,7 @@ use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::{Updates, running_build};
 use crate::file_path::FilePath;
+use crate::review_subject::ReviewSubject;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, FileView, LineKind, LineLocation, PageRow, PieceLabels, Problem, ProblemKind,
@@ -64,10 +65,15 @@ enum Scene {
     BasicRead,
     BasicGuidedReady,
     SwitchedSummary,
+    LocalOverview,
+    LocalFile,
+    LocalChangedOnDisk,
+    LocalMoveOffer,
+    LocalTaskSendAnyway,
 }
 
 impl Scene {
-    const ALL: [Self; 36] = [
+    const ALL: [Self; 41] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -104,6 +110,11 @@ impl Scene {
         Self::BasicRead,
         Self::BasicGuidedReady,
         Self::SwitchedSummary,
+        Self::LocalOverview,
+        Self::LocalFile,
+        Self::LocalChangedOnDisk,
+        Self::LocalMoveOffer,
+        Self::LocalTaskSendAnyway,
     ];
 
     fn file_name(self) -> &'static str {
@@ -144,6 +155,11 @@ impl Scene {
             Self::BasicRead => "55-basic-read",
             Self::BasicGuidedReady => "56-basic-guided-ready",
             Self::SwitchedSummary => "57-switched-summary",
+            Self::LocalOverview => "58-local-overview",
+            Self::LocalFile => "59-local-file",
+            Self::LocalChangedOnDisk => "60-local-changed-on-disk",
+            Self::LocalMoveOffer => "61-local-move-to-pr",
+            Self::LocalTaskSendAnyway => "62-local-task-send-anyway",
         }
     }
 }
@@ -408,9 +424,11 @@ impl OneStepLayout {
                 self.jump
                     .update(cx, |palette, cx| palette.open(groups, window, cx));
             }
-            Scene::PrSwitcher => self
-                .pr_switcher
-                .update(cx, |switcher, cx| switcher.open(window, cx)),
+            Scene::PrSwitcher => {
+                ReviewSession::stage_local_review_on_disk(cx);
+                self.pr_switcher
+                    .update(cx, |switcher, cx| switcher.open(window, cx));
+            }
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
                     session.type_in(
@@ -424,7 +442,7 @@ impl OneStepLayout {
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
             Scene::AskPanel => self.ask_about_screen(window, cx),
             Scene::SwitchingVeil => {
-                if let Some(other) = sample_pr(OTHER_PR) {
+                if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
                     let active = cx.global::<PrSwitching>().active.clone();
                     active.update(cx, |active, cx| {
                         active.picked(other);
@@ -433,7 +451,7 @@ impl OneStepLayout {
                 }
             }
             Scene::LoadingScreen => {
-                if let Some(other) = sample_pr(OTHER_PR) {
+                if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
                     let active = cx.global::<PrSwitching>().active.clone();
                     active.update(cx, |active, cx| {
                         active.write(other.clone());
@@ -544,6 +562,31 @@ impl OneStepLayout {
             Scene::BasicFile => {
                 self.session.update(cx, ReviewSession::stage_basic);
                 self.change_review(cx, |review| review.go_forward());
+            }
+            Scene::LocalOverview => self.session.update(cx, ReviewSession::stage_local),
+            Scene::LocalChangedOnDisk => self
+                .session
+                .update(cx, ReviewSession::stage_local_changed_on_disk),
+            Scene::LocalMoveOffer => self
+                .session
+                .update(cx, ReviewSession::stage_local_move_offer),
+            Scene::LocalFile => {
+                self.session
+                    .update(cx, ReviewSession::stage_local_with_task);
+                self.change_review(cx, |review| {
+                    if let Ok(path) = FilePath::new("README.md") {
+                        review.go_to_file(&path);
+                    }
+                });
+            }
+            Scene::LocalTaskSendAnyway => {
+                self.session
+                    .update(cx, ReviewSession::stage_local_with_held_back_task);
+                self.change_review(cx, |review| {
+                    if let Ok(path) = FilePath::new("README.md") {
+                        review.go_to_file(&path);
+                    }
+                });
             }
             Scene::BasicRead => self.session.update(cx, ReviewSession::stage_basic_read),
             Scene::BasicGuidedReady => self
@@ -663,8 +706,17 @@ impl OneStepLayout {
             | Scene::BasicOverviewFiles
             | Scene::BasicFile
             | Scene::BasicRead
-            | Scene::BasicGuidedReady => {
+            | Scene::BasicGuidedReady
+            | Scene::LocalOverview
+            | Scene::LocalMoveOffer
+            | Scene::LocalFile
+            | Scene::LocalTaskSendAnyway => {
                 self.session.update(cx, ReviewSession::unstage_basic);
+                self.go_to_first_open_code(cx);
+            }
+            Scene::LocalChangedOnDisk => {
+                self.session
+                    .update(cx, ReviewSession::unstage_local_changed_on_disk);
                 self.go_to_first_open_code(cx);
             }
             Scene::SwitchedSummary => {

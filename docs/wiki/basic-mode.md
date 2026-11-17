@@ -20,7 +20,7 @@ On 2026-11-16 the maintainer decided that a PR can be read in the app with no AI
 
 ## Decided for the later review of local changes
 
-Not built. Only what the basic tour's code must not get in the way of:
+Superseded by [Local review](local-review.md), which keeps the decisions of 2026-11-16 in full. What the basic tour's code was kept from getting in the way of:
 
 - Comments stay local and go to the agent as tasks.
 - Uncommitted files are snapshotted, with a "changed on disk, update" offer like re-pin.

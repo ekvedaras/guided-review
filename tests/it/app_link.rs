@@ -10,10 +10,75 @@ use crate::support::FixtureRepo;
 
 fn open_request() -> OpenRequest {
     OpenRequest {
-        pr: "https://github.com/acme/shop/pull/7".to_owned(),
+        subject: "https://github.com/acme/shop/pull/7".to_owned(),
         folder: "/work/shop".into(),
         terminal: Some("t1b".to_owned()),
         at_step: None,
+    }
+}
+
+const LOCAL_SUBJECT: &str = "local:/work/shop@feature/cart";
+
+fn open_json_of(request: OpenRequest) -> serde_json::Value {
+    let line = RequestLine::new(Request::Open(request)).to_line().unwrap();
+    let json: serde_json::Value = serde_json::from_str(&line).unwrap();
+    json["request"]["open"].clone()
+}
+
+fn open_request_read_from(open: &serde_json::Value) -> OpenRequest {
+    let line = serde_json::json!({"version": build(), "request": {"open": open}}).to_string();
+    let RequestLine {
+        request: Request::Open(request),
+        ..
+    } = serde_json::from_str(&line).unwrap()
+    else {
+        panic!("not an open request: {line}");
+    };
+    request
+}
+
+#[test]
+fn an_open_request_of_a_pr_names_its_subject_and_also_the_pr_an_older_app_reads() {
+    let open = open_json_of(open_request());
+
+    assert_eq!(open["subject"], "https://github.com/acme/shop/pull/7");
+    assert_eq!(open["pr"], "https://github.com/acme/shop/pull/7");
+}
+
+#[test]
+fn an_open_request_of_a_local_change_set_names_only_its_subject() {
+    let open = open_json_of(OpenRequest {
+        subject: LOCAL_SUBJECT.to_owned(),
+        ..open_request()
+    });
+
+    assert_eq!(open["subject"], LOCAL_SUBJECT);
+    assert!(open.get("pr").is_none(), "{open}");
+}
+
+#[test]
+fn an_open_request_from_an_older_build_names_its_subject_by_the_pr() {
+    let request = open_request_read_from(&serde_json::json!({
+        "pr": "https://github.com/acme/shop/pull/7",
+        "folder": "/work/shop",
+        "terminal": "t1b",
+    }));
+
+    assert_eq!(request, open_request());
+}
+
+#[test]
+fn an_open_request_reads_back_as_it_was_written() {
+    let local = OpenRequest {
+        subject: LOCAL_SUBJECT.to_owned(),
+        ..open_request()
+    };
+
+    for request in [open_request(), local] {
+        assert_eq!(
+            open_request_read_from(&open_json_of(request.clone())),
+            request
+        );
     }
 }
 
@@ -72,7 +137,7 @@ fn the_listener_answers_each_request_line_through_the_handler() {
     AppListener::bind(&folder)
         .unwrap()
         .serve(|request| match request {
-            Request::Open(open) => Answer::Opening { pr: open.pr },
+            Request::Open(open) => Answer::Opening { pr: open.subject },
             Request::AgentReplied { pr, .. } => Answer::HandOffAnswered { pr },
             Request::ShowSettings => Answer::ShowingSettings,
             Request::ShowSwitcher => Answer::ShowingSwitcher,

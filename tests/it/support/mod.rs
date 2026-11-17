@@ -67,8 +67,21 @@ pub struct FixtureRepo {
 
 impl FixtureRepo {
     pub fn cloned_from(github_repo: &str) -> Self {
+        Self::cloned_into(github_repo, TempDir::new().unwrap())
+    }
+
+    /// For what a folder name with a space does to a command line.
+    pub fn cloned_into_folder_with_a_space(github_repo: &str) -> Self {
+        let root = tempfile::Builder::new()
+            .prefix("my shop ")
+            .tempdir()
+            .unwrap();
+        Self::cloned_into(github_repo, root)
+    }
+
+    fn cloned_into(github_repo: &str, root: TempDir) -> Self {
         let repo = Self {
-            root: TempDir::new().unwrap(),
+            root,
             home: TempDir::new().unwrap(),
         };
         repo.git(&["init", "-q", "-b", "main"]);

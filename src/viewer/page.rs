@@ -25,6 +25,7 @@ use super::review::{ReviewCore, Screen};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::step_page::{DiffLine, LineLocation};
 use crate::file_path::FilePath;
+use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
 
 /// The content of one screen as rows: the summary, a step's text and its file boxes, or the safety
@@ -330,6 +331,14 @@ impl Page {
             })
     }
 
+    /// Where a local review's change to the shown file comes from; `None` for a PR and off a file screen.
+    pub fn screen_change(&self) -> Option<LocalChange> {
+        self.rows.iter().find_map(|row| match row {
+            PageRow::Toolbar(toolbar) => toolbar.change,
+            _ => None,
+        })
+    }
+
     /// What the screen's own Ask button asks about, as its toolbar offers it.
     pub fn screen_ask(&self) -> Option<&AskAt> {
         self.rows.iter().find_map(|row| match row {
@@ -409,7 +418,7 @@ impl Page {
                         file_place: footer.file_place,
                         lead: Some(crate::viewer::TourLead::Finish {
                             steps,
-                            can_finish: true,
+                            finish: Some(crate::viewer::FinishAction::FinishReview),
                         }),
                     }));
                 }

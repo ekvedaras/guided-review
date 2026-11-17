@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::config::Config;
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::json::at;
-use crate::pull_request::PullRequestUrl;
+use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
 
@@ -188,12 +188,18 @@ impl ClaudeRefreshWriter {
 }
 
 impl RefreshWriter for ClaudeRefreshWriter {
-    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
+    fn refresh(
+        &self,
+        subject: &ReviewSubject,
+        on_line: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<()> {
         let prompt = format!(
-            "Run the tour skill as `/tour {pr}` on a PR that already has a tour, which makes it a Refresh. \
+            "Run the tour skill as `/tour {subject}` on a {kind} that already has a tour, which makes it a Refresh. \
              Only the listed tools are allowed and a command outside them is denied, never asked: \
-             run each `guided-review` and `gh` command as its own Bash call with the PR url written out, \
-             without shell variables, `&&`, `;` or `$(...)`."
+             run each `guided-review` and `gh` command as its own Bash call with the {key_name} written out, \
+             without shell variables, `&&`, `;` or `$(...)`.",
+            kind = subject.kind(),
+            key_name = subject.key_name(),
         );
         let mut child = Command::new(&self.binary)
             .args(["-p", &prompt])

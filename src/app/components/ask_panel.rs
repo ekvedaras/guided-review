@@ -133,6 +133,8 @@ pub struct UseAsComment(pub Ask);
 pub struct HandToAgent {
     pub ask: Ask,
     pub place: String,
+    /// Typed in whatever the agent's state, once the reviewer chose Send anyway.
+    pub anyway: bool,
 }
 
 /// The right side panel: Asks about one place, newest first, and the box to ask the next one.
@@ -302,7 +304,7 @@ impl AskPanel {
         cx.notify();
     }
 
-    fn hand_to_agent(&mut self, ask: &Ask, place: &str, cx: &mut Context<Self>) {
+    fn hand_to_agent(&mut self, ask: &Ask, place: &str, anyway: bool, cx: &mut Context<Self>) {
         let id = ask.id;
         self.change(cx, |review, _| {
             review.change_asks(|desk| desk.hand_off_started(id));
@@ -310,6 +312,7 @@ impl AskPanel {
         cx.emit(HandToAgent {
             ask: ask.clone(),
             place: place.to_owned(),
+            anyway,
         });
         cx.notify();
     }
@@ -453,8 +456,18 @@ impl AskPanel {
                     "Hand to your agent",
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.hand_to_agent(&ask_to_hand, &place, cx);
+                    this.hand_to_agent(&ask_to_hand, &place, false, cx);
                 })),
+            );
+        }
+        if desk.can_send_anyway(id) {
+            let (ask_to_hand, place) = (ask.clone(), place.to_owned());
+            actions = actions.child(
+                action("send-anyway".to_owned(), Icon::Send, "Send anyway").on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.hand_to_agent(&ask_to_hand, &place, true, cx);
+                    },
+                )),
             );
         }
         let hand_off = desk.hand_off(id).map(|line| {

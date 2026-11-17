@@ -7,10 +7,16 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Context as _;
+
+use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
+use crate::local_facts::{LocalChange, LocalFacts};
+use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::{PullRequestUrl, Sha};
+use crate::pull_request::Sha;
+use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
 use std::path::{Path, PathBuf};
@@ -21,31 +27,36 @@ use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
-use super::code_link::{CodeLinks, CodeOpener, WorkingCopy};
+use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
-    CommentOutcome, CommentPlace, CommentRefusal, CommentRequest, CommentResult, QueuedComment,
-    SendMode,
+    CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest, CommentResult,
+    QueuedComment, SendMode, Sending,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
+use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finish_review::{
-    ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
-    SubmittedReview,
+    ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
+    ReviewVerdict, SubmittedReview,
 };
 use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
-use super::hand_offs::{AgentReplied, Audience, HandOffId, HandOffState, HandOffs, SentFrom};
+use super::hand_offs::{
+    AgentReplied, Audience, HandOff, HandOffId, HandOffState, HandOffs, SentFrom,
+};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
+use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
+use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
-use super::ports::{AgentLaunch, GitHubError};
+use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
@@ -53,7 +64,7 @@ use super::refresh::RefreshBrief;
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
-use super::saved_state::SavedState;
+use super::saved_state::{SavedState, WriterElsewhere};
 use super::step_page::{
     DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
 };
@@ -186,12 +197,12 @@ pub enum TourLead {
     ContinueFile(UnreadFile),
     FinishFiles {
         files: usize,
-        can_finish: bool,
+        finish: Option<FinishAction>,
     },
     Finish {
         steps: usize,
         /// The PR takes a review from the viewer; an own PR with nothing to send does not.
-        can_finish: bool,
+        finish: Option<FinishAction>,
     },
 }
 
@@ -272,11 +283,29 @@ pub struct ReviewCore {
     file_tree: FileTree,
     /// Folders the reviewer folded. Not saved: a reopened app shows the tree unfolded.
     folded_folders: BTreeSet<FolderPath>,
-    pr: PullRequestUrl,
+    subject: ReviewSubject,
+    /// Where code the IDE cannot open goes: the PR's repo on GitHub, or nowhere for a local review.
+    code_host: CodeHost,
+    /// What a local review's overview shows; set by the app from the clone, `None` for a PR.
+    local_facts: Option<LocalFacts>,
+    /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
+    local_heading: Option<Arc<str>>,
+    /// The open PR whose head is a local review's branch, as GitHub last said; not saved.
+    pull_of_branch: Option<PullOfBranch>,
+    /// For a PR: the local reviews on disk of its repo, which one of may be of the PR's branch. Not saved.
+    local_reviews_of_repo: Vec<LocalChangeSet>,
+    /// For a PR: the local review of the branch it is opened from, which it offers to take over.
+    local_to_move_here: Option<LocalChangeSet>,
+    /// How many looks for the PR's head branch failed in a row; each one waits longer for the next.
+    head_branch_failures: u32,
+    /// Where those local reviews' files are.
+    local_reviews_in: Option<AppFolders>,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
     pr_head: Option<Sha>,
+    /// A local review's folder against the snapshot it reads; unknown until the folder is looked at.
+    on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
     files: Vec<ChangedFile>,
@@ -412,6 +441,20 @@ impl Review {
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
+        if self.local_facts.is_none()
+            && let Some(facts) = replaced.local_facts
+        {
+            self.local_facts_are(facts);
+        }
+        if self.pull_of_branch.is_none() {
+            self.pull_of_branch = replaced.pull_of_branch;
+        }
+        if self.local_reviews_of_repo.is_empty() {
+            self.local_reviews_of_repo = replaced.local_reviews_of_repo;
+            self.local_to_move_here = replaced.local_to_move_here;
+            self.head_branch_failures = replaced.head_branch_failures;
+            self.local_reviews_in = replaced.local_reviews_in;
+        }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
         }
@@ -523,7 +566,15 @@ impl ReviewCore {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
-        let pr: PullRequestUrl = tour.pin().pr.parse()?;
+        let subject = tour.pin().subject()?;
+        let code_host = subject
+            .github_repo()
+            .map_or(CodeHost::LocalClone, |repo| CodeHost::GitHub(repo.clone()));
+        let viewed_sync = if subject.syncs_viewed_marks() {
+            ViewedSync::default()
+        } else {
+            ViewedSync::without_github_marks()
+        };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let reviewing_mark = ReviewingMark::new(head.clone());
         let files = pieces::cut(source, &base, &head)?;
@@ -573,14 +624,24 @@ impl ReviewCore {
             .collect();
         let mut display_options = DisplayOptions::for_code(base.clone(), head.clone());
         display_options.cut_markdown(&files);
+        let local_heading = Self::heading_of(&subject, None);
         Ok(Self {
             tour,
             file_tree,
             folded_folders: BTreeSet::new(),
-            pr,
+            subject,
+            code_host,
+            local_heading,
+            local_facts: None,
+            pull_of_branch: None,
+            local_reviews_of_repo: Vec::new(),
+            local_to_move_here: None,
+            head_branch_failures: 0,
+            local_reviews_in: None,
             base,
             head,
             pr_head: None,
+            on_disk: None,
             last_review: None,
             files,
             steps_in_reading_order,
@@ -593,7 +654,7 @@ impl ReviewCore {
             state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
-            viewed_sync: ViewedSync::default(),
+            viewed_sync,
             problems: {
                 let mut problems = Problems::default();
                 if let Some(reason) = source.fallback_reason() {
@@ -666,8 +727,42 @@ impl ReviewCore {
         &self.screen
     }
 
-    pub fn pr(&self) -> &PullRequestUrl {
-        &self.pr
+    pub fn subject(&self) -> &ReviewSubject {
+        &self.subject
+    }
+
+    pub(super) fn thread_home(&self) -> ThreadHome {
+        ThreadHome::of(&self.subject, self.state.file())
+    }
+
+    /// The send actions a comment box of this review offers; Ask agent is one more for a PR.
+    pub fn send_modes(&self) -> &'static [SendMode] {
+        if self.subject.comments_are_agent_tasks() {
+            &SendMode::LOCAL
+        } else {
+            &[SendMode::AddToReview, SendMode::CommentNow]
+        }
+    }
+
+    /// A local review's boxes send tasks for its agent, a PR's send to GitHub.
+    pub fn sending(&self) -> Sending {
+        if self.subject.comments_are_agent_tasks() {
+            Sending::Tasks(&SendMode::LOCAL)
+        } else {
+            Sending::GitHub
+        }
+    }
+
+    /// A local review's comments are tasks for its agent: while the link to the agent is off one
+    /// sent now stays a draft, and says why; one added to tasks waits for Send tasks all the same.
+    fn send_refusal(&self, mode: SendMode) -> Option<CommentRefusal> {
+        if !self.send_modes().contains(&mode) {
+            Some(CommentRefusal::NotOffered)
+        } else if mode == SendMode::SendNow && self.agent_link_is_off {
+            Some(CommentRefusal::AgentLinkOff)
+        } else {
+            None
+        }
     }
 
     pub(super) fn has_seen_end_of_screen(&self) -> bool {
@@ -690,6 +785,13 @@ impl ReviewCore {
                 self.raise_problem(Problem::ShowAgentFailed(format!("{error:#}")));
             }
             None => self.clear_problem(ProblemKind::ShowAgentFailed),
+        }
+    }
+
+    pub fn use_agent_result(&mut self, failure: Option<&anyhow::Error>) {
+        match failure {
+            Some(error) => self.raise_problem(Problem::UseAgentFailed(format!("{error:#}"))),
+            None => self.clear_problem(ProblemKind::UseAgentFailed),
         }
     }
 
@@ -745,6 +847,129 @@ impl ReviewCore {
             })
     }
 
+    /// What GitHub said of the PR opened from a local review's branch.
+    pub fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
+        self.pull_of_branch = found;
+    }
+
+    /// The local reviews on disk that are of this PR's repo, so the review looks for one of the PR's branch.
+    /// A PR's head branch never changes, so it is looked up once here, never again on focus.
+    pub fn local_reviews_of_repo_are(
+        &mut self,
+        folders: &AppFolders,
+        reviews: Vec<LocalChangeSet>,
+    ) {
+        self.local_reviews_in = Some(folders.clone());
+        self.local_reviews_of_repo = reviews;
+        self.work.want(WorkKind::LookUpHeadBranch);
+    }
+
+    pub(super) fn head_branch_is(&mut self, branch: Option<BranchName>) {
+        self.local_to_move_here = branch.and_then(|branch| {
+            self.local_reviews_of_repo
+                .iter()
+                .find(|review| *review.branch() == branch)
+                .cloned()
+        });
+    }
+
+    /// A lasting line of a PR's review: a local review of the branch it is opened from, which it offers
+    /// to take over.
+    pub fn move_here_offer(&self) -> Option<MoveHereOffer> {
+        let pr = self.subject.pull_request()?;
+        Some(MoveHereOffer {
+            change_set: self.local_to_move_here.clone()?,
+            offer: MoveOffer {
+                pr: pr.clone(),
+                title: String::new(),
+            },
+        })
+    }
+
+    /// Keep local review: the offer goes for good, on both sides, and the local review stays.
+    pub fn decline_move_here(&mut self) -> anyhow::Result<()> {
+        let Some(offer) = self.move_here_offer() else {
+            return Ok(());
+        };
+        let local = ReviewSubject::from(offer.change_set.clone());
+        let folders = self
+            .local_reviews_in
+            .clone()
+            .context("no local review is known here")?;
+        ReviewStateFile::for_subject(&folders, &local)
+            .update(|state| state.decline_move_to(&offer.offer.pr))?;
+        self.local_reviews_of_repo
+            .retain(|review| *review != offer.change_set);
+        self.local_to_move_here = None;
+        Ok(())
+    }
+
+    /// A lasting line of a local review: the PR opened from its branch, which it offers to move to.
+    pub fn move_offer(&self) -> Option<MoveOffer> {
+        self.subject.local()?;
+        let found = self.pull_of_branch.as_ref()?;
+        (!self.state.has_declined_move_to(&found.pr)).then(|| MoveOffer::of(found))
+    }
+
+    /// Declining hides the offer for that PR for good and keeps the local review. Written to the state
+    /// file on its own, so it never writes the viewer's sections back.
+    pub fn decline_move(&mut self) -> anyhow::Result<()> {
+        let Some(offer) = self.move_offer() else {
+            return Ok(());
+        };
+        self.state
+            .keep_until_repinned(|state| state.decline_move_to(&offer.pr));
+        self.state
+            .file()
+            .update(|state| state.decline_move_to(&offer.pr))
+    }
+
+    /// The move the button asks for, whichever review it is pressed in; the review then takes no
+    /// changes until `move_failed` or until the window shows the other review.
+    pub fn start_move(&mut self) -> Option<StartedMove> {
+        let (from, change_set, offer) = if let Some(here) = self.move_here_offer() {
+            (MoveFrom::ThePr, here.change_set, here.offer)
+        } else {
+            let offer = self.move_offer()?;
+            (
+                MoveFrom::TheLocalReview,
+                self.subject.local()?.clone(),
+                offer,
+            )
+        };
+        self.start_drop().then_some(StartedMove {
+            from,
+            change_set,
+            offer,
+        })
+    }
+
+    /// Not now, on either side's offer. A decline that could not be written to the state file is a
+    /// problem, as the offer then comes back at the next open.
+    pub fn decline_the_move(&mut self) {
+        let declined = if self.move_here_offer().is_some() {
+            self.decline_move_here()
+        } else {
+            self.decline_move()
+        };
+        match declined {
+            Ok(()) => self.clear_problem(ProblemKind::MoveNotDeclined),
+            Err(error) => self.raise_problem(Problem::MoveNotDeclined(format!("{error:#}"))),
+        }
+    }
+
+    /// What a local review's folder is against its snapshot, once the folder was looked at.
+    pub fn working_tree_is(&mut self, on_disk: OnDisk) {
+        self.working_copy = WorkingCopy::of(on_disk == OnDisk::Same);
+        self.on_disk = Some(on_disk);
+    }
+
+    /// The line the sidebar shows when a local review's folder is not its snapshot any more.
+    pub fn disk_news(&self) -> Option<DiskNews> {
+        let change_set = self.subject.local()?;
+        DiskNews::of(self.on_disk.as_ref()?, change_set.branch())
+    }
+
     /// The overview's facts: the PR's title and description, the counts and the files.
     pub fn overview_page(&self) -> OverviewPage {
         let stats = self.summary_stats();
@@ -758,6 +983,7 @@ impl ReviewCore {
                     added_lines: file.added,
                     removed_lines: file.removed,
                     is_read: self.is_file_ticked(&path),
+                    change: self.local_change_of(&path),
                     path,
                 })
             })
@@ -773,7 +999,23 @@ impl ReviewCore {
             },
             files,
             write_guided_tour_refusal: self.write_guided_tour_refusal(),
+            local: self.local_facts.clone(),
         }
+    }
+
+    fn local_change_of(&self, path: &FilePath) -> Option<LocalChange> {
+        self.local_facts.as_ref()?.change_of(path)
+    }
+
+    /// What the app read of the clone for a local review's overview. Not saved: git tells it again.
+    pub fn local_facts_are(&mut self, facts: LocalFacts) {
+        self.local_heading = Self::heading_of(&self.subject, Some(&facts));
+        self.local_facts = Some(facts);
+    }
+
+    /// `None` for a PR, and for a local review until the app has read its clone.
+    pub fn local_facts(&self) -> Option<&LocalFacts> {
+        self.local_facts.as_ref()
     }
 
     /// The open file of a basic tour with every piece of it.
@@ -785,6 +1027,7 @@ impl ReviewCore {
         let links = self.links();
         let display = self.display(&links);
         let mut page = FilePage::of(file, &self.files, &display);
+        page.change = self.local_change_of(path);
         page.threads = threads::views(
             self.threads.in_file(path),
             &page.pieces,
@@ -804,7 +1047,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    pr: &self.pr,
+                    host: &self.code_host,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -849,6 +1092,36 @@ impl ReviewCore {
         }
     }
 
+    /// The window's title.
+    pub fn window_title(&self) -> String {
+        match &self.local_heading {
+            Some(heading) => heading.to_string(),
+            None => format!("{}: {}", self.subject, self.title()),
+        }
+    }
+
+    /// The line a local review's sidebar leads with, naming what is reviewed; `None` for a PR.
+    pub fn local_heading(&self) -> Option<Arc<str>> {
+        self.local_heading.clone()
+    }
+
+    fn heading_of(subject: &ReviewSubject, facts: Option<&LocalFacts>) -> Option<Arc<str>> {
+        let change_set = subject.local()?;
+        let branch = change_set.branch().as_str();
+        Some(
+            match facts.and_then(|facts| facts.repo.as_ref()) {
+                Some(repo) => format!("Local changes · {repo} · {branch}"),
+                None => format!("Local changes · {branch}"),
+            }
+            .into(),
+        )
+    }
+
+    /// Whether the review has a PR page to open.
+    pub fn can_open_on_github(&self) -> bool {
+        self.subject.has_github_page()
+    }
+
     pub fn summary(&self) -> &[String] {
         self.tour.guided().map_or(&[], |guided| &guided.summary)
     }
@@ -888,7 +1161,8 @@ impl ReviewCore {
         if note.is_in(self.state.pr_description()) {
             return None;
         }
-        self.pr_notes.start(&self.pr, subject, note)
+        self.pr_notes
+            .start(self.subject.pull_request()?, subject, note)
     }
 
     pub fn apply_to_notes(&mut self, outcome: ToNotesOutcome) -> anyhow::Result<()> {
@@ -977,7 +1251,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    pr: &self.pr,
+                    host: &self.code_host,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1076,9 +1350,9 @@ impl ReviewCore {
     /// What the reviewer's own tour agent is typed for an Ask. In a basic tour it is told so, and which
     /// file the Ask is on, since there is no tour text to find the place in.
     pub fn ask_hand_off_text(&self, ask: &Ask, place: &str) -> String {
-        let pr = &self.pr;
+        let subject = &self.subject;
         let Tour::Basic(_) = &self.tour else {
-            return ask.hand_off_text(pr, place);
+            return ask.hand_off_text(subject, place);
         };
         let file = match &ask.place {
             Place::File { path }
@@ -1089,12 +1363,13 @@ impl ReviewCore {
             Place::Tour | Place::Step { .. } | Place::Piece { .. } | Place::Lines { .. } => None,
         };
         let named_file = file.map_or_else(String::new, |file| format!("\nFile: {file}"));
+        let reviewed = subject.owner_of_changed_files();
         let basic_place = format!(
-            "{place}{named_file}\nThe tour is a basic tour: the PR's changed files, with no tour file. \
-             Read the changed code with `guided-review outline {pr}` and \
-             `guided-review show {pr} <piece ids> --around`."
+            "{place}{named_file}\nThe tour is a basic tour: {reviewed} changed files, with no tour file. \
+             Read the changed code with `guided-review outline {subject}` and \
+             `guided-review show {subject} <piece ids> --around`."
         );
-        ask.hand_off_text(pr, &basic_place)
+        ask.hand_off_text(subject, &basic_place)
     }
 
     /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
@@ -1240,7 +1515,7 @@ impl ReviewCore {
             cwd,
             model: settings.model.clone(),
             effort: settings.effort.clone(),
-            system_prompt: ask_context::system_prompt(&self.tour.pin().pr),
+            system_prompt: ask_context::system_prompt(self.tour.pin().subject_key()),
             resume,
         }
     }
@@ -1465,20 +1740,40 @@ impl ReviewCore {
         self.comment_desk.can_comment_now()
     }
 
+    /// A reply in a local thread is a follow-up task, so it always reaches the agent too.
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
-        let reply_body = match &action {
-            ThreadAction::Reply { thread_id, .. } => {
-                self.state.reply_draft(thread_id).map(str::to_owned)
+        let (action, reply_body, send_refusal) = match action {
+            ThreadAction::Reply {
+                thread_id,
+                mode,
+                audience,
+            } => {
+                let reply_body = self.state.reply_draft(&thread_id).map(str::to_owned);
+                let audience = if mode.is_task() {
+                    Audience::Agent
+                } else {
+                    audience
+                };
+                let action = ThreadAction::Reply {
+                    thread_id,
+                    mode,
+                    audience,
+                };
+                (action, reply_body, self.send_refusal(mode))
             }
-            _ => None,
+            other => (other, None, None),
         };
-        self.comment_desk.thread_action_request(
-            &self.pr,
+        let mut request = self.comment_desk.thread_action_request(
+            (self.thread_home(), &self.head),
             &self.pulled_threads,
             action,
             reply_body,
             self.tour_freshness(),
-        )
+        );
+        if send_refusal.is_some() {
+            request.refusal = send_refusal;
+        }
+        request
     }
 
     /// Asks the reviewer to confirm deleting one of their own comments, which a deletion needs.
@@ -1566,17 +1861,45 @@ impl ReviewCore {
     }
 
     /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.
+    /// A local review gives no verdict.
     pub fn can_approve_or_request_changes(&self) -> bool {
-        self.comment_desk.can_approve_or_request_changes()
+        self.finishes_with_send_tasks().is_none()
+            && self.comment_desk.can_approve_or_request_changes()
     }
 
-    /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments to send.
+    /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments
+    /// to send; a local review's finish sends its queued tasks, so it needs some.
     pub fn can_finish_review(&self) -> bool {
-        self.comment_desk.can_finish_review()
+        match self.finishes_with_send_tasks() {
+            Some(queued) => queued > 0,
+            None => self.comment_desk.can_finish_review(),
+        }
+    }
+
+    /// What finishing the review does now; `None` when there is nothing to finish.
+    pub fn finish_action(&self) -> Option<FinishAction> {
+        self.can_finish_review().then(|| {
+            if self.finishes_with_send_tasks().is_some() {
+                FinishAction::SendTasks
+            } else {
+                FinishAction::FinishReview
+            }
+        })
+    }
+
+    /// A local review finishes with Send tasks, never with a review on GitHub: how many tasks it
+    /// would send. `None` for a PR.
+    pub fn finishes_with_send_tasks(&self) -> Option<usize> {
+        self.subject
+            .comments_are_agent_tasks()
+            .then(|| self.queued_tasks())
     }
 
     /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
     pub fn approve_warning(&self) -> Option<ApproveWarning> {
+        if self.finishes_with_send_tasks().is_some() {
+            return None;
+        }
         let progress = self.progress();
         let unread_safety_net_pieces = self.tour.guided().map_or(0, |guided| {
             coverage::safety_net(guided, &self.files)
@@ -1607,8 +1930,10 @@ impl ReviewCore {
         verdict: ReviewVerdict,
         body: &str,
     ) -> Result<FinishRequest, FinishRefusal> {
-        self.comment_desk
-            .finish_review_request(&self.pr, verdict, body)
+        let Some(pr) = self.subject.pull_request() else {
+            return Err(FinishRefusal::NoPullRequest);
+        };
+        self.comment_desk.finish_review_request(pr, verdict, body)
     }
 
     /// A sent review is read back, so the finish button shows it.
@@ -1672,8 +1997,18 @@ impl ReviewCore {
     /// The comment boxes open on this review, each with what it is doing; each hangs under the
     /// last line of its place, or under the picture of its file.
     pub fn comment_boxes(&self) -> impl Iterator<Item = CommentBox<'_>> {
+        let agent_out_of_reach = SendMode::LOCAL
+            .iter()
+            .find_map(|mode| self.send_refusal(*mode))
+            .filter(|refusal| *refusal == CommentRefusal::AgentLinkOff);
         self.comment_desk
             .comment_boxes(&self.state, self.tour_freshness())
+            .map(move |mut comment_box| {
+                if comment_box.problem.is_none() {
+                    comment_box.problem = agent_out_of_reach.clone().map(CommentProblem::Refused);
+                }
+                comment_box
+            })
     }
 
     pub fn comment_box(&self, place: &CommentPlace) -> Option<CommentBox<'_>> {
@@ -1693,12 +2028,44 @@ impl ReviewCore {
         mode: SendMode,
         audience: Audience,
     ) -> Option<CommentRequest> {
+        if self.send_refusal(mode).is_some() {
+            return None;
+        }
+        let audience = if mode.is_task() {
+            Audience::Agent
+        } else {
+            audience
+        };
+        let home = self.thread_home();
         self.comment_desk
-            .start_sending(&self.state, place, mode, audience, (&self.head, &self.pr))
+            .start_sending(&self.state, place, mode, audience, (&self.head, home))
     }
 
     pub fn hand_offs(&self) -> &HandOffs {
         self.state.hand_offs()
+    }
+
+    /// How many tasks wait for Send tasks.
+    pub fn queued_tasks(&self) -> usize {
+        self.state.hand_offs().waiting_for_send_tasks().count()
+    }
+
+    /// The finish of a local review: every queued task goes to the agent in one message, in
+    /// reading order, each with its own hand-off state.
+    pub fn send_tasks(&mut self) -> anyhow::Result<()> {
+        let order = self.reading_order();
+        let threads = self.pulled_threads.clone();
+        let reading_place = |task: &HandOff, thread: &ReviewThread| {
+            let screen = task.step().map_or_else(
+                || Screen::File(thread.path.clone()),
+                |step| Screen::Step(step.clone()),
+            );
+            let nth = order.iter().position(|shown| *shown == screen);
+            (nth.is_none(), nth, thread.original_line)
+        };
+        self.record_hand_offs(|hand_offs| hand_offs.send_queued_tasks(&threads, reading_place))?;
+        self.work.want(WorkKind::DeliverHandOff);
+        Ok(())
     }
 
     /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
@@ -1712,7 +2079,7 @@ impl ReviewCore {
 
     /// The oldest comment in the queue, to send again.
     pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        CommentDesk::queued_comment_request(&self.state, &self.head, &self.pr)
+        CommentDesk::queued_comment_request(&self.state, &self.head, self.thread_home())
     }
 
     /// The window was asked for another PR and could not open it; named until another switch succeeds.
@@ -1734,12 +2101,23 @@ impl ReviewCore {
     fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
         let threads = outcome.threads.clone();
         let hand_offs_before = self.state.hand_offs().all().len();
-        let result =
-            self.comment_desk
-                .apply_comment(&mut self.state, outcome, self.screen.sent_from());
+        let code = self.code_commented_on(&outcome);
+        let result = self.comment_desk.apply_comment(
+            &mut self.state,
+            outcome,
+            (self.screen.sent_from(), code),
+        );
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
         result
+    }
+
+    /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.
+    fn code_commented_on(&self, outcome: &CommentOutcome) -> Option<String> {
+        self.subject.local()?;
+        let place = &outcome.request.draft.place;
+        let selected = Page::of(self).selected(&RowSelection::of(place)?)?;
+        Some(ask_context::code_lines(selected.lines()))
     }
 
     fn note_new_hand_off(&mut self, hand_offs_before: usize) {
@@ -1764,7 +2142,7 @@ impl ReviewCore {
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
     pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
-        CodeOpener::new(ide, self.working_copy, &self.pr, &self.head)
+        CodeOpener::new(ide, self.working_copy, &self.code_host, &self.head)
     }
 
     /// Asked of the clone on open and on each focus, not on each click.
@@ -1774,7 +2152,7 @@ impl ReviewCore {
 
     fn links(&self) -> CodeLinks<'_> {
         CodeLinks {
-            pr: &self.pr,
+            host: &self.code_host,
             base: &self.base,
             head: &self.head,
         }
@@ -1852,9 +2230,10 @@ impl ReviewCore {
             || self.first_unread_file().is_some())
         .then_some(PaletteAction::NextUnreadStep);
         let ask = step.map(|_| PaletteAction::AskAboutStep);
-        let finish = self
-            .can_finish_review()
-            .then_some(PaletteAction::FinishReview);
+        let finish = self.finish_action().map(|finish| match finish {
+            FinishAction::FinishReview => PaletteAction::FinishReview,
+            FinishAction::SendTasks => PaletteAction::SendTasks,
+        });
         let check_for_updates = build
             .takes_updates()
             .then_some(PaletteAction::CheckForUpdates);
@@ -1999,12 +2378,12 @@ impl ReviewCore {
         if progress.total == 0 {
             return TourLead::Nowhere;
         }
-        let can_finish = self.can_finish_review();
+        let finish = self.finish_action();
         if let Tour::Basic(_) = &self.tour {
             return match self.first_unread_file() {
                 _ if progress.is_complete() => TourLead::FinishFiles {
                     files: progress.total,
-                    can_finish,
+                    finish,
                 },
                 Some(first) if progress.read == 0 => TourLead::StartFile(first),
                 Some(next) => TourLead::ContinueFile(next),
@@ -2014,7 +2393,7 @@ impl ReviewCore {
         if progress.is_complete() {
             return TourLead::Finish {
                 steps: progress.total,
-                can_finish,
+                finish,
             };
         }
         match self.first_unread_step() {
@@ -2098,10 +2477,17 @@ impl ReviewCore {
         })
     }
 
+    /// Only a PR has viewed marks on GitHub to keep in step with the ticks.
+    fn want_viewed_synced(&mut self) {
+        if self.subject.syncs_viewed_marks() {
+            self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        }
+    }
+
     /// Only files of this tour can be read; a file the tour does not hold is ignored. Viewed
     /// marks follow it one to one.
     pub fn tick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         if !self.reading_order().contains(&Screen::File(path.clone())) {
             return Ok(());
         }
@@ -2114,7 +2500,7 @@ impl ReviewCore {
     }
 
     pub fn untick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         let coverage = self.coverage();
         let subject = ReadSubject::File(path.clone());
         self.state.change(|state| {
@@ -2130,8 +2516,29 @@ impl ReviewCore {
 
     /// The re-pin writes the state file from another thread and this review is replaced when it
     /// is done, so from now on nothing it holds may be saved over the re-pin's record.
-    pub fn start_repin(&mut self) {
-        self.state.start_repin();
+    /// `false` while a drop or a move runs, which the re-pin would write over: it does not start.
+    #[must_use]
+    pub fn start_repin(&mut self) -> bool {
+        self.state.start_writing_elsewhere(WriterElsewhere::Repin)
+    }
+
+    /// Drop review, or a move to a PR, deletes the state file from another thread, and this review is
+    /// closed when it is done, so from now on nothing it holds may write the file again; as during a
+    /// re-pin. `false` while a re-pin or another drop runs: it does not start.
+    #[must_use]
+    pub fn start_drop(&mut self) -> bool {
+        self.state.start_writing_elsewhere(WriterElsewhere::Drop)
+    }
+
+    /// The move failed and the review stays: it takes changes again.
+    pub fn move_failed(&mut self) {
+        self.state.failed_elsewhere(WriterElsewhere::Drop);
+    }
+
+    /// The drop failed and the review stays: it takes changes again.
+    pub fn drop_failed(&mut self, error: &anyhow::Error) {
+        self.state.failed_elsewhere(WriterElsewhere::Drop);
+        self.raise_problem(Problem::ReviewNotDropped(format!("{error:#}")));
     }
 
     pub fn refresh_failed(&mut self, error: &anyhow::Error) {
@@ -2144,13 +2551,13 @@ impl ReviewCore {
     }
 
     pub fn repin_failed(&mut self) {
-        self.state.repin_failed();
+        self.state.failed_elsewhere(WriterElsewhere::Repin);
     }
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
     /// Viewed marks sync once no other tick or untick came for `PUSH_DEBOUNCE`.
     pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         if !self.reading_order().contains(&Screen::Step(id.clone())) {
             return Ok(());
         }
@@ -2164,7 +2571,7 @@ impl ReviewCore {
     }
 
     pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
+        self.want_viewed_synced();
         let coverage = self.coverage();
         let subject = ReadSubject::Step(id.clone());
         self.state.change(|state| {
@@ -2247,9 +2654,13 @@ impl ReviewCore {
         self.viewed_sync.not_synced(&self.state)
     }
 
-    pub fn sync_request(&self) -> SyncRequest {
-        self.viewed_sync
-            .request(&self.state, &self.coverage(), &self.pr, &self.head)
+    /// `None` for a local review: GitHub has no viewed marks of it.
+    pub fn sync_request(&self) -> Option<SyncRequest> {
+        let pr = self.subject.pull_request()?;
+        Some(
+            self.viewed_sync
+                .request(&self.state, &self.coverage(), pr, &self.head),
+        )
     }
 
     /// An error means something stays queued or unread; the next sync tries again.

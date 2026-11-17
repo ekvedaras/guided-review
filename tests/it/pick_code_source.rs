@@ -7,7 +7,8 @@ use guided_review::file_path::FilePath;
 use guided_review::github::GitHub;
 use guided_review::local_git::LocalGit;
 use guided_review::pick_code_source::pick_code_source;
-use guided_review::pull_request::{PullRequestTips, PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Problem, Review, ReviewStateFile};
 use serde_json::json;
@@ -30,14 +31,14 @@ impl Shop {
         Self { repo, base, head }
     }
 
-    fn tips(&self) -> PullRequestTips {
-        PullRequestTips {
+    fn tips(&self) -> ChangeTips {
+        ChangeTips {
             base_branch_tip: Sha::new(&self.base),
             head: Sha::new(&self.head),
         }
     }
 
-    fn pick(&self, tips: &PullRequestTips) -> Box<dyn CodeSource> {
+    fn pick(&self, tips: &ChangeTips) -> Box<dyn CodeSource> {
         let github = GitHub::at("http://127.0.0.1:1");
         pick_code_source(&github, &pr(), tips, self.repo.path()).unwrap()
     }
@@ -52,7 +53,8 @@ impl Shop {
             "steps": [{"id": "readme", "title": "Readme", "why": "w", "pieces": [{"file": "README.md"}]}],
         }))
         .unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr());
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr()));
         Review::open(tour, source, state_file).unwrap()
     }
 }
@@ -62,13 +64,13 @@ fn pr() -> PullRequestUrl {
 }
 
 /// A commit the clone lacks, which its only remote cannot give.
-fn tips_the_clone_cannot_fetch(shop: &Shop) -> PullRequestTips {
+fn tips_the_clone_cannot_fetch(shop: &Shop) -> ChangeTips {
     shop.repo.git(&[
         "config",
         "url./nowhere/shop.insteadOf",
         "git@github.com:acme/shop.git",
     ]);
-    PullRequestTips {
+    ChangeTips {
         base_branch_tip: Sha::new(&shop.base),
         head: Sha::new("0123456789012345678901234567890123456789"),
     }

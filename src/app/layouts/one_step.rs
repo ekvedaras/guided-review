@@ -52,13 +52,15 @@ use crate::app::components::motion::{
     BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
     pop_in, slide_in, turn_to,
 };
-use crate::app::components::new_commits_banner::NewCommitsBanner;
+use crate::app::components::new_commits_banner::{NewCommitsBanner, RepinProgress};
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
-use crate::app::components::pr_switcher::{PrSwitcherView, PrSwitching, SwitcherPlace};
+use crate::app::components::pr_switcher::{
+    DropShownReview, PrSwitcherView, PrSwitching, SwitcherPlace,
+};
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
@@ -71,8 +73,8 @@ use crate::app::components::sidebar_row::{
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
-    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnReplyDraft, OnThreadAction,
-    OnTryHandOffAgain, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
+    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnHandOffButton, OnReplyDraft, OnThreadAction,
+    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
 };
 use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge, title_inset};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -82,24 +84,27 @@ use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
-use crate::app::sidebar_rows::{SidebarGuidedTour, SidebarTourAgent, WriteOffer};
+use crate::app::sidebar_rows::{
+    SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows, SidebarTourAgent, WriteOffer,
+};
 use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
+use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
-    CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, Effect, FileToggle,
-    FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, NextScreen,
-    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Refusal, Reopen, ReopenAfterSave,
-    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
-    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
-    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
-    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
-    WindowMoment, pluralised,
+    CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, DiskOffer, Effect,
+    FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch,
+    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats,
+    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit,
+    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -277,6 +282,10 @@ impl OneStepLayout {
         .detach();
         let pr_switcher = cx
             .new(|cx| PrSwitcherView::new(switching, SwitcherPlace::OverReview, focus.clone(), cx));
+        cx.subscribe(&pr_switcher, |this, _, DropShownReview, cx| {
+            this.session.update(cx, ReviewSession::drop_review);
+        })
+        .detach();
         let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
         cx.subscribe_in(
@@ -317,16 +326,19 @@ impl OneStepLayout {
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
                 this.open_comment_box(CommentGesture::AskAnswer(ask), window, cx);
             });
-        cx.subscribe(&ask, |this, _, HandToAgent { ask, place }, cx| {
-            let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
+        cx.subscribe(&ask, |this, _, HandToAgent { ask, place, anyway }, cx| {
+            let handing = this
+                .session
+                .read(cx)
+                .hand_ask_to_agent(ask, place, *anyway, cx);
             let id = ask.id;
             this.reopen_after_save.ask_handed_to_agent();
             cx.spawn(async move |this, cx| {
-                let line = handing.await;
+                let outcome = handing.await;
                 this.update(cx, |this, cx| {
                     this.session.update(cx, |session, cx| {
                         session.change_asks(cx, |review| {
-                            review.change_asks(|desk| desk.hand_off_ended(id, &line));
+                            review.change_asks(|desk| desk.hand_off_ended(id, &outcome));
                         });
                     });
                     let in_flight = this.in_flight(cx);
@@ -749,6 +761,7 @@ impl OneStepLayout {
             comment_now: review.can_comment_now(),
             suggest_change: review.can_suggest_change(place),
             ask_agent: session.agent_link_is_on(),
+            sending: review.sending(),
         };
         let ask_place = review.ask_place_of(place);
         let on_type = {
@@ -812,6 +825,17 @@ impl OneStepLayout {
                 });
                 window.focus(&this.focus, cx);
             }),
+            on_send_task: {
+                let (layout, place) = (cx.entity(), place.clone());
+                Rc::new(move |mode, window: &mut Window, cx: &mut App| {
+                    layout.update(cx, |this, cx| {
+                        this.session.update(cx, |session, cx| {
+                            session.send_comment(&place, mode, Audience::Agent, cx);
+                        });
+                        window.focus(&this.focus, cx);
+                    });
+                })
+            },
         };
         let ask = ask_place.map(|ask_place| {
             let label = ask_place.lines_label().unwrap_or_default();
@@ -844,10 +868,10 @@ impl OneStepLayout {
         })
     }
 
-    fn on_try_hand_off_again(&self) -> OnTryHandOffAgain {
+    fn on_hand_off_button(&self) -> OnHandOffButton {
         let session = self.session.clone();
-        Rc::new(move |hand_off, cx| {
-            session.update(cx, |session, cx| session.try_hand_off_again(hand_off, cx));
+        Rc::new(move |button, cx| {
+            session.update(cx, |session, cx| session.press_hand_off_button(button, cx));
         })
     }
 
@@ -889,6 +913,50 @@ impl OneStepLayout {
         })
     }
 
+    fn finish_review_dialog(
+        &self,
+        sidebar: &SidebarRows,
+        is_everything_read: bool,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        FinishReviewDialog::new(
+            is_everything_read,
+            sidebar.finishing,
+            sidebar.approve_warning,
+            sidebar.last_review.clone(),
+            self.session
+                .read(cx)
+                .review()
+                .text_of(&TextBox::FinishBody)
+                .unwrap_or_default()
+                .to_owned(),
+            self.on_finish_body_edit(),
+            self.on_finish_review(),
+        )
+        .opened_by(self.finish_form_request)
+        .into_any_element()
+    }
+
+    /// A local review's finish: no verdict and no body, only its queued tasks to send.
+    fn send_tasks_button(
+        colors: &Colors,
+        queued: usize,
+        is_everything_read: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let kind = if is_everything_read {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Secondary
+        };
+        button(colors, "send-tasks", kind, ButtonSize::Regular)
+            .child(button_icon(colors, kind, ButtonSize::Regular, Icon::Send))
+            .child(SharedString::from(format!("Send tasks ({queued})")))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::SendTasks, window, cx);
+            }))
+    }
+
     fn on_finish_review(&self) -> OnFinish {
         let session = self.session.clone();
         Rc::new(move |verdict, body, on_done, cx| {
@@ -920,6 +988,7 @@ impl OneStepLayout {
             ThreadDrafts {
                 can_reply_now: can_comment_now,
                 can_ask_agent,
+                sending: review.sending(),
                 reply,
                 edits,
             },
@@ -931,7 +1000,7 @@ impl OneStepLayout {
                     this.change_review(cx, |review| review.toggle_thread_fold(&id));
                 })),
                 on_action: self.on_thread_action(),
-                on_try_hand_off_again: self.on_try_hand_off_again(),
+                on_hand_off_button: self.on_hand_off_button(),
             },
         )
     }
@@ -983,12 +1052,12 @@ impl OneStepLayout {
         if review.basic_mode_label().is_none() {
             return;
         }
-        let pr = review.pr().clone();
-        let on_disk = ToursOnDisk::of(&switching.folders, &pr);
+        let subject = review.subject();
+        let on_disk = ToursOnDisk::of(&switching.folders, subject);
         let progress = switching
             .active
             .read(cx)
-            .guided_tour_progress_of(&pr, on_disk);
+            .guided_tour_progress_of(subject, on_disk);
         if review.guided_tour_progress() != &progress {
             self.session.update(cx, |session, cx| {
                 session.change(cx, |review| review.guided_tour_is(progress));
@@ -999,12 +1068,12 @@ impl OneStepLayout {
     /// Write guided tour, from the overview, the sidebar and the palette: the review takes the
     /// asking, and the app's writer hands the task to the PR's tour agent in the background.
     fn write_guided_tour(&mut self, cx: &mut Context<Self>) {
-        let pr = self.session.read(cx).review().pr().clone();
+        let subject = self.session.read(cx).review().subject().clone();
         let asked = self.session.update(cx, |session, cx| {
             session.change(cx, |review| review.ask_to_write_guided_tour())
         });
         match asked {
-            Ok(()) => crate::app::tour_writer::write_in_background(pr, cx),
+            Ok(()) => crate::app::tour_writer::write_in_background(subject, cx),
             Err(refusal) => post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned()),
         }
     }
@@ -1107,7 +1176,7 @@ impl OneStepLayout {
     /// What the window alone knows when the reader asks for something.
     fn moment(&self, cx: &App) -> WindowMoment {
         let is_reopening = cx.global::<PrSwitching>().active.read(cx).switching_to()
-            == Some(self.session.read(cx).review().pr());
+            == Some(self.session.read(cx).review().subject());
         WindowMoment {
             reopening: if is_reopening {
                 Reopening::Underway
@@ -1174,6 +1243,7 @@ impl OneStepLayout {
                 .update(cx, |switcher, cx| switcher.show(window, cx)),
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
+            Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::Restart(restart) => match crate::platform::running_binary() {
                 Ok(exe) => self.restart_app_with(exe, &restart, cx),
@@ -1266,22 +1336,43 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::retry_agent_link);
             }))
         });
-        div().flex().flex_col().gap_1().child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_xs()
-                        .text_color(colors.muted_text)
-                        .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
-                )
-                .children(show)
-                .children(retry),
-        )
+        let choices = agent.choices.iter().map(|terminal| {
+            let chosen = terminal.clone();
+            icon_label_button(
+                colors,
+                SharedString::from(format!("use-agent-{terminal}")),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Terminal,
+                format!("Use this agent: {terminal}"),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let chosen = chosen.clone();
+                this.session
+                    .update(cx, |session, cx| session.use_tour_agent(chosen, cx));
+            }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                    )
+                    .children(show)
+                    .children(retry),
+            )
+            .children(choices)
     }
 
     /// A basic review's guided tour in the sidebar: Write guided tour while nothing is asked, the stage
@@ -1382,6 +1473,129 @@ impl OneStepLayout {
             .children(banner)
             .children(stage)
             .children(write)
+    }
+
+    /// A local review's folder is not its snapshot any more: the line, with Update or Drop review when
+    /// the reviewer can do something about it.
+    fn disk_news_block(
+        colors: &Colors,
+        news: &SidebarDiskNews,
+        repin_progress: &RepinProgress,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let is_updating = repin_progress == &RepinProgress::Running;
+        let action = news.offer.map(|offer| match offer {
+            DiskOffer::Update => icon_label_button(
+                colors,
+                "changed-on-disk-update",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Refresh,
+                match repin_progress {
+                    RepinProgress::Idle => "Update",
+                    RepinProgress::Running => "Updating…",
+                    RepinProgress::Failed(_) => "Try again",
+                },
+            )
+            .when(!is_updating, |button| {
+                button.on_click(cx.listener(|this, _, _, cx| {
+                    this.session.update(cx, ReviewSession::repin);
+                }))
+            }),
+            DiskOffer::DropReview => icon_label_button(
+                colors,
+                "branch-gone-drop-review",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Trash,
+                "Drop review",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::drop_review);
+            })),
+        });
+        let failure = match repin_progress {
+            RepinProgress::Failed(reason) => Some(
+                div()
+                    .text_xs()
+                    .text_color(colors.danger)
+                    .child(SharedString::from(reason.clone())),
+            ),
+            RepinProgress::Idle | RepinProgress::Running => None,
+        };
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.warning)
+                    .child(news.line.clone()),
+            )
+            .children(failure)
+            .children(action)
+    }
+
+    /// A local review's branch has an open PR: the line, Move to <pr> and Keep local review.
+    fn move_offer_block(
+        colors: &Colors,
+        offer: &SidebarMoveOffer,
+        is_moving: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.accent)
+                    .child(offer.heading.clone()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        icon_label_button(
+                            colors,
+                            "move-to-pr",
+                            ButtonKind::Secondary,
+                            ButtonSize::Small,
+                            Icon::ArrowRight,
+                            if is_moving {
+                                "Moving…".to_owned()
+                            } else {
+                                offer.button.to_string()
+                            },
+                        )
+                        .when(!is_moving, |button| {
+                            button.on_click(cx.listener(|this, _, _, cx| {
+                                this.session.update(cx, ReviewSession::move_to_pr);
+                            }))
+                        }),
+                    )
+                    .when(!is_moving, |row| {
+                        row.child(
+                            icon_label_button(
+                                colors,
+                                "decline-move-to-pr",
+                                ButtonKind::Secondary,
+                                ButtonSize::Small,
+                                Icon::Close,
+                                offer.keep,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.session.update(cx, ReviewSession::decline_move);
+                            })),
+                        )
+                    }),
+            )
     }
 
     /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
@@ -1696,23 +1910,24 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
+        let disk_news = sidebar
+            .disk_news
+            .as_ref()
+            .map(|news| Self::disk_news_block(&colors, news, session.repin_progress(), cx));
+        let move_offer = sidebar
+            .move_offer
+            .as_ref()
+            .map(|offer| Self::move_offer_block(&colors, offer, session.is_moving(), cx));
         let clone_offer = session
             .clone_offer()
             .map(|offer| Self::clone_offer_block(&colors, offer, cx));
-        let finish_dialog = FinishReviewDialog::new(
-            progress.total > 0 && progress.read == progress.total,
-            sidebar.finishing,
-            sidebar.approve_warning,
-            sidebar.last_review.clone(),
-            session
-                .review()
-                .text_of(&TextBox::FinishBody)
-                .unwrap_or_default()
-                .to_owned(),
-            self.on_finish_body_edit(),
-            self.on_finish_review(),
-        )
-        .opened_by(self.finish_form_request);
+        let is_everything_read = progress.total > 0 && progress.read == progress.total;
+        let finish_dialog = match session.review().finishes_with_send_tasks() {
+            Some(queued) => (queued > 0)
+                .then(|| Self::send_tasks_button(&colors, queued, is_everything_read, cx))
+                .map(IntoElement::into_any_element),
+            None => Some(self.finish_review_dialog(sidebar, is_everything_read, cx)),
+        };
         let step_rows = sidebar
             .steps
             .iter()
@@ -1788,6 +2003,14 @@ impl OneStepLayout {
             .flex()
             .flex_col()
             .gap_3()
+            .children(
+                sidebar
+                    .local_heading
+                    .clone()
+                    .map(|heading| div().text_xs().text_color(colors.muted_text).child(heading)),
+            )
+            .children(disk_news)
+            .children(move_offer)
             .child(match sidebar.basic_mode_label {
                 Some(label) => div()
                     .flex()
@@ -1795,7 +2018,7 @@ impl OneStepLayout {
                     .into_any_element(),
                 None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
-            .child(finish_dialog)
+            .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
             .children(clone_offer)
@@ -1917,8 +2140,11 @@ impl OneStepLayout {
     fn title_bar(&self, is_writing_tour: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let review = self.session.read(cx).review();
-        let pr = review.pr().clone();
+        let subject_name = review.subject().short();
         let title = review.title().to_owned();
+        let local_heading = review.local_heading().map(SharedString::from);
+        let is_local = local_heading.is_some();
+        let can_open_on_github = review.can_open_on_github();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -1934,26 +2160,28 @@ impl OneStepLayout {
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
-        let github = button(
-            &colors,
-            "title-bar-github",
-            ButtonKind::Ghost,
-            ButtonSize::Small,
-        )
-        .child(button_icon(
-            &colors,
-            ButtonKind::Ghost,
-            ButtonSize::Small,
-            Icon::ExternalLink,
-        ))
-        .child("GitHub")
-        .child(button_keys(
-            &colors,
-            ButtonKind::Ghost,
-            Command::OpenOnGitHub,
-            cx,
-        ))
-        .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)));
+        let github = can_open_on_github.then(|| {
+            button(
+                &colors,
+                "title-bar-github",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+            .child(button_icon(
+                &colors,
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ExternalLink,
+            ))
+            .child("GitHub")
+            .child(button_keys(
+                &colors,
+                ButtonKind::Ghost,
+                Command::OpenOnGitHub,
+                cx,
+            ))
+            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)))
+        });
         let switch_pr = div()
             .id("title-bar-switch-pr")
             .min_w_0()
@@ -1966,24 +2194,48 @@ impl OneStepLayout {
             .cursor_pointer()
             .hover(|button| button.bg(colors.hover))
             .active(|button| button.bg(colors.pressed))
-            .tooltip(tooltip(|_| "Switch pull request".into()))
+            .tooltip(tooltip(move |_| {
+                if is_local {
+                    "Switch review"
+                } else {
+                    "Switch pull request"
+                }
+                .into()
+            }))
             .on_click(
                 cx.listener(|this, _, window, cx| this.act(Intent::TogglePrSwitcher, window, cx)),
             )
-            .child(icon(Icon::PullRequest, colors.success))
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(colors.muted_text)
-                    .child(pr.short()),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(InlineMarkdown::new("title-bar-title", &title)),
-            )
+            .child(icon(
+                if is_local {
+                    Icon::FolderGit
+                } else {
+                    Icon::PullRequest
+                },
+                colors.success,
+            ))
+            .children(match local_heading {
+                Some(heading) => vec![
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(heading)
+                        .into_any_element(),
+                ],
+                None => vec![
+                    div()
+                        .flex_none()
+                        .text_color(colors.muted_text)
+                        .child(subject_name)
+                        .into_any_element(),
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(InlineMarkdown::new("title-bar-title", &title))
+                        .into_any_element(),
+                ],
+            })
             .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
         let page_share = scrolled_share(
             -self.screen_list.scroll_px_offset_for_scrollbar().y,
@@ -2003,7 +2255,7 @@ impl OneStepLayout {
                     .child(switch_pr)
                     .child(div().flex_1())
                     .child(jump)
-                    .child(github),
+                    .children(github),
             )
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
@@ -2444,22 +2696,22 @@ impl OneStepLayout {
                 .max_w(READING_WIDTH)
                 .flex()
                 .children(match lead.as_ref() {
-                    TourLead::Finish { steps, can_finish } => Some(
+                    TourLead::Finish { steps, finish } => Some(
                         finish_card(
                             *steps,
                             ReadUnit::Steps,
-                            *can_finish,
+                            *finish,
                             ReviewAgain::Offered,
                             "summary-lead",
                             cx,
                         )
                         .into_any_element(),
                     ),
-                    TourLead::FinishFiles { files, can_finish } => Some(
+                    TourLead::FinishFiles { files, finish } => Some(
                         finish_card(
                             *files,
                             ReadUnit::Files,
-                            *can_finish,
+                            *finish,
                             ReviewAgain::Offered,
                             "summary-lead",
                             cx,
@@ -2751,6 +3003,10 @@ impl OneStepLayout {
                     cx,
                 )
             });
+        let local = overview
+            .local
+            .as_ref()
+            .map(|local| local_overview_card(&colors, local));
         let files = overview.files.iter().map(|file| {
             let path = file.path.clone();
             let (folder, name) = match file.path.as_str().rsplit_once('/') {
@@ -2798,6 +3054,7 @@ impl OneStepLayout {
                         }))
                         .child(div().min_w_0().truncate().child(name.to_owned())),
                 )
+                .children(file.change.map(|change| change_chip(&colors, change)))
                 .child(line_counts(&colors, file.added_lines, file.removed_lines))
         });
         let write_guided_tour = Some(overview.write_guided_tour_refusal).map(|refusal| {
@@ -2854,6 +3111,7 @@ impl OneStepLayout {
             )
             .child(overview_stats(&colors, overview.stats))
             .children(description)
+            .children(local)
             .child(
                 div()
                     .pb_4()
@@ -2972,6 +3230,7 @@ impl OneStepLayout {
             .flex_wrap()
             .items_center()
             .gap_2()
+            .children(toolbar.change.map(|change| change_chip(&colors, change)))
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
@@ -3290,9 +3549,9 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         NextScreen::File { path } => path.to_string(),
         NextScreen::SafetyNet => SafetyNetIntro::TITLE.to_owned(),
     });
-    if let Some((count, unit, can_finish)) = footer.lead.as_ref().and_then(|lead| match lead {
-        TourLead::Finish { steps, can_finish } => Some((*steps, ReadUnit::Steps, *can_finish)),
-        TourLead::FinishFiles { files, can_finish } => Some((*files, ReadUnit::Files, *can_finish)),
+    if let Some((count, unit, finish)) = footer.lead.as_ref().and_then(|lead| match lead {
+        TourLead::Finish { steps, finish } => Some((*steps, ReadUnit::Steps, *finish)),
+        TourLead::FinishFiles { files, finish } => Some((*files, ReadUnit::Files, *finish)),
         _ => None,
     }) {
         return div()
@@ -3305,7 +3564,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .child(finish_card(
                 count,
                 unit,
-                can_finish,
+                finish,
                 ReviewAgain::NotOffered,
                 "footer",
                 cx,
@@ -3465,6 +3724,110 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .child(dot())
                 .child(item(Icon::Check, SharedString::from(started_read)))
         }))
+}
+
+/// Where a file's change in a local review comes from, as a chip.
+fn change_chip(colors: &Colors, change: LocalChange) -> impl IntoElement {
+    chip(
+        colors,
+        match change {
+            LocalChange::Committed => Tone::Neutral,
+            LocalChange::Uncommitted => Tone::Warning,
+            LocalChange::Both => Tone::Accent,
+        },
+    )
+    .child(change.label())
+}
+
+/// One line of the local overview card: a quiet label and its value.
+fn local_fact(colors: &Colors, label: &'static str, value: impl IntoElement) -> impl IntoElement {
+    div()
+        .flex()
+        .items_baseline()
+        .gap_3()
+        .child(
+            div()
+                .flex_none()
+                .w(px(96.))
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().child(value))
+}
+
+/// What a local review is of, in place of the PR description: where it is, which branch against
+/// which, the branch's commits and how many files are not committed.
+fn local_overview_card(colors: &Colors, local: &LocalFacts) -> impl IntoElement {
+    let commits = if local.commit_subjects.is_empty() {
+        vec![
+            div()
+                .text_color(colors.muted_text)
+                .child(format!("None beyond {}", local.default_branch))
+                .into_any_element(),
+        ]
+    } else {
+        local
+            .commit_subjects
+            .iter()
+            .map(|subject| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_3()
+                    .child(bullet(colors, SUMMARY_LINE))
+                    .child(div().flex_1().min_w_0().child(subject.clone()))
+                    .into_any_element()
+            })
+            .collect()
+    };
+    div()
+        .pb_4()
+        .w_full()
+        .max_w(READING_WIDTH)
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(note_label("LOCAL CHANGES").text_color(colors.muted_text))
+        .child(
+            card(colors)
+                .px_5()
+                .py_4()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .text_sm()
+                .children(
+                    local
+                        .repo
+                        .as_ref()
+                        .map(|repo| local_fact(colors, "Repo", repo.to_string())),
+                )
+                .child(local_fact(
+                    colors,
+                    "Folder",
+                    local.folder.as_path().display().to_string(),
+                ))
+                .child(local_fact(
+                    colors,
+                    "Branch",
+                    format!(
+                        "{} (compared with {})",
+                        local.branch.as_str(),
+                        local.default_branch
+                    ),
+                ))
+                .child(local_fact(
+                    colors,
+                    "Commits",
+                    div().flex().flex_col().children(commits),
+                ))
+                .child(local_fact(
+                    colors,
+                    "Working tree",
+                    local.uncommitted_label(),
+                )),
+        )
 }
 
 /// How big a basic review's PR is, in the numbers the review truly has.
@@ -3727,11 +4090,12 @@ fn lead_button(
 }
 
 /// The tour's end once every step is read: a calm success card whose check pops in once, with
-/// Finish review when the PR takes a review from the reader.
+/// Finish review when the PR takes a review from the reader, or Send tasks when a local review
+/// has tasks queued.
 fn finish_card(
     count: usize,
     unit: ReadUnit,
-    can_finish: bool,
+    finish: Option<FinishAction>,
     review_again: ReviewAgain,
     id: &'static str,
     cx: &mut Context<OneStepLayout>,
@@ -3742,16 +4106,22 @@ fn finish_card(
         (1, ReadUnit::Files) => "The one file is read".to_owned(),
         (count, unit) => format!("All {count} {} read", unit.plural()),
     };
-    let finish = can_finish.then(|| {
+    let finish_button = finish.map(|finish| {
+        let (icon, label) = match finish {
+            FinishAction::FinishReview => (Icon::ListChecks, "Finish review"),
+            FinishAction::SendTasks => (Icon::Send, "Send tasks"),
+        };
         icon_label_button(
             &colors,
             SharedString::from(format!("{id}-finish")),
             ButtonKind::Primary,
             ButtonSize::Large,
-            Icon::ListChecks,
-            "Finish review",
+            icon,
+            label,
         )
-        .on_click(cx.listener(|this, _, _, cx| this.open_finish_form(cx)))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.act(Intent::FinishReview, window, cx);
+        }))
     });
     let again = (review_again == ReviewAgain::Offered).then(|| {
         icon_label_button(
@@ -3805,20 +4175,26 @@ fn finish_card(
                         .child(title),
                 )
                 .child(div().text_sm().text_color(colors.muted_text).child(
-                    match (unit, can_finish) {
-                        (ReadUnit::Steps, true) => {
+                    match (unit, finish) {
+                        (ReadUnit::Steps, Some(FinishAction::FinishReview)) => {
                             "Every step of the tour is read. Send your review when you are ready."
                         }
-                        (ReadUnit::Steps, false) => "Every step of the tour is read.",
-                        (ReadUnit::Files, true) => {
+                        (ReadUnit::Steps, Some(FinishAction::SendTasks)) => {
+                            "Every step of the tour is read. Send your tasks when you are ready."
+                        }
+                        (ReadUnit::Steps, None) => "Every step of the tour is read.",
+                        (ReadUnit::Files, Some(FinishAction::FinishReview)) => {
                             "Every changed file is read. Send your review when you are ready."
                         }
-                        (ReadUnit::Files, false) => "Every changed file is read.",
+                        (ReadUnit::Files, Some(FinishAction::SendTasks)) => {
+                            "Every changed file is read. Send your tasks when you are ready."
+                        }
+                        (ReadUnit::Files, None) => "Every changed file is read.",
                     },
                 )),
         )
         .children(again)
-        .children(finish)
+        .children(finish_button)
 }
 
 /// Whether the footer's primary action moves on to another screen, which its key says.

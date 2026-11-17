@@ -28,7 +28,7 @@ fn three_step_review(repo: &FixtureRepo) -> Review {
     let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
         .unwrap()
         .unwrap();
-    let state_file = ReviewStateFile::for_pr(
+    let state_file = ReviewStateFile::for_subject(
         &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );

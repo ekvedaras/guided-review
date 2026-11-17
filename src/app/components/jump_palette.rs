@@ -120,6 +120,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::AskAboutStep | PaletteAction::WriteGuidedTour => Icon::Sparkles,
         PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview => Icon::ListChecks,
+        PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnGitHub => Icon::ExternalLink,
         PaletteAction::SwitchPr => Icon::PullRequest,
         PaletteAction::Settings => Icon::Settings,

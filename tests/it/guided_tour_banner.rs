@@ -1,6 +1,7 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, TourPin};
 use guided_review::update::Build;
 use guided_review::viewer::{
@@ -35,13 +36,15 @@ impl Shop {
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap())
+        ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse::<ReviewSubject>().unwrap())
     }
 
     fn pin(&self) -> TourPin {
         TourPin {
             version: 1,
             pr: PR.to_owned(),
+            local: None,
+            repo: None,
             base: Sha::new(&self.base),
             head: Sha::new(&self.head),
             previous_head: None,

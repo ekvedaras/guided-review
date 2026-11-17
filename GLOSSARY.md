@@ -1,6 +1,26 @@
 # Glossary
 
-**Tour**: A reading route through one PR: a guided tour or a basic tour. Both are pinned to the same base and head.
+**Tour**: A reading route through one review subject: a guided tour or a basic tour. Both are pinned to the same base and head.
+
+**Review subject**: What a review reads: a PR, or a local change set. A type in the code, never a flag or a string checked for a prefix. Its one text form is the subject key: a PR's is its URL, a local change set's is `local:<folder>@<branch>` (an `@` or `%` in the folder written `%40`, `%25`). Everything a review keeps is keyed by it. Avoid: target.
+
+**Local change set**: One branch of one working tree: its commits that are not on the repo's default branch (from their merge base), plus the uncommitted and untracked files git does not ignore. Its identity is the folder (the working tree's root) and the branch; the repo, from `origin`, only names it. Avoid: local PR.
+
+**Local review**: A review of a local change set, with no GitHub in it: started with `guided-review open <path>` or from the PR switcher, read as a basic tour first, its comments tasks for the change set's agent.
+
+**Snapshot**: The commit object the app makes of the working tree when a local review opens and at Update, with `HEAD` as its parent (`HEAD` itself when the tree is clean). A ref under `refs/guided-review/` keeps it from `git gc`; the app never pushes it. What a local review reads never moves under the reviewer. Avoid: stash, live view.
+
+**Changed on disk**: A local review's working tree no longer matches its snapshot: the branch got commits or files changed. The sidebar says so with Update, which re-pins the tour to a new snapshot. Avoid: new commits (that is a PR's).
+
+**Task**: A comment of a local review, for the change set's agent. It never leaves the machine. Avoid: local comment, todo.
+
+**Queued task**: A task held back by Add to tasks, shown under its lines, editable and deletable until Send tasks. Avoid: pending task, draft (that is a comment box's text).
+
+**Add to tasks / Send now / Send tasks**: A local review's send actions. Add to tasks queues the comment as a queued task; Send now hands it to the change set's agent at once; Send tasks, the finish of a local review, hands every queued task over as one message in reading order. They mirror a PR's Add to review, Comment now and Finish review.
+
+**Change set's agent**: The herdr agent that takes a local review's tasks: the terminal that ran `guided-review open` when it runs Claude, else the only Claude terminal working in the folder, else the one the reviewer picks among several, else one the app starts there. Claimed by the herdr label `gr.local=<subject key>`. Unlike a tour agent it is not told to commit and push. Avoid: local agent.
+
+**Move to PR**: Carrying a local review over to the PR opened from its branch: read ticks carry by the re-pin rule, open tasks become draft comments in the PR's review, resolved ones are dropped, and the local review goes. Only on the reviewer's say. Avoid: migrate, convert.
 
 **Guided tour**: A tour the tour writer wrote with the `tour` skill: summary, steps and safety net, top-down: main flow first, details later. A tour file with no `kind` is guided. Avoid: AI tour, full tour.
 
@@ -54,7 +74,7 @@
 
 **Code link**: A link to a file or a line of the PR's code: a diff line, a piece, or a link in the tour's text. The viewer opens it in the reviewer's IDE when the file is in the working copy of a local clone, else on GitHub, and says why. When the clone is not checked out clean at the tour's head, it still opens in the IDE, with a note that the lines may differ. Removed lines and deleted files always open on GitHub, at base.
 
-**Re-pin**: Moving a tour to the PR's new head after new commits, with no AI. Each diff piece becomes same, changed, gone or new. Steps with changed pieces lose their read tick. In a basic tour, files with changed or new pieces lose their read tick.
+**Re-pin**: Moving a tour to the PR's new head after new commits, or a local review's tour to a new snapshot, with no AI. Each diff piece becomes same, changed, gone or new. Steps with changed pieces lose their read tick. In a basic tour, files with changed or new pieces lose their read tick.
 
 **Refresh**: An AI pass on a re-pinned tour. It rewrites only the steps whose pieces changed and places new pieces into steps.
 
@@ -66,15 +86,15 @@
 
 **Last review**: The reviewer's latest sent review of the PR, as GitHub holds it: how it ended (approved, changes requested, commented or dismissed), its text, when, and the PR head it was sent on. A review sent from the GitHub web page counts too. The viewer reads it and does not keep it. While it exists the finish button reads "Update review", and it is named as old when the PR head has moved past its commit.
 
-**Tour agent**: The AI session, in a herdr terminal, that answers for the tour of one PR. At most one per PR. The viewer finds it by the herdr label `gr.pr=<url>`, never by a stored terminal id, and a terminal claimed for another PR loses the label.
+**Tour agent**: The AI session, in a herdr terminal, that answers for the tour of one review subject. At most one per subject. The viewer finds it by a herdr label, `gr.pr=<url>` for a PR and `gr.local=<subject key>` for a local change set, never by a stored terminal id, and a terminal claimed for another subject loses the label. A local review's tour agent is its change set's agent.
 
 **Agent link**: Whether the viewer can reach tour agents at all, which needs herdr (`hc`) on PATH and its server running. When it is off, the sidebar says why (`hc` missing, the herdr server not running, or herdr running but a command failed) and the tour agent features are off. The app looks again every 30 s and on Retry, and the features come back when herdr answers.
 
-**Text box**: A box the reviewer writes text for GitHub in. There are four kinds: a comment box (a new comment on lines or on a file, its text called a draft), a reply box under a thread, the edit of one of the reviewer's own comments, and the body of the review being finished. Each kind opens, takes typing, and is left, given up or sent in the same way. A box left with nothing written in it goes. The text of every kind but an edit is saved while typing, so it comes back after a restart. Avoid: composer.
+**Text box**: A box the reviewer writes text for GitHub in, or in a local review for the change set's agent. There are four kinds: a comment box (a new comment on lines or on a file, its text called a draft), a reply box under a thread, the edit of one of the reviewer's own comments, and the body of the review being finished. Each kind opens, takes typing, and is left, given up or sent in the same way. A box left with nothing written in it goes. The text of every kind but an edit is saved while typing, so it comes back after a restart. A comment box of a local review sends tasks (Add to tasks, Send now), never to GitHub. Avoid: composer.
 
 **Ask agent**: The comment box's second send action. The comment or reply is posted to GitHub like any other and also handed off to the tour agent. A comment sent with the plain action is for the PR author only; the agent never sees it.
 
-**Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, working on it (the agent posted "Working on it…" and its answer will replace that comment), answered, ended without an answer, or failed. It holds the id of its GitHub thread and of the reviewer's comment.
+**Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, working on it (the agent posted "Working on it…" and its answer will replace that comment), answered, ended without an answer, failed, or held back because its agent does not report its state to herdr (the reviewer looks at the agent, since it may be waiting on a question, and chooses Send anyway, which types it in whatever the state). It holds the id of its GitHub thread and of the reviewer's comment. In a local review each task is a hand-off to the change set's agent, its thread a local one, with no seen mark: delivery is its state.
 
 **Agent comment**: A comment whose text starts with 🤖, which a tour agent posted under its person's account. The app names it `<login>'s agent` in the accent colour, with the agent's mark as its picture and the person's picture small at its corner, and shows the text without the 🤖. On GitHub it stays as posted.
 

@@ -6,7 +6,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{BoxState, CommentDraft, CommentPlace, CommentProblem, QueuedComment};
+use crate::viewer::{
+    BoxState, CommentDraft, CommentPlace, CommentProblem, QueuedComment, SendMode, Sending,
+};
 
 use super::button::{
     ButtonKind, ButtonSize, button as styled_button, button_icon, icon_label_button, joined,
@@ -35,7 +37,11 @@ pub struct ComposerActions {
     pub on_ask_agent_now: OnCompose,
     pub on_suggest_change: OnCompose,
     pub on_discard: OnCompose,
+    /// One of a local review's task send actions.
+    pub on_send_task: OnSendTask,
 }
+
+pub type OnSendTask = Rc<dyn Fn(SendMode, &mut Window, &mut App)>;
 
 /// Which ways out the box offers; they are independent facts, not modes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,6 +50,17 @@ pub struct CommentCapabilities {
     pub suggest_change: bool,
     /// The agent link is on, so the comment can also go to the tour agent.
     pub ask_agent: bool,
+    /// A local review's comment is a task, which replaces every GitHub send action.
+    pub sending: Sending,
+}
+
+/// What a task send action's button says.
+pub fn task_button(mode: SendMode) -> (Icon, &'static str) {
+    match mode {
+        SendMode::SendNow => (Icon::Send, "Send now"),
+        SendMode::AddToTasks => (Icon::ListChecks, "Add to tasks"),
+        SendMode::AddToReview | SendMode::CommentNow => (Icon::Send, "Send"),
+    }
 }
 
 /// The box a comment is written in, under the last selected row: the text and the buttons.
@@ -110,12 +127,16 @@ impl RenderOnce for CommentComposer {
         });
         let actions = self.actions;
         let on_focus = Rc::clone(&actions.on_focus);
+        let sending = self.capabilities.sending;
         let body = if self.state == BoxState::Composing {
-            let (on_type, on_submit, on_stop) = (
-                Rc::clone(&actions.on_type),
-                Rc::clone(&actions.on_add_to_review),
-                Rc::clone(&actions.on_stop),
-            );
+            let on_submit: OnCompose = match sending.tasks().first() {
+                Some(&mode) => {
+                    let on_send_task = Rc::clone(&actions.on_send_task);
+                    Rc::new(move |window, cx| on_send_task(mode, window, cx))
+                }
+                None => Rc::clone(&actions.on_add_to_review),
+            };
+            let (on_type, on_stop) = (Rc::clone(&actions.on_type), Rc::clone(&actions.on_stop));
             let on_ask = Rc::clone(&actions.on_ask_agent);
             let asks = self.capabilities.ask_agent;
             TextBox::new(
@@ -127,12 +148,59 @@ impl RenderOnce for CommentComposer {
             .on_edit(move |body, window, cx| on_type(body, window, cx))
             .on_submit(move |window, cx| on_submit(window, cx))
             .on_cancel(move |window, cx| on_stop(window, cx))
-            .on_submit_to_agent(asks, move |window, cx| on_ask(window, cx))
+            .on_submit_to_agent(asks && sending.on_github(), move |window, cx| {
+                on_ask(window, cx);
+            })
             .into_any_element()
         } else {
             div().child(self.draft.body.clone()).into_any_element()
         };
-        let buttons = (self.state != BoxState::Sending).then(|| {
+        let task_buttons = (self.state != BoxState::Sending && !sending.on_github()).then(|| {
+            let task_buttons = sending.tasks().iter().enumerate().map(|(index, &mode)| {
+                let (icon, label) = task_button(mode);
+                let on_send_task = Rc::clone(&actions.on_send_task);
+                let kind = if index == 0 {
+                    ButtonKind::Primary
+                } else {
+                    ButtonKind::Secondary
+                };
+                icon_label_button(
+                    &colors,
+                    SharedString::from(format!("send-task-{index}")),
+                    kind,
+                    ButtonSize::Regular,
+                    icon,
+                    label,
+                )
+                .on_click(move |_, window, cx| on_send_task(mode, window, cx))
+            });
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .children(task_buttons)
+                .children(self.capabilities.suggest_change.then(|| {
+                    button(
+                        &colors,
+                        "suggest-change",
+                        Icon::Diff,
+                        "Suggest change",
+                        ButtonKind::Secondary,
+                        Rc::clone(&actions.on_suggest_change),
+                    )
+                }))
+                .child(div().flex_1())
+                .child(button(
+                    &colors,
+                    "discard-comment",
+                    Icon::Trash,
+                    "Discard",
+                    ButtonKind::Danger,
+                    Rc::clone(&actions.on_discard),
+                ))
+        });
+        let buttons = (self.state != BoxState::Sending && sending.on_github()).then(|| {
             let capabilities = self.capabilities;
             let ask_agent = capabilities.ask_agent.then(|| {
                 let mut parts = vec![button(
@@ -259,8 +327,13 @@ impl RenderOnce for CommentComposer {
                     .text_sm()
                     .text_color(colors.muted_text)
                     .child(busy_dot(&colors, "composer-posting-dot"))
-                    .child("Posting…")
+                    .child(if sending.on_github() {
+                        "Posting…"
+                    } else {
+                        "Sending…"
+                    })
             }))
+            .children(task_buttons)
             .children(buttons);
         slide_in(composer, rise_id, STATE, Edge::Bottom, BOX_RISE)
     }

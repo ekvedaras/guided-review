@@ -288,6 +288,23 @@ fn check_never_moves_a_pinned_tour_when_the_pull_request_has_new_commits() {
     assert_eq!(written["base"], shop.base.as_str());
 }
 
+#[test]
+fn check_filling_in_the_subject_of_a_pinned_tour_keeps_its_version() {
+    let shop = Shop::with_pull();
+    let mut pinned = covering_everything();
+    pinned["version"] = json!(0);
+    pinned["base"] = json!(shop.base);
+    pinned["head"] = json!(shop.head);
+    shop.write_tour(pinned);
+
+    let run = shop.check();
+
+    assert!(run.success, "{}", run.stderr);
+    let written = shop.tour_on_disk();
+    assert_eq!(written["pr"], PR);
+    assert_eq!(written["version"], 0);
+}
+
 struct CiFile {
     repo: FixtureRepo,
     github: FakeGitHub,

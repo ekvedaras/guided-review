@@ -8,6 +8,7 @@ use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
@@ -95,11 +96,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.repo.folders(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {
@@ -122,6 +123,7 @@ impl Shop {
 
     fn repin_onto(&self, head: &str) {
         repin_tour(
+            &ReviewSubject::from(self.pr()),
             &self.tour_path(),
             &self.state_file(),
             &self.source(),
@@ -586,7 +588,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
         folders: shop.repo.folders(),
-        pr: shop.pr(),
+        subject: shop.pr().into(),
         pick_code_source: Arc::new(move |_| {
             Ok(Box::new(
                 LocalGit::find(&RepoName::new("acme", "shop"), &clone)?.unwrap(),
@@ -611,7 +613,7 @@ fn ticks_on_the_open_review_are_refused_while_a_re_pin_runs_so_they_cannot_overw
     let second_head = shop.commit_second_head();
     let mut review = shop.open();
 
-    review.start_repin();
+    assert!(review.start_repin());
     shop.repin_onto(&second_head);
     let refused = [review.tick(&"total".into()), review.untick(&"keep".into())];
 
@@ -632,7 +634,7 @@ fn text_typed_while_a_re_pin_runs_is_named_as_not_kept_until_the_re_pin_ends() {
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
         .unwrap();
 
-    review.start_repin();
+    assert!(review.start_repin());
     assert!(
         review
             .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
@@ -649,7 +651,7 @@ fn ticks_count_again_once_a_re_pin_failed() {
     let shop = Shop::with_tour_at_first_head();
     let mut review = shop.open();
 
-    review.start_repin();
+    assert!(review.start_repin());
     review.repin_failed();
     review.tick(&"total".into()).unwrap();
 
@@ -687,7 +689,7 @@ fn a_sync_answer_for_the_head_before_a_re_pin_leaves_the_re_pinned_review_s_tick
     let mut before = shop.open();
     before.sync(&github).unwrap();
     github.set_viewed("app/Order.php", ViewedState::Unviewed);
-    let stale = before.sync_request().run(&github);
+    let stale = before.sync_request().unwrap().run(&github);
     drop(before);
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);

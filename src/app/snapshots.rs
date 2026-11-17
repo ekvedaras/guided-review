@@ -215,6 +215,65 @@ impl RelevantPullRequestsPort for SamplePullRequests {
     }
 }
 
+/// A small clone for a local review's pictures, under `home`: `main` with a README and a file that goes,
+/// then `feature/cart` one commit ahead, with a changed README, a changed cart and a note that git does
+/// not know yet. Made with git itself and no network, so no PR is needed.
+pub fn local_repo_in(home: &std::path::Path) -> anyhow::Result<PathBuf> {
+    let folder = home.join("shop");
+    // Staged once per scene: the tour on disk is pinned to this clone's commits, so it is kept as it is.
+    if folder.join(".git").exists() {
+        return Ok(folder);
+    }
+    std::fs::create_dir_all(folder.join("src"))?;
+    let git = |args: &[&str]| -> anyhow::Result<()> {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&folder)
+            .args([
+                "-c",
+                "user.name=Sample",
+                "-c",
+                "user.email=sample@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()?;
+        anyhow::ensure!(status.success(), "git {} failed", args.join(" "));
+        Ok(())
+    };
+    let write = |path: &str, text: &str| std::fs::write(folder.join(path), text);
+    git(&["init", "--quiet", "--initial-branch=main"])?;
+    git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/acme/shop.git",
+    ])?;
+    write("README.md", "# Shop\n\nOrders cost two.\n")?;
+    write("old.txt", "goes away\n")?;
+    git(&["add", "--all"])?;
+    git(&["commit", "--quiet", "-m", "Start the shop"])?;
+    git(&["checkout", "--quiet", "-b", "feature/cart"])?;
+    write(
+        "src/cart.rs",
+        "pub fn total(items: &[u32]) -> u32 {\n    items.iter().sum()\n}\n",
+    )?;
+    std::fs::remove_file(folder.join("old.txt"))?;
+    git(&["add", "--all"])?;
+    git(&["commit", "--quiet", "-m", "Add the cart"])?;
+    write(
+        "README.md",
+        "# Shop\n\nOrders cost two, and a cart adds them up.\n",
+    )?;
+    write(
+        "src/cart.rs",
+        "pub fn total(items: &[u32]) -> u32 {\n    items.iter().sum()\n}\n\npub fn tax(total: u32) -> u32 {\n    total / 5\n}\n",
+    )?;
+    write("notes.txt", "ask about tax rules\n")?;
+    Ok(folder)
+}
+
 pub fn sample_pr(number: u32) -> Option<PullRequestUrl> {
     format!("https://github.com/ekvedaras/guided-review/pull/{number}")
         .parse()

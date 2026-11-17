@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{AgentStatus, TerminalId, TourAgentPort, TourAgents, WriterHandOver};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
@@ -72,7 +72,14 @@ fn a_pr_with_no_agent_gets_one_started_with_the_writer_task() {
         panic!("started, got {handed:?}");
     };
     let calls = fake.calls();
-    let [TourAgentCall::Start { first_task, pr, .. }] = calls.as_slice() else {
+    let [
+        TourAgentCall::Start {
+            first_task,
+            subject: pr,
+            ..
+        },
+    ] = calls.as_slice()
+    else {
         panic!("one start and nothing else, got {calls:?}");
     };
     assert_eq!(pr.to_string(), PR);

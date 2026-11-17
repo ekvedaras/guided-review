@@ -12,6 +12,7 @@ use super::ask::{Ask, AskId, Asks, Place, ShownOn};
 use super::ask_target::AskTarget;
 use super::ports::{AgentLaunch, TurnStopper};
 use super::review::Screen;
+use super::tour_agent::OwnAgentHandOff;
 
 /// The live AI processes of Asks, each answering on its own thread. The desk decides which run;
 /// the shell starts, feeds and stops them, and reports what each says as an `AskProcessEvent`.
@@ -82,6 +83,8 @@ pub struct AskDesk {
     notice: Option<AskNotice>,
     /// What became of each Ask handed to the tour agent, or that it is being handed.
     hand_offs: HashMap<AskId, Arc<str>>,
+    /// Asks held back from an agent that does not report its state, which the reviewer may send anyway.
+    held_back: HashSet<AskId>,
 }
 
 impl AskDesk {
@@ -95,6 +98,7 @@ impl AskDesk {
             code_changed: HashSet::new(),
             notice: None,
             hand_offs: HashMap::new(),
+            held_back: HashSet::new(),
         }
     }
 
@@ -291,11 +295,19 @@ impl AskDesk {
 
     pub fn hand_off_started(&mut self, id: AskId) {
         self.hand_offs.insert(id, HANDING_TO_AGENT.into());
+        self.held_back.remove(&id);
     }
 
-    /// The word on an Ask handed, or tried to hand, to the tour agent.
-    pub fn hand_off_ended(&mut self, id: AskId, line: &str) {
-        self.hand_offs.insert(id, line.into());
+    /// What became of an Ask handed, or tried to hand, to the tour agent.
+    pub fn hand_off_ended(&mut self, id: AskId, outcome: &OwnAgentHandOff) {
+        self.hand_offs.insert(id, outcome.line().into());
+        if outcome.can_send_anyway() {
+            self.held_back.insert(id);
+        }
+    }
+
+    pub fn can_send_anyway(&self, id: AskId) -> bool {
+        self.held_back.contains(&id)
     }
 
     /// Gets the Ask a live process, stopping the one used longest ago when three are live.

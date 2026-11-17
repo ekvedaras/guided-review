@@ -2,7 +2,8 @@ use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     CommentGesture, CommentId, CommentPlace, CommentResult, FollowedLines, LineLocation, PageRow,
@@ -46,6 +47,8 @@ impl Shop {
             TourPin {
                 version: 1,
                 pr: PR.to_owned(),
+                local: None,
+                repo: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
@@ -55,8 +58,10 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let state_file =
-            ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap());
+        let state_file = ReviewStateFile::for_subject(
+            &self.repo.folders(),
+            &PR.parse::<ReviewSubject>().unwrap(),
+        );
         Review::open_basic(tour, &source, state_file).unwrap()
     }
 }
@@ -68,6 +73,7 @@ fn comment(body: &str) -> ThreadComment {
         reactions: Vec::new(),
         author: "alice".into(),
         is_bot: false,
+        by_agent: None,
         by_viewer: false,
         body: body.into(),
         url: format!("https://github.com/acme/shop/pull/7#discussion_{body}"),

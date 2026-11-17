@@ -2,6 +2,7 @@ use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentReplied, Audience, CommentGesture, CommentId, CommentPlace, HandOffId, HandOffState,
@@ -44,7 +45,7 @@ impl Pull {
 
     fn state_file(&self) -> ReviewStateFile {
         let pr: PullRequestUrl = PR.parse().unwrap();
-        ReviewStateFile::for_pr(&self.repo.folders(), &pr)
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr))
     }
 
     fn open(&self) -> Review {
@@ -131,6 +132,7 @@ fn thread_on_line_ten() -> ReviewThread {
             id: CommentId::new("C1"),
             author: "me".into(),
             is_bot: false,
+            by_agent: None,
             body: "why ten?".into(),
             url: String::new(),
             reactions: Vec::new(),
@@ -176,7 +178,7 @@ fn while_a_re_pin_runs_the_reviewer_s_changes_are_refused_and_nothing_changes() 
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
         .unwrap();
 
-    review.start_repin();
+    assert!(review.start_repin());
     let refused = [
         review.tick(&notes()),
         review.type_in(&TextBox::Draft(place), "why ten?"),
@@ -203,7 +205,7 @@ fn while_a_re_pin_runs_what_the_tour_agent_did_is_kept_in_memory_but_not_saved()
     let mut review = pull.open();
     let hand_off = pull.hand_off(&mut review);
 
-    review.start_repin();
+    assert!(review.start_repin());
     review
         .hand_off_replied(hand_off, &AgentReplied::default())
         .unwrap();
@@ -217,7 +219,7 @@ fn once_a_re_pin_failed_changes_are_saved_again_and_nothing_is_named_as_not_kept
     let pull = Pull::new();
     let mut review = pull.open();
     let hand_off = pull.hand_off(&mut review);
-    review.start_repin();
+    assert!(review.start_repin());
     review.tick(&notes()).unwrap_err();
 
     review.repin_failed();
@@ -237,7 +239,7 @@ fn a_tour_agent_reply_during_a_re_pin_is_taken_and_carried_into_the_re_pinned_re
     let mut review = pull.open();
     let hand_off = pull.hand_off(&mut review);
 
-    review.start_repin();
+    assert!(review.start_repin());
     review
         .hand_off_replied(hand_off, &AgentReplied::default())
         .unwrap();
@@ -249,4 +251,49 @@ fn a_tour_agent_reply_during_a_re_pin_is_taken_and_carried_into_the_re_pinned_re
 
     assert_eq!(hand_off_states(&re_pinned), [HandOffState::Answered]);
     assert_eq!(pull.saved_hand_off_states(), [HandOffState::Answered]);
+}
+
+#[test]
+fn an_update_never_starts_while_the_review_is_moved_or_dropped_and_its_failure_never_frees_the_move()
+ {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    assert!(review.start_drop());
+
+    assert!(!review.start_repin(), "the move is running");
+    review.repin_failed();
+
+    assert!(
+        review.tick(&notes()).is_err(),
+        "the stale copy still takes no changes while the move runs"
+    );
+    assert!(!pull.open().is_ticked(&notes()));
+}
+
+#[test]
+fn a_move_or_drop_never_starts_while_an_update_runs_and_its_failure_never_frees_the_update() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    assert!(review.start_repin());
+
+    assert!(!review.start_drop(), "the update is running");
+    assert!(!review.start_drop(), "nor a second move");
+    review.move_failed();
+
+    assert!(review.tick(&notes()).is_err());
+    review.repin_failed();
+    review.tick(&notes()).unwrap();
+}
+
+#[test]
+fn a_second_move_never_starts_while_one_runs_and_a_failed_move_frees_the_review() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    assert!(review.start_drop());
+
+    assert!(!review.start_drop());
+    review.move_failed();
+
+    review.tick(&notes()).unwrap();
+    assert!(pull.open().is_ticked(&notes()));
 }

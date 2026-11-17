@@ -6,7 +6,9 @@ use anyhow::Context as _;
 
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
+use crate::local_work_tree::OnDisk;
 use crate::pull_request::Sha;
+use crate::review_subject::LocalChangeSet;
 
 pub trait CodeSource: Send + Sync {
     fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String>;
@@ -18,6 +20,18 @@ pub trait CodeSource: Send + Sync {
     fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha>;
     /// True when the checked-out files are exactly `head`, so they can be opened in an IDE.
     fn working_tree_is_at(&self, head: &Sha) -> bool;
+    /// Where a local change set's folder is against its snapshot. Only a local review's clone can tell.
+    fn change_set_on_disk(
+        &self,
+        change_set: &LocalChangeSet,
+        snapshot: &Sha,
+    ) -> anyhow::Result<OnDisk> {
+        anyhow::bail!(
+            "{} cannot tell whether {} changed on disk since {snapshot}",
+            std::any::type_name::<Self>(),
+            change_set.folder().as_path().display()
+        )
+    }
     /// The clone this source reads, so a file can be opened in an IDE. `None` for GitHub.
     fn local_clone(&self) -> Option<&Path> {
         None

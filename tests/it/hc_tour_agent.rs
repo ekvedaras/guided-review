@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::platform::Os;
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
     TourAgentPort, TourAgentStart,
@@ -14,12 +14,12 @@ use crate::support::write_executable;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
-/// A stand-in `hc` that logs each call on one line and answers from `<dir>/answer-<subcommand>`,
-/// failing when the server is made to be down.
+/// A stand-in `hc` that logs each call on one line and answers from `<dir>/answer-<subcommand>-<first
+/// argument>`, else `<dir>/answer-<subcommand>`, failing when the server is made to be down.
 fn fake_hc(dir: &Path) -> PathBuf {
     let script = dir.join("hc");
     write_executable(
@@ -39,7 +39,8 @@ if [ "$1" = "send" ] && [ "$4" = "idle" ] && [ -f "{dir}/refuse-idle" ]; then
   cat "{dir}/refuse-idle" >&2
   exit 10
 fi
-if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
+if [ -f "{dir}/answer-$1-$2" ]; then cat "{dir}/answer-$1-$2"
+elif [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
 "#,
             dir = dir.display()
         ),
@@ -139,7 +140,7 @@ fn a_terminal_is_claimed_with_both_labels_and_released_by_emptying_the_pr_label(
     let agents = adapter(dir.path());
 
     agents.claim(&TerminalId::new("t7"), &pr()).unwrap();
-    agents.release(&TerminalId::new("t9")).unwrap();
+    agents.release(&TerminalId::new("t9"), &pr()).unwrap();
 
     assert_eq!(
         calls(dir.path(), "calls"),
@@ -147,6 +148,76 @@ fn a_terminal_is_claimed_with_both_labels_and_released_by_emptying_the_pr_label(
             format!("label t7 app=guided-review gr.pr={PR}"),
             "label t9 gr.pr=".to_owned()
         ]
+    );
+}
+
+const LOCAL: &str = "local:/work/shop@feature/cart";
+
+fn local() -> ReviewSubject {
+    LOCAL.parse().unwrap()
+}
+
+#[test]
+fn the_agent_of_a_local_change_set_is_looked_up_by_its_own_label() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[{"address":"t4","state":"live"}]}"#,
+    );
+
+    let terminals = adapter(dir.path()).terminals_of(&local()).unwrap();
+
+    assert_eq!(terminals, [TerminalId::new("t4")]);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [format!(
+            "ls --label app=guided-review --label gr.local={LOCAL} --json"
+        )]
+    );
+}
+
+#[test]
+fn a_terminal_is_claimed_for_a_local_change_set_and_released_by_emptying_its_label() {
+    let dir = TempDir::new().unwrap();
+    let agents = adapter(dir.path());
+
+    agents.claim(&TerminalId::new("t4"), &local()).unwrap();
+    agents.release(&TerminalId::new("t5"), &local()).unwrap();
+
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            format!("label t4 app=guided-review gr.local={LOCAL}"),
+            "label t5 gr.local=".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn an_app_started_agent_of_a_local_change_set_is_read_back_by_its_label() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[{"address":"t4","state":"live"}]}"#,
+    );
+    answer(
+        dir.path(),
+        "get",
+        &format!(
+            r#"{{"address":"t4","labels":{{"gr.local":"{LOCAL}","gr.started-by":"app"}},"status":{{"state":"idle"}},"status_ms":7}}"#
+        ),
+    );
+
+    let agents = adapter(dir.path()).app_started().unwrap();
+
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent.subject.clone())
+            .collect::<Vec<_>>(),
+        [Some(local())]
     );
 }
 
@@ -358,16 +429,17 @@ fn showing_an_agent_placed_while_the_herdr_app_was_closed_names_its_space_and_ta
     );
 }
 
-fn live(terminal: &str, runs_claude: bool, space: &str) -> LiveTerminal {
+fn live(terminal: &str, runs_claude: bool, space: &str, cwd: &str) -> LiveTerminal {
     LiveTerminal {
         terminal: TerminalId::new(terminal),
         runs_claude,
         space: space.to_owned(),
+        cwd: PathBuf::from(cwd),
     }
 }
 
 #[test]
-fn live_terminals_say_whether_they_run_claude_and_in_which_space_as_herdr_lists_them() {
+fn live_terminals_say_whether_they_run_claude_in_which_space_and_folder_as_herdr_lists_them() {
     let dir = TempDir::new().unwrap();
     answer(dir.path(), "ls", include_str!("../fixtures/herdr/ls.json"));
 
@@ -376,15 +448,68 @@ fn live_terminals_say_whether_they_run_claude_and_in_which_space_as_herdr_lists_
     assert_eq!(
         terminals,
         [
-            live("t1", true, "dotfiles"),
-            live("t3", false, "shop"),
-            live("t4", false, "shop"),
-            live("t1b", true, "guided-review"),
-            live("t2h", false, "guided-review"),
-            live("t2j", true, "guided-review"),
+            live("t1", true, "dotfiles", "/Users/me/dotfiles"),
+            live("t3", false, "shop", "/Users/me/Code/shop"),
+            live("t4", false, "shop", "/Users/me/Code/shop"),
+            live("t1b", true, "guided-review", "/Users/me/Code/guided-review"),
+            live(
+                "t2h",
+                false,
+                "guided-review",
+                "/Users/me/Code/guided-review/.claude/worktrees/agent-1"
+            ),
+            live(
+                "t2j",
+                true,
+                "guided-review",
+                "/Users/me/Code/guided-review/.claude/worktrees/agent-1"
+            ),
         ]
     );
-    assert_eq!(calls(dir.path(), "calls"), ["ls --json"]);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            "ls --json",
+            "get t3 --json",
+            "get t4 --json",
+            "get t2h --json"
+        ]
+    );
+}
+
+/// Herdr lists a terminal as `claude-code` only once Claude has reported a status to it; a Claude started by
+/// hand that it has not heard from is listed by its shell, and only its foreground process says Claude.
+#[test]
+fn a_claude_herdr_has_no_status_from_runs_claude_by_its_foreground_process() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[
+            {"address":"t11","agent":"zsh","cwd":"/Users/me/Code/Trees/a","state":"live","turn":222,"where":"a / 1"},
+            {"address":"t21","agent":"zsh","cwd":"/Users/me/Code/Trees/a","state":"live","turn":0,"where":"a / 2"}
+        ]}"#,
+    );
+    answer(
+        dir.path(),
+        "get-t11",
+        include_str!("../fixtures/herdr/get-claude-not-reported.json"),
+    );
+    answer(
+        dir.path(),
+        "get-t21",
+        include_str!("../fixtures/herdr/get-shell.json"),
+    );
+
+    let terminals = adapter(dir.path()).live_terminals().unwrap();
+
+    assert_eq!(
+        terminals,
+        [
+            live("t11", true, "a", "/Users/me/Code/Trees/a"),
+            live("t21", false, "a", "/Users/me/Code/Trees/a"),
+        ]
+    );
 }
 
 #[test]
@@ -483,6 +608,37 @@ fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_d
 }
 
 #[test]
+fn an_agent_herdr_has_no_state_from_takes_nothing_and_is_named_as_not_reporting_it() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("refuse-idle"),
+        include_str!("../fixtures/hc/send-refused-silent.json"),
+    )
+    .unwrap();
+
+    let sent = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(sent, SendOutcome::Unreported(TerminalId::new("t2b")));
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        ["send t2b --if idle a question"]
+    );
+}
+
+#[test]
+fn text_sent_anyway_is_typed_in_whatever_the_agents_state() {
+    let dir = TempDir::new().unwrap();
+
+    adapter(dir.path())
+        .send(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(calls(dir.path(), "calls"), ["send t2b a question"]);
+}
+
+#[test]
 fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_tools_and_the_apps_path()
  {
     let dir = TempDir::new().unwrap();
@@ -495,7 +651,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
     let started = adapter(dir.path())
         .giving_agents_path("/opt/gr/bin:/usr/bin")
         .start(&TourAgentStart {
-            pr: pr(),
+            subject: pr(),
             name: "tour-acme-shop-7".to_owned(),
             folder: PathBuf::from("/clones/shop"),
             first_task: "You are the tour agent".to_owned(),
@@ -531,7 +687,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
 
 fn start_shop_agent(agents: &HcTourAgents) -> anyhow::Result<TerminalId> {
     agents.start(&TourAgentStart {
-        pr: pr(),
+        subject: pr(),
         name: "tour-acme-shop-7".to_owned(),
         folder: PathBuf::from("/clones/shop"),
         first_task: "You are the tour agent".to_owned(),
@@ -544,7 +700,7 @@ fn tools_of_started_agent(summary_skill: Option<&str>) -> Vec<String> {
     answer(dir.path(), "run", r#"{"address":"t9"}"#);
     adapter(dir.path())
         .start(&TourAgentStart {
-            pr: pr(),
+            subject: pr(),
             name: "tour-acme-shop-7".to_owned(),
             folder: PathBuf::from("/clones/shop"),
             first_task: "You are the tour agent".to_owned(),
@@ -735,7 +891,7 @@ fn the_app_started_agents_are_listed_with_their_pr_status_and_when_it_changed() 
         agents,
         [AppAgent {
             terminal: TerminalId::new("t9"),
-            pr: Some(pr()),
+            subject: Some(pr()),
             status: AgentStatus::Idle,
             status_since_ms: 1_793_954_000_972,
         }]

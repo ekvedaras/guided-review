@@ -59,7 +59,34 @@ impl fmt::Display for RepoName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `owner/name`, as it is shown.
+impl FromStr for RepoName {
+    type Err = anyhow::Error;
+
+    fn from_str(full_name: &str) -> anyhow::Result<Self> {
+        match full_name.split_once('/') {
+            Some((owner, name)) if !owner.is_empty() && !name.is_empty() && !name.contains('/') => {
+                Ok(Self::new(owner, name))
+            }
+            _ => bail!("not an owner/name repo: {full_name}"),
+        }
+    }
+}
+
+impl serde::Serialize for RepoName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RepoName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let full_name = String::deserialize(deserializer)?;
+        full_name.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PullRequestUrl {
     pub repo: RepoName,
     pub number: u64,
@@ -135,7 +162,8 @@ impl fmt::Display for Sha {
     }
 }
 
-pub struct PullRequestTips {
+/// The two tips a change is read between: where its base branch is, and its head.
+pub struct ChangeTips {
     pub base_branch_tip: Sha,
     pub head: Sha,
 }

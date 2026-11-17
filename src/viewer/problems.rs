@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::app_folders::NotRead;
+use crate::opened_change_set::UnreadableLocalTour;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
@@ -35,12 +36,21 @@ pub enum Problem {
     TourNotRefreshed(String),
     /// `open` named the PR shown, and its tour file could not be read again.
     TourNotReloaded(String),
+    /// Drop review of a local review failed part way; the review stays on screen.
+    ReviewNotDropped(String),
+    /// git could not say how a local review's folder stands against its snapshot, so the sidebar
+    /// says what the last look that went through found.
+    FolderNotLookedAt(String),
+    /// Not now was clicked on a move offer and the choice could not be written, so the offer comes back.
+    MoveNotDeclined(String),
     /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
     SwitchFailed(String),
     /// Show agent was clicked and the terminal did not come up.
     ShowAgentFailed(String),
+    /// Use this agent was clicked and the terminal could not be made the change set's agent.
+    UseAgentFailed(String),
     /// GitHub refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
     ReviewingMarkNotChanged(String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
@@ -48,6 +58,9 @@ pub enum Problem {
     /// Files the app keeps that lie in the app folders it does not use: what a move from
     /// `~/.guided-review` left behind or could not put back, or what an older binary wrote there since.
     FilesNotRead(Vec<NotRead>),
+    /// Local tours that could not be read: the app keeps every snapshot ref of their clones, and the
+    /// reviews they hold do not open.
+    LocalToursNotRead(Vec<UnreadableLocalTour>),
 }
 
 /// What a problem is about. A problem of a kind stands in for the one of that kind before it, and
@@ -74,20 +87,30 @@ pub enum ProblemKind {
     TourNotRefreshed,
     /// Stays: a reload that goes through opens a new review.
     TourNotReloaded,
+    /// Stays: a drop that goes through closes the review.
+    ReviewNotDropped,
+    /// Cleared by a look at the folder that goes through.
+    FolderNotLookedAt,
     /// Raised when the review opens; the old file is kept, so nothing clears it.
     SavedReviewNotRead,
+    /// Cleared by the next Not now or Keep local review that is written.
+    MoveNotDeclined,
     /// Replaced by the next hand-off, which clears it when that one is sent.
     HandOffNotSent,
     /// Stays: a switch that goes through opens another review.
     SwitchFailed,
     /// Cleared by the next Show agent that brings the terminal up.
     ShowAgentFailed,
+    /// Cleared by the next Use this agent that goes through.
+    UseAgentFailed,
     /// Cleared by the next change of the 👀 on the PR that goes through.
     ReviewingMarkNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
     ReleaseInstallInTheWay,
     /// Raised when the review opens; a review opened once the files are gone has none.
     FilesNotRead,
+    /// Raised when the review opens; a review opened once the tours are readable or gone has none.
+    LocalToursNotRead,
 }
 
 impl Problem {
@@ -104,12 +127,17 @@ impl Problem {
             Self::ViewedNotSynced(_) => ProblemKind::ViewedNotSynced,
             Self::TourNotRefreshed(_) => ProblemKind::TourNotRefreshed,
             Self::TourNotReloaded(_) => ProblemKind::TourNotReloaded,
+            Self::ReviewNotDropped(_) => ProblemKind::ReviewNotDropped,
+            Self::FolderNotLookedAt(_) => ProblemKind::FolderNotLookedAt,
+            Self::MoveNotDeclined(_) => ProblemKind::MoveNotDeclined,
             Self::HandOffNotSent { .. } => ProblemKind::HandOffNotSent,
             Self::SwitchFailed(_) => ProblemKind::SwitchFailed,
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
+            Self::UseAgentFailed(_) => ProblemKind::UseAgentFailed,
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
             Self::FilesNotRead(_) => ProblemKind::FilesNotRead,
+            Self::LocalToursNotRead(_) => ProblemKind::LocalToursNotRead,
         }
     }
 }
@@ -282,6 +310,17 @@ impl fmt::Display for Problem {
                 formatter,
                 "The tour could not be read again, so it shows as it was: {reason}"
             ),
+            Self::ReviewNotDropped(reason) => {
+                write!(formatter, "The review was not dropped: {reason}")
+            }
+            Self::FolderNotLookedAt(reason) => write!(
+                formatter,
+                "The folder could not be looked at, so the sidebar may not say how it changed: {reason}"
+            ),
+            Self::MoveNotDeclined(reason) => write!(
+                formatter,
+                "Your choice not to move was not kept, so the offer will come back: {reason}"
+            ),
             Self::HandOffNotSent { comment, reason } => write!(
                 formatter,
                 "The agent will not get your comment \"{comment}\": {reason}"
@@ -289,6 +328,9 @@ impl fmt::Display for Problem {
             Self::SwitchFailed(reason) => write!(formatter, "Not switched: {reason}"),
             Self::ShowAgentFailed(reason) => {
                 write!(formatter, "Could not show the agent: {reason}")
+            }
+            Self::UseAgentFailed(reason) => {
+                write!(formatter, "Could not use that agent: {reason}")
             }
             Self::ReviewingMarkNotChanged(reason) => write!(
                 formatter,
@@ -324,6 +366,31 @@ impl fmt::Display for Problem {
                     .collect();
                 write!(formatter, "{}", named.join(", "))?;
                 match files.len().saturating_sub(NAMED) {
+                    0 => Ok(()),
+                    more => write!(formatter, " and {more} more"),
+                }
+            }
+            Self::LocalToursNotRead(tours) => {
+                const NAMED: usize = 3;
+                if tours.len() == 1 {
+                    write!(
+                        formatter,
+                        "A local review's tour could not be read, so the snapshot refs of its clone are kept until it can: "
+                    )?;
+                } else {
+                    write!(
+                        formatter,
+                        "{} local tours could not be read, so the snapshot refs of their clones are kept until they can: ",
+                        tours.len()
+                    )?;
+                }
+                let named: Vec<String> = tours
+                    .iter()
+                    .take(NAMED)
+                    .map(|tour| format!("{} ({})", tour.path.display(), tour.reason))
+                    .collect();
+                write!(formatter, "{}", named.join(", "))?;
+                match tours.len().saturating_sub(NAMED) {
                     0 => Ok(()),
                     more => write!(formatter, " and {more} more"),
                 }

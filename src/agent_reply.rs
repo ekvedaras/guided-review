@@ -1,14 +1,18 @@
-//! `guided-review agent-reply`: the tour agent answers a hand-off on GitHub, or says it is working on
-//! it, then the hand-off takes that on, in the running app when it shows the PR, else in the state file.
+//! `guided-review agent-reply`: the agent answers a hand-off, or says it is working on it, then the
+//! hand-off takes that on, in the running app when it shows the review, else in the state file. A PR's
+//! answer goes on GitHub; a local review's goes on its local thread in the state file, which only ever
+//! changes by a locked read and write of that thread, so the app and this command never write over
+//! each other's thread.
 
 use crate::app_folders::AppFolders;
+use crate::review_subject::ReviewSubject;
 
 use anyhow::Context;
 
 use crate::app_link::{Answer, AppFolder, Request, tell_app};
-use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
     AgentReplied, HandOffId, ReplyPlacement, ReviewStateFile, ReviewThreadsPort, ReviewWritesPort,
+    ThreadHome,
 };
 
 /// What the agent posts on the hand-off's thread.
@@ -18,51 +22,58 @@ pub enum AgentReply<'a> {
     WorkingOnIt,
 }
 
-/// Says where the reply went. Nothing is posted for a hand-off the PR does not have.
+/// Says where the reply went. Nothing is posted for a hand-off the review does not have.
 pub fn agent_reply(
     github: &(impl ReviewThreadsPort + ReviewWritesPort),
     folders: &AppFolders,
-    pr: &PullRequestUrl,
+    subject: &ReviewSubject,
     id: HandOffId,
     reply: &AgentReply<'_>,
 ) -> anyhow::Result<String> {
-    let state_file = ReviewStateFile::for_pr(folders, pr);
+    let state_file = ReviewStateFile::for_subject(folders, subject);
     let state = state_file.load()?;
+    let home = ThreadHome::of(subject, &state_file);
     let request = match reply {
-        AgentReply::Answer(body) => state.hand_offs().agent_reply(pr, id, body)?,
-        AgentReply::WorkingOnIt => state.hand_offs().agent_working_on_it(pr, id)?,
+        AgentReply::Answer(body) => state.hand_offs().agent_reply(&home, id, body)?,
+        AgentReply::WorkingOnIt => state.hand_offs().agent_working_on_it(&home, id)?,
     };
     let done = request
         .run(github)
-        .with_context(|| format!("could not post the reply to {id} on {pr}"))?;
-    mark_replied(folders, &state_file, pr, id, done.replied())?;
+        .with_context(|| format!("could not post the reply to {id} on {subject}"))?;
+    mark_replied(folders, &state_file, subject, id, done.replied())?;
     let what = match reply {
         AgentReply::Answer(_) => "replied to",
         AgentReply::WorkingOnIt => "said you are working on",
     };
-    Ok(match done.placement() {
-        ReplyPlacement::JoinedPendingReview => {
+    Ok(match (done.placement(), subject) {
+        (ReplyPlacement::JoinedPendingReview, _) => {
             format!("{what} {id}: in your pending review, which goes out when you send it")
         }
-        ReplyPlacement::PostedAtOnce => format!("{what} {id}: posted on {pr}"),
-        ReplyPlacement::ReplacedWorkingOnIt => {
+        (ReplyPlacement::PostedAtOnce, ReviewSubject::PullRequest(pr)) => {
+            format!("{what} {id}: posted on {pr}")
+        }
+        (ReplyPlacement::PostedAtOnce, ReviewSubject::Local(_)) => {
+            format!("{what} {id}: on its thread in the local review")
+        }
+        (ReplyPlacement::ReplacedWorkingOnIt, _) => {
             format!("{what} {id}: in place of the \"Working on it…\" reply")
         }
     })
 }
 
-/// The app holds the state of the PR it shows and writes it back whole, so it marks that one itself.
+/// The app holds the hand-offs of the review it shows and writes them back whole, so it marks that
+/// one itself and reads the threads again.
 fn mark_replied(
     folders: &AppFolders,
     state_file: &ReviewStateFile,
-    pr: &PullRequestUrl,
+    subject: &ReviewSubject,
     id: HandOffId,
     replied: &AgentReplied,
 ) -> anyhow::Result<()> {
     let told = tell_app(
         &AppFolder::of(folders),
         &Request::AgentReplied {
-            pr: pr.to_string(),
+            pr: subject.to_string(),
             hand_off: id,
             replied: replied.clone(),
         },

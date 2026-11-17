@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
-fn pr() -> PullRequestUrl {
+fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 

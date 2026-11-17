@@ -10,12 +10,17 @@ use gpui::{
 };
 
 use crate::app::tour_writer;
-use crate::pull_request::PullRequestUrl;
+use crate::config::Config;
+use crate::github::GitHub;
+use crate::local_change_sets::find_local_rows;
+use crate::opened_change_set::OpenedChangeSet;
+use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    ActivePr, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, SwitcherRow, TourAgentPort,
-    TourFact, WhyListed, WritingFact,
+    ActivePr, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, RowKind, SwitcherRow,
+    TourAgentPort, TourFact, WhyListed, WritingFact,
 };
 
+use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{chip, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
@@ -36,9 +41,11 @@ const MIN_THUMB_HEIGHT: Pixels = px(20.);
 pub struct PrSwitching {
     pub relevant: Arc<dyn RelevantPullRequestsPort>,
     pub folders: AppFolders,
-    pub show: Arc<dyn Fn(PullRequestUrl) + Send + Sync>,
+    pub show: Arc<dyn Fn(ReviewSubject) + Send + Sync>,
     /// Asks the app to open the PR on screen again, after a save of the settings.
     pub reopen: Arc<dyn Fn() + Send + Sync>,
+    /// Tells the app a review's files were deleted with Drop review, so its window shows it no more.
+    pub dropped: Arc<dyn Fn(ReviewSubject) + Send + Sync>,
     /// The PR shown, the tours being written and the agent replies not seen.
     pub active: Entity<ActivePr>,
     /// Herdr, where tour agents write tours.
@@ -55,8 +62,12 @@ impl PrSwitching {
     pub fn refresh(&self, cx: &mut App) {
         self.list.update(cx, |list, _| list.refreshing());
         let relevant = Arc::clone(&self.relevant);
-        let (list, active, folders) =
-            (self.list.clone(), self.active.clone(), self.folders.clone());
+        let (list, active, folders, agents) = (
+            self.list.clone(),
+            self.active.clone(),
+            self.folders.clone(),
+            Arc::clone(&self.agents),
+        );
         cx.spawn(async move |cx| {
             let answer = cx
                 .background_executor()
@@ -64,6 +75,21 @@ impl PrSwitching {
                 .await;
             list.update(cx, |list, cx| {
                 list.loaded(answer, &folders);
+                list.check_tours(&folders, active.read(cx));
+                cx.notify();
+            });
+            // After the PRs, so a slow disk never holds their rows back.
+            let looked_in = folders.clone();
+            let found = cx
+                .background_executor()
+                .spawn(async move {
+                    // A config that cannot be read is Settings' to report; here it only names no clones.
+                    let config = Config::load_from(&looked_in).unwrap_or_default();
+                    find_local_rows(&looked_in, &config, agents.as_ref(), &GitHub::from_env())
+                })
+                .await;
+            list.update(cx, |list, cx| {
+                list.local_found(found, &folders);
                 list.check_tours(&folders, active.read(cx));
                 cx.notify();
             });
@@ -84,6 +110,9 @@ pub enum SwitcherPlace {
 /// The switcher was closed while it filled the window.
 pub struct SwitcherDismissed;
 
+/// The reviewer dropped the review on screen: its session deletes the files, so it writes nothing more.
+pub struct DropShownReview;
+
 /// The overlay behind the PR title: the reviewer's relevant PRs under a query box.
 pub struct PrSwitcherView {
     place: SwitcherPlace,
@@ -101,41 +130,88 @@ pub struct PrSwitcherView {
     _list_changes: Subscription,
 }
 
-/// A row with its texts made when the list or the query changes, not every frame.
-struct ShownRow {
-    pr: SharedString,
+/// What a row says of what is reviewed: a PR link and its author, or a repo and what changed in the folder.
+struct RowWords {
+    reference: SharedString,
     title: SharedString,
-    author: SharedString,
+    byline: SharedString,
     why: &'static str,
     is_draft: bool,
+}
+
+/// A row with its texts made when the list or the query changes, not every frame.
+struct ShownRow {
+    words: RowWords,
     tour: TourFact,
     tour_label: &'static str,
     has_unseen_reply: bool,
     is_active: bool,
+    /// What the folder of a local review is now, when it is no longer the snapshot.
+    disk_label: Option<&'static str>,
+    /// A local row whose branch has an open PR: "PR acme/shop#7 open".
+    open_pr: Option<SharedString>,
+    offers_drop_review: bool,
 }
 
 impl ShownRow {
     fn of(row: &SwitcherRow, switcher: &PrSwitcher) -> Self {
-        let pull_request = &row.pull_request;
-        Self {
-            pr: pull_request.url.short().into(),
-            title: pull_request.title.clone().into(),
-            author: pull_request.author.clone().into(),
-            why: match pull_request.why_listed {
-                WhyListed::Mine => "mine",
-                WhyListed::ReviewRequested => "review requested",
-                WhyListed::Involved => "involved",
+        let words = match &row.kind {
+            RowKind::PullRequest(pull_request) => RowWords {
+                reference: pull_request.url.short().into(),
+                title: pull_request.title.clone().into(),
+                byline: pull_request.author.clone().into(),
+                why: match pull_request.why_listed {
+                    WhyListed::Mine => "mine",
+                    WhyListed::ReviewRequested => "review requested",
+                    WhyListed::Involved => "involved",
+                },
+                is_draft: pull_request.is_draft,
             },
-            is_draft: pull_request.is_draft,
+            RowKind::Local(local) => RowWords {
+                reference: local.change_set.repo().map_or_else(
+                    || local.change_set.folder().name().into_owned().into(),
+                    |repo| repo.to_string().into(),
+                ),
+                title: local.change_set.branch().as_str().to_owned().into(),
+                byline: changes_of(local).into(),
+                why: "Local",
+                is_draft: false,
+            },
+        };
+        Self {
+            words,
             tour: row.tour,
             tour_label: switcher.tour_label(row),
             has_unseen_reply: row.has_unseen_reply,
             is_active: row.is_active,
+            disk_label: row.local().and_then(LocalRow::disk_label),
+            open_pr: row
+                .local()
+                .and_then(|local| local.open_pr.as_ref())
+                .map(|pr| format!("{} is open", pr.short()).into()),
+            offers_drop_review: row.local().is_some_and(LocalRow::offers_drop_review),
         }
     }
 }
 
+/// "1 commit, 2 uncommitted files": what the reviewer would find in the folder.
+fn changes_of(local: &LocalRow) -> String {
+    let plural =
+        |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
+    [
+        local.commits_ahead.map(|commits| plural(commits, "commit")),
+        local
+            .uncommitted_files
+            .map(|files| format!("{} uncommitted", plural(files, "file"))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
 impl EventEmitter<SwitcherDismissed> for PrSwitcherView {}
+impl EventEmitter<DropShownReview> for PrSwitcherView {}
 
 impl PrSwitcherView {
     pub const KEY_CONTEXT: &str = "PrSwitcherInput";
@@ -267,6 +343,44 @@ impl PrSwitcherView {
         }
     }
 
+    /// Drop review of the `nth` row, whose branch is gone: its files go off the UI thread, then its row.
+    fn drop_review(&mut self, nth: usize, cx: &mut Context<Self>) {
+        let Some(subject) = self.switching.list.read(cx).drop_offer(nth) else {
+            return;
+        };
+        let Some(change_set) = subject.local().cloned() else {
+            return;
+        };
+        if self.switching.active.read(cx).is_shown(&subject) {
+            cx.emit(DropShownReview);
+            return;
+        }
+        let (folders, list, dropped) = (
+            self.switching.folders.clone(),
+            self.switching.list.clone(),
+            Arc::clone(&self.switching.dropped),
+        );
+        cx.spawn(async move |this, cx| {
+            let dropping = change_set.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { OpenedChangeSet::new(&dropping, &folders).drop_review() })
+                .await;
+            this.update(cx, |this, cx| match result {
+                Ok(()) => {
+                    list.update(cx, |list, cx| {
+                        list.dropped(&subject);
+                        cx.notify();
+                    });
+                    dropped(subject);
+                }
+                Err(error) => this.refuse(format!("Could not drop the review: {error:#}"), cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
             "down" => self.switching.list.update(cx, |list, _| list.select_next()),
@@ -356,7 +470,7 @@ impl PrSwitcherView {
                 } else {
                     colors.muted_text
                 })
-                .child(shown.pr.clone()),
+                .child(shown.words.reference.clone()),
         )
         .child(
             div()
@@ -364,9 +478,9 @@ impl PrSwitcherView {
                 .min_w_0()
                 .truncate()
                 .font_weight(FontWeight::MEDIUM)
-                .child(shown.title.clone()),
+                .child(shown.words.title.clone()),
         )
-        .when(shown.is_draft, |row| {
+        .when(shown.words.is_draft, |row| {
             row.child(chip(&colors, Tone::Neutral).child("draft"))
         })
         .child(
@@ -374,7 +488,7 @@ impl PrSwitcherView {
                 .flex_none()
                 .text_xs()
                 .text_color(colors.muted_text)
-                .child(shown.author.clone()),
+                .child(shown.words.byline.clone()),
         )
         .child(
             div()
@@ -382,13 +496,40 @@ impl PrSwitcherView {
                 .w(px(96.))
                 .text_xs()
                 .text_color(colors.muted_text)
-                .child(shown.why),
+                .child(shown.words.why),
         )
         .when(shown.is_active, |row| {
             row.child(chip(&colors, Tone::Accent).child("viewing"))
         })
         .when(shown.has_unseen_reply, |row| {
             row.child(chip(&colors, Tone::Accent).child("agent replied"))
+        })
+        .children(
+            shown
+                .open_pr
+                .clone()
+                .map(|label| chip(&colors, Tone::Accent).child(label)),
+        )
+        .children(
+            shown
+                .disk_label
+                .map(|label| chip(&colors, Tone::Warning).child(label)),
+        )
+        .when(shown.offers_drop_review, |row| {
+            row.child(
+                icon_label_button(
+                    &colors,
+                    SharedString::from(format!("pr-switcher-drop-{index}")),
+                    ButtonKind::Secondary,
+                    ButtonSize::Small,
+                    Icon::Trash,
+                    "Drop review",
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.drop_review(index, cx);
+                })),
+            )
         })
         .child(
             div()

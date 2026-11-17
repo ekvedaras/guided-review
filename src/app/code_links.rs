@@ -35,7 +35,7 @@ pub fn open_code_label(link: &CodeLink, cx: &App) -> &'static str {
 /// The icon beside that label: code for the IDE, a link out for the browser.
 pub fn open_code_icon(link: &CodeLink, cx: &App) -> Icon {
     match cx.global::<ActiveCodeOpener>().0.destination(link) {
-        Destination::Ide { .. } => Icon::Code,
+        Destination::Ide { .. } | Destination::NotOpenable { .. } => Icon::Code,
         Destination::GitHub { .. } | Destination::Browser(_) => Icon::ExternalLink,
     }
 }
@@ -74,6 +74,6 @@ fn open(destination: &Destination, cx: &mut App) {
         Opened::IdeNotStarted(reason) => session.update(cx, |session, cx| {
             session.change(cx, |review| review.ide_not_started(&reason));
         }),
-        Opened::Elsewhere => {}
+        Opened::Elsewhere | Opened::Nowhere => {}
     }
 }

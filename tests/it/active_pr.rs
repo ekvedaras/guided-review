@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::support::FixtureRepo;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, AgentReplied, Finished, HandOffId, OpenDecision, OpenOrigin, OpenOutcome, Problem,
@@ -15,7 +15,7 @@ const B: &str = "https://github.com/acme/shop/pull/8";
 const NO_TOUR: &str = "https://github.com/acme/shop/pull/9";
 const BROKEN_TOUR: &str = "https://github.com/acme/shop/pull/10";
 
-fn pr(url: &str) -> PullRequestUrl {
+fn pr(url: &str) -> ReviewSubject {
     url.parse().unwrap()
 }
 
@@ -108,6 +108,46 @@ fn shown_after(active: &mut ActivePr, url: &str) {
         panic!("builds");
     };
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
+}
+
+#[test]
+fn a_dropped_review_is_shown_no_more_and_a_later_open_of_it_builds_it_anew() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.agent_replied(&pr(B));
+
+    let was_shown = active.dropped(&pr(A));
+    let other_was_shown = active.dropped(&pr(B));
+
+    assert!(was_shown);
+    assert!(!other_was_shown);
+    assert_eq!(active.shown(), None);
+    assert!(!active.has_unseen_reply(&pr(B)));
+    assert!(matches!(
+        active.request(pr(A), OpenOrigin::Reviewer),
+        OpenDecision::Build(_)
+    ));
+}
+
+#[test]
+fn a_review_moved_away_from_is_forgotten_but_stays_on_screen_until_the_one_it_moved_to_opens() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    active.agent_replied(&pr(A));
+
+    active.moved_away(&pr(A));
+
+    assert_eq!(active.shown(), Some(&pr(A)));
+    assert!(!active.has_unseen_reply(&pr(A)));
+}
+
+#[test]
+fn a_drop_of_the_review_on_screen_goes_through_its_open_session_and_any_other_does_not() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+
+    assert!(active.is_shown(&pr(A)));
+    assert!(!active.is_shown(&pr(B)));
 }
 
 #[test]
@@ -250,7 +290,7 @@ fn the_folder_a_pr_was_opened_from_is_remembered_for_a_later_switch() {
     let repo = shop_with_tours_of_a_and_b();
     open_review(&pr(A), repo.path(), &repo.folders()).unwrap();
 
-    let file = ReviewStateFile::for_pr(&repo.folders(), &pr(A));
+    let file = ReviewStateFile::for_subject(&repo.folders(), &pr(A));
 
     assert_eq!(file.opened_from().unwrap().as_deref(), Some(repo.path()));
 }
@@ -414,7 +454,7 @@ fn an_agent_reply_while_the_pr_reopens_is_kept_for_the_window_it_opens_in() {
     shown_after(&mut active, A);
     let (ticket, _) = active.reopen().unwrap();
 
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
 
     assert_eq!(
@@ -425,13 +465,30 @@ fn an_agent_reply_while_the_pr_reopens_is_kept_for_the_window_it_opens_in() {
 }
 
 #[test]
+fn an_agent_reply_while_a_switch_builds_its_review_is_kept_for_the_window_it_opens_in() {
+    let mut active = ActivePr::default();
+    shown_after(&mut active, A);
+    let OpenDecision::Build(ticket) = active.request(pr(B), OpenOrigin::Reviewer) else {
+        panic!("builds");
+    };
+
+    active.hold_reply_while_building(&pr(B), hand_off("h1"), &AgentReplied::default());
+    active.finished(ticket, Ok::<_, anyhow::Error>(()));
+
+    assert_eq!(
+        active.take_replies_for_reopened(),
+        [(hand_off("h1"), AgentReplied::default())]
+    );
+}
+
+#[test]
 fn an_agent_reply_is_kept_only_while_its_pr_reopens() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
     let (ticket, _) = active.reopen().unwrap();
 
-    active.hold_reply_for_reopen(&pr(B), hand_off("h2"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(B), hand_off("h2"), &AgentReplied::default());
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
 
     assert_eq!(active.take_replies_for_reopened(), []);
@@ -442,7 +499,7 @@ fn replies_kept_for_a_reopen_go_with_it_when_it_fails() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
     let (failing, _) = active.reopen().unwrap();
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
     active.finished(failing, Err::<(), _>(anyhow::anyhow!("clone is gone")));
 
     let (ticket, _) = active.reopen().unwrap();
@@ -456,7 +513,7 @@ fn replies_kept_for_a_reopen_go_with_it_when_another_pr_wins() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
     active.reopen().unwrap();
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
 
     shown_after(&mut active, B);
 
@@ -468,7 +525,7 @@ fn replies_kept_for_a_reopen_stay_kept_when_the_pr_is_built_again() {
     let mut active = ActivePr::default();
     shown_after(&mut active, A);
     active.reopen().unwrap();
-    active.hold_reply_for_reopen(&pr(A), hand_off("h1"), &AgentReplied::default());
+    active.hold_reply_while_building(&pr(A), hand_off("h1"), &AgentReplied::default());
 
     let (ticket, _) = active.reopen().unwrap();
     active.finished(ticket, Ok::<_, anyhow::Error>(()));
@@ -495,7 +552,7 @@ fn a_failed_reopen_keeps_the_pr_on_screen_with_the_reason() {
 #[test]
 fn an_open_of_a_pr_without_a_tour_builds_it_with_no_loading_screen() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
 
     let outcome = active.open(pr, OpenOrigin::Reviewer, ToursOnDisk::None);
 
@@ -507,7 +564,7 @@ fn an_open_of_a_pr_without_a_tour_builds_it_with_no_loading_screen() {
 #[test]
 fn an_open_of_a_pr_whose_tour_is_being_written_watches_that_writing() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     active.write(pr.clone());
 
     let outcome = active.open(pr, OpenOrigin::Reviewer, ToursOnDisk::None);
@@ -534,7 +591,7 @@ fn an_open_of_a_pr_with_a_tour_builds_it() {
 #[test]
 fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_waiting_on_it() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     active.write(pr.clone());
 
     let outcome = active.open(pr, OpenOrigin::AppStartedAgent, ToursOnDisk::Guided);
@@ -546,7 +603,7 @@ fn the_writers_open_once_the_tour_is_there_builds_it_for_the_loading_screen_wait
 #[test]
 fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to_try_again() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     active.write(pr.clone());
     let OpenOutcome::Tour(OpenDecision::Build(ticket)) =
         active.open(pr.clone(), OpenOrigin::AppStartedAgent, ToursOnDisk::Guided)
@@ -568,7 +625,7 @@ fn a_written_tour_that_fails_to_build_shows_the_failure_on_the_loading_screen_to
 #[test]
 fn a_failed_build_of_a_tour_nobody_was_writing_leaves_no_loading_screen() {
     let mut active = ActivePr::default();
-    let pr: PullRequestUrl = A.parse().unwrap();
+    let pr: ReviewSubject = A.parse().unwrap();
     let OpenDecision::Build(ticket) = active.request(pr, OpenOrigin::Reviewer) else {
         panic!("builds");
     };

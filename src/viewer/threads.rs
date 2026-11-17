@@ -10,7 +10,7 @@ use crate::pieces::ChangedFile;
 use crate::tour::{GuidedTour, Tour};
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
-use super::hand_offs::{HandOffId, HandOffs};
+use super::hand_offs::{HandOffButton, HandOffs};
 use super::outdated_lines::FollowedLines;
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
@@ -89,6 +89,9 @@ pub struct ThreadComment {
     /// GitHub's address of the author's picture; `None` for a deleted account.
     pub avatar_url: Option<String>,
     pub is_bot: bool,
+    /// Whether the change set's agent wrote it, as a local thread knows it of its own authors; `None` on
+    /// GitHub, where an agent's comment is told by the robot in front of it instead.
+    pub by_agent: Option<bool>,
     /// The viewer wrote it, so the viewer may edit it.
     pub by_viewer: bool,
     pub body: String,
@@ -101,12 +104,13 @@ pub struct ThreadComment {
 impl ThreadComment {
     /// Written by the author's tour agent, which posts under their account with the robot in front.
     pub fn is_by_agent(&self) -> bool {
-        self.body.starts_with(AGENT_MARK)
+        self.by_agent
+            .unwrap_or_else(|| self.body.starts_with(AGENT_MARK))
     }
 
-    /// `<login>'s agent` for an agent's comment.
+    /// `<login>'s agent` for an agent's comment on GitHub; a local thread names its authors itself.
     pub fn shown_author(&self) -> String {
-        if self.is_by_agent() {
+        if self.by_agent.is_none() && self.is_by_agent() {
             format!("{}'s agent", self.author)
         } else {
             self.author.clone()
@@ -115,6 +119,9 @@ impl ThreadComment {
 
     /// An agent's comment without the robot, which the page shows in its own way.
     pub fn shown_body(&self) -> &str {
+        if self.by_agent.is_some() {
+            return &self.body;
+        }
         self.body
             .strip_prefix(AGENT_MARK)
             .map_or(self.body.as_str(), str::trim_start)
@@ -185,8 +192,8 @@ pub struct ThreadView {
     pub hand_off_line: Option<Arc<str>>,
     /// The agent is at work on the thread's latest hand-off, so its line shows it busy.
     pub agent_is_working: bool,
-    /// The thread's latest hand-off failed and can be tried again.
-    pub failed_hand_off: Option<HandOffId>,
+    /// What the reviewer can do about the thread's latest hand-off.
+    pub hand_off_button: Option<HandOffButton>,
     /// An outdated thread's lines, followed to the head, and what they were.
     pub followed: Option<FollowedLines>,
 }
@@ -364,7 +371,7 @@ pub(super) fn views(
                 .cloned(),
             hand_off_line: hand_offs.line_for(&thread.id),
             agent_is_working: hand_offs.is_working_on(&thread.id),
-            failed_hand_off: hand_offs.failed_in(&thread.id),
+            hand_off_button: hand_offs.button_in(&thread.id),
             thread: without_working_on_it(thread, hand_offs),
         })
         .collect()

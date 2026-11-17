@@ -6,14 +6,15 @@ use crate::support::work::{drive_until_idle, kinds};
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AGENT_START_RETRY, AfterLanding, AgentReplied, AgentReplyRefused, AgentReplyRequest,
-    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffId,
-    HandOffState, LineLocation, Problem, Reaction, ReactionChange, ReplyPlacement, Review,
-    ReviewStateFile, ReviewThread, SeenMark, SendMode, Side, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ThreadComment, ThreadId, ThreadMessage, TourAgentPort, TourAgentState,
-    TourAgents, Work, WorkKind, WorkPorts,
+    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffButton,
+    HandOffId, HandOffState, LineLocation, Problem, Reaction, ReactionChange, ReplyPlacement,
+    Review, ReviewStateFile, ReviewThread, SeenMark, SendMode, Side, TerminalId, TextBox,
+    ThreadAction, ThreadActionResult, ThreadComment, ThreadHome, ThreadId, ThreadMessage,
+    TourAgentPort, TourAgentState, TourAgents, Work, WorkKind, WorkPorts,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -105,7 +106,8 @@ impl Pull {
         .unwrap();
         let source = self.source();
         let pr: PullRequestUrl = PR.parse().unwrap();
-        let state_file = ReviewStateFile::for_pr(&self.repo.folders(), &pr);
+        let state_file =
+            ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr));
         let mut review = Review::open(tour, &source, state_file).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -120,6 +122,7 @@ fn comment(id: &str, author: &str, body: &str) -> ThreadComment {
         id: CommentId::new(id),
         author: author.into(),
         is_bot: false,
+        by_agent: None,
         body: body.into(),
         url: String::new(),
         reactions: Vec::new(),
@@ -558,7 +561,7 @@ fn with_no_agent_for_the_pr_one_is_started_and_the_hand_off_goes_once_it_is_idle
     let [
         TourAgentCall::Start {
             name,
-            pr,
+            subject: pr,
             folder,
             first_task,
         },
@@ -767,17 +770,19 @@ fn a_hand_off_that_failed_in_its_thread_can_be_tried_again_and_then_goes_to_the_
     let no_room = Arc::new(FakeTourAgent::new());
     pull.deliver(&mut review, &agents_of(&no_room));
     assert!(matches!(states(&review)[0], HandOffState::Failed(_)));
-    let offered: Vec<Option<HandOffId>> = review
+    let offered: Vec<Option<HandOffButton>> = review
         .current_step()
         .unwrap()
         .threads
         .iter()
-        .map(|view| view.failed_hand_off)
+        .map(|view| view.hand_off_button)
         .collect();
     let first = review.hand_offs().all()[0].id();
-    assert_eq!(offered, [Some(first), None]);
+    assert_eq!(offered, [Some(HandOffButton::TryAgain(first)), None]);
 
-    review.try_hand_off_again(first).unwrap();
+    review
+        .press_hand_off_button(HandOffButton::TryAgain(first))
+        .unwrap();
 
     assert_eq!(states(&review)[0], HandOffState::Queued);
     let idle = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
@@ -799,6 +804,8 @@ fn every_hand_off_state_has_its_own_line() {
         HandOffState::Answered,
         HandOffState::EndedWithoutAnswer,
         HandOffState::Failed("no agent".into()),
+        HandOffState::AgentUnreported,
+        HandOffState::SendAnyway,
     ]
     .iter()
     .map(HandOffState::line)
@@ -813,6 +820,8 @@ fn every_hand_off_state_has_its_own_line() {
             "The agent answered",
             "The agent finished without answering",
             "Hand-off failed: no agent",
+            "The agent does not report its state: look at it first, it may be waiting on a question this task answers",
+            "Sending to the agent anyway",
         ]
     );
 }
@@ -898,10 +907,13 @@ fn reply_request(
     body: &str,
 ) -> Result<AgentReplyRequest, AgentReplyRefused> {
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let state = ReviewStateFile::for_pr(&pull.repo.folders(), &pr)
-        .load()
-        .unwrap();
-    state.hand_offs().agent_reply(&pr, id, body)
+    let state =
+        ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr.clone()))
+            .load()
+            .unwrap();
+    state
+        .hand_offs()
+        .agent_reply(&ThreadHome::GitHub(pr), id, body)
 }
 
 fn replies(sent: &SentLog) -> Vec<(String, SendMode)> {
@@ -1031,7 +1043,7 @@ fn an_answered_hand_off_is_answered_in_the_review_and_in_the_state_file() {
         [HandOffState::Answered, HandOffState::Queued]
     );
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let saved = ReviewStateFile::for_pr(&pull.repo.folders(), &pr)
+    let saved = ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr))
         .load()
         .unwrap();
     assert_eq!(
@@ -1046,7 +1058,7 @@ fn a_hand_off_answered_in_the_state_file_alone_is_answered_and_an_unknown_one_is
     let github = github_with_the_comment_as_a_thread(&pull, "why ten?");
     let id = asked_one(&pull, &github, SendMode::AddToReview);
     let pr: PullRequestUrl = PR.parse().unwrap();
-    let file = ReviewStateFile::for_pr(&pull.repo.folders(), &pr);
+    let file = ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr));
 
     let mut result = Ok(());
     file.update(|state| result = state.hand_off_replied(id, &AgentReplied::default()))
@@ -1113,11 +1125,11 @@ fn delivered_one(pull: &Pull, github: &FakeGitHub) -> (Review, HandOffId) {
 
 fn working_on_it_request(pull: &Pull, id: HandOffId) -> AgentReplyRequest {
     let pr: PullRequestUrl = PR.parse().unwrap();
-    ReviewStateFile::for_pr(&pull.repo.folders(), &pr)
+    ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr.clone()))
         .load()
         .unwrap()
         .hand_offs()
-        .agent_working_on_it(&pr, id)
+        .agent_working_on_it(&ThreadHome::GitHub(pr), id)
         .unwrap()
 }
 

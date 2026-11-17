@@ -6,6 +6,7 @@ use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
@@ -58,11 +59,11 @@ impl Shop {
     }
 
     fn tour_path(&self) -> PathBuf {
-        Tour::path_for(&self.repo.folders(), &self.pr())
+        Tour::path_for(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &self.pr())
+        ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()))
     }
 
     fn source(&self) -> LocalGit {
@@ -89,6 +90,7 @@ impl Shop {
 
     fn repin_onto(&self, head: &str) {
         repin_tour(
+            &ReviewSubject::from(self.pr()),
             &self.tour_path(),
             &self.state_file(),
             &self.source(),
@@ -216,8 +218,12 @@ struct SkillStandIn {
 }
 
 impl RefreshWriter for SkillStandIn {
-    fn refresh(&self, pr: &PullRequestUrl, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
-        assert_eq!(pr.to_string(), self.pr.to_string());
+    fn refresh(
+        &self,
+        subject: &ReviewSubject,
+        on_line: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<()> {
+        assert_eq!(subject.to_string(), self.pr.to_string());
         match self.writer {
             Writer::Fails => anyhow::bail!("claude stopped"),
             Writer::GivesUp => {
@@ -234,7 +240,7 @@ impl RefreshWriter for SkillStandIn {
             Writer::Refreshes => {
                 on_line(&tool_use_line("Read", "file_path", "app/Pricing.php"));
                 on_line(&tool_use_line("Edit", "file_path", "tour.json"));
-                ReviewStateFile::for_pr(&self.folders, pr)
+                ReviewStateFile::for_subject(&self.folders, subject)
                     .update(guided_review::viewer::ReviewState::finish_refresh)?;
                 on_line(&result_line("Refreshed the tour.", false));
                 Ok(())
@@ -264,7 +270,7 @@ fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
     });
     TourRefresher {
         folders: shop.repo.folders(),
-        pr: shop.pr(),
+        subject: shop.pr().into(),
         pick_code_source: pick,
         writer: Arc::new(SkillStandIn {
             folders: shop.repo.folders(),
@@ -458,4 +464,26 @@ fn a_claude_that_exits_with_an_error_fails_the_refresh_with_what_it_said() {
         .unwrap_err();
 
     assert!(format!("{error:#}").contains("no login"), "{error:#}");
+}
+
+#[test]
+fn claude_refreshing_a_local_review_is_asked_about_the_local_key_not_a_pr() {
+    let dir = TempDir::new().unwrap();
+    let writer = ClaudeRefreshWriter::with_binary(
+        fake_claude(dir.path(), 0),
+        dir.path().to_path_buf(),
+        dir.path().join("tours"),
+    );
+    let key = "local:/work/shop@feature";
+
+    writer.refresh(&key.parse().unwrap(), &mut |_| {}).unwrap();
+
+    let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
+    assert!(args.contains(&format!("/tour {key}")), "{args}");
+    assert!(
+        args.contains("a local review that already has a tour"),
+        "{args}"
+    );
+    assert!(args.contains("with the local key written out"), "{args}");
+    assert!(!args.contains("PR"), "{args}");
 }

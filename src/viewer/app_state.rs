@@ -5,8 +5,9 @@ use anyhow::Context;
 use crate::app_folders::AppFolders;
 use serde::{Deserialize, Serialize};
 
-/// What the app keeps across a restart that belongs to no one PR: the tours being written and the PRs
-/// with an agent reply the reviewer has not seen.
+/// What the app keeps across a restart that belongs to no one review: the tours being written and the
+/// review subjects with an agent reply the reviewer has not seen, each by its subject key (an entry
+/// written before local review, a PR's URL, is its key).
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AppState {
     #[serde(default)]

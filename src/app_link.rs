@@ -13,6 +13,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
+use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
 use crate::update::ReleaseInstall;
 use crate::viewer::{AgentReplied, HandOffId};
@@ -40,15 +41,62 @@ pub fn build() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "OpenRequestOnTheWire", into = "OpenRequestOnTheWire")]
 pub struct OpenRequest {
-    pub pr: String,
+    /// The subject key of what to open.
+    pub subject: String,
     /// The caller's folder, where a local clone of the PR is looked for.
     pub folder: PathBuf,
     /// The caller's herdr terminal, when it runs in one.
     pub terminal: Option<String>,
     /// The step to show once open, as a restart brings back the screen it left; else the summary.
-    #[serde(default)]
     pub at_step: Option<StepId>,
+}
+
+/// An open request as the line carries it. Any build may take an open, and a build from before local
+/// review reads only `pr`, so a PR's key goes in `pr` too; a request from such a build has only `pr`.
+#[derive(Serialize, Deserialize)]
+struct OpenRequestOnTheWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pr: Option<String>,
+    folder: PathBuf,
+    terminal: Option<String>,
+    #[serde(default)]
+    at_step: Option<StepId>,
+}
+
+impl TryFrom<OpenRequestOnTheWire> for OpenRequest {
+    type Error = &'static str;
+
+    fn try_from(wire: OpenRequestOnTheWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            subject: wire
+                .subject
+                .or(wire.pr)
+                .ok_or("an open request names neither a subject nor a PR")?,
+            folder: wire.folder,
+            terminal: wire.terminal,
+            at_step: wire.at_step,
+        })
+    }
+}
+
+impl From<OpenRequest> for OpenRequestOnTheWire {
+    fn from(request: OpenRequest) -> Self {
+        let is_a_pr = request
+            .subject
+            .parse::<ReviewSubject>()
+            .is_ok_and(|subject| subject.has_github_page());
+        Self {
+            pr: is_a_pr.then(|| request.subject.clone()),
+            subject: Some(request.subject),
+            folder: request.folder,
+            terminal: request.terminal,
+            at_step: request.at_step,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

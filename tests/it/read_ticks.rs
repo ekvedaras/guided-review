@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::RepoName;
+use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     NextScreen, Problem, ReadProgress, Review, ReviewState, ReviewStateFile, Screen, SummaryStats,
@@ -44,7 +45,7 @@ impl Shop {
     }
 
     fn state_file(&self) -> ReviewStateFile {
-        ReviewStateFile::for_pr(&self.repo.folders(), &PR.parse::<PullRequestUrl>().unwrap())
+        ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse::<ReviewSubject>().unwrap())
     }
 
     fn open(&self) -> Review {
@@ -445,7 +446,7 @@ fn the_summary_leads_into_the_tour_from_where_the_reader_is() {
         review.tour_lead(),
         TourLead::Finish {
             steps: 3,
-            can_finish: review.can_finish_review()
+            finish: review.finish_action()
         }
     );
 }

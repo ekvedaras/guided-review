@@ -295,6 +295,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             toolbar.full_diff.hash(&mut hasher);
             toolbar.ignores_whitespace.hash(&mut hasher);
             toolbar.wraps_lines.hash(&mut hasher);
+            toolbar.change.hash(&mut hasher);
         }
         PageRow::ScreenFooter(footer) => footer.hash(&mut hasher),
         PageRow::Overview(overview) => overview.hash(&mut hasher),
@@ -366,7 +367,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             }
             view.commented_lines.hash(&mut hasher);
             view.hand_off_line.hash(&mut hasher);
-            view.failed_hand_off.hash(&mut hasher);
+            view.hand_off_button.hash(&mut hasher);
             view.delete_asked.hash(&mut hasher);
             reply_lines.hash(&mut hasher);
             for (id, text) in &view.edit_drafts {
@@ -458,6 +459,7 @@ mod tests {
                     id: CommentId::new("C1"),
                     author: "alice".into(),
                     is_bot: false,
+                    by_agent: None,
                     by_viewer: false,
                     body: "why?".into(),
                     url: String::new(),
@@ -473,7 +475,7 @@ mod tests {
             hand_off_line: None,
             agent_is_working: false,
             followed: None,
-            failed_hand_off: None,
+            hand_off_button: None,
         }
     }
 
