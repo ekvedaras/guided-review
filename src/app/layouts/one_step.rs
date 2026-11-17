@@ -95,16 +95,16 @@ use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, CloneOffer, CloneOfferState,
-    CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure, DiskOffer, Effect,
-    FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch,
-    LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats,
-    PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit,
-    ReadinessStep, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
-    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
-    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
-    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
-    Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, Checks, CloneOffer,
+    CloneOfferState, CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure,
+    DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent,
+    LabelSwitch, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage,
+    OverviewStats, PageRow, PieceLabels, Place, PrStatus, QueuedComment, ReadProgress, ReadStep,
+    ReadSubject, ReadUnit, Readiness, ReadinessStep, Refusal, Reopen, ReopenAfterSave, Reopening,
+    RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
+    Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
+    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
+    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -2169,6 +2169,7 @@ impl OneStepLayout {
         let local_heading = review.local_heading().map(SharedString::from);
         let is_local = local_heading.is_some();
         let can_open_on_github = review.can_open_on_github();
+        let status = review.pr_status().copied();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -2235,7 +2236,13 @@ impl OneStepLayout {
                 } else {
                     Icon::PullRequest
                 },
-                colors.success,
+                match status {
+                    Some(PrStatus {
+                        readiness: Readiness::Ready,
+                        ..
+                    }) => colors.success,
+                    Some(_) | None => colors.muted_text,
+                },
             ))
             .children(match local_heading {
                 Some(heading) => vec![
@@ -2277,12 +2284,42 @@ impl OneStepLayout {
                     .gap_2()
                     .text_sm()
                     .child(switch_pr)
+                    .children(status.map(|status| self.status_chip(&colors, status, cx)))
                     .child(div().flex_1())
                     .child(jump)
                     .children(github),
             )
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
+            })
+    }
+
+    /// Draft or ready and the checks, in the colour of the checks. Pressing it is the key `D`.
+    fn status_chip(
+        &self,
+        colors: &Colors,
+        status: PrStatus,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let tone = match status.checks {
+            Checks::Failing => Tone::Danger,
+            Checks::Running => Tone::Warning,
+            Checks::Passing => Tone::Success,
+            Checks::NoneRun => Tone::Neutral,
+        };
+        let change = match status.readiness {
+            Readiness::Ready => "convert the PR to a draft",
+            Readiness::Draft => "mark the PR ready for review",
+        };
+        chip(colors, tone)
+            .id("title-bar-pr-status")
+            .child(status.label())
+            .when(status.viewer_may_change_readiness, |chip| {
+                chip.cursor_pointer()
+                    .tooltip(tooltip(move |_| format!("Click twice to {change}").into()))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::ToggleDraft, window, cx);
+                    }))
             })
     }
 

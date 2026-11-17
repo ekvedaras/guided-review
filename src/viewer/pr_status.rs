@@ -69,3 +69,20 @@ pub struct PrStatus {
     /// GitHub lets only the author and those with write access change it.
     pub viewer_may_change_readiness: bool,
 }
+
+impl PrStatus {
+    /// The words next to the PR number: "Draft", "Ready · checks passing".
+    pub fn label(self) -> String {
+        let readiness = match self.readiness {
+            Readiness::Draft => "Draft",
+            Readiness::Ready => "Ready",
+        };
+        let checks = match self.checks {
+            Checks::NoneRun => return readiness.to_owned(),
+            Checks::Running => "running",
+            Checks::Passing => "passing",
+            Checks::Failing => "failing",
+        };
+        format!("{readiness} · checks {checks}")
+    }
+}

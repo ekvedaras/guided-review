@@ -410,3 +410,23 @@ fn the_key_and_the_palette_ask_for_the_same_thing() {
     }
     assert_eq!(Command::ToggleDraft.default_chords()[0].keystroke(), "d");
 }
+
+#[test]
+fn the_label_says_draft_or_ready_and_what_the_checks_roll_up_to() {
+    let label = |readiness, checks| status(readiness, checks).label();
+
+    assert_eq!(label(Readiness::Draft, Checks::NoneRun), "Draft");
+    assert_eq!(label(Readiness::Ready, Checks::NoneRun), "Ready");
+    assert_eq!(
+        label(Readiness::Ready, Checks::Passing),
+        "Ready · checks passing"
+    );
+    assert_eq!(
+        label(Readiness::Draft, Checks::Running),
+        "Draft · checks running"
+    );
+    assert_eq!(
+        label(Readiness::Ready, Checks::Failing),
+        "Ready · checks failing"
+    );
+}
