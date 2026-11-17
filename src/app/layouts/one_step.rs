@@ -326,16 +326,19 @@ impl OneStepLayout {
             cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
                 this.open_comment_box(CommentGesture::AskAnswer(ask), window, cx);
             });
-        cx.subscribe(&ask, |this, _, HandToAgent { ask, place }, cx| {
-            let handing = this.session.read(cx).hand_ask_to_agent(ask, place, cx);
+        cx.subscribe(&ask, |this, _, HandToAgent { ask, place, anyway }, cx| {
+            let handing = this
+                .session
+                .read(cx)
+                .hand_ask_to_agent(ask, place, *anyway, cx);
             let id = ask.id;
             this.reopen_after_save.ask_handed_to_agent();
             cx.spawn(async move |this, cx| {
-                let line = handing.await;
+                let outcome = handing.await;
                 this.update(cx, |this, cx| {
                     this.session.update(cx, |session, cx| {
                         session.change_asks(cx, |review| {
-                            review.change_asks(|desk| desk.hand_off_ended(id, &line));
+                            review.change_asks(|desk| desk.hand_off_ended(id, &outcome));
                         });
                     });
                     let in_flight = this.in_flight(cx);

@@ -31,10 +31,10 @@ use crate::opened_change_set::OpenedChangeSet;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
     CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, LineLocation,
-    NoteSubject, OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict,
-    Screen, SendMode, TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone,
-    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts,
-    announcements, line_count,
+    NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, Review,
+    ReviewChange, ReviewVerdict, Screen, SendMode, TerminalId, TextBox, ThreadAction,
+    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
+    TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -1177,12 +1177,23 @@ impl ReviewSession {
 
     /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
     /// Ends with what the Ask panel says of it.
-    pub fn hand_ask_to_agent(&self, ask: &Ask, place: &str, cx: &App) -> Task<String> {
+    pub fn hand_ask_to_agent(
+        &self,
+        ask: &Ask,
+        place: &str,
+        anyway: bool,
+        cx: &App,
+    ) -> Task<OwnAgentHandOff> {
         let agents = self.tour_work.tour_agents.clone();
         let subject = self.review.subject().clone();
         let text = self.review.ask_hand_off_text(ask, place);
-        cx.background_executor()
-            .spawn(async move { agents.hand_to_own_agent(&subject, &text).line() })
+        cx.background_executor().spawn(async move {
+            if anyway {
+                agents.hand_to_own_agent_anyway(&subject, &text)
+            } else {
+                agents.hand_to_own_agent(&subject, &text)
+            }
+        })
     }
 
     /// Retry beside the message of an off link.

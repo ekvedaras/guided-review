@@ -266,6 +266,30 @@ fn an_ask_is_handed_to_the_change_sets_agent_even_when_the_app_started_it() {
 }
 
 #[test]
+fn an_ask_for_an_agent_that_does_not_report_its_state_is_typed_in_only_when_sent_anyway() {
+    let fake =
+        Arc::new(FakeTourAgent::new().with_terminal("t1", Some(LOCAL), AgentStatus::Unreported));
+
+    let held = agents(&fake).hand_to_own_agent(&local(), "do it");
+
+    assert_eq!(held, OwnAgentHandOff::Unreported(TerminalId::new("t1")));
+    assert_eq!(sends(&fake), []);
+    assert!(held.can_send_anyway());
+
+    let sent = agents(&fake).hand_to_own_agent_anyway(&local(), "do it");
+
+    assert_eq!(sent, OwnAgentHandOff::Delivered(TerminalId::new("t1")));
+    assert!(!sent.can_send_anyway());
+    assert_eq!(
+        sends(&fake),
+        [TourAgentCall::Send {
+            terminal: TerminalId::new("t1"),
+            text: "do it".to_owned()
+        }]
+    );
+}
+
+#[test]
 fn an_ask_with_no_agent_in_the_folder_starts_one_with_the_ask_as_its_task() {
     let fake = Arc::new(FakeTourAgent::new());
 

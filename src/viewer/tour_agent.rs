@@ -312,6 +312,11 @@ pub enum OwnAgentHandOff {
 }
 
 impl OwnAgentHandOff {
+    /// Held back from an agent that does not report its state: the reviewer may send it anyway.
+    pub fn can_send_anyway(&self) -> bool {
+        matches!(self, Self::Unreported(_))
+    }
+
     /// What the Ask panel says under the Ask.
     pub fn line(&self) -> String {
         const MAKE_YOURS: &str =
@@ -668,6 +673,15 @@ impl TourAgents {
     /// Types an Ask into the PR's tour agent, but only one the reviewer started: an app-started agent
     /// cannot change files, and the reviewer's own one may.
     pub fn hand_to_own_agent(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
+        self.hand_to_own(subject, text, false)
+    }
+
+    /// Types an Ask the reviewer chose to send anyway into their agent, whatever its state.
+    pub fn hand_to_own_agent_anyway(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
+        self.hand_to_own(subject, text, true)
+    }
+
+    fn hand_to_own(&self, subject: &ReviewSubject, text: &str, anyway: bool) -> OwnAgentHandOff {
         let terminal = match self.lookup(subject) {
             TourAgentState::Agent { terminal, .. } => terminal,
             TourAgentState::LinkOff(reason) => {
@@ -691,7 +705,12 @@ impl TourAgents {
                 Err(error) => return OwnAgentHandOff::NotSent(format!("{error:#}")),
             }
         }
-        match self.send_if_idle(subject, text) {
+        let sent = if anyway {
+            self.send_anyway(subject, text)
+        } else {
+            self.send_if_idle(subject, text)
+        };
+        match sent {
             Ok(SendOutcome::Delivered) => OwnAgentHandOff::Delivered(terminal),
             Ok(SendOutcome::Refused(reason)) => OwnAgentHandOff::NotSent(reason),
             Ok(SendOutcome::Starting) => {
