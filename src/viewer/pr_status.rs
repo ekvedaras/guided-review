@@ -2,6 +2,11 @@
 //! the reviewer may do about it is read alongside, so a button is offered only where GitHub would
 //! take the change.
 
+use std::time::Duration;
+
+/// How often the checks are read again while one is running.
+pub const CHECKS_RECHECK: Duration = Duration::from_secs(30);
+
 /// Whether the PR is a draft, which GitHub does not let anyone merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {

@@ -175,3 +175,48 @@ fn a_refusal_to_read_the_status_is_a_problem_of_its_own_that_is_not_tried_again(
     );
     assert_eq!(review.next_due(), None);
 }
+
+#[test]
+fn checks_that_are_running_are_read_again_every_30_seconds_until_they_are_done() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    let github = pull
+        .github()
+        .with_status(status(Readiness::Ready, Checks::Running));
+    let mut now = Instant::now();
+    pull.read(&mut review, &github, now);
+
+    let mut waits = Vec::new();
+    for _ in 0..2 {
+        let due = review.next_due().unwrap();
+        waits.push(due - now);
+        now = due;
+        drive_without_agents(&mut review, &github, &pull.source(), now);
+    }
+    github.set_status(status(Readiness::Ready, Checks::Failing));
+    let due = review.next_due().unwrap();
+    drive_without_agents(&mut review, &github, &pull.source(), due);
+
+    assert_eq!(
+        waits.iter().map(Duration::as_secs).collect::<Vec<_>>(),
+        [30, 30]
+    );
+    assert_eq!(
+        review.pr_status().map(|status| status.checks),
+        Some(Checks::Failing)
+    );
+    assert_eq!(review.next_due(), None);
+}
+
+#[test]
+fn checks_that_are_not_running_are_not_read_again_by_themselves() {
+    for checks in [Checks::NoneRun, Checks::Passing, Checks::Failing] {
+        let pull = Pull::new();
+        let mut review = pull.open();
+        let github = pull.github().with_status(status(Readiness::Ready, checks));
+
+        pull.read(&mut review, &github, Instant::now());
+
+        assert_eq!(review.next_due(), None, "{checks:?}");
+    }
+}
