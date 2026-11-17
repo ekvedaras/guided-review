@@ -268,12 +268,19 @@ impl Review {
 
     /// What the palette can do on the open screen, with the toggles of the focused change's file.
     pub fn palette_actions(&self, build: Build) -> Vec<PaletteAction> {
-        self.palette_actions_with(build, self.file_toggle_actions())
+        self.palette_actions_with(build, self.page_toggle_actions())
     }
 
     /// The cmd+k palette for what the reviewer has typed so far: places by kind, then actions.
     pub fn palette(&self, query: &str, build: Build) -> Vec<PaletteGroup> {
-        self.palette_with(query, build, self.file_toggle_actions())
+        self.palette_with(query, build, self.page_toggle_actions())
+    }
+
+    fn page_toggle_actions(&self) -> Vec<PaletteAction> {
+        self.screen_fold_action()
+            .into_iter()
+            .chain(self.file_toggle_actions())
+            .collect()
     }
 
     fn file_toggle_actions(&self) -> Vec<PaletteAction> {

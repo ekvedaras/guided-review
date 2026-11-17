@@ -174,6 +174,9 @@ fn assemble(
     review
         .display_options_mut()
         .use_more_lines(config.more_lines());
+    if let Some(pr) = subject.pull_request() {
+        review.prefer_merge_method(config.merge_method(&pr.repo));
+    }
     let unreadable = unreadable_local_tours(folders);
     if !unreadable.is_empty() {
         review.raise_problem(Problem::LocalToursNotRead(unreadable));

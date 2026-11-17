@@ -15,12 +15,15 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause,
-    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RepoCloner, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState, percent_encode_path,
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, PrStatus, Readiness,
+};
+use crate::viewer::{
+    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
+    NoAccess, OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
+    ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -571,6 +574,174 @@ struct UploadedJson {
 
 /// GitHub's own drag-and-drop store, so the picture is seen only by those who can see the repository.
 /// It is not in GitHub's documented API, but it takes the token `gh` holds.
+/// A rollup's contexts: check runs and commit statuses, which have different fields.
+fn check_runs_of(nodes: &serde_json::Value) -> Arc<[CheckRun]> {
+    let text = |node: &serde_json::Value, pointer: &str| at(node, pointer).as_str().map(Arc::from);
+    nodes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| match at(node, "/__typename").as_str()? {
+            "CheckRun" => Some(CheckRun {
+                name: text(node, "/name")?,
+                state: CheckState::of_check_run(
+                    at(node, "/status").as_str()?,
+                    at(node, "/conclusion").as_str(),
+                ),
+                page: text(node, "/detailsUrl"),
+            }),
+            "StatusContext" => Some(CheckRun {
+                name: text(node, "/context")?,
+                state: CheckState::of_status_context(at(node, "/state").as_str()?),
+                page: text(node, "/targetUrl"),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+impl PullRequestStatusPort for GitHub {
+    fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                        autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
+                        viewerPermission
+                        pullRequest(number: $number) {
+                            isDraft
+                            viewerCanUpdate
+                            commits(last: 1) { nodes { commit { statusCheckRollup {
+                                state
+                                contexts(first: 100) { nodes {
+                                    __typename
+                                    ... on CheckRun { name status conclusion detailsUrl }
+                                    ... on StatusContext { context state targetUrl }
+                                } }
+                            } } } }
+                            state
+                            mergeStateStatus
+                            viewerCanEnableAutoMerge
+                            viewerCanDisableAutoMerge
+                            autoMergeRequest { mergeMethod }
+                        }
+                    }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read the status of {pr}")))?;
+        let repository = at(&data, "/repository");
+        let pull = at(repository, "/pullRequest");
+        let flag_of = |node: &serde_json::Value, pointer: &str| {
+            at(node, pointer)
+                .as_bool()
+                .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
+        };
+        let flag = |pointer: &str| flag_of(pull, pointer);
+        let text = |pointer: &str| {
+            at(pull, pointer)
+                .as_str()
+                .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
+        };
+        let rollup = at(pull, "/commits/nodes/0/commit/statusCheckRollup/state").as_str();
+        let allowed: Vec<MergeMethod> = [
+            ("/mergeCommitAllowed", MergeMethod::Merge),
+            ("/squashMergeAllowed", MergeMethod::Squash),
+            ("/rebaseMergeAllowed", MergeMethod::Rebase),
+        ]
+        .into_iter()
+        .filter(|(pointer, _)| at(repository, pointer).as_bool() == Some(true))
+        .map(|(_, method)| method)
+        .collect();
+        let auto_merge = match at(pull, "/autoMergeRequest/mergeMethod").as_str() {
+            None => AutoMerge::Off,
+            Some(name) => AutoMerge::On(
+                MergeMethod::of_github_name(name)
+                    .with_context(|| format!("GitHub gave an unknown merge method {name}"))?,
+            ),
+        };
+        let merging = Merging {
+            mergeability: Mergeability::from_github(text("/state")?, text("/mergeStateStatus")?),
+            auto_merge,
+            methods: MergeMethods::only(&allowed),
+            repo_allows_auto_merge: flag_of(repository, "/autoMergeAllowed")?,
+            viewer_may_enable_auto_merge: flag("/viewerCanEnableAutoMerge")?,
+            viewer_may_disable_auto_merge: flag("/viewerCanDisableAutoMerge")?,
+            viewer_may_merge: matches!(
+                at(repository, "/viewerPermission").as_str(),
+                Some("ADMIN" | "MAINTAIN" | "WRITE")
+            ),
+        };
+        Ok(PrStatus {
+            readiness: if flag("/isDraft")? {
+                Readiness::Draft
+            } else {
+                Readiness::Ready
+            },
+            checks: Checks::from_github_state(rollup),
+            check_runs: check_runs_of(at(
+                pull,
+                "/commits/nodes/0/commit/statusCheckRollup/contexts/nodes",
+            )),
+            viewer_may_change_readiness: flag("/viewerCanUpdate")?,
+            merging,
+        })
+    }
+
+    fn set_pull_request_readiness(
+        &self,
+        pr: &PullRequestUrl,
+        readiness: Readiness,
+    ) -> Result<(), GitHubError> {
+        let id = self.pull_request_id(pr)?;
+        let (mutation, doing) = match readiness {
+            Readiness::Draft => ("convertPullRequestToDraft", "convert"),
+            Readiness::Ready => ("markPullRequestReadyForReview", "mark ready"),
+        };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            &serde_json::json!({"input": {"pullRequestId": id}}),
+        )
+        .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
+        Ok(())
+    }
+
+    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), GitHubError> {
+        let id = self.pull_request_id(pr)?;
+        let (mutation, method, doing) = match change {
+            MergeChange::EnableAutoMerge(method) => (
+                "enablePullRequestAutoMerge",
+                Some(method),
+                "turn on auto-merge for",
+            ),
+            MergeChange::DisableAutoMerge => (
+                "disablePullRequestAutoMerge",
+                None,
+                "turn off auto-merge for",
+            ),
+            MergeChange::MergeNow(method) => ("mergePullRequest", Some(method), "merge"),
+        };
+        let input = match method {
+            Some(method) => {
+                serde_json::json!({"pullRequestId": id, "mergeMethod": method.github_name()})
+            }
+            None => serde_json::json!({"pullRequestId": id}),
+        };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            &serde_json::json!({ "input": input }),
+        )
+        .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
+        Ok(())
+    }
+}
+
 impl PullRequestReactionsPort for GitHub {
     fn set_pull_request_reaction(
         &self,

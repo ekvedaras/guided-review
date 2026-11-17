@@ -14,8 +14,10 @@ use super::comments::{CommentOutcome, CommentRequest};
 use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_threads::ThreadHome;
+use super::merging::MergeChange;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
+use super::pr_status::{PrStatus, Readiness};
 use super::reactions::ReactionChange;
 use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
@@ -46,8 +48,11 @@ pub enum WorkKind {
     PullThreads,
     PullPendingReview,
     PullLastReview,
+    PullPrStatus,
     SendQueuedComment,
     ChangeReviewingMark,
+    ChangePrReadiness,
+    ChangeMerging,
     TakeSeenMarksOff,
     DeliverHandOff,
     CheckAgentLink,
@@ -67,7 +72,7 @@ impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
     /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
     /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
-    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 11] = [
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 12] = [
         Self::CheckPrHead,
         Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
@@ -77,6 +82,7 @@ impl WorkKind {
         Self::PullThreads,
         Self::PullPendingReview,
         Self::PullLastReview,
+        Self::PullPrStatus,
         Self::SendQueuedComment,
         Self::ChangeReviewingMark,
     ];
@@ -87,6 +93,8 @@ impl WorkKind {
             Self::SendQueuedComment
             | Self::TakeSeenMarksOff
             | Self::DeliverHandOff
+            | Self::ChangePrReadiness
+            | Self::ChangeMerging
             | Self::CheckAgentLink => WhileRunning::IsDropped,
             Self::CheckPrHead
             | Self::CheckWorkingTree
@@ -96,7 +104,8 @@ impl WorkKind {
             | Self::PullPrDescription
             | Self::PullThreads
             | Self::PullPendingReview
-            | Self::PullLastReview => WhileRunning::Replaces,
+            | Self::PullLastReview
+            | Self::PullPrStatus => WhileRunning::Replaces,
         }
     }
 }
@@ -239,10 +248,19 @@ pub(super) enum Job {
     },
     PullPendingReview(PullRequestUrl),
     PullLastReview(PullRequestUrl),
+    PullPrStatus(PullRequestUrl),
     SendQueuedComment(CommentRequest),
     ChangeReviewingMark {
         pr: PullRequestUrl,
         change: ReactionChange,
+    },
+    ChangePrReadiness {
+        pr: PullRequestUrl,
+        readiness: Readiness,
+    },
+    ChangeMerging {
+        pr: PullRequestUrl,
+        change: MergeChange,
     },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
@@ -262,8 +280,11 @@ impl Job {
             Self::PullThreads { .. } => WorkKind::PullThreads,
             Self::PullPendingReview(_) => WorkKind::PullPendingReview,
             Self::PullLastReview(_) => WorkKind::PullLastReview,
+            Self::PullPrStatus(_) => WorkKind::PullPrStatus,
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
             Self::ChangeReviewingMark { .. } => WorkKind::ChangeReviewingMark,
+            Self::ChangePrReadiness { .. } => WorkKind::ChangePrReadiness,
+            Self::ChangeMerging { .. } => WorkKind::ChangeMerging,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
             Self::DeliverHandOff(_) => WorkKind::DeliverHandOff,
             Self::CheckAgentLink(_) => WorkKind::CheckAgentLink,
@@ -314,10 +335,19 @@ impl Work {
                 authored: github.viewer_authored(&pr),
             },
             Job::PullLastReview(pr) => Done::LastReview(github.viewer_latest_review(&pr)),
+            Job::PullPrStatus(pr) => Done::PrStatus(github.pull_request_status(&pr)),
             Job::SendQueuedComment(request) => Done::QueuedComment(request.run(github)),
             Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
                 change,
                 result: github.set_pull_request_reaction(&pr, REVIEWING_MARK, change),
+            },
+            Job::ChangePrReadiness { pr, readiness } => Done::PrReadiness {
+                readiness,
+                result: github.set_pull_request_readiness(&pr, readiness),
+            },
+            Job::ChangeMerging { pr, change } => Done::Merging {
+                change,
+                result: github.change_merging(&pr, change),
             },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
                 requests
@@ -357,9 +387,18 @@ pub(super) enum Done {
         authored: Result<bool, GitHubError>,
     },
     LastReview(Result<Option<SubmittedReview>, GitHubError>),
+    PrStatus(Result<PrStatus, GitHubError>),
     QueuedComment(CommentOutcome),
     ReviewingMark {
         change: ReactionChange,
+        result: Result<(), GitHubError>,
+    },
+    PrReadiness {
+        readiness: Readiness,
+        result: Result<(), GitHubError>,
+    },
+    Merging {
+        change: MergeChange,
         result: Result<(), GitHubError>,
     },
     SeenMarksOff(Vec<SeenMarkOffOutcome>),

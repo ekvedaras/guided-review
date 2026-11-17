@@ -2,9 +2,11 @@ use crate::support::FixtureRepo;
 use crate::support::folders_in;
 use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use guided_review::ide::{IdeChoice, IdeTemplate};
+use guided_review::pull_request::RepoName;
 use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use guided_review::viewer::{
-    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, SaveOutcome, SettingProblem, Settings,
+    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, SaveOutcome,
+    SettingProblem, Settings,
 };
 use std::path::{Path, PathBuf};
 
@@ -1052,4 +1054,53 @@ fn the_problem_says_which_numbers_are_allowed() {
     let message = SettingProblem::MoreLinesNotACount("many".to_owned()).message();
 
     assert_eq!(message, "many is not a whole number from 1 to 200");
+}
+
+#[test]
+fn with_no_merge_method_key_a_merge_commit_is_used_for_every_repo() {
+    let (_home, settings) = loaded_from("");
+    let config = Config::from_text("").unwrap();
+
+    assert_eq!(settings.merge_method(), MergeMethod::Merge);
+    assert_eq!(
+        config.merge_method(&RepoName::new("acme", "shop")),
+        MergeMethod::Merge
+    );
+}
+
+#[test]
+fn a_repo_in_merge_methods_gets_its_own_and_the_others_the_global_one() {
+    let config = Config::from_text(
+        "merge_method = \"rebase\"\n\n[merge_methods]\n\"acme/shop\" = \"squash\"\n\"acme/bad\" = \"zip\"\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.merge_method(&RepoName::new("acme", "shop")),
+        MergeMethod::Squash
+    );
+    assert_eq!(
+        config.merge_method(&RepoName::new("acme", "other")),
+        MergeMethod::Rebase
+    );
+    assert_eq!(
+        config.merge_method(&RepoName::new("acme", "bad")),
+        MergeMethod::Rebase
+    );
+}
+
+#[test]
+fn a_chosen_merge_method_is_written_and_a_merge_commit_leaves_no_line() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+
+    settings.set_merge_method(MergeMethod::Squash);
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\" # quick\nmerge_method = \"squash\"\n"
+    );
+
+    settings.set_merge_method(MergeMethod::Merge);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
 }

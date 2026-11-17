@@ -35,6 +35,7 @@ mod keymap;
 mod local_row;
 mod local_threads;
 mod markdown;
+mod merging;
 mod more_lines;
 mod move_offer;
 mod move_to_pr;
@@ -46,8 +47,10 @@ mod page;
 mod piece_labels;
 mod ports;
 mod pr_notes;
+mod pr_status;
 mod pr_switcher;
 mod presence;
+mod press_again;
 mod problems;
 mod reactions;
 mod refresh;
@@ -60,6 +63,7 @@ mod review_state;
 mod reviewing_mark;
 mod row_selection;
 mod saved_state;
+mod screen_fold;
 mod screen_travel;
 mod settings;
 mod shortcuts;
@@ -139,6 +143,10 @@ pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use local_row::LocalRow;
 pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
+pub use merging::{
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal, Mergeability,
+    Merging,
+};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
@@ -156,12 +164,14 @@ pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort, NoAccess,
     PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort,
+    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
+pub use pr_status::{CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, PrStatus, Readiness};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
+pub use press_again::{CONFIRM_WITHIN, PressStep};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
@@ -180,6 +190,7 @@ pub use review::{
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
 pub use saved_state::RepinRunning;
+pub use screen_fold::ScreenFold;
 pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};

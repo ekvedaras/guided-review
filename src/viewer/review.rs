@@ -1,5 +1,7 @@
 mod guided_tour;
 mod kept;
+mod merging;
+mod status;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -52,12 +54,15 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
+use super::merging::{MergeChange, MergeMethod};
 use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
+use super::pr_status::{PrStatus, Readiness};
+use super::press_again::PressAgain;
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
@@ -308,6 +313,18 @@ pub struct ReviewCore {
     on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
+    /// What GitHub last said of the PR's draft state and checks; kept as it was while a read fails.
+    pr_status: Option<PrStatus>,
+    /// The first press of the key, waiting for the same press again.
+    readiness_asked: PressAgain<Readiness>,
+    /// What the confirmed press changed the PR to, until GitHub answers.
+    readiness_to_send: Option<Readiness>,
+    /// The reviewer's merge method for this PR's repo, from Settings.
+    merge_method: MergeMethod,
+    /// The first press of the auto-merge key, waiting for the same press again.
+    merging_asked: PressAgain<MergeChange>,
+    /// What the confirmed press asked of GitHub, until GitHub answers.
+    merging_to_send: Option<MergeChange>,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -643,6 +660,12 @@ impl ReviewCore {
             pr_head: None,
             on_disk: None,
             last_review: None,
+            pr_status: None,
+            readiness_asked: PressAgain::default(),
+            readiness_to_send: None,
+            merge_method: MergeMethod::default(),
+            merging_asked: PressAgain::default(),
+            merging_to_send: None,
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -2188,22 +2211,22 @@ impl ReviewCore {
         &self,
         query: &str,
         build: Build,
-        file_toggles: Vec<PaletteAction>,
+        page_toggles: Vec<PaletteAction>,
     ) -> Vec<PaletteGroup> {
         jump::palette(
             self.jump_targets(""),
-            &self.palette_actions_with(build, file_toggles),
+            &self.palette_actions_with(build, page_toggles),
             query,
         )
     }
 
     /// What the palette can do on the open screen.
     /// Checking for updates only where the build takes them.
-    /// `file_toggles` are the actions on the focused change's file, which only the page knows.
+    /// `page_toggles` are the actions on the screen's boxes and the focused change's file, which only the page knows.
     pub(super) fn palette_actions_with(
         &self,
         build: Build,
-        file_toggles: Vec<PaletteAction>,
+        page_toggles: Vec<PaletteAction>,
     ) -> Vec<PaletteAction> {
         let step = match &self.screen {
             Screen::Step(id) => Some(id),
@@ -2243,10 +2266,17 @@ impl ReviewCore {
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
             .chain([wrap, whitespace])
-            .chain(file_toggles)
+            .chain(page_toggles)
             .chain(finish)
+            .chain(self.readiness_palette_action())
+            .chain(self.merging_palette_action())
+            .chain([PaletteAction::OpenOnGitHub])
+            .chain(
+                self.subject
+                    .pull_request()
+                    .map(|_| PaletteAction::OpenChecksOnGitHub),
+            )
             .chain([
-                PaletteAction::OpenOnGitHub,
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,
                 PaletteAction::Shortcuts,
@@ -2611,6 +2641,15 @@ impl ReviewCore {
             != self
                 .box_fold_flipped
                 .contains(&(screen.clone(), path.clone()))
+    }
+
+    /// Folds or opens each of the boxes, leaving one already as asked alone.
+    pub fn set_boxes_folded(&mut self, screen: &Screen, paths: &[FilePath], folded: bool) {
+        for path in paths {
+            if self.is_box_folded(screen, path) != folded {
+                self.toggle_box_fold(screen, path);
+            }
+        }
     }
 
     pub fn toggle_box_fold(&mut self, screen: &Screen, path: &FilePath) {

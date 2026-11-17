@@ -28,6 +28,8 @@ pub enum Intent {
     ToggleRenderedView,
     /// `L`, on the focused change's file.
     TogglePieceLabels,
+    /// `O`, on the open screen's boxes.
+    ToggleFold,
     ToggleJump,
     TogglePrSwitcher,
     /// The PR switcher asked for from outside the window, by a launch from the Desktop entry.
@@ -44,6 +46,16 @@ pub enum Intent {
     /// A local review's finish, from the sidebar, the finish card or the palette.
     SendTasks,
     OpenOnGitHub,
+    /// GitHub's checks page of the PR.
+    OpenChecksOnGitHub,
+    /// A row of the title bar's check list, by its place in the list; the row past the last is the
+    /// "and more" one. Opens the check's run, else the checks page.
+    OpenCheck(usize),
+    /// `D`: asks, and on the same press again soon after, converts the PR to a draft or marks it ready.
+    ToggleDraft,
+    /// `Shift+M`: asks, and on the same press again soon after, turns auto-merge on or off, or
+    /// merges now when nothing blocks the PR.
+    ToggleAutoMerge,
     CheckForUpdates,
     RestartApp,
 }
@@ -63,12 +75,18 @@ impl From<PaletteAction> for Intent {
                 Self::TogglePieceLabels
             }
             PaletteAction::ShowRendered | PaletteAction::ShowCode => Self::ToggleRenderedView,
+            PaletteAction::OpenAllPieces | PaletteAction::FoldAllPieces => Self::ToggleFold,
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::SendTasks => Self::SendTasks,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
+            PaletteAction::OpenChecksOnGitHub => Self::OpenChecksOnGitHub,
+            PaletteAction::ConvertToDraft | PaletteAction::MarkReadyForReview => Self::ToggleDraft,
+            PaletteAction::EnableAutoMerge
+            | PaletteAction::DisableAutoMerge
+            | PaletteAction::MergeNow => Self::ToggleAutoMerge,
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
             PaletteAction::Settings => Self::ToggleSettings,
             PaletteAction::Shortcuts => Self::ToggleShortcuts,
@@ -84,6 +102,8 @@ pub enum Effect {
     Change(ReviewChange),
     /// Switches the focused change's file; does nothing when there is none or it has no such switch.
     ToggleFocusedFile(FileToggle),
+    /// Opens or folds every box of the screen; does nothing where the screen has no fold toggle.
+    ToggleScreenFold,
     /// Opens the overlay, or closes it when open.
     Toggle(Overlay),
     /// Opens Settings, which is closed.
@@ -99,6 +119,13 @@ pub enum Effect {
     /// Hands a local review's queued tasks to its agent.
     SendTasks,
     OpenOnGitHub(PullRequestUrl),
+    OpenChecksOnGitHub(PullRequestUrl),
+    /// A check's run, on the page GitHub gave.
+    OpenCheck(String),
+    /// The window asks the review to change the PR between draft and ready, and says what it answers.
+    ChangeReadiness,
+    /// The window asks the review to turn auto-merge on or off or merge now, and says what it answers.
+    ChangeMerging,
     Restart(RestartArgs),
     /// Asks GitHub for a newer release now.
     CheckForUpdates,
@@ -199,6 +226,9 @@ impl Intent {
             | Self::ToggleWrapLines
             | Self::ToggleRenderedView
             | Self::TogglePieceLabels
+            | Self::ToggleFold
+            | Self::ToggleDraft
+            | Self::ToggleAutoMerge
             | Self::ToggleJump
             | Self::ToggleSettings
             | Self::ShowSettings
@@ -213,6 +243,8 @@ impl Intent {
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenOnGitHub
+            | Self::OpenChecksOnGitHub
+            | Self::OpenCheck(_)
             | Self::CheckForUpdates
             | Self::RestartApp => false,
         };
@@ -259,6 +291,7 @@ impl ReviewCore {
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
             Intent::ToggleRenderedView => Effect::ToggleFocusedFile(FileToggle::RenderedView),
             Intent::TogglePieceLabels => Effect::ToggleFocusedFile(FileToggle::PieceLabels),
+            Intent::ToggleFold => Effect::ToggleScreenFold,
             Intent::ToggleJump => Effect::Toggle(Overlay::Jump),
             Intent::TogglePrSwitcher => Effect::Toggle(Overlay::PrSwitcher),
             Intent::ShowPrSwitcher => Effect::OpenPrSwitcher,
@@ -286,6 +319,23 @@ impl ReviewCore {
                 .subject()
                 .pull_request()
                 .map_or(Effect::Nothing, |pr| Effect::OpenOnGitHub(pr.clone())),
+            Intent::OpenChecksOnGitHub => self
+                .subject()
+                .pull_request()
+                .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnGitHub(pr.clone())),
+            Intent::OpenCheck(place) => {
+                let page = self
+                    .pr_status()
+                    .and_then(|status| status.check_list().shown.into_iter().nth(place))
+                    .and_then(|check| check.page);
+                match (page, self.subject().pull_request()) {
+                    (Some(page), _) => Effect::OpenCheck(page.to_string()),
+                    (None, Some(pr)) => Effect::OpenChecksOnGitHub(pr.clone()),
+                    (None, None) => Effect::Nothing,
+                }
+            }
+            Intent::ToggleDraft => Effect::ChangeReadiness,
+            Intent::ToggleAutoMerge => Effect::ChangeMerging,
             Intent::CheckForUpdates => Effect::CheckForUpdates,
             Intent::RestartApp => Effect::Restart(self.restart_args()),
         }

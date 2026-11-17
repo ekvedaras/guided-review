@@ -193,6 +193,9 @@ pub enum PaletteAction {
     HidePieceLabels,
     ShowRendered,
     ShowCode,
+    /// On the open screen's boxes, where the toolbar has the fold toggle.
+    OpenAllPieces,
+    FoldAllPieces,
     AskAboutStep,
     /// Asks the PR's tour agent to write the guided tour of a basic review.
     WriteGuidedTour,
@@ -201,6 +204,18 @@ pub enum PaletteAction {
     /// A local review's finish: its queued tasks go to the change set's agent.
     SendTasks,
     OpenOnGitHub,
+    /// GitHub's checks page of the PR.
+    OpenChecksOnGitHub,
+    /// Offered only where the PR is ready and the viewer may change it.
+    ConvertToDraft,
+    /// Offered only where the PR is a draft and the viewer may change it.
+    MarkReadyForReview,
+    /// Offered only where GitHub lets the viewer turn it on and something blocks the merge.
+    EnableAutoMerge,
+    /// Offered only while auto-merge is on and GitHub lets the viewer turn it off.
+    DisableAutoMerge,
+    /// Offered only where nothing blocks the merge and the viewer may merge.
+    MergeNow,
     SwitchPr,
     Settings,
     Shortcuts,
@@ -226,12 +241,20 @@ impl PaletteAction {
             Self::HidePieceLabels => "Hide piece labels in this file",
             Self::ShowRendered => "Show this file rendered",
             Self::ShowCode => "Show this file as code",
+            Self::OpenAllPieces => "Open all pieces",
+            Self::FoldAllPieces => "Fold all pieces",
             Self::AskAboutStep => "Ask about this step",
             Self::WriteGuidedTour => "Write guided tour",
             Self::SwitchToGuidedTour => "Switch to guided tour",
             Self::FinishReview => "Finish review",
             Self::SendTasks => "Send tasks",
             Self::OpenOnGitHub => "Open on GitHub",
+            Self::OpenChecksOnGitHub => "Open checks on GitHub",
+            Self::ConvertToDraft => "Convert to draft",
+            Self::MarkReadyForReview => "Mark as ready for review",
+            Self::EnableAutoMerge => "Enable auto-merge",
+            Self::DisableAutoMerge => "Disable auto-merge",
+            Self::MergeNow => "Merge now",
             Self::SwitchPr => "Switch pull request",
             Self::Settings => "Settings",
             Self::Shortcuts => "Keyboard shortcuts",
@@ -251,6 +274,11 @@ impl PaletteAction {
             Self::WrapLines | Self::StopWrappingLines => Some(Command::WrapLines),
             Self::ShowPieceLabels | Self::HidePieceLabels => Some(Command::TogglePieceLabels),
             Self::ShowRendered | Self::ShowCode => Some(Command::ToggleRenderedView),
+            Self::OpenAllPieces | Self::FoldAllPieces => Some(Command::ToggleFold),
+            Self::ConvertToDraft | Self::MarkReadyForReview => Some(Command::ToggleDraft),
+            Self::EnableAutoMerge | Self::DisableAutoMerge | Self::MergeNow => {
+                Some(Command::ToggleAutoMerge)
+            }
             Self::Settings => Some(Command::Settings),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
@@ -260,6 +288,7 @@ impl PaletteAction {
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenOnGitHub
+            | Self::OpenChecksOnGitHub
             | Self::SwitchPr
             | Self::CheckForUpdates
             | Self::RestartApp => None,

@@ -4,15 +4,33 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::file_path;
+use guided_review::viewer::{
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+};
+
+/// A PR that checks or reviews still hold back, in a repo that allows every merge method and
+/// auto-merge, read by someone with write access.
+pub fn blocked_merging() -> Merging {
+    Merging {
+        mergeability: Mergeability::Blocked,
+        auto_merge: AutoMerge::Off,
+        methods: MergeMethods::only(&MergeMethod::ALL),
+        repo_allows_auto_merge: true,
+        viewer_may_enable_auto_merge: true,
+        viewer_may_disable_auto_merge: false,
+        viewer_may_merge: true,
+    }
+}
 use guided_review::file_path::FilePath;
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
-    CommentId, CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullsOfBranchPort, Reaction,
-    ReactionChange, ReactionCount, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    Checks, CommentId, CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
+    PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, Readiness,
+    RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId,
+    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -87,6 +105,15 @@ pub enum GitHubCall {
     UploadPicture {
         pr: PullRequestUrl,
         name: String,
+    },
+    StatusOf(PullRequestUrl),
+    SetReadiness {
+        pr: PullRequestUrl,
+        readiness: Readiness,
+    },
+    ChangeMerging {
+        pr: PullRequestUrl,
+        change: MergeChange,
     },
 }
 
@@ -174,6 +201,7 @@ pub struct FakeGitHub {
     edited_now: Mutex<BTreeMap<CommentId, String>>,
     deleted_now: Mutex<BTreeSet<CommentId>>,
     description: Mutex<String>,
+    status: Mutex<PrStatus>,
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
     head_branches: Mutex<Vec<(String, String)>>,
 }
@@ -195,6 +223,13 @@ impl FakeGitHub {
             edited_now: Mutex::default(),
             deleted_now: Mutex::default(),
             description: Mutex::default(),
+            status: Mutex::new(PrStatus {
+                readiness: Readiness::Ready,
+                checks: Checks::NoneRun,
+                check_runs: Arc::default(),
+                viewer_may_change_readiness: true,
+                merging: blocked_merging(),
+            }),
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),
         }
@@ -229,6 +264,21 @@ impl FakeGitHub {
 
     pub fn description_now(&self) -> String {
         self.description.lock().unwrap().clone()
+    }
+
+    /// The PR's status as it is on GitHub.
+    pub fn with_status(self, status: PrStatus) -> Self {
+        self.set_status(status);
+        self
+    }
+
+    /// A change made on the GitHub web page, or by a check finishing.
+    pub fn set_status(&self, status: PrStatus) {
+        *self.status.lock().unwrap() = status;
+    }
+
+    pub fn status_now(&self) -> PrStatus {
+        self.status.lock().unwrap().clone()
     }
 
     pub fn with_viewer_as_pull_author(self) -> Self {
@@ -410,6 +460,43 @@ impl PullRequestDescriptionPort for FakeGitHub {
         });
         self.fail_if_connection_lost()?;
         body.clone_into(&mut self.description.lock().unwrap());
+        Ok(())
+    }
+}
+
+impl PullRequestStatusPort for FakeGitHub {
+    fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
+        self.sent.record(GitHubCall::StatusOf(pr.clone()));
+        self.fail_if_reads_fail()?;
+        Ok(self.status_now())
+    }
+
+    fn set_pull_request_readiness(
+        &self,
+        pr: &PullRequestUrl,
+        readiness: Readiness,
+    ) -> Result<(), GitHubError> {
+        self.sent.record(GitHubCall::SetReadiness {
+            pr: pr.clone(),
+            readiness,
+        });
+        self.fail_if_connection_lost()?;
+        self.status.lock().unwrap().readiness = readiness;
+        Ok(())
+    }
+
+    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), GitHubError> {
+        self.sent.record(GitHubCall::ChangeMerging {
+            pr: pr.clone(),
+            change,
+        });
+        self.fail_if_connection_lost()?;
+        let merging = &mut self.status.lock().unwrap().merging;
+        match change {
+            MergeChange::EnableAutoMerge(method) => merging.auto_merge = AutoMerge::On(method),
+            MergeChange::DisableAutoMerge => merging.auto_merge = AutoMerge::Off,
+            MergeChange::MergeNow(_) => merging.mergeability = Mergeability::NotOpen,
+        }
         Ok(())
     }
 }

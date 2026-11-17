@@ -54,10 +54,11 @@ pub enum Icon {
     CircleDot,
     ChevronUp,
     Clock,
+    GitMerge,
 }
 
 impl Icon {
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 52] = [
         Self::Search,
         Self::ExternalLink,
         Self::PullRequest,
@@ -109,6 +110,7 @@ impl Icon {
         Self::CircleDot,
         Self::ChevronUp,
         Self::Clock,
+        Self::GitMerge,
     ];
 
     pub fn path(self) -> &'static str {
@@ -164,6 +166,7 @@ impl Icon {
             Self::CircleDot => "icons/circle-dot.svg",
             Self::ChevronUp => "icons/chevron-up.svg",
             Self::Clock => "icons/clock.svg",
+            Self::GitMerge => "icons/git-merge.svg",
         }
     }
 }

@@ -94,6 +94,7 @@ fn a_window_coming_to_the_front_reads_github_and_the_clone_and_sends_what_waits_
             WorkKind::PullThreads,
             WorkKind::PullPendingReview,
             WorkKind::PullLastReview,
+            WorkKind::PullPrStatus,
         ],
         "an empty queue sends nothing"
     );

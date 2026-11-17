@@ -38,6 +38,7 @@ pub enum Affected {
     PendingReview,
     Authorship,
     LastReview,
+    PrStatus,
 }
 
 impl Affected {
@@ -50,6 +51,7 @@ impl Affected {
             Self::ViewedMarks => WorkKind::SyncViewed,
             Self::PendingReview | Self::Authorship => WorkKind::PullPendingReview,
             Self::LastReview => WorkKind::PullLastReview,
+            Self::PrStatus => WorkKind::PullPrStatus,
         }
     }
 }
@@ -62,6 +64,7 @@ impl From<Read> for Affected {
             Read::PendingReview => Self::PendingReview,
             Read::Authorship => Self::Authorship,
             Read::LastReview => Self::LastReview,
+            Read::PrStatus => Self::PrStatus,
         }
     }
 }
@@ -76,6 +79,7 @@ impl fmt::Display for Affected {
             Self::PendingReview => "the pending review",
             Self::Authorship => "who wrote the PR",
             Self::LastReview => "your last review",
+            Self::PrStatus => "whether the PR is a draft and its checks",
         })
     }
 }

@@ -2,11 +2,13 @@ use std::path::Path;
 
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
+use super::merging::MergeChange;
 use super::ports::{
     ChangeTipsPort, GitHubError, NoAccess, PictureUploadPort, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullsOfBranchPort, Resolution,
-    ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort,
+    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
+    Resolution, ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort,
 };
+use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
@@ -90,6 +92,28 @@ impl PullRequestDescriptionPort for NoGitHub {
         _body: &str,
     ) -> anyhow::Result<()> {
         Ok(refused()?)
+    }
+}
+
+impl PullRequestStatusPort for NoGitHub {
+    fn pull_request_status(&self, _pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
+        refused()
+    }
+
+    fn set_pull_request_readiness(
+        &self,
+        _pr: &PullRequestUrl,
+        _readiness: Readiness,
+    ) -> Result<(), GitHubError> {
+        refused()
+    }
+
+    fn change_merging(
+        &self,
+        _pr: &PullRequestUrl,
+        _change: MergeChange,
+    ) -> Result<(), GitHubError> {
+        refused()
     }
 }
 

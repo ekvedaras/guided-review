@@ -8,7 +8,8 @@ Rust 2024 gpui app.
 
 - Start it with `run_in_background` and read only until it ends. A commit stages what is on disk, so edit nothing while it runs, and stage first or check `git diff` against what you commit.
 - Agent sessions, worktrees included, share the main checkout's `target` folder (`CARGO_TARGET_DIR` in `.claude/settings.json`), since a `target/` per worktree (3-5 GB each) filled the disk on 2026-11-16. Two builds at once wait for each other's cargo lock.
-- Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`.
+- One agent builds at a time. Never delete `target/` while a build runs. On 2026-11-17 two agents' gates after a wiped `target/` overloaded the maintainer's Mac, since macOS checks every new test binary (`syspolicyd`); see `docs/wiki/agent-builds.md`.
+- Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`. Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` first, and the full `scripts/check` once, when the change is done, not after every fix.
 - Change files with the Edit and Write tools, not shell edits. In an agent worktree the sandbox has refused heredocs, `sed -i` without a backup suffix, and chained commands (2026-11-06).
 
 ## Tests
@@ -30,7 +31,7 @@ The snapshot scripts work on macOS only, and say so elsewhere: pictures need gpu
 
 `scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]` puts each scene side by side, before left. Markers number spots on the after picture, in its pixels: `{ "21-jump-palette": [{ "x": 640, "y": 260, "n": 1 }] }`.
 
-A PR that changes what the app shows puts before and after pictures in its Evidence: snapshot `main` and the branch, run `snapshot-compare`, and upload with `gh attach`. When the change is a small part of the window, crop both pictures to that part and a little around it before comparing (`sips -c <h> <w> --cropOffset <y> <x>`), one picture per changed spot. When no scene shows the change, stage one in `scenes.rs` in the same PR, so the next change to it has a picture too.
+A PR that changes what the app shows puts before and after pictures in its Evidence: snapshot `main` and the branch, run `snapshot-compare`, and upload with `gh attach`. When the change is a small part of the window, crop both pictures to that part and a little around it before comparing (`sips -c <h> <w> --cropOffset <y> <x>`), one picture per changed spot. Open every picture with the Read tool before you upload it: on 2026-11-17 six crops with a wrong offset showed a file header instead of the title bar and went into a PR. When no scene shows the change, stage one in `scenes.rs` in the same PR, so the next change to it has a picture too.
 
 ## Change notes
 
