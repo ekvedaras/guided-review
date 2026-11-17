@@ -1,1 +1,1 @@
-When an open fails and no window is up, the app now shows the PR switcher with the reason instead of quitting.
+A failed open with no window now shows the PR switcher with the reason, instead of quitting the app.
