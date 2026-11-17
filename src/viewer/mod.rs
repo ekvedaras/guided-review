@@ -144,8 +144,8 @@ pub use local_row::LocalRow;
 pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use merging::{
-    AutoMerge, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal, Mergeability,
-    Merging,
+    AutoMerge, ButtonDetail, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal,
+    Mergeability, Merging,
 };
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};

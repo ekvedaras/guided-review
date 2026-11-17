@@ -95,17 +95,17 @@ use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, Checks, CloneOffer,
-    CloneOfferState, CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure,
-    DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent,
-    LabelSwitch, LineLocation, Merging, NextScreen, NoteSubject, NotesButton, Overlay,
-    OverviewPage, OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment,
-    ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave,
-    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
-    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
-    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
-    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
-    WindowMoment, pluralised,
+    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ButtonDetail, ChangeInView,
+    Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
+    CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
+    HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Merging, NextScreen, NoteSubject,
+    NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place, PrStatus,
+    PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness, Refusal,
+    Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -2164,7 +2164,12 @@ impl OneStepLayout {
     }
 
     /// The PR this review is of, and the window-wide actions.
-    fn title_bar(&self, is_writing_tour: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    fn title_bar(
+        &self,
+        is_writing_tour: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = Colors::active(cx);
         let review = self.session.read(cx).review();
         let subject_name = review.subject().short();
@@ -2173,6 +2178,8 @@ impl OneStepLayout {
         let is_local = local_heading.is_some();
         let can_open_on_github = review.can_open_on_github();
         let status = review.pr_status().copied();
+        let bar_width = f32::from(window.viewport_size().width) - SIDEBAR_WIDTH;
+        let subject_chars = subject_name.chars().count();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -2288,7 +2295,15 @@ impl OneStepLayout {
                     .text_sm()
                     .child(switch_pr)
                     .children(status.map(|status| self.status_chip(&colors, status, cx)))
-                    .children(status.and_then(|status| merge_button(&colors, status.merging, cx)))
+                    .children(status.and_then(|status| {
+                        let detail = ButtonDetail::fitting(
+                            status.merging,
+                            bar_width,
+                            subject_chars,
+                            status.label().chars().count(),
+                        );
+                        merge_button(&colors, status.merging, detail, cx)
+                    }))
                     .child(div().flex_1())
                     .child(jump)
                     .children(github),
@@ -3418,23 +3433,29 @@ const FOCUS_BAR_LEFT: Pixels = px(15.);
 fn merge_button(
     colors: &Colors,
     merging: Merging,
+    detail: ButtonDetail,
     cx: &mut Context<OneStepLayout>,
 ) -> Option<Stateful<Div>> {
+    if detail == ButtonDetail::Hidden {
+        return None;
+    }
     let label = merging.button_label()?;
     let kind = match merging.auto_merge {
         AutoMerge::On(_) => ButtonKind::Pressed,
         AutoMerge::Off => ButtonKind::Ghost,
     };
     let method = match merging.auto_merge {
-        AutoMerge::On(method) => Some(method.label()),
-        AutoMerge::Off => None,
+        AutoMerge::On(method) if detail != ButtonDetail::WithoutMethod => Some(method.label()),
+        AutoMerge::On(_) | AutoMerge::Off => None,
     };
     Some(
         button(colors, "title-bar-merge", kind, ButtonSize::Small)
             .child(button_icon(colors, kind, ButtonSize::Small, Icon::Clock))
             .child(label)
             .children(method.map(|method| div().text_color(colors.muted_text).child(method)))
-            .child(button_keys(colors, kind, Command::ToggleAutoMerge, cx))
+            .when(detail == ButtonDetail::Full, |button| {
+                button.child(button_keys(colors, kind, Command::ToggleAutoMerge, cx))
+            })
             .tooltip(tooltip(|_| "Click twice to confirm".into()))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::ToggleAutoMerge, window, cx);
@@ -4696,7 +4717,7 @@ impl Render for OneStepLayout {
                             .border_color(colors.subtle_border)
                             .shadow(colors.page_shadow())
                     })
-                    .child(self.title_bar(is_writing_tour, cx))
+                    .child(self.title_bar(is_writing_tour, window, cx))
                     .children(old_head.clone().map(|old_head| {
                         NewCommitsBanner::new(
                             old_head,

@@ -58,3 +58,5 @@ Drawn icons from `Icon`, never emoji. Sizes follow the button size (`ButtonSize:
 - A step screen can show two Ask buttons at once: the toolbar's (the whole step) and a file header's (that file). They ask about different things, but read as one action twice.
 - When the tour is older than the PR, the comment box's refusal ("Update tour to comment") shows as a second amber band under the new-commits band, which already says so.
 - The sidebar's foot puts two key-cap clusters side by side (Settings ⌘ , and the shortcuts sheet's ?).
+
+2026-11-17: the title bar's PR title is what the bar is for, so what #94 and #95 added gives way first. `ButtonDetail::fitting` estimates from the window's width (less the sidebar) whether the title keeps 240 px after the PR name, the status chip and the Jump and GitHub buttons; if not, the auto-merge button drops its key caps, then the merge method word, then itself (its key still works). A scene had shown the title shrunk to nothing. The widths are estimates in characters, not measured text (open).
