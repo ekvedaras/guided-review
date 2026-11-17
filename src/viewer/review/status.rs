@@ -4,9 +4,8 @@ use super::ReviewCore;
 use crate::viewer::github_outage::Affected;
 use crate::viewer::jump::PaletteAction;
 use crate::viewer::ports::GitHubError;
-use crate::viewer::pr_status::{
-    CHECKS_RECHECK, CONFIRM_WITHIN, Checks, PrStatus, Readiness, ReadinessStep,
-};
+use crate::viewer::pr_status::{CHECKS_RECHECK, Checks, PrStatus, Readiness};
+use crate::viewer::press_again::PressStep;
 use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::shortcuts::Command;
 use crate::viewer::work_agenda::WorkKind;
@@ -28,36 +27,27 @@ impl ReviewCore {
 
     /// `D`: the first press says what the same press again does; that press, within ten seconds,
     /// converts the PR to a draft or marks it ready.
-    pub fn ask_to_change_readiness(&mut self, now: Instant) -> ReadinessStep {
+    pub fn ask_to_change_readiness(&mut self, now: Instant) -> PressStep {
         let (Some(status), Some(_)) = (self.pr_status, self.subject.pull_request()) else {
-            return ReadinessStep::Nothing;
+            return PressStep::Nothing;
         };
         if !status.viewer_may_change_readiness {
-            return ReadinessStep::NotAllowed;
+            return PressStep::Refused(
+                "Only the author and people with write access can change whether the PR is a draft"
+                    .to_owned(),
+            );
         }
         let target = status.readiness.other();
-        let confirmed = self.readiness_asked.is_some_and(|(asked, at)| {
-            asked == target && now.saturating_duration_since(at) <= CONFIRM_WITHIN
-        });
-        if confirmed {
-            self.readiness_asked = None;
+        if self.readiness_asked.confirms(target, now) {
             self.readiness_to_send = Some(target);
             self.work.want(WorkKind::ChangePrReadiness);
-            return ReadinessStep::Sent;
+            return PressStep::Sent;
         }
-        self.readiness_asked = Some((target, now));
-        let key = Command::ToggleDraft
-            .default_chords()
-            .first()
-            .map_or_else(String::new, |chord| chord.spelled());
         let does = match target {
             Readiness::Draft => "convert the PR to a draft",
             Readiness::Ready => "mark the PR ready for review",
         };
-        ReadinessStep::Ask(format!(
-            "Press {key} again within {} s to {does}.",
-            CONFIRM_WITHIN.as_secs()
-        ))
+        PressStep::ask(Command::ToggleDraft, does)
     }
 
     /// Convert to draft or Mark as ready for review: the one that applies, where the viewer may.

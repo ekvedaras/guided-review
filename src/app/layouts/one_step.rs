@@ -99,8 +99,8 @@ use crate::viewer::{
     CloneOfferState, CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure,
     DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent,
     LabelSwitch, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage,
-    OverviewStats, PageRow, PieceLabels, Place, PrStatus, QueuedComment, ReadProgress, ReadStep,
-    ReadSubject, ReadUnit, Readiness, ReadinessStep, Refusal, Reopen, ReopenAfterSave, Reopening,
+    OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress,
+    ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening,
     RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
     Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
@@ -1085,16 +1085,7 @@ impl OneStepLayout {
         let step = self.session.update(cx, |session, cx| {
             session.change(cx, |review| review.ask_to_change_readiness(Instant::now()))
         });
-        match step {
-            ReadinessStep::Nothing | ReadinessStep::Sent => {}
-            ReadinessStep::NotAllowed => post_toast(
-                cx,
-                ToastTone::Neutral,
-                "Only the author and people with write access can change whether the PR is a draft"
-                    .to_owned(),
-            ),
-            ReadinessStep::Ask(note) => post_toast(cx, ToastTone::Neutral, note),
-        }
+        tell_press(step, cx);
     }
 
     /// Switch to guided tour, from the banner, the sidebar and the palette: the reviewer's click only.
@@ -3409,6 +3400,16 @@ const FOCUS_BAR_LEFT: Pixels = px(15.);
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
 /// A refused or failed save is one of the review's problems, which the sidebar shows.
+/// A key that changes the PR on GitHub says why it does nothing, or what its next press does.
+fn tell_press(step: PressStep, cx: &mut App) {
+    match step {
+        PressStep::Nothing | PressStep::Sent => {}
+        PressStep::Refused(note) | PressStep::Ask(note) => {
+            post_toast(cx, ToastTone::Neutral, note);
+        }
+    }
+}
+
 fn change_box(
     session: &mut ReviewSession,
     text_box: &TextBox,

@@ -8,8 +8,8 @@ use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    Checks, Command, Effect, Intent, PaletteAction, PrStatus, Problem, Read, Readiness,
-    ReadinessStep, Review, ReviewStateFile, WindowMoment,
+    Checks, Command, Effect, Intent, PaletteAction, PrStatus, PressStep, Problem, Read, Readiness,
+    Review, ReviewStateFile, WindowMoment,
 };
 use serde_json::json;
 
@@ -256,7 +256,7 @@ fn the_first_press_says_what_pressing_again_does_and_changes_nothing() {
 
     let step = review.ask_to_change_readiness(now);
 
-    let ReadinessStep::Ask(note) = step else {
+    let PressStep::Ask(note) = step else {
         panic!("{step:?}");
     };
     assert!(note.contains("convert the PR to a draft"), "{note}");
@@ -273,7 +273,7 @@ fn the_same_press_again_within_ten_seconds_converts_a_ready_pr_to_a_draft() {
     review.ask_to_change_readiness(now);
 
     let later = now + Duration::from_secs(10);
-    assert_eq!(review.ask_to_change_readiness(later), ReadinessStep::Sent);
+    assert_eq!(review.ask_to_change_readiness(later), PressStep::Sent);
     drive_without_agents(&mut review, &github, &pull.source(), later);
 
     assert_eq!(
@@ -295,7 +295,7 @@ fn a_draft_is_marked_ready_by_the_same_key() {
     let pull = Pull::new();
     let (mut review, github, now) = read_status(&pull, Readiness::Draft, true);
 
-    let ReadinessStep::Ask(note) = review.ask_to_change_readiness(now) else {
+    let PressStep::Ask(note) = review.ask_to_change_readiness(now) else {
         panic!("not asked");
     };
     assert!(note.contains("mark the PR ready for review"), "{note}");
@@ -313,7 +313,7 @@ fn a_press_after_the_ten_seconds_only_asks_again() {
 
     let step = review.ask_to_change_readiness(now + Duration::from_secs(11));
 
-    assert!(matches!(step, ReadinessStep::Ask(_)), "{step:?}");
+    assert!(matches!(step, PressStep::Ask(_)), "{step:?}");
     drive_without_agents(&mut review, &github, &pull.source(), now);
     assert_eq!(readiness_calls(&pull), []);
 }
@@ -322,13 +322,14 @@ fn a_press_after_the_ten_seconds_only_asks_again() {
 fn nothing_is_asked_where_github_would_refuse_or_the_status_is_not_known() {
     let pull = Pull::new();
     let (mut read_only, _github, now) = read_status(&pull, Readiness::Ready, false);
-    assert_eq!(
-        read_only.ask_to_change_readiness(now),
-        ReadinessStep::NotAllowed
+    let refused = read_only.ask_to_change_readiness(now);
+    assert!(
+        matches!(&refused, PressStep::Refused(why) if why.contains("write access")),
+        "{refused:?}"
     );
 
     let mut unread = pull.open();
-    assert_eq!(unread.ask_to_change_readiness(now), ReadinessStep::Nothing);
+    assert_eq!(unread.ask_to_change_readiness(now), PressStep::Nothing);
 }
 
 #[test]

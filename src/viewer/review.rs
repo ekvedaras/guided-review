@@ -60,6 +60,7 @@ use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::pr_status::{PrStatus, Readiness};
+use super::press_again::PressAgain;
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
@@ -313,7 +314,7 @@ pub struct ReviewCore {
     /// What GitHub last said of the PR's draft state and checks; kept as it was while a read fails.
     pr_status: Option<PrStatus>,
     /// The first press of the key, waiting for the same press again.
-    readiness_asked: Option<(Readiness, Instant)>,
+    readiness_asked: PressAgain<Readiness>,
     /// What the confirmed press changed the PR to, until GitHub answers.
     readiness_to_send: Option<Readiness>,
     files: Vec<ChangedFile>,
@@ -652,7 +653,7 @@ impl ReviewCore {
             on_disk: None,
             last_review: None,
             pr_status: None,
-            readiness_asked: None,
+            readiness_asked: PressAgain::default(),
             readiness_to_send: None,
             files,
             steps_in_reading_order,
