@@ -194,6 +194,7 @@ pub enum Read {
     PendingReview,
     Authorship,
     LastReview,
+    PrStatus,
 }
 
 impl Problem {
@@ -285,6 +286,10 @@ impl fmt::Display for Problem {
             Self::NotRead(Read::LastReview, reason) => write!(
                 formatter,
                 "Your last review could not be read, so Finish review may not show it: {reason}"
+            ),
+            Self::NotRead(Read::PrStatus, reason) => write!(
+                formatter,
+                "Whether the PR is a draft and its checks may be out of date: {reason}"
             ),
             Self::IdeNotStarted(reason) => write!(
                 formatter,
