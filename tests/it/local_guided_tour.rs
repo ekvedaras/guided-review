@@ -6,7 +6,7 @@ use crate::support::fake_ports::{FakeGitHub as FakePorts, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_without_agents;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, file_path};
-use guided_review::local_work_tree::LocalWorkTree;
+use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::pull_request::Sha;
@@ -288,7 +288,7 @@ fn check_names_the_repo_of_the_clone_so_a_pr_of_the_repo_finds_the_guided_tour_w
 }
 
 #[test]
-fn check_of_a_tour_pinned_before_an_update_says_the_review_has_a_new_snapshot() {
+fn check_after_an_update_finds_the_guided_tour_on_the_new_snapshot_and_warns_of_nothing() {
     let feature = Feature::with_work_in_progress().with_basic_tour();
     feature.writer_writes_a_tour_of_both_files();
     assert!(feature.run(&["check", &feature.key()]).success);
@@ -297,10 +297,31 @@ fn check_of_a_tour_pinned_before_an_update_says_the_review_has_a_new_snapshot() 
 
     let run = feature.run(&["check", &feature.key()]);
 
-    assert!(
-        run.stdout.contains("new snapshot") && run.stdout.contains("repin"),
-        "{}",
-        run.stdout
+    assert!(run.success, "{}{}", run.stdout, run.stderr);
+    assert!(!run.stdout.contains("new snapshot"), "{}", run.stdout);
+}
+
+#[test]
+fn repin_moves_the_waiting_guided_tour_with_the_basic_one_before_the_ref_moves() {
+    let feature = Feature::with_work_in_progress().with_basic_tour();
+    feature.writer_writes_a_tour_of_both_files();
+    assert!(feature.run(&["check", &feature.key()]).success);
+    let old_head = feature.basic_pin_head();
+    feature.repo.write("notes.txt", "more\n");
+
+    let run = feature.run(&["repin", &feature.key()]);
+
+    assert!(run.success, "{}{}", run.stdout, run.stderr);
+    let new_head = feature.basic_pin_head();
+    assert_ne!(new_head, old_head);
+    let guided = GuidedTour::load(&feature.guided_path()).unwrap();
+    assert_eq!(guided.pin.head.to_string(), new_head);
+    assert_eq!(guided.pin.previous_head, Some(Sha::new(&old_head)));
+    assert_eq!(
+        feature
+            .repo
+            .git(&["rev-parse", &snapshot_ref(feature.subject.local().unwrap())]),
+        new_head
     );
 }
 

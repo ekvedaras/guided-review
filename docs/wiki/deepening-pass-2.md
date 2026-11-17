@@ -30,7 +30,7 @@ Each candidate kept the behaviour it found, except the bugs above. Lettered on f
 - (q) A first `Shift+M` before a rebuild whose config names another merge method asks again after it.
 - (r) A carried first press keeps its time, so the 10 s count from before the rebuild.
 - (s) A rebuilt PR review reads its status from GitHub again though it carries the old one.
-- (t) **Likely bug.** With a basic and a guided tour on disk, the CLI's `repin` moves a PR's guided tour but a local review's basic tour. The local guided tour then stays on a snapshot no ref keeps, which `git gc` may take before the switch or a refresh reads it.
+- (t) **Fixed (2026-11-17).** With a basic and a guided tour on disk, a local `repin` or Update moved only the shown basic tour, so the waiting guided tour stayed on a snapshot no ref kept, which `git gc` may take. `OpenedChangeSet::repin_to_new_snapshot` now also re-pins a pinned waiting guided tour (`repin` and save, no state record and no `follow_to`: those follow the shown tour once) inside the pin lock and before the ref moves, so the ref still moves only after every tour on disk reads the new snapshot. A guided tour the writer has not had pinned by `check` is left alone. A guided tour that fails to read or re-pin now fails the Update before anything moves. Test: `repin_moves_the_waiting_guided_tour_with_the_basic_one_before_the_ref_moves`.
 - (u) An `agent-reply` written to a local thread after `PrMover::carry` read the threads and before the local state file is deleted is lost. The pin lock would not close it.
 - (v) The app's open no longer reads `origin` again for a local subject that carries its repo.
 - (w) The app's Update lets a missing tour fail after the GitHub call; the CLI's PR `repin` checks first.

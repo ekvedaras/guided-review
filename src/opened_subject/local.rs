@@ -12,10 +12,10 @@ use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
 use crate::local_work_tree::{LocalWorkTree, SharedGitFolder, snapshot_ref};
 use crate::make_basic_tour::make_basic_tour;
-use crate::pull_request::PullRequestUrl;
-use crate::repin::Repin;
+use crate::pull_request::{PullRequestUrl, Sha};
+use crate::repin::{Repin, repin};
 use crate::review_subject::{LOCAL_FILES_FOLDER, LocalChangeSet, ReviewSubject};
-use crate::tour::{Tour, TourPin, ToursOnDisk};
+use crate::tour::{GuidedTour, Tour, TourPin, ToursOnDisk};
 use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
 
 use super::CodeAtTips;
@@ -319,6 +319,7 @@ impl OpenedChangeSet {
         let tips = self.work_tree.tips(&snapshot)?;
         let source = LocalGit::at_worktree(self.change_set.folder());
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
+        self.repin_waiting_guided_tour(&source, &base, &tips.head)?;
         let repinned = repin_tour(
             &subject,
             &Tour::shown_path_for(&self.folders, &subject),
@@ -329,6 +330,29 @@ impl OpenedChangeSet {
         )?;
         self.work_tree.keep_snapshot(&self.change_set, &snapshot)?;
         Ok(repinned)
+    }
+
+    /// The guided tour that waits beside the shown basic one is pinned to a snapshot too, and the ref
+    /// keeps only the newest: it moves with the shown tour, so no tour on disk reads a snapshot `git gc`
+    /// may take. It carries no state of its own (ticks and threads follow the shown tour), and a tour the
+    /// writer has not had pinned by `check` yet reads no snapshot, so it stays.
+    fn repin_waiting_guided_tour(
+        &self,
+        source: &LocalGit,
+        base: &Sha,
+        head: &Sha,
+    ) -> anyhow::Result<()> {
+        let subject = self.subject();
+        if ToursOnDisk::of(&self.folders, &subject) != ToursOnDisk::BasicWithGuided {
+            return Ok(());
+        }
+        let path = Tour::path_for(&self.folders, &subject);
+        let mut guided = Tour::Guided(GuidedTour::load_of(&path, &subject)?);
+        if !guided.pin().is_pinned() {
+            return Ok(());
+        }
+        repin(&mut guided, source, base, head)?;
+        guided.save(&path)
     }
 
     /// Drop review: the snapshot ref goes first, then the tours, the tour writer's files and the state
