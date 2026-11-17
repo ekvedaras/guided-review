@@ -2,6 +2,8 @@
 //! panels over the first step. Each scene is staged through the layout's own methods and undone after
 //! its picture, so the next one starts from the plain screen.
 
+use std::sync::Arc;
+
 use gpui::{
     App, AsyncWindowContext, Context, Keystroke, ListOffset, Modifiers, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, Task, WeakEntity, Window, point,
@@ -19,16 +21,16 @@ use crate::file_path::FilePath;
 use crate::review_subject::ReviewSubject;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
-    AgentStatus, AutoMerge, Checks, FileView, LineKind, LineLocation, MergeMethod, MergeMethods,
-    Mergeability, Merging, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness,
-    TerminalId, TextBox,
+    AgentStatus, AutoMerge, CheckRun, CheckState, Checks, FileView, LineKind, LineLocation,
+    MergeMethod, MergeMethods, Mergeability, Merging, PageRow, PieceLabels, PrStatus, Problem,
+    ProblemKind, Readiness, TerminalId, TextBox,
 };
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
 const OTHER_PR: u32 = 14;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scene {
     Settings,
     JumpPalette,
@@ -76,10 +78,11 @@ enum Scene {
     TitleBarAutoMergeOff,
     TitleBarAutoMergeOn,
     TitleBarMergeNow,
+    TitleBarChecksList,
 }
 
 impl Scene {
-    const ALL: [Self; 46] = [
+    const ALL: [Self; 47] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -126,6 +129,7 @@ impl Scene {
         Self::TitleBarAutoMergeOff,
         Self::TitleBarAutoMergeOn,
         Self::TitleBarMergeNow,
+        Self::TitleBarChecksList,
     ];
 
     fn file_name(self) -> &'static str {
@@ -176,6 +180,7 @@ impl Scene {
             Self::TitleBarAutoMergeOff => "65-title-bar-auto-merge-off",
             Self::TitleBarAutoMergeOn => "66-title-bar-auto-merge-on",
             Self::TitleBarMergeNow => "67-title-bar-merge-now",
+            Self::TitleBarChecksList => "68-title-bar-checks-list",
         }
     }
 
@@ -197,6 +202,7 @@ impl Scene {
         let status = |readiness, checks, merging| PrStatus {
             readiness,
             checks,
+            check_runs: Arc::default(),
             viewer_may_change_readiness: true,
             merging,
         };
@@ -224,6 +230,20 @@ impl Scene {
                     ..blocked
                 },
             ),
+            Self::TitleBarChecksList => PrStatus {
+                check_runs: [
+                    ("lint", CheckState::Passing),
+                    ("test (ubuntu-latest)", CheckState::Failing),
+                    ("test (macos-latest)", CheckState::Running),
+                ]
+                .map(|(name, state)| CheckRun {
+                    name: name.into(),
+                    state,
+                    page: None,
+                })
+                .into(),
+                ..status(Readiness::Ready, Checks::Failing, cannot_act)
+            },
             _ => return None,
         })
     }
@@ -672,11 +692,13 @@ impl OneStepLayout {
             | Scene::TitleBarReadyChecksFailing
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
-            | Scene::TitleBarMergeNow => {
+            | Scene::TitleBarMergeNow
+            | Scene::TitleBarChecksList => {
                 if let Some(status) = scene.staged_status() {
                     self.session
                         .update(cx, |session, cx| session.stage_pr_status(status, cx));
                 }
+                self.checks_hover.chip = scene == Scene::TitleBarChecksList;
             }
             Scene::JumpActions => {
                 let query = ">";
@@ -805,8 +827,10 @@ impl OneStepLayout {
             | Scene::TitleBarReadyChecksFailing
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
-            | Scene::TitleBarMergeNow => {
+            | Scene::TitleBarMergeNow
+            | Scene::TitleBarChecksList => {
                 self.session.update(cx, ReviewSession::unstage_pr_status);
+                self.checks_hover.chip = false;
             }
             Scene::RefreshRunning => self
                 .session

@@ -226,6 +226,7 @@ impl FakeGitHub {
             status: Mutex::new(PrStatus {
                 readiness: Readiness::Ready,
                 checks: Checks::NoneRun,
+                check_runs: Arc::default(),
                 viewer_may_change_readiness: true,
                 merging: blocked_merging(),
             }),
@@ -277,7 +278,7 @@ impl FakeGitHub {
     }
 
     pub fn status_now(&self) -> PrStatus {
-        *self.status.lock().unwrap()
+        self.status.lock().unwrap().clone()
     }
 
     pub fn with_viewer_as_pull_author(self) -> Self {

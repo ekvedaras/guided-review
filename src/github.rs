@@ -18,8 +18,8 @@ use crate::viewer::{
     AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, PrStatus, Readiness,
 };
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, Checks, CommentId, CommentPlace, GitHubError, NoAccess,
-    OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
+    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
+    NoAccess, OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
     PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
     ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
     ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
@@ -574,6 +574,32 @@ struct UploadedJson {
 
 /// GitHub's own drag-and-drop store, so the picture is seen only by those who can see the repository.
 /// It is not in GitHub's documented API, but it takes the token `gh` holds.
+/// A rollup's contexts: check runs and commit statuses, which have different fields.
+fn check_runs_of(nodes: &serde_json::Value) -> Arc<[CheckRun]> {
+    let text = |node: &serde_json::Value, pointer: &str| at(node, pointer).as_str().map(Arc::from);
+    nodes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| match at(node, "/__typename").as_str()? {
+            "CheckRun" => Some(CheckRun {
+                name: text(node, "/name")?,
+                state: CheckState::of_check_run(
+                    at(node, "/status").as_str()?,
+                    at(node, "/conclusion").as_str(),
+                ),
+                page: text(node, "/detailsUrl"),
+            }),
+            "StatusContext" => Some(CheckRun {
+                name: text(node, "/context")?,
+                state: CheckState::of_status_context(at(node, "/state").as_str()?),
+                page: text(node, "/targetUrl"),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 impl PullRequestStatusPort for GitHub {
     fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
         let data = self
@@ -585,7 +611,14 @@ impl PullRequestStatusPort for GitHub {
                         pullRequest(number: $number) {
                             isDraft
                             viewerCanUpdate
-                            commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+                            commits(last: 1) { nodes { commit { statusCheckRollup {
+                                state
+                                contexts(first: 100) { nodes {
+                                    __typename
+                                    ... on CheckRun { name status conclusion detailsUrl }
+                                    ... on StatusContext { context state targetUrl }
+                                } }
+                            } } } }
                             state
                             mergeStateStatus
                             viewerCanEnableAutoMerge
@@ -646,6 +679,10 @@ impl PullRequestStatusPort for GitHub {
                 Readiness::Ready
             },
             checks: Checks::from_github_state(rollup),
+            check_runs: check_runs_of(at(
+                pull,
+                "/commits/nodes/0/commit/statusCheckRollup/contexts/nodes",
+            )),
             viewer_may_change_readiness: flag("/viewerCanUpdate")?,
             merging,
         })

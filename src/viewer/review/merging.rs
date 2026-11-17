@@ -18,7 +18,7 @@ impl ReviewCore {
     /// `Shift+M`: the first press says what the same press again does, naming the merge method;
     /// that press, within ten seconds, turns auto-merge on or off, or merges the PR now.
     pub fn ask_to_change_merging(&mut self, now: Instant) -> PressStep {
-        let (Some(status), Some(_)) = (self.pr_status, self.subject.pull_request()) else {
+        let (Some(status), Some(_)) = (self.pr_status.as_ref(), self.subject.pull_request()) else {
             return PressStep::Nothing;
         };
         let change = match status.merging.change(self.merge_method) {
@@ -58,7 +58,7 @@ impl ReviewCore {
 
     /// Enable or Disable auto-merge, or Merge now: the one that applies, where the viewer may.
     pub(in crate::viewer) fn merging_palette_action(&self) -> Option<PaletteAction> {
-        Some(match self.pr_status?.merging.offer().ok()? {
+        Some(match self.pr_status.as_ref()?.merging.offer().ok()? {
             MergeOffer::EnableAutoMerge => PaletteAction::EnableAutoMerge,
             MergeOffer::DisableAutoMerge => PaletteAction::DisableAutoMerge,
             MergeOffer::MergeNow => PaletteAction::MergeNow,

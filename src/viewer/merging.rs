@@ -177,63 +177,6 @@ pub enum MergeChange {
     MergeNow(MergeMethod),
 }
 
-/// How much of the title bar button there is room for. The PR's title is what the bar is for, so
-/// the button gives way first: its key caps, then the method, then the button itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ButtonDetail {
-    Full,
-    WithoutKeys,
-    WithoutMethod,
-    Hidden,
-}
-
-/// Pixels a character of the bar's `text_sm` takes, rounded up.
-const CHAR_WIDTH: f32 = 8.;
-/// The PR's title keeps this much before anything else of the bar is shown.
-const TITLE_MIN_WIDTH: f32 = 240.;
-/// The bar's side margins, the PR icon, the chevron, the gaps, and the Jump and GitHub buttons.
-const BAR_FIXED_WIDTH: f32 = 380.;
-/// A button's icon, padding and gap, around its words.
-const BUTTON_CHROME_WIDTH: f32 = 44.;
-/// The key caps of the button.
-const KEYS_WIDTH: f32 = 40.;
-/// A chip's padding.
-const CHIP_CHROME_WIDTH: f32 = 24.;
-
-impl ButtonDetail {
-    /// The most of the button that fits the title bar `bar_width` wide, next to the PR's name and
-    /// the status chip's words, with the title keeping its minimum.
-    pub fn fitting(
-        merging: Merging,
-        bar_width: f32,
-        subject_chars: usize,
-        chip_chars: usize,
-    ) -> Self {
-        let Some(label) = merging.button_label() else {
-            return Self::Hidden;
-        };
-        let taken = BAR_FIXED_WIDTH
-            + TITLE_MIN_WIDTH
-            + subject_chars as f32 * CHAR_WIDTH
-            + chip_chars as f32 * CHAR_WIDTH
-            + CHIP_CHROME_WIDTH;
-        let room = bar_width - taken;
-        let method = match merging.auto_merge {
-            AutoMerge::On(method) => method.label().len() as f32 * CHAR_WIDTH,
-            AutoMerge::Off => 0.,
-        };
-        let label_width = BUTTON_CHROME_WIDTH + label.len() as f32 * CHAR_WIDTH;
-        [
-            (Self::Full, label_width + method + KEYS_WIDTH),
-            (Self::WithoutKeys, label_width + method),
-            (Self::WithoutMethod, label_width),
-        ]
-        .into_iter()
-        .find_map(|(detail, width)| (width <= room).then_some(detail))
-        .unwrap_or(Self::Hidden)
-    }
-}
-
 impl Merging {
     /// Turn auto-merge off while it is on; merge now while nothing blocks the PR; else turn
     /// auto-merge on. Each only where GitHub says the viewer may.

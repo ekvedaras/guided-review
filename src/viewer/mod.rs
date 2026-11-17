@@ -144,8 +144,8 @@ pub use local_row::LocalRow;
 pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use merging::{
-    AutoMerge, ButtonDetail, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal,
-    Mergeability, Merging,
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal, Mergeability,
+    Merging,
 };
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
@@ -168,7 +168,7 @@ pub use ports::{
     ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
-pub use pr_status::{Checks, PrStatus, Readiness};
+pub use pr_status::{CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, PrStatus, Readiness};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use press_again::{CONFIRM_WITHIN, PressStep};

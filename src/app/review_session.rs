@@ -867,16 +867,16 @@ impl ReviewSession {
     #[cfg(feature = "snapshots")]
     pub fn stage_pr_status(&mut self, status: crate::viewer::PrStatus, cx: &mut Context<Self>) {
         if self.pr_status_before_staging.is_none() {
-            self.pr_status_before_staging = self.review.pr_status().copied();
+            self.pr_status_before_staging = self.review.pr_status().cloned();
         }
-        self.review.pr_status_is(status);
+        self.review.pr_status_is(status.clone());
         self.staged_pr_status = Some(status);
         cx.notify();
     }
 
     #[cfg(feature = "snapshots")]
     fn keep_staged_pr_status(&mut self) {
-        if let Some(status) = self.staged_pr_status {
+        if let Some(status) = self.staged_pr_status.clone() {
             self.review.pr_status_is(status);
         }
     }

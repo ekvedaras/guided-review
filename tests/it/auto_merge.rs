@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::pr_status::{PR, Pull};
@@ -5,9 +6,9 @@ use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, blocked_me
 use crate::support::work::drive_without_agents;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    AutoMerge, ButtonDetail, Checks, Command, Effect, Intent, MergeChange, MergeMethod,
-    MergeMethods, MergeOffer, MergeRefusal, Mergeability, Merging, PaletteAction, PrStatus,
-    PressStep, Problem, Readiness, Review, WindowMoment,
+    AutoMerge, Checks, Command, Effect, Intent, MergeChange, MergeMethod, MergeMethods, MergeOffer,
+    MergeRefusal, Mergeability, Merging, PaletteAction, PrStatus, PressStep, Problem, Readiness,
+    Review, WindowMoment,
 };
 
 #[test]
@@ -45,6 +46,7 @@ fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeGitHub, Instant) 
     let github = pull.github().with_status(PrStatus {
         readiness: Readiness::Ready,
         checks: Checks::Running,
+        check_runs: Arc::default(),
         viewer_may_change_readiness: true,
         merging,
     });
@@ -457,20 +459,4 @@ fn merge_methods_read_and_write_as_github_and_the_config_spell_them() {
         );
     }
     assert_eq!(MergeMethod::default(), MergeMethod::Merge);
-}
-
-#[test]
-fn the_title_bar_button_gives_way_before_the_pr_title_does() {
-    let on = Merging {
-        auto_merge: AutoMerge::On(MergeMethod::Squash),
-        viewer_may_disable_auto_merge: true,
-        ..blocked_merging()
-    };
-    let fitting = |merging: Merging, width: f32| ButtonDetail::fitting(merging, width, 28, 23);
-
-    assert_eq!(fitting(on, 1600.), ButtonDetail::Full);
-    assert_eq!(fitting(on, 1260.), ButtonDetail::WithoutKeys);
-    assert_eq!(fitting(on, 1220.), ButtonDetail::WithoutMethod);
-    assert_eq!(fitting(on, 1100.), ButtonDetail::Hidden);
-    assert_eq!(fitting(blocked_merging(), 1250.), ButtonDetail::Full);
 }

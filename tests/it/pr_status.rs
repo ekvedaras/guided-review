@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::support::FixtureRepo;
@@ -10,8 +11,8 @@ use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    Checks, Command, Effect, Intent, PaletteAction, PrStatus, PressStep, Problem, Read, Readiness,
-    Review, ReviewStateFile, WindowMoment,
+    CHECKS_SHOWN, CheckRun, CheckState, Checks, Command, Effect, Intent, PaletteAction, PrStatus,
+    PressStep, Problem, Read, Readiness, Review, ReviewStateFile, WindowMoment,
 };
 use serde_json::json;
 
@@ -76,6 +77,7 @@ fn status(readiness: Readiness, checks: Checks) -> PrStatus {
     PrStatus {
         readiness,
         checks,
+        check_runs: Arc::default(),
         viewer_may_change_readiness: true,
         merging: blocked_merging(),
     }
@@ -238,6 +240,7 @@ fn read_status(
     let github = pull.github().with_status(PrStatus {
         readiness,
         checks: Checks::Passing,
+        check_runs: Arc::default(),
         viewer_may_change_readiness: may_change,
         merging: blocked_merging(),
     });
@@ -418,21 +421,125 @@ fn the_key_and_the_palette_ask_for_the_same_thing() {
 }
 
 #[test]
-fn the_label_says_draft_or_ready_and_what_the_checks_roll_up_to() {
-    let label = |readiness, checks| status(readiness, checks).label();
+fn the_chip_says_draft_or_ready_and_the_description_adds_what_the_checks_roll_up_to() {
+    let chip = |readiness, checks| status(readiness, checks);
 
-    assert_eq!(label(Readiness::Draft, Checks::NoneRun), "Draft");
-    assert_eq!(label(Readiness::Ready, Checks::NoneRun), "Ready");
+    assert_eq!(chip(Readiness::Draft, Checks::Failing).label(), "Draft");
+    assert_eq!(chip(Readiness::Ready, Checks::Passing).label(), "Ready");
+    let description = |readiness, checks| chip(readiness, checks).description();
+    assert_eq!(description(Readiness::Draft, Checks::NoneRun), "Draft");
+    assert_eq!(description(Readiness::Ready, Checks::NoneRun), "Ready");
     assert_eq!(
-        label(Readiness::Ready, Checks::Passing),
+        description(Readiness::Ready, Checks::Passing),
         "Ready · checks passing"
     );
     assert_eq!(
-        label(Readiness::Draft, Checks::Running),
+        description(Readiness::Draft, Checks::Running),
         "Draft · checks running"
     );
     assert_eq!(
-        label(Readiness::Ready, Checks::Failing),
+        description(Readiness::Ready, Checks::Failing),
         "Ready · checks failing"
     );
+}
+
+fn run(name: &str, state: CheckState, page: Option<&str>) -> CheckRun {
+    CheckRun {
+        name: name.into(),
+        state,
+        page: page.map(Into::into),
+    }
+}
+
+fn status_with_runs(runs: Vec<CheckRun>) -> PrStatus {
+    PrStatus {
+        check_runs: runs.into(),
+        ..status(Readiness::Ready, Checks::Failing)
+    }
+}
+
+#[test]
+fn the_check_list_puts_failing_first_then_running_then_passing_in_the_order_github_gave() {
+    let list = status_with_runs(vec![
+        run("lint", CheckState::Passing, None),
+        run("build", CheckState::Running, None),
+        run("test", CheckState::Failing, None),
+        run("deploy", CheckState::Passing, None),
+        run("e2e", CheckState::Failing, None),
+    ])
+    .check_list();
+
+    let names: Vec<&str> = list.shown.iter().map(|check| &*check.name).collect();
+    assert_eq!(names, ["test", "e2e", "build", "lint", "deploy"]);
+    assert_eq!(list.hidden, 0);
+}
+
+#[test]
+fn the_check_list_is_capped_and_counts_what_it_left_out_after_the_worst_were_kept() {
+    let mut runs: Vec<CheckRun> = (0..CHECKS_SHOWN + 5)
+        .map(|index| run(&format!("ok-{index}"), CheckState::Passing, None))
+        .collect();
+    runs.push(run("broken", CheckState::Failing, None));
+
+    let list = status_with_runs(runs).check_list();
+
+    assert_eq!(list.shown.len(), CHECKS_SHOWN);
+    assert_eq!(&*list.shown[0].name, "broken");
+    assert_eq!(list.hidden, 6);
+}
+
+#[test]
+fn a_check_run_is_running_until_it_completed_and_then_passes_or_fails_by_its_conclusion() {
+    let of = CheckState::of_check_run;
+
+    assert_eq!(of("IN_PROGRESS", None), CheckState::Running);
+    assert_eq!(of("QUEUED", None), CheckState::Running);
+    assert_eq!(of("COMPLETED", Some("SUCCESS")), CheckState::Passing);
+    assert_eq!(of("COMPLETED", Some("SKIPPED")), CheckState::Passing);
+    assert_eq!(of("COMPLETED", Some("NEUTRAL")), CheckState::Passing);
+    assert_eq!(of("COMPLETED", Some("FAILURE")), CheckState::Failing);
+    assert_eq!(of("COMPLETED", Some("TIMED_OUT")), CheckState::Failing);
+    assert_eq!(of("COMPLETED", Some("CANCELLED")), CheckState::Failing);
+    assert_eq!(
+        CheckState::of_status_context("SUCCESS"),
+        CheckState::Passing
+    );
+    assert_eq!(CheckState::of_status_context("ERROR"), CheckState::Failing);
+    assert_eq!(
+        CheckState::of_status_context("PENDING"),
+        CheckState::Running
+    );
+}
+
+#[test]
+fn clicking_a_check_opens_its_run_and_one_without_a_page_or_the_more_row_opens_the_checks_page() {
+    let pull = Pull::new();
+    let github = pull.github().with_status(status_with_runs(vec![
+        run(
+            "lint",
+            CheckState::Passing,
+            Some("https://ci.example/lint/1"),
+        ),
+        run(
+            "test",
+            CheckState::Failing,
+            Some("https://ci.example/test/2"),
+        ),
+        run("legacy", CheckState::Passing, None),
+    ]));
+    let mut review = pull.open();
+    pull.read(&mut review, &github, Instant::now());
+    let click = |index| review.decide(Intent::OpenCheck(index), WindowMoment::default());
+    let checks_page = Effect::OpenChecksOnGitHub(PR.parse().unwrap());
+
+    assert_eq!(
+        click(0),
+        Effect::OpenCheck("https://ci.example/test/2".to_owned())
+    );
+    assert_eq!(
+        click(1),
+        Effect::OpenCheck("https://ci.example/lint/1".to_owned())
+    );
+    assert_eq!(click(2), checks_page);
+    assert_eq!(click(3), checks_page);
 }

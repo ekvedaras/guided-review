@@ -48,6 +48,9 @@ pub enum Intent {
     OpenOnGitHub,
     /// GitHub's checks page of the PR.
     OpenChecksOnGitHub,
+    /// A row of the title bar's check list, by its place in the list; the row past the last is the
+    /// "and more" one. Opens the check's run, else the checks page.
+    OpenCheck(usize),
     /// `D`: asks, and on the same press again soon after, converts the PR to a draft or marks it ready.
     ToggleDraft,
     /// `Shift+M`: asks, and on the same press again soon after, turns auto-merge on or off, or
@@ -117,6 +120,8 @@ pub enum Effect {
     SendTasks,
     OpenOnGitHub(PullRequestUrl),
     OpenChecksOnGitHub(PullRequestUrl),
+    /// A check's run, on the page GitHub gave.
+    OpenCheck(String),
     /// The window asks the review to change the PR between draft and ready, and says what it answers.
     ChangeReadiness,
     /// The window asks the review to turn auto-merge on or off or merge now, and says what it answers.
@@ -239,6 +244,7 @@ impl Intent {
             | Self::SendTasks
             | Self::OpenOnGitHub
             | Self::OpenChecksOnGitHub
+            | Self::OpenCheck(_)
             | Self::CheckForUpdates
             | Self::RestartApp => false,
         };
@@ -317,6 +323,17 @@ impl ReviewCore {
                 .subject()
                 .pull_request()
                 .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnGitHub(pr.clone())),
+            Intent::OpenCheck(place) => {
+                let page = self
+                    .pr_status()
+                    .and_then(|status| status.check_list().shown.into_iter().nth(place))
+                    .and_then(|check| check.page);
+                match (page, self.subject().pull_request()) {
+                    (Some(page), _) => Effect::OpenCheck(page.to_string()),
+                    (None, Some(pr)) => Effect::OpenChecksOnGitHub(pr.clone()),
+                    (None, None) => Effect::Nothing,
+                }
+            }
             Intent::ToggleDraft => Effect::ChangeReadiness,
             Intent::ToggleAutoMerge => Effect::ChangeMerging,
             Intent::CheckForUpdates => Effect::CheckForUpdates,

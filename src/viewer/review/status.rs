@@ -28,7 +28,7 @@ impl ReviewCore {
     /// `D`: the first press says what the same press again does; that press, within ten seconds,
     /// converts the PR to a draft or marks it ready.
     pub fn ask_to_change_readiness(&mut self, now: Instant) -> PressStep {
-        let (Some(status), Some(_)) = (self.pr_status, self.subject.pull_request()) else {
+        let (Some(status), Some(_)) = (self.pr_status.as_ref(), self.subject.pull_request()) else {
             return PressStep::Nothing;
         };
         if !status.viewer_may_change_readiness {
@@ -54,6 +54,7 @@ impl ReviewCore {
     pub(in crate::viewer) fn readiness_palette_action(&self) -> Option<PaletteAction> {
         let status = self
             .pr_status
+            .as_ref()
             .filter(|status| status.viewer_may_change_readiness)?;
         Some(match status.readiness {
             Readiness::Ready => PaletteAction::ConvertToDraft,

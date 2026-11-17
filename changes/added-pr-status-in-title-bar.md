@@ -1,1 +1,1 @@
-Title bar: whether the PR is a draft or ready, and if its checks are running, passing or failing.
+Title bar chip says Draft or Ready, tinted by checks; hover to list them, click one to open its run.

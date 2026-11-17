@@ -3,7 +3,8 @@ use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
     ParentElement, PathPromptOptions, Pixels, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, anchored, deferred, div,
+    list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -95,8 +96,8 @@ use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ButtonDetail, ChangeInView,
-    Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
+    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
+    CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
     CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
     HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Merging, NextScreen, NoteSubject,
     NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place, PrStatus,
@@ -173,6 +174,8 @@ pub struct OneStepLayout {
     code_selection: Option<CodeSelection>,
     /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
     hovered_touching_row: Option<(usize, RowPlace)>,
+    /// The mouse is on the title bar's status chip or on the list of checks it opens.
+    checks_hover: ChecksHover,
     on_code_gesture: OnTextSpot,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
@@ -396,6 +399,7 @@ impl OneStepLayout {
             ask,
             code_selection: None,
             hovered_touching_row: None,
+            checks_hover: ChecksHover::default(),
             on_code_gesture,
             selection_notice: None,
             scrollbar_grab: None,
@@ -1270,6 +1274,7 @@ impl OneStepLayout {
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
+            Effect::OpenCheck(url) => open_link(&url, cx),
             Effect::ChangeReadiness => self.change_readiness(cx),
             Effect::ChangeMerging => self.change_merging(cx),
             Effect::Restart(restart) => match crate::platform::running_binary() {
@@ -2164,12 +2169,7 @@ impl OneStepLayout {
     }
 
     /// The PR this review is of, and the window-wide actions.
-    fn title_bar(
-        &self,
-        is_writing_tour: bool,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn title_bar(&self, is_writing_tour: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let review = self.session.read(cx).review();
         let subject_name = review.subject().short();
@@ -2177,9 +2177,7 @@ impl OneStepLayout {
         let local_heading = review.local_heading().map(SharedString::from);
         let is_local = local_heading.is_some();
         let can_open_on_github = review.can_open_on_github();
-        let status = review.pr_status().copied();
-        let bar_width = f32::from(window.viewport_size().width) - SIDEBAR_WIDTH;
-        let subject_chars = subject_name.chars().count();
+        let status = review.pr_status().cloned();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -2217,9 +2215,11 @@ impl OneStepLayout {
             ))
             .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)))
         });
-        let switch_pr = div()
-            .id("title-bar-switch-pr")
-            .min_w_0()
+        let mut switch_pr = div().id("title-bar-switch-pr");
+        switch_pr.style().flex_shrink = Some(TITLE_SHRINKS_FIRST);
+        let switch_pr = switch_pr
+            .min_w(px(PR_TITLE_MIN_WIDTH))
+            .overflow_hidden()
             .flex()
             .items_center()
             .gap_2()
@@ -2294,16 +2294,16 @@ impl OneStepLayout {
                     .gap_2()
                     .text_sm()
                     .child(switch_pr)
-                    .children(status.map(|status| self.status_chip(&colors, status, cx)))
-                    .children(status.and_then(|status| {
-                        let detail = ButtonDetail::fitting(
-                            status.merging,
-                            bar_width,
-                            subject_chars,
-                            status.label().chars().count(),
-                        );
-                        merge_button(&colors, status.merging, detail, cx)
-                    }))
+                    .children(
+                        status
+                            .as_ref()
+                            .map(|status| self.status_chip(&colors, status, cx)),
+                    )
+                    .children(
+                        status
+                            .as_ref()
+                            .and_then(|status| merge_button(&colors, status.merging, cx)),
+                    )
                     .child(div().flex_1())
                     .child(jump)
                     .children(github),
@@ -2313,33 +2313,135 @@ impl OneStepLayout {
             })
     }
 
-    /// Draft or ready and the checks, in the colour of the checks. Pressing it is the key `D`.
+    /// Draft or ready, in the colour and with the icon of the checks, which a hover lists. Pressing
+    /// it is the key `D`.
     fn status_chip(
         &self,
         colors: &Colors,
-        status: PrStatus,
+        status: &PrStatus,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> impl IntoElement + use<> {
         let tone = match status.checks {
             Checks::Failing => Tone::Danger,
             Checks::Running => Tone::Warning,
             Checks::Passing => Tone::Success,
             Checks::NoneRun => Tone::Neutral,
         };
-        let change = match status.readiness {
-            Readiness::Ready => "convert the PR to a draft",
-            Readiness::Draft => "mark the PR ready for review",
+        let mark = match status.checks {
+            Checks::Failing => Some(Icon::Close),
+            Checks::Running => Some(Icon::Clock),
+            Checks::Passing => Some(Icon::Check),
+            Checks::NoneRun => None,
         };
-        chip(colors, tone)
+        let text_color = colors.tone(tone).text;
+        let list = status.check_list();
+        let is_listed = self.checks_hover.is_on() && !list.shown.is_empty();
+        let chip = chip(colors, tone)
             .id("title-bar-pr-status")
+            .children(mark.map(|mark| sized_icon(mark, text_color, px(11.))))
             .child(status.label())
             .when(status.viewer_may_change_readiness, |chip| {
                 chip.cursor_pointer()
-                    .tooltip(tooltip(move |_| format!("Click twice to {change}").into()))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.act(Intent::ToggleDraft, window, cx);
                     }))
+            });
+        div()
+            .id("title-bar-checks")
+            .flex_none()
+            .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
+                this.checks_hover.chip = *is_hovered;
+                cx.notify();
+            }))
+            .child(chip)
+            .when(is_listed, |wrapper| {
+                wrapper.child(self.checks_list(colors, &list, cx))
             })
+    }
+
+    /// Under the chip: each check with where it stands, failing first; a click opens its run.
+    fn checks_list(
+        &self,
+        colors: &Colors,
+        list: &CheckList,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let rows = list.shown.iter().enumerate().map(|(place, check)| {
+            let (mark, color, state) = match check.state {
+                CheckState::Failing => (Icon::Close, colors.danger, "failing"),
+                CheckState::Running => (Icon::Clock, colors.warning, "running"),
+                CheckState::Passing => (Icon::Check, colors.success, "passing"),
+            };
+            div()
+                .id(("title-bar-check", place))
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .h(px(28.))
+                .rounded(px(INNER_RADIUS))
+                .cursor_pointer()
+                .hover(|row| row.bg(colors.hover))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.act(Intent::OpenCheck(place), window, cx);
+                }))
+                .child(sized_icon(mark, color, px(12.)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(SharedString::from(check.name.to_string())),
+                )
+                .child(div().flex_none().text_xs().text_color(color).child(state))
+        });
+        let more = (list.hidden > 0).then(|| {
+            div()
+                .id("title-bar-checks-more")
+                .flex()
+                .items_center()
+                .px_2()
+                .h(px(28.))
+                .rounded(px(INNER_RADIUS))
+                .cursor_pointer()
+                .text_color(colors.muted_text)
+                .hover(|row| row.bg(colors.hover).text_color(colors.text))
+                .on_click({
+                    let past_the_list = list.shown.len();
+                    cx.listener(move |this, _, window, cx| {
+                        this.act(Intent::OpenCheck(past_the_list), window, cx);
+                    })
+                })
+                .child(format!("and {} more on GitHub", list.hidden))
+        });
+        deferred(
+            anchored().snap_to_window_with_margin(px(8.)).child(
+                div()
+                    .id("title-bar-checks-hover")
+                    .mt(px(CHIP_HEIGHT))
+                    .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
+                        this.checks_hover.list = *is_hovered;
+                        cx.notify();
+                    }))
+                    .child(div().h(px(4.)))
+                    .child(
+                        div()
+                            .id("title-bar-checks-list")
+                            .w(px(CHECKS_LIST_WIDTH))
+                            .p_1()
+                            .flex()
+                            .flex_col()
+                            .text_sm()
+                            .bg(colors.overlay)
+                            .border_1()
+                            .border_color(colors.border)
+                            .rounded(px(CARD_RADIUS))
+                            .shadow(colors.overlay_shadow())
+                            .children(rows)
+                            .children(more),
+                    ),
+            ),
+        )
     }
 
     /// Once the step's heading has scrolled away, a slim bar under the title bar keeps where the
@@ -3428,34 +3530,93 @@ const FOCUS_BAR_LEFT: Pixels = px(15.);
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
 /// A refused or failed save is one of the review's problems, which the sidebar shows.
+/// Which of the status chip and its list of checks the mouse is on; the list shows while it is on
+/// either, so the mouse can cross the gap between them.
+#[derive(Default)]
+struct ChecksHover {
+    chip: bool,
+    list: bool,
+}
+
+impl ChecksHover {
+    fn is_on(&self) -> bool {
+        self.chip || self.list
+    }
+}
+
+/// The chip's height with its border, which the list hangs under.
+const CHIP_HEIGHT: f32 = 22.;
+const CHECKS_LIST_WIDTH: f32 = 340.;
+/// What the PR's name and title keep of the bar: its icon, the name and a stretch of the title.
+/// Past it the status button gives way. Fixed, not counted from the text: the title is cut with an
+/// ellipsis, so any width shows something.
+const PR_TITLE_MIN_WIDTH: f32 = 340.;
+/// The PR's name and title shrink this many times faster than the status button, so they give up
+/// room down to their minimum before the button loses any.
+const TITLE_SHRINKS_FIRST: f32 = 10_000.;
+
+/// A button of the title bar that gives way once the PR's title has shrunk to its minimum. It is
+/// one line tall and clips what does not fit, and its parts are flex items that wrap: the parts
+/// that no longer fit wrap to a second line, last first, and the clip hides them whole. The empty
+/// first item takes the first line alone once even the first part does not fit, so no part shows
+/// cut in two.
+fn giving_way(button: Stateful<Div>) -> Stateful<Div> {
+    button
+        .flex_shrink(1.)
+        .min_w_0()
+        .flex_wrap()
+        .content_start()
+        .justify_start()
+        .overflow_hidden()
+        .px_0()
+        .gap_0()
+        .child(div().flex_none().w_0().h(px(1.)))
+}
+
+/// One part of a `giving_way` button, with the room around it that the button's own padding would give.
+fn part_of_button(left: f32, right: f32) -> Div {
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(6.))
+        .h(ButtonSize::Small.height() - px(2.))
+        .pl(px(left))
+        .pr(px(right))
+}
+
 /// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
 /// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.
 fn merge_button(
     colors: &Colors,
     merging: Merging,
-    detail: ButtonDetail,
     cx: &mut Context<OneStepLayout>,
 ) -> Option<Stateful<Div>> {
-    if detail == ButtonDetail::Hidden {
-        return None;
-    }
     let label = merging.button_label()?;
     let kind = match merging.auto_merge {
         AutoMerge::On(_) => ButtonKind::Pressed,
         AutoMerge::Off => ButtonKind::Ghost,
     };
     let method = match merging.auto_merge {
-        AutoMerge::On(method) if detail != ButtonDetail::WithoutMethod => Some(method.label()),
-        AutoMerge::On(_) | AutoMerge::Off => None,
+        AutoMerge::On(method) => Some(method.label()),
+        AutoMerge::Off => None,
     };
     Some(
-        button(colors, "title-bar-merge", kind, ButtonSize::Small)
-            .child(button_icon(colors, kind, ButtonSize::Small, Icon::Clock))
-            .child(label)
-            .children(method.map(|method| div().text_color(colors.muted_text).child(method)))
-            .when(detail == ButtonDetail::Full, |button| {
-                button.child(button_keys(colors, kind, Command::ToggleAutoMerge, cx))
-            })
+        giving_way(button(colors, "title-bar-merge", kind, ButtonSize::Small))
+            .child(
+                part_of_button(10., 10.)
+                    .child(button_icon(colors, kind, ButtonSize::Small, Icon::Clock))
+                    .child(label),
+            )
+            .children(method.map(|method| {
+                part_of_button(0., 10.).child(div().text_color(colors.muted_text).child(method))
+            }))
+            .child(part_of_button(0., 10.).child(button_keys(
+                colors,
+                kind,
+                Command::ToggleAutoMerge,
+                cx,
+            )))
             .tooltip(tooltip(|_| "Click twice to confirm".into()))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::ToggleAutoMerge, window, cx);
@@ -4717,7 +4878,7 @@ impl Render for OneStepLayout {
                             .border_color(colors.subtle_border)
                             .shadow(colors.page_shadow())
                     })
-                    .child(self.title_bar(is_writing_tour, window, cx))
+                    .child(self.title_bar(is_writing_tour, cx))
                     .children(old_head.clone().map(|old_head| {
                         NewCommitsBanner::new(
                             old_head,
