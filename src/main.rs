@@ -444,6 +444,7 @@ fn open(target: &OpenTarget, launch: &Launch) -> anyhow::Result<()> {
         subject: subject.to_string(),
         folder: std::env::current_dir().context("could not read the current folder")?,
         terminal: std::env::var("HC_TERMINAL_ID").ok(),
+        waits_for_build: true,
         at_step: match launch {
             Launch::Open => None,
             Launch::Restart { at, .. } => at.clone(),
@@ -465,18 +466,12 @@ fn open(target: &OpenTarget, launch: &Launch) -> anyhow::Result<()> {
         } => restart_app(&folder, &request, &Caller::Command)?,
         Launch::Open => hand_over(&folder, &request, &Caller::Command)?,
     };
-    match answer {
-        Answer::GuidedReady { .. } => println!("{answer}"),
-        Answer::Opening { .. }
-        | Answer::Writing { .. }
-        | Answer::Reloaded { .. }
-        | Answer::KeptInBackground { .. } => {
-            println!("{answer}");
-            if ToursOnDisk::of(folders, &subject).opens_basic() {
-                println!("{subject} opened in Basic mode");
-            }
-        }
-        other => anyhow::bail!("{other}"),
+    let told = answer.clone().about_open(true)?;
+    println!("{told}");
+    if !matches!(answer, Answer::GuidedReady { .. })
+        && ToursOnDisk::of(folders, &subject).opens_basic()
+    {
+        println!("{subject} opened in Basic mode");
     }
     Ok(())
 }
