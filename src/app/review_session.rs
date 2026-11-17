@@ -79,6 +79,9 @@ pub struct ReviewSession {
     /// What GitHub said of the PR before a snapshot scene staged another title bar.
     #[cfg(feature = "snapshots")]
     pr_status_before_staging: Option<crate::viewer::PrStatus>,
+    /// The status a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    #[cfg(feature = "snapshots")]
+    staged_pr_status: Option<crate::viewer::PrStatus>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -184,6 +187,8 @@ impl ReviewSession {
             source_before_staging: None,
             #[cfg(feature = "snapshots")]
             pr_status_before_staging: None,
+            #[cfg(feature = "snapshots")]
+            staged_pr_status: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -305,6 +310,8 @@ impl ReviewSession {
                 },
                 |this, outcome, cx| {
                     let after = this.change(cx, |review| review.land(outcome));
+                    #[cfg(feature = "snapshots")]
+                    this.keep_staged_pr_status();
                     match after {
                         AfterLanding::Nothing => {}
                         AfterLanding::TourAgentIs(state) if state.can_retry() => {
@@ -863,12 +870,21 @@ impl ReviewSession {
             self.pr_status_before_staging = self.review.pr_status().copied();
         }
         self.review.pr_status_is(status);
+        self.staged_pr_status = Some(status);
         cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn keep_staged_pr_status(&mut self) {
+        if let Some(status) = self.staged_pr_status {
+            self.review.pr_status_is(status);
+        }
     }
 
     /// With no status read before, the staged one stays: the title bar scenes come last.
     #[cfg(feature = "snapshots")]
     pub fn unstage_pr_status(&mut self, cx: &mut Context<Self>) {
+        self.staged_pr_status = None;
         if let Some(before) = self.pr_status_before_staging.take() {
             self.review.pr_status_is(before);
         }
