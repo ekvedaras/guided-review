@@ -2336,22 +2336,32 @@ impl OneStepLayout {
         let text_color = colors.tone(tone).text;
         let list = status.check_list();
         let is_listed = self.checks_hover.is_on() && !list.shown.is_empty();
-        let chip = chip(colors, tone)
-            .id("title-bar-pr-status")
-            .children(mark.map(|mark| sized_icon(mark, text_color, px(11.))))
-            .child(status.label())
-            .when(status.viewer_may_change_readiness, |chip| {
-                chip.child(button_keys(
-                    colors,
-                    ButtonKind::Ghost,
-                    Command::ToggleDraft,
-                    cx,
-                ))
-                .cursor_pointer()
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.act(Intent::ToggleDraft, window, cx);
-                }))
-            });
+        let tinted = colors.tone(tone);
+        let chip = button(
+            colors,
+            "title-bar-pr-status",
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+        )
+        .bg(tinted.background)
+        .border_color(tinted.border)
+        .text_color(tinted.text)
+        .children(mark.map(|mark| sized_icon(mark, text_color, ButtonSize::Small.icon_size())))
+        .child(status.label())
+        .when(status.viewer_may_change_readiness, |chip| {
+            chip.child(button_keys(
+                colors,
+                ButtonKind::Ghost,
+                Command::ToggleDraft,
+                cx,
+            ))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::ToggleDraft, window, cx);
+            }))
+        })
+        .when(!status.viewer_may_change_readiness, |chip| {
+            chip.cursor_default()
+        });
         div()
             .id("title-bar-checks")
             .flex_none()
