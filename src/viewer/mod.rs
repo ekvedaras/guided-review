@@ -58,6 +58,7 @@ mod relevant_prs;
 mod remembered_prs;
 mod rendered_view;
 mod reopen_after_save;
+mod replacing_jobs;
 mod review;
 mod review_builder;
 mod review_state;
@@ -183,6 +184,9 @@ pub use remembered_prs::RememberedPullRequestsFile;
 pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
 pub use reopen_after_save::{
     Departure, InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep,
+};
+pub use replacing_jobs::{
+    AfterJob, JobOutcome, JobProgress, ReplacingJob, ReplacingJobs, StartedJob,
 };
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop,

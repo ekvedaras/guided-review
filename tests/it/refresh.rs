@@ -8,6 +8,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
+use guided_review::viewer::{JobOutcome, ReplacingJob};
 use guided_review::viewer::{
     PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
 };
@@ -364,7 +365,8 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
         .run(&mut |_| {})
         .err()
         .unwrap();
-    review.refresh_failed(&error);
+    review.start_job(ReplacingJob::Refresh).unwrap();
+    review.land_job(JobOutcome::Refresh(Err(error)));
 
     assert_eq!(
         review.problems(),

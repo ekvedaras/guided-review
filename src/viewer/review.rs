@@ -1,4 +1,5 @@
 mod guided_tour;
+mod jobs;
 mod kept;
 mod merging;
 mod status;
@@ -66,10 +67,11 @@ use super::press_again::PressAgain;
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
+use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
-use super::saved_state::{SavedState, WriterElsewhere};
+use super::saved_state::SavedState;
 use super::step_page::{
     DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
 };
@@ -359,6 +361,7 @@ pub struct ReviewCore {
     pr_notes: PrNotes,
     ask_desk: AskDesk,
     work: WorkAgenda,
+    jobs: ReplacingJobs,
     reviewing_mark: ReviewingMark,
     /// Agent replies taken while a re-pin ran, which the re-pinned review applies and saves.
     replies_after_repin: Vec<(HandOffId, AgentReplied)>,
@@ -459,6 +462,7 @@ impl Review {
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
+        self.jobs = replaced.jobs;
         if self.pull_of_branch.is_none() {
             self.pull_of_branch = replaced.pull_of_branch;
         }
@@ -692,6 +696,7 @@ impl ReviewCore {
             pr_notes: PrNotes::default(),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
+            jobs: ReplacingJobs::default(),
             reviewing_mark,
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
@@ -943,9 +948,8 @@ impl ReviewCore {
             .update(|state| state.decline_move_to(&offer.pr))
     }
 
-    /// The move the button asks for, whichever review it is pressed in; the review then takes no
-    /// changes until `move_failed` or until the window shows the other review.
-    pub fn start_move(&mut self) -> Option<StartedMove> {
+    /// The move the button asks for, whichever review it is pressed in.
+    fn move_to_start(&self) -> Option<StartedMove> {
         let (from, change_set, offer) = if let Some(here) = self.move_here_offer() {
             (MoveFrom::ThePr, here.change_set, here.offer)
         } else {
@@ -956,16 +960,19 @@ impl ReviewCore {
                 offer,
             )
         };
-        self.start_drop().then_some(StartedMove {
+        Some(StartedMove {
             from,
             change_set,
             offer,
         })
     }
 
-    /// Not now, on either side's offer. A decline that could not be written to the state file is a
-    /// problem, as the offer then comes back at the next open.
+    /// Not now, on either side's offer, unless the move runs. A decline that could not be written to
+    /// the state file is a problem, as the offer then comes back at the next open.
     pub fn decline_the_move(&mut self) {
+        if self.jobs.is_running(ReplacingJob::MoveToPr) {
+            return;
+        }
         let declined = if self.move_here_offer().is_some() {
             self.decline_move_here()
         } else {
@@ -2545,46 +2552,6 @@ impl ReviewCore {
 
     pub fn is_ticked(&self, id: &StepId) -> bool {
         self.state.read_tick(id).is_some()
-    }
-
-    /// The re-pin writes the state file from another thread and this review is replaced when it
-    /// is done, so from now on nothing it holds may be saved over the re-pin's record.
-    /// `false` while a drop or a move runs, which the re-pin would write over: it does not start.
-    #[must_use]
-    pub fn start_repin(&mut self) -> bool {
-        self.state.start_writing_elsewhere(WriterElsewhere::Repin)
-    }
-
-    /// Drop review, or a move to a PR, deletes the state file from another thread, and this review is
-    /// closed when it is done, so from now on nothing it holds may write the file again; as during a
-    /// re-pin. `false` while a re-pin or another drop runs: it does not start.
-    #[must_use]
-    pub fn start_drop(&mut self) -> bool {
-        self.state.start_writing_elsewhere(WriterElsewhere::Drop)
-    }
-
-    /// The move failed and the review stays: it takes changes again.
-    pub fn move_failed(&mut self) {
-        self.state.failed_elsewhere(WriterElsewhere::Drop);
-    }
-
-    /// The drop failed and the review stays: it takes changes again.
-    pub fn drop_failed(&mut self, error: &anyhow::Error) {
-        self.state.failed_elsewhere(WriterElsewhere::Drop);
-        self.raise_problem(Problem::ReviewNotDropped(format!("{error:#}")));
-    }
-
-    pub fn refresh_failed(&mut self, error: &anyhow::Error) {
-        self.raise_problem(Problem::TourNotRefreshed(format!("{error:#}")));
-    }
-
-    /// `open` named the PR shown and its tour file could not be read again.
-    pub fn reload_failed(&mut self, error: &anyhow::Error) {
-        self.raise_problem(Problem::TourNotReloaded(format!("{error:#}")));
-    }
-
-    pub fn repin_failed(&mut self) {
-        self.state.failed_elsewhere(WriterElsewhere::Repin);
     }
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.

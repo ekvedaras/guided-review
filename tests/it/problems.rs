@@ -4,7 +4,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::update::InTheWay;
-use guided_review::viewer::{Problem, ProblemKind, Read, Review, ReviewStateFile};
+use guided_review::viewer::{
+    JobOutcome, Problem, ProblemKind, Read, ReplacingJob, Review, ReviewStateFile,
+};
 use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -102,7 +104,8 @@ fn problems_are_listed_in_the_order_of_their_kinds_not_of_when_they_were_raised(
 fn a_tour_that_could_not_be_read_again_is_a_problem_that_says_the_screen_shows_it_as_it_was() {
     let (_repo, mut review) = open_review();
 
-    review.reload_failed(&anyhow::anyhow!("no tour file"));
+    review.start_job(ReplacingJob::Reload).unwrap();
+    review.land_job(JobOutcome::Reload(Err(anyhow::anyhow!("no tour file"))));
 
     let [problem] = review.problems().try_into().unwrap();
     assert_eq!(problem, Problem::TourNotReloaded("no tour file".into()));

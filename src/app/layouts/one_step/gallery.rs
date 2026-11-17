@@ -11,16 +11,16 @@ use crate::app::components::card::card;
 use crate::app::components::chip::notice_band;
 use crate::app::components::comment_composer::QueuedCommentNote;
 use crate::app::components::markdown_view::{MarkdownView, parsed_markdown};
-use crate::app::components::new_commits_banner::{NewCommitsBanner, RepinProgress};
+use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::palette::{Colors, Tone};
 use crate::app::components::thread_view::{ThreadChanges, ThreadDrafts, ThreadElement};
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
 use crate::pull_request::Sha;
 use crate::viewer::{
-    Audience, CommentDraft, CommentId, CommentPlace, LineLocation, OldHead, QueuedComment,
-    Reaction, ReactionCount, ReviewThread, SendMode, Sending, Side, ThreadComment, ThreadId,
-    ThreadView,
+    Audience, CommentDraft, CommentId, CommentPlace, JobProgress, LineLocation, OldHead,
+    QueuedComment, Reaction, ReactionCount, ReviewThread, SendMode, Sending, Side, ThreadComment,
+    ThreadId, ThreadView,
 };
 
 const SAMPLE_MARKDOWN: &str = "A note with `inline code`, a [link](https://example.test) and a list:\n\n\
@@ -40,7 +40,7 @@ pub fn gallery(colors: &Colors) -> AnyElement {
                 tour_head: Sha::new("3f2a9c1d0e4b"),
                 pr_head: Sha::new("8b41e07f22aa"),
             },
-            RepinProgress::Failed("GitHub did not answer; try again in a moment.".to_owned()),
+            JobProgress::Failed("GitHub did not answer; try again in a moment.".into()),
             |_, _, _| {},
         ))
         .child(

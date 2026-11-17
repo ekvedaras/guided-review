@@ -3,24 +3,13 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div,
 };
 
-use crate::viewer::RefreshBrief;
+use crate::viewer::{JobProgress, RefreshBrief};
 
 use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{dropping_in, notice_band};
 use super::icon::Icon;
 use super::motion::busy_dot;
 use super::palette::{Colors, Tone};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RefreshProgress {
-    Idle,
-    /// `activity` is the tool claude used last, `None` until it uses one.
-    Running {
-        activity: Option<String>,
-    },
-    /// The reason is a problem of the review, shown in the sidebar.
-    Failed,
-}
 
 type OnRefresh = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -29,14 +18,14 @@ type OnRefresh = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 #[derive(IntoElement)]
 pub struct RefreshBanner {
     brief: RefreshBrief,
-    progress: RefreshProgress,
+    progress: JobProgress,
     on_refresh: OnRefresh,
 }
 
 impl RefreshBanner {
     pub fn new(
         brief: RefreshBrief,
-        progress: RefreshProgress,
+        progress: JobProgress,
         on_refresh: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
@@ -51,8 +40,8 @@ impl RenderOnce for RefreshBanner {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let message = match &self.progress {
-            RefreshProgress::Running { .. } => "Refreshing the tour with your claude…".to_owned(),
-            RefreshProgress::Idle | RefreshProgress::Failed => format!(
+            JobProgress::Running { .. } => "Refreshing the tour with your claude…".to_owned(),
+            JobProgress::Idle | JobProgress::Failed(_) => format!(
                 "{} to rewrite, {} to place since the new commits.",
                 counted(self.brief.stale_steps.len(), "step", "steps"),
                 counted(
@@ -63,11 +52,11 @@ impl RenderOnce for RefreshBanner {
             ),
         };
         let button_label = match &self.progress {
-            RefreshProgress::Failed => "Try again",
-            RefreshProgress::Idle | RefreshProgress::Running { .. } => "Refresh",
+            JobProgress::Failed(_) => "Try again",
+            JobProgress::Idle | JobProgress::Running { .. } => "Refresh",
         };
         let activity = match &self.progress {
-            RefreshProgress::Running {
+            JobProgress::Running {
                 activity: Some(activity),
             } => Some(
                 div()
@@ -85,11 +74,9 @@ impl RenderOnce for RefreshBanner {
                             .child(format!("{activity}...")),
                     ),
             ),
-            RefreshProgress::Idle | RefreshProgress::Running { .. } | RefreshProgress::Failed => {
-                None
-            }
+            JobProgress::Idle | JobProgress::Running { .. } | JobProgress::Failed(_) => None,
         };
-        let is_running = matches!(self.progress, RefreshProgress::Running { .. });
+        let is_running = matches!(self.progress, JobProgress::Running { .. });
         let button = (!is_running).then(|| {
             icon_label_button(
                 &colors,
@@ -106,7 +93,8 @@ impl RenderOnce for RefreshBanner {
                 "{hint}. A full redo may read better: `/tour --redo` in claude."
             )))
         });
-        let failed = (self.progress == RefreshProgress::Failed).then(|| {
+        // The reason is a problem of the review, which the sidebar lists.
+        let failed = matches!(self.progress, JobProgress::Failed(_)).then(|| {
             div()
                 .text_color(colors.danger)
                 .child("The last refresh did not go through, the sidebar says why.")

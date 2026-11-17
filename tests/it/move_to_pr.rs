@@ -14,6 +14,7 @@ use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use guided_review::tour::{Tour, ToursOnDisk};
+use guided_review::viewer::{AfterJob, JobOutcome, ReplacingJob, StartedJob, StartedMove};
 use guided_review::viewer::{
     Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveFrom,
     MoveOffer, PULL_OF_BRANCH_RETRY, PieceDiff, PrMover, Problem, PullOfBranch, PullsOfBranchPort,
@@ -867,7 +868,7 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
     opened.review.tick_file(&path("src/cart.rs")).unwrap();
     let offer = opened.review.move_here_offer().unwrap();
 
-    assert!(opened.review.start_drop());
+    assert!(start_move(&mut opened.review).is_some());
     feature
         .mover_of(&offer.change_set)
         .run(&offer.offer, &github)
@@ -1042,6 +1043,13 @@ fn a_local_tour_pinned_to_another_folder_is_refused_by_the_move_and_nothing_is_c
     assert!(!pr_state_path(&feature).exists());
 }
 
+fn start_move(review: &mut guided_review::viewer::Review) -> Option<StartedMove> {
+    match review.start_job(ReplacingJob::MoveToPr)? {
+        StartedJob::MoveToPr(started) => Some(started),
+        other => panic!("{other:?} started instead of the move"),
+    }
+}
+
 #[test]
 fn the_move_button_starts_the_move_the_review_offers_and_the_review_takes_no_changes_from_then() {
     let feature = Feature::with_work_in_progress();
@@ -1049,7 +1057,7 @@ fn the_move_button_starts_the_move_the_review_offers_and_the_review_takes_no_cha
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut local, &github, Instant::now());
 
-    let started = local.review.start_move().unwrap();
+    let started = start_move(&mut local.review).unwrap();
 
     assert_eq!(started.from, MoveFrom::TheLocalReview);
     assert_eq!(started.offer.pr, SHOP_7.parse().unwrap());
@@ -1059,7 +1067,7 @@ fn the_move_button_starts_the_move_the_review_offers_and_the_review_takes_no_cha
     let github = github.with_head_branch(SHOP_7, "feature");
     let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
 
-    let started = in_the_pr.review.start_move().unwrap();
+    let started = start_move(&mut in_the_pr.review).unwrap();
 
     assert_eq!(started.from, MoveFrom::ThePr);
     assert_eq!(started.change_set, *feature.subject.local().unwrap());
@@ -1071,29 +1079,95 @@ fn the_move_button_starts_nothing_without_an_offer() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
 
-    assert_eq!(local.review.start_move(), None);
+    assert_eq!(start_move(&mut local.review), None);
     local.review.tick_file(&path("README.md")).unwrap();
 }
 
 #[test]
-fn a_failed_move_says_which_move_it_was_and_why() {
+fn a_failed_move_says_which_move_it_was_and_why_and_the_review_takes_changes_again() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut local, &github, Instant::now());
-    let error = anyhow::anyhow!("no network");
+    let failed = || JobOutcome::MoveToPr(Err(anyhow::anyhow!("no network")));
 
-    assert_eq!(
-        local.review.start_move().unwrap().failure_text(&error),
-        "Could not move to acme/shop#7: no network"
-    );
+    start_move(&mut local.review).unwrap();
+    let AfterJob::Stays { toast: Some(toast) } = local.review.land_job(failed()) else {
+        panic!("nothing is told");
+    };
+    assert_eq!(toast, "Could not move to acme/shop#7: no network");
+    local.review.tick_file(&path("README.md")).unwrap();
 
     let github = github.with_head_branch(SHOP_7, "feature");
     let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
-    assert_eq!(
-        in_the_pr.review.start_move().unwrap().failure_text(&error),
-        "Could not move feature here: no network"
-    );
+    start_move(&mut in_the_pr.review).unwrap();
+    let AfterJob::Stays { toast: Some(toast) } = in_the_pr.review.land_job(failed()) else {
+        panic!("nothing is told");
+    };
+    assert_eq!(toast, "Could not move feature here: no network");
+}
+
+#[test]
+fn after_a_move_from_the_local_review_it_is_gone_and_the_pr_is_shown() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    let (github, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &github, Instant::now());
+    start_move(&mut local.review).unwrap();
+
+    let after = local.review.land_job(JobOutcome::MoveToPr(Ok(())));
+
+    let AfterJob::ShowPr { moved_away, pr } = after else {
+        panic!("the PR is not shown");
+    };
+    assert_eq!(moved_away, feature.subject);
+    assert_eq!(pr, SHOP_7.parse().unwrap());
+}
+
+#[test]
+fn after_a_move_from_the_pr_side_the_local_review_is_dropped_and_the_pr_reopened() {
+    let feature = Feature::with_work_in_progress();
+    feature.open();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
+    start_move(&mut in_the_pr.review).unwrap();
+
+    let after = in_the_pr.review.land_job(JobOutcome::MoveToPr(Ok(())));
+
+    let AfterJob::DropAndReopen(dropped) = after else {
+        panic!("the PR is not reopened");
+    };
+    assert_eq!(dropped, feature.subject);
+}
+
+#[test]
+fn update_and_not_now_are_refused_while_a_move_runs() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    let (github, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &github, Instant::now());
+    start_move(&mut local.review).unwrap();
+
+    assert_eq!(local.review.start_job(ReplacingJob::Repin), None);
+    local.review.decline_the_move();
+
+    assert!(local.review.move_offer().is_some(), "the offer stays");
+    assert!(local.review.jobs().is_running(ReplacingJob::MoveToPr));
+}
+
+#[test]
+fn a_reload_asked_for_while_a_move_runs_never_runs_once_the_review_is_gone() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    let (github, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &github, Instant::now());
+    start_move(&mut local.review).unwrap();
+    assert_eq!(local.review.start_job(ReplacingJob::Reload), None);
+
+    local.review.land_job(JobOutcome::MoveToPr(Ok(())));
+
+    assert_eq!(local.review.due_job(), None);
 }
 
 #[test]

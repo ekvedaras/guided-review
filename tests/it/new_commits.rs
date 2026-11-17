@@ -14,6 +14,7 @@ use guided_review::viewer::{
     CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
     ReviewStateFile, Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
 };
+use guided_review::viewer::{JobOutcome, ReplacingJob};
 use serde_json::json;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -613,7 +614,7 @@ fn ticks_on_the_open_review_are_refused_while_a_re_pin_runs_so_they_cannot_overw
     let second_head = shop.commit_second_head();
     let mut review = shop.open();
 
-    assert!(review.start_repin());
+    review.start_job(ReplacingJob::Repin).unwrap();
     shop.repin_onto(&second_head);
     let refused = [review.tick(&"total".into()), review.untick(&"keep".into())];
 
@@ -634,7 +635,7 @@ fn text_typed_while_a_re_pin_runs_is_named_as_not_kept_until_the_re_pin_ends() {
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
         .unwrap();
 
-    assert!(review.start_repin());
+    review.start_job(ReplacingJob::Repin).unwrap();
     assert!(
         review
             .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
@@ -642,7 +643,7 @@ fn text_typed_while_a_re_pin_runs_is_named_as_not_kept_until_the_re_pin_ends() {
     );
 
     assert_eq!(review.problems(), [Problem::ChangeNotKeptWhileRepinning]);
-    review.repin_failed();
+    review.land_job(JobOutcome::Repin(Err(anyhow::anyhow!("offline"))));
     assert_eq!(review.problems(), []);
 }
 
@@ -651,8 +652,8 @@ fn ticks_count_again_once_a_re_pin_failed() {
     let shop = Shop::with_tour_at_first_head();
     let mut review = shop.open();
 
-    assert!(review.start_repin());
-    review.repin_failed();
+    review.start_job(ReplacingJob::Repin).unwrap();
+    review.land_job(JobOutcome::Repin(Err(anyhow::anyhow!("offline"))));
     review.tick(&"total".into()).unwrap();
 
     assert_eq!(ticked(&shop.open()), ["total"]);
