@@ -19,7 +19,8 @@ use crate::file_path::FilePath;
 use crate::review_subject::ReviewSubject;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
-    AgentStatus, FileView, LineKind, LineLocation, PageRow, PieceLabels, Problem, ProblemKind,
+    AgentStatus, AutoMerge, Checks, FileView, LineKind, LineLocation, MergeMethod, MergeMethods,
+    Mergeability, Merging, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness,
     TerminalId, TextBox,
 };
 
@@ -70,10 +71,15 @@ enum Scene {
     LocalChangedOnDisk,
     LocalMoveOffer,
     LocalTaskSendAnyway,
+    TitleBarDraftChecksRunning,
+    TitleBarReadyChecksFailing,
+    TitleBarAutoMergeOff,
+    TitleBarAutoMergeOn,
+    TitleBarMergeNow,
 }
 
 impl Scene {
-    const ALL: [Self; 41] = [
+    const ALL: [Self; 46] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -115,6 +121,11 @@ impl Scene {
         Self::LocalChangedOnDisk,
         Self::LocalMoveOffer,
         Self::LocalTaskSendAnyway,
+        Self::TitleBarDraftChecksRunning,
+        Self::TitleBarReadyChecksFailing,
+        Self::TitleBarAutoMergeOff,
+        Self::TitleBarAutoMergeOn,
+        Self::TitleBarMergeNow,
     ];
 
     fn file_name(self) -> &'static str {
@@ -160,7 +171,61 @@ impl Scene {
             Self::LocalChangedOnDisk => "60-local-changed-on-disk",
             Self::LocalMoveOffer => "61-local-move-to-pr",
             Self::LocalTaskSendAnyway => "62-local-task-send-anyway",
+            Self::TitleBarDraftChecksRunning => "63-title-bar-draft-checks-running",
+            Self::TitleBarReadyChecksFailing => "64-title-bar-ready-checks-failing",
+            Self::TitleBarAutoMergeOff => "65-title-bar-auto-merge-off",
+            Self::TitleBarAutoMergeOn => "66-title-bar-auto-merge-on",
+            Self::TitleBarMergeNow => "67-title-bar-merge-now",
         }
+    }
+
+    /// The PR status a title bar scene shows; `None` for every other scene.
+    fn staged_status(self) -> Option<PrStatus> {
+        let blocked = Merging {
+            mergeability: Mergeability::Blocked,
+            auto_merge: AutoMerge::Off,
+            methods: MergeMethods::only(&MergeMethod::ALL),
+            repo_allows_auto_merge: true,
+            viewer_may_enable_auto_merge: true,
+            viewer_may_disable_auto_merge: true,
+            viewer_may_merge: true,
+        };
+        let cannot_act = Merging {
+            viewer_may_enable_auto_merge: false,
+            ..blocked
+        };
+        let status = |readiness, checks, merging| PrStatus {
+            readiness,
+            checks,
+            viewer_may_change_readiness: true,
+            merging,
+        };
+        Some(match self {
+            Self::TitleBarDraftChecksRunning => {
+                status(Readiness::Draft, Checks::Running, cannot_act)
+            }
+            Self::TitleBarReadyChecksFailing => {
+                status(Readiness::Ready, Checks::Failing, cannot_act)
+            }
+            Self::TitleBarAutoMergeOff => status(Readiness::Ready, Checks::Running, blocked),
+            Self::TitleBarAutoMergeOn => status(
+                Readiness::Ready,
+                Checks::Running,
+                Merging {
+                    auto_merge: AutoMerge::On(MergeMethod::Squash),
+                    ..blocked
+                },
+            ),
+            Self::TitleBarMergeNow => status(
+                Readiness::Ready,
+                Checks::Passing,
+                Merging {
+                    mergeability: Mergeability::Now,
+                    ..blocked
+                },
+            ),
+            _ => return None,
+        })
     }
 }
 
@@ -603,6 +668,16 @@ impl OneStepLayout {
                 self.session
                     .update(cx, ReviewSession::stage_refresh_running);
             }
+            Scene::TitleBarDraftChecksRunning
+            | Scene::TitleBarReadyChecksFailing
+            | Scene::TitleBarAutoMergeOff
+            | Scene::TitleBarAutoMergeOn
+            | Scene::TitleBarMergeNow => {
+                if let Some(status) = scene.staged_status() {
+                    self.session
+                        .update(cx, |session, cx| session.stage_pr_status(status, cx));
+                }
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self
@@ -726,6 +801,13 @@ impl OneStepLayout {
             Scene::AgentLinkOff => self
                 .session
                 .update(cx, ReviewSession::unstage_agent_link_off),
+            Scene::TitleBarDraftChecksRunning
+            | Scene::TitleBarReadyChecksFailing
+            | Scene::TitleBarAutoMergeOff
+            | Scene::TitleBarAutoMergeOn
+            | Scene::TitleBarMergeNow => {
+                self.session.update(cx, ReviewSession::unstage_pr_status);
+            }
             Scene::RefreshRunning => self
                 .session
                 .update(cx, ReviewSession::unstage_refresh_running),

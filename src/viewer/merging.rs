@@ -201,6 +201,15 @@ impl Merging {
         }
     }
 
+    /// The title bar button's words; `None` hides it, as the viewer cannot act.
+    pub fn button_label(self) -> Option<&'static str> {
+        Some(match self.offer().ok()? {
+            MergeOffer::EnableAutoMerge => "Auto-merge",
+            MergeOffer::DisableAutoMerge => "Auto-merge on",
+            MergeOffer::MergeNow => "Merge now",
+        })
+    }
+
     /// The offer with the method it would use: the preferred one where the repo allows it.
     pub fn change(self, preferred: MergeMethod) -> Result<MergeChange, MergeRefusal> {
         let method = self.methods.pick(preferred);

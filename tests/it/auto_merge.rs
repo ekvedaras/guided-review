@@ -10,6 +10,36 @@ use guided_review::viewer::{
     Review, WindowMoment,
 };
 
+#[test]
+fn the_title_bar_button_says_what_a_click_offers_and_hides_where_the_viewer_cannot_act() {
+    let blocked = blocked_merging();
+    let label = |merging: Merging| merging.button_label();
+
+    assert_eq!(label(blocked), Some("Auto-merge"));
+    assert_eq!(
+        label(Merging {
+            auto_merge: AutoMerge::On(MergeMethod::Squash),
+            viewer_may_disable_auto_merge: true,
+            ..blocked
+        }),
+        Some("Auto-merge on")
+    );
+    assert_eq!(
+        label(Merging {
+            mergeability: Mergeability::Now,
+            ..blocked
+        }),
+        Some("Merge now")
+    );
+    assert_eq!(
+        label(Merging {
+            viewer_may_enable_auto_merge: false,
+            ..blocked
+        }),
+        None
+    );
+}
+
 fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeGitHub, Instant) {
     let mut review = pull.open();
     let github = pull.github().with_status(PrStatus {

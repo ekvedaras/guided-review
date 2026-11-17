@@ -95,16 +95,17 @@ use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, BoxEdges, BoxFold, ChangeInView, Checks, CloneOffer,
+    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, Checks, CloneOffer,
     CloneOfferState, CodeLink, Command, CommentBox, CommentGesture, CommentPlace, Departure,
     DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent,
-    LabelSwitch, LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage,
-    OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress,
-    ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening,
-    RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
-    Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
-    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
-    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    LabelSwitch, LineLocation, Merging, NextScreen, NoteSubject, NotesButton, Overlay,
+    OverviewPage, OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment,
+    ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave,
+    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
+    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
+    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
+    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
+    WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -2287,6 +2288,7 @@ impl OneStepLayout {
                     .text_sm()
                     .child(switch_pr)
                     .children(status.map(|status| self.status_chip(&colors, status, cx)))
+                    .children(status.and_then(|status| merge_button(&colors, status.merging, cx)))
                     .child(div().flex_1())
                     .child(jump)
                     .children(github),
@@ -3411,6 +3413,35 @@ const FOCUS_BAR_LEFT: Pixels = px(15.);
 /// Every row of the page column takes the column's side margins; the first one also carries the
 /// wash behind the screen's heading, so the wash scrolls away with it.
 /// A refused or failed save is one of the review's problems, which the sidebar shows.
+/// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
+/// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.
+fn merge_button(
+    colors: &Colors,
+    merging: Merging,
+    cx: &mut Context<OneStepLayout>,
+) -> Option<Stateful<Div>> {
+    let label = merging.button_label()?;
+    let kind = match merging.auto_merge {
+        AutoMerge::On(_) => ButtonKind::Pressed,
+        AutoMerge::Off => ButtonKind::Ghost,
+    };
+    let method = match merging.auto_merge {
+        AutoMerge::On(method) => Some(method.label()),
+        AutoMerge::Off => None,
+    };
+    Some(
+        button(colors, "title-bar-merge", kind, ButtonSize::Small)
+            .child(button_icon(colors, kind, ButtonSize::Small, Icon::Clock))
+            .child(label)
+            .children(method.map(|method| div().text_color(colors.muted_text).child(method)))
+            .child(button_keys(colors, kind, Command::ToggleAutoMerge, cx))
+            .tooltip(tooltip(|_| "Click twice to confirm".into()))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::ToggleAutoMerge, window, cx);
+            })),
+    )
+}
+
 /// A key that changes the PR on GitHub says why it does nothing, or what its next press does.
 fn tell_press(step: PressStep, cx: &mut App) {
     match step {

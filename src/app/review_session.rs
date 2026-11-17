@@ -76,6 +76,9 @@ pub struct ReviewSession {
     /// The code source of the PR a snapshot scene put aside to show a local review.
     #[cfg(feature = "snapshots")]
     source_before_staging: Option<Arc<dyn CodeSource>>,
+    /// What GitHub said of the PR before a snapshot scene staged another title bar.
+    #[cfg(feature = "snapshots")]
+    pr_status_before_staging: Option<crate::viewer::PrStatus>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -179,6 +182,8 @@ impl ReviewSession {
             guided_before_staging: None,
             #[cfg(feature = "snapshots")]
             source_before_staging: None,
+            #[cfg(feature = "snapshots")]
+            pr_status_before_staging: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -848,6 +853,25 @@ impl ReviewSession {
         }
         self.rows.stage_all_read(total, &self.open_details);
         self.screen_list.reset(self.rows.len());
+        cx.notify();
+    }
+
+    /// The title bar as GitHub would have it say `status`; `unstage_pr_status` puts back what was read.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_pr_status(&mut self, status: crate::viewer::PrStatus, cx: &mut Context<Self>) {
+        if self.pr_status_before_staging.is_none() {
+            self.pr_status_before_staging = self.review.pr_status().copied();
+        }
+        self.review.pr_status_is(status);
+        cx.notify();
+    }
+
+    /// With no status read before, the staged one stays: the title bar scenes come last.
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_pr_status(&mut self, cx: &mut Context<Self>) {
+        if let Some(before) = self.pr_status_before_staging.take() {
+            self.review.pr_status_is(before);
+        }
         cx.notify();
     }
 
