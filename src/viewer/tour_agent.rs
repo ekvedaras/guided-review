@@ -88,6 +88,9 @@ pub enum SendOutcome {
     Refused(String),
     /// Nothing was typed: the agent was just started and its screen has not settled yet. Try again shortly.
     Starting,
+    /// Nothing was typed: herdr has no state from the agent, so it cannot tell it is idle. The agent may be
+    /// waiting on a question, which the reviewer sees by looking at it; only they send it anyway.
+    Unreported(TerminalId),
     /// The PR has no tour agent to send to.
     NoAgent,
 }
@@ -198,6 +201,9 @@ pub trait TourAgentPort: Send + Sync {
     /// into a working agent would arrive mid-turn as input.
     fn send_if_idle(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<SendOutcome>;
 
+    /// Types the text into the agent and presses enter, whatever its state.
+    fn send(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<()>;
+
     /// Brings the terminal up in the herdr app.
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()>;
 
@@ -301,6 +307,8 @@ pub enum OwnAgentHandOff {
     Started(TerminalId),
     /// A local change set whose folder has several agents and none is picked.
     PickAnAgent,
+    /// Nothing was typed: the agent does not report its state, so it may be waiting on a question.
+    Unreported(TerminalId),
 }
 
 impl OwnAgentHandOff {
@@ -319,6 +327,9 @@ impl OwnAgentHandOff {
                 format!("Started an agent {terminal} in this review's folder with your Ask")
             }
             Self::PickAnAgent => "Not handed: several agents work in this review's folder. Pick one with Use this agent in the sidebar".to_owned(),
+            Self::Unreported(terminal) => format!(
+                "Not handed: your agent {terminal} does not report its state. Look at it first, it may be waiting on a question"
+            ),
         }
     }
 }
@@ -442,9 +453,10 @@ impl TourAgents {
             TourAgentState::Agent { terminal, .. } => {
                 match self.port.send_if_idle(&terminal, &task)? {
                     SendOutcome::Delivered => Ok(WriterHandOver::Delivered(terminal)),
-                    SendOutcome::Refused(_) | SendOutcome::Starting | SendOutcome::NoAgent => {
-                        Ok(WriterHandOver::Waiting(terminal))
-                    }
+                    SendOutcome::Refused(_)
+                    | SendOutcome::Starting
+                    | SendOutcome::NoAgent
+                    | SendOutcome::Unreported(_) => Ok(WriterHandOver::Waiting(terminal)),
                 }
             }
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
@@ -637,6 +649,22 @@ impl TourAgents {
         }
     }
 
+    /// Types the text into the subject's tour agent whatever its state, once the reviewer has looked at an
+    /// agent that does not report its state and chose to send anyway.
+    pub fn send_anyway(&self, subject: &ReviewSubject, text: &str) -> anyhow::Result<SendOutcome> {
+        match self.lookup(subject) {
+            TourAgentState::Agent { terminal, .. } => {
+                self.port.send(&terminal, text)?;
+                Ok(SendOutcome::Delivered)
+            }
+            TourAgentState::Choose(_) => Ok(SendOutcome::Refused(SEVERAL_AGENTS.to_owned())),
+            TourAgentState::LinkOff(reason) => Ok(SendOutcome::Refused(format!(
+                "tour agents are off: {reason}"
+            ))),
+            TourAgentState::None | TourAgentState::Unknown => Ok(SendOutcome::NoAgent),
+        }
+    }
+
     /// Types an Ask into the PR's tour agent, but only one the reviewer started: an app-started agent
     /// cannot change files, and the reviewer's own one may.
     pub fn hand_to_own_agent(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
@@ -670,6 +698,7 @@ impl TourAgents {
                 OwnAgentHandOff::NotSent(format!("{terminal} is still starting"))
             }
             Ok(SendOutcome::NoAgent) => OwnAgentHandOff::NoAgent,
+            Ok(SendOutcome::Unreported(terminal)) => OwnAgentHandOff::Unreported(terminal),
             Err(error) => OwnAgentHandOff::NotSent(format!("{error:#}")),
         }
     }

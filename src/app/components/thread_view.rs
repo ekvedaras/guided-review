@@ -12,7 +12,7 @@ use gpui::{
 use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::viewer::{
-    Audience, CommentId, HandOffId, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
+    Audience, CommentId, HandOffButton, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
     ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadView,
 };
 
@@ -46,7 +46,7 @@ pub enum ReplyDraftChange {
 pub type OnReplyDraft = Rc<dyn Fn(ReplyDraftChange, &mut App)>;
 
 /// Queues a failed hand-off again.
-pub type OnTryHandOffAgain = Rc<dyn Fn(HandOffId, &mut App)>;
+pub type OnHandOffButton = Rc<dyn Fn(HandOffButton, &mut App)>;
 
 /// What happened to the edit of one comment; the core keeps its text, so it survives scrolling away.
 pub type OnCommentEdit = Rc<dyn Fn(&CommentId, ReplyDraftChange, &mut App)>;
@@ -111,7 +111,7 @@ pub struct ThreadElement {
     on_delete_question: OnDeleteQuestion,
     on_toggle: OnToggle,
     on_action: OnThreadAction,
-    on_try_hand_off_again: OnTryHandOffAgain,
+    on_hand_off_button: OnHandOffButton,
 }
 
 /// What the review holds about one thread: what the reviewer may do and what they have typed.
@@ -132,7 +132,7 @@ pub struct ThreadChanges {
     pub on_delete_question: OnDeleteQuestion,
     pub on_toggle: OnToggle,
     pub on_action: OnThreadAction,
-    pub on_try_hand_off_again: OnTryHandOffAgain,
+    pub on_hand_off_button: OnHandOffButton,
 }
 
 /// What an outdated thread's lines were when it was written, since the code under it shows what they are now.
@@ -179,7 +179,7 @@ impl ThreadElement {
             on_delete_question,
             on_toggle,
             on_action,
-            on_try_hand_off_again,
+            on_hand_off_button,
         } = changes;
         Self {
             view,
@@ -193,7 +193,7 @@ impl ThreadElement {
             on_delete_question,
             on_toggle,
             on_action,
-            on_try_hand_off_again,
+            on_hand_off_button,
         }
     }
 
@@ -1223,26 +1223,30 @@ impl RenderOnce for ThreadElement {
             )
             .children(comments)
             .children(self.view.hand_off_line.as_ref().map(|line| {
-                let try_again = self.view.failed_hand_off.map(|hand_off| {
-                    let on_try_again = Rc::clone(&self.on_try_hand_off_again);
+                let button = self.view.hand_off_button.map(|button| {
+                    let on_press = Rc::clone(&self.on_hand_off_button);
+                    let icon = match button {
+                        HandOffButton::TryAgain(_) => Icon::Refresh,
+                        HandOffButton::SendAnyway(_) => Icon::Send,
+                    };
                     small_button(
                         &colors,
-                        SharedString::from(format!("try-hand-off-again-{id}")),
+                        SharedString::from(format!("hand-off-button-{id}")),
                         ButtonKind::Secondary,
-                        Icon::Refresh,
-                        "Try again",
+                        icon,
+                        button.label(),
                     )
-                    .on_click(move |_, _, cx| on_try_again(hand_off, cx))
+                    .on_click(move |_, _, cx| on_press(button, cx))
                 });
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
                     .text_sm()
-                    .text_color(if try_again.is_some() {
-                        colors.danger
-                    } else {
-                        colors.muted_text
+                    .text_color(match self.view.hand_off_button {
+                        Some(HandOffButton::TryAgain(_)) => colors.danger,
+                        Some(HandOffButton::SendAnyway(_)) => colors.text,
+                        None => colors.muted_text,
                     })
                     .child(if self.view.agent_is_working {
                         shimmer_text(
@@ -1255,7 +1259,7 @@ impl RenderOnce for ThreadElement {
                     } else {
                         SharedString::from(Arc::clone(line)).into_any_element()
                     })
-                    .children(try_again)
+                    .children(button)
             }))
             .children(actions)
     }

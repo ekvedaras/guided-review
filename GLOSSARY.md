@@ -94,7 +94,7 @@
 
 **Ask agent**: The comment box's second send action. The comment or reply is posted to GitHub like any other and also handed off to the tour agent. A comment sent with the plain action is for the PR author only; the agent never sees it.
 
-**Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, working on it (the agent posted "Working on it…" and its answer will replace that comment), answered, ended without an answer, or failed. It holds the id of its GitHub thread and of the reviewer's comment. In a local review each task is a hand-off to the change set's agent, its thread a local one, with no seen mark: delivery is its state.
+**Hand-off**: One reviewer comment sent with Ask agent, as passed to the tour agent, with where it is: queued, delivered, working, working on it (the agent posted "Working on it…" and its answer will replace that comment), answered, ended without an answer, failed, or held back because its agent does not report its state to herdr (the reviewer looks at the agent, since it may be waiting on a question, and chooses Send anyway, which types it in whatever the state). It holds the id of its GitHub thread and of the reviewer's comment. In a local review each task is a hand-off to the change set's agent, its thread a local one, with no seen mark: delivery is its state.
 
 **Agent comment**: A comment whose text starts with 🤖, which a tour agent posted under its person's account. The app names it `<login>'s agent` in the accent colour, with the agent's mark as its picture and the person's picture small at its corner, and shows the text without the 🤖. On GitHub it stays as posted.
 

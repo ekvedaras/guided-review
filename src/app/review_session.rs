@@ -30,11 +30,11 @@ use crate::github::GhCloner;
 use crate::opened_change_set::OpenedChangeSet;
 use crate::viewer::{
     AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
-    CommentResult, FinishResult, GitHubPort, HandOffId, ImageCache, LineLocation, NoteSubject,
-    OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict, Screen,
-    SendMode, TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState,
-    TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements,
-    line_count,
+    CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, LineLocation,
+    NoteSubject, OldHead, Problem, RefreshBrief, RepinnedTour, Review, ReviewChange, ReviewVerdict,
+    Screen, SendMode, TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone,
+    TourAgentState, TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts,
+    announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -1195,11 +1195,11 @@ impl ReviewSession {
         !matches!(self.tour_agent, TourAgentState::LinkOff(_))
     }
 
-    /// The button is offered only for a failed hand-off in a thread, so an error other than a save
-    /// the sidebar names is a bug.
-    pub fn try_hand_off_again(&mut self, hand_off: HandOffId, cx: &mut Context<Self>) {
-        if let Err(error) = self.change(cx, |review| review.try_hand_off_again(hand_off)) {
-            eprintln!("could not queue hand-off {hand_off} again: {error:#}");
+    /// The button is offered only for a hand-off in a thread that can take it, so an error other than a
+    /// save the sidebar names is a bug.
+    pub fn press_hand_off_button(&mut self, button: HandOffButton, cx: &mut Context<Self>) {
+        if let Err(error) = self.change(cx, |review| review.press_hand_off_button(button)) {
+            eprintln!("could not {} for {button:?}: {error:#}", button.label());
         }
     }
 

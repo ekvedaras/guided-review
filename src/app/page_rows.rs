@@ -367,7 +367,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             }
             view.commented_lines.hash(&mut hasher);
             view.hand_off_line.hash(&mut hasher);
-            view.failed_hand_off.hash(&mut hasher);
+            view.hand_off_button.hash(&mut hasher);
             view.delete_asked.hash(&mut hasher);
             reply_lines.hash(&mut hasher);
             for (id, text) in &view.edit_drafts {
@@ -475,7 +475,7 @@ mod tests {
             hand_off_line: None,
             agent_is_working: false,
             followed: None,
-            failed_hand_off: None,
+            hand_off_button: None,
         }
     }
 

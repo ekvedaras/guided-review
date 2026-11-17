@@ -119,8 +119,8 @@ pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
-    HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, Reviewed, SeenMark,
-    ThreadMessage,
+    HandOffButton, HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, Reviewed,
+    SeenMark, ThreadMessage,
 };
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{

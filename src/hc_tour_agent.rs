@@ -299,10 +299,17 @@ impl TourAgentPort for HcTourAgents {
         // Herdr keeps an agent at `done` after a turn until someone looks at the terminal, and `--if idle`
         // refuses it, so an agent running in the background would never take a comment.
         if reason.contains(" is done, not idle") {
-            self.hc(&["send", terminal.as_str(), text])?;
+            self.send(terminal, text)?;
             return Ok(SendOutcome::Delivered);
         }
+        if reason.contains(" is silent, not idle") {
+            return Ok(SendOutcome::Unreported(terminal.clone()));
+        }
         Ok(SendOutcome::Refused(reason.to_owned()))
+    }
+
+    fn send(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<()> {
+        self.hc(&["send", terminal.as_str(), text]).map(drop)
     }
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {

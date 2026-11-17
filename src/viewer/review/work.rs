@@ -3,7 +3,7 @@ use std::time::Instant;
 use super::{Review, ReviewCore};
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
-use crate::viewer::hand_offs::{AgentReplied, HandOffId};
+use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
 use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
@@ -216,6 +216,17 @@ impl ReviewCore {
         self.work.want(WorkKind::PullThreads);
         self.work.want(WorkKind::PullPendingReview);
         Ok(())
+    }
+
+    pub fn press_hand_off_button(&mut self, button: HandOffButton) -> anyhow::Result<()> {
+        match button {
+            HandOffButton::TryAgain(id) => self.try_hand_off_again(id),
+            HandOffButton::SendAnyway(id) => {
+                self.work.want(WorkKind::DeliverHandOff);
+                self.record_hand_offs(|hand_offs| hand_offs.send_anyway(id))
+                    .and_then(|sent| sent)
+            }
+        }
     }
 
     /// Queues a failed hand-off again and lets the next hand-off go, whether it was queued or not.

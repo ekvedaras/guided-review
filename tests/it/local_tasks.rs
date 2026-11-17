@@ -13,10 +13,10 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
-    CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffState, Intent, LineLocation,
-    PieceDiff, ReviewStateFile, ReviewVerdict, SendMode, Side, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ThreadHome, ThreadMessage, ThreadView, TourAgentPort, TourAgentState,
-    TourAgents, WindowMoment, WorkPorts,
+    CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffButton, HandOffState, Intent,
+    LineLocation, PieceDiff, ReviewStateFile, ReviewVerdict, SendMode, Side, TerminalId, TextBox,
+    ThreadAction, ThreadActionResult, ThreadHome, ThreadMessage, ThreadView, TourAgentPort,
+    TourAgentState, TourAgents, WindowMoment, WorkPorts,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README's second line written and not
@@ -862,6 +862,58 @@ fn send_tasks_hands_every_queued_task_to_the_agent_as_one_message_in_reading_ord
     );
     assert_eq!(opened.review.queued_tasks(), 0);
     assert_eq!(feature.sent.github_calls(), []);
+}
+
+/// A Claude herdr has no status from may be waiting on a question the task text would answer, so the
+/// reviewer looks at it first; no second agent is started beside it.
+#[test]
+fn tasks_for_an_agent_that_does_not_report_its_state_wait_until_the_reviewer_sends_them_anyway() {
+    let feature = Feature::with_work_in_progress();
+    feature.agent.set_status("t1", AgentStatus::Unreported);
+    let mut opened = feature.open();
+    add_to_tasks(&feature, &mut opened, "world", "Say who the world is");
+
+    send_tasks(&feature, &mut opened);
+
+    assert_eq!(feature.typed_into_agent(), Vec::<String>::new());
+    assert!(
+        !feature
+            .agent
+            .calls()
+            .iter()
+            .any(|call| matches!(call, TourAgentCall::Start { .. })),
+        "{:?}",
+        feature.agent.calls()
+    );
+    let thread = &threads(&opened)[0];
+    assert_eq!(
+        thread.hand_off_line.as_deref(),
+        Some(
+            "The agent does not report its state: look at it first, it may be waiting on a question this task answers"
+        )
+    );
+    let first = opened.review.hand_offs().all()[0].id();
+    assert_eq!(
+        thread.hand_off_button,
+        Some(HandOffButton::SendAnyway(first))
+    );
+
+    opened
+        .review
+        .press_hand_off_button(HandOffButton::SendAnyway(first))
+        .unwrap();
+    feature.run_work(&mut opened);
+
+    let typed = feature.typed_into_agent();
+    let [message] = typed.as_slice() else {
+        panic!("{typed:?}");
+    };
+    assert!(message.contains("Say who the world is"), "{message}");
+    assert_eq!(
+        opened.review.hand_offs().all()[0].state(),
+        &HandOffState::Delivered
+    );
+    assert_eq!(threads(&opened)[0].hand_off_button, None);
 }
 
 /// The app's review saves its own copy while `agent-reply` writes the threads; Send tasks turns

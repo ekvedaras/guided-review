@@ -273,18 +273,31 @@ impl TourAgentPort for FakeTourAgent {
         let (_, status) = terminals
             .get_mut(terminal)
             .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
+        if *status == AgentStatus::Unreported {
+            return Ok(SendOutcome::Unreported(terminal.clone()));
+        }
         if *status != AgentStatus::Idle {
             return Ok(SendOutcome::Refused(format!(
                 "{terminal} is {status}, not idle"
             )));
         }
+        drop(terminals);
+        self.send(terminal, text)?;
+        Ok(SendOutcome::Delivered)
+    }
+
+    fn send(&self, terminal: &TerminalId, text: &str) -> anyhow::Result<()> {
+        let mut terminals = self.terminals.lock().unwrap();
+        let (_, status) = terminals
+            .get_mut(terminal)
+            .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
         *status = AgentStatus::Working;
         drop(terminals);
         self.record(TourAgentCall::Send {
             terminal: terminal.clone(),
             text: text.to_owned(),
         });
-        Ok(SendOutcome::Delivered)
+        Ok(())
     }
 
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()> {

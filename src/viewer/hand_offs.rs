@@ -124,6 +124,29 @@ pub enum HandOffState {
     Answered,
     EndedWithoutAnswer,
     Failed(String),
+    /// Nothing was typed: the agent does not report its state, so it may be waiting on a question the
+    /// hand-off would answer. The reviewer looks at it, then sends anyway.
+    AgentUnreported,
+    /// The reviewer sends it to an agent that does not report its state, without waiting for it to be idle.
+    SendAnyway,
+}
+
+/// What the reviewer can do about a thread's latest hand-off from its line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HandOffButton {
+    /// It failed; it is queued again.
+    TryAgain(HandOffId),
+    /// Its agent does not report its state; it goes without waiting for the agent to be idle.
+    SendAnyway(HandOffId),
+}
+
+impl HandOffButton {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TryAgain(_) => "Try again",
+            Self::SendAnyway(_) => "Send anyway",
+        }
+    }
 }
 
 impl HandOffState {
@@ -144,6 +167,8 @@ impl HandOffState {
             Self::Answered => "The agent answered".to_owned(),
             Self::EndedWithoutAnswer => "The agent finished without answering".to_owned(),
             Self::Failed(reason) => format!("Hand-off failed: {reason}"),
+            Self::AgentUnreported => "The agent does not report its state: look at it first, it may be waiting on a question this task answers".to_owned(),
+            Self::SendAnyway => "Sending to the agent anyway".to_owned(),
         }
     }
 }
@@ -399,6 +424,8 @@ pub(super) struct DeliveryRequest {
     /// What a tour agent started for this hand-off has to read.
     tour: TourKind,
     reviewer_comment: Option<CommentId>,
+    /// The reviewer chose to send it without waiting for the agent to be idle.
+    anyway: bool,
 }
 
 impl DeliveryRequest {
@@ -408,8 +435,14 @@ impl DeliveryRequest {
         agents: &TourAgents,
         github: &(impl ReviewThreadsPort + ?Sized),
     ) -> DeliveryOutcome {
-        let how = match agents.send_if_idle(&self.subject, &self.text) {
+        let sent = if self.anyway {
+            agents.send_anyway(&self.subject, &self.text)
+        } else {
+            agents.send_if_idle(&self.subject, &self.text)
+        };
+        let how = match sent {
             Ok(SendOutcome::Delivered) => Delivery::Delivered,
+            Ok(SendOutcome::Unreported(_)) => Delivery::AgentUnreported,
             Ok(SendOutcome::Refused(_)) => Delivery::Waiting,
             Ok(SendOutcome::Starting) => Delivery::AgentStarting,
             Ok(SendOutcome::NoAgent) => match agents.start(&self.subject, &self.subject, self.tour)
@@ -457,6 +490,8 @@ enum Delivery {
     Waiting,
     /// The agent's screen has not settled since it started; the hand-off stays queued.
     AgentStarting,
+    /// The agent does not report its state; the hand-off waits for the reviewer to send it anyway.
+    AgentUnreported,
     Failed(String),
 }
 
@@ -655,13 +690,16 @@ impl HandOffs {
         if self.0.iter().any(|h| h.state == HandOffState::Delivered) {
             return None;
         }
-        let next = self.0.iter().find(|h| h.state == HandOffState::Queued)?;
+        let next = self
+            .0
+            .iter()
+            .find(|h| matches!(h.state, HandOffState::Queued | HandOffState::SendAnyway))?;
         let (ids, text) = match (next.batch, subject) {
             (Some(batch), ReviewSubject::Local(change_set)) => {
                 let tasks: Vec<&HandOff> = self
                     .0
                     .iter()
-                    .filter(|h| h.state == HandOffState::Queued && h.batch == Some(batch))
+                    .filter(|h| h.state == next.state && h.batch == Some(batch))
                     .collect();
                 (
                     tasks.iter().map(|task| task.id).collect(),
@@ -683,6 +721,7 @@ impl HandOffs {
                 .reviewer_comment
                 .clone()
                 .filter(|_| subject.pull_request().is_some()),
+            anyway: next.state == HandOffState::SendAnyway,
         })
     }
 
@@ -690,6 +729,7 @@ impl HandOffs {
         let state = match outcome.how {
             Delivery::Delivered => HandOffState::Delivered,
             Delivery::Waiting | Delivery::AgentStarting | Delivery::AgentStarted => return,
+            Delivery::AgentUnreported => HandOffState::AgentUnreported,
             Delivery::Failed(reason) => HandOffState::Failed(reason),
         };
         for hand_off in self.0.iter_mut().filter(|h| outcome.ids.contains(&h.id)) {
@@ -699,11 +739,13 @@ impl HandOffs {
     }
 
     /// A delivered hand-off is working once the agent is seen working; when it then goes idle with no
-    /// answer, it ended without one.
+    /// answer, it ended without one. One held back from an agent that did not report its state goes
+    /// once the agent says it is idle.
     pub(super) fn agent_status_is(&mut self, status: AgentStatus) {
         for hand_off in &mut self.0 {
             hand_off.state = match (&hand_off.state, status) {
                 (HandOffState::Delivered, AgentStatus::Working) => HandOffState::Working,
+                (HandOffState::AgentUnreported, AgentStatus::Idle) => HandOffState::Queued,
                 (HandOffState::Working | HandOffState::WorkingOnIt { .. }, AgentStatus::Idle) => {
                     HandOffState::EndedWithoutAnswer
                 }
@@ -762,12 +804,37 @@ impl HandOffs {
             })
     }
 
-    pub(super) fn failed_in(&self, thread: &ThreadId) -> Option<HandOffId> {
-        self.0
+    pub(super) fn button_in(&self, thread: &ThreadId) -> Option<HandOffButton> {
+        let latest = self
+            .0
             .iter()
-            .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))
-            .filter(|hand_off| matches!(hand_off.state, HandOffState::Failed(_)))
-            .map(|hand_off| hand_off.id)
+            .rfind(|hand_off| hand_off.thread.as_ref() == Some(thread))?;
+        match latest.state {
+            HandOffState::Failed(_) => Some(HandOffButton::TryAgain(latest.id)),
+            HandOffState::AgentUnreported => Some(HandOffButton::SendAnyway(latest.id)),
+            _ => None,
+        }
+    }
+
+    /// Sends a hand-off held back from an agent that does not report its state, with the tasks sent
+    /// together with it, without waiting for the agent to be idle.
+    pub(super) fn send_anyway(&mut self, id: HandOffId) -> anyhow::Result<()> {
+        let held = self
+            .0
+            .iter()
+            .find(|hand_off| hand_off.id == id)
+            .ok_or_else(|| anyhow::anyhow!("no hand-off {id} in this review"))?;
+        if held.state != HandOffState::AgentUnreported {
+            return Ok(());
+        }
+        let batch = held.batch;
+        for hand_off in &mut self.0 {
+            let sent_with_it = hand_off.id == id || (batch.is_some() && hand_off.batch == batch);
+            if sent_with_it && hand_off.state == HandOffState::AgentUnreported {
+                hand_off.state = HandOffState::SendAnyway;
+            }
+        }
+        Ok(())
     }
 
     /// Queues a failed hand-off again. One with no thread cannot go: the agent would have nowhere to answer.

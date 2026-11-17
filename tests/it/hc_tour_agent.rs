@@ -608,6 +608,37 @@ fn an_agent_that_finished_its_turn_unseen_takes_the_text_though_herdr_calls_it_d
 }
 
 #[test]
+fn an_agent_herdr_has_no_state_from_takes_nothing_and_is_named_as_not_reporting_it() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("refuse-idle"),
+        include_str!("../fixtures/hc/send-refused-silent.json"),
+    )
+    .unwrap();
+
+    let sent = adapter(dir.path())
+        .send_if_idle(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(sent, SendOutcome::Unreported(TerminalId::new("t2b")));
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        ["send t2b --if idle a question"]
+    );
+}
+
+#[test]
+fn text_sent_anyway_is_typed_in_whatever_the_agents_state() {
+    let dir = TempDir::new().unwrap();
+
+    adapter(dir.path())
+        .send(&TerminalId::new("t2b"), "a question")
+        .unwrap();
+
+    assert_eq!(calls(dir.path(), "calls"), ["send t2b a question"]);
+}
+
+#[test]
 fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_tools_and_the_apps_path()
  {
     let dir = TempDir::new().unwrap();

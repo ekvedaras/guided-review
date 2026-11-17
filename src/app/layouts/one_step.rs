@@ -73,8 +73,8 @@ use crate::app::components::sidebar_row::{
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
-    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnReplyDraft, OnThreadAction,
-    OnTryHandOffAgain, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
+    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnHandOffButton, OnReplyDraft, OnThreadAction,
+    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
 };
 use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge, title_inset};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -865,10 +865,10 @@ impl OneStepLayout {
         })
     }
 
-    fn on_try_hand_off_again(&self) -> OnTryHandOffAgain {
+    fn on_hand_off_button(&self) -> OnHandOffButton {
         let session = self.session.clone();
-        Rc::new(move |hand_off, cx| {
-            session.update(cx, |session, cx| session.try_hand_off_again(hand_off, cx));
+        Rc::new(move |button, cx| {
+            session.update(cx, |session, cx| session.press_hand_off_button(button, cx));
         })
     }
 
@@ -997,7 +997,7 @@ impl OneStepLayout {
                     this.change_review(cx, |review| review.toggle_thread_fold(&id));
                 })),
                 on_action: self.on_thread_action(),
-                on_try_hand_off_again: self.on_try_hand_off_again(),
+                on_hand_off_button: self.on_hand_off_button(),
             },
         )
     }

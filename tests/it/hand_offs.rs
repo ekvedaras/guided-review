@@ -10,11 +10,11 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AGENT_START_RETRY, AfterLanding, AgentReplied, AgentReplyRefused, AgentReplyRequest,
-    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffId,
-    HandOffState, LineLocation, Problem, Reaction, ReactionChange, ReplyPlacement, Review,
-    ReviewStateFile, ReviewThread, SeenMark, SendMode, Side, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ThreadComment, ThreadHome, ThreadId, ThreadMessage, TourAgentPort,
-    TourAgentState, TourAgents, Work, WorkKind, WorkPorts,
+    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffButton,
+    HandOffId, HandOffState, LineLocation, Problem, Reaction, ReactionChange, ReplyPlacement,
+    Review, ReviewStateFile, ReviewThread, SeenMark, SendMode, Side, TerminalId, TextBox,
+    ThreadAction, ThreadActionResult, ThreadComment, ThreadHome, ThreadId, ThreadMessage,
+    TourAgentPort, TourAgentState, TourAgents, Work, WorkKind, WorkPorts,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -770,17 +770,19 @@ fn a_hand_off_that_failed_in_its_thread_can_be_tried_again_and_then_goes_to_the_
     let no_room = Arc::new(FakeTourAgent::new());
     pull.deliver(&mut review, &agents_of(&no_room));
     assert!(matches!(states(&review)[0], HandOffState::Failed(_)));
-    let offered: Vec<Option<HandOffId>> = review
+    let offered: Vec<Option<HandOffButton>> = review
         .current_step()
         .unwrap()
         .threads
         .iter()
-        .map(|view| view.failed_hand_off)
+        .map(|view| view.hand_off_button)
         .collect();
     let first = review.hand_offs().all()[0].id();
-    assert_eq!(offered, [Some(first), None]);
+    assert_eq!(offered, [Some(HandOffButton::TryAgain(first)), None]);
 
-    review.try_hand_off_again(first).unwrap();
+    review
+        .press_hand_off_button(HandOffButton::TryAgain(first))
+        .unwrap();
 
     assert_eq!(states(&review)[0], HandOffState::Queued);
     let idle = Arc::new(FakeTourAgent::new().with_terminal("t1", Some(PR), AgentStatus::Idle));
@@ -802,6 +804,8 @@ fn every_hand_off_state_has_its_own_line() {
         HandOffState::Answered,
         HandOffState::EndedWithoutAnswer,
         HandOffState::Failed("no agent".into()),
+        HandOffState::AgentUnreported,
+        HandOffState::SendAnyway,
     ]
     .iter()
     .map(HandOffState::line)
@@ -816,6 +820,8 @@ fn every_hand_off_state_has_its_own_line() {
             "The agent answered",
             "The agent finished without answering",
             "Hand-off failed: no agent",
+            "The agent does not report its state: look at it first, it may be waiting on a question this task answers",
+            "Sending to the agent anyway",
         ]
     );
 }
