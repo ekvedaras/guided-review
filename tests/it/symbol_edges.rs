@@ -284,6 +284,38 @@ app/Order.php  modified  +1 −0
 }
 
 #[test]
+fn an_added_blank_line_goes_to_the_piece_nearest_to_it_not_to_the_class_around_it() {
+    let method = |name: &str| {
+        format!("    public function {name}(): int\n    {{\n        return 1;\n    }}\n")
+    };
+    let status =
+        |body: &str| format!("<?php\n\nnamespace App;\n\nenum Status\n{{\n    case A;\n{body}}}\n");
+    let rows = rows_of_change(
+        &[("app/Status.php", &status(""))],
+        &[(
+            "app/Status.php",
+            &status(&format!(
+                "    case B;\n\n{}\n{}\n{}",
+                method("a"),
+                method("b"),
+                method("c")
+            )),
+        )],
+    );
+
+    assert_eq!(
+        rows,
+        "\
+app/Status.php  modified  +16 −0
+  #Status  enum  modified  +2 −0  enum Status
+  #Status::a  method  added  +5 −0  public function a(): int
+  #Status::b  method  added  +5 −0  public function b(): int
+  #Status::c  method  added  +4 −0  public function c(): int
+"
+    );
+}
+
+#[test]
 fn typescript_imports_and_docblocks_of_exported_symbols_follow_the_same_rules() {
     let cart = |import: &str, docblock: &str, total: &str| {
         format!(
