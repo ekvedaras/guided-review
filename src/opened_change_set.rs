@@ -9,20 +9,22 @@ use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
 use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
-use crate::local_work_tree::{LocalWorkTree, snapshot_ref};
+use crate::local_work_tree::{LocalWorkTree, SharedGitFolder, snapshot_ref};
 use crate::make_basic_tour::make_basic_tour;
 use crate::opened_pr::CodeAtTips;
 use crate::pull_request::PullRequestUrl;
 use crate::repin::Repin;
-use crate::review_subject::{LOCAL_FILES_FOLDER, LocalChangeSet, ReviewSubject, WorkTreeRoot};
+use crate::review_subject::{LOCAL_FILES_FOLDER, LocalChangeSet, ReviewSubject};
 use crate::tour::{Tour, TourPin, ToursOnDisk};
 use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
 
-/// Deletes the snapshot refs, in the clones of the local reviews on disk, of local reviews that are
-/// on disk no more, as after a crash between deleting a review's files and its ref. PR fetch refs are
-/// never touched. Runs when the app starts. A clone it cannot read keeps its refs, and so does a clone
-/// with a tour it cannot read, as that tour may be the very review a ref keeps. Says what it left and
-/// why.
+/// Deletes the snapshot refs, in the repositories of the local reviews on disk, of local reviews that
+/// are on disk no more, as after a crash between deleting a review's files and its ref. Linked worktrees
+/// share their repository's refs, so a repository keeps the refs of the reviews in all its worktrees.
+/// PR fetch refs are never touched. Runs when the app starts. A repository it cannot read keeps its
+/// refs, and so does a repository with a tour it cannot read in any of its worktrees, as that tour may
+/// be the very review a ref keeps; a tour that cannot be read in a folder of no readable review keeps
+/// every repository's refs. Says what it left and why.
 pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
     let on_disk = LocalReviewsOnDisk::read(folders);
     let mut not_cleaned: Vec<String> = on_disk
@@ -30,26 +32,46 @@ pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
         .iter()
         .map(|unreadable| {
             format!(
-                "{} cannot be read, so the snapshot refs of its clone were kept: {}",
+                "{} cannot be read, so the snapshot refs of its repository were kept: {}",
                 unreadable.path.display(),
                 unreadable.reason
             )
         })
         .collect();
-    let mut kept_by_clone: HashMap<WorkTreeRoot, HashSet<String>> = HashMap::new();
-    for change_set in &on_disk.change_sets {
-        kept_by_clone
-            .entry(change_set.folder().clone())
-            .or_default()
-            .insert(snapshot_ref(change_set));
+    if on_disk.cannot_tell_whose(folders) {
+        not_cleaned.push(
+            "a local tour that cannot be read is of no review on disk, so no repository's snapshot refs were cleaned"
+                .to_owned(),
+        );
+        return not_cleaned;
     }
+    let mut by_repository: HashMap<SharedGitFolder, RepositoryRefs> = HashMap::new();
     for change_set in &on_disk.change_sets {
-        if on_disk.cannot_tell_all_of(folders, change_set) {
-            kept_by_clone.remove(change_set.folder());
+        let work_tree = LocalWorkTree::at(change_set.folder().clone());
+        let shared = match work_tree.shared_git_folder() {
+            Ok(shared) => shared,
+            Err(error) => {
+                not_cleaned.push(format!("could not clean the snapshot refs: {error}"));
+                continue;
+            }
+        };
+        let repository = by_repository
+            .entry(shared)
+            .or_insert_with(|| RepositoryRefs {
+                work_tree,
+                kept: HashSet::new(),
+                cannot_tell_all: false,
+            });
+        repository.kept.insert(snapshot_ref(change_set));
+        repository.cannot_tell_all |= on_disk.cannot_tell_all_of(folders, change_set);
+    }
+    for repository in by_repository.into_values() {
+        if repository.cannot_tell_all {
+            continue;
         }
-    }
-    for (folder, kept) in kept_by_clone {
-        let work_tree = LocalWorkTree::at(folder);
+        let RepositoryRefs {
+            work_tree, kept, ..
+        } = repository;
         let refs = match work_tree.snapshot_refs() {
             Ok(refs) => refs,
             Err(error) => {
@@ -68,6 +90,14 @@ pub fn clean_snapshot_refs(folders: &AppFolders) -> Vec<String> {
     not_cleaned
 }
 
+/// The snapshot refs of one repository that local reviews on disk keep, from all its worktrees, since
+/// they share one set of refs.
+struct RepositoryRefs {
+    work_tree: LocalWorkTree,
+    kept: HashSet<String>,
+    cannot_tell_all: bool,
+}
+
 /// The change sets whose tours are on disk, basic or guided, for a list of them. A file that cannot be
 /// read names none; the clean-up, which must not take that for absent, reads `LocalReviewsOnDisk`.
 pub fn local_reviews_on_disk(folders: &AppFolders) -> HashSet<LocalChangeSet> {
@@ -75,7 +105,7 @@ pub fn local_reviews_on_disk(folders: &AppFolders) -> HashSet<LocalChangeSet> {
 }
 
 /// The local tours, or folders of them, that could not be read. Each may be the review a snapshot ref
-/// keeps, so the clean-up keeps every ref of its clone, and the reviewer is told.
+/// keeps, so the clean-up keeps every ref of its repository, and the reviewer is told.
 pub fn unreadable_local_tours(folders: &AppFolders) -> Vec<UnreadableLocalTour> {
     LocalReviewsOnDisk::read(folders).unreadable
 }
@@ -147,11 +177,38 @@ impl LocalReviewsOnDisk {
     /// Whether something unreadable may be a review of the change set's clone: a tour in its folder,
     /// or a folder holding it.
     fn cannot_tell_all_of(&self, folders: &AppFolders, change_set: &LocalChangeSet) -> bool {
-        let subject = ReviewSubject::from(change_set.clone());
-        let tours_folder = Tour::tours_dir(folders).join(subject.files_folder());
+        let tours_folder = Self::tours_folder_of(folders, change_set);
+        self.unreadable
+            .iter()
+            .any(|unreadable| unreadable.may_be_in(&tours_folder))
+    }
+
+    /// Whether something unreadable is in the folder of no readable review, and so may be the review
+    /// of any repository: a worktree whose only tour cannot be read names no folder to find its
+    /// repository by.
+    fn cannot_tell_whose(&self, folders: &AppFolders) -> bool {
+        let known: Vec<PathBuf> = self
+            .change_sets
+            .iter()
+            .map(|change_set| Self::tours_folder_of(folders, change_set))
+            .collect();
         self.unreadable.iter().any(|unreadable| {
-            unreadable.path.starts_with(&tours_folder) || tours_folder.starts_with(&unreadable.path)
+            !known
+                .iter()
+                .any(|tours_folder| unreadable.may_be_in(tours_folder))
         })
+    }
+
+    fn tours_folder_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PathBuf {
+        let subject = ReviewSubject::from(change_set.clone());
+        Tour::tours_dir(folders).join(subject.files_folder())
+    }
+}
+
+impl UnreadableLocalTour {
+    /// A tour in the folder, or a folder holding it.
+    fn may_be_in(&self, tours_folder: &Path) -> bool {
+        self.path.starts_with(tours_folder) || tours_folder.starts_with(&self.path)
     }
 }
 
