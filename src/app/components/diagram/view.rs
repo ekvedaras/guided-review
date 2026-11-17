@@ -2,9 +2,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, AppContext, Bounds, Context, Corners, Entity, InteractiveElement, IntoElement,
-    ParentElement, Pixels, RenderImage, RenderOnce, SharedString, StatefulInteractiveElement,
-    Styled, Window, canvas, div, px,
+    AnyElement, App, AppContext, Bounds, Context, Corners, Div, Entity, InteractiveElement,
+    IntoElement, ParentElement, Pixels, RenderImage, RenderOnce, SharedString,
+    StatefulInteractiveElement, Styled, Window, canvas, div, px,
 };
 
 use crate::app::components::palette::{Appearance, CARD_RADIUS, Colors};
@@ -227,16 +227,20 @@ fn strip_block(strip: &Strip, width: f32, diagrams: Entity<Diagrams>) -> impl In
             }
         },
     )
+    .size_full()
     .map(|block| fit_to_width(block, width, strip))
 }
 
 /// As wide as the diagram, or narrower with its height in proportion when the page is narrower, so
-/// no part of it is cut off.
-fn fit_to_width<E: Styled>(block: E, width: f32, strip: &Strip) -> E {
-    block
-        .w_full()
-        .max_w(px(width))
-        .aspect_ratio(width / strip.height())
+/// no part of it is cut off. The width is capped on an outer box: with the cap and the ratio on one
+/// box, the height follows the page's width, not the capped one, and leaves a gap under the diagram.
+fn fit_to_width(block: impl IntoElement, width: f32, strip: &Strip) -> Div {
+    div().w_full().max_w(px(width)).child(
+        div()
+            .w_full()
+            .aspect_ratio(width / strip.height())
+            .child(block),
+    )
 }
 
 /// Shows the whole diagram as large as the window holds it, drawn off the main thread first.
@@ -284,12 +288,13 @@ fn zoom_diagram(svg: Svg, window: &mut Window, cx: &mut App) {
 
 /// Says why in the strip's own place, as a diagram that could not be drawn at all does.
 fn failed_strip_block(strip: &Strip, width: f32, note: &Arc<str>, colors: &Colors) -> AnyElement {
-    fit_to_width(div(), width, strip)
+    let note = div()
+        .size_full()
         .p_3()
         .text_sm()
         .text_color(colors.muted_text)
-        .child(SharedString::from(Arc::clone(note)))
-        .into_any_element()
+        .child(SharedString::from(Arc::clone(note)));
+    fit_to_width(note, width, strip).into_any_element()
 }
 
 fn near_visible_part(bounds: Bounds<Pixels>, window: &Window) -> bool {
