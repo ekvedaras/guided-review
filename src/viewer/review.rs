@@ -10,16 +10,13 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Context as _;
-
-use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::Sha;
-use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
 use std::path::{Path, PathBuf};
@@ -30,6 +27,7 @@ use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
+use super::branch_link::{BranchLink, BranchOffer, LocalReviewsOfRepo};
 use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
@@ -56,7 +54,6 @@ use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
 use super::merging::{MergeChange, MergeMethod};
-use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
@@ -297,16 +294,7 @@ pub struct ReviewCore {
     local_facts: Option<LocalFacts>,
     /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
     local_heading: Option<Arc<str>>,
-    /// The open PR whose head is a local review's branch, as GitHub last said; not saved.
-    pull_of_branch: Option<PullOfBranch>,
-    /// For a PR: the local reviews on disk of its repo, which one of may be of the PR's branch. Not saved.
-    local_reviews_of_repo: Vec<LocalChangeSet>,
-    /// For a PR: the local review of the branch it is opened from, which it offers to take over.
-    local_to_move_here: Option<LocalChangeSet>,
-    /// How many looks for the PR's head branch failed in a row; each one waits longer for the next.
-    head_branch_failures: u32,
-    /// Where those local reviews' files are.
-    local_reviews_in: Option<AppFolders>,
+    branch_link: BranchLink,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -454,8 +442,9 @@ impl Review {
 
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
-    /// go), its work, whose outcomes still land here, and which screen's end the window saw. What
-    /// the config and the disk say is `ReviewBuilder`'s, which built this review.
+    /// go), its work, whose outcomes still land here, its branch link, which those outcomes filled,
+    /// and which screen's end the window saw. What the config and the disk say is `ReviewBuilder`'s,
+    /// which built this review.
     pub fn carry_on_from(&mut self, replaced: Self) {
         let replaced = replaced.into_core();
         let switched_to_guided =
@@ -463,15 +452,7 @@ impl Review {
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
         self.jobs = replaced.jobs;
-        if self.pull_of_branch.is_none() {
-            self.pull_of_branch = replaced.pull_of_branch;
-        }
-        if self.local_reviews_of_repo.is_empty() {
-            self.local_reviews_of_repo = replaced.local_reviews_of_repo;
-            self.local_to_move_here = replaced.local_to_move_here;
-            self.head_branch_failures = replaced.head_branch_failures;
-            self.local_reviews_in = replaced.local_reviews_in;
-        }
+        self.branch_link = replaced.branch_link;
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
         }
@@ -642,6 +623,7 @@ impl ReviewCore {
         let mut display_options = DisplayOptions::for_code(base.clone(), head.clone());
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
+        let branch_link = BranchLink::of(&subject);
         Ok(Self {
             tour,
             file_tree,
@@ -650,11 +632,7 @@ impl ReviewCore {
             code_host,
             local_heading,
             local_facts: None,
-            pull_of_branch: None,
-            local_reviews_of_repo: Vec::new(),
-            local_to_move_here: None,
-            head_branch_failures: 0,
-            local_reviews_in: None,
+            branch_link,
             base,
             head,
             pr_head: None,
@@ -873,98 +851,19 @@ impl ReviewCore {
 
     /// What GitHub said of the PR opened from a local review's branch.
     pub fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
-        self.pull_of_branch = found;
+        self.branch_link.pull_of_branch_is(found);
     }
 
     /// The local reviews on disk that are of this PR's repo, so the review looks for one of the PR's branch.
     /// A PR's head branch never changes, so it is looked up once here, never again on focus.
-    pub fn local_reviews_of_repo_are(
-        &mut self,
-        folders: &AppFolders,
-        reviews: Vec<LocalChangeSet>,
-    ) {
-        self.local_reviews_in = Some(folders.clone());
-        self.local_reviews_of_repo = reviews;
+    pub(super) fn local_reviews_of_repo_are(&mut self, reviews: LocalReviewsOfRepo) {
+        self.branch_link.local_reviews_are(reviews);
         self.work.want(WorkKind::LookUpHeadBranch);
     }
 
-    pub(super) fn head_branch_is(&mut self, branch: Option<BranchName>) {
-        self.local_to_move_here = branch.and_then(|branch| {
-            self.local_reviews_of_repo
-                .iter()
-                .find(|review| *review.branch() == branch)
-                .cloned()
-        });
-    }
-
-    /// A lasting line of a PR's review: a local review of the branch it is opened from, which it offers
-    /// to take over.
-    pub fn move_here_offer(&self) -> Option<MoveHereOffer> {
-        let pr = self.subject.pull_request()?;
-        Some(MoveHereOffer {
-            change_set: self.local_to_move_here.clone()?,
-            offer: MoveOffer {
-                pr: pr.clone(),
-                title: String::new(),
-            },
-        })
-    }
-
-    /// Keep local review: the offer goes for good, on both sides, and the local review stays.
-    pub fn decline_move_here(&mut self) -> anyhow::Result<()> {
-        let Some(offer) = self.move_here_offer() else {
-            return Ok(());
-        };
-        let local = ReviewSubject::from(offer.change_set.clone());
-        let folders = self
-            .local_reviews_in
-            .clone()
-            .context("no local review is known here")?;
-        ReviewStateFile::for_subject(&folders, &local)
-            .update(|state| state.decline_move_to(&offer.offer.pr))?;
-        self.local_reviews_of_repo
-            .retain(|review| *review != offer.change_set);
-        self.local_to_move_here = None;
-        Ok(())
-    }
-
-    /// A lasting line of a local review: the PR opened from its branch, which it offers to move to.
-    pub fn move_offer(&self) -> Option<MoveOffer> {
-        self.subject.local()?;
-        let found = self.pull_of_branch.as_ref()?;
-        (!self.state.has_declined_move_to(&found.pr)).then(|| MoveOffer::of(found))
-    }
-
-    /// Declining hides the offer for that PR for good and keeps the local review. Written to the state
-    /// file on its own, so it never writes the viewer's sections back.
-    pub fn decline_move(&mut self) -> anyhow::Result<()> {
-        let Some(offer) = self.move_offer() else {
-            return Ok(());
-        };
-        self.state
-            .keep_until_repinned(|state| state.decline_move_to(&offer.pr));
-        self.state
-            .file()
-            .update(|state| state.decline_move_to(&offer.pr))
-    }
-
-    /// The move the button asks for, whichever review it is pressed in.
-    fn move_to_start(&self) -> Option<StartedMove> {
-        let (from, change_set, offer) = if let Some(here) = self.move_here_offer() {
-            (MoveFrom::ThePr, here.change_set, here.offer)
-        } else {
-            let offer = self.move_offer()?;
-            (
-                MoveFrom::TheLocalReview,
-                self.subject.local()?.clone(),
-                offer,
-            )
-        };
-        Some(StartedMove {
-            from,
-            change_set,
-            offer,
-        })
+    /// The lasting line of the sidebar, or Open PR, from what is known of the other side of the branch.
+    pub fn branch_offer(&self) -> Option<BranchOffer> {
+        self.branch_link.offer(&self.state)
     }
 
     /// Not now, on either side's offer, unless the move runs. A decline that could not be written to
@@ -973,11 +872,7 @@ impl ReviewCore {
         if self.jobs.is_running(ReplacingJob::MoveToPr) {
             return;
         }
-        let declined = if self.move_here_offer().is_some() {
-            self.decline_move_here()
-        } else {
-            self.decline_move()
-        };
+        let declined = self.branch_link.decline(&mut self.state);
         match declined {
             Ok(()) => self.clear_problem(ProblemKind::MoveNotDeclined),
             Err(error) => self.raise_problem(Problem::MoveNotDeclined(format!("{error:#}"))),
@@ -1150,7 +1045,7 @@ impl ReviewCore {
 
     /// A local review whose branch has no open PR yet, so its agent can be asked to open one.
     pub fn can_open_pr(&self) -> bool {
-        self.subject.local().is_some() && self.pull_of_branch.is_none()
+        self.branch_link.can_open_pr()
     }
 
     pub fn summary(&self) -> &[String] {

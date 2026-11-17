@@ -464,10 +464,10 @@ fn a_move_declined_while_the_guided_review_is_built_stays_declined_in_it() {
     feature.writer_writes_a_tour_of_both_files();
     assert!(feature.run(&["check", &feature.key()]).success);
     let switched = feature.switcher().run().unwrap();
-    basic.decline_move().unwrap();
+    basic.decline_the_move();
     let mut guided = switched.review;
 
     guided.carry_on_from(basic);
 
-    assert_eq!(guided.move_offer(), None);
+    assert_eq!(guided.branch_offer(), None);
 }

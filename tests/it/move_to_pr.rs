@@ -16,9 +16,10 @@ use guided_review::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{AfterJob, JobOutcome, ReplacingJob, StartedJob, StartedMove};
 use guided_review::viewer::{
-    Audience, CommentGesture, CommentPlace, LineLocation, LocalAuthor, LocalThreadStore, MoveFrom,
-    MoveOffer, PULL_OF_BRANCH_RETRY, PieceDiff, PrMover, Problem, PullOfBranch, PullsOfBranchPort,
-    Resolution, ReviewStateFile, SendMode, Side, TextBox,
+    Audience, BranchOffer, CommentGesture, CommentPlace, LineLocation, LocalAuthor,
+    LocalThreadStore, MoveFrom, MoveHereOffer, MoveOffer, PULL_OF_BRANCH_RETRY, PieceDiff, PrMover,
+    Problem, PullOfBranch, PullsOfBranchPort, Resolution, Review, ReviewStateFile, SendMode, Side,
+    TextBox,
 };
 
 const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
@@ -71,6 +72,33 @@ fn offer_of(pr: &str, title: &str) -> MoveOffer {
     }
 }
 
+fn move_offer(review: &Review) -> Option<MoveOffer> {
+    match review.branch_offer()? {
+        BranchOffer::MoveToPr(offer) => Some(offer),
+        _ => None,
+    }
+}
+
+fn move_here_offer(review: &Review) -> Option<MoveHereOffer> {
+    match review.branch_offer()? {
+        BranchOffer::MoveHere(offer) => Some(offer),
+        _ => None,
+    }
+}
+
+/// The Keep button, on whichever side's offer, written without a problem.
+fn keep_the_local_review(review: &mut Review) {
+    review.decline_the_move();
+    assert!(
+        !review
+            .problems()
+            .iter()
+            .any(|problem| matches!(problem, Problem::MoveNotDeclined(_))),
+        "{:?}",
+        review.problems()
+    );
+}
+
 #[test]
 fn a_local_review_offers_to_move_to_the_open_pr_whose_head_is_its_branch() {
     let feature = Feature::with_work_in_progress();
@@ -78,11 +106,11 @@ fn a_local_review_offers_to_move_to_the_open_pr_whose_head_is_its_branch() {
         .github()
         .with_open_pull_from("feature", SHOP_7, "Add the cart");
     let mut opened = feature.open();
-    assert_eq!(opened.review.move_offer(), None);
+    assert_eq!(move_offer(&opened.review), None);
 
     feature.focus(&mut opened, &github, Instant::now());
 
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
     assert_eq!(offer, offer_of(SHOP_7, "Add the cart"));
     assert_eq!(offer.label(), "Move to acme/shop#7");
     assert_eq!(feature.sent.branch_lookups(), ["acme/shop:feature"]);
@@ -98,7 +126,7 @@ fn there_is_no_offer_without_a_pr_from_the_branch_or_with_one_from_another_branc
 
     feature.focus(&mut opened, &github, Instant::now());
 
-    assert_eq!(opened.review.move_offer(), None);
+    assert_eq!(move_offer(&opened.review), None);
     assert_eq!(feature.sent.branch_lookups(), ["acme/shop:feature"]);
     assert_eq!(feature.sent.github_calls(), []);
 }
@@ -115,7 +143,7 @@ fn a_look_that_fails_is_silent_and_tried_again_later() {
 
     feature.focus(&mut opened, &github, now);
 
-    assert_eq!(opened.review.move_offer(), None);
+    assert_eq!(move_offer(&opened.review), None);
     assert_eq!(opened.review.problems(), []);
     github.heal(&GitHubFault::ReadsFail);
 
@@ -127,7 +155,7 @@ fn a_look_that_fails_is_silent_and_tried_again_later() {
     );
 
     assert_eq!(
-        opened.review.move_offer(),
+        move_offer(&opened.review),
         Some(offer_of(SHOP_7, "Add the cart"))
     );
 }
@@ -157,12 +185,12 @@ fn a_pr_review_looks_for_no_branch() {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr));
-    let mut review = guided_review::viewer::Review::open_basic(tour, &source, state_file).unwrap();
+    let mut review = Review::open_basic(tour, &source, state_file).unwrap();
 
     review.pull_from_github();
     drive_without_agents(&mut review, &github, &source, Instant::now());
 
-    assert_eq!(review.move_offer(), None);
+    assert_eq!(review.branch_offer(), None);
     assert_eq!(sent.branch_lookups(), Vec::<String>::new());
 }
 
@@ -269,7 +297,7 @@ fn moving_carries_the_tick_of_a_file_whose_code_is_the_same_and_shows_what_chang
     let read_at = feature.snapshot_head();
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
 
     feature
         .mover_of(feature.subject.local().unwrap())
@@ -516,7 +544,7 @@ fn moving_makes_drafts_of_open_threads_and_queued_tasks_none_of_resolved_ones_an
     add_to_tasks(&feature, &mut opened, "pub fn total() {}", "Shout it");
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
 
     feature
         .mover_of(feature.subject.local().unwrap())
@@ -570,7 +598,7 @@ fn the_local_review_and_its_ref_go_only_once_the_prs_state_is_saved() {
     opened.review.tick_file(&path("README.md")).unwrap();
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
     let mover = feature.mover_of(feature.subject.local().unwrap());
     assert!(local_review_is_on_disk(&feature));
 
@@ -606,7 +634,7 @@ fn a_pr_state_that_cannot_be_saved_keeps_the_local_review_whole() {
     opened.review.tick_file(&path("README.md")).unwrap();
     let (github, _) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
     std::fs::create_dir_all(pr_state_path(&feature).parent().unwrap()).unwrap();
     std::fs::write(pr_state_path(&feature), "{ not json").unwrap();
 
@@ -642,7 +670,7 @@ fn a_move_that_crashed_after_saving_carries_again_without_doubling_drafts_or_und
         .unwrap();
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
     let mover = feature.mover_of(feature.subject.local().unwrap());
     mover.carry(&offer, &github).unwrap();
     assert!(
@@ -707,7 +735,7 @@ fn a_thread_follows_its_lines_to_the_prs_head_and_one_whose_file_is_gone_becomes
     let github = FakeGitHub::with_pull(main.trim(), head.as_str(), &feature.sent)
         .with_open_pull_from("feature", SHOP_7, "Add the cart");
     feature.focus(&mut opened, &github, Instant::now());
-    let offer = opened.review.move_offer().unwrap();
+    let offer = move_offer(&opened.review).unwrap();
 
     feature
         .mover_of(feature.subject.local().unwrap())
@@ -740,13 +768,13 @@ fn declining_hides_the_offer_for_that_pr_for_good_and_keeps_the_local_review() {
     let mut opened = feature.open();
     feature.focus(&mut opened, &github, Instant::now());
 
-    opened.review.decline_move().unwrap();
+    keep_the_local_review(&mut opened.review);
 
-    assert_eq!(opened.review.move_offer(), None);
+    assert_eq!(move_offer(&opened.review), None);
     assert!(local_review_is_on_disk(&feature));
     let mut reopened = feature.open();
     feature.focus(&mut reopened, &github, Instant::now());
-    assert_eq!(reopened.review.move_offer(), None);
+    assert_eq!(move_offer(&reopened.review), None);
     let another = feature.github().with_open_pull_from(
         "feature",
         "https://github.com/acme/shop/pull/8",
@@ -754,7 +782,7 @@ fn declining_hides_the_offer_for_that_pr_for_good_and_keeps_the_local_review() {
     );
     feature.focus(&mut reopened, &another, Instant::now());
     assert_eq!(
-        reopened.review.move_offer().map(|offer| offer.label()),
+        move_offer(&reopened.review).map(|offer| offer.label()),
         Some("Move to acme/shop#8".to_owned())
     );
 }
@@ -813,7 +841,7 @@ fn a_pr_review_offers_to_take_over_the_local_review_of_the_branch_it_is_opened_f
 
     let opened = feature.open_the_pr(&github, &head);
 
-    let offer = opened.review.move_here_offer().unwrap();
+    let offer = move_here_offer(&opened.review).unwrap();
     assert_eq!(offer.change_set, *feature.subject.local().unwrap());
     assert_eq!(offer.label(), "Move feature here");
     assert_eq!(offer.offer.pr, SHOP_7.parse().unwrap());
@@ -832,14 +860,14 @@ fn a_pr_review_offers_nothing_for_another_branch_or_without_a_local_review_and_a
     let (github, head) = other_branch.open_a_pr_after_one_more_commit();
     let github = github.with_head_branch(SHOP_7, "another");
     let opened = other_branch.open_the_pr(&github, &head);
-    assert_eq!(opened.review.move_here_offer(), None);
+    assert_eq!(move_here_offer(&opened.review), None);
 
     let no_local_review = Feature::with_work_in_progress();
     let (github, head) = no_local_review.open_a_pr_after_one_more_commit();
     let github = github.with_head_branch(SHOP_7, "feature");
     opened_without_a_local_review(&no_local_review);
     let opened = no_local_review.open_the_pr(&github, &head);
-    assert_eq!(opened.review.move_here_offer(), None);
+    assert_eq!(move_here_offer(&opened.review), None);
 }
 
 fn opened_without_a_local_review(feature: &Feature) {
@@ -866,7 +894,7 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
     let github = github.with_head_branch(SHOP_7, "feature");
     let mut opened = feature.open_the_pr(&github, &pr_head);
     opened.review.tick_file(&path("src/cart.rs")).unwrap();
-    let offer = opened.review.move_here_offer().unwrap();
+    let offer = move_here_offer(&opened.review).unwrap();
 
     assert!(start_move(&mut opened.review).is_some());
     feature
@@ -908,17 +936,17 @@ fn keeping_the_local_review_hides_the_pr_reviews_offer_and_the_local_ones_too() 
     let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
     let github = github.with_head_branch(SHOP_7, "feature");
     let mut opened = feature.open_the_pr(&github, &pr_head);
-    assert!(opened.review.move_here_offer().is_some());
+    assert!(move_here_offer(&opened.review).is_some());
 
-    opened.review.decline_move_here().unwrap();
+    keep_the_local_review(&mut opened.review);
 
-    assert_eq!(opened.review.move_here_offer(), None);
+    assert_eq!(move_here_offer(&opened.review), None);
     let reopened = feature.open_the_pr(&github, &pr_head);
-    assert_eq!(reopened.review.move_here_offer(), None);
+    assert_eq!(move_here_offer(&reopened.review), None);
     drop(local);
     let mut local = feature.open();
     feature.focus(&mut local, &github, Instant::now());
-    assert_eq!(local.review.move_offer(), None);
+    assert_eq!(move_offer(&local.review), None);
     assert!(local_review_is_on_disk(&feature));
 }
 
@@ -943,7 +971,7 @@ fn a_pr_review_asks_github_for_its_head_branch_once_and_not_again_when_it_comes_
     feature.focus(&mut opened, &github, Instant::now());
 
     assert_eq!(head_branch_lookups(&feature), 1);
-    assert!(opened.review.move_here_offer().is_some());
+    assert!(move_here_offer(&opened.review).is_some());
 }
 
 #[test]
@@ -981,7 +1009,7 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
     github.heal(&GitHubFault::ReadsFail);
     drive_at(&mut opened, PULL_OF_BRANCH_RETRY * 3 + a_second * 2);
     assert_eq!(head_branch_lookups(&feature), 3);
-    assert!(opened.review.move_here_offer().is_some());
+    assert!(move_here_offer(&opened.review).is_some());
 }
 
 #[test]
@@ -1003,7 +1031,7 @@ fn a_pr_review_finds_the_local_review_of_its_repo_by_its_tour_file_without_askin
 
     let opened = feature.open_the_pr(&github, &pr_head);
 
-    assert!(opened.review.move_here_offer().is_some());
+    assert!(move_here_offer(&opened.review).is_some());
 }
 
 #[test]
@@ -1014,10 +1042,10 @@ fn a_kept_local_review_is_not_offered_again_when_the_pr_review_comes_back_to_the
     let github = github.with_head_branch(SHOP_7, "feature");
     let mut opened = feature.open_the_pr(&github, &pr_head);
 
-    opened.review.decline_move_here().unwrap();
+    keep_the_local_review(&mut opened.review);
     feature.focus(&mut opened, &github, Instant::now());
 
-    assert_eq!(opened.review.move_here_offer(), None);
+    assert_eq!(move_here_offer(&opened.review), None);
 }
 
 #[test]
@@ -1043,7 +1071,7 @@ fn a_local_tour_pinned_to_another_folder_is_refused_by_the_move_and_nothing_is_c
     assert!(!pr_state_path(&feature).exists());
 }
 
-fn start_move(review: &mut guided_review::viewer::Review) -> Option<StartedMove> {
+fn start_move(review: &mut Review) -> Option<StartedMove> {
     match review.start_job(ReplacingJob::MoveToPr)? {
         StartedJob::MoveToPr(started) => Some(started),
         other => panic!("{other:?} started instead of the move"),
@@ -1152,7 +1180,7 @@ fn update_and_not_now_are_refused_while_a_move_runs() {
     assert_eq!(local.review.start_job(ReplacingJob::Repin), None);
     local.review.decline_the_move();
 
-    assert!(local.review.move_offer().is_some(), "the offer stays");
+    assert!(move_offer(&local.review).is_some(), "the offer stays");
     assert!(local.review.jobs().is_running(ReplacingJob::MoveToPr));
 }
 
@@ -1176,12 +1204,7 @@ fn a_decline_that_could_not_be_kept_is_a_problem_the_reviewer_sees_and_one_that_
     let mut opened = feature.open();
     let (github, _) = feature.open_a_pr_after_one_more_commit();
     feature.focus(&mut opened, &github, Instant::now());
-    let state_path = feature
-        .repo
-        .folders()
-        .state_files()
-        .join(feature.subject.files_folder())
-        .join(format!("{}.json", feature.subject.file_stem()));
+    let state_path = local_state_path(&feature);
     std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
     std::fs::write(&state_path, "{ not json").unwrap();
 
@@ -1207,4 +1230,85 @@ fn a_decline_that_could_not_be_kept_is_a_problem_the_reviewer_sees_and_one_that_
             .iter()
             .any(|problem| matches!(problem, Problem::MoveNotDeclined(_)))
     );
+}
+
+fn local_state_path(feature: &Feature) -> std::path::PathBuf {
+    feature
+        .repo
+        .folders()
+        .state_files()
+        .join(feature.subject.files_folder())
+        .join(format!("{}.json", feature.subject.file_stem()))
+}
+
+#[test]
+fn keeping_the_local_review_from_the_pr_side_that_could_not_be_written_is_a_problem_and_the_offer_stays()
+ {
+    let feature = Feature::with_work_in_progress();
+    drop(feature.open());
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let offered = opened.review.branch_offer();
+    assert!(matches!(offered, Some(BranchOffer::MoveHere(_))));
+    let local_state = local_state_path(&feature);
+    std::fs::create_dir_all(local_state.parent().unwrap()).unwrap();
+    std::fs::write(&local_state, "{ not json").unwrap();
+
+    opened.review.decline_the_move();
+
+    assert!(
+        opened
+            .review
+            .problems()
+            .iter()
+            .any(|problem| matches!(problem, Problem::MoveNotDeclined(_))),
+        "{:?}",
+        opened.review.problems()
+    );
+    assert_eq!(opened.review.branch_offer(), offered);
+}
+
+#[test]
+fn a_rebuilt_review_keeps_what_github_said_of_its_branch_and_asks_it_nothing_again() {
+    let feature = Feature::with_work_in_progress();
+    let mut local = feature.open();
+    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let github = github.with_head_branch(SHOP_7, "feature");
+    feature.focus(&mut local, &github, Instant::now());
+    let offered = local.review.branch_offer();
+    assert!(matches!(offered, Some(BranchOffer::MoveToPr(_))));
+
+    let mut rebuilt = feature.open();
+    rebuilt.review.carry_on_from(local.review);
+    drive_without_agents(
+        &mut rebuilt.review,
+        &github,
+        rebuilt.source.as_ref(),
+        Instant::now(),
+    );
+
+    assert_eq!(rebuilt.review.branch_offer(), offered);
+    assert_eq!(feature.sent.branch_lookups(), ["acme/shop:feature"]);
+
+    let in_the_pr = feature.open_the_pr(&github, &pr_head);
+    let offered = in_the_pr.review.branch_offer();
+    assert!(matches!(offered, Some(BranchOffer::MoveHere(_))));
+    let pr: PullRequestUrl = SHOP_7.parse().unwrap();
+    let mut rebuilt = open_review(
+        &ReviewSubject::from(pr),
+        feature.repo.path(),
+        &feature.repo.folders(),
+    )
+    .unwrap();
+    rebuilt.review.carry_on_from(in_the_pr.review);
+    drive_without_agents(
+        &mut rebuilt.review,
+        &github,
+        rebuilt.source.as_ref(),
+        Instant::now(),
+    );
+
+    assert_eq!(rebuilt.review.branch_offer(), offered);
+    assert_eq!(head_branch_lookups(&feature), 1);
 }

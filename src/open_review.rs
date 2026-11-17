@@ -10,7 +10,7 @@ use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
-use crate::opened_change_set::{OpenedChangeSet, local_reviews_of_repo};
+use crate::opened_change_set::OpenedChangeSet;
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
@@ -112,8 +112,7 @@ fn build_pull_request(
     }
     let tour = Tour::load_of(&Tour::shown_path_for(folders, &subject), &subject)?;
     let code = opened.at_pinned_tips(tour.pin())?;
-    let mut review = ReviewBuilder::new(folders, &subject).build(tour, code.source.as_ref())?;
-    review.local_reviews_of_repo_are(folders, local_reviews_of_repo(folders, pr));
+    let review = ReviewBuilder::new(folders, &subject).build(tour, code.source.as_ref())?;
     opened.state_file().remember_folder(clones_from)?;
     Ok(Built {
         review,

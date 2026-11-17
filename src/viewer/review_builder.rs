@@ -5,6 +5,7 @@ use crate::opened_change_set::{OpenedChangeSet, unreadable_local_tours};
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 
+use super::branch_link::LocalReviewsOfRepo;
 use super::code_link::WorkingCopy;
 use super::problems::Problem;
 use super::review::Review;
@@ -52,6 +53,7 @@ impl ReviewBuilder {
             .use_more_lines(config.more_lines());
         if let Some(pr) = self.subject.pull_request() {
             review.prefer_merge_method(config.merge_method(&pr.repo));
+            review.local_reviews_of_repo_are(LocalReviewsOfRepo::on_disk(&self.folders, pr));
         }
         let unreadable = unreadable_local_tours(&self.folders);
         if !unreadable.is_empty() {

@@ -19,7 +19,9 @@ impl Review {
             ReplacingJob::Refresh => StartedJob::Refresh,
             ReplacingJob::Reload => StartedJob::Reload,
             ReplacingJob::SwitchToGuided => StartedJob::SwitchToGuided,
-            ReplacingJob::MoveToPr => StartedJob::MoveToPr(self.move_to_start()?),
+            ReplacingJob::MoveToPr => {
+                StartedJob::MoveToPr(self.branch_link.move_to_start(&self.state)?)
+            }
             ReplacingJob::DropReview => StartedJob::DropReview(self.subject.local()?.clone()),
         };
         if matches!(

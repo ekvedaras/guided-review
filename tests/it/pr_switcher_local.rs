@@ -410,7 +410,8 @@ fn a_local_review_that_declined_the_move_to_its_open_pr_shows_no_chip_of_it() {
         opened.source.as_ref(),
         std::time::Instant::now(),
     );
-    opened.review.decline_move().unwrap();
+    opened.review.decline_the_move();
+    assert_eq!(opened.review.problems(), []);
 
     let rows = find_local_rows(
         &repo.folders(),

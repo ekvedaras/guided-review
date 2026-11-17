@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::{Review, ReviewCore};
 use crate::viewer::code_link::WorkingCopy;
@@ -7,8 +7,8 @@ use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
 use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
-    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, PULL_OF_BRANCH_RETRY,
-    WORKING_TREE_RECHECK, Work, WorkKind, WorkOutcome,
+    AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
+    WorkKind, WorkOutcome,
 };
 
 impl Review {
@@ -60,10 +60,7 @@ impl ReviewCore {
                 branch: self.subject.local()?.branch().clone(),
             },
             WorkKind::LookUpHeadBranch => {
-                if self.local_reviews_of_repo.is_empty() {
-                    return None;
-                }
-                Job::LookUpHeadBranch(pr()?)
+                Job::LookUpHeadBranch(self.branch_link.head_branch_to_look_up()?.clone())
             }
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
@@ -128,24 +125,15 @@ impl ReviewCore {
                     .want_in(WorkKind::CheckWorkingTree, WORKING_TREE_RECHECK);
             }
             Done::WorkingCopy(is_at) => self.working_copy_is(WorkingCopy::of(is_at)),
-            Done::PullOfBranch(found) => match found {
-                Ok(found) => self.pull_of_branch_is(found),
-                // Silent: a look for a PR is a convenience, so a failure is only tried again later.
-                Err(_) => self
-                    .work
-                    .want_in(WorkKind::LookUpPullOfBranch, PULL_OF_BRANCH_RETRY),
-            },
-            Done::HeadBranch(Ok(branch)) => {
-                self.head_branch_failures = 0;
-                self.head_branch_is(branch);
+            Done::PullOfBranch(found) => {
+                if let Some(wait) = self.branch_link.pull_looked_up(found) {
+                    self.work.want_in(WorkKind::LookUpPullOfBranch, wait);
+                }
             }
-            // Silent, as for a local review's look for its PR.
-            Done::HeadBranch(Err(_)) => {
-                self.head_branch_failures += 1;
-                self.work.want_in(
-                    WorkKind::LookUpHeadBranch,
-                    head_branch_retry_after(self.head_branch_failures),
-                );
+            Done::HeadBranch(branch) => {
+                if let Some(wait) = self.branch_link.head_branch_looked_up(branch) {
+                    self.work.want_in(WorkKind::LookUpHeadBranch, wait);
+                }
             }
             Done::PrDescription(Ok(body)) => {
                 self.set_pr_description(&body).ok();
@@ -277,11 +265,4 @@ impl ReviewCore {
         self.record_hand_offs(|hand_offs| hand_offs.try_again(id))
             .and_then(|tried| tried)
     }
-}
-
-/// Each failed look for a PR's head branch doubles the wait for the next, up to a cap, since nothing
-/// but the move offer waits on it.
-fn head_branch_retry_after(failures: u32) -> Duration {
-    const LONGEST_WAIT_DOUBLINGS: u32 = 5;
-    PULL_OF_BRANCH_RETRY * 2_u32.pow(failures.saturating_sub(1).min(LONGEST_WAIT_DOUBLINGS))
 }

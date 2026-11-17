@@ -5,9 +5,9 @@ use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 
 use crate::viewer::{
-    ApproveWarning, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal,
-    GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId, TerminalId,
-    TourAgentState, TreeRow,
+    ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress,
+    GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId,
+    TerminalId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -205,24 +205,23 @@ impl SidebarRows {
             }),
             basic_mode_label: review.basic_mode_label(),
             local_heading: review.local_heading().map(Into::into),
-            move_offer: review
-                .move_offer()
-                .map(|offer| SidebarMoveOffer {
+            move_offer: match review.branch_offer() {
+                Some(BranchOffer::MoveToPr(offer)) => Some(SidebarMoveOffer {
                     heading: format!("{} is open from this branch", offer.pr.short()).into(),
                     button: offer.label().into(),
                     keep: "Keep local review",
-                })
-                .or_else(|| {
-                    review.move_here_offer().map(|offer| SidebarMoveOffer {
-                        heading: format!(
-                            "A local review of {} is on this machine",
-                            offer.change_set.branch().as_str()
-                        )
-                        .into(),
-                        button: offer.label().into(),
-                        keep: "Keep it separate",
-                    })
                 }),
+                Some(BranchOffer::MoveHere(offer)) => Some(SidebarMoveOffer {
+                    heading: format!(
+                        "A local review of {} is on this machine",
+                        offer.change_set.branch().as_str()
+                    )
+                    .into(),
+                    button: offer.label().into(),
+                    keep: "Keep it separate",
+                }),
+                Some(BranchOffer::OpenPr) | None => None,
+            },
             disk_news: review
                 .disk_news()
                 .map(|DiskNews { line, offer }| SidebarDiskNews {

@@ -2,6 +2,8 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use crate::pull_request::PullRequestUrl;
+
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::typing_save::{Saves, TypingSave};
 
@@ -87,6 +89,13 @@ impl SavedState {
         change: impl FnOnce(&mut ReviewState) -> T,
     ) -> T {
         change(&mut self.state)
+    }
+
+    /// Made even while a re-pin runs, and written to the file's own section of declines alone, so it
+    /// never writes the viewer's sections back.
+    pub(super) fn decline_move_to(&mut self, pr: &PullRequestUrl) -> anyhow::Result<()> {
+        self.state.decline_move_to(pr);
+        self.file.decline_move_to(pr)
     }
 
     pub(super) fn is_repinning(&self) -> bool {

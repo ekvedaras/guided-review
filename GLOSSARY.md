@@ -24,6 +24,8 @@
 
 **Open PR**: A local review's action, until its branch has an open PR: it types `pr it` into the change set's agent, so the agent's own skills open the PR. Move to PR is offered once GitHub has it. Avoid: create PR.
 
+**Branch link**: What a review knows of the other side of Move to PR: in a local review, the open PR GitHub says is opened from its branch; in a PR's review, the local review on disk of the branch the PR is opened from. It decides what the review offers, Open PR, Move to PR or Keep local review, from whichever side. Only a decline is saved, in the local review's state file, so it holds on both sides. Avoid: PR match, pairing.
+
 **Guided tour**: A tour the tour writer wrote with the `tour` skill: summary, steps and safety net, top-down: main flow first, details later. A tour file with no `kind` is guided. Avoid: AI tour, full tour.
 
 **Basic tour**: A tour made with no AI: every changed file of the PR with its diff, one screen per file, the sidebar a file tree like an IDE. It has no steps, no summary and no safety net; its file says `"kind": "basic"`, holds the pin and the PR's own title (`pr_title`), and sits beside the guided tour's (`<number>.basic.json`). A PR with no tour opens as one. The window names it Basic mode and offers Write guided tour. Avoid: empty tour, plain tour, quick tour.
