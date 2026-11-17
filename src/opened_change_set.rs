@@ -7,6 +7,7 @@ use anyhow::Context;
 use crate::app_folders::{AppFolders, remove_if_there};
 use crate::cached_code_source::CachedCodeSource;
 use crate::code_source::CodeSource;
+use crate::gone_local_reviews::GoneLocalReviews;
 use crate::local_facts::LocalFacts;
 use crate::local_git::LocalGit;
 use crate::local_work_tree::{LocalWorkTree, SharedGitFolder, snapshot_ref};
@@ -293,6 +294,7 @@ impl OpenedChangeSet {
             &tips,
             live.branch().as_str(),
         )?;
+        GoneLocalReviews::in_folders(&self.folders).forget(&live)?;
         Ok(true)
     }
 
@@ -329,6 +331,7 @@ impl OpenedChangeSet {
     pub fn drop_review(&self) -> anyhow::Result<()> {
         let subject = self.subject();
         let _lock = self.lock_tour_and_ref()?;
+        GoneLocalReviews::in_folders(&self.folders).record(&self.change_set)?;
         self.work_tree.forget_snapshot(&self.change_set)?;
         for tour in [
             Tour::basic_path_for(&self.folders, &subject),
@@ -388,17 +391,27 @@ impl OpenedChangeSet {
         Ok(self.code_at(tour.pin()))
     }
 
-    /// A tour with no snapshot ref beside it was written after a drop or a move had deleted the review,
-    /// as by a tour agent still writing then: it is no review, so it is deleted rather than shown.
+    /// A tour with no snapshot ref beside it is one of two things. After a drop or a move had deleted the
+    /// review (its record says so), a tour agent may still have written one: it is no review, so it is
+    /// deleted rather than shown. Otherwise the ref was lost, which the review did not do itself: the
+    /// tour stays and the reviewer is told.
     fn refuse_when_gone(&self) -> anyhow::Result<()> {
         let kept = self.work_tree.snapshot_refs()?;
         if kept.contains(&snapshot_ref(&self.change_set)) {
             return Ok(());
         }
-        self.drop_review()?;
+        if GoneLocalReviews::in_folders(&self.folders).is_recorded(&self.change_set)? {
+            self.drop_review()?;
+            anyhow::bail!(
+                "the local review of {} was dropped or moved to a PR, so its tour is not kept; `guided-review open {}` starts a new one",
+                self.subject(),
+                self.change_set.folder().as_path().display()
+            )
+        }
         anyhow::bail!(
-            "the local review of {} was dropped or moved to a PR, so its tour is not kept; `guided-review open {}` starts a new one",
+            "the snapshot of the local review of {} is lost: its ref {} is gone from the repository, so the code the tour reads may be gone too. The tour and the reviewer's notes are kept. Use Drop review on it in the PR switcher, then `guided-review open {}` starts a new review",
             self.subject(),
+            snapshot_ref(&self.change_set),
             self.change_set.folder().as_path().display()
         )
     }

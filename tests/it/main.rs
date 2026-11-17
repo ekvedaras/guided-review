@@ -75,6 +75,7 @@ mod local_open;
 mod local_review;
 mod local_tasks;
 mod local_work_tree;
+mod lost_snapshot_ref;
 mod markdown;
 mod move_to_pr;
 mod new_commits;
