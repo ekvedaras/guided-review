@@ -256,15 +256,16 @@ pub struct BinaryFileRow {
     pub link: CodeLink,
 }
 
+/// A local review has no PR description, so its buttons that add to PR notes are `None`.
 pub struct ReviewerSummaryRow {
     pub markdown: Markdown,
-    pub notes_button: NotesButton,
+    pub notes_button: Option<NotesButton>,
     pub picture_buttons: Arc<BTreeMap<PathBuf, NotesButton>>,
 }
 
 pub struct DiagramRow {
     pub step: StepId,
-    pub notes_button: NotesButton,
+    pub notes_button: Option<NotesButton>,
 }
 
 /// What a step says before its code: its why, what to check, and its diagram. One row, so a wide

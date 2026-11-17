@@ -1145,6 +1145,11 @@ impl ReviewCore {
         self.subject.has_github_page()
     }
 
+    /// A local review whose branch has no open PR yet, so its agent can be asked to open one.
+    pub fn can_open_pr(&self) -> bool {
+        self.subject.local().is_some() && self.pull_of_branch.is_none()
+    }
+
     pub fn summary(&self) -> &[String] {
         self.tour.guided().map_or(&[], |guided| &guided.summary)
     }
@@ -1169,8 +1174,9 @@ impl ReviewCore {
         (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
     }
 
-    /// `None` when the tour has no such diagram, picture or summary.
+    /// `None` when the tour has no such diagram, picture or summary, or the review has no PR.
     pub fn notes_button(&self, subject: &NoteSubject) -> Option<NotesButton> {
+        self.subject.pull_request()?;
         let note = self.note(subject)?;
         Some(
             self.pr_notes
@@ -2270,12 +2276,13 @@ impl ReviewCore {
             .chain(finish)
             .chain(self.readiness_palette_action())
             .chain(self.merging_palette_action())
-            .chain([PaletteAction::OpenOnGitHub])
-            .chain(
-                self.subject
-                    .pull_request()
-                    .map(|_| PaletteAction::OpenChecksOnGitHub),
-            )
+            .chain(self.can_open_pr().then_some(PaletteAction::OpenPr))
+            .chain(self.subject.pull_request().into_iter().flat_map(|_| {
+                [
+                    PaletteAction::OpenOnGitHub,
+                    PaletteAction::OpenChecksOnGitHub,
+                ]
+            }))
             .chain([
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,

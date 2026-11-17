@@ -16,9 +16,9 @@ use crate::repin::RepinStatus;
 use crate::viewer::focused_change::ChangeFile;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
-    BoxState, CommentPlace, FileBlock, FilePage, LineLocation, Markdown, NoteSubject, NotesButton,
-    PieceDiff, Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, StepPage, ThreadView,
-    TourLead, hidden_lines_after, hidden_lines_before,
+    BoxState, CommentPlace, FileBlock, FilePage, LineLocation, Markdown, NoteSubject, PieceDiff,
+    Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, StepPage, ThreadView, TourLead,
+    hidden_lines_after, hidden_lines_before,
 };
 use crate::viewer::{FileView, LabelSwitch, PageChange, PieceLabels, Rendering, ViewSwitch};
 
@@ -266,13 +266,10 @@ impl<'a> Builder<'a> {
             .as_ref()
             .filter(|_| !page.is_folded)
             .map(|source| Arc::<str>::from(source.as_str()));
-        let diagram_row = diagram
-            .as_ref()
-            .and_then(|_| review.notes_button(&NoteSubject::StepDiagram(id.clone())))
-            .map(|notes_button| DiagramRow {
-                step: id.clone(),
-                notes_button,
-            });
+        let diagram_row = diagram.as_ref().map(|_| DiagramRow {
+            step: id.clone(),
+            notes_button: review.notes_button(&NoteSubject::StepDiagram(id.clone())),
+        });
         self.rows.push(PageRow::StepIntro(Arc::new(StepIntro {
             why: step.why.as_str().into(),
             notes: StepNotes::of(step),
@@ -678,9 +675,7 @@ fn reviewer_summary_row(review: &ReviewCore, summary: Markdown) -> ReviewerSumma
         })
         .collect();
     ReviewerSummaryRow {
-        notes_button: review
-            .notes_button(&NoteSubject::ReviewerSummary)
-            .unwrap_or(NotesButton::Add),
+        notes_button: review.notes_button(&NoteSubject::ReviewerSummary),
         picture_buttons: Arc::new(picture_buttons),
         markdown: summary,
     }

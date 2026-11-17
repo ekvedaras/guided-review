@@ -45,6 +45,8 @@ pub enum Intent {
     FinishReview,
     /// A local review's finish, from the sidebar, the finish card or the palette.
     SendTasks,
+    /// A local review's ask to its agent to open the PR of its branch.
+    OpenPr,
     OpenOnGitHub,
     /// GitHub's checks page of the PR.
     OpenChecksOnGitHub,
@@ -81,6 +83,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::SendTasks => Self::SendTasks,
+            PaletteAction::OpenPr => Self::OpenPr,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
             PaletteAction::OpenChecksOnGitHub => Self::OpenChecksOnGitHub,
             PaletteAction::ConvertToDraft | PaletteAction::MarkReadyForReview => Self::ToggleDraft,
@@ -118,6 +121,8 @@ pub enum Effect {
     OpenFinishForm,
     /// Hands a local review's queued tasks to its agent.
     SendTasks,
+    /// Asks the local review's agent to open the PR of its branch.
+    OpenPr,
     OpenOnGitHub(PullRequestUrl),
     OpenChecksOnGitHub(PullRequestUrl),
     /// A check's run, on the page GitHub gave.
@@ -242,6 +247,7 @@ impl Intent {
             | Self::SwitchToGuidedTour
             | Self::FinishReview
             | Self::SendTasks
+            | Self::OpenPr
             | Self::OpenOnGitHub
             | Self::OpenChecksOnGitHub
             | Self::OpenCheck(_)
@@ -315,6 +321,8 @@ impl ReviewCore {
                 Some(_) => Effect::SendTasks,
                 None => Effect::OpenFinishForm,
             },
+            Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
+            Intent::OpenPr => Effect::Nothing,
             Intent::OpenOnGitHub => self
                 .subject()
                 .pull_request()

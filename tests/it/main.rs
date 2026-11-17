@@ -80,6 +80,7 @@ mod markdown;
 mod move_to_pr;
 mod new_commits;
 mod open_app;
+mod open_pr;
 mod open_review;
 mod outdated_threads;
 mod outline;
