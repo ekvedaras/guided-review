@@ -3560,9 +3560,10 @@ impl ChecksHover {
 }
 
 const CHECKS_LIST_WIDTH: f32 = 340.;
-/// What the PR's name and title keep of the bar: its icon, the name and a stretch of the title.
-/// Past it the title is cut with an ellipsis and the status button keeps its width.
-const PR_TITLE_MIN_WIDTH: f32 = 340.;
+/// What the PR's name and title keep of the bar: its icon, the name (which never truncates) and
+/// the chevron, with a few characters of title. Past it the title is cut with an ellipsis, down to
+/// nothing, and the controls to its right keep their width.
+const PR_TITLE_MIN_WIDTH: f32 = 220.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
 const TITLE_SHRINKS_FIRST: f32 = 10_000.;
