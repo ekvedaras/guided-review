@@ -8,7 +8,8 @@ Rust 2024 gpui app.
 
 - Start it with `run_in_background` and read only until it ends. A commit stages what is on disk, so edit nothing while it runs, and stage first or check `git diff` against what you commit.
 - Agent sessions, worktrees included, share the main checkout's `target` folder (`CARGO_TARGET_DIR` in `.claude/settings.json`), since a `target/` per worktree (3-5 GB each) filled the disk on 2026-11-16. Two builds at once wait for each other's cargo lock.
-- Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`.
+- One agent builds at a time. Never delete `target/` while a build runs. On 2026-11-17 two agents' gates after a wiped `target/` overloaded the maintainer's Mac, since macOS checks every new test binary (`syspolicyd`); see `docs/wiki/agent-builds.md`.
+- Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`. Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` first, and the full `scripts/check` once, when the change is done, not after every fix.
 - Change files with the Edit and Write tools, not shell edits. In an agent worktree the sandbox has refused heredocs, `sed -i` without a backup suffix, and chained commands (2026-11-06).
 
 ## Tests
