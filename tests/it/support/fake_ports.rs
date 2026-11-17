@@ -4,6 +4,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::file_path;
+use guided_review::viewer::{AutoMerge, MergeMethod, MergeMethods, Mergeability, Merging};
+
+/// A PR that checks or reviews still hold back, in a repo that allows every merge method and
+/// auto-merge, read by someone with write access.
+pub fn blocked_merging() -> Merging {
+    Merging {
+        mergeability: Mergeability::Blocked,
+        auto_merge: AutoMerge::Off,
+        methods: MergeMethods::only(&MergeMethod::ALL),
+        repo_allows_auto_merge: true,
+        viewer_may_enable_auto_merge: true,
+        viewer_may_disable_auto_merge: false,
+        viewer_may_merge: true,
+    }
+}
 use guided_review::file_path::FilePath;
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
@@ -206,6 +221,7 @@ impl FakeGitHub {
                 readiness: Readiness::Ready,
                 checks: Checks::NoneRun,
                 viewer_may_change_readiness: true,
+                merging: blocked_merging(),
             }),
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),

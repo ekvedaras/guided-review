@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, ReadFailure, SentLog};
+use crate::support::fake_ports::{
+    FakeGitHub, GitHubCall, GitHubFault, ReadFailure, SentLog, blocked_merging,
+};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
@@ -74,6 +76,7 @@ fn status(readiness: Readiness, checks: Checks) -> PrStatus {
         readiness,
         checks,
         viewer_may_change_readiness: true,
+        merging: blocked_merging(),
     }
 }
 
@@ -235,6 +238,7 @@ fn read_status(
         readiness,
         checks: Checks::Passing,
         viewer_may_change_readiness: may_change,
+        merging: blocked_merging(),
     });
     let now = Instant::now();
     pull.read(&mut review, &github, now);

@@ -35,6 +35,7 @@ mod keymap;
 mod local_row;
 mod local_threads;
 mod markdown;
+mod merging;
 mod more_lines;
 mod move_offer;
 mod move_to_pr;
@@ -142,6 +143,10 @@ pub use keymap::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, WrittenKeys};
 pub use local_row::LocalRow;
 pub use local_threads::{LocalAuthor, LocalThreadStore, LocalThreads, ThreadHome};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
+pub use merging::{
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, MergeOffer, MergeRefusal, Mergeability,
+    Merging,
+};
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};

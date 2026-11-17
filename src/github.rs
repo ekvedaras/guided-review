@@ -15,6 +15,9 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
+    AutoMerge, MergeMethod, MergeMethods, Mergeability, Merging, PrStatus, Readiness,
+};
+use crate::viewer::{
     AvatarPort, ChangeTipsPort, Checks, CommentId, CommentPlace, GitHubError, NoAccess,
     OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
     PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
@@ -22,7 +25,6 @@ use crate::viewer::{
     ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
     Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
-use crate::viewer::{PrStatus, Readiness};
 
 #[derive(Clone)]
 pub struct GitHub {
@@ -577,22 +579,66 @@ impl PullRequestStatusPort for GitHub {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
-                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-                        isDraft
-                        viewerCanUpdate
-                        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-                    } }
+                    repository(owner: $owner, name: $name) {
+                        autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
+                        viewerPermission
+                        pullRequest(number: $number) {
+                            isDraft
+                            viewerCanUpdate
+                            commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+                            state
+                            mergeStateStatus
+                            viewerCanEnableAutoMerge
+                            viewerCanDisableAutoMerge
+                            autoMergeRequest { mergeMethod }
+                        }
+                    }
                 }",
                 &pull_request_variables(pr, &serde_json::Value::Null),
             )
             .map_err(|error| error.context(format!("could not read the status of {pr}")))?;
-        let pull = at(&data, "/repository/pullRequest");
-        let flag = |pointer: &str| {
-            at(pull, pointer)
+        let repository = at(&data, "/repository");
+        let pull = at(repository, "/pullRequest");
+        let flag_of = |node: &serde_json::Value, pointer: &str| {
+            at(node, pointer)
                 .as_bool()
                 .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
         };
+        let flag = |pointer: &str| flag_of(pull, pointer);
+        let text = |pointer: &str| {
+            at(pull, pointer)
+                .as_str()
+                .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
+        };
         let rollup = at(pull, "/commits/nodes/0/commit/statusCheckRollup/state").as_str();
+        let allowed: Vec<MergeMethod> = [
+            ("/mergeCommitAllowed", MergeMethod::Merge),
+            ("/squashMergeAllowed", MergeMethod::Squash),
+            ("/rebaseMergeAllowed", MergeMethod::Rebase),
+        ]
+        .into_iter()
+        .filter(|(pointer, _)| at(repository, pointer).as_bool() == Some(true))
+        .map(|(_, method)| method)
+        .collect();
+        let auto_merge = match at(pull, "/autoMergeRequest/mergeMethod").as_str() {
+            None => AutoMerge::Off,
+            Some(name) => AutoMerge::On(
+                MergeMethod::of_github_name(name)
+                    .with_context(|| format!("GitHub gave an unknown merge method {name}"))?,
+            ),
+        };
+        let merging = Merging {
+            mergeability: Mergeability::from_github(text("/state")?, text("/mergeStateStatus")?),
+            auto_merge,
+            methods: MergeMethods::only(&allowed),
+            repo_allows_auto_merge: flag_of(repository, "/autoMergeAllowed")?,
+            viewer_may_enable_auto_merge: flag("/viewerCanEnableAutoMerge")?,
+            viewer_may_disable_auto_merge: flag("/viewerCanDisableAutoMerge")?,
+            viewer_may_merge: matches!(
+                at(repository, "/viewerPermission").as_str(),
+                Some("ADMIN" | "MAINTAIN" | "WRITE")
+            ),
+        };
         Ok(PrStatus {
             readiness: if flag("/isDraft")? {
                 Readiness::Draft
@@ -601,6 +647,7 @@ impl PullRequestStatusPort for GitHub {
             },
             checks: Checks::from_github_state(rollup),
             viewer_may_change_readiness: flag("/viewerCanUpdate")?,
+            merging,
         })
     }
 

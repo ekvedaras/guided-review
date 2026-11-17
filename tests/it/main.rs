@@ -24,6 +24,7 @@ mod app_window;
 mod ask;
 mod ask_adapters;
 mod ask_lifecycle;
+mod auto_merge;
 mod avatars;
 mod basic_ask;
 mod basic_comments;

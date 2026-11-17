@@ -4,6 +4,8 @@
 
 use std::time::Duration;
 
+use super::merging::Merging;
+
 /// How often the checks are read again while one is running.
 pub const CHECKS_RECHECK: Duration = Duration::from_secs(30);
 
@@ -52,6 +54,7 @@ pub struct PrStatus {
     pub checks: Checks,
     /// GitHub lets only the author and those with write access change it.
     pub viewer_may_change_readiness: bool,
+    pub merging: Merging,
 }
 
 impl PrStatus {
