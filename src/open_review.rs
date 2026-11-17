@@ -10,15 +10,15 @@ use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::local_git::LocalGit;
-use crate::opened_change_set::{OpenedChangeSet, local_reviews_of_repo, unreadable_local_tours};
+use crate::opened_change_set::{OpenedChangeSet, local_reviews_of_repo};
 use crate::opened_pr::OpenedPr;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::summary_instructions::SummaryInstructions;
-use crate::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
+use crate::tour::Tour;
 use crate::viewer::{
-    GitHubPort, NoGitHub, PickCodeSource, PrMover, Problem, Review, ReviewStateFile, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkingCopy,
+    GitHubPort, NoGitHub, PickCodeSource, PrMover, Review, ReviewBuilder, ReviewStateFile,
+    TourAgents, TourRefresher, TourReloader, TourRepinner, TourSwitcher,
     let_go_of_unread_snapshots,
 };
 
@@ -77,11 +77,25 @@ pub fn open_review(
     clones_from: &Path,
     folders: &AppFolders,
 ) -> anyhow::Result<OpenedReview> {
+    let subject = &with_its_repo(subject);
     let built = match subject {
         ReviewSubject::PullRequest(pr) => build_pull_request(pr, clones_from, folders)?,
         ReviewSubject::Local(change_set) => build_local(change_set, folders)?,
     };
     assemble(subject, folders, built)
+}
+
+/// A local change set named by its key alone learns its repo from the clone's `origin`, and keeps it
+/// for every review rebuilt after this open.
+fn with_its_repo(subject: &ReviewSubject) -> ReviewSubject {
+    match subject {
+        ReviewSubject::PullRequest(_) => subject.clone(),
+        ReviewSubject::Local(change_set) => ReviewSubject::from(
+            change_set
+                .clone()
+                .in_repo(LocalGit::origin_of(change_set.folder().as_path())),
+        ),
+    }
 }
 
 fn build_pull_request(
@@ -96,22 +110,9 @@ fn build_pull_request(
         // A ref kept too long only waits for the next open; the review reads the same either way.
         eprintln!("could not let go of the snapshots {pr} no longer reads: {error:#}");
     }
-    // A basic file with a guided one beside it shows the basic tour.
-    let tour = if ToursOnDisk::of(folders, &subject).opens_basic() {
-        Tour::Basic(BasicTour::load_of(
-            &Tour::basic_path_for(folders, &subject),
-            &subject,
-        )?)
-    } else {
-        Tour::Guided(GuidedTour::load_of(&opened.tour_path(), &subject)?)
-    };
+    let tour = Tour::load_of(&Tour::shown_path_for(folders, &subject), &subject)?;
     let code = opened.at_pinned_tips(tour.pin())?;
-    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin().head);
-    let mut review = match tour {
-        Tour::Basic(tour) => Review::open_basic(tour, code.source.as_ref(), opened.state_file())?,
-        Tour::Guided(tour) => Review::open(tour, code.source.as_ref(), opened.state_file())?,
-    };
-    review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
+    let mut review = ReviewBuilder::new(folders, &subject).build(tour, code.source.as_ref())?;
     review.local_reviews_of_repo_are(folders, local_reviews_of_repo(folders, pr));
     opened.state_file().remember_folder(clones_from)?;
     Ok(Built {
@@ -125,29 +126,12 @@ fn build_pull_request(
 /// A local review reads the snapshot its tour is pinned to from its own folder, and has no GitHub to
 /// ask: the port it holds refuses every call.
 fn build_local(change_set: &LocalChangeSet, folders: &AppFolders) -> anyhow::Result<Built> {
-    let change_set = &change_set
-        .clone()
-        .in_repo(LocalGit::origin_of(change_set.folder().as_path()));
     let subject = ReviewSubject::from(change_set.clone());
     let opened = OpenedChangeSet::new(change_set, folders);
     opened.make_basic_tour_if_no_tour()?;
-    let tour = if ToursOnDisk::of(folders, &subject).opens_basic() {
-        Tour::Basic(BasicTour::load_of(
-            &Tour::basic_path_for(folders, &subject),
-            &subject,
-        )?)
-    } else {
-        Tour::Guided(GuidedTour::load_of(&opened.tour_path(), &subject)?)
-    };
+    let tour = Tour::load_of(&Tour::shown_path_for(folders, &subject), &subject)?;
     let code = opened.at_pinned_tips()?;
-    let facts = opened.facts(tour.pin())?;
-    let working_copy_is_at_tour_head = code.source.working_tree_is_at(&tour.pin().head);
-    let mut review = match tour {
-        Tour::Basic(tour) => Review::open_basic(tour, code.source.as_ref(), opened.state_file())?,
-        Tour::Guided(tour) => Review::open(tour, code.source.as_ref(), opened.state_file())?,
-    };
-    review.local_facts_are(facts);
-    review.working_copy_is(WorkingCopy::of(working_copy_is_at_tour_head));
+    let review = ReviewBuilder::new(folders, &subject).build(tour, code.source.as_ref())?;
     Ok(Built {
         review,
         source: code.source,
@@ -164,24 +148,13 @@ fn assemble(
     built: Built,
 ) -> anyhow::Result<OpenedReview> {
     let Built {
-        mut review,
+        review,
         source,
         pick_code_source,
         github,
     } = built;
     let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(folders)?;
-    review
-        .display_options_mut()
-        .use_more_lines(config.more_lines());
-    if let Some(pr) = subject.pull_request() {
-        review.prefer_merge_method(config.merge_method(&pr.repo));
-    }
-    let unreadable = unreadable_local_tours(folders);
-    if !unreadable.is_empty() {
-        review.raise_problem(Problem::LocalToursNotRead(unreadable));
-    }
-
     let agent_folder = clone
         .clone()
         .unwrap_or_else(|| folders.home().to_path_buf());

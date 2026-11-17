@@ -15,6 +15,10 @@ impl ReviewCore {
         self.merge_method = method;
     }
 
+    pub fn merge_method(&self) -> MergeMethod {
+        self.merge_method
+    }
+
     /// `Shift+M`: the first press says what the same press again does, naming the merge method;
     /// that press, within ten seconds, turns auto-merge on or off, or merges the PR now.
     pub fn ask_to_change_merging(&mut self, now: Instant) -> PressStep {

@@ -800,6 +800,42 @@ fn a_local_tour_that_cannot_be_read_is_a_problem_naming_the_file_in_any_review_o
 }
 
 #[test]
+fn an_update_keeps_the_more_lines_setting_the_repo_and_the_problem_of_an_unreadable_local_tour() {
+    let feature = Feature::with_work_in_progress();
+    let second = with_a_second_review_and_a_pr_ref(&feature);
+    std::fs::write(
+        Tour::shown_path_for(&feature.repo.folders(), &second),
+        "not a tour",
+    )
+    .unwrap();
+    let config = feature.repo.folders().config_file();
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(config, "more_lines = 5\n").unwrap();
+    let as_the_cli_names_it: ReviewSubject = feature.subject().to_string().parse().unwrap();
+    let mut opened = open_review(
+        &as_the_cli_names_it,
+        feature.repo.path(),
+        &feature.repo.folders(),
+    )
+    .unwrap();
+    let repo = opened.review.local_facts().unwrap().repo.clone();
+    assert!(repo.is_some());
+    feature.repo.write("README.md", "hello\nworld\nagain\n");
+
+    update(&mut opened);
+
+    assert_eq!(opened.review.local_facts().unwrap().repo, repo);
+    assert_eq!(opened.review.display_options().more_lines().get(), 5);
+    assert!(
+        opened
+            .review
+            .problems()
+            .iter()
+            .any(|problem| problem.kind() == ProblemKind::LocalToursNotRead)
+    );
+}
+
+#[test]
 fn a_review_opened_with_every_local_tour_readable_has_no_such_problem() {
     let feature = Feature::with_work_in_progress();
     with_a_second_review_and_a_pr_ref(&feature);

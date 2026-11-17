@@ -451,18 +451,14 @@ impl Review {
 
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
-    /// go), its work, whose outcomes still land here, and which screen's end the window saw.
+    /// go), its work, whose outcomes still land here, and which screen's end the window saw. What
+    /// the config and the disk say is `ReviewBuilder`'s, which built this review.
     pub fn carry_on_from(&mut self, replaced: Self) {
         let replaced = replaced.into_core();
         let switched_to_guided =
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
-        if self.local_facts.is_none()
-            && let Some(facts) = replaced.local_facts
-        {
-            self.local_facts_are(facts);
-        }
         if self.pull_of_branch.is_none() {
             self.pull_of_branch = replaced.pull_of_branch;
         }

@@ -59,6 +59,7 @@ mod remembered_prs;
 mod rendered_view;
 mod reopen_after_save;
 mod review;
+mod review_builder;
 mod review_state;
 mod reviewing_mark;
 mod row_selection;
@@ -187,6 +188,7 @@ pub use review::{
     NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop,
     SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadFile, UnreadStep,
 };
+pub use review_builder::ReviewBuilder;
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
 pub use saved_state::RepinRunning;
