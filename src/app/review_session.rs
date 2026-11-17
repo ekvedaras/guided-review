@@ -513,6 +513,21 @@ impl ReviewSession {
         }
     }
 
+    /// Open PR of a local review: the agent is asked off the UI thread, since herdr is asked first.
+    pub fn open_pr(&mut self, cx: &mut Context<Self>) {
+        let agents = self.tour_work.tour_agents.clone();
+        let subject = self.review.subject().clone();
+        self.run_off_thread(
+            cx,
+            move || agents.ask_to_open_pr(&subject),
+            |_, outcome, cx| {
+                let (tone, line) = outcome.open_pr_toast();
+                post_toast(cx, tone, line);
+            },
+        )
+        .detach();
+    }
+
     /// Sends the review in the background; `on_done` gets the answer.
     pub fn finish_review(
         &mut self,

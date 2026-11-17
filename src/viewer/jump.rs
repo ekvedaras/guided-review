@@ -203,6 +203,8 @@ pub enum PaletteAction {
     FinishReview,
     /// A local review's finish: its queued tasks go to the change set's agent.
     SendTasks,
+    /// A local review's ask to its agent to open the PR of its branch.
+    OpenPr,
     OpenOnGitHub,
     /// GitHub's checks page of the PR.
     OpenChecksOnGitHub,
@@ -248,6 +250,7 @@ impl PaletteAction {
             Self::SwitchToGuidedTour => "Switch to guided tour",
             Self::FinishReview => "Finish review",
             Self::SendTasks => "Send tasks",
+            Self::OpenPr => "Open PR",
             Self::OpenOnGitHub => "Open on GitHub",
             Self::OpenChecksOnGitHub => "Open checks on GitHub",
             Self::ConvertToDraft => "Convert to draft",
@@ -287,6 +290,7 @@ impl PaletteAction {
             | Self::SwitchToGuidedTour
             | Self::FinishReview
             | Self::SendTasks
+            | Self::OpenPr
             | Self::OpenOnGitHub
             | Self::OpenChecksOnGitHub
             | Self::SwitchPr

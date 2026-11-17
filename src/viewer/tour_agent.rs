@@ -7,6 +7,7 @@ use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
 use super::active_pr::OpenOrigin;
+use super::toasts::ToastTone;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
 /// A herdr terminal, as `hc` names it (`t7`).
@@ -307,16 +308,49 @@ pub enum OwnAgentHandOff {
     Unreported(TerminalId),
 }
 
+const MAKE_YOURS: &str =
+    "Run `guided-review open` from your own Claude in herdr to make it the tour agent";
+
+fn not_asked(why: &str) -> (ToastTone, String) {
+    (
+        ToastTone::Danger,
+        format!("Could not ask to open the PR: {why}"),
+    )
+}
+
 impl OwnAgentHandOff {
     /// Held back from an agent that does not report its state: the reviewer may send it anyway.
     pub fn can_send_anyway(&self) -> bool {
         matches!(self, Self::Unreported(_))
     }
 
+    /// What the toast says after Open PR.
+    pub fn open_pr_toast(&self) -> (ToastTone, String) {
+        match self {
+            Self::Delivered(terminal) => (
+                ToastTone::Success,
+                format!("Asked your agent {terminal} to open the PR"),
+            ),
+            Self::Started(terminal) => (
+                ToastTone::Success,
+                format!("Started an agent {terminal} to open the PR"),
+            ),
+            Self::StartedByApp(terminal) => not_asked(&format!(
+                "the agent {terminal} was started by the app and cannot change files. {MAKE_YOURS}"
+            )),
+            Self::NotSent(reason) => not_asked(&format!("{reason}. Try again when it is free")),
+            Self::NoAgent => not_asked(&format!("there is no tour agent. {MAKE_YOURS}")),
+            Self::PickAnAgent => not_asked(
+                "several agents work in this review's folder. Pick one with Use this agent in the sidebar",
+            ),
+            Self::Unreported(terminal) => not_asked(&format!(
+                "your agent {terminal} does not report its state. Look at it first, it may be waiting on a question"
+            )),
+        }
+    }
+
     /// What the Ask panel says under the Ask.
     pub fn line(&self) -> String {
-        const MAKE_YOURS: &str =
-            "Run `guided-review open` from your own Claude in herdr to make it the tour agent";
         match self {
             Self::Delivered(terminal) => format!("Handed to your agent {terminal}"),
             Self::StartedByApp(terminal) => format!(
@@ -670,6 +704,11 @@ impl TourAgents {
     /// cannot change files, and the reviewer's own one may.
     pub fn hand_to_own_agent(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
         self.hand_to_own(subject, text, false)
+    }
+
+    /// Open PR: the agent's own skills open the PR of the branch, as when the reviewer types it.
+    pub fn ask_to_open_pr(&self, subject: &ReviewSubject) -> OwnAgentHandOff {
+        self.hand_to_own_agent(subject, "pr it")
     }
 
     /// Types an Ask the reviewer chose to send anyway into their agent, whatever its state.

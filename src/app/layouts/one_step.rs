@@ -1272,6 +1272,7 @@ impl OneStepLayout {
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
+            Effect::OpenPr => self.session.update(cx, ReviewSession::open_pr),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
             Effect::OpenCheck(url) => open_link(&url, cx),
@@ -2215,6 +2216,25 @@ impl OneStepLayout {
             ))
             .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)))
         });
+        let open_pr = review.can_open_pr().then(|| {
+            button(
+                &colors,
+                "title-bar-open-pr",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+            .child(button_icon(
+                &colors,
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::PullRequest,
+            ))
+            .child("Open PR")
+            .tooltip(tooltip(|_| {
+                "Ask your agent to open the PR: it types `pr it`".into()
+            }))
+            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenPr, window, cx)))
+        });
         let mut switch_pr = div().id("title-bar-switch-pr");
         switch_pr.style().flex_shrink = Some(TITLE_SHRINKS_FIRST);
         let switch_pr = switch_pr
@@ -2306,6 +2326,7 @@ impl OneStepLayout {
                     )
                     .child(div().flex_1())
                     .child(jump)
+                    .children(open_pr)
                     .children(github),
             )
             .when(!is_writing_tour, |bar| {
@@ -3175,14 +3196,16 @@ impl OneStepLayout {
         let markdown =
             MarkdownView::new("reviewer-summary", prepared).under_each_picture(under_picture);
         self.markdown_card("REVIEWER SUMMARY", markdown, cx)
-            .child(notes_button(
-                &colors,
-                "summary-to-notes",
-                &summary.notes_button,
-                NotesLabels::SUMMARY,
-                self.session.clone(),
-                NoteSubject::ReviewerSummary,
-            ))
+            .children(summary.notes_button.as_ref().map(|state| {
+                notes_button(
+                    &colors,
+                    "summary-to-notes",
+                    state,
+                    NotesLabels::SUMMARY,
+                    self.session.clone(),
+                    NoteSubject::ReviewerSummary,
+                )
+            }))
     }
 
     fn overview(&self, overview: &OverviewPage, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3475,14 +3498,16 @@ impl OneStepLayout {
                 .items_start()
                 .gap_2()
                 .child(DiagramView::new(self.diagrams.clone()))
-                .child(notes_button(
-                    &Colors::active(cx),
-                    "diagram-to-notes",
-                    &diagram.notes_button,
-                    NotesLabels::DIAGRAM,
-                    self.session.clone(),
-                    NoteSubject::StepDiagram(diagram.step.clone()),
-                ))
+                .children(diagram.notes_button.as_ref().map(|state| {
+                    notes_button(
+                        &Colors::active(cx),
+                        "diagram-to-notes",
+                        state,
+                        NotesLabels::DIAGRAM,
+                        self.session.clone(),
+                        NoteSubject::StepDiagram(diagram.step.clone()),
+                    )
+                }))
         });
         div()
             .pb_4()

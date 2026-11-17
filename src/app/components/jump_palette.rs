@@ -124,7 +124,8 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::FinishReview => Icon::ListChecks,
         PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
-        PaletteAction::ConvertToDraft
+        PaletteAction::OpenPr
+        | PaletteAction::ConvertToDraft
         | PaletteAction::MarkReadyForReview
         | PaletteAction::SwitchPr => Icon::PullRequest,
         PaletteAction::MergeNow | PaletteAction::EnableAutoMerge => Icon::GitMerge,

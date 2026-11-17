@@ -22,6 +22,8 @@
 
 **Move to PR**: Carrying a local review over to the PR opened from its branch: read ticks carry by the re-pin rule, open tasks become draft comments in the PR's review, resolved ones are dropped, and the local review goes. Only on the reviewer's say. Avoid: migrate, convert.
 
+**Open PR**: A local review's action, until its branch has an open PR: it types `pr it` into the change set's agent, so the agent's own skills open the PR. Move to PR is offered once GitHub has it. Avoid: create PR.
+
 **Guided tour**: A tour the tour writer wrote with the `tour` skill: summary, steps and safety net, top-down: main flow first, details later. A tour file with no `kind` is guided. Avoid: AI tour, full tour.
 
 **Basic tour**: A tour made with no AI: every changed file of the PR with its diff, one screen per file, the sidebar a file tree like an IDE. It has no steps, no summary and no safety net; its file says `"kind": "basic"`, holds the pin and the PR's own title (`pr_title`), and sits beside the guided tour's (`<number>.basic.json`). A PR with no tour opens as one. The window names it Basic mode and offers Write guided tour. Avoid: empty tour, plain tour, quick tour.
