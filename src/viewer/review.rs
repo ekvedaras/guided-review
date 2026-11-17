@@ -1,8 +1,7 @@
 mod guided_tour;
 mod jobs;
 mod kept;
-mod merging;
-mod status;
+mod pr_controls;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -53,14 +52,12 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
-use super::merging::{MergeChange, MergeMethod};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
+use super::pr_controls::PrControls;
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
-use super::pr_status::{PrStatus, Readiness};
-use super::press_again::PressAgain;
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
@@ -303,18 +300,8 @@ pub struct ReviewCore {
     on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
-    /// What GitHub last said of the PR's draft state and checks; kept as it was while a read fails.
-    pr_status: Option<PrStatus>,
-    /// The first press of the key, waiting for the same press again.
-    readiness_asked: PressAgain<Readiness>,
-    /// What the confirmed press changed the PR to, until GitHub answers.
-    readiness_to_send: Option<Readiness>,
-    /// The reviewer's merge method for this PR's repo, from Settings.
-    merge_method: MergeMethod,
-    /// The first press of the auto-merge key, waiting for the same press again.
-    merging_asked: PressAgain<MergeChange>,
-    /// What the confirmed press asked of GitHub, until GitHub answers.
-    merging_to_send: Option<MergeChange>,
+    /// `None` for a local review, which has no PR to change.
+    pr_controls: Option<PrControls>,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -442,9 +429,9 @@ impl Review {
 
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
-    /// go), its work, whose outcomes still land here, its branch link, which those outcomes filled,
-    /// and which screen's end the window saw. What the config and the disk say is `ReviewBuilder`'s,
-    /// which built this review.
+    /// go), its work, whose outcomes still land here, its branch link and PR controls, which those
+    /// outcomes filled, and which screen's end the window saw. What the config and the disk say is
+    /// `ReviewBuilder`'s, which built this review.
     pub fn carry_on_from(&mut self, replaced: Self) {
         let replaced = replaced.into_core();
         let switched_to_guided =
@@ -453,6 +440,9 @@ impl Review {
         self.work = replaced.work;
         self.jobs = replaced.jobs;
         self.branch_link = replaced.branch_link;
+        if let (Some(controls), Some(replaced)) = (&mut self.pr_controls, replaced.pr_controls) {
+            controls.carry_on_from(replaced);
+        }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
         }
@@ -624,6 +614,7 @@ impl ReviewCore {
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
         let branch_link = BranchLink::of(&subject);
+        let pr_controls = PrControls::of(&subject);
         Ok(Self {
             tour,
             file_tree,
@@ -638,12 +629,7 @@ impl ReviewCore {
             pr_head: None,
             on_disk: None,
             last_review: None,
-            pr_status: None,
-            readiness_asked: PressAgain::default(),
-            readiness_to_send: None,
-            merge_method: MergeMethod::default(),
-            merging_asked: PressAgain::default(),
-            merging_to_send: None,
+            pr_controls,
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -2172,8 +2158,11 @@ impl ReviewCore {
             .chain([wrap, whitespace])
             .chain(page_toggles)
             .chain(finish)
-            .chain(self.readiness_palette_action())
-            .chain(self.merging_palette_action())
+            .chain(
+                self.pr_controls
+                    .iter()
+                    .flat_map(PrControls::palette_actions),
+            )
             .chain(self.can_open_pr().then_some(PaletteAction::OpenPr))
             .chain(self.subject.pull_request().into_iter().flat_map(|_| {
                 [

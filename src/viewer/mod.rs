@@ -47,6 +47,7 @@ mod overview;
 mod page;
 mod piece_labels;
 mod ports;
+mod pr_controls;
 mod pr_notes;
 mod pr_status;
 mod pr_switcher;

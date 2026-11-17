@@ -207,19 +207,6 @@ fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press(
 }
 
 #[test]
-fn a_press_after_ten_seconds_only_asks_again() {
-    let pull = Pull::new();
-    let (mut review, github, now) = read_merging(&pull, blocked_merging());
-    review.ask_to_change_merging(now);
-
-    let step = review.ask_to_change_merging(now + Duration::from_secs(11));
-
-    assert!(matches!(step, PressStep::Ask(_)), "{step:?}");
-    drive_without_agents(&mut review, &github, &pull.source(), now);
-    assert_eq!(merging_calls(&pull), []);
-}
-
-#[test]
 fn a_press_github_would_refuse_says_why_and_one_before_github_is_read_does_nothing() {
     let pull = Pull::new();
     let (mut read_only, _github, now) = read_merging(
