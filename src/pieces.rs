@@ -550,32 +550,46 @@ fn mark_for(
     })
 }
 
-/// Blank-line-only changes ride along with the nearest piece that has real changes.
-/// They stay a piece of their own only when nothing else in the file changed.
+/// A blank changed line rides along with the piece of the nearest real changed line: its own piece
+/// on a tie, else the first. So a class piece does not show blank lines from all over the file,
+/// as each one between two new methods sits nearer to one of them. Blank lines stay a piece of their
+/// own only when nothing else changed.
 fn join_blank_line_changes(changes: Vec<SymbolChange>) -> Vec<SymbolChange> {
-    let (blank_only, mut changes): (Vec<_>, Vec<_>) =
-        changes.into_iter().partition(|change| !change.moves_code());
-    if changes.is_empty() {
-        return blank_only;
+    if !changes.iter().any(SymbolChange::moves_code) {
+        return changes;
     }
-    for blank in blank_only {
-        for (is_added, line) in blank
-            .removed
-            .into_iter()
-            .map(|line| (false, line))
-            .chain(blank.added.into_iter().map(|line| (true, line)))
-        {
-            let Some(nearest) = changes
-                .iter_mut()
-                .min_by_key(|change| change.distance_to(line.number.into()))
-            else {
-                continue;
-            };
-            if is_added {
-                nearest.added.push(line);
-            } else {
-                nearest.removed.push(line);
+    let mut blank_lines = Vec::new();
+    let mut changes: Vec<SymbolChange> = changes
+        .into_iter()
+        .filter_map(|mut change| {
+            for (is_added, lines) in [(false, &mut change.removed), (true, &mut change.added)] {
+                let (blank, code): (Vec<_>, Vec<_>) = lines
+                    .drain(..)
+                    .partition(|line| line.text.trim().is_empty());
+                *lines = code;
+                blank_lines.extend(
+                    blank
+                        .into_iter()
+                        .map(|line| (change.slot.clone(), is_added, line)),
+                );
             }
+            change.moves_code().then_some(change)
+        })
+        .collect();
+    for (own_slot, is_added, line) in blank_lines {
+        let number = usize::from(line.number);
+        let Some(nearest) = changes.iter_mut().min_by_key(|change| {
+            (
+                change.distance_to(number, is_added),
+                change.slot != own_slot,
+            )
+        }) else {
+            continue;
+        };
+        if is_added {
+            nearest.added.push(line);
+        } else {
+            nearest.removed.push(line);
         }
     }
     for change in &mut changes {
@@ -653,10 +667,13 @@ impl<'a> SymbolChange<'a> {
             .any(|line| !line.text.trim().is_empty())
     }
 
-    fn distance_to(&self, line: usize) -> usize {
-        self.added
+    /// To the nearest line on the same side, as added and removed lines count from different files.
+    fn distance_to(&self, line: usize, is_added: bool) -> usize {
+        let side = if is_added { &self.added } else { &self.removed };
+        let other_side = if is_added { &self.removed } else { &self.added };
+        let lines = if side.is_empty() { other_side } else { side };
+        lines
             .iter()
-            .chain(&self.removed)
             .map(|other| usize::from(other.number).abs_diff(line))
             .min()
             .unwrap_or(usize::MAX)

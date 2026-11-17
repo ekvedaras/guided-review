@@ -122,8 +122,8 @@ fn ts_tests_are_pieces_nested_under_their_describe() {
     assert_eq!(
         pieces,
         [
-            "#Cart  test  added  +3 −0  describe(\"Cart\", () =>",
-            "#Cart::adds items  test  added  +3 −0  it(\"adds items\", () =>",
+            "#Cart  test  added  +2 −0  describe(\"Cart\", () =>",
+            "#Cart::adds items  test  added  +4 −0  it(\"adds items\", () =>",
             "#Cart::removes items  test  added  +3 −0  test(\"removes items\", () =>",
         ]
     );
@@ -154,9 +154,9 @@ enum Status: string
     assert_eq!(
         pieces,
         [
-            "#LIMIT  const  added  +1 −0  const LIMIT = 10",
-            "#Status  enum  added  +6 −0  enum Status: string",
-            "#Status::DEFAULT  const  added  +1 −0  const DEFAULT = self::Open",
+            "#LIMIT  const  added  +2 −0  const LIMIT = 10",
+            "#Status  enum  added  +5 −0  enum Status: string",
+            "#Status::DEFAULT  const  added  +2 −0  const DEFAULT = self::Open",
             "#Status::label  method  added  +4 −0  public function label(): string",
         ]
     );

@@ -538,7 +538,7 @@ fn a_new_php_file_is_one_piece_per_symbol() {
 
     assert!(outline.contains("  #Order  class  added"), "{outline}");
     assert!(
-        outline.contains("  #Order::a  method  added  +4 −0"),
+        outline.contains("  #Order::a  method  added  +5 −0"),
         "{outline}"
     );
     assert!(
