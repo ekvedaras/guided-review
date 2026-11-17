@@ -82,7 +82,6 @@ use crate::app::components::toast_stack::{Toaster, post_toast};
 use crate::app::components::tooltip::tooltip;
 use crate::app::components::version_link::version_link;
 use crate::app::frame_stats::{FrameStatsHook, ScriptMove};
-use crate::app::keymap::keymap;
 use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
@@ -98,16 +97,16 @@ use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
-    CheckState, Checks, Chord, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
-    CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
-    GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, MergeOffer, Merging,
-    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
-    PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject,
-    ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
-    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
-    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
-    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
-    Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
+    CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
+    HandOffId, InFlight, Intent, LabelSwitch, LineLocation, MergeOffer, Merging, NextScreen,
+    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
+    PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness,
+    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
+    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
+    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
+    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
+    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -2342,10 +2341,16 @@ impl OneStepLayout {
             .children(mark.map(|mark| sized_icon(mark, text_color, px(11.))))
             .child(status.label())
             .when(status.viewer_may_change_readiness, |chip| {
-                chip.cursor_pointer()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.act(Intent::ToggleDraft, window, cx);
-                    }))
+                chip.child(button_keys(
+                    colors,
+                    ButtonKind::Ghost,
+                    Command::ToggleDraft,
+                    cx,
+                ))
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.act(Intent::ToggleDraft, window, cx);
+                }))
             });
         div()
             .id("title-bar-checks")
@@ -3572,9 +3577,6 @@ fn merge_button(
         AutoMerge::On(method) => Some(method.label()),
         AutoMerge::Off => None,
     };
-    let key = keymap(cx)
-        .first_chord(Command::ToggleAutoMerge)
-        .map(Chord::spelled);
     Some(
         icon_label_button(
             colors,
@@ -3585,10 +3587,8 @@ fn merge_button(
             label,
         )
         .children(method.map(|method| div().text_color(colors.muted_text).child(method)))
-        .tooltip(tooltip(move |_| match &key {
-            Some(key) => format!("{key}. Click twice to confirm").into(),
-            None => "Click twice to confirm".into(),
-        }))
+        .child(button_keys(colors, kind, Command::ToggleAutoMerge, cx))
+        .tooltip(tooltip(|_| "Click twice to confirm".into()))
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleAutoMerge, window, cx);
         })),
