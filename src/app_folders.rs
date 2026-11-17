@@ -249,6 +249,11 @@ impl AppFolders {
         self.state.join("state")
     }
 
+    /// The record of the local reviews dropped or moved to a PR, kept beside the state files.
+    pub fn gone_local_reviews(&self) -> PathBuf {
+        self.state.join("gone-local-reviews")
+    }
+
     pub fn evals(&self) -> PathBuf {
         self.state.join("evals")
     }

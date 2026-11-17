@@ -21,6 +21,8 @@ use crate::viewer::{AgentReplied, HandOffId};
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
 const START_WAIT: Duration = Duration::from_secs(20);
 const QUIT_WAIT: Duration = Duration::from_secs(10);
+/// How long an open that waits for the build holds its answer: the build reads git and may be slow.
+pub const BUILD_WAIT: Duration = Duration::from_secs(60);
 const POLL: Duration = Duration::from_millis(25);
 
 /// Names the binary: its version and the time it was built, so a reinstall of the same version is another
@@ -51,6 +53,9 @@ pub struct OpenRequest {
     pub terminal: Option<String>,
     /// The step to show once open, as a restart brings back the screen it left; else the summary.
     pub at_step: Option<StepId>,
+    /// Answer once the review is built, with how it went, not at once with "opening". An app from before
+    /// this was added ignores it and answers at once.
+    pub waits_for_build: bool,
 }
 
 /// An open request as the line carries it. Any build may take an open, and a build from before local
@@ -65,6 +70,8 @@ struct OpenRequestOnTheWire {
     terminal: Option<String>,
     #[serde(default)]
     at_step: Option<StepId>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    waits_for_build: bool,
 }
 
 impl TryFrom<OpenRequestOnTheWire> for OpenRequest {
@@ -79,6 +86,7 @@ impl TryFrom<OpenRequestOnTheWire> for OpenRequest {
             folder: wire.folder,
             terminal: wire.terminal,
             at_step: wire.at_step,
+            waits_for_build: wire.waits_for_build,
         })
     }
 }
@@ -95,6 +103,7 @@ impl From<OpenRequest> for OpenRequestOnTheWire {
             folder: request.folder,
             terminal: request.terminal,
             at_step: request.at_step,
+            waits_for_build: request.waits_for_build,
         }
     }
 }
@@ -189,6 +198,14 @@ impl RequestLine {
         }
     }
 
+    /// How long the app may take to answer: an open that waits for the build takes as long as the build.
+    pub fn answer_wait(&self) -> Duration {
+        match &self.request {
+            Request::Open(open) if open.waits_for_build => BUILD_WAIT,
+            _ => Duration::ZERO,
+        }
+    }
+
     pub fn to_line(&self) -> anyhow::Result<String> {
         serde_json::to_string(self).context("could not write the request")
     }
@@ -207,6 +224,14 @@ pub enum Answer {
     },
     Refused {
         reason: String,
+    },
+    /// The review is built and shown, or ready in the PR switcher: the answer to an open that waited.
+    Opened {
+        pr: String,
+    },
+    /// The build of an open that waited has not ended in time; it goes on, and a failure shows in the window.
+    StillOpening {
+        pr: String,
     },
     /// The PR has no tour, so the app shows a tour agent writing one; the agent's own `open` ends it.
     Writing {
@@ -247,6 +272,11 @@ impl std::fmt::Display for Answer {
                 f,
                 "No tour of {pr} yet; guided-review app is writing one and opens it when it is ready"
             ),
+            Self::Opened { pr } => write!(f, "guided-review app opened {pr}"),
+            Self::StillOpening { pr } => write!(
+                f,
+                "guided-review app is still building {pr}; it shows when ready, and a failure shows in its window"
+            ),
             Self::Reloaded { pr } => write!(f, "guided-review app reloaded the tour of {pr}"),
             Self::Refused { reason } => write!(f, "guided-review app refused: {reason}"),
             Self::KeptInBackground { pr } => write!(
@@ -265,6 +295,27 @@ impl std::fmt::Display for Answer {
             Self::ShowingSwitcher => write!(f, "guided-review app is showing the PR switcher"),
             Self::Quitting => write!(f, "guided-review app is quitting"),
             Self::OtherBuild => write!(f, "guided-review app is another build"),
+        }
+    }
+}
+
+impl Answer {
+    /// What `open` tells the reviewer: the answer, or its failure. An app that says "opening" to an open
+    /// that asked to wait is of a build from before waiting, so it built nothing yet and cannot say how
+    /// the open went.
+    pub fn about_open(self, asked_to_wait: bool) -> anyhow::Result<String> {
+        match self {
+            Self::Opening { .. } if asked_to_wait => Ok(format!(
+                "{self}\nthis app is an older build, which answers before it has built the review, so it cannot say whether the open worked; quit it (Primary+Q) and run the command again to be told"
+            )),
+            Self::Opening { .. }
+            | Self::Opened { .. }
+            | Self::StillOpening { .. }
+            | Self::Writing { .. }
+            | Self::Reloaded { .. }
+            | Self::KeptInBackground { .. }
+            | Self::GuidedReady { .. } => Ok(self.to_string()),
+            other => anyhow::bail!("{other}"),
         }
     }
 }
@@ -451,12 +502,16 @@ fn exchange(socket: &Path, request: &RequestLine) -> anyhow::Result<Option<Answe
     let Ok(mut stream) = UnixStream::connect(socket) else {
         return Ok(None);
     };
-    stream.set_read_timeout(Some(QUIT_WAIT))?;
+    stream.set_read_timeout(Some(QUIT_WAIT + request.answer_wait()))?;
     writeln!(stream, "{}", request.to_line()?).context("could not send the request")?;
     let mut reply = String::new();
     BufReader::new(stream)
         .read_line(&mut reply)
         .context("the app did not answer")?;
+    anyhow::ensure!(
+        !reply.is_empty(),
+        "the running guided-review app closed the connection without answering, which an app of an older build does when it cannot read the request; quit it (Primary+Q) and run the command again"
+    );
     serde_json::from_str(&reply)
         .map(Some)
         .context("the app's answer is not an answer line")

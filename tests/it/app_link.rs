@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 
 use guided_review::app_link::{
     Answer, AnswerLine, AppFolder, AppListener, BindError, Caller, OnOtherBuild, OpenRequest,
-    OtherBuildRuns, Request, RequestLine, build,
+    OtherBuildRuns, Request, RequestLine, build, hand_over,
 };
 
 use crate::support::FixtureRepo;
@@ -14,6 +14,7 @@ fn open_request() -> OpenRequest {
         folder: "/work/shop".into(),
         terminal: Some("t1b".to_owned()),
         at_step: None,
+        waits_for_build: false,
     }
 }
 
@@ -290,4 +291,128 @@ fn bind_when_free(folder: &AppFolder) -> Result<AppListener, BindError> {
             other => return other,
         }
     }
+}
+
+fn waiting_open_request() -> OpenRequest {
+    OpenRequest {
+        waits_for_build: true,
+        ..open_request()
+    }
+}
+
+#[test]
+fn an_open_request_says_whether_it_waits_for_the_build_and_an_older_one_does_not() {
+    let waiting = open_json_of(waiting_open_request());
+    let mut older = open_json_of(open_request());
+    older.as_object_mut().unwrap().remove("waits_for_build");
+
+    assert_eq!(waiting["waits_for_build"], true);
+    assert!(!open_request_read_from(&older).waits_for_build);
+    assert!(open_request_read_from(&waiting).waits_for_build);
+}
+
+#[test]
+fn a_waiting_open_gets_the_answer_the_app_gives_after_the_build() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let folder = AppFolder::of(&repo.folders());
+    AppListener::bind(&folder).unwrap().serve(|request| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        match request {
+            Request::Open(open) => Answer::Refused {
+                reason: format!("{} has no snapshot", open.subject),
+            },
+            _ => Answer::ShowingSwitcher,
+        }
+    });
+
+    let answer = hand_over(
+        &folder,
+        &Request::Open(waiting_open_request()),
+        &Caller::Command,
+    )
+    .unwrap();
+
+    assert_eq!(
+        answer,
+        Answer::Refused {
+            reason: "https://github.com/acme/shop/pull/7 has no snapshot".to_owned()
+        }
+    );
+}
+
+#[test]
+fn an_app_that_closes_the_connection_without_answering_is_said_to_be_an_older_build_to_quit() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let folder = AppFolder::of(&repo.folders());
+    std::fs::create_dir_all(folder.socket().parent().unwrap()).unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(folder.socket()).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut line = String::new();
+            BufReader::new(&stream).read_line(&mut line).unwrap();
+        }
+    });
+
+    let error = hand_over(
+        &folder,
+        &Request::Open(waiting_open_request()),
+        &Caller::Command,
+    )
+    .unwrap_err();
+
+    let said = format!("{error:#}");
+    assert!(said.contains("older build"), "{said}");
+    assert!(said.contains("quit"), "{said}");
+    assert!(!said.contains("EOF"), "{said}");
+}
+
+#[test]
+fn an_open_the_app_built_is_reported_as_opened() {
+    let told = Answer::Opened {
+        pr: LOCAL_SUBJECT.to_owned(),
+    }
+    .about_open(true)
+    .unwrap();
+
+    assert_eq!(told, format!("guided-review app opened {LOCAL_SUBJECT}"));
+}
+
+#[test]
+fn an_open_the_app_could_not_build_fails_with_the_apps_reason() {
+    let error = Answer::Refused {
+        reason: "the snapshot is lost".to_owned(),
+    }
+    .about_open(true)
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "guided-review app refused: the snapshot is lost"
+    );
+}
+
+#[test]
+fn an_older_app_that_says_opening_before_it_built_is_named_so_the_reviewer_can_quit_it() {
+    let opening = Answer::Opening {
+        pr: LOCAL_SUBJECT.to_owned(),
+    };
+
+    let told = opening.clone().about_open(true).unwrap();
+    let not_waiting = opening.about_open(false).unwrap();
+
+    assert!(told.contains("older build"), "{told}");
+    assert!(told.contains("quit"), "{told}");
+    assert!(!not_waiting.contains("older build"), "{not_waiting}");
+}
+
+#[test]
+fn an_open_still_building_when_the_wait_ends_says_so() {
+    let told = Answer::StillOpening {
+        pr: LOCAL_SUBJECT.to_owned(),
+    }
+    .about_open(true)
+    .unwrap();
+
+    assert!(told.contains("still"), "{told}");
+    assert!(told.contains("window"), "{told}");
 }

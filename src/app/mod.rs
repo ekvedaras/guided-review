@@ -36,7 +36,7 @@ use gpui::{
 use gpui_platform::application;
 
 use crate::app_folders::AppFolders;
-use crate::app_link::{Answer, AppListener, OpenRequest, Request};
+use crate::app_link::{Answer, AppListener, BUILD_WAIT, OpenRequest, Request};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
@@ -91,15 +91,24 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
     let requests_to_self = requests.clone();
     listener.serve(move |request| {
         let (reply, answer) = std::sync::mpsc::channel();
+        let waited_for = match &request {
+            Request::Open(open) if open.waits_for_build => Some(open.subject.clone()),
+            _ => None,
+        };
         if requests
             .unbounded_send(Asked::Request(request, reply))
             .is_err()
         {
             return refused("the app is closing");
         }
-        answer
-            .recv_timeout(Duration::from_secs(10))
-            .unwrap_or_else(|_| refused("the app did not answer in time"))
+        match waited_for {
+            Some(pr) => answer
+                .recv_timeout(BUILD_WAIT)
+                .unwrap_or(Answer::StillOpening { pr }),
+            None => answer
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| refused("the app did not answer in time")),
+        }
     });
     let app = application().with_assets(assets::Assets);
     let relaunches = requests_to_self.clone();
@@ -222,6 +231,7 @@ fn open_request_of(folders: &AppFolders, subject: &ReviewSubject) -> OpenRequest
         folder,
         terminal: None,
         at_step: None,
+        waits_for_build: false,
     }
 }
 
@@ -352,14 +362,25 @@ async fn answer_requests(
                         }
                     }
                     OpenDecision::Build(ticket) => {
-                        reply
-                            .send(Answer::Opening {
-                                pr: open.subject.clone(),
-                            })
-                            .ok();
+                        // An open that waits is answered when the build ends; any other at once.
+                        let waiting = if open.waits_for_build {
+                            Some(reply)
+                        } else {
+                            reply
+                                .send(Answer::Opening {
+                                    pr: open.subject.clone(),
+                                })
+                                .ok();
+                            None
+                        };
                         let (screen, folders) = (Rc::clone(&screen), folders.clone());
                         cx.spawn(async move |cx| {
-                            build_and_show(screen, ticket, pr, open, folders, cx).await;
+                            let subject = open.subject.clone();
+                            let answer =
+                                build_and_show(screen, ticket, pr, open, folders, cx).await;
+                            if let Some(waiting) = waiting {
+                                waiting.send(answer.into_answer(subject)).ok();
+                            }
                         })
                         .detach();
                     }
@@ -498,8 +519,10 @@ fn reopen_shown(screen: &SharedScreen, folders: &AppFolders, cx: &mut AsyncApp) 
     };
     let open = open_request_of(folders, &pr);
     let (screen, folders) = (Rc::clone(screen), folders.clone());
-    cx.spawn(async move |cx| build_and_show(screen, ticket, pr, open, folders, cx).await)
-        .detach();
+    cx.spawn(async move |cx| {
+        build_and_show(screen, ticket, pr, open, folders, cx).await;
+    })
+    .detach();
 }
 
 /// Only the PR in the window is marked here, because its session holds the state it writes back. For
@@ -587,9 +610,9 @@ fn show_again(window: WindowHandle<OneStepLayout>, cx: &mut AsyncApp) {
     });
 }
 
-/// The review is built off the UI thread while the PR on screen stays. When a build fails with no window
-/// open, the app ends with the reason in its log; otherwise the reason is also shown in the window, over
-/// Settings or the PR on screen, whichever it holds.
+/// The review is built off the UI thread while the PR on screen stays. The reason a build fails is also
+/// shown in the window, over Settings or the PR on screen, whichever it holds, and in a switcher the app
+/// opens when it has no window.
 async fn build_and_show(
     screen: SharedScreen,
     ticket: BuildTicket,
@@ -597,7 +620,7 @@ async fn build_and_show(
     open: OpenRequest,
     folders: AppFolders,
     cx: &mut AsyncApp,
-) {
+) -> BuildEnd {
     let (build_pr, folder, at_step) = (pr.clone(), open.folder.clone(), open.at_step.clone());
     let disk_folders = folders.clone();
     let mut built = cx
@@ -625,11 +648,27 @@ async fn build_and_show(
     });
     let window = screen.borrow().window;
     match finished {
-        Finished::Superseded => {}
+        Finished::Superseded => BuildEnd::Superseded,
         Finished::Stay { reason } => {
             eprintln!("{reason}");
+            let failed = BuildEnd::Failed(reason.clone());
             match window.build_failed() {
-                FailedBuild::EndApp => std::process::exit(1),
+                FailedBuild::OpenSwitcherWithReason => {
+                    let opened = cx.update(|cx| {
+                        let window = open_switcher_window(cx)?;
+                        window.update(cx, |switcher_window, _, cx| {
+                            switcher_window.build_failed(reason, cx);
+                        })?;
+                        Ok::<_, anyhow::Error>(window)
+                    });
+                    match opened {
+                        Ok(window) => screen.borrow_mut().window = AppWindow::SwitcherOnly(window),
+                        Err(error) => {
+                            eprintln!("could not show the reason in a window: {error:#}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 FailedBuild::ShowInSettings(window) => cx.update(|cx| {
                     window
                         .update(cx, |settings_window, _, cx| {
@@ -652,6 +691,7 @@ async fn build_and_show(
                         .ok();
                 }),
             }
+            failed
         }
         Finished::Switch(opened) => {
             let shown = cx.update(|cx| {
@@ -675,12 +715,30 @@ async fn build_and_show(
                 Ok(window) => {
                     screen.borrow_mut().window = AppWindow::Review(window);
                     apply_replies_held_for_reopen(&active, window, cx);
+                    BuildEnd::Shown
                 }
                 Err(error) => {
                     eprintln!("could not show {pr}: {error:#}");
                     std::process::exit(1);
                 }
             }
+        }
+    }
+}
+
+/// How a build ended, for the open that waited for it.
+enum BuildEnd {
+    Shown,
+    Failed(String),
+    Superseded,
+}
+
+impl BuildEnd {
+    fn into_answer(self, subject: String) -> Answer {
+        match self {
+            Self::Shown => Answer::Opened { pr: subject },
+            Self::Failed(reason) => refused(&reason),
+            Self::Superseded => refused("another open took its place before this one was built"),
         }
     }
 }

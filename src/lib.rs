@@ -12,6 +12,7 @@ pub mod eval;
 pub mod file_path;
 pub mod file_rules;
 pub mod github;
+pub mod gone_local_reviews;
 pub mod hc_tour_agent;
 pub mod hex;
 pub mod home;
