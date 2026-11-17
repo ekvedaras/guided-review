@@ -2,6 +2,8 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use crate::pull_request::PullRequestUrl;
+
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::typing_save::{Saves, TypingSave};
 
@@ -28,18 +30,11 @@ impl fmt::Display for RepinRunning {
 
 impl std::error::Error for RepinRunning {}
 
-/// What writes the state file from another thread while this review waits to be replaced or closed.
-/// Only one runs at a time: each starts from the file as it is and the other's write would be lost.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum WriterElsewhere {
-    Repin,
-    /// Drop review, or a move to a PR, which deletes the local review once the PR's state is saved.
-    Drop,
-}
-
 #[derive(Default)]
 struct RepinGuard {
-    running: Option<WriterElsewhere>,
+    /// A re-pin, a move or a drop writes the state file from another thread while this review waits
+    /// to be replaced or closed. Which one, and that only one runs, is `ReplacingJobs`'.
+    writer_elsewhere: bool,
     /// A refused change is named to the reviewer until the re-pin ends.
     refused: bool,
 }
@@ -96,13 +91,20 @@ impl SavedState {
         change(&mut self.state)
     }
 
+    /// Made even while a re-pin runs, and written to the file's own section of declines alone, so it
+    /// never writes the viewer's sections back.
+    pub(super) fn decline_move_to(&mut self, pr: &PullRequestUrl) -> anyhow::Result<()> {
+        self.state.decline_move_to(pr);
+        self.file.decline_move_to(pr)
+    }
+
     pub(super) fn is_repinning(&self) -> bool {
-        self.repin.running.is_some()
+        self.repin.writer_elsewhere
     }
 
     /// For what the review keeps outside its state but would lose all the same when the re-pin replaces it.
     pub(super) fn refuse_while_repinning(&mut self) -> anyhow::Result<()> {
-        if self.repin.running.is_some() {
+        if self.repin.writer_elsewhere {
             self.repin.refused = true;
             Err(RepinRunning.into())
         } else {
@@ -115,20 +117,13 @@ impl SavedState {
         self.saves.typed();
     }
 
-    /// `false`, and nothing changes, while another writer runs.
-    pub(super) fn start_writing_elsewhere(&mut self, writer: WriterElsewhere) -> bool {
-        if self.repin.running.is_some() {
-            return false;
-        }
-        self.repin.running = Some(writer);
-        true
+    pub(super) fn writes_elsewhere(&mut self) {
+        self.repin.writer_elsewhere = true;
     }
 
-    /// Only `writer`'s own failure frees the review: another's failure is not the end of this one.
-    pub(super) fn failed_elsewhere(&mut self, writer: WriterElsewhere) {
-        if self.repin.running == Some(writer) {
-            self.repin = RepinGuard::default();
-        }
+    /// The writer elsewhere failed and the review stays: it takes changes again.
+    pub(super) fn writes_here_again(&mut self) {
+        self.repin = RepinGuard::default();
     }
 
     pub(super) fn refused_while_repinning(&self) -> bool {

@@ -9,13 +9,13 @@ use crate::support::work::drive_without_agents;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{StepId, Tour};
 use guided_review::update::Build;
 use guided_review::viewer::{
-    AgentStatus, Effect, Intent, NoteSubject, OwnAgentHandOff, PageRow, PaletteAction, Review,
-    ReviewStateFile, TerminalId, ToastTone, TourAgentPort, TourAgents, WindowMoment,
+    AgentStatus, BranchOffer, Effect, Intent, NoteSubject, OwnAgentHandOff, PageRow, PaletteAction,
+    Review, ReviewStateFile, TerminalId, ToastTone, TourAgentPort, TourAgents, WindowMoment,
 };
 use serde_json::json;
 
@@ -121,6 +121,7 @@ fn a_local_review_offers_open_pr_and_not_open_on_github() {
     let feature = Feature::with_work_in_progress();
     let opened = feature.open();
 
+    assert_eq!(opened.review.branch_offer(), Some(BranchOffer::OpenPr));
     assert!(opened.review.can_open_pr());
     assert!(offered(&opened.review, PaletteAction::OpenPr));
     assert!(!offered(&opened.review, PaletteAction::OpenOnGitHub));
@@ -138,6 +139,7 @@ fn a_pr_review_offers_open_on_github_and_not_open_pr() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let review = pr_review(&repo);
 
+    assert_eq!(review.branch_offer(), None);
     assert!(!review.can_open_pr());
     assert!(offered(&review, PaletteAction::OpenOnGitHub));
     assert!(!offered(&review, PaletteAction::OpenPr));
@@ -159,7 +161,10 @@ fn once_the_pr_of_the_branch_is_open_the_local_review_offers_the_move_instead_of
 
     feature.focus(&mut opened, &github);
 
-    assert!(opened.review.move_offer().is_some());
+    assert!(matches!(
+        opened.review.branch_offer(),
+        Some(BranchOffer::MoveToPr(_))
+    ));
     assert!(!opened.review.can_open_pr());
     assert!(!offered(&opened.review, PaletteAction::OpenPr));
     assert_eq!(
@@ -168,6 +173,23 @@ fn once_the_pr_of_the_branch_is_open_the_local_review_offers_the_move_instead_of
             .decide(Intent::OpenPr, WindowMoment::default()),
         Effect::Nothing
     );
+}
+
+#[test]
+fn a_local_review_that_kept_away_from_its_pr_offers_neither_the_move_nor_open_pr() {
+    let feature = Feature::with_work_in_progress();
+    let github = FakePorts::with_pull("main-tip", "snapshot", &feature.sent).with_open_pull_from(
+        "feature",
+        SHOP_7,
+        "Add the cart",
+    );
+    let mut opened = feature.open();
+    feature.focus(&mut opened, &github);
+
+    opened.review.decline_the_move();
+
+    assert_eq!(opened.review.branch_offer(), None);
+    assert!(!opened.review.can_open_pr());
 }
 
 #[test]

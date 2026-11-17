@@ -35,26 +35,58 @@ impl PressStep {
     }
 }
 
-/// The first press of a key and what it asked for, waiting for the same press again.
+/// One change a key asks of the PR: the first press and what it asked for, waiting for the same
+/// press again, then the confirmed change until GitHub answers.
 #[derive(Debug)]
-pub struct PressAgain<T> {
+pub(super) struct PressAgain<T> {
     asked: Option<(T, Instant)>,
+    to_send: Option<T>,
 }
 
 impl<T> Default for PressAgain<T> {
     fn default() -> Self {
-        Self { asked: None }
+        Self {
+            asked: None,
+            to_send: None,
+        }
     }
 }
 
 impl<T: Copy + PartialEq> PressAgain<T> {
-    /// Whether this press confirms the first one: the same change, soon enough. When it does not,
-    /// it becomes the first press.
-    pub fn confirms(&mut self, wanted: T, now: Instant) -> bool {
+    /// A press of `command`, which offers the change GitHub would take or says why it would not.
+    /// It sends the change when it is the same press as the first, soon enough; otherwise it
+    /// becomes the first press and says what the same press again `does`.
+    pub(super) fn press(
+        &mut self,
+        command: Command,
+        offered: Result<T, String>,
+        now: Instant,
+        does: impl FnOnce(T) -> String,
+    ) -> PressStep {
+        let wanted = match offered {
+            Ok(wanted) => wanted,
+            Err(refusal) => return PressStep::Refused(refusal),
+        };
         let confirmed = self.asked.is_some_and(|(asked, at)| {
             asked == wanted && now.saturating_duration_since(at) <= CONFIRM_WITHIN
         });
         self.asked = (!confirmed).then_some((wanted, now));
-        confirmed
+        if confirmed {
+            self.to_send = Some(wanted);
+            return PressStep::Sent;
+        }
+        PressStep::ask(command, &does(wanted))
+    }
+
+    /// What the confirmed press wants GitHub to be told.
+    pub(super) fn to_send(&self) -> Option<T> {
+        self.to_send
+    }
+
+    /// GitHub answered `change`, so it is no longer to send.
+    pub(super) fn landed(&mut self, change: T) {
+        if self.to_send == Some(change) {
+            self.to_send = None;
+        }
     }
 }

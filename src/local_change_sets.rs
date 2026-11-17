@@ -5,7 +5,7 @@ use crate::app_folders::AppFolders;
 use crate::config::Config;
 use crate::local_git::LocalGit;
 use crate::local_work_tree::LocalWorkTree;
-use crate::opened_change_set::local_reviews_on_disk;
+use crate::opened_subject::local_reviews_on_disk;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use crate::tour::Tour;

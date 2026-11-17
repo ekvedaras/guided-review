@@ -11,6 +11,7 @@ mod ask_context;
 mod ask_desk;
 mod ask_target;
 mod avatars;
+mod branch_link;
 mod chord;
 mod clone_offer;
 mod code_link;
@@ -46,6 +47,7 @@ mod overview;
 mod page;
 mod piece_labels;
 mod ports;
+mod pr_controls;
 mod pr_notes;
 mod pr_status;
 mod pr_switcher;
@@ -58,7 +60,9 @@ mod relevant_prs;
 mod remembered_prs;
 mod rendered_view;
 mod reopen_after_save;
+mod replacing_jobs;
 mod review;
+mod review_builder;
 mod review_state;
 mod reviewing_mark;
 mod row_selection;
@@ -96,6 +100,7 @@ pub use ask_desk::{
 };
 pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
+pub use branch_link::BranchOffer;
 pub use chord::{Chord, Key, KeyCap, Modifier, Modifiers};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
 pub(crate) use code_link::percent_encode_path;
@@ -183,10 +188,14 @@ pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwi
 pub use reopen_after_save::{
     Departure, InFlight, Reopen, ReopenAfterSave, RestartGuard, RestartStep,
 };
+pub use replacing_jobs::{
+    AfterJob, JobOutcome, JobProgress, ReplacingJob, ReplacingJobs, StartedJob,
+};
 pub use review::{
     NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop,
     SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadFile, UnreadStep,
 };
+pub use review_builder::ReviewBuilder;
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use row_selection::{RowSelection, SelectedLines};
 pub use saved_state::RepinRunning;

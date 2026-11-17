@@ -12,8 +12,9 @@ use crate::tour::{GuidedTour, Tour};
 use super::agent_event::AgentEvent;
 use super::new_commits::{PickCodeSource, RepinnedTour};
 use super::ports::RefreshWriter;
-use super::review::{Review, StepId};
-use super::review_state::{RepinRecord, ReviewStateFile};
+use super::review::StepId;
+use super::review_builder::ReviewBuilder;
+use super::review_state::RepinRecord;
 
 /// More new or changed pieces than this share of the tour's pieces and a full redo may read better.
 const REDO_SUGGESTED_ABOVE_PERCENT: usize = 30;
@@ -150,11 +151,8 @@ impl TourRefresher {
             head: tour.pin.head.clone(),
         };
         let source = (self.pick_code_source)(&pinned)?;
-        let review = Review::open(
-            tour,
-            source.as_ref(),
-            ReviewStateFile::for_subject(&self.folders, &self.subject),
-        )?;
+        let review = ReviewBuilder::new(&self.folders, &self.subject)
+            .build(Tour::Guided(tour), source.as_ref())?;
         if !review.refresh_brief().is_empty() {
             anyhow::bail!("claude ended without refreshing the tour: {said}");
         }

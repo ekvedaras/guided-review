@@ -16,9 +16,7 @@ use gpui::{
 
 use crate::app::components::image_row::ImagePictures;
 use crate::app::components::markdown_view::OpenDetails;
-use crate::app::components::new_commits_banner::RepinProgress;
 use crate::app::components::pr_switcher::PrSwitching;
-use crate::app::components::refresh_banner::RefreshProgress;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
@@ -27,14 +25,14 @@ use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::{GhCloner, GitHub};
-use crate::opened_change_set::OpenedChangeSet;
+use crate::opened_subject::OpenedChangeSet;
 use crate::viewer::{
-    AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
-    CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, LineLocation,
-    MoveFrom, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, Review,
-    ReviewChange, ReviewVerdict, Screen, SendMode, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
-    TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    AfterJob, AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
+    CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome,
+    JobProgress, LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief,
+    RepinnedTour, ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob,
+    TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -82,6 +80,9 @@ pub struct ReviewSession {
     /// The status a title bar scene shows, held over a GitHub read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_pr_status: Option<crate::viewer::PrStatus>,
+    /// The Refresh a banner scene shows under way.
+    #[cfg(feature = "snapshots")]
+    staged_refresh: Option<JobProgress>,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -92,18 +93,10 @@ pub struct ReviewSession {
     github: Arc<dyn GitHubPort>,
     source: Arc<dyn CodeSource>,
     tour_work: TourWork,
-    repin_progress: RepinProgress,
-    refresh_progress: RefreshProgress,
     image_cache: ImageCache,
     image_pictures: HashMap<FilePath, Rc<ImagePictures>>,
     loading_images: HashSet<FilePath>,
-    reload: Option<Task<()>>,
-    /// The build of the guided review a click on Switch to guided tour started.
-    switch: Option<Task<()>>,
-    /// The move of a local review to its PR a click on Move to <pr> started.
-    moving: Option<Task<()>>,
     clone_offer: Option<CloneOffer>,
-    cloning: Option<Task<()>>,
     typing_save: Option<Task<()>>,
     frame_stats: FrameStatsHook,
     _focus_subscription: Subscription,
@@ -189,6 +182,8 @@ impl ReviewSession {
             pr_status_before_staging: None,
             #[cfg(feature = "snapshots")]
             staged_pr_status: None,
+            #[cfg(feature = "snapshots")]
+            staged_refresh: None,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
@@ -200,16 +195,10 @@ impl ReviewSession {
             github,
             source,
             tour_work,
-            repin_progress: RepinProgress::Idle,
-            refresh_progress: RefreshProgress::Idle,
             image_cache: ImageCache::in_folders(&folders),
             image_pictures: HashMap::new(),
             loading_images: HashSet::new(),
-            reload: None,
-            switch: None,
-            moving: None,
             clone_offer,
-            cloning: None,
             typing_save: None,
             frame_stats,
             _focus_subscription: focus_subscription,
@@ -253,16 +242,20 @@ impl ReviewSession {
         &self.screen_list
     }
 
-    pub const fn is_moving(&self) -> bool {
-        self.moving.is_some()
+    pub fn is_moving(&self) -> bool {
+        self.review.jobs().is_running(ReplacingJob::MoveToPr)
     }
 
-    pub fn repin_progress(&self) -> &RepinProgress {
-        &self.repin_progress
+    pub fn repin_progress(&self) -> JobProgress {
+        self.review.jobs().progress(ReplacingJob::Repin)
     }
 
-    pub fn refresh_progress(&self) -> &RefreshProgress {
-        &self.refresh_progress
+    pub fn refresh_progress(&self) -> JobProgress {
+        #[cfg(feature = "snapshots")]
+        if let Some(staged) = &self.staged_refresh {
+            return staged.clone();
+        }
+        self.review.jobs().progress(ReplacingJob::Refresh)
     }
 
     pub fn image_pictures(&self, path: &FilePath) -> Option<Rc<ImagePictures>> {
@@ -555,140 +548,30 @@ impl ReviewSession {
         .detach();
     }
 
-    /// Drop review of a local review whose branch is gone, on the button only. The review takes no
-    /// changes from here on, so nothing writes its state file again once it is deleted; the app then
-    /// shows the switcher in its place.
+    /// Drop review of a local review whose branch is gone, on the button only.
     pub fn drop_review(&mut self, cx: &mut Context<Self>) {
-        let Some(change_set) = self.review.subject().local().cloned() else {
-            return;
-        };
-        self.save_typing_now();
-        if !self.change(cx, |review| review.start_drop()) {
-            return;
-        }
-        let folders = self.tour_work.repinner.folders.clone();
-        self.run_off_thread(
-            cx,
-            move || OpenedChangeSet::new(&change_set, &folders).drop_review(),
-            |this, dropped, cx| match dropped {
-                Ok(()) => (cx.global::<PrSwitching>().dropped)(this.review.subject().clone()),
-                Err(error) => {
-                    this.review.drop_failed(&error);
-                    this.show_problems(cx);
-                }
-            },
-        )
-        .detach();
+        self.start_job(ReplacingJob::DropReview, cx);
     }
 
-    /// The move button, in either review. The review takes no changes from here on, as its state file
-    /// is carried to the PR's and the local review deleted. The PR's review takes the window when the
-    /// move is done: from the local review it is shown, from the PR's review it is opened again from
-    /// disk, as after Save in Settings, since its copy of the state is stale once the move saved the PR's.
+    /// The move button, in either review.
     pub fn move_to_pr(&mut self, cx: &mut Context<Self>) {
-        self.save_typing_now();
-        let Some(started) = self.change(cx, |review| review.start_move()) else {
-            return;
-        };
-        let mover = crate::open_review::mover_of(
-            &self.tour_work.repinner.folders.clone(),
-            &started.change_set,
-        );
-        self.moving = Some(self.run_off_thread(
-            cx,
-            {
-                let offer = started.offer.clone();
-                move || mover.run(&offer, &GitHub::from_env())
-            },
-            move |this, moved, cx| {
-                this.moving = None;
-                match moved {
-                    Ok(()) => {
-                        let switching = cx.global::<PrSwitching>().clone();
-                        match started.from {
-                            MoveFrom::TheLocalReview => {
-                                let moved_from = this.review.subject().clone();
-                                switching.active.update(cx, |active, cx| {
-                                    active.moved_away(&moved_from);
-                                    cx.notify();
-                                });
-                                (switching.show)(started.offer.pr.into());
-                            }
-                            MoveFrom::ThePr => {
-                                (switching.dropped)(started.change_set.into());
-                                (switching.reopen)();
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        this.review.move_failed();
-                        post_toast(cx, ToastTone::Danger, started.failure_text(&error));
-                    }
-                }
-            },
-        ));
+        self.start_job(ReplacingJob::MoveToPr, cx);
     }
 
     /// Not now: the offer goes for that PR and the local review stays.
     pub fn decline_move(&mut self, cx: &mut Context<Self>) {
-        if self.moving.is_some() {
-            return;
-        }
         self.change(cx, |review| review.decline_the_move());
         self.show_problems(cx);
     }
 
-    /// Runs only on the button. The old `Review` takes no changes while it runs and is replaced after.
+    /// Runs only on the button.
     pub fn repin(&mut self, cx: &mut Context<Self>) {
-        self.save_typing_now();
-        if !self.change(cx, |review| review.start_repin()) {
-            return;
-        }
-        self.repin_progress = RepinProgress::Running;
-        let (repinner, github) = (
-            Arc::clone(&self.tour_work.repinner),
-            Arc::clone(&self.github),
-        );
-        self.run_off_thread(
-            cx,
-            move || repinner.run(github.as_ref()),
-            |this, repinned, cx| match repinned {
-                Ok(repinned) => {
-                    this.repin_progress = RepinProgress::Idle;
-                    this.reopen(repinned, cx);
-                }
-                Err(error) => {
-                    this.repin_progress = RepinProgress::Failed(format!("{error:#}"));
-                    this.change(cx, |review| review.repin_failed());
-                }
-            },
-        )
-        .detach();
+        self.start_job(ReplacingJob::Repin, cx);
     }
 
-    /// Runs only on the reviewer's click. The guided review is built in the background, carrying the
-    /// read ticks; the basic review stays on screen until it is ready.
+    /// Runs only on the reviewer's click; the basic review stays on screen until the guided one is built.
     pub fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
-        if self.switch.is_some() {
-            return;
-        }
-        self.save_typing_now();
-        let switcher = Arc::clone(&self.tour_work.switcher);
-        self.switch = Some(self.run_off_thread(
-            cx,
-            move || switcher.run(),
-            |this, switched, cx| {
-                this.switch = None;
-                match switched {
-                    Ok(switched) => this.reopen_on_summary(switched, cx),
-                    Err(error) => post_toast(
-                        cx,
-                        ToastTone::Danger,
-                        format!("Could not switch to the guided tour: {error:#}"),
-                    ),
-                }
-            },
-        ));
+        self.start_job(ReplacingJob::SwitchToGuided, cx);
     }
 
     pub fn clone_offer(&self) -> Option<&CloneOffer> {
@@ -713,7 +596,7 @@ impl ReviewSession {
             return;
         };
         cx.notify();
-        self.cloning = Some(self.run_off_thread(
+        self.run_off_thread(
             cx,
             move || job.run(&GhCloner),
             |this, cloned, cx| match cloned {
@@ -728,45 +611,73 @@ impl ReviewSession {
                     cx.notify();
                 }
             },
-        ));
+        )
+        .detach();
     }
 
-    /// Runs when `open` names the PR already shown: the tour file is read again and the screen stays.
-    /// A failed read keeps the review on screen and is one of its problems.
+    /// Runs when `open` names the PR already shown, and after a clone: the tour file is read again
+    /// and the screen stays.
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
-        let reloader = Arc::clone(&self.tour_work.reloader);
-        self.reload = Some(self.run_off_thread(
-            cx,
-            move || reloader.run(),
-            |this, reloaded, cx| match reloaded {
-                Ok(reloaded) => this.reopen(reloaded, cx),
-                Err(error) => {
-                    this.review.reload_failed(&error);
-                    this.show_problems(cx);
-                }
-            },
-        ));
+        self.start_job(ReplacingJob::Reload, cx);
     }
 
-    /// Runs only on the button, in the background: the user's `claude` rewrites the marked steps.
-    /// Each tool claude uses shows in the banner, so a long refresh is seen to be working.
+    /// Runs only on the button: the user's `claude` rewrites the marked steps.
     pub fn refresh_tour(&mut self, cx: &mut Context<Self>) {
-        if self.is_refreshing() {
-            return;
-        }
-        self.refresh_progress = RefreshProgress::Running { activity: None };
+        self.start_job(ReplacingJob::Refresh, cx);
+    }
+
+    /// The review says whether the job may start; what it is typing goes to disk first, as the job
+    /// reads the state file.
+    fn start_job(&mut self, job: ReplacingJob, cx: &mut Context<Self>) {
         self.save_typing_now();
-        cx.notify();
+        if let Some(started) = self.change(cx, |review| review.start_job(job)) {
+            self.run_job(started, cx);
+        }
+    }
+
+    fn run_job(&mut self, started: StartedJob, cx: &mut Context<Self>) {
+        let folders = self.tour_work.repinner.folders.clone();
+        let run: Box<dyn FnOnce() -> JobOutcome + Send> = match started {
+            StartedJob::Repin => {
+                let (repinner, github) = (
+                    Arc::clone(&self.tour_work.repinner),
+                    Arc::clone(&self.github),
+                );
+                Box::new(move || JobOutcome::Repin(repinner.run(github.as_ref())))
+            }
+            StartedJob::Refresh => self.refresh_reporting_activity(cx),
+            StartedJob::Reload => {
+                let reloader = Arc::clone(&self.tour_work.reloader);
+                Box::new(move || JobOutcome::Reload(reloader.run()))
+            }
+            StartedJob::SwitchToGuided => {
+                let switcher = Arc::clone(&self.tour_work.switcher);
+                Box::new(move || JobOutcome::SwitchToGuided(switcher.run()))
+            }
+            StartedJob::MoveToPr(started) => {
+                let mover = crate::open_review::mover_of(&folders, &started.change_set);
+                Box::new(move || {
+                    JobOutcome::MoveToPr(mover.run(&started.offer, &GitHub::from_env()))
+                })
+            }
+            StartedJob::DropReview(change_set) => Box::new(move || {
+                JobOutcome::DropReview(OpenedChangeSet::new(&change_set, &folders).drop_review())
+            }),
+        };
+        self.run_off_thread(cx, run, Self::land_job).detach();
+    }
+
+    /// Each tool claude uses shows in the banner, so a long refresh is seen to be working.
+    fn refresh_reporting_activity(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Box<dyn FnOnce() -> JobOutcome + Send> {
         let (activities, mut arrived) = futures::channel::mpsc::unbounded();
         cx.spawn(async move |this, cx| {
             while let Some(activity) = futures::StreamExt::next(&mut arrived).await {
                 let shown = this.update(cx, |this, cx| {
-                    if this.is_refreshing() {
-                        this.refresh_progress = RefreshProgress::Running {
-                            activity: Some(activity),
-                        };
-                        cx.notify();
-                    }
+                    this.review.job_did(ReplacingJob::Refresh, activity);
+                    cx.notify();
                 });
                 if shown.is_err() {
                     break;
@@ -775,30 +686,38 @@ impl ReviewSession {
         })
         .detach();
         let refresher = Arc::clone(&self.tour_work.refresher);
-        self.run_off_thread(
-            cx,
-            move || {
-                refresher.run(&mut |activity| {
-                    activities.unbounded_send(activity).ok();
-                })
-            },
-            |this, refreshed, cx| match refreshed {
-                Ok(refreshed) => {
-                    this.refresh_progress = RefreshProgress::Idle;
-                    this.reopen(refreshed, cx);
-                }
-                Err(error) => {
-                    this.refresh_progress = RefreshProgress::Failed;
-                    this.review.refresh_failed(&error);
-                    this.show_problems(cx);
-                }
-            },
-        )
-        .detach();
+        Box::new(move || {
+            JobOutcome::Refresh(refresher.run(&mut |activity| {
+                activities.unbounded_send(activity).ok();
+            }))
+        })
     }
 
-    fn is_refreshing(&self) -> bool {
-        matches!(self.refresh_progress, RefreshProgress::Running { .. })
+    fn land_job(&mut self, outcome: JobOutcome, cx: &mut Context<Self>) {
+        let switching = cx.global::<PrSwitching>().clone();
+        match self.change(cx, |review| review.land_job(outcome)) {
+            AfterJob::Nothing | AfterJob::Stays { toast: None } => {}
+            AfterJob::Stays { toast: Some(toast) } => post_toast(cx, ToastTone::Danger, toast),
+            AfterJob::Reopen {
+                replacement,
+                screen,
+            } => self.reopen_on(*replacement, &screen, cx),
+            AfterJob::ShowPr { moved_away, pr } => {
+                switching.active.update(cx, |active, cx| {
+                    active.moved_away(&moved_away);
+                    cx.notify();
+                });
+                (switching.show)(pr.into());
+            }
+            AfterJob::DropAndReopen(local) => {
+                (switching.dropped)(local);
+                (switching.reopen)();
+            }
+            AfterJob::Dropped(subject) => (switching.dropped)(subject),
+        }
+        if let Some(due) = self.review.due_job() {
+            self.run_job(due, cx);
+        }
     }
 
     /// Runs `request` on a background thread, then hands its outcome to `apply` on the UI thread.
@@ -1183,16 +1102,16 @@ impl ReviewSession {
             new_or_changed_pieces: 48,
             pieces: 157,
         };
-        self.refresh_progress = RefreshProgress::Running {
-            activity: Some("Read app/Pricing.php".to_owned()),
-        };
+        self.staged_refresh = Some(JobProgress::Running {
+            activity: Some("Read app/Pricing.php".into()),
+        });
         cx.notify();
     }
 
     #[cfg(feature = "snapshots")]
     pub fn unstage_refresh_running(&mut self, cx: &mut Context<Self>) {
         self.refresh_brief = self.review.refresh_brief();
-        self.refresh_progress = RefreshProgress::Idle;
+        self.staged_refresh = None;
         cx.notify();
     }
 
@@ -1246,23 +1165,8 @@ impl ReviewSession {
         self.sidebar = sidebar;
     }
 
-    fn reopen(&mut self, repinned: RepinnedTour, cx: &mut Context<Self>) {
-        self.reopen_on(repinned, None, cx);
-    }
-
-    /// Opens the review of the guided tour the reviewer asked for, on its summary.
-    fn reopen_on_summary(&mut self, switched: RepinnedTour, cx: &mut Context<Self>) {
-        self.reopen_on(switched, Some(Screen::Summary), cx);
-    }
-
-    /// `screen` is where the new review opens; `None` keeps the one on show.
-    fn reopen_on(
-        &mut self,
-        repinned: RepinnedTour,
-        screen: Option<Screen>,
-        cx: &mut Context<Self>,
-    ) {
-        let screen = screen.unwrap_or_else(|| self.review.screen().clone());
+    /// The review a job built takes the place of the one shown, on `screen`.
+    fn reopen_on(&mut self, repinned: RepinnedTour, screen: &Screen, cx: &mut Context<Self>) {
         self.save_typing_now();
         let replaced = std::mem::replace(&mut self.review, repinned.review);
         self.review.carry_on_from(replaced);
@@ -1271,8 +1175,8 @@ impl ReviewSession {
         self.loading_images.clear();
         self.rows = PageRows::none();
         self.change(cx, |review| match screen {
-            Screen::Step(id) => review.go_to(&id),
-            Screen::File(path) => review.go_to_file(&path),
+            Screen::Step(id) => review.go_to(id),
+            Screen::File(path) => review.go_to_file(path),
             _ => {}
         });
         cx.emit(SessionEvent::Reopened);

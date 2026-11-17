@@ -11,9 +11,7 @@ use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
 use guided_review::github::GitHub;
-use guided_review::local_git::LocalGit;
-use guided_review::opened_change_set::OpenedChangeSet;
-use guided_review::opened_pr::{CodeAtTips, OpenedPr};
+use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
 use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
@@ -26,7 +24,7 @@ use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
-use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile, repin_tour};
+use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
@@ -216,15 +214,12 @@ fn tour_path(subject: &ReviewSubject) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A PR is read at the tips GitHub has now; a local change set at the snapshot its tour is pinned to,
-/// since the folder is not what the reviewer reads.
-fn code_to_read(subject: &ReviewSubject) -> anyhow::Result<CodeAtTips> {
-    match subject {
-        ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_live_tips(),
-        ReviewSubject::Local(change_set) => {
-            OpenedChangeSet::new(change_set, &AppFolders::running()?).at_pinned_tips()
-        }
-    }
+fn opened(subject: &ReviewSubject) -> anyhow::Result<OpenedSubject> {
+    Ok(OpenedSubject::in_folders(
+        subject,
+        &AppFolders::running()?,
+        &std::env::current_dir().context("could not read the current folder")?,
+    ))
 }
 
 /// A config that cannot be read must not stop `outline` or `check`, which work without it.
@@ -241,7 +236,7 @@ fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
 
 fn outline(subject: &ReviewSubject) -> anyhow::Result<()> {
     let summary_instructions = summary_instructions()?;
-    let code = code_to_read(subject)?;
+    let code = opened(subject)?.code_to_read()?;
     let (base, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
@@ -259,7 +254,7 @@ fn outline(subject: &ReviewSubject) -> anyhow::Result<()> {
 }
 
 fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result<()> {
-    let code = code_to_read(subject)?;
+    let code = opened(subject)?.code_to_read()?;
     let (_, files) = code.pieces_since_merge_base()?;
     print!(
         "{}",
@@ -275,24 +270,14 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
     Ok(())
 }
 
-/// A local key names no repo; the tour pin keeps its clone's, so a PR of the repo finds the review without git.
-fn with_repo_of_its_clone(subject: &ReviewSubject) -> ReviewSubject {
-    match subject {
-        ReviewSubject::Local(change_set) if change_set.repo().is_none() => ReviewSubject::from(
-            change_set
-                .clone()
-                .in_repo(LocalGit::origin_of(change_set.folder().as_path())),
-        ),
-        _ => subject.clone(),
-    }
-}
-
 fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
-    let subject = &with_repo_of_its_clone(subject);
+    let opened = opened(subject)?;
+    // The tour pin keeps a local change set's repo, so a PR of the repo finds the review without git.
+    let subject = &opened.subject();
     let tour_path = Tour::path_for(&AppFolders::running()?, subject);
     let mut tour = GuidedTour::load_of(&tour_path, subject)?;
 
-    let code = code_to_read(subject)?;
+    let code = opened.code_to_read()?;
     if tour.pin.head.is_empty() {
         tour.pin
             .pin_to(subject, &code.merge_base()?, &code.tips.head);
@@ -301,14 +286,7 @@ fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
             tour.pin.name_subject(subject);
         }
         if tour.pin.head != code.tips.head {
-            match subject {
-                ReviewSubject::PullRequest(_) => {
-                    println!("warning: PR has new commits; run `guided-review repin`");
-                }
-                ReviewSubject::Local(_) => println!(
-                    "warning: the review has a new snapshot of its folder; run `guided-review repin`"
-                ),
-            }
+            println!("warning: {}; run `guided-review repin`", subject.moved_on());
         }
     }
     tour.save(&tour_path)?;
@@ -322,33 +300,8 @@ fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A PR's tour moves to the PR's head on GitHub; a local review's to a new snapshot of its folder.
 fn repin_command(subject: &ReviewSubject) -> anyhow::Result<()> {
-    let pr = match subject {
-        ReviewSubject::PullRequest(pr) => pr,
-        ReviewSubject::Local(change_set) => {
-            let (_, result) = OpenedChangeSet::new(change_set, &AppFolders::running()?)
-                .repin_to_new_snapshot()?;
-            print!("{result}");
-            return Ok(());
-        }
-    };
-    let opened = OpenedPr::new(pr)?;
-    let tour_path = opened.tour_to_repin_path();
-    // Fails before any network call when there is no tour yet.
-    Tour::load_of(&tour_path, subject)?;
-
-    let code = opened.at_live_tips()?;
-    let base = code.merge_base()?;
-    let (_, result) = repin_tour(
-        subject,
-        &tour_path,
-        &opened.state_file(),
-        code.source.as_ref(),
-        &base,
-        &code.tips.head,
-    )?;
-    print!("{result}");
+    print!("{}", opened(subject)?.repin()?);
     Ok(())
 }
 
@@ -361,12 +314,7 @@ fn refresh(subject: &ReviewSubject, done: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let tour = GuidedTour::load_of(&Tour::path_for(&folders, subject), subject)?;
-    let code = match subject {
-        ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.at_pinned_tips(&tour.pin)?,
-        ReviewSubject::Local(change_set) => {
-            OpenedChangeSet::new(change_set, &folders).code_at(&tour.pin)
-        }
-    };
+    let code = opened(subject)?.code_at(&tour.pin)?;
     let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
     print!(
         "{}",
@@ -432,12 +380,7 @@ fn open(target: &OpenTarget, launch: &Launch) -> anyhow::Result<()> {
         );
     }
     if tours == ToursOnDisk::None {
-        match &subject {
-            ReviewSubject::PullRequest(pr) => OpenedPr::new(pr)?.make_basic_tour_if_no_tour()?,
-            ReviewSubject::Local(change_set) => {
-                OpenedChangeSet::new(change_set, folders).make_basic_tour_if_no_tour()?
-            }
-        };
+        opened(&subject)?.make_basic_tour_if_no_tour()?;
     }
     let folder = AppFolder::of(folders);
     let request = Request::Open(OpenRequest {

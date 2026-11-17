@@ -53,7 +53,7 @@ use crate::app::components::motion::{
     BANNER_DROP, Edge, SCREEN, SCREEN_SLIDE, STATE, glide_to, glide_to_share, grow_when_shown,
     pop_in, slide_in, turn_to,
 };
-use crate::app::components::new_commits_banner::{NewCommitsBanner, RepinProgress};
+use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
@@ -99,14 +99,14 @@ use crate::viewer::{
     AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
     CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
     CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
-    HandOffId, InFlight, Intent, LabelSwitch, LineLocation, MergeOffer, Merging, NextScreen,
-    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness,
-    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation, MergeOffer, Merging,
+    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
+    PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject,
+    ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
+    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
+    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
+    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
+    Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -1513,10 +1513,10 @@ impl OneStepLayout {
     fn disk_news_block(
         colors: &Colors,
         news: &SidebarDiskNews,
-        repin_progress: &RepinProgress,
+        repin_progress: &JobProgress,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let is_updating = repin_progress == &RepinProgress::Running;
+        let is_updating = matches!(repin_progress, JobProgress::Running { .. });
         let action = news.offer.map(|offer| match offer {
             DiskOffer::Update => icon_label_button(
                 colors,
@@ -1525,9 +1525,9 @@ impl OneStepLayout {
                 ButtonSize::Small,
                 Icon::Refresh,
                 match repin_progress {
-                    RepinProgress::Idle => "Update",
-                    RepinProgress::Running => "Updating…",
-                    RepinProgress::Failed(_) => "Try again",
+                    JobProgress::Idle => "Update",
+                    JobProgress::Running { .. } => "Updating…",
+                    JobProgress::Failed(_) => "Try again",
                 },
             )
             .when(!is_updating, |button| {
@@ -1548,13 +1548,13 @@ impl OneStepLayout {
             })),
         });
         let failure = match repin_progress {
-            RepinProgress::Failed(reason) => Some(
+            JobProgress::Failed(reason) => Some(
                 div()
                     .text_xs()
                     .text_color(colors.danger)
-                    .child(SharedString::from(reason.clone())),
+                    .child(SharedString::from(reason.to_string())),
             ),
-            RepinProgress::Idle | RepinProgress::Running => None,
+            JobProgress::Idle | JobProgress::Running { .. } => None,
         };
         div()
             .flex()
@@ -1943,10 +1943,11 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
+        let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
             .as_ref()
-            .map(|news| Self::disk_news_block(&colors, news, session.repin_progress(), cx));
+            .map(|news| Self::disk_news_block(&colors, news, &repin_progress, cx));
         let move_offer = sidebar
             .move_offer
             .as_ref()
@@ -4683,9 +4684,9 @@ impl Render for OneStepLayout {
         );
         let old_head = session.old_head().cloned();
         let guided_tour_banner = session.review().guided_tour_banner();
-        let repin_progress = session.repin_progress().clone();
+        let repin_progress = session.repin_progress();
         let refresh_brief = session.refresh_brief().clone();
-        let refresh_progress = session.refresh_progress().clone();
+        let refresh_progress = session.refresh_progress();
         #[cfg_attr(
             not(feature = "snapshots"),
             expect(unused_mut, reason = "the gallery picture has no step")

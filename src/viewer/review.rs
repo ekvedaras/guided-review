@@ -1,7 +1,7 @@
 mod guided_tour;
+mod jobs;
 mod kept;
-mod merging;
-mod status;
+mod pr_controls;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -9,16 +9,13 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Context as _;
-
-use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::Sha;
-use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
+use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
 use std::path::{Path, PathBuf};
@@ -29,6 +26,7 @@ use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
+use super::branch_link::{BranchLink, BranchOffer, LocalReviewsOfRepo};
 use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
 use super::comments::{
@@ -54,22 +52,20 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
-use super::merging::{MergeChange, MergeMethod};
-use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
+use super::pr_controls::PrControls;
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
-use super::pr_status::{PrStatus, Readiness};
-use super::press_again::PressAgain;
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
+use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
-use super::saved_state::{SavedState, WriterElsewhere};
+use super::saved_state::SavedState;
 use super::step_page::{
     DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
 };
@@ -295,16 +291,7 @@ pub struct ReviewCore {
     local_facts: Option<LocalFacts>,
     /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
     local_heading: Option<Arc<str>>,
-    /// The open PR whose head is a local review's branch, as GitHub last said; not saved.
-    pull_of_branch: Option<PullOfBranch>,
-    /// For a PR: the local reviews on disk of its repo, which one of may be of the PR's branch. Not saved.
-    local_reviews_of_repo: Vec<LocalChangeSet>,
-    /// For a PR: the local review of the branch it is opened from, which it offers to take over.
-    local_to_move_here: Option<LocalChangeSet>,
-    /// How many looks for the PR's head branch failed in a row; each one waits longer for the next.
-    head_branch_failures: u32,
-    /// Where those local reviews' files are.
-    local_reviews_in: Option<AppFolders>,
+    branch_link: BranchLink,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -313,18 +300,8 @@ pub struct ReviewCore {
     on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
-    /// What GitHub last said of the PR's draft state and checks; kept as it was while a read fails.
-    pr_status: Option<PrStatus>,
-    /// The first press of the key, waiting for the same press again.
-    readiness_asked: PressAgain<Readiness>,
-    /// What the confirmed press changed the PR to, until GitHub answers.
-    readiness_to_send: Option<Readiness>,
-    /// The reviewer's merge method for this PR's repo, from Settings.
-    merge_method: MergeMethod,
-    /// The first press of the auto-merge key, waiting for the same press again.
-    merging_asked: PressAgain<MergeChange>,
-    /// What the confirmed press asked of GitHub, until GitHub answers.
-    merging_to_send: Option<MergeChange>,
+    /// `None` for a local review, which has no PR to change.
+    pr_controls: Option<PrControls>,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -359,6 +336,7 @@ pub struct ReviewCore {
     pr_notes: PrNotes,
     ask_desk: AskDesk,
     work: WorkAgenda,
+    jobs: ReplacingJobs,
     reviewing_mark: ReviewingMark,
     /// Agent replies taken while a re-pin ran, which the re-pinned review applies and saves.
     replies_after_repin: Vec<(HandOffId, AgentReplied)>,
@@ -451,26 +429,19 @@ impl Review {
 
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
-    /// go), its work, whose outcomes still land here, and which screen's end the window saw.
+    /// go), its work, whose outcomes still land here, its branch link and PR controls, which those
+    /// outcomes filled, and which screen's end the window saw. What the config and the disk say is
+    /// `ReviewBuilder`'s, which built this review.
     pub fn carry_on_from(&mut self, replaced: Self) {
         let replaced = replaced.into_core();
         let switched_to_guided =
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
         self.work = replaced.work;
-        if self.local_facts.is_none()
-            && let Some(facts) = replaced.local_facts
-        {
-            self.local_facts_are(facts);
-        }
-        if self.pull_of_branch.is_none() {
-            self.pull_of_branch = replaced.pull_of_branch;
-        }
-        if self.local_reviews_of_repo.is_empty() {
-            self.local_reviews_of_repo = replaced.local_reviews_of_repo;
-            self.local_to_move_here = replaced.local_to_move_here;
-            self.head_branch_failures = replaced.head_branch_failures;
-            self.local_reviews_in = replaced.local_reviews_in;
+        self.jobs = replaced.jobs;
+        self.branch_link = replaced.branch_link;
+        if let (Some(controls), Some(replaced)) = (&mut self.pr_controls, replaced.pr_controls) {
+            controls.carry_on_from(replaced);
         }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
@@ -642,6 +613,8 @@ impl ReviewCore {
         let mut display_options = DisplayOptions::for_code(base.clone(), head.clone());
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
+        let branch_link = BranchLink::of(&subject);
+        let pr_controls = PrControls::of(&subject);
         Ok(Self {
             tour,
             file_tree,
@@ -650,22 +623,13 @@ impl ReviewCore {
             code_host,
             local_heading,
             local_facts: None,
-            pull_of_branch: None,
-            local_reviews_of_repo: Vec::new(),
-            local_to_move_here: None,
-            head_branch_failures: 0,
-            local_reviews_in: None,
+            branch_link,
             base,
             head,
             pr_head: None,
             on_disk: None,
             last_review: None,
-            pr_status: None,
-            readiness_asked: PressAgain::default(),
-            readiness_to_send: None,
-            merge_method: MergeMethod::default(),
-            merging_asked: PressAgain::default(),
-            merging_to_send: None,
+            pr_controls,
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -696,6 +660,7 @@ impl ReviewCore {
             pr_notes: PrNotes::default(),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
+            jobs: ReplacingJobs::default(),
             reviewing_mark,
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
@@ -872,109 +837,28 @@ impl ReviewCore {
 
     /// What GitHub said of the PR opened from a local review's branch.
     pub fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
-        self.pull_of_branch = found;
+        self.branch_link.pull_of_branch_is(found);
     }
 
     /// The local reviews on disk that are of this PR's repo, so the review looks for one of the PR's branch.
     /// A PR's head branch never changes, so it is looked up once here, never again on focus.
-    pub fn local_reviews_of_repo_are(
-        &mut self,
-        folders: &AppFolders,
-        reviews: Vec<LocalChangeSet>,
-    ) {
-        self.local_reviews_in = Some(folders.clone());
-        self.local_reviews_of_repo = reviews;
+    pub(super) fn local_reviews_of_repo_are(&mut self, reviews: LocalReviewsOfRepo) {
+        self.branch_link.local_reviews_are(reviews);
         self.work.want(WorkKind::LookUpHeadBranch);
     }
 
-    pub(super) fn head_branch_is(&mut self, branch: Option<BranchName>) {
-        self.local_to_move_here = branch.and_then(|branch| {
-            self.local_reviews_of_repo
-                .iter()
-                .find(|review| *review.branch() == branch)
-                .cloned()
-        });
+    /// The lasting line of the sidebar, or Open PR, from what is known of the other side of the branch.
+    pub fn branch_offer(&self) -> Option<BranchOffer> {
+        self.branch_link.offer(&self.state)
     }
 
-    /// A lasting line of a PR's review: a local review of the branch it is opened from, which it offers
-    /// to take over.
-    pub fn move_here_offer(&self) -> Option<MoveHereOffer> {
-        let pr = self.subject.pull_request()?;
-        Some(MoveHereOffer {
-            change_set: self.local_to_move_here.clone()?,
-            offer: MoveOffer {
-                pr: pr.clone(),
-                title: String::new(),
-            },
-        })
-    }
-
-    /// Keep local review: the offer goes for good, on both sides, and the local review stays.
-    pub fn decline_move_here(&mut self) -> anyhow::Result<()> {
-        let Some(offer) = self.move_here_offer() else {
-            return Ok(());
-        };
-        let local = ReviewSubject::from(offer.change_set.clone());
-        let folders = self
-            .local_reviews_in
-            .clone()
-            .context("no local review is known here")?;
-        ReviewStateFile::for_subject(&folders, &local)
-            .update(|state| state.decline_move_to(&offer.offer.pr))?;
-        self.local_reviews_of_repo
-            .retain(|review| *review != offer.change_set);
-        self.local_to_move_here = None;
-        Ok(())
-    }
-
-    /// A lasting line of a local review: the PR opened from its branch, which it offers to move to.
-    pub fn move_offer(&self) -> Option<MoveOffer> {
-        self.subject.local()?;
-        let found = self.pull_of_branch.as_ref()?;
-        (!self.state.has_declined_move_to(&found.pr)).then(|| MoveOffer::of(found))
-    }
-
-    /// Declining hides the offer for that PR for good and keeps the local review. Written to the state
-    /// file on its own, so it never writes the viewer's sections back.
-    pub fn decline_move(&mut self) -> anyhow::Result<()> {
-        let Some(offer) = self.move_offer() else {
-            return Ok(());
-        };
-        self.state
-            .keep_until_repinned(|state| state.decline_move_to(&offer.pr));
-        self.state
-            .file()
-            .update(|state| state.decline_move_to(&offer.pr))
-    }
-
-    /// The move the button asks for, whichever review it is pressed in; the review then takes no
-    /// changes until `move_failed` or until the window shows the other review.
-    pub fn start_move(&mut self) -> Option<StartedMove> {
-        let (from, change_set, offer) = if let Some(here) = self.move_here_offer() {
-            (MoveFrom::ThePr, here.change_set, here.offer)
-        } else {
-            let offer = self.move_offer()?;
-            (
-                MoveFrom::TheLocalReview,
-                self.subject.local()?.clone(),
-                offer,
-            )
-        };
-        self.start_drop().then_some(StartedMove {
-            from,
-            change_set,
-            offer,
-        })
-    }
-
-    /// Not now, on either side's offer. A decline that could not be written to the state file is a
-    /// problem, as the offer then comes back at the next open.
+    /// Not now, on either side's offer, unless the move runs. A decline that could not be written to
+    /// the state file is a problem, as the offer then comes back at the next open.
     pub fn decline_the_move(&mut self) {
-        let declined = if self.move_here_offer().is_some() {
-            self.decline_move_here()
-        } else {
-            self.decline_move()
-        };
+        if self.jobs.is_running(ReplacingJob::MoveToPr) {
+            return;
+        }
+        let declined = self.branch_link.decline(&mut self.state);
         match declined {
             Ok(()) => self.clear_problem(ProblemKind::MoveNotDeclined),
             Err(error) => self.raise_problem(Problem::MoveNotDeclined(format!("{error:#}"))),
@@ -1147,7 +1031,7 @@ impl ReviewCore {
 
     /// A local review whose branch has no open PR yet, so its agent can be asked to open one.
     pub fn can_open_pr(&self) -> bool {
-        self.subject.local().is_some() && self.pull_of_branch.is_none()
+        self.branch_link.can_open_pr()
     }
 
     pub fn summary(&self) -> &[String] {
@@ -2274,8 +2158,11 @@ impl ReviewCore {
             .chain([wrap, whitespace])
             .chain(page_toggles)
             .chain(finish)
-            .chain(self.readiness_palette_action())
-            .chain(self.merging_palette_action())
+            .chain(
+                self.pr_controls
+                    .iter()
+                    .flat_map(PrControls::palette_actions),
+            )
             .chain(self.can_open_pr().then_some(PaletteAction::OpenPr))
             .chain(self.subject.pull_request().into_iter().flat_map(|_| {
                 [
@@ -2549,46 +2436,6 @@ impl ReviewCore {
 
     pub fn is_ticked(&self, id: &StepId) -> bool {
         self.state.read_tick(id).is_some()
-    }
-
-    /// The re-pin writes the state file from another thread and this review is replaced when it
-    /// is done, so from now on nothing it holds may be saved over the re-pin's record.
-    /// `false` while a drop or a move runs, which the re-pin would write over: it does not start.
-    #[must_use]
-    pub fn start_repin(&mut self) -> bool {
-        self.state.start_writing_elsewhere(WriterElsewhere::Repin)
-    }
-
-    /// Drop review, or a move to a PR, deletes the state file from another thread, and this review is
-    /// closed when it is done, so from now on nothing it holds may write the file again; as during a
-    /// re-pin. `false` while a re-pin or another drop runs: it does not start.
-    #[must_use]
-    pub fn start_drop(&mut self) -> bool {
-        self.state.start_writing_elsewhere(WriterElsewhere::Drop)
-    }
-
-    /// The move failed and the review stays: it takes changes again.
-    pub fn move_failed(&mut self) {
-        self.state.failed_elsewhere(WriterElsewhere::Drop);
-    }
-
-    /// The drop failed and the review stays: it takes changes again.
-    pub fn drop_failed(&mut self, error: &anyhow::Error) {
-        self.state.failed_elsewhere(WriterElsewhere::Drop);
-        self.raise_problem(Problem::ReviewNotDropped(format!("{error:#}")));
-    }
-
-    pub fn refresh_failed(&mut self, error: &anyhow::Error) {
-        self.raise_problem(Problem::TourNotRefreshed(format!("{error:#}")));
-    }
-
-    /// `open` named the PR shown and its tour file could not be read again.
-    pub fn reload_failed(&mut self, error: &anyhow::Error) {
-        self.raise_problem(Problem::TourNotReloaded(format!("{error:#}")));
-    }
-
-    pub fn repin_failed(&mut self) {
-        self.state.failed_elsewhere(WriterElsewhere::Repin);
     }
 
     /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.

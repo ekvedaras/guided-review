@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::open_review;
-use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{Tour, ToursOnDisk};
 

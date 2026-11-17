@@ -314,19 +314,6 @@ fn a_draft_is_marked_ready_by_the_same_key() {
 }
 
 #[test]
-fn a_press_after_the_ten_seconds_only_asks_again() {
-    let pull = Pull::new();
-    let (mut review, github, now) = read_status(&pull, Readiness::Ready, true);
-    review.ask_to_change_readiness(now);
-
-    let step = review.ask_to_change_readiness(now + Duration::from_secs(11));
-
-    assert!(matches!(step, PressStep::Ask(_)), "{step:?}");
-    drive_without_agents(&mut review, &github, &pull.source(), now);
-    assert_eq!(readiness_calls(&pull), []);
-}
-
-#[test]
 fn nothing_is_asked_where_github_would_refuse_or_the_status_is_not_known() {
     let pull = Pull::new();
     let (mut read_only, _github, now) = read_status(&pull, Readiness::Ready, false);

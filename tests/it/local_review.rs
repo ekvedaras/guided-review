@@ -10,14 +10,14 @@ use guided_review::local_facts::LocalChange;
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
-use guided_review::opened_change_set::OpenedChangeSet;
+use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
     CodeOpener, Destination, Effect, IdeCaveat, Intent, NotInIde, Opened, PieceDiff, Review,
-    ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
+    ReviewBuilder, ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
 };
 
 /// `main` with a README of two lines and a file that goes, then `feature` one commit ahead that adds
@@ -542,7 +542,7 @@ fn a_local_review_leads_its_sidebar_with_the_window_title_and_a_pr_does_not() {
 }
 
 #[test]
-fn a_reloaded_local_review_keeps_what_the_app_read_of_the_clone() {
+fn a_rebuilt_local_review_reads_the_clone_again() {
     let feature = Feature::with_work_in_progress();
     let shown = feature.open();
     let tour = BasicTour::load(&Tour::basic_path_for(
@@ -550,8 +550,9 @@ fn a_reloaded_local_review_keeps_what_the_app_read_of_the_clone() {
         &feature.subject(),
     ))
     .unwrap();
-    let mut reloaded = Review::open_basic(tour, &feature.source(), feature.state_file()).unwrap();
-    assert_eq!(reloaded.local_facts(), None);
+    let mut reloaded = ReviewBuilder::new(&feature.repo.folders(), &feature.subject())
+        .build(Tour::Basic(tour), &feature.source())
+        .unwrap();
 
     reloaded.carry_on_from(shown);
 

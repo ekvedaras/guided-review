@@ -8,10 +8,11 @@ use guided_review::config::Config;
 use guided_review::ide::Ide;
 use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::opened_change_set::{OpenedChangeSet, clean_snapshot_refs};
+use guided_review::opened_subject::{OpenedChangeSet, clean_snapshot_refs};
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::{ReviewSubject, WorkTreeRoot};
 use guided_review::tour::{Tour, ToursOnDisk};
+use guided_review::viewer::{AfterJob, JobOutcome, Problem, ReplacingJob, StartedJob};
 use guided_review::viewer::{
     Destination, DiskNews, DiskOffer, IdeCaveat, PieceDiff, ProblemKind, Review, ReviewStateFile,
     Side, WorkKind,
@@ -642,7 +643,7 @@ fn a_review_being_dropped_takes_no_change_so_nothing_writes_its_state_file_again
     let mut opened = feature.open();
     let folders = feature.repo.folders();
 
-    assert!(opened.review.start_drop());
+    assert!(opened.review.start_job(ReplacingJob::DropReview).is_some());
     OpenedChangeSet::new(feature.subject().local().unwrap(), &folders)
         .drop_review()
         .unwrap();
@@ -650,6 +651,46 @@ fn a_review_being_dropped_takes_no_change_so_nothing_writes_its_state_file_again
 
     assert!(ticked.is_err());
     assert!(!ReviewStateFile::for_subject(&folders, &feature.subject()).exists());
+}
+
+#[test]
+fn drop_review_starts_with_the_change_set_and_once_dropped_the_switcher_takes_its_place() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+
+    let started = opened.review.start_job(ReplacingJob::DropReview);
+    let after = opened.review.land_job(JobOutcome::DropReview(Ok(())));
+
+    assert_eq!(
+        started,
+        Some(StartedJob::DropReview(
+            feature.subject().local().unwrap().clone()
+        ))
+    );
+    let AfterJob::Dropped(dropped) = after else {
+        panic!("the switcher does not take its place");
+    };
+    assert_eq!(dropped, feature.subject());
+}
+
+#[test]
+fn a_failed_drop_is_a_problem_and_the_review_takes_changes_again() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    opened.review.start_job(ReplacingJob::DropReview).unwrap();
+
+    let after = opened
+        .review
+        .land_job(JobOutcome::DropReview(Err(anyhow::anyhow!("busy"))));
+
+    assert!(matches!(after, AfterJob::Stays { toast: None }));
+    assert!(
+        opened
+            .review
+            .problems()
+            .contains(&Problem::ReviewNotDropped("busy".into()))
+    );
+    opened.review.tick_file(&file_path("README.md")).unwrap();
 }
 
 #[test]
@@ -796,6 +837,42 @@ fn a_local_tour_that_cannot_be_read_is_a_problem_naming_the_file_in_any_review_o
             unreadable.display()
         )),
         "{problem}"
+    );
+}
+
+#[test]
+fn an_update_keeps_the_more_lines_setting_the_repo_and_the_problem_of_an_unreadable_local_tour() {
+    let feature = Feature::with_work_in_progress();
+    let second = with_a_second_review_and_a_pr_ref(&feature);
+    std::fs::write(
+        Tour::shown_path_for(&feature.repo.folders(), &second),
+        "not a tour",
+    )
+    .unwrap();
+    let config = feature.repo.folders().config_file();
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(config, "more_lines = 5\n").unwrap();
+    let as_the_cli_names_it: ReviewSubject = feature.subject().to_string().parse().unwrap();
+    let mut opened = open_review(
+        &as_the_cli_names_it,
+        feature.repo.path(),
+        &feature.repo.folders(),
+    )
+    .unwrap();
+    let repo = opened.review.local_facts().unwrap().repo.clone();
+    assert!(repo.is_some());
+    feature.repo.write("README.md", "hello\nworld\nagain\n");
+
+    update(&mut opened);
+
+    assert_eq!(opened.review.local_facts().unwrap().repo, repo);
+    assert_eq!(opened.review.display_options().more_lines().get(), 5);
+    assert!(
+        opened
+            .review
+            .problems()
+            .iter()
+            .any(|problem| problem.kind() == ProblemKind::LocalToursNotRead)
     );
 }
 

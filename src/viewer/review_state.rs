@@ -876,6 +876,12 @@ impl ReviewStateFile {
             .is_ok_and(|state| state.has_declined_move_to(pr))
     }
 
+    /// The one writer of `declined_moves`, which the review's own saves never write, so neither side
+    /// of a move writes a stale copy of the other's sections.
+    pub(super) fn decline_move_to(&self, pr: &PullRequestUrl) -> anyhow::Result<()> {
+        self.update(|state| state.decline_move_to(pr))
+    }
+
     pub fn exists(&self) -> bool {
         self.path.exists()
     }

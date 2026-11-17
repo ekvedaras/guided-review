@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use crate::pull_request::Sha;
-use crate::viewer::OldHead;
+use crate::viewer::{JobProgress, OldHead};
 
 use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{dropping_in, notice_band};
@@ -13,25 +13,18 @@ use super::palette::{Colors, Tone};
 
 type OnRepin = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RepinProgress {
-    Idle,
-    Running,
-    Failed(String),
-}
-
 /// Offers to move the tour to the PR's new commits. Nothing moves until the button is clicked.
 #[derive(IntoElement)]
 pub struct NewCommitsBanner {
     old_head: OldHead,
-    progress: RepinProgress,
+    progress: JobProgress,
     on_repin: OnRepin,
 }
 
 impl NewCommitsBanner {
     pub fn new(
         old_head: OldHead,
-        progress: RepinProgress,
+        progress: JobProgress,
         on_repin: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
@@ -46,18 +39,18 @@ impl RenderOnce for NewCommitsBanner {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let message = match &self.progress {
-            RepinProgress::Running => "Updating the tour…".to_owned(),
-            RepinProgress::Idle | RepinProgress::Failed(_) => format!(
+            JobProgress::Running { .. } => "Updating the tour…".to_owned(),
+            JobProgress::Idle | JobProgress::Failed(_) => format!(
                 "The PR has new commits ({} → {}). Update the tour to comment.",
                 short(&self.old_head.tour_head),
                 short(&self.old_head.pr_head)
             ),
         };
         let button_label = match &self.progress {
-            RepinProgress::Failed(_) => "Try again",
-            RepinProgress::Idle | RepinProgress::Running => "Update tour",
+            JobProgress::Failed(_) => "Try again",
+            JobProgress::Idle | JobProgress::Running { .. } => "Update tour",
         };
-        let button = (self.progress != RepinProgress::Running).then(|| {
+        let button = (!matches!(self.progress, JobProgress::Running { .. })).then(|| {
             icon_label_button(
                 &colors,
                 "update-tour",
@@ -69,12 +62,12 @@ impl RenderOnce for NewCommitsBanner {
             .on_click(self.on_repin)
         });
         let error = match &self.progress {
-            RepinProgress::Failed(error) => Some(
+            JobProgress::Failed(error) => Some(
                 div()
                     .text_color(colors.danger)
-                    .child(SharedString::from(error.clone())),
+                    .child(SharedString::from(error.to_string())),
             ),
-            RepinProgress::Idle | RepinProgress::Running => None,
+            JobProgress::Idle | JobProgress::Running { .. } => None,
         };
         let band = notice_band(&colors, Tone::Warning)
             .py_2()

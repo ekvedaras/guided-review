@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::support::FixtureRepo;
 use crate::support::fake_tour_agent::FakeTourAgent;
-use guided_review::open_review::writer_folder;
+use guided_review::opened_subject::writer_folder;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     ActivePr, AgentStatus, Finished, OpenDecision, OpenOrigin, ReviewStateFile, TerminalId,
