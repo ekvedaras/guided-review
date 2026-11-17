@@ -11,7 +11,7 @@ Paste this into Claude Code (or any coding agent with a shell):
 
 ```text
 Install guided-review (https://github.com/ekvedaras/guided-review) for me from its latest GitHub release. Do it yourself, one step at a time, and stop and tell me if any step fails:
-1. Find my OS and CPU with `uname -sm`: `Darwin arm64` means target aarch64-apple-darwin, `Darwin x86_64` means x86_64-apple-darwin, `Linux x86_64` means x86_64-unknown-linux-gnu. Stop on anything else.
+1. Find my OS and CPU with `uname -sm`: `Darwin arm64` means target aarch64-apple-darwin, `Linux x86_64` means x86_64-unknown-linux-gnu. Stop on anything else.
 2. Check what it needs and tell me what is missing, but go on: `gh auth status` (gh, logged in), `command -v claude` (Claude Code) and `command -v hc` (herdr, only for the agent features).
 3. Find the latest release and its assets: `gh release view --repo ekvedaras/guided-review --json tagName,assets` (or, without gh, https://api.github.com/repos/ekvedaras/guided-review/releases/latest). The version is the tag without its leading v. Pick guided-review-<version>-<target>.tar.gz and guided-review-<version>-<target>.tar.gz.sha256.
 4. Make the folder ~/.local/share/guided-review/<version>/ and, inside it, download both files, check the archive with `shasum -a 256 -c <archive>.sha256` and unpack it with `tar xzf <archive>`. It unpacks to guided-review-<version>-<target>/, holding the guided-review binary, skills/tour and the files of the Desktop entry; that folder is the release folder below.
@@ -55,7 +55,7 @@ Comments and GitHub review threads sit inline in the diff, in a box that splits 
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel), or Linux on x86_64 with a Vulkan driver and glibc 2.39 or newer (Ubuntu 24.04 or later). CI runs the gate on macOS and Ubuntu. On Linux the app is used on Arch with Hyprland (Wayland); X11 and other desktops are built but untried.
+- macOS on Apple Silicon, or Linux on x86_64 with a Vulkan driver and glibc 2.39 or newer (Ubuntu 24.04 or later). CI runs the gate on macOS and Ubuntu. On Linux the app is used on Arch with Hyprland (Wayland); X11 and other desktops are built but untried.
 - A Rust toolchain, stable (edition 2024), only to build from source.
 - [`gh`](https://cli.github.com), logged in. The app reads the token from `gh auth token`.
 - [Claude Code](https://claude.com/claude-code) (`claude`), which writes the tours.
@@ -65,12 +65,11 @@ Comments and GitHub review threads sit inline in the diff, in a box that splits 
 
 ### Prebuilt (no Rust needed)
 
-Each release has an archive per OS and CPU: `aarch64-apple-darwin`, `x86_64-apple-darwin` and `x86_64-unknown-linux-gnu`. Unpack it into its own version folder and link the binary and the tour skill into it. The app updates itself only when it is installed this way:
+Each release has an archive per OS and CPU: `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`. Unpack it into its own version folder and link the binary and the tour skill into it. The app updates itself only when it is installed this way:
 
 ```sh
 case "$(uname -sm)" in
   "Darwin arm64")  TARGET=aarch64-apple-darwin ;;
-  "Darwin x86_64") TARGET=x86_64-apple-darwin ;;
   "Linux x86_64")  TARGET=x86_64-unknown-linux-gnu ;;
   *) echo "No release for $(uname -sm); build from source" ;;
 esac

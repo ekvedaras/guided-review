@@ -57,13 +57,11 @@ jobs:
 
   build:
     needs: verify
-    # macos-15 is arm64. The Intel build cross-compiles on it: the metal shaders compile at
-    # runtime (gpui_platform "runtime_shaders"), so the build needs no target-specific tooling.
     runs-on: macos-15
     strategy:
       fail-fast: true
       matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        target: [aarch64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
