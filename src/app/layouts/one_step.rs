@@ -100,14 +100,14 @@ use crate::viewer::{
     AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
     CheckState, Checks, Chord, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
     CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
-    GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Merging, NextScreen,
-    NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow, PieceLabels, Place,
-    PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness,
-    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, MergeOffer, Merging,
+    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
+    PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject,
+    ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
+    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
+    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
+    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
+    Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -3560,6 +3560,10 @@ fn merge_button(
     cx: &mut Context<OneStepLayout>,
 ) -> Option<Stateful<Div>> {
     let label = merging.button_label()?;
+    let icon = match merging.offer().ok()? {
+        MergeOffer::DisableAutoMerge => Icon::Clock,
+        MergeOffer::EnableAutoMerge | MergeOffer::MergeNow => Icon::GitMerge,
+    };
     let kind = match merging.auto_merge {
         AutoMerge::On(_) => ButtonKind::Pressed,
         AutoMerge::Off => ButtonKind::Ghost,
@@ -3577,7 +3581,7 @@ fn merge_button(
             "title-bar-merge",
             kind,
             ButtonSize::Small,
-            Icon::Clock,
+            icon,
             label,
         )
         .children(method.map(|method| div().text_color(colors.muted_text).child(method)))

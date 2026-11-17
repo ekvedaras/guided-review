@@ -126,9 +126,9 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
         PaletteAction::ConvertToDraft
         | PaletteAction::MarkReadyForReview
-        | PaletteAction::MergeNow
         | PaletteAction::SwitchPr => Icon::PullRequest,
-        PaletteAction::EnableAutoMerge | PaletteAction::DisableAutoMerge => Icon::Clock,
+        PaletteAction::MergeNow | PaletteAction::EnableAutoMerge => Icon::GitMerge,
+        PaletteAction::DisableAutoMerge => Icon::Clock,
         PaletteAction::Settings => Icon::Settings,
         PaletteAction::Shortcuts => Icon::Keyboard,
         PaletteAction::RestartApp => Icon::RotateCcw,
