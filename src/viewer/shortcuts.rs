@@ -22,6 +22,7 @@ const W: Chord = key('w');
 const R: Chord = key('r');
 const L: Chord = key('l');
 const O: Chord = key('o');
+const D: Chord = key('d');
 const G: Chord = key('g');
 const QUESTION: Chord = key('?');
 const OPEN_BRACKET: Chord = key('[');
@@ -128,12 +129,13 @@ pub enum Command {
     Settings,
     Shortcuts,
     OpenOnGitHub,
+    ToggleDraft,
     CloseWindow,
     Quit,
 }
 
 impl Command {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 27] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -158,6 +160,7 @@ impl Command {
         Self::Settings,
         Self::Shortcuts,
         Self::OpenOnGitHub,
+        Self::ToggleDraft,
         Self::CloseWindow,
         Self::Quit,
     ];
@@ -189,6 +192,7 @@ impl Command {
             Self::Settings => &[PRIMARY_COMMA],
             Self::Shortcuts => &[QUESTION],
             Self::OpenOnGitHub => &[G],
+            Self::ToggleDraft => &[D],
             Self::CloseWindow => &[PRIMARY_W],
             Self::Quit => &[PRIMARY_Q],
         }
@@ -221,6 +225,7 @@ impl Command {
             Self::Settings => "settings",
             Self::Shortcuts => "shortcuts",
             Self::OpenOnGitHub => "open_on_github",
+            Self::ToggleDraft => "toggle_draft",
             Self::CloseWindow => "close_window",
             Self::Quit => "quit",
         }
@@ -251,7 +256,8 @@ impl Command {
             | Self::TogglePieceLabels
             | Self::ToggleFold
             | Self::Shortcuts
-            | Self::OpenOnGitHub => KeyScope::Page,
+            | Self::OpenOnGitHub
+            | Self::ToggleDraft => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
@@ -281,6 +287,7 @@ impl Command {
             Self::Settings
             | Self::Shortcuts
             | Self::OpenOnGitHub
+            | Self::ToggleDraft
             | Self::CloseWindow
             | Self::Quit => ShortcutGroup::App,
         }
@@ -313,6 +320,9 @@ impl Command {
             Self::Settings => "Settings",
             Self::Shortcuts => "This list of shortcuts",
             Self::OpenOnGitHub => "Open the pull request on GitHub",
+            Self::ToggleDraft => {
+                "Convert the pull request to a draft, or mark it ready; press again to confirm"
+            }
             Self::CloseWindow => "Close the window and quit",
             Self::Quit => "Quit",
         }

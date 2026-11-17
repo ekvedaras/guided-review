@@ -8,6 +8,7 @@ use crate::opened_change_set::UnreadableLocalTour;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
+use super::pr_status::Readiness;
 use super::saved_state::RepinRunning;
 use super::toasts::ToastTone;
 
@@ -53,6 +54,8 @@ pub enum Problem {
     UseAgentFailed(String),
     /// GitHub refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
     ReviewingMarkNotChanged(String),
+    /// GitHub did not take the change of the PR between draft and ready.
+    ReadinessNotChanged(Readiness, String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
     ReleaseInstallInTheWay(InTheWay),
     /// Files the app keeps that lie in the app folders it does not use: what a move from
@@ -105,6 +108,8 @@ pub enum ProblemKind {
     UseAgentFailed,
     /// Cleared by the next change of the 👀 on the PR that goes through.
     ReviewingMarkNotChanged,
+    /// Cleared by the next change of the PR between draft and ready that goes through.
+    ReadinessNotChanged,
     /// Raised when the review opens; a review opened once the binary is removed has none.
     ReleaseInstallInTheWay,
     /// Raised when the review opens; a review opened once the files are gone has none.
@@ -135,6 +140,7 @@ impl Problem {
             Self::ShowAgentFailed(_) => ProblemKind::ShowAgentFailed,
             Self::UseAgentFailed(_) => ProblemKind::UseAgentFailed,
             Self::ReviewingMarkNotChanged(_) => ProblemKind::ReviewingMarkNotChanged,
+            Self::ReadinessNotChanged(..) => ProblemKind::ReadinessNotChanged,
             Self::ReleaseInstallInTheWay(_) => ProblemKind::ReleaseInstallInTheWay,
             Self::FilesNotRead(_) => ProblemKind::FilesNotRead,
             Self::LocalToursNotRead(_) => ProblemKind::LocalToursNotRead,
@@ -341,6 +347,15 @@ impl fmt::Display for Problem {
                 formatter,
                 "The 👀 on the PR may tell its author the wrong thing; trying again when the window comes to the front: {reason}"
             ),
+            Self::ReadinessNotChanged(Readiness::Draft, reason) => {
+                write!(formatter, "The PR was not converted to a draft: {reason}")
+            }
+            Self::ReadinessNotChanged(Readiness::Ready, reason) => {
+                write!(
+                    formatter,
+                    "The PR was not marked ready for review: {reason}"
+                )
+            }
             Self::ReleaseInstallInTheWay(InTheWay::FirstOnPath { binary, .. }) => write!(
                 formatter,
                 "{} comes first on PATH, so the tour skill misses updates",

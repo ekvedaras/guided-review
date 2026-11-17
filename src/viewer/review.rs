@@ -59,7 +59,7 @@ use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
-use super::pr_status::PrStatus;
+use super::pr_status::{PrStatus, Readiness};
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
@@ -312,6 +312,10 @@ pub struct ReviewCore {
     last_review: Option<SubmittedReview>,
     /// What GitHub last said of the PR's draft state and checks; kept as it was while a read fails.
     pr_status: Option<PrStatus>,
+    /// The first press of the key, waiting for the same press again.
+    readiness_asked: Option<(Readiness, Instant)>,
+    /// What the confirmed press changed the PR to, until GitHub answers.
+    readiness_to_send: Option<Readiness>,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -648,6 +652,8 @@ impl ReviewCore {
             on_disk: None,
             last_review: None,
             pr_status: None,
+            readiness_asked: None,
+            readiness_to_send: None,
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -2250,8 +2256,14 @@ impl ReviewCore {
             .chain([wrap, whitespace])
             .chain(page_toggles)
             .chain(finish)
+            .chain(self.readiness_palette_action())
+            .chain([PaletteAction::OpenOnGitHub])
+            .chain(
+                self.subject
+                    .pull_request()
+                    .map(|_| PaletteAction::OpenChecksOnGitHub),
+            )
             .chain([
-                PaletteAction::OpenOnGitHub,
                 PaletteAction::SwitchPr,
                 PaletteAction::Settings,
                 PaletteAction::Shortcuts,

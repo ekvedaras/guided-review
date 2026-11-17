@@ -7,6 +7,9 @@ use std::time::Duration;
 /// How often the checks are read again while one is running.
 pub const CHECKS_RECHECK: Duration = Duration::from_secs(30);
 
+/// How soon the second press must follow the first to go ahead.
+pub const CONFIRM_WITHIN: Duration = Duration::from_secs(10);
+
 /// Whether the PR is a draft, which GitHub does not let anyone merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
@@ -43,6 +46,19 @@ impl Checks {
             Some(_) => Self::Running,
         }
     }
+}
+
+/// What a press of the key did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadinessStep {
+    /// The status is not known, so there is nothing to change.
+    Nothing,
+    /// GitHub would refuse: only the author and those with write access may change it.
+    NotAllowed,
+    /// The first press: what the same press again does.
+    Ask(String),
+    /// The second press: the change is on its way to GitHub.
+    Sent,
 }
 
 /// What GitHub says of the PR right now, and what the viewer may do about it.

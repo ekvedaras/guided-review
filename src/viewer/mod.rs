@@ -162,7 +162,7 @@ pub use ports::{
     ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
-pub use pr_status::{Checks, PrStatus, Readiness};
+pub use pr_status::{Checks, PrStatus, Readiness, ReadinessStep};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};

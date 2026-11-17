@@ -16,7 +16,7 @@ use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOf
 use super::local_threads::ThreadHome;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
-use super::pr_status::PrStatus;
+use super::pr_status::{PrStatus, Readiness};
 use super::reactions::ReactionChange;
 use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
@@ -50,6 +50,7 @@ pub enum WorkKind {
     PullPrStatus,
     SendQueuedComment,
     ChangeReviewingMark,
+    ChangePrReadiness,
     TakeSeenMarksOff,
     DeliverHandOff,
     CheckAgentLink,
@@ -90,6 +91,7 @@ impl WorkKind {
             Self::SendQueuedComment
             | Self::TakeSeenMarksOff
             | Self::DeliverHandOff
+            | Self::ChangePrReadiness
             | Self::CheckAgentLink => WhileRunning::IsDropped,
             Self::CheckPrHead
             | Self::CheckWorkingTree
@@ -249,6 +251,10 @@ pub(super) enum Job {
         pr: PullRequestUrl,
         change: ReactionChange,
     },
+    ChangePrReadiness {
+        pr: PullRequestUrl,
+        readiness: Readiness,
+    },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
     CheckAgentLink(ReviewSubject),
@@ -270,6 +276,7 @@ impl Job {
             Self::PullPrStatus(_) => WorkKind::PullPrStatus,
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
             Self::ChangeReviewingMark { .. } => WorkKind::ChangeReviewingMark,
+            Self::ChangePrReadiness { .. } => WorkKind::ChangePrReadiness,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
             Self::DeliverHandOff(_) => WorkKind::DeliverHandOff,
             Self::CheckAgentLink(_) => WorkKind::CheckAgentLink,
@@ -326,6 +333,10 @@ impl Work {
                 change,
                 result: github.set_pull_request_reaction(&pr, REVIEWING_MARK, change),
             },
+            Job::ChangePrReadiness { pr, readiness } => Done::PrReadiness {
+                readiness,
+                result: github.set_pull_request_readiness(&pr, readiness),
+            },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
                 requests
                     .into_iter()
@@ -368,6 +379,10 @@ pub(super) enum Done {
     QueuedComment(CommentOutcome),
     ReviewingMark {
         change: ReactionChange,
+        result: Result<(), GitHubError>,
+    },
+    PrReadiness {
+        readiness: Readiness,
         result: Result<(), GitHubError>,
     },
     SeenMarksOff(Vec<SeenMarkOffOutcome>),

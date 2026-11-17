@@ -123,8 +123,10 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview => Icon::ListChecks,
         PaletteAction::SendTasks => Icon::Send,
-        PaletteAction::OpenOnGitHub => Icon::ExternalLink,
-        PaletteAction::SwitchPr => Icon::PullRequest,
+        PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
+        PaletteAction::ConvertToDraft
+        | PaletteAction::MarkReadyForReview
+        | PaletteAction::SwitchPr => Icon::PullRequest,
         PaletteAction::Settings => Icon::Settings,
         PaletteAction::Shortcuts => Icon::Keyboard,
         PaletteAction::RestartApp => Icon::RotateCcw,

@@ -100,11 +100,11 @@ use crate::viewer::{
     FileToggle, FileView, FinishAction, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch,
     LineLocation, NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats,
     PageRow, PieceLabels, Place, QueuedComment, ReadProgress, ReadStep, ReadSubject, ReadUnit,
-    Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard, RestartStep, Review,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, ScreenTravel,
-    SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro, SummaryColumns,
-    SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead,
-    Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    ReadinessStep, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
+    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
+    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
+    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
+    Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 
 #[cfg(feature = "snapshots")]
@@ -133,6 +133,7 @@ actions!(
         ToggleRenderedView,
         TogglePieceLabels,
         ToggleFold,
+        ToggleDraft,
         ToggleRead,
         ToggleShortcuts,
         OpenPrOnGitHub,
@@ -1079,6 +1080,23 @@ impl OneStepLayout {
         }
     }
 
+    /// `D` and the palette's actions: the first ask says what asking again does.
+    fn change_readiness(&mut self, cx: &mut Context<Self>) {
+        let step = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.ask_to_change_readiness(Instant::now()))
+        });
+        match step {
+            ReadinessStep::Nothing | ReadinessStep::Sent => {}
+            ReadinessStep::NotAllowed => post_toast(
+                cx,
+                ToastTone::Neutral,
+                "Only the author and people with write access can change whether the PR is a draft"
+                    .to_owned(),
+            ),
+            ReadinessStep::Ask(note) => post_toast(cx, ToastTone::Neutral, note),
+        }
+    }
+
     /// Switch to guided tour, from the banner, the sidebar and the palette: the reviewer's click only.
     fn switch_to_guided_tour(&mut self, cx: &mut Context<Self>) {
         self.session
@@ -1249,6 +1267,8 @@ impl OneStepLayout {
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
+            Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
+            Effect::ChangeReadiness => self.change_readiness(cx),
             Effect::Restart(restart) => match crate::platform::running_binary() {
                 Ok(exe) => self.restart_app_with(exe, &restart, cx),
                 Err(error) => {
@@ -4522,6 +4542,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &TogglePieceLabels, window, cx| {
                 this.act(Intent::TogglePieceLabels, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleDraft, window, cx| {
+                this.act(Intent::ToggleDraft, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleFold, window, cx| {
                 this.act(Intent::ToggleFold, window, cx);

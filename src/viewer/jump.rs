@@ -204,6 +204,12 @@ pub enum PaletteAction {
     /// A local review's finish: its queued tasks go to the change set's agent.
     SendTasks,
     OpenOnGitHub,
+    /// GitHub's checks page of the PR.
+    OpenChecksOnGitHub,
+    /// Offered only where the PR is ready and the viewer may change it.
+    ConvertToDraft,
+    /// Offered only where the PR is a draft and the viewer may change it.
+    MarkReadyForReview,
     SwitchPr,
     Settings,
     Shortcuts,
@@ -237,6 +243,9 @@ impl PaletteAction {
             Self::FinishReview => "Finish review",
             Self::SendTasks => "Send tasks",
             Self::OpenOnGitHub => "Open on GitHub",
+            Self::OpenChecksOnGitHub => "Open checks on GitHub",
+            Self::ConvertToDraft => "Convert to draft",
+            Self::MarkReadyForReview => "Mark as ready for review",
             Self::SwitchPr => "Switch pull request",
             Self::Settings => "Settings",
             Self::Shortcuts => "Keyboard shortcuts",
@@ -257,6 +266,7 @@ impl PaletteAction {
             Self::ShowPieceLabels | Self::HidePieceLabels => Some(Command::TogglePieceLabels),
             Self::ShowRendered | Self::ShowCode => Some(Command::ToggleRenderedView),
             Self::OpenAllPieces | Self::FoldAllPieces => Some(Command::ToggleFold),
+            Self::ConvertToDraft | Self::MarkReadyForReview => Some(Command::ToggleDraft),
             Self::Settings => Some(Command::Settings),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
@@ -266,6 +276,7 @@ impl PaletteAction {
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenOnGitHub
+            | Self::OpenChecksOnGitHub
             | Self::SwitchPr
             | Self::CheckForUpdates
             | Self::RestartApp => None,

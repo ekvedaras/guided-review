@@ -46,6 +46,10 @@ pub enum Intent {
     /// A local review's finish, from the sidebar, the finish card or the palette.
     SendTasks,
     OpenOnGitHub,
+    /// GitHub's checks page of the PR.
+    OpenChecksOnGitHub,
+    /// `D`: asks, and on the same press again soon after, converts the PR to a draft or marks it ready.
+    ToggleDraft,
     CheckForUpdates,
     RestartApp,
 }
@@ -72,6 +76,8 @@ impl From<PaletteAction> for Intent {
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::SendTasks => Self::SendTasks,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
+            PaletteAction::OpenChecksOnGitHub => Self::OpenChecksOnGitHub,
+            PaletteAction::ConvertToDraft | PaletteAction::MarkReadyForReview => Self::ToggleDraft,
             PaletteAction::SwitchPr => Self::TogglePrSwitcher,
             PaletteAction::Settings => Self::ToggleSettings,
             PaletteAction::Shortcuts => Self::ToggleShortcuts,
@@ -104,6 +110,9 @@ pub enum Effect {
     /// Hands a local review's queued tasks to its agent.
     SendTasks,
     OpenOnGitHub(PullRequestUrl),
+    OpenChecksOnGitHub(PullRequestUrl),
+    /// The window asks the review to change the PR between draft and ready, and says what it answers.
+    ChangeReadiness,
     Restart(RestartArgs),
     /// Asks GitHub for a newer release now.
     CheckForUpdates,
@@ -205,6 +214,7 @@ impl Intent {
             | Self::ToggleRenderedView
             | Self::TogglePieceLabels
             | Self::ToggleFold
+            | Self::ToggleDraft
             | Self::ToggleJump
             | Self::ToggleSettings
             | Self::ShowSettings
@@ -219,6 +229,7 @@ impl Intent {
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenOnGitHub
+            | Self::OpenChecksOnGitHub
             | Self::CheckForUpdates
             | Self::RestartApp => false,
         };
@@ -293,6 +304,11 @@ impl ReviewCore {
                 .subject()
                 .pull_request()
                 .map_or(Effect::Nothing, |pr| Effect::OpenOnGitHub(pr.clone())),
+            Intent::OpenChecksOnGitHub => self
+                .subject()
+                .pull_request()
+                .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnGitHub(pr.clone())),
+            Intent::ToggleDraft => Effect::ChangeReadiness,
             Intent::CheckForUpdates => Effect::CheckForUpdates,
             Intent::RestartApp => Effect::Restart(self.restart_args()),
         }
