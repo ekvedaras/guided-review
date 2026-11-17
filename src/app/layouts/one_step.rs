@@ -2419,7 +2419,6 @@ impl OneStepLayout {
             anchored().snap_to_window_with_margin(px(8.)).child(
                 div()
                     .id("title-bar-checks-hover")
-                    .mt(px(CHIP_HEIGHT))
                     .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
                         this.checks_hover.list = *is_hovered;
                         cx.notify();
@@ -3545,8 +3544,6 @@ impl ChecksHover {
     }
 }
 
-/// The chip's height with its border, which the list hangs under.
-const CHIP_HEIGHT: f32 = 22.;
 const CHECKS_LIST_WIDTH: f32 = 340.;
 /// What the PR's name and title keep of the bar: its icon, the name and a stretch of the title.
 /// Past it the title is cut with an ellipsis and the status button keeps its width.
