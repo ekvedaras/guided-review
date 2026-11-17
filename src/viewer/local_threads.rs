@@ -436,6 +436,43 @@ impl LocalThreadStore {
         })
     }
 
+    /// A task sent to an agent that does not report its state, held back until the reviewer sends it
+    /// anyway, for a snapshot scene of a local review. Nothing is written when a thread holds the task already.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_held_back_task(
+        &self,
+        place: &CommentPlace,
+        head: &Sha,
+        task: &str,
+    ) -> anyhow::Result<()> {
+        use super::hand_offs::{SentComment, SentFrom};
+
+        let staged = self.threads_at(head)?;
+        if staged
+            .iter()
+            .any(|thread| thread.comments.iter().any(|said| said.body == task))
+        {
+            return Ok(());
+        }
+        self.start(place, task, head)?;
+        let threads = self.threads_at(head)?;
+        self.file.update(|state| {
+            let hand_offs = state.hand_offs_mut();
+            hand_offs.record_new_thread(
+                place.path(),
+                &SentComment {
+                    place: place.describe(),
+                    from: SentFrom::File(place.path().clone()),
+                    mode: super::comments::SendMode::SendNow,
+                    body: task,
+                    code: None,
+                },
+                Some(&Ok(threads)),
+            );
+            hand_offs.hold_back_latest();
+        })
+    }
+
     /// Nothing is written when the change is refused.
     fn change<T>(
         &self,

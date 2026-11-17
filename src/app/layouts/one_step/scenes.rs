@@ -68,10 +68,11 @@ enum Scene {
     LocalOverview,
     LocalFile,
     LocalChangedOnDisk,
+    LocalTaskSendAnyway,
 }
 
 impl Scene {
-    const ALL: [Self; 39] = [
+    const ALL: [Self; 40] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -111,6 +112,7 @@ impl Scene {
         Self::LocalOverview,
         Self::LocalFile,
         Self::LocalChangedOnDisk,
+        Self::LocalTaskSendAnyway,
     ];
 
     fn file_name(self) -> &'static str {
@@ -154,6 +156,7 @@ impl Scene {
             Self::LocalOverview => "58-local-overview",
             Self::LocalFile => "59-local-file",
             Self::LocalChangedOnDisk => "60-local-changed-on-disk",
+            Self::LocalTaskSendAnyway => "62-local-task-send-anyway",
         }
     }
 }
@@ -570,6 +573,15 @@ impl OneStepLayout {
                     }
                 });
             }
+            Scene::LocalTaskSendAnyway => {
+                self.session
+                    .update(cx, ReviewSession::stage_local_with_held_back_task);
+                self.change_review(cx, |review| {
+                    if let Ok(path) = FilePath::new("README.md") {
+                        review.go_to_file(&path);
+                    }
+                });
+            }
             Scene::BasicRead => self.session.update(cx, ReviewSession::stage_basic_read),
             Scene::BasicGuidedReady => self
                 .session
@@ -690,7 +702,8 @@ impl OneStepLayout {
             | Scene::BasicRead
             | Scene::BasicGuidedReady
             | Scene::LocalOverview
-            | Scene::LocalFile => {
+            | Scene::LocalFile
+            | Scene::LocalTaskSendAnyway => {
                 self.session.update(cx, ReviewSession::unstage_basic);
                 self.go_to_first_open_code(cx);
             }

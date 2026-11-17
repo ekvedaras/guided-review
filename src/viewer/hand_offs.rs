@@ -838,6 +838,15 @@ impl HandOffs {
     }
 
     /// Queues a failed hand-off again. One with no thread cannot go: the agent would have nowhere to answer.
+    /// The latest hand-off held back from an agent that does not report its state, as a delivery to such
+    /// an agent leaves it, for a snapshot scene.
+    #[cfg(feature = "snapshots")]
+    pub(super) fn hold_back_latest(&mut self) {
+        if let Some(latest) = self.0.last_mut() {
+            latest.state = HandOffState::AgentUnreported;
+        }
+    }
+
     pub(super) fn try_again(&mut self, id: HandOffId) -> anyhow::Result<()> {
         let hand_off = self
             .0
