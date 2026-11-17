@@ -123,6 +123,7 @@ impl HcTourAgents {
 
 /// What `hc ls --json` names the Claude Code program in `agent`.
 const CLAUDE_AGENT: &str = "claude-code";
+const CLAUDE_PROGRAM: &str = "claude";
 
 /// `where` reads `<space> / <tab>`.
 fn space_of(place: &str) -> &str {
@@ -204,9 +205,11 @@ impl TourAgentPort for HcTourAgents {
             .into_iter()
             .flatten()
             .filter_map(|terminal| {
+                let address = at(terminal, "/address").as_str()?;
                 Some(LiveTerminal {
-                    terminal: TerminalId::new(at(terminal, "/address").as_str()?),
-                    runs_claude: at(terminal, "/agent") == CLAUDE_AGENT,
+                    terminal: TerminalId::new(address),
+                    runs_claude: at(terminal, "/agent") == CLAUDE_AGENT
+                        || self.runs_claude_unreported(address),
                     space: space_of(at(terminal, "/where").as_str()?).to_owned(),
                     // A terminal herdr gives no cwd is in no folder, so it is never taken for a change
                     // set's agent: an empty path starts with no folder.
@@ -547,6 +550,18 @@ impl HcTourAgents {
             };
         }
         Naming::Named
+    }
+
+    /// Herdr lists a terminal as `claude-code` only once Claude has reported a status to it, so a Claude
+    /// started by hand that herdr has not heard from is listed by its shell; its foreground process still
+    /// says Claude. A terminal gone since the list runs nothing.
+    fn runs_claude_unreported(&self, address: &str) -> bool {
+        self.hc(&["get", address, "--json"]).is_ok_and(|got| {
+            at(&got, "/foreground/argv/0")
+                .as_str()
+                .and_then(|program| Path::new(program).file_name())
+                .is_some_and(|program| program == CLAUDE_PROGRAM)
+        })
     }
 
     fn hc_is_missing(&self) -> bool {

@@ -18,8 +18,8 @@ fn pr() -> ReviewSubject {
     PR.parse().unwrap()
 }
 
-/// A stand-in `hc` that logs each call on one line and answers from `<dir>/answer-<subcommand>`,
-/// failing when the server is made to be down.
+/// A stand-in `hc` that logs each call on one line and answers from `<dir>/answer-<subcommand>-<first
+/// argument>`, else `<dir>/answer-<subcommand>`, failing when the server is made to be down.
 fn fake_hc(dir: &Path) -> PathBuf {
     let script = dir.join("hc");
     write_executable(
@@ -39,7 +39,8 @@ if [ "$1" = "send" ] && [ "$4" = "idle" ] && [ -f "{dir}/refuse-idle" ]; then
   cat "{dir}/refuse-idle" >&2
   exit 10
 fi
-if [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
+if [ -f "{dir}/answer-$1-$2" ]; then cat "{dir}/answer-$1-$2"
+elif [ -f "{dir}/answer-$1" ]; then cat "{dir}/answer-$1"; fi
 "#,
             dir = dir.display()
         ),
@@ -465,7 +466,50 @@ fn live_terminals_say_whether_they_run_claude_in_which_space_and_folder_as_herdr
             ),
         ]
     );
-    assert_eq!(calls(dir.path(), "calls"), ["ls --json"]);
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [
+            "ls --json",
+            "get t3 --json",
+            "get t4 --json",
+            "get t2h --json"
+        ]
+    );
+}
+
+/// Herdr lists a terminal as `claude-code` only once Claude has reported a status to it; a Claude started by
+/// hand that it has not heard from is listed by its shell, and only its foreground process says Claude.
+#[test]
+fn a_claude_herdr_has_no_status_from_runs_claude_by_its_foreground_process() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[
+            {"address":"t11","agent":"zsh","cwd":"/Users/me/Code/Trees/a","state":"live","turn":222,"where":"a / 1"},
+            {"address":"t21","agent":"zsh","cwd":"/Users/me/Code/Trees/a","state":"live","turn":0,"where":"a / 2"}
+        ]}"#,
+    );
+    answer(
+        dir.path(),
+        "get-t11",
+        include_str!("../fixtures/herdr/get-claude-not-reported.json"),
+    );
+    answer(
+        dir.path(),
+        "get-t21",
+        include_str!("../fixtures/herdr/get-shell.json"),
+    );
+
+    let terminals = adapter(dir.path()).live_terminals().unwrap();
+
+    assert_eq!(
+        terminals,
+        [
+            live("t11", true, "a", "/Users/me/Code/Trees/a"),
+            live("t21", false, "a", "/Users/me/Code/Trees/a"),
+        ]
+    );
 }
 
 #[test]

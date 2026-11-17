@@ -71,7 +71,8 @@ impl fmt::Display for AgentStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveTerminal {
     pub terminal: TerminalId,
-    /// Herdr recognises the program in it as Claude Code, so a question sent to it is read by Claude, not run by a shell.
+    /// Claude Code runs in it, by herdr's word or by its foreground process, so a question sent to it is read by
+    /// Claude, not run by a shell.
     pub runs_claude: bool,
     /// The herdr space (workspace) it lives in.
     pub space: String,
