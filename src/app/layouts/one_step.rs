@@ -132,6 +132,7 @@ actions!(
         ShowMoreBelow,
         ToggleRenderedView,
         TogglePieceLabels,
+        ToggleFold,
         ToggleRead,
         ToggleShortcuts,
         OpenPrOnGitHub,
@@ -1207,6 +1208,9 @@ impl OneStepLayout {
             }
             Effect::ToggleFocusedFile(FileToggle::PieceLabels) => {
                 self.change_review(cx, Review::toggle_focused_piece_labels);
+            }
+            Effect::ToggleScreenFold => {
+                self.change_review(cx, Review::toggle_screen_fold);
             }
             Effect::Toggle(Overlay::Jump) => {
                 let groups = self.session.read(cx).review().palette("", running_build());
@@ -3153,6 +3157,16 @@ impl OneStepLayout {
                     this.change_review(cx, |review| review.toggle_fold(&step));
                 }),
             )
+            .keys(button_keys(
+                &colors,
+                if fold.is_folded {
+                    ButtonKind::Secondary
+                } else {
+                    ButtonKind::Ghost
+                },
+                Command::ToggleFold,
+                cx,
+            ))
         });
         let full_diff = toolbar.full_diff.as_ref().map(|control| {
             let subject = control.subject.clone();
@@ -4508,6 +4522,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &TogglePieceLabels, window, cx| {
                 this.act(Intent::TogglePieceLabels, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFold, window, cx| {
+                this.act(Intent::ToggleFold, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleWrapLines, window, cx| {
                 this.act(Intent::ToggleWrapLines, window, cx);

@@ -193,6 +193,9 @@ pub enum PaletteAction {
     HidePieceLabels,
     ShowRendered,
     ShowCode,
+    /// On the open screen's boxes, where the toolbar has the fold toggle.
+    OpenAllPieces,
+    FoldAllPieces,
     AskAboutStep,
     /// Asks the PR's tour agent to write the guided tour of a basic review.
     WriteGuidedTour,
@@ -226,6 +229,8 @@ impl PaletteAction {
             Self::HidePieceLabels => "Hide piece labels in this file",
             Self::ShowRendered => "Show this file rendered",
             Self::ShowCode => "Show this file as code",
+            Self::OpenAllPieces => "Open all pieces",
+            Self::FoldAllPieces => "Fold all pieces",
             Self::AskAboutStep => "Ask about this step",
             Self::WriteGuidedTour => "Write guided tour",
             Self::SwitchToGuidedTour => "Switch to guided tour",
@@ -251,6 +256,7 @@ impl PaletteAction {
             Self::WrapLines | Self::StopWrappingLines => Some(Command::WrapLines),
             Self::ShowPieceLabels | Self::HidePieceLabels => Some(Command::TogglePieceLabels),
             Self::ShowRendered | Self::ShowCode => Some(Command::ToggleRenderedView),
+            Self::OpenAllPieces | Self::FoldAllPieces => Some(Command::ToggleFold),
             Self::Settings => Some(Command::Settings),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),

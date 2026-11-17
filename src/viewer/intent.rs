@@ -28,6 +28,8 @@ pub enum Intent {
     ToggleRenderedView,
     /// `L`, on the focused change's file.
     TogglePieceLabels,
+    /// `O`, on the open screen's boxes.
+    ToggleFold,
     ToggleJump,
     TogglePrSwitcher,
     /// The PR switcher asked for from outside the window, by a launch from the Desktop entry.
@@ -63,6 +65,7 @@ impl From<PaletteAction> for Intent {
                 Self::TogglePieceLabels
             }
             PaletteAction::ShowRendered | PaletteAction::ShowCode => Self::ToggleRenderedView,
+            PaletteAction::OpenAllPieces | PaletteAction::FoldAllPieces => Self::ToggleFold,
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
@@ -84,6 +87,8 @@ pub enum Effect {
     Change(ReviewChange),
     /// Switches the focused change's file; does nothing when there is none or it has no such switch.
     ToggleFocusedFile(FileToggle),
+    /// Opens or folds every box of the screen; does nothing where the screen has no fold toggle.
+    ToggleScreenFold,
     /// Opens the overlay, or closes it when open.
     Toggle(Overlay),
     /// Opens Settings, which is closed.
@@ -199,6 +204,7 @@ impl Intent {
             | Self::ToggleWrapLines
             | Self::ToggleRenderedView
             | Self::TogglePieceLabels
+            | Self::ToggleFold
             | Self::ToggleJump
             | Self::ToggleSettings
             | Self::ShowSettings
@@ -259,6 +265,7 @@ impl ReviewCore {
             Intent::ToggleWhitespace => Effect::Change(ReviewChange::ToggleWhitespace),
             Intent::ToggleRenderedView => Effect::ToggleFocusedFile(FileToggle::RenderedView),
             Intent::TogglePieceLabels => Effect::ToggleFocusedFile(FileToggle::PieceLabels),
+            Intent::ToggleFold => Effect::ToggleScreenFold,
             Intent::ToggleJump => Effect::Toggle(Overlay::Jump),
             Intent::TogglePrSwitcher => Effect::Toggle(Overlay::PrSwitcher),
             Intent::ShowPrSwitcher => Effect::OpenPrSwitcher,

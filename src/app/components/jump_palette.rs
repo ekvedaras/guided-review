@@ -117,6 +117,8 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::ShowPieceLabels | PaletteAction::HidePieceLabels => Icon::Milestone,
         PaletteAction::ShowRendered => Icon::FileText,
         PaletteAction::ShowCode => Icon::Code,
+        PaletteAction::OpenAllPieces => Icon::ChevronDown,
+        PaletteAction::FoldAllPieces => Icon::ChevronRight,
         PaletteAction::AskAboutStep | PaletteAction::WriteGuidedTour => Icon::Sparkles,
         PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview => Icon::ListChecks,

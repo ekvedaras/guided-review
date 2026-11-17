@@ -2188,22 +2188,22 @@ impl ReviewCore {
         &self,
         query: &str,
         build: Build,
-        file_toggles: Vec<PaletteAction>,
+        page_toggles: Vec<PaletteAction>,
     ) -> Vec<PaletteGroup> {
         jump::palette(
             self.jump_targets(""),
-            &self.palette_actions_with(build, file_toggles),
+            &self.palette_actions_with(build, page_toggles),
             query,
         )
     }
 
     /// What the palette can do on the open screen.
     /// Checking for updates only where the build takes them.
-    /// `file_toggles` are the actions on the focused change's file, which only the page knows.
+    /// `page_toggles` are the actions on the screen's boxes and the focused change's file, which only the page knows.
     pub(super) fn palette_actions_with(
         &self,
         build: Build,
-        file_toggles: Vec<PaletteAction>,
+        page_toggles: Vec<PaletteAction>,
     ) -> Vec<PaletteAction> {
         let step = match &self.screen {
             Screen::Step(id) => Some(id),
@@ -2243,7 +2243,7 @@ impl ReviewCore {
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
             .chain([wrap, whitespace])
-            .chain(file_toggles)
+            .chain(page_toggles)
             .chain(finish)
             .chain([
                 PaletteAction::OpenOnGitHub,
@@ -2611,6 +2611,15 @@ impl ReviewCore {
             != self
                 .box_fold_flipped
                 .contains(&(screen.clone(), path.clone()))
+    }
+
+    /// Folds or opens each of the boxes, leaving one already as asked alone.
+    pub fn set_boxes_folded(&mut self, screen: &Screen, paths: &[FilePath], folded: bool) {
+        for path in paths {
+            if self.is_box_folded(screen, path) != folded {
+                self.toggle_box_fold(screen, path);
+            }
+        }
     }
 
     pub fn toggle_box_fold(&mut self, screen: &Screen, path: &FilePath) {

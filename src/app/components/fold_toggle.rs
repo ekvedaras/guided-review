@@ -1,5 +1,6 @@
 use gpui::{
-    App, ClickEvent, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement, Window, px,
+    App, ClickEvent, Div, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement,
+    Window, px,
 };
 
 use super::button::{ButtonKind, ButtonSize, button};
@@ -15,6 +16,7 @@ pub struct FoldToggle {
     folded: bool,
     piece_count: usize,
     on_toggle: OnToggle,
+    keys: Option<Div>,
 }
 
 impl FoldToggle {
@@ -27,7 +29,14 @@ impl FoldToggle {
             folded,
             piece_count,
             on_toggle: Box::new(on_toggle),
+            keys: None,
         }
+    }
+
+    /// The key cap of the shortcut that does the same.
+    pub fn keys(mut self, keys: Div) -> Self {
+        self.keys = Some(keys);
+        self
     }
 }
 
@@ -49,5 +58,6 @@ impl RenderOnce for FoldToggle {
             .on_click(self.on_toggle)
             .child(turn_to(chevron, "fold-chevron", !self.folded, 1.))
             .child(label)
+            .children(self.keys)
     }
 }

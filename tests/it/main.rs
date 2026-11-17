@@ -50,6 +50,7 @@ mod file_path;
 mod file_reads;
 mod finish_review;
 mod focused_change;
+mod fold_key;
 mod fonts;
 mod github_outage;
 mod github_releases;
