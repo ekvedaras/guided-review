@@ -73,6 +73,7 @@ impl ReviewCore {
             },
             WorkKind::PullPendingReview => Job::PullPendingReview(pr()?),
             WorkKind::PullLastReview => Job::PullLastReview(pr()?),
+            WorkKind::PullPrStatus => Job::PullPrStatus(pr()?),
             WorkKind::SendQueuedComment => Job::SendQueuedComment(self.queued_comment_request()?),
             WorkKind::ChangeReviewingMark => Job::ChangeReviewingMark {
                 pr: pr()?,
@@ -162,6 +163,9 @@ impl ReviewCore {
             }
             Done::LastReview(Ok(last)) => self.last_review_is(last),
             Done::LastReview(Err(error)) => self.could_not_read(Read::LastReview, &error),
+            Done::PrStatus(Ok(status)) => self.pr_status_is(status),
+            // Not told yet: the outage rules come with the next slice.
+            Done::PrStatus(Err(_)) => {}
             Done::ReviewingMark { change, result } => self.reviewing_mark_landed(change, result),
             Done::QueuedComment(outcome) => {
                 if matches!(self.land_comment(outcome), Ok(CommentResult::Sent)) {

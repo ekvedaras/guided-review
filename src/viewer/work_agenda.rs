@@ -16,6 +16,7 @@ use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOf
 use super::local_threads::ThreadHome;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
+use super::pr_status::PrStatus;
 use super::reactions::ReactionChange;
 use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
@@ -46,6 +47,7 @@ pub enum WorkKind {
     PullThreads,
     PullPendingReview,
     PullLastReview,
+    PullPrStatus,
     SendQueuedComment,
     ChangeReviewingMark,
     TakeSeenMarksOff,
@@ -67,7 +69,7 @@ impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
     /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
     /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
-    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 11] = [
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 12] = [
         Self::CheckPrHead,
         Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
@@ -77,6 +79,7 @@ impl WorkKind {
         Self::PullThreads,
         Self::PullPendingReview,
         Self::PullLastReview,
+        Self::PullPrStatus,
         Self::SendQueuedComment,
         Self::ChangeReviewingMark,
     ];
@@ -96,7 +99,8 @@ impl WorkKind {
             | Self::PullPrDescription
             | Self::PullThreads
             | Self::PullPendingReview
-            | Self::PullLastReview => WhileRunning::Replaces,
+            | Self::PullLastReview
+            | Self::PullPrStatus => WhileRunning::Replaces,
         }
     }
 }
@@ -239,6 +243,7 @@ pub(super) enum Job {
     },
     PullPendingReview(PullRequestUrl),
     PullLastReview(PullRequestUrl),
+    PullPrStatus(PullRequestUrl),
     SendQueuedComment(CommentRequest),
     ChangeReviewingMark {
         pr: PullRequestUrl,
@@ -262,6 +267,7 @@ impl Job {
             Self::PullThreads { .. } => WorkKind::PullThreads,
             Self::PullPendingReview(_) => WorkKind::PullPendingReview,
             Self::PullLastReview(_) => WorkKind::PullLastReview,
+            Self::PullPrStatus(_) => WorkKind::PullPrStatus,
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
             Self::ChangeReviewingMark { .. } => WorkKind::ChangeReviewingMark,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
@@ -314,6 +320,7 @@ impl Work {
                 authored: github.viewer_authored(&pr),
             },
             Job::PullLastReview(pr) => Done::LastReview(github.viewer_latest_review(&pr)),
+            Job::PullPrStatus(pr) => Done::PrStatus(github.pull_request_status(&pr)),
             Job::SendQueuedComment(request) => Done::QueuedComment(request.run(github)),
             Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
                 change,
@@ -357,6 +364,7 @@ pub(super) enum Done {
         authored: Result<bool, GitHubError>,
     },
     LastReview(Result<Option<SubmittedReview>, GitHubError>),
+    PrStatus(Result<PrStatus, GitHubError>),
     QueuedComment(CommentOutcome),
     ReviewingMark {
         change: ReactionChange,

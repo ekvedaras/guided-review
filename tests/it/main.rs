@@ -90,6 +90,7 @@ mod piece_id;
 mod piece_labels;
 mod pr_description;
 mod pr_notes;
+mod pr_status;
 mod pr_switcher;
 mod pr_switcher_local;
 mod pr_switcher_memory;

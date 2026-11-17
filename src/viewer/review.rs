@@ -1,5 +1,6 @@
 mod guided_tour;
 mod kept;
+mod status;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -58,6 +59,7 @@ use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
+use super::pr_status::PrStatus;
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
@@ -308,6 +310,8 @@ pub struct ReviewCore {
     on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
+    /// What GitHub last said of the PR's draft state and checks; kept as it was while a read fails.
+    pr_status: Option<PrStatus>,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -643,6 +647,7 @@ impl ReviewCore {
             pr_head: None,
             on_disk: None,
             last_review: None,
+            pr_status: None,
             files,
             steps_in_reading_order,
             has_uncovered_changes,

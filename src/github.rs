@@ -15,13 +15,14 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, CommentId, CommentPlace, GitHubError, NoAccess, OutageCause,
-    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RepoCloner, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState, percent_encode_path,
+    AvatarPort, ChangeTipsPort, Checks, CommentId, CommentPlace, GitHubError, NoAccess,
+    OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
+    ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
+use crate::viewer::{PrStatus, Readiness};
 
 #[derive(Clone)]
 pub struct GitHub {
@@ -571,6 +572,60 @@ struct UploadedJson {
 
 /// GitHub's own drag-and-drop store, so the picture is seen only by those who can see the repository.
 /// It is not in GitHub's documented API, but it takes the token `gh` holds.
+impl PullRequestStatusPort for GitHub {
+    fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        isDraft
+                        viewerCanUpdate
+                        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+                    } }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read the status of {pr}")))?;
+        let pull = at(&data, "/repository/pullRequest");
+        let flag = |pointer: &str| {
+            at(pull, pointer)
+                .as_bool()
+                .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
+        };
+        let rollup = at(pull, "/commits/nodes/0/commit/statusCheckRollup/state").as_str();
+        Ok(PrStatus {
+            readiness: if flag("/isDraft")? {
+                Readiness::Draft
+            } else {
+                Readiness::Ready
+            },
+            checks: Checks::from_github_state(rollup),
+            viewer_may_change_readiness: flag("/viewerCanUpdate")?,
+        })
+    }
+
+    fn set_pull_request_readiness(
+        &self,
+        pr: &PullRequestUrl,
+        readiness: Readiness,
+    ) -> Result<(), GitHubError> {
+        let id = self.pull_request_id(pr)?;
+        let (mutation, doing) = match readiness {
+            Readiness::Draft => ("convertPullRequestToDraft", "convert"),
+            Readiness::Ready => ("markPullRequestReadyForReview", "mark ready"),
+        };
+        self.graphql(
+            &format!(
+                "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
+                capitalized(mutation)
+            ),
+            &serde_json::json!({"input": {"pullRequestId": id}}),
+        )
+        .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
+        Ok(())
+    }
+}
+
 impl PullRequestReactionsPort for GitHub {
     fn set_pull_request_reaction(
         &self,

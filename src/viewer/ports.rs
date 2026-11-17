@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::github_outage::OutageCause;
+use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
@@ -59,6 +60,18 @@ pub trait PullRequestDescriptionPort: Send + Sync {
 }
 
 /// The viewer's reactions on the PR itself, which GitHub shows under its description.
+/// The PR's status: whether it is a draft, its checks, and what the viewer may change.
+pub trait PullRequestStatusPort: Send + Sync {
+    fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, GitHubError>;
+
+    /// Converts the PR to a draft or marks it ready for review.
+    fn set_pull_request_readiness(
+        &self,
+        pr: &PullRequestUrl,
+        readiness: Readiness,
+    ) -> Result<(), GitHubError>;
+}
+
 pub trait PullRequestReactionsPort: Send + Sync {
     fn set_pull_request_reaction(
         &self,
@@ -155,6 +168,7 @@ pub trait GitHubPort:
     + PullsOfBranchPort
     + PullRequestDescriptionPort
     + PullRequestReactionsPort
+    + PullRequestStatusPort
     + PictureUploadPort
     + ViewedFilesPort
     + ReviewThreadsPort
@@ -167,6 +181,7 @@ impl<T> GitHubPort for T where
         + PullsOfBranchPort
         + PullRequestDescriptionPort
         + PullRequestReactionsPort
+        + PullRequestStatusPort
         + PictureUploadPort
         + ViewedFilesPort
         + ReviewThreadsPort

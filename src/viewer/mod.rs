@@ -46,6 +46,7 @@ mod page;
 mod piece_labels;
 mod ports;
 mod pr_notes;
+mod pr_status;
 mod pr_switcher;
 mod presence;
 mod problems;
@@ -157,10 +158,11 @@ pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort, NoAccess,
     PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort,
+    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
+pub use pr_status::{Checks, PrStatus, Readiness};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
