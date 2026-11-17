@@ -13,6 +13,7 @@ use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 
 use super::chord::Chord;
 use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
+use super::merging::MergeMethod;
 use super::more_lines::{MoreLines, MoreLinesEntry};
 use super::shortcuts::Command;
 
@@ -38,6 +39,8 @@ struct Values {
     clones: Vec<CloneRow>,
     keys: KeyChanges,
     more_lines: MoreLinesEntry,
+    /// A value that names no method reads as the default, as the app reads it.
+    merge_method: MergeMethod,
 }
 
 impl Values {
@@ -71,6 +74,10 @@ impl Values {
                 .collect(),
             keys: key_changes_in(document),
             more_lines: more_lines_in(document),
+            merge_method: text(MERGE_METHOD)
+                .as_deref()
+                .and_then(MergeMethod::of_config_text)
+                .unwrap_or_default(),
         }
     }
 
@@ -213,6 +220,7 @@ const IDE_CUSTOM: &str = "ide_custom";
 const CLONES: &str = "clones";
 const KEYS: &str = "keys";
 const MORE_LINES: &str = "more_lines";
+const MERGE_METHOD: &str = "merge_method";
 const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
@@ -536,6 +544,15 @@ impl Settings {
         self.edited.more_lines = MoreLinesEntry::of_text(text);
     }
 
+    /// The global `merge_method`; `[merge_methods]` per repo is edited in the config only.
+    pub fn merge_method(&self) -> MergeMethod {
+        self.edited.merge_method
+    }
+
+    pub fn set_merge_method(&mut self, method: MergeMethod) {
+        self.edited.merge_method = method;
+    }
+
     pub fn has_unsaved_changes(&self) -> bool {
         self.edited != self.saved
     }
@@ -580,6 +597,14 @@ impl Settings {
         }
         if saved.more_lines != edited.more_lines {
             set_value(root, MORE_LINES, more_lines_value(&edited.more_lines));
+        }
+        if saved.merge_method != edited.merge_method {
+            let method = edited.merge_method;
+            set_text(
+                root,
+                MERGE_METHOD,
+                (method != MergeMethod::default()).then(|| method.config_text()),
+            );
         }
         self.write()?;
         self.saved = self.edited.clone();

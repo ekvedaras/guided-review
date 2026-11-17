@@ -9,7 +9,9 @@ use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::pull_request::RepoName;
 use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice};
-use crate::viewer::{KeyChanges, KeyProblem, Keymap, MoreLines, ResolvedKeymap, WrittenKeys};
+use crate::viewer::{
+    KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, WrittenKeys,
+};
 
 /// `config.toml` in the config folder.
 #[derive(Default, Deserialize)]
@@ -32,6 +34,12 @@ pub struct Config {
     /// How many lines one "more lines" step shows. Any value is read, so a wrong one cannot stop the app opening.
     #[serde(default)]
     more_lines: Option<toml::Value>,
+    /// `"merge"`, `"squash"` or `"rebase"`: how auto-merge and Merge now merge.
+    #[serde(default)]
+    merge_method: Option<String>,
+    /// `"owner/repo" = "squash"`: a repo's own merge method, over `merge_method`.
+    #[serde(default)]
+    merge_methods: BTreeMap<String, String>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -197,6 +205,25 @@ impl Config {
             .and_then(toml::Value::as_integer)
             .and_then(MoreLines::new)
             .unwrap_or_default()
+    }
+
+    /// The repo's own method, else the global one, else a merge commit. A value that names no
+    /// method is passed over, so a typo cannot stop the app opening.
+    pub fn merge_method(&self, repo: &RepoName) -> MergeMethod {
+        let own = self
+            .merge_methods
+            .iter()
+            .find(|(name, _)| {
+                name.split_once('/')
+                    .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
+            })
+            .and_then(|(_, method)| MergeMethod::of_config_text(method));
+        own.or_else(|| {
+            self.merge_method
+                .as_deref()
+                .and_then(MergeMethod::of_config_text)
+        })
+        .unwrap_or_default()
     }
 
     pub fn keymap(&self) -> Result<Keymap, Vec<KeyProblem>> {

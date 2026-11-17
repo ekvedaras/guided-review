@@ -15,7 +15,8 @@ use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use crate::viewer::{
-    CloneRowProblem, MoreLines, Motion, Presence, SaveOutcome, SettingProblem, Settings,
+    CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SettingProblem,
+    Settings,
 };
 
 use super::button::{
@@ -1116,6 +1117,38 @@ impl SettingsPanel {
             )
     }
 
+    fn merge_method(editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
+        let chosen = editing.settings.merge_method();
+        let segments = MergeMethod::ALL
+            .into_iter()
+            .map(|method| {
+                Segment::new(
+                    method.config_text(),
+                    method.label(),
+                    cx.listener(move |this, _, _, cx| {
+                        this.edit(cx, |editing| editing.settings.set_merge_method(method));
+                    }),
+                )
+            })
+            .collect();
+        let note = div()
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child("Where a repo does not allow it, its first allowed method. [merge_methods] in config.toml sets one per repo.");
+        setting_row(
+            "Method",
+            note,
+            Segmented::new(
+                "merge-method",
+                SegmentLayout::Row {
+                    segment_width: px(110.),
+                },
+                segments,
+            )
+            .picked(MergeMethod::ALL.iter().position(|method| *method == chosen)),
+        )
+    }
+
     fn more_lines(
         &self,
         editing: &Editing,
@@ -1866,6 +1899,13 @@ impl Render for SettingsPanel {
                             "More lines",
                             "How many lines the arrows on a gap and the [ and ] keys show at a time.",
                             more_lines,
+                        ))
+                        .child(Self::section_rule(&colors))
+                        .child(Self::section(
+                            &colors,
+                            "Merge",
+                            "How auto-merge and Merge now merge a PR.",
+                            Self::merge_method(editing, &colors, cx),
                         ))
                         .child(Self::section_rule(&colors))
                         .child(Self::section(
