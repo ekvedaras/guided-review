@@ -17,16 +17,16 @@ use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
-use crate::app::updater::{Updates, running_build};
+use crate::app::updater::Updates;
 use crate::file_path::FilePath;
 use crate::issue::{IssueLink, IssueUrl};
 use crate::pull_request::RepoName;
 use crate::review_subject::ReviewSubject;
-use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
+use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, AutoMerge, CheckRun, CheckState, Checks, FileView, LineKind, LineLocation,
-    MergeMethod, MergeMethods, Mergeability, Merging, PageRow, PieceLabels, PrStatus, Problem,
-    ProblemKind, Readiness, TerminalId, TextBox,
+    MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus, PageRow, PieceLabels, PrStatus,
+    Problem, ProblemKind, Readiness, TerminalId, TextBox,
 };
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
 
@@ -86,10 +86,12 @@ enum Scene {
     TitleBarIssue,
     TitleBarIssueCard,
     TitleBarIssueList,
+    TitleBarMerged,
+    TitleBarClosed,
 }
 
 impl Scene {
-    const ALL: [Self; 50] = [
+    const ALL: [Self; 52] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -140,6 +142,8 @@ impl Scene {
         Self::TitleBarIssue,
         Self::TitleBarIssueCard,
         Self::TitleBarIssueList,
+        Self::TitleBarMerged,
+        Self::TitleBarClosed,
     ];
 
     fn file_name(self) -> &'static str {
@@ -194,6 +198,8 @@ impl Scene {
             Self::TitleBarIssue => "69-title-bar-issue",
             Self::TitleBarIssueCard => "70-title-bar-issue-card",
             Self::TitleBarIssueList => "71-title-bar-issue-list",
+            Self::TitleBarMerged => "72-title-bar-merged",
+            Self::TitleBarClosed => "73-title-bar-closed",
         }
     }
 
@@ -256,13 +262,14 @@ impl Scene {
             viewer_may_enable_auto_merge: false,
             ..blocked
         };
-        let status = |readiness, checks, merging| PrStatus {
+        let open = |readiness, checks, merging| OpenPrStatus {
             readiness,
             checks,
             check_runs: Arc::default(),
             viewer_may_change_readiness: true,
             merging,
         };
+        let status = |readiness, checks, merging| PrStatus::Open(open(readiness, checks, merging));
         Some(match self {
             Self::TitleBarDraftChecksRunning => {
                 status(Readiness::Draft, Checks::Running, cannot_act)
@@ -287,10 +294,11 @@ impl Scene {
                     ..blocked
                 },
             ),
-            Self::TitleBarChecksList => PrStatus {
+            Self::TitleBarChecksList => PrStatus::Open(OpenPrStatus {
                 check_runs: [
                     ("lint", CheckState::Passing),
                     ("test (ubuntu-latest)", CheckState::Failing),
+                    ("deploy preview", CheckState::Skipped),
                     ("test (macos-latest)", CheckState::Running),
                 ]
                 .map(|(name, state)| CheckRun {
@@ -299,8 +307,10 @@ impl Scene {
                     page: None,
                 })
                 .into(),
-                ..status(Readiness::Ready, Checks::Failing, cannot_act)
-            },
+                ..open(Readiness::Ready, Checks::Failing, cannot_act)
+            }),
+            Self::TitleBarMerged => PrStatus::Merged,
+            Self::TitleBarClosed => PrStatus::Closed,
             _ => return None,
         })
     }
@@ -562,7 +572,7 @@ impl OneStepLayout {
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
             Scene::JumpPalette => {
-                let groups = self.session.read(cx).review().palette("", running_build());
+                let groups = self.session.read(cx).review().palette("", Build::running());
                 self.jump
                     .update(cx, |palette, cx| palette.open(groups, window, cx));
             }
@@ -750,7 +760,9 @@ impl OneStepLayout {
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
             | Scene::TitleBarMergeNow
-            | Scene::TitleBarChecksList => {
+            | Scene::TitleBarChecksList
+            | Scene::TitleBarMerged
+            | Scene::TitleBarClosed => {
                 if let Some(status) = scene.staged_status() {
                     self.session
                         .update(cx, |session, cx| session.stage_pr_status(status, cx));
@@ -771,7 +783,7 @@ impl OneStepLayout {
                     .session
                     .read(cx)
                     .review()
-                    .palette(query, running_build());
+                    .palette(query, Build::running());
                 self.jump.update(cx, |palette, cx| {
                     palette.open(Vec::new(), window, cx);
                     palette.stage_query(query, groups);
@@ -893,7 +905,9 @@ impl OneStepLayout {
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
             | Scene::TitleBarMergeNow
-            | Scene::TitleBarChecksList => {
+            | Scene::TitleBarChecksList
+            | Scene::TitleBarMerged
+            | Scene::TitleBarClosed => {
                 self.session.update(cx, ReviewSession::unstage_pr_status);
                 self.checks_hover.chip = false;
             }

@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use flate2::read::GzDecoder;
@@ -67,6 +67,28 @@ impl Build {
 
     pub fn takes_updates(self) -> bool {
         self == Self::Release
+    }
+
+    /// A window's title, which the Window menu and Mission Control show, with the badge after it.
+    pub fn marked_title(self, title: String) -> String {
+        match self.badge() {
+            Some(badge) => format!("{title} ({badge})"),
+            None => title,
+        }
+    }
+
+    /// Which build runs, looked up once: the snapshot build is `Test` wherever it lies.
+    pub fn running() -> Self {
+        static BUILD: OnceLock<Build> = OnceLock::new();
+        *BUILD.get_or_init(|| {
+            if cfg!(feature = "snapshots") {
+                return Self::Test;
+            }
+            match (std::env::home_dir(), crate::platform::running_binary()) {
+                (Some(home), Ok(exe)) => ReleaseInstall::in_home(&home).build_of(&exe),
+                _ => Self::Local,
+            }
+        })
     }
 }
 

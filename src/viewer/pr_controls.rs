@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use super::jump::PaletteAction;
-use super::merging::{AutoMerge, MergeChange, MergeMethod, MergeOffer, Mergeability};
+use super::merging::{AutoMerge, MergeChange, MergeMethod, MergeOffer};
 use super::ports::GitHubError;
 use super::pr_status::{PrStatus, Readiness};
 use super::press_again::{PressAgain, PressStep};
@@ -52,8 +52,9 @@ impl PrControls {
         self.merge_method = method;
     }
 
+    /// A merged or closed PR has nothing to change, so the key does nothing.
     pub(super) fn ask_to_change_readiness(&mut self, now: Instant) -> PressStep {
-        let Some(status) = &self.status else {
+        let Some(status) = self.status.as_ref().and_then(PrStatus::open) else {
             return PressStep::Nothing;
         };
         let offered = if status.viewer_may_change_readiness {
@@ -74,8 +75,9 @@ impl PrControls {
             })
     }
 
+    /// A merged or closed PR has nothing to change, so the key does nothing.
     pub(super) fn ask_to_change_merging(&mut self, now: Instant) -> PressStep {
-        let Some(status) = &self.status else {
+        let Some(status) = self.status.as_ref().and_then(PrStatus::open) else {
             return PressStep::Nothing;
         };
         let preferred = self.merge_method;
@@ -101,9 +103,9 @@ impl PrControls {
     }
 
     /// Convert to draft or Mark as ready for review, then Enable or Disable auto-merge or Merge
-    /// now: the ones that apply, where the viewer may.
+    /// now: the ones that apply to an open PR, where the viewer may.
     pub(super) fn palette_actions(&self) -> impl Iterator<Item = PaletteAction> + use<> {
-        let status = self.status.as_ref();
+        let status = self.status.as_ref().and_then(PrStatus::open);
         let readiness = status
             .filter(|status| status.viewer_may_change_readiness)
             .map(|status| match status.readiness {
@@ -137,7 +139,7 @@ impl PrControls {
     ) -> Result<(), Problem> {
         self.readiness.landed(readiness);
         result.map_err(|error| Problem::ReadinessNotChanged(readiness, error.short_reason()))?;
-        if let Some(status) = &mut self.status {
+        if let Some(status) = self.status.as_mut().and_then(PrStatus::open_mut) {
             status.readiness = readiness;
         }
         Ok(())
@@ -151,13 +153,16 @@ impl PrControls {
     ) -> Result<(), Problem> {
         self.merging.landed(change);
         result.map_err(|error| Problem::MergingNotChanged(change, error.short_reason()))?;
-        if let Some(status) = &mut self.status {
-            let merging = &mut status.merging;
-            match change {
-                MergeChange::EnableAutoMerge(method) => merging.auto_merge = AutoMerge::On(method),
-                MergeChange::DisableAutoMerge => merging.auto_merge = AutoMerge::Off,
-                MergeChange::MergeNow(_) => merging.mergeability = Mergeability::NotOpen,
+        let auto_merge = match change {
+            MergeChange::EnableAutoMerge(method) => AutoMerge::On(method),
+            MergeChange::DisableAutoMerge => AutoMerge::Off,
+            MergeChange::MergeNow(_) => {
+                self.status = Some(PrStatus::Merged);
+                return Ok(());
             }
+        };
+        if let Some(status) = self.status.as_mut().and_then(PrStatus::open_mut) {
+            status.merging.auto_merge = auto_merge;
         }
         Ok(())
     }

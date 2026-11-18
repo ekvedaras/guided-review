@@ -1,12 +1,11 @@
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use gpui::{App, AppContext, Context, Entity, EventEmitter, Global, SharedString, Task};
 
 use crate::github::GitHub;
 use crate::update::{
-    Build, InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version,
+    InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version,
     find_update,
 };
 use crate::viewer::ToastTone;
@@ -71,20 +70,6 @@ impl Updates {
         });
         cx.set_global(Self(updater));
     }
-}
-
-/// Which build runs, looked up once: the snapshot build is `Test` wherever it lies.
-pub fn running_build() -> Build {
-    static BUILD: OnceLock<Build> = OnceLock::new();
-    *BUILD.get_or_init(|| {
-        if cfg!(feature = "snapshots") {
-            return Build::Test;
-        }
-        match (std::env::home_dir(), crate::platform::running_binary()) {
-            (Some(home), Ok(exe)) => ReleaseInstall::in_home(&home).build_of(&exe),
-            _ => Build::Local,
-        }
-    })
 }
 
 /// Looked up again for each review opened, so removing the binary named clears it.

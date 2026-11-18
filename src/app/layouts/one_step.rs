@@ -89,25 +89,26 @@ use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, Tou
 use crate::app::sidebar_rows::{
     SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows, SidebarTourAgent, WriteOffer,
 };
-use crate::app::updater::{UpdateInstalled, Updater, Updates, running_build};
+use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
+use crate::update::Build;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
     CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
     CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
     HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation, MergeOffer, Merging,
-    NextScreen, NoteSubject, NotesButton, Overlay, OverviewPage, OverviewStats, PageRow,
-    PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep, ReadSubject,
-    ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
-    RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter,
-    ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId, StepIntro,
-    SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
-    Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage, OverviewStats,
+    PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep,
+    ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs,
+    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
+    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
+    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
+    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 use crate::viewer::{IssueDetails, RelatedIssue};
 use issue_card::{CardSide, IssueHover, issue_card};
@@ -316,7 +317,7 @@ impl OneStepLayout {
                         .session
                         .read(cx)
                         .review()
-                        .palette(query, running_build());
+                        .palette(query, Build::running());
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
                 JumpEvent::Act(action) => this.act((*action).into(), window, cx),
@@ -1253,7 +1254,7 @@ impl OneStepLayout {
                 self.change_review(cx, Review::toggle_screen_fold);
             }
             Effect::Toggle(Overlay::Jump) => {
-                let groups = self.session.read(cx).review().palette("", running_build());
+                let groups = self.session.read(cx).review().palette("", Build::running());
                 self.jump.update(cx, |palette, cx| {
                     if palette.is_open() {
                         palette.close(window, cx);
@@ -2167,8 +2168,6 @@ impl OneStepLayout {
                     ButtonKind::Ghost,
                     ButtonSize::Regular,
                 )
-                .flex_1()
-                .justify_start()
                 .px_2()
                 .child(button_icon(
                     colors,
@@ -2176,7 +2175,7 @@ impl OneStepLayout {
                     ButtonSize::Regular,
                     Icon::Settings,
                 ))
-                .child(div().flex_1().child("Settings"))
+                .child("Settings")
                 .child(button_keys(
                     colors,
                     ButtonKind::Ghost,
@@ -2187,6 +2186,7 @@ impl OneStepLayout {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),
             )
+            .child(div().flex_1())
             .child(shortcuts);
         let version = div().px_4().pt_2().pb_1().flex().child(
             version_link(colors, "sidebar-version", colors.faint_text())
@@ -2293,12 +2293,14 @@ impl OneStepLayout {
                 } else {
                     Icon::PullRequest
                 },
-                match status {
-                    Some(PrStatus {
+                match &status {
+                    Some(PrStatus::Open(OpenPrStatus {
                         readiness: Readiness::Ready,
                         ..
-                    }) => colors.success,
-                    Some(_) | None => colors.muted_text,
+                    })) => colors.success,
+                    Some(PrStatus::Merged) => colors.accent,
+                    Some(PrStatus::Closed) => colors.danger,
+                    Some(PrStatus::Open(_)) | None => colors.muted_text,
                 },
             ))
             .children(match local_heading {
@@ -2341,14 +2343,28 @@ impl OneStepLayout {
                     .gap_2()
                     .text_sm()
                     .child(switch_pr)
+                    .children(status.as_ref().map(|status| {
+                        match status {
+                            PrStatus::Open(open) => {
+                                self.status_chip(&colors, open, cx).into_any_element()
+                            }
+                            PrStatus::Merged => closed_pr_chip(
+                                &colors,
+                                Tone::Accent,
+                                Icon::GitMerge,
+                                status.label(),
+                            )
+                            .into_any_element(),
+                            PrStatus::Closed => {
+                                closed_pr_chip(&colors, Tone::Danger, Icon::Close, status.label())
+                                    .into_any_element()
+                            }
+                        }
+                    }))
                     .children(
                         status
                             .as_ref()
-                            .map(|status| self.status_chip(&colors, status, cx)),
-                    )
-                    .children(
-                        status
-                            .as_ref()
+                            .and_then(PrStatus::open)
                             .and_then(|status| merge_button(&colors, status.merging, cx)),
                     )
                     .child(div().flex_1())
@@ -2580,7 +2596,7 @@ impl OneStepLayout {
     fn status_chip(
         &self,
         colors: &Colors,
-        status: &PrStatus,
+        status: &OpenPrStatus,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let tone = match status.checks {
@@ -2649,6 +2665,8 @@ impl OneStepLayout {
                 CheckState::Failing => (Icon::Close, colors.danger, "failing"),
                 CheckState::Running => (Icon::Clock, colors.warning, "running"),
                 CheckState::Passing => (Icon::Check, colors.success, "passing"),
+                CheckState::Neutral => (Icon::Square, colors.muted_text, "neutral"),
+                CheckState::Skipped => (Icon::Minus, colors.muted_text, "skipped"),
             };
             div()
                 .id(("title-bar-check", place))
@@ -3833,6 +3851,23 @@ const PR_TITLE_MIN_WIDTH: f32 = 220.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
 const TITLE_SHRINKS_FIRST: f32 = 10_000.;
+
+/// In place of the status chip and the merge button once the PR is merged or closed, in GitHub's
+/// colour for it. Nothing is left to change, so it is no button.
+fn closed_pr_chip(colors: &Colors, tone: Tone, mark: Icon, label: &'static str) -> Div {
+    chip(colors, tone)
+        .h(ButtonSize::Small.height())
+        .px_2()
+        .gap_1p5()
+        .rounded(px(CONTROL_RADIUS))
+        .font_weight(FontWeight::MEDIUM)
+        .child(sized_icon(
+            mark,
+            colors.tone(tone).text,
+            ButtonSize::Small.icon_size(),
+        ))
+        .child(label)
+}
 
 /// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
 /// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.

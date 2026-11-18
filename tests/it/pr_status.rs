@@ -11,8 +11,9 @@ use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    CHECKS_SHOWN, CheckRun, CheckState, Checks, Command, Effect, Intent, PaletteAction, PrStatus,
-    PressStep, Problem, Read, Readiness, Review, ReviewStateFile, WindowMoment,
+    CHECKS_SHOWN, CheckRun, CheckState, Checks, Command, Effect, Intent, OpenPrStatus,
+    PaletteAction, PrStatus, PressStep, Problem, Read, Readiness, Review, ReviewStateFile,
+    WindowMoment,
 };
 use serde_json::json;
 
@@ -73,14 +74,22 @@ impl Pull {
     }
 }
 
-fn status(readiness: Readiness, checks: Checks) -> PrStatus {
-    PrStatus {
+fn open_status(readiness: Readiness, checks: Checks) -> OpenPrStatus {
+    OpenPrStatus {
         readiness,
         checks,
         check_runs: Arc::default(),
         viewer_may_change_readiness: true,
         merging: blocked_merging(),
     }
+}
+
+fn status(readiness: Readiness, checks: Checks) -> PrStatus {
+    PrStatus::Open(open_status(readiness, checks))
+}
+
+fn open_part(review: &Review) -> Option<&OpenPrStatus> {
+    review.pr_status().and_then(PrStatus::open)
 }
 
 #[test]
@@ -212,7 +221,7 @@ fn checks_that_are_running_are_read_again_every_30_seconds_until_they_are_done()
         [30, 30]
     );
     assert_eq!(
-        review.pr_status().map(|status| status.checks),
+        open_part(&review).map(|status| status.checks),
         Some(Checks::Failing)
     );
     assert_eq!(review.next_due(), None);
@@ -237,13 +246,10 @@ fn read_status(
     may_change: bool,
 ) -> (Review, FakeGitHub, Instant) {
     let mut review = pull.open();
-    let github = pull.github().with_status(PrStatus {
-        readiness,
-        checks: Checks::Passing,
-        check_runs: Arc::default(),
+    let github = pull.github().with_status(PrStatus::Open(OpenPrStatus {
         viewer_may_change_readiness: may_change,
-        merging: blocked_merging(),
-    });
+        ..open_status(readiness, Checks::Passing)
+    }));
     let now = Instant::now();
     pull.read(&mut review, &github, now);
     (review, github, now)
@@ -292,7 +298,7 @@ fn the_same_press_again_within_ten_seconds_converts_a_ready_pr_to_a_draft() {
         }]
     );
     assert_eq!(
-        review.pr_status().map(|status| status.readiness),
+        open_part(&review).map(|status| status.readiness),
         Some(Readiness::Draft)
     );
     assert_eq!(review.problems(), []);
@@ -310,7 +316,10 @@ fn a_draft_is_marked_ready_by_the_same_key() {
     review.ask_to_change_readiness(now);
     drive_without_agents(&mut review, &github, &pull.source(), now);
 
-    assert_eq!(github.status_now().readiness, Readiness::Ready);
+    assert_eq!(
+        github.status_now().open().map(|status| status.readiness),
+        Some(Readiness::Ready)
+    );
 }
 
 #[test]
@@ -338,7 +347,7 @@ fn a_change_that_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_w
     drive_without_agents(&mut review, &github, &pull.source(), now);
 
     assert_eq!(
-        review.pr_status().map(|status| status.readiness),
+        open_part(&review).map(|status| status.readiness),
         Some(Readiness::Ready)
     );
     assert_eq!(
@@ -439,15 +448,19 @@ fn run(name: &str, state: CheckState, page: Option<&str>) -> CheckRun {
 }
 
 fn status_with_runs(runs: Vec<CheckRun>) -> PrStatus {
-    PrStatus {
+    PrStatus::Open(open_with_runs(runs))
+}
+
+fn open_with_runs(runs: Vec<CheckRun>) -> OpenPrStatus {
+    OpenPrStatus {
         check_runs: runs.into(),
-        ..status(Readiness::Ready, Checks::Failing)
+        ..open_status(Readiness::Ready, Checks::Failing)
     }
 }
 
 #[test]
 fn the_check_list_puts_failing_first_then_running_then_passing_in_the_order_github_gave() {
-    let list = status_with_runs(vec![
+    let list = open_with_runs(vec![
         run("lint", CheckState::Passing, None),
         run("build", CheckState::Running, None),
         run("test", CheckState::Failing, None),
@@ -462,13 +475,27 @@ fn the_check_list_puts_failing_first_then_running_then_passing_in_the_order_gith
 }
 
 #[test]
+fn the_check_list_puts_neutral_and_then_skipped_checks_after_the_passing_ones() {
+    let list = open_with_runs(vec![
+        run("docs", CheckState::Skipped, None),
+        run("lint", CheckState::Passing, None),
+        run("advice", CheckState::Neutral, None),
+        run("test", CheckState::Failing, None),
+    ])
+    .check_list();
+
+    let names: Vec<&str> = list.shown.iter().map(|check| &*check.name).collect();
+    assert_eq!(names, ["test", "lint", "advice", "docs"]);
+}
+
+#[test]
 fn the_check_list_is_capped_and_counts_what_it_left_out_after_the_worst_were_kept() {
     let mut runs: Vec<CheckRun> = (0..CHECKS_SHOWN + 5)
         .map(|index| run(&format!("ok-{index}"), CheckState::Passing, None))
         .collect();
     runs.push(run("broken", CheckState::Failing, None));
 
-    let list = status_with_runs(runs).check_list();
+    let list = open_with_runs(runs).check_list();
 
     assert_eq!(list.shown.len(), CHECKS_SHOWN);
     assert_eq!(&*list.shown[0].name, "broken");
@@ -482,8 +509,8 @@ fn a_check_run_is_running_until_it_completed_and_then_passes_or_fails_by_its_con
     assert_eq!(of("IN_PROGRESS", None), CheckState::Running);
     assert_eq!(of("QUEUED", None), CheckState::Running);
     assert_eq!(of("COMPLETED", Some("SUCCESS")), CheckState::Passing);
-    assert_eq!(of("COMPLETED", Some("SKIPPED")), CheckState::Passing);
-    assert_eq!(of("COMPLETED", Some("NEUTRAL")), CheckState::Passing);
+    assert_eq!(of("COMPLETED", Some("SKIPPED")), CheckState::Skipped);
+    assert_eq!(of("COMPLETED", Some("NEUTRAL")), CheckState::Neutral);
     assert_eq!(of("COMPLETED", Some("FAILURE")), CheckState::Failing);
     assert_eq!(of("COMPLETED", Some("TIMED_OUT")), CheckState::Failing);
     assert_eq!(of("COMPLETED", Some("CANCELLED")), CheckState::Failing);

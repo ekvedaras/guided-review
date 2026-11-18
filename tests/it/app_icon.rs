@@ -1,4 +1,5 @@
 use guided_review::app_icon::{self, AppIcon, Look};
+use guided_review::update::Build;
 use image::Rgba;
 
 const SIZE: u16 = 64;
@@ -16,31 +17,46 @@ fn brightness(Rgba([red, green, blue, _]): Rgba<u8>) -> u16 {
 
 #[test]
 fn the_light_icon_stands_on_a_light_ground() {
-    assert!(brightness(ground(AppIcon::release(Look::Light))) > 200);
+    assert!(brightness(ground(AppIcon::of(Build::Release, Look::Light))) > 200);
 }
 
 #[test]
 fn the_dark_icon_stands_on_a_dark_ground() {
-    assert!(brightness(ground(AppIcon::release(Look::Dark))) < 60);
+    assert!(brightness(ground(AppIcon::of(Build::Release, Look::Dark))) < 60);
 }
 
 #[test]
-fn a_dev_build_shows_the_icon_of_the_look_it_is_given() {
+fn a_local_build_shows_the_icon_of_the_look_it_is_given() {
     assert_eq!(
-        ground(AppIcon::dev(Look::Light)),
-        ground(AppIcon::release(Look::Light))
+        ground(AppIcon::of(Build::Local, Look::Light)),
+        ground(AppIcon::of(Build::Release, Look::Light))
     );
     assert_eq!(
-        ground(AppIcon::dev(Look::Dark)),
-        ground(AppIcon::release(Look::Dark))
+        ground(AppIcon::of(Build::Local, Look::Dark)),
+        ground(AppIcon::of(Build::Release, Look::Dark))
     );
 }
 
 #[test]
-fn a_dev_build_wears_a_badge_the_release_does_not() {
-    let release = AppIcon::release(Look::Light).png(SIZE).unwrap();
-    let dev = AppIcon::dev(Look::Light).png(SIZE).unwrap();
-    assert_ne!(release, dev);
+fn a_local_build_wears_the_dev_badge_and_the_release_and_the_snapshot_build_do_not() {
+    let picture = |build| AppIcon::of(build, Look::Light).png(SIZE).unwrap();
+    let release = picture(Build::Release);
+
+    assert_ne!(picture(Build::Local), release);
+    assert_eq!(picture(Build::Test), release);
+}
+
+#[test]
+fn a_window_title_carries_the_badge_of_the_build_that_is_not_the_release() {
+    assert_eq!(Build::Release.marked_title("Letters".to_owned()), "Letters");
+    assert_eq!(
+        Build::Local.marked_title("Letters".to_owned()),
+        "Letters (DEV)"
+    );
+    assert_eq!(
+        Build::Test.marked_title("Letters".to_owned()),
+        "Letters (TEST)"
+    );
 }
 
 #[test]

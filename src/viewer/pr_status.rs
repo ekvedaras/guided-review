@@ -1,6 +1,6 @@
-//! The PR status the title bar shows: draft or ready, and the checks rolled up into one word. What
-//! the reviewer may do about it is read alongside, so a button is offered only where GitHub would
-//! take the change.
+//! The PR status the title bar shows: merged or closed, or while open, draft or ready and the checks
+//! rolled up into one word. What the reviewer may do about it is read alongside, so a button is
+//! offered only where GitHub would take the change.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,23 +51,28 @@ impl Checks {
 /// How many checks the title bar's list shows before it says how many more there are.
 pub const CHECKS_SHOWN: usize = 20;
 
-/// Where one check stands. In the order a list shows them: what needs the reviewer first.
+/// Where one check stands, in GitHub's words. In the order a list shows them: what needs the
+/// reviewer first. Whether the PR as a whole passes is GitHub's roll-up, `Checks`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CheckState {
     Failing,
     Running,
     Passing,
+    Neutral,
+    Skipped,
 }
 
 impl CheckState {
-    /// From a check run's `status` and, once it completed, its `conclusion`. A skipped or neutral
-    /// run did not fail, so it passes; a cancelled or timed out one did not pass.
+    /// From a check run's `status` and, once it completed, its `conclusion`. A cancelled or timed
+    /// out run did not pass, so it fails.
     pub fn of_check_run(status: &str, conclusion: Option<&str>) -> Self {
         if status != "COMPLETED" {
             return Self::Running;
         }
         match conclusion {
-            Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => Self::Passing,
+            Some("SUCCESS") => Self::Passing,
+            Some("NEUTRAL") => Self::Neutral,
+            Some("SKIPPED") => Self::Skipped,
             _ => Self::Failing,
         }
     }
@@ -99,9 +104,51 @@ pub struct CheckList {
     pub hidden: usize,
 }
 
-/// What GitHub says of the PR right now, and what the viewer may do about it.
+/// What GitHub says of the PR right now. Draft or ready, the checks and merging mean something only
+/// while the PR is open; a merged or closed PR is only that.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrStatus {
+pub enum PrStatus {
+    Open(OpenPrStatus),
+    Merged,
+    Closed,
+}
+
+impl PrStatus {
+    pub fn open(&self) -> Option<&OpenPrStatus> {
+        match self {
+            Self::Open(open) => Some(open),
+            Self::Merged | Self::Closed => None,
+        }
+    }
+
+    pub fn open_mut(&mut self) -> Option<&mut OpenPrStatus> {
+        match self {
+            Self::Open(open) => Some(open),
+            Self::Merged | Self::Closed => None,
+        }
+    }
+
+    /// The chip's words: "Draft" or "Ready" while open, else "Merged" or "Closed".
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Open(open) => open.label(),
+            Self::Merged => "Merged",
+            Self::Closed => "Closed",
+        }
+    }
+
+    /// Everything the chip says, in words, for what cannot see its colour: "Ready · checks passing".
+    pub fn description(&self) -> String {
+        match self {
+            Self::Open(open) => open.description(),
+            Self::Merged | Self::Closed => self.label().to_owned(),
+        }
+    }
+}
+
+/// An open PR's status, and what the viewer may do about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenPrStatus {
     pub readiness: Readiness,
     pub checks: Checks,
     pub check_runs: Arc<[CheckRun]>,
@@ -110,7 +157,7 @@ pub struct PrStatus {
     pub merging: Merging,
 }
 
-impl PrStatus {
+impl OpenPrStatus {
     /// The chip's words: "Draft" or "Ready". The checks are its colour, its icon and its list.
     pub fn label(&self) -> &'static str {
         match self.readiness {

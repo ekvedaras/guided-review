@@ -102,30 +102,26 @@ pub enum AutoMerge {
     On(MergeMethod),
 }
 
-/// Whether a merge would go through now. GitHub's `mergeStateStatus`, with merged and closed PRs apart.
+/// Whether a merge of the open PR would go through now: GitHub's `mergeStateStatus`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mergeability {
     /// Nothing blocks it, so GitHub refuses auto-merge and takes a merge at once.
     Now,
     /// Checks, reviews, rules, conflicts or a draft hold it back, or GitHub has not worked it out yet.
     Blocked,
-    /// Merged or closed: nothing to merge.
-    NotOpen,
 }
 
 impl Mergeability {
-    /// From the PR's `state` and `mergeStateStatus`. `UNSTABLE` (checks that are not required
-    /// fail) and `HAS_HOOKS` merge like `CLEAN`.
-    pub fn from_github(state: &str, merge_state_status: &str) -> Self {
-        match (state, merge_state_status) {
-            ("OPEN", "CLEAN" | "UNSTABLE" | "HAS_HOOKS") => Self::Now,
-            ("OPEN", _) => Self::Blocked,
-            _ => Self::NotOpen,
+    /// `UNSTABLE` (checks that are not required fail) and `HAS_HOOKS` merge like `CLEAN`.
+    pub fn from_github(merge_state_status: &str) -> Self {
+        match merge_state_status {
+            "CLEAN" | "UNSTABLE" | "HAS_HOOKS" => Self::Now,
+            _ => Self::Blocked,
         }
     }
 }
 
-/// What GitHub says of merging the PR, and what the viewer may do about it.
+/// What GitHub says of merging the open PR, and what the viewer may do about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Merging {
     pub mergeability: Mergeability,
@@ -149,8 +145,11 @@ pub enum MergeOffer {
 
 /// Why the key does nothing on this PR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "each names what GitHub refuses, and each refused thing happens to be a merge"
+)]
 pub enum MergeRefusal {
-    NotOpen,
     MayNotDisableAutoMerge,
     MayNotMerge,
     RepoDisallowsAutoMerge,
@@ -160,7 +159,6 @@ pub enum MergeRefusal {
 impl fmt::Display for MergeRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(match self {
-            Self::NotOpen => "The PR is merged or closed",
             Self::MayNotDisableAutoMerge => "GitHub does not let you turn off this PR's auto-merge",
             Self::MayNotMerge => "Only people with write access can merge the PR",
             Self::RepoDisallowsAutoMerge => "The repo does not allow auto-merge",
@@ -182,7 +180,6 @@ impl Merging {
     /// auto-merge on. Each only where GitHub says the viewer may.
     pub fn offer(self) -> Result<MergeOffer, MergeRefusal> {
         match (self.mergeability, self.auto_merge) {
-            (Mergeability::NotOpen, _) => Err(MergeRefusal::NotOpen),
             (_, AutoMerge::On(_)) if self.viewer_may_disable_auto_merge => {
                 Ok(MergeOffer::DisableAutoMerge)
             }

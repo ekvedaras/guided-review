@@ -345,6 +345,7 @@ impl ReviewCore {
             Intent::OpenCheck(place) => {
                 let page = self
                     .pr_status()
+                    .and_then(|status| status.open())
                     .and_then(|status| status.check_list().shown.into_iter().nth(place))
                     .and_then(|check| check.page);
                 match (page, self.subject().pull_request()) {
