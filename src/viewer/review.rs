@@ -1040,6 +1040,17 @@ impl ReviewCore {
         self.related_issues.shown()
     }
 
+    /// The issues a snapshot scene shows, as if GitHub linked them to the PR.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_related_issues(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
+        self.related_issues.staged(issues);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_related_issues(&mut self) {
+        self.related_issues.unstaged();
+    }
+
     /// Whether the review has a PR page to open.
     pub fn can_open_on_github(&self) -> bool {
         self.subject.has_github_page()

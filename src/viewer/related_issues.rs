@@ -170,6 +170,29 @@ impl RelatedIssues {
             .collect()
     }
 
+    /// The issues a snapshot scene shows, with what GitHub would say of each; `unstaged` takes them off.
+    #[cfg(feature = "snapshots")]
+    pub(super) fn staged(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
+        let read = issues
+            .iter()
+            .filter_map(|(issue, details)| match (&issue.link, details) {
+                (IssueLink::GitHub(url), Some(details)) => Some((url.clone(), details.clone())),
+                _ => None,
+            })
+            .collect();
+        self.details_say(read);
+        self.github_says(PullRequestIssues {
+            linked: issues.into_iter().map(|(issue, _)| issue).collect(),
+            head_branch: None,
+        });
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub(super) fn unstaged(&mut self) {
+        self.on_github = None;
+        self.choose_shown();
+    }
+
     pub(super) fn github_says(&mut self, issues: PullRequestIssues) {
         self.on_github = Some(issues);
         self.choose_shown();
