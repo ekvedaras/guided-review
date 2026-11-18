@@ -2412,12 +2412,18 @@ impl OneStepLayout {
                 ))
                 .into_any_element()
         });
-        let base = explained("title-bar-base-branch")
-            .flex_none()
+        let mut base = explained("title-bar-base-branch");
+        base.style().flex_shrink = Some(BASE_BRANCH_SHRINKS_BEFORE_TITLE);
+        let mut base_chip = chip(colors, Tone::Neutral);
+        base_chip.style().flex_shrink = Some(1.);
+        let base = base
+            .min_w(px(BASE_BRANCH_MIN_WIDTH))
+            .flex()
             .child(
-                chip(colors, Tone::Neutral)
+                base_chip
+                    .min_w_0()
                     .font_family(*CODE_FONT)
-                    .child(route.base.to_string()),
+                    .child(div().min_w_0().truncate().child(route.base.to_string())),
             )
             .into_any_element();
         let mut head = explained("title-bar-head-branch");
@@ -3899,13 +3905,15 @@ impl ChecksHover {
 const CHECKS_LIST_WIDTH: f32 = 340.;
 /// The keys that open the issue list's rows, in order.
 const ISSUE_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-/// What the PR's name and title keep of the bar: its icon, the name (which never truncates) and
-/// the chevron, with a few characters of title. Past it the title is cut with an ellipsis, down to
+/// What the PR's name and title keep of the bar: its icon, the name (which never truncates), the
+/// chevron and the switch keys, with a few characters of title. Past it the title is cut with an ellipsis, down to
 /// nothing, and the controls to its right keep their width.
-const PR_TITLE_MIN_WIDTH: f32 = 220.;
-/// The author's picture and the base branch never shrink; the head branch gives up room ten times
-/// faster than the PR's title, so the title is cut after it.
-const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 10.;
+const PR_TITLE_MIN_WIDTH: f32 = 290.;
+/// The head branch gives up its room first, then the base branch down to a few characters, then the
+/// PR's title; the author's picture never shrinks.
+const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 100.;
+const BASE_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 10.;
+const BASE_BRANCH_MIN_WIDTH: f32 = 120.;
 const ROUTE_AVATAR_SIZE: f32 = 18.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
