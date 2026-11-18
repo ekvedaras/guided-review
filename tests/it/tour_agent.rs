@@ -325,7 +325,7 @@ fn writing_a_tour_starts_the_prs_one_tour_agent_in_its_folder_on_the_tour_skill(
     let fake = Arc::new(FakeTourAgent::new());
 
     let terminal = starting(&fake)
-        .write_tour(&url(PR_9), &pr(), None)
+        .write_tour(&url(PR_9), &pr())
         .unwrap()
         .into_terminal();
 
@@ -363,7 +363,7 @@ fn writing_a_tour_again_ends_the_app_started_agent_of_the_pr_and_hands_the_task_
             .app_started("t1", PR_9, AgentStatus::Idle, 100),
     );
 
-    let handed = starting(&fake).write_tour(&url(PR_9), &pr(), None).unwrap();
+    let handed = starting(&fake).write_tour(&url(PR_9), &pr()).unwrap();
 
     assert_eq!(kills(&fake), [TourAgentCall::Kill(TerminalId::new("t1"))]);
     assert_eq!(handed, WriterHandOver::Delivered(TerminalId::new("mine")));

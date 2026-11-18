@@ -36,7 +36,7 @@ fn agents(fake: &Arc<FakeTourAgent>) -> TourAgents {
 fn pick_no_tour(active: &mut ActivePr, fake: &Arc<FakeTourAgent>) -> TerminalId {
     assert_eq!(active.write(pr(NO_TOUR)), WriteDecision::StartWriter);
     let started = agents(fake)
-        .write_tour(&pr(NO_TOUR), &pr(SHOWN), None)
+        .write_tour(&pr(NO_TOUR), &pr(SHOWN))
         .map(WriterHandOver::into_terminal);
     let terminal = started.as_ref().unwrap().clone();
     active.writer_started(&pr(NO_TOUR), started);
@@ -182,7 +182,7 @@ fn a_writer_that_could_not_start_failed_with_the_reason() {
     active.write(pr(NO_TOUR));
 
     let started = agents(&fake)
-        .write_tour(&pr(NO_TOUR), &pr(SHOWN), None)
+        .write_tour(&pr(NO_TOUR), &pr(SHOWN))
         .map(WriterHandOver::into_terminal);
     active.writer_started(&pr(NO_TOUR), started);
 

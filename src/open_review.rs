@@ -14,8 +14,8 @@ use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::summary_instructions::SummaryInstructions;
 use crate::tour::Tour;
 use crate::viewer::{
-    GitHubPort, PrMover, Review, TourAgents, TourRefresher, TourReloader, TourRepinner,
-    TourSwitcher,
+    GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher, TourReloader,
+    TourRepinner, TourSwitcher,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -81,6 +81,10 @@ pub fn open_review(
         subject: subject.clone(),
         pick_code_source,
     };
+    let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
+        .finding_head_branches_with(Arc::clone(&github) as Arc<dyn PullsOfBranchPort>)
+        .starting_in(agent_folder)
+        .with_summary_skill(SummaryInstructions::skill_for_launch(folders));
     Ok(OpenedReview {
         review,
         source: source.into(),
@@ -91,9 +95,7 @@ pub fn open_review(
         refresher,
         reloader,
         switcher,
-        tour_agents: TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
-            .starting_in(agent_folder)
-            .with_summary_skill(SummaryInstructions::skill_for_launch(folders)),
+        tour_agents,
     })
 }
 

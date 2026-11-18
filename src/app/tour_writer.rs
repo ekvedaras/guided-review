@@ -11,11 +11,10 @@ use gpui::{App, AsyncApp, Entity};
 
 use super::components::pr_switcher::PrSwitching;
 use crate::opened_subject::writer_folder;
-use crate::review_subject::{BranchName, ReviewSubject};
+use crate::review_subject::ReviewSubject;
 use crate::summary_instructions::SummaryInstructions;
 use crate::viewer::{
-    ActivePr, AgentStatus, PullsOfBranchPort, TerminalId, TourAgentPort, TourAgents, WriteDecision,
-    WriterHandOver,
+    ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision, WriterHandOver,
 };
 
 const SCREEN_LINES: usize = 20;
@@ -68,37 +67,22 @@ fn hand_over(switching: &PrSwitching, pr: ReviewSubject, task: WriterTask, cx: &
         .shown()
         .cloned()
         .unwrap_or_else(|| pr.clone());
-    let (port, folders) = (Arc::clone(&switching.agents), switching.folders.clone());
-    let head_branches = Arc::clone(&switching.head_branches);
+    let port = Arc::clone(&switching.agents);
+    let agents = TourAgents::new(Arc::clone(&port))
+        .finding_head_branches_with(Arc::clone(&switching.head_branches))
+        .with_summary_skill(SummaryInstructions::skill_for_launch(&switching.folders))
+        .starting_in(writer_folder(&pr, &switching.folders));
     cx.spawn(async move |cx| {
-        let head_branch = match task {
-            WriterTask::Tour => {
-                let head_pr = pr.clone();
-                cx.background_executor()
-                    .spawn(async move { head_branch_of(&head_pr, head_branches.as_ref()) })
-                    .await
-            }
-            WriterTask::GuidedOfBasic => None,
-        };
         loop {
-            let (task_pr, task_shown, task_port, task_folders, task_head) = (
-                pr.clone(),
-                shown.clone(),
-                Arc::clone(&port),
-                folders.clone(),
-                head_branch.clone(),
-            );
+            let (task_pr, task_shown, task_agents) = (pr.clone(), shown.clone(), agents.clone());
             let handed = cx
                 .background_executor()
                 .spawn(async move {
-                    let agents = TourAgents::new(task_port)
-                        .with_summary_skill(SummaryInstructions::skill_for_launch(&task_folders))
-                        .starting_in(writer_folder(&task_pr, &task_folders));
                     match task {
-                        WriterTask::Tour => {
-                            agents.write_tour(&task_pr, &task_shown, task_head.as_ref())
+                        WriterTask::Tour => task_agents.write_tour(&task_pr, &task_shown),
+                        WriterTask::GuidedOfBasic => {
+                            task_agents.hand_writer_task(&task_pr, &task_shown)
                         }
-                        WriterTask::GuidedOfBasic => agents.hand_writer_task(&task_pr, &task_shown),
                     }
                 })
                 .await;
@@ -143,20 +127,6 @@ pub fn start_writer(pr: ReviewSubject, cx: &mut App) {
     start(&switching, pr, cx);
 }
 
-/// A failed look only costs the reviewer's own agent: a writer is started as before.
-fn head_branch_of(
-    subject: &ReviewSubject,
-    head_branches: &dyn PullsOfBranchPort,
-) -> Option<BranchName> {
-    let pr = subject.pull_request()?;
-    head_branches
-        .pull_request_head_branch(pr)
-        .unwrap_or_else(|error| {
-            eprintln!("could not look up the branch {pr} is opened from: {error}");
-            None
-        })
-}
-
 /// After a restart, finds each remembered writing's terminal again and follows it. Asking herdr is
 /// brief and happens once, before the window exists.
 pub fn resume(cx: &mut App) {
@@ -194,7 +164,9 @@ pub fn stop_waiting(cx: &mut App) {
 
 /// Brings the writer's terminal up in herdr. Slow (it runs `herdr-app`), so it runs off the UI thread.
 pub fn show_agent(pr: ReviewSubject, cx: &mut App) {
-    let agents = TourAgents::new(Arc::clone(&cx.global::<PrSwitching>().agents));
+    let switching = cx.global::<PrSwitching>();
+    let agents = TourAgents::new(Arc::clone(&switching.agents))
+        .finding_head_branches_with(Arc::clone(&switching.head_branches));
     cx.background_executor()
         .spawn(async move {
             if let Err(error) = agents.show(&pr) {
