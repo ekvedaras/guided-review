@@ -16,8 +16,8 @@ use crate::local_change_sets::find_local_rows;
 use crate::opened_subject::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    ActivePr, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, RowKind, SwitcherRow,
-    TourAgentPort, TourFact, WhyListed, WritingFact,
+    ActivePr, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, RowKind, ScreenLine,
+    SwitcherRow, TourAgentPort, TourFact, WhyListed, WritingFact,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_label_button};
@@ -28,11 +28,14 @@ use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
 };
-use super::palette::{Colors, Tone};
+use super::palette::{CODE_FONT, Colors, Tone};
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
-const ROW_HEIGHT: Pixels = px(36.);
+/// A row is two lines high, a repo's name one: `PrSwitcher::ROW_LINES` and `HEADING_LINES`.
+const LINE_HEIGHT: Pixels = px(22.);
+const ROW_HEIGHT: Pixels = px(44.);
+const LEAD_WIDTH: Pixels = px(36.);
 const MIN_THUMB_HEIGHT: Pixels = px(20.);
 
 /// What the switcher needs from the app: where the list comes from, and how to ask the app to show
@@ -128,27 +131,37 @@ pub struct PrSwitcherView {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     _list_changes: Subscription,
+    /// A snapshot scene keeps the last row selected as the rows come in.
+    #[cfg(feature = "snapshots")]
+    staged_at_end: bool,
 }
 
-/// What a row says of what is reviewed: a PR link and its author, or a repo and what changed in the folder.
+/// What a row says of what is reviewed, the same shape for a PR and a local review: what it is, its
+/// title or branch, then a quiet line of facts.
 struct RowWords {
-    reference: SharedString,
+    lead: Lead,
     title: SharedString,
-    byline: SharedString,
-    why: &'static str,
+    title_is_branch: bool,
+    facts: SharedString,
     is_draft: bool,
+}
+
+/// What a row is, in the narrow column before its title.
+enum Lead {
+    Number(SharedString),
+    LocalFolder,
 }
 
 /// A row with its texts made when the list or the query changes, not every frame.
 struct ShownRow {
     words: RowWords,
     tour: TourFact,
-    tour_label: &'static str,
+    tour_label: Option<&'static str>,
     has_unseen_reply: bool,
     is_active: bool,
     /// What the folder of a local review is now, when it is no longer the snapshot.
     disk_label: Option<&'static str>,
-    /// A local row whose branch has an open PR: "PR acme/shop#7 open".
+    /// A local row whose branch has an open PR: "acme/shop#7 is open".
     open_pr: Option<SharedString>,
     offers_drop_review: bool,
 }
@@ -157,24 +170,30 @@ impl ShownRow {
     fn of(row: &SwitcherRow, switcher: &PrSwitcher) -> Self {
         let words = match &row.kind {
             RowKind::PullRequest(pull_request) => RowWords {
-                reference: pull_request.url.short().into(),
+                lead: Lead::Number(format!("#{}", pull_request.url.number).into()),
                 title: pull_request.title.clone().into(),
-                byline: pull_request.author.clone().into(),
-                why: match pull_request.why_listed {
-                    WhyListed::Mine => "mine",
-                    WhyListed::ReviewRequested => "review requested",
-                    WhyListed::Involved => "involved",
-                },
+                title_is_branch: false,
+                facts: format!(
+                    "{} · {}",
+                    pull_request.author,
+                    match pull_request.why_listed {
+                        WhyListed::Mine => "mine",
+                        WhyListed::ReviewRequested => "review requested",
+                        WhyListed::Involved => "involved",
+                    }
+                )
+                .into(),
                 is_draft: pull_request.is_draft,
             },
             RowKind::Local(local) => RowWords {
-                reference: local.change_set.repo().map_or_else(
-                    || local.change_set.folder().name().into_owned().into(),
-                    |repo| repo.to_string().into(),
-                ),
+                lead: Lead::LocalFolder,
                 title: local.change_set.branch().as_str().to_owned().into(),
-                byline: changes_of(local).into(),
-                why: "Local",
+                title_is_branch: true,
+                facts: std::iter::once("local review".to_owned())
+                    .chain(Some(changes_of(local)).filter(|changes| !changes.is_empty()))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+                    .into(),
                 is_draft: false,
             },
         };
@@ -240,6 +259,8 @@ impl PrSwitcherView {
             focus: cx.focus_handle(),
             owner_focus,
             _list_changes: list_changes,
+            #[cfg(feature = "snapshots")]
+            staged_at_end: false,
         };
         view.refresh_shown(cx);
         view
@@ -283,6 +304,10 @@ impl PrSwitcherView {
         if !self.presence.is_open() {
             return;
         }
+        #[cfg(feature = "snapshots")]
+        {
+            self.staged_at_end = false;
+        }
         close_presence(self, cx, |this| &mut this.presence);
         window.focus(&self.owner_focus, cx);
         cx.notify();
@@ -312,7 +337,18 @@ impl PrSwitcherView {
         }
     }
 
-    fn refresh_shown(&mut self, cx: &Context<Self>) {
+    /// Opens it with the last row selected, which stays selected as the rows come in.
+    #[cfg(feature = "snapshots")]
+    pub fn open_at_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.staged_at_end = true;
+        self.open(window, cx);
+    }
+
+    fn refresh_shown(&mut self, cx: &mut Context<Self>) {
+        #[cfg(feature = "snapshots")]
+        if self.staged_at_end {
+            self.switching.list.update(cx, |list, _| list.select_last());
+        }
         let list = self.switching.list.read(cx);
         self.shown = list.visible().map(|row| ShownRow::of(row, list)).collect();
         self.notice = list.notice().map(Into::into);
@@ -428,19 +464,28 @@ impl PrSwitcherView {
     fn row(&self, index: usize, shown: &ShownRow, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         let is_selected = index == self.switching.list.read(cx).selected();
-        let has_tour = shown.tour.writing == WritingFact::None;
-        let tour_color = match shown.tour.writing {
-            WritingFact::None => colors.accent,
-            WritingFact::Failed => colors.warning,
-            WritingFact::Writing => colors.muted_text,
+        let is_writing = shown.tour.writing != WritingFact::None;
+        let lead = match &shown.words.lead {
+            Lead::Number(number) => div().child(number.clone()).into_any_element(),
+            Lead::LocalFolder => {
+                sized_icon(Icon::FolderGit, colors.muted_text, px(13.)).into_any_element()
+            }
         };
+        let title = div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .font_weight(FontWeight::MEDIUM)
+            .when(shown.words.title_is_branch, |title| {
+                title.font_family(*CODE_FONT)
+            })
+            .child(shown.words.title.clone());
         picker_row(
             &colors,
             SharedString::from(format!("pr-switcher-row-{index}")),
             is_selected,
         )
-        .h(px(36.))
-        .when(!has_tour, |row| row.text_color(colors.muted_text))
+        .h(ROW_HEIGHT)
         .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
             this.switching.list.update(cx, |list, _| {
                 if *is_hovered {
@@ -456,89 +501,126 @@ impl PrSwitcherView {
         }))
         .child(
             div()
-                .flex_none()
-                .size(px(6.))
-                .rounded_full()
-                .when(shown.is_active, |dot| dot.bg(colors.accent)),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_xs()
-                .text_color(if shown.is_active {
-                    colors.accent
-                } else {
-                    colors.muted_text
-                })
-                .child(shown.words.reference.clone()),
-        )
-        .child(
-            div()
                 .flex_1()
                 .min_w_0()
-                .truncate()
-                .font_weight(FontWeight::MEDIUM)
-                .child(shown.words.title.clone()),
-        )
-        .when(shown.words.is_draft, |row| {
-            row.child(chip(&colors, Tone::Neutral).child("draft"))
-        })
-        .child(
-            div()
-                .flex_none()
-                .text_xs()
-                .text_color(colors.muted_text)
-                .child(shown.words.byline.clone()),
-        )
-        .child(
-            div()
-                .flex_none()
-                .w(px(96.))
-                .text_xs()
-                .text_color(colors.muted_text)
-                .child(shown.words.why),
-        )
-        .when(shown.is_active, |row| {
-            row.child(chip(&colors, Tone::Accent).child("viewing"))
-        })
-        .when(shown.has_unseen_reply, |row| {
-            row.child(chip(&colors, Tone::Accent).child("agent replied"))
-        })
-        .children(
-            shown
-                .open_pr
-                .clone()
-                .map(|label| chip(&colors, Tone::Accent).child(label)),
-        )
-        .children(
-            shown
-                .disk_label
-                .map(|label| chip(&colors, Tone::Warning).child(label)),
-        )
-        .when(shown.offers_drop_review, |row| {
-            row.child(
-                icon_label_button(
-                    &colors,
-                    SharedString::from(format!("pr-switcher-drop-{index}")),
-                    ButtonKind::Secondary,
-                    ButtonSize::Small,
-                    Icon::Trash,
-                    "Drop review",
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .text_color(if is_writing {
+                            colors.muted_text
+                        } else {
+                            colors.text
+                        })
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(LEAD_WIDTH)
+                                .flex()
+                                .justify_end()
+                                .text_xs()
+                                .text_color(colors.muted_text)
+                                .child(lead),
+                        )
+                        .child(title),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.drop_review(index, cx);
-                })),
-            )
-        })
-        .child(
-            div()
-                .flex_none()
-                .w(px(88.))
-                .text_xs()
-                .text_color(tour_color)
-                .child(shown.tour_label),
+                .child(
+                    div()
+                        .flex()
+                        .gap_3()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(div().flex_none().w(LEAD_WIDTH))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(shown.words.facts.clone()),
+                        ),
+                ),
         )
+        .child(self.states(index, shown, &colors, cx))
+    }
+
+    /// The row's states, always in this order at its right edge, so the same fact is in the same place
+    /// on every row.
+    fn states(
+        &self,
+        index: usize,
+        shown: &ShownRow,
+        colors: &Colors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let tour_tone = match shown.tour.writing {
+            WritingFact::Failed => Tone::Warning,
+            WritingFact::None | WritingFact::Writing => Tone::Neutral,
+        };
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .when(shown.words.is_draft, |states| {
+                states.child(chip(colors, Tone::Neutral).child("draft"))
+            })
+            .children(
+                shown
+                    .open_pr
+                    .clone()
+                    .map(|label| chip(colors, Tone::Neutral).child(label)),
+            )
+            .children(
+                shown
+                    .disk_label
+                    .map(|label| chip(colors, Tone::Warning).child(label)),
+            )
+            .when(shown.has_unseen_reply, |states| {
+                states.child(chip(colors, Tone::Accent).child("agent replied"))
+            })
+            .when(shown.is_active, |states| {
+                states.child(chip(colors, Tone::Accent).child("viewing"))
+            })
+            .children(
+                shown
+                    .tour_label
+                    .map(|label| chip(colors, tour_tone).child(label)),
+            )
+            .when(shown.offers_drop_review, |states| {
+                states.child(
+                    icon_label_button(
+                        colors,
+                        SharedString::from(format!("pr-switcher-drop-{index}")),
+                        ButtonKind::Secondary,
+                        ButtonSize::Small,
+                        Icon::Trash,
+                        "Drop review",
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.drop_review(index, cx);
+                    })),
+                )
+            })
+    }
+
+    /// The repo, or folder, whose rows follow, on the rows' own left edge.
+    fn heading(name: &str, colors: &Colors) -> impl IntoElement {
+        div()
+            .h(LINE_HEIGHT)
+            .mx_2()
+            .px(px(9.))
+            .flex()
+            .items_end()
+            .pb(px(3.))
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(colors.muted_text)
+            .truncate()
+            .child(SharedString::from(name.to_owned()))
     }
 }
 
@@ -549,17 +631,26 @@ impl Render for PrSwitcherView {
             return div().into_any_element();
         }
         let list = self.switching.list.read(cx);
-        let (first_shown, is_loading, is_refreshing) =
-            (list.first_shown(), list.is_loading(), list.is_refreshing());
-        let rows: Vec<_> = self
-            .shown
+        let (first_shown, rows_on_screen, is_loading, is_refreshing) = (
+            list.first_shown(),
+            list.rows_on_screen(),
+            list.is_loading(),
+            list.is_refreshing(),
+        );
+        let screen = list.screen();
+        let lines: Vec<_> = screen
             .iter()
-            .enumerate()
-            .skip(first_shown)
-            .take(PrSwitcher::ROWS_SHOWN)
-            .map(|(index, shown)| self.row(index, shown, cx).into_any_element())
+            .filter_map(|line| match line {
+                ScreenLine::Heading(name) => Some(Self::heading(name, &colors).into_any_element()),
+                ScreenLine::Row(nth) => self
+                    .shown
+                    .get(*nth)
+                    .map(|shown| self.row(*nth, shown, cx).into_any_element()),
+            })
             .collect();
-        let scrollbar = scrollbar(first_shown, self.shown.len(), &colors);
+        let overflows = rows_on_screen < self.shown.len();
+        let scrollbar =
+            overflows.then(|| scrollbar(first_shown, rows_on_screen, self.shown.len(), &colors));
         let empty_text = if is_loading {
             "Loading your pull requests from GitHub..."
         } else {
@@ -604,7 +695,10 @@ impl Render for PrSwitcherView {
                             .flex()
                             .flex_col()
                             .on_scroll(cx.listener(Self::on_scroll))
-                            .children(rows)
+                            .when(overflows, |list| {
+                                list.h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32 + px(16.))
+                            })
+                            .children(lines)
                             .when(self.shown.is_empty(), |list| {
                                 list.child(
                                     div()
@@ -649,22 +743,22 @@ impl Render for PrSwitcherView {
 
 /// A thumb on the right edge of the rows: where the rows shown sit in the whole list. It shows only
 /// when some rows are out of sight.
-fn scrollbar(first_shown: usize, total: usize, colors: &Colors) -> Option<impl IntoElement> {
-    if total <= PrSwitcher::ROWS_SHOWN {
-        return None;
-    }
-    let track = ROW_HEIGHT * PrSwitcher::ROWS_SHOWN as f32;
+fn scrollbar(
+    first_shown: usize,
+    on_screen: usize,
+    total: usize,
+    colors: &Colors,
+) -> impl IntoElement {
+    let track = LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32;
     let share = |rows: usize| track * (rows as f32 / total as f32);
-    let height = share(PrSwitcher::ROWS_SHOWN).max(MIN_THUMB_HEIGHT);
+    let height = share(on_screen).max(MIN_THUMB_HEIGHT);
     let top = px(8.) + share(first_shown).min(track - height);
-    Some(
-        div()
-            .absolute()
-            .right(px(2.))
-            .top(top)
-            .w(px(5.))
-            .h(height)
-            .rounded_full()
-            .bg(colors.muted_text),
-    )
+    div()
+        .absolute()
+        .right(px(2.))
+        .top(top)
+        .w(px(5.))
+        .h(height)
+        .rounded_full()
+        .bg(colors.muted_text)
 }

@@ -159,12 +159,13 @@ fn picking_a_pull_request_with_no_tour_shows_it_as_a_basic_tour() {
     assert_eq!(switcher.pick(0).unwrap(), Pick::Show(pr(BLOG_7)));
     assert_eq!(
         switcher.tour_label(switcher.visible().next().unwrap()),
-        "basic"
+        None,
+        "a basic tour, as most rows have, is not named"
     );
 }
 
 #[test]
-fn a_row_labels_the_tour_it_opens_basic_guided_or_guided_ready() {
+fn a_row_names_the_tour_it_opens_only_when_it_is_guided_or_guided_ready() {
     let home = home_with_tour_of(API_31);
     write_basic_tour(home.path(), BLOG_7);
     write_basic_tour(home.path(), SHOP_7);
@@ -176,7 +177,7 @@ fn a_row_labels_the_tour_it_opens_basic_guided_or_guided_ready() {
         .visible()
         .map(|row| switcher.tour_label(row))
         .collect();
-    assert_eq!(labels, ["basic", "guided", "guided ready"]);
+    assert_eq!(labels, [None, Some("guided"), Some("guided ready")]);
 }
 
 #[test]
@@ -199,7 +200,10 @@ fn rows_say_which_tours_are_being_written_failed_or_have_an_unseen_agent_reply()
     );
     assert_eq!(tours[1].on_disk, ToursOnDisk::Guided);
     let labels: Vec<_> = rows.iter().map(|row| switcher.tour_label(row)).collect();
-    assert_eq!(labels, ["writing", "guided", "writing failed"]);
+    assert_eq!(
+        labels,
+        [Some("writing"), Some("guided"), Some("writing failed")]
+    );
     let unseen: Vec<_> = rows.iter().map(|row| row.has_unseen_reply).collect();
     assert_eq!(unseen, [false, true, false]);
     assert_eq!(

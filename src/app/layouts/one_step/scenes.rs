@@ -90,10 +90,11 @@ enum Scene {
     TitleBarMerged,
     TitleBarClosed,
     TitleBarPrOrigin,
+    PrSwitcherEnd,
 }
 
 impl Scene {
-    const ALL: [Self; 53] = [
+    const ALL: [Self; 54] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -147,6 +148,7 @@ impl Scene {
         Self::TitleBarMerged,
         Self::TitleBarClosed,
         Self::TitleBarPrOrigin,
+        Self::PrSwitcherEnd,
     ];
 
     fn file_name(self) -> &'static str {
@@ -204,6 +206,7 @@ impl Scene {
             Self::TitleBarMerged => "72-title-bar-merged",
             Self::TitleBarClosed => "73-title-bar-closed",
             Self::TitleBarPrOrigin => "74-title-bar-pr-origin",
+            Self::PrSwitcherEnd => "75-pr-switcher-end",
         }
     }
 
@@ -599,6 +602,11 @@ impl OneStepLayout {
                 self.pr_switcher
                     .update(cx, |switcher, cx| switcher.open(window, cx));
             }
+            Scene::PrSwitcherEnd => {
+                ReviewSession::stage_local_review_on_disk(cx);
+                self.pr_switcher
+                    .update(cx, |switcher, cx| switcher.open_at_end(window, cx));
+            }
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
                     session.type_in(
@@ -829,7 +837,7 @@ impl OneStepLayout {
             Scene::JumpPalette | Scene::JumpActions => self
                 .jump
                 .update(cx, |palette, cx| palette.close(window, cx)),
-            Scene::PrSwitcher => self
+            Scene::PrSwitcher | Scene::PrSwitcherEnd => self
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.close(window, cx)),
             Scene::FinishReview => {
