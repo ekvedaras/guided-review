@@ -30,7 +30,7 @@ use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
 };
 use super::palette::{CODE_FONT, Colors, INNER_RADIUS, Tone};
-use super::scrollbar::{ScrollbarDrag, TRACK_WIDTH, scrollbar};
+use super::scrollbar::{ScrollbarDrag, TRACK_WIDTH, drag_listener, scrollbar};
 use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -38,6 +38,10 @@ use super::thread_view::avatar_circle;
 
 /// A row is two lines high, a repo's name one: `PrSwitcher::ROW_LINES` and `HEADING_LINES`.
 const LINE_HEIGHT: Pixels = px(28.);
+/// A repo's name with the gap above it.
+const HEADING_HEIGHT: Pixels = px(34.);
+/// Room under the last row, so it does not touch the footer.
+const END_GAP: Pixels = px(8.);
 const ROW_HEIGHT: Pixels = px(56.);
 const LEAD_SIZE: f32 = 30.;
 
@@ -421,14 +425,14 @@ impl PrSwitcherView {
     }
 
     fn scroll_to_px(&self, scrolled: Pixels) {
-        let most = (content_height(&self.lines) - self.list_height()).max(px(0.));
+        let most = (content_height(&self.lines) + END_GAP - self.list_height()).max(px(0.));
         self.list_state
             .scroll_to(offset_at(&self.lines, scrolled.clamp(px(0.), most)));
     }
 
     /// The list's height: all of it, up to eight rows and a repo's name.
     fn list_height(&self) -> Pixels {
-        content_height(&self.lines).min(ROW_HEIGHT * 8. + LINE_HEIGHT)
+        (content_height(&self.lines) + END_GAP).min(ROW_HEIGHT * 8. + HEADING_HEIGHT)
     }
 
     /// Scrolls only as far as the selected row needs to be in full sight, below the repo name that
@@ -443,10 +447,17 @@ impl PrSwitcherView {
             self.scrolled(),
             self.list_height(),
         );
-        if top - LINE_HEIGHT < scrolled {
-            self.scroll_to_px(top - LINE_HEIGHT);
-        } else if top + ROW_HEIGHT > scrolled + height {
-            self.scroll_to_px(top + ROW_HEIGHT - height);
+        let bottom = top
+            + ROW_HEIGHT
+            + if line + 1 == self.lines.len() {
+                END_GAP
+            } else {
+                px(0.)
+            };
+        if top - HEADING_HEIGHT < scrolled {
+            self.scroll_to_px(top - HEADING_HEIGHT);
+        } else if bottom > scrolled + height {
+            self.scroll_to_px(bottom - height);
         }
     }
 
@@ -702,34 +713,39 @@ impl PrSwitcherView {
             })
     }
 
-    /// The repo, or folder, whose rows follow, with how many there are; a hairline parts it from the
-    /// group above.
+    /// The repo, or folder, whose rows follow, with how many there are. A gap above parts it from the
+    /// rows of the repo before, and a hairline from the second repo on.
     fn heading(name: &str, rows: usize, is_first: bool, colors: &Colors) -> impl IntoElement {
         div()
-            .h(LINE_HEIGHT)
-            .mx_2()
-            .px(px(13.))
-            .flex()
-            .items_end()
-            .gap_2()
-            .pb(px(5.))
-            .when(!is_first, |heading| {
-                heading.border_t_1().border_color(colors.subtle_border)
-            })
-            .text_xs()
+            .h(HEADING_HEIGHT)
+            .pt(HEADING_HEIGHT - LINE_HEIGHT)
             .child(
                 div()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors.text)
-                    .child(SharedString::from(name.to_owned())),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(colors.muted_text)
-                    .child(SharedString::from(rows.to_string())),
+                    .h(LINE_HEIGHT)
+                    .mx_2()
+                    .px(px(13.))
+                    .flex()
+                    .items_end()
+                    .gap_2()
+                    .pb(px(5.))
+                    .when(!is_first, |heading| {
+                        heading.border_t_1().border_color(colors.subtle_border)
+                    })
+                    .text_xs()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors.text)
+                            .child(SharedString::from(name.to_owned())),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(colors.muted_text)
+                            .child(SharedString::from(rows.to_string())),
+                    ),
             )
     }
 }
@@ -811,7 +827,7 @@ impl PrSwitcherView {
             .skip(top + 1)
             .find(|(_, line)| matches!(line, ListLine::Heading { .. }))
             .map(|(line, _)| top_of(&self.lines, line) - self.scrolled());
-        let pushed = next.map_or(px(0.), |next_top| (next_top - LINE_HEIGHT).min(px(0.)));
+        let pushed = next.map_or(px(0.), |next_top| (next_top - HEADING_HEIGHT).min(px(0.)));
         Some(
             div()
                 .absolute()
@@ -843,7 +859,7 @@ impl Render for PrSwitcherView {
         .into_iter()
         .flatten()
         .collect();
-        let overflows = content_height(&self.lines) > self.list_height();
+        let overflows = content_height(&self.lines) + END_GAP > self.list_height();
         let is_dragging = self.drag.is_dragging();
         let scrollbar = ScrollbarDrag::thumb(&self.list_state)
             .filter(|_| overflows)
@@ -887,6 +903,7 @@ impl Render for PrSwitcherView {
                         self.list_state.clone(),
                         cx.processor(|this, ix, _window, cx| this.line_element(ix, cx)),
                     )
+                    .pb(END_GAP)
                     .size_full(),
                 )
                 .children(sticky)
@@ -895,22 +912,17 @@ impl Render for PrSwitcherView {
         };
         modal_layer_for(&colors, "pr-switcher-scrim", &self.presence)
             .when(is_dragging, |layer| {
-                layer
-                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
-                        if event.pressed_button == Some(gpui::MouseButton::Left) {
-                            this.drag.drag_to(&this.list_state, event.position.y);
-                        } else {
-                            this.drag.release(&this.list_state);
-                        }
+                layer.child(drag_listener(
+                    cx.weak_entity(),
+                    |this: &mut Self, pointer, cx| {
+                        this.drag.drag_to(&this.list_state, pointer.y);
                         cx.notify();
-                    }))
-                    .on_mouse_up(
-                        gpui::MouseButton::Left,
-                        cx.listener(|this, _, _, cx| {
-                            this.drag.release(&this.list_state);
-                            cx.notify();
-                        }),
-                    )
+                    },
+                    |this: &mut Self, _, cx| {
+                        this.drag.release(&this.list_state);
+                        cx.notify();
+                    },
+                ))
             })
             .when(closes_on_scrim, |scrim| {
                 scrim.on_mouse_down(
@@ -974,7 +986,7 @@ impl Render for PrSwitcherView {
 /// known before gpui measures it.
 fn line_height(line: &ListLine) -> Pixels {
     match line {
-        ListLine::Heading { .. } => LINE_HEIGHT,
+        ListLine::Heading { .. } => HEADING_HEIGHT,
         ListLine::Row(_) => ROW_HEIGHT,
     }
 }

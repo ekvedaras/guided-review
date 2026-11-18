@@ -86,3 +86,5 @@ Drawn icons from `Icon`, never emoji. Sizes follow the button size (`ButtonSize:
 
 2026-11-18: one scrollbar drag, `ScrollbarDrag` over a `ScrollSource` (gpui's `ListState` or a `ScrollHandle`) in `scrollbar.rs`: the page, the PR switcher and the issue card drag the same way. The issue card stays open while its scrollbar is dragged, and closes when the drag ends off it.
 
+2026-11-18: a scrollbar drag listens to the whole window (`drag_listener` in `scrollbar.rs`, a canvas that adds window mouse listeners while a drag is on). An element's `on_mouse_move` fires only while the pointer is over it, and the issue card floats in a layer above the page, so the page's root heard no moves while the card's scrollbar was dragged over the card: it never scrolled. The snapshot run drags it for real (`76-issue-card-dragged`), with a frame between the press and the move, as a screen gives. The PR switcher's repo names have a 6 px gap above them (`HEADING_HEIGHT` 34) and its list 8 px below its last row, so a selected row touches neither the next name nor the footer.
+

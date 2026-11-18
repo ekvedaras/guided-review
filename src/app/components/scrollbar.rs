@@ -2,9 +2,12 @@
 //! The page, the PR switcher and the issue card all draw it here, so they look the same.
 
 use gpui::prelude::FluentBuilder;
+use std::rc::Rc;
+
 use gpui::{
-    Bounds, Div, ElementId, InteractiveElement, ListState, ParentElement, Pixels, ScrollHandle,
-    Stateful, Styled, div, point, px,
+    Bounds, Context, DispatchPhase, Div, ElementId, InteractiveElement, IntoElement, ListState,
+    MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollHandle,
+    Stateful, Styled, WeakEntity, canvas, div, point, px,
 };
 
 use super::palette::Colors;
@@ -47,6 +50,48 @@ pub fn scrollbar(
 }
 
 const MIN_THUMB_HEIGHT: Pixels = px(24.);
+
+/// While a scrollbar is dragged: every pointer move and the let-go, wherever in the window the pointer
+/// is. An element hears a move only while the pointer is over it, and a card floating above its owner
+/// (the issue card over the page) hides the owner from the pointer. The owner adds it while it drags.
+pub fn drag_listener<V: 'static>(
+    owner: WeakEntity<V>,
+    on_move: impl Fn(&mut V, Point<Pixels>, &mut Context<V>) + 'static,
+    on_release: impl Fn(&mut V, Point<Pixels>, &mut Context<V>) + 'static,
+) -> impl IntoElement {
+    let (on_move, on_release) = (Rc::new(on_move), Rc::new(on_release));
+    canvas(
+        |_, _, _| {},
+        move |_, (), window, _| {
+            let (moved, released) = (owner.clone(), owner);
+            let release_on_move = Rc::clone(&on_release);
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                let is_held = event.pressed_button == Some(MouseButton::Left);
+                moved
+                    .update(cx, |owner, cx| {
+                        if is_held {
+                            on_move(owner, event.position, cx);
+                        } else {
+                            release_on_move(owner, event.position, cx);
+                        }
+                    })
+                    .ok();
+            });
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                    released
+                        .update(cx, |owner, cx| on_release(owner, event.position, cx))
+                        .ok();
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_full()
+}
 
 /// What a scrollbar scrolls: gpui's list (the page, the PR switcher) or a scrolling box (the issue card).
 pub trait ScrollSource {

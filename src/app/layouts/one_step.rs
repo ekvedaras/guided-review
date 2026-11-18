@@ -65,7 +65,7 @@ use crate::app::components::pr_switcher::{
 };
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
-use crate::app::components::scrollbar::{ScrollbarDrag, scrollbar};
+use crate::app::components::scrollbar::{ScrollbarDrag, drag_listener, scrollbar};
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
@@ -5089,19 +5089,11 @@ impl Render for OneStepLayout {
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
             .when(self.is_dragging_a_scrollbar(), |root| {
-                root.on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
-                    if event.pressed_button == Some(MouseButton::Left) {
-                        this.drag_scrollbar_to(event.position.y, cx);
-                    } else {
-                        this.end_scrollbar_drag(event.position, cx);
-                    }
-                }))
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
-                        this.end_scrollbar_drag(event.position, cx);
-                    }),
-                )
+                root.child(drag_listener(
+                    cx.weak_entity(),
+                    |this: &mut Self, pointer, cx| this.drag_scrollbar_to(pointer.y, cx),
+                    |this: &mut Self, pointer, cx| this.end_scrollbar_drag(pointer, cx),
+                ))
             })
             // Before the press reaches what is under the pointer, so a double click's word, chosen
             // there, is not the selection cleared here.
