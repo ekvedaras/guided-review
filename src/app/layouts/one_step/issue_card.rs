@@ -14,9 +14,9 @@ use crate::app::components::palette::{CARD_RADIUS, Colors, Tone};
 use crate::issue::IssueLink;
 use crate::viewer::{IssueDetails, IssueState};
 
-const ISSUE_CARD_WIDTH: f32 = 420.;
+const ISSUE_CARD_WIDTH: f32 = 560.;
 /// How tall the issue's description is before it scrolls.
-const ISSUE_BODY_HEIGHT: f32 = 220.;
+const ISSUE_BODY_HEIGHT: f32 = 420.;
 const MIN_THUMB_HEIGHT: f32 = 24.;
 
 /// Which of the issue button, or the rows of its list, and which card the mouse is on; the card
