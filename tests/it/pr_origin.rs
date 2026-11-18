@@ -209,3 +209,29 @@ fn a_local_review_goes_from_its_branch_into_the_default_branch_with_no_author() 
         Some("Reviewing feature against main")
     );
 }
+
+#[test]
+fn a_local_review_compared_with_origin_still_merges_into_the_branch_by_its_own_name() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("README.md", "hello\n");
+    repo.commit("Start the shop");
+    repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    repo.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ]);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("src/cart.rs", "pub fn total() {}\n");
+    repo.commit("Add the cart");
+    let work_tree = LocalWorkTree::containing(repo.path()).unwrap();
+    let subject = ReviewSubject::from(work_tree.change_set().unwrap());
+
+    let opened = open_review(&subject, repo.path(), &repo.folders()).unwrap();
+
+    assert_eq!(opened.review.merge_route().unwrap().base, branch("main"));
+    assert_eq!(
+        opened.review.merge_route_sentence().as_deref(),
+        Some("Reviewing feature against main")
+    );
+}

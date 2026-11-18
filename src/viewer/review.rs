@@ -1050,7 +1050,7 @@ impl ReviewCore {
     pub fn merge_route(&self) -> Option<MergeRoute> {
         match &self.local_facts {
             Some(facts) => Some(MergeRoute {
-                base: facts.default_branch.clone(),
+                base: facts.default_branch.without_remote(),
                 head: HeadBranch::of_repo(facts.branch.clone()),
             }),
             None => self.pr_origin.as_ref().map(|origin| origin.route.clone()),

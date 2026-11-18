@@ -32,6 +32,7 @@ pub struct WorkTreeRoot(PathBuf);
 pub struct BranchName(String);
 
 const LOCAL_KEY_PREFIX: &str = "local:";
+const REMOTE_PREFIX: &str = "origin/";
 /// A PR keeps the label it has always had; a local change set is labelled by its subject key.
 const PR_LABEL_KEY: &str = "gr.pr";
 const LOCAL_LABEL_KEY: &str = "gr.local";
@@ -380,5 +381,12 @@ impl BranchName {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The branch itself, without the `origin/` of a remote-tracking ref: `origin/main` is `main`.
+    pub fn without_remote(&self) -> Self {
+        self.0
+            .strip_prefix(REMOTE_PREFIX)
+            .map_or_else(|| self.clone(), |name| Self(name.to_owned()))
     }
 }
