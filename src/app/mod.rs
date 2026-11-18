@@ -49,9 +49,9 @@ use crate::update::Build;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
-    Relaunched, RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile,
-    ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgentPort,
-    TourAgents, WriteDecision,
+    PullsOfBranchPort, Relaunched, RelevantPullRequestsPort, RememberedPullRequestsFile,
+    ReviewStateFile, ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone,
+    TourAgentPort, TourAgents, WriteDecision,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -181,6 +181,7 @@ fn pr_switching(
         folders: folders.clone(),
         active,
         agents: switcher_agents(folders),
+        head_branches: head_branches(),
         list: cx.new(|_| {
             PrSwitcher::remembering_in(RememberedPullRequestsFile::in_folders(folders), folders)
         }),
@@ -217,6 +218,14 @@ fn switcher_agents(folders: &AppFolders) -> Arc<dyn TourAgentPort> {
         return Arc::new(snapshots::NoReviewerTerminals(herdr));
     }
     herdr
+}
+
+fn head_branches() -> Arc<dyn PullsOfBranchPort> {
+    #[cfg(feature = "snapshots")]
+    if snapshots::is_on() {
+        return Arc::new(crate::viewer::NoGitHub::default());
+    }
+    Arc::new(GitHub::from_env())
 }
 
 fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {

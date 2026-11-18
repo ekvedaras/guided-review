@@ -162,3 +162,9 @@ How it is built (`src/app_link.rs`):
 Flows that relied on the swap: `restart` and `open` typed after a `cargo install` or a manual install no longer replace the running app; the reviewer quits it, or uses Restart app here, which runs the binary now at the app's path. The Dock icon of a running app and the OS launcher are unchanged.
 
 Open: an app from before this change runs `restart` without `--replacing`, so its update to the first release with this change installs but cannot restart into it; the reviewer quits and starts the app once. The OS launcher is told by an environment variable that the app's own children (such as a refresh writer) inherit on macOS; only a bare `guided-review` of theirs would count as a launch.
+
+## The reviewer's own agent writes a PR's missing tour (2026-11-18)
+
+The maintainer picked a PR with no tour in the app while their own Claude worked on its branch in a worktree; the app started a fresh tour agent beside it. `TourAgents::write_tour` never looked for an agent: it ended an app-started one, took the PR's label off the reviewer's, and started a new one.
+
+Decided: the writer task goes to the reviewer's own agent of the PR when there is one, as a local review's agent is found. First the terminal with the PR's label, which now keeps it; else the one Claude terminal, not started by the app, whose folder is in a clone of the PR's repo on the PR's head branch (GitHub's `headRefName`, looked up once; a failed look or a fork's PR skips this). It is claimed and typed the task when idle; a busy one is waited for, as `hand_writer_task` does. Several on the branch are not guessed between: the writing fails and says to run `guided-review open <pr>` from the one to use, which claims it. With none, a tour agent is started as before. The reviewer's agent gets a task without the app-started agent's tool rules.

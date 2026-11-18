@@ -6,7 +6,7 @@ use guided_review::opened_subject::writer_folder;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     ActivePr, AgentStatus, Finished, OpenDecision, OpenOrigin, ReviewStateFile, TerminalId,
-    TourAgentPort, TourAgents, WriteDecision, WritingFact, WritingStage,
+    TourAgentPort, TourAgents, WriteDecision, WriterHandOver, WritingFact, WritingStage,
 };
 
 const SHOWN: &str = "https://github.com/acme/shop/pull/7";
@@ -35,7 +35,9 @@ fn agents(fake: &Arc<FakeTourAgent>) -> TourAgents {
 /// Picks the PR with no tour, as the switcher does, and starts its writer through the fake herdr.
 fn pick_no_tour(active: &mut ActivePr, fake: &Arc<FakeTourAgent>) -> TerminalId {
     assert_eq!(active.write(pr(NO_TOUR)), WriteDecision::StartWriter);
-    let started = agents(fake).write_tour(&pr(NO_TOUR), &pr(SHOWN));
+    let started = agents(fake)
+        .write_tour(&pr(NO_TOUR), &pr(SHOWN), None)
+        .map(WriterHandOver::into_terminal);
     let terminal = started.as_ref().unwrap().clone();
     active.writer_started(&pr(NO_TOUR), started);
     terminal
@@ -179,7 +181,9 @@ fn a_writer_that_could_not_start_failed_with_the_reason() {
     let mut active = showing_a_pr();
     active.write(pr(NO_TOUR));
 
-    let started = agents(&fake).write_tour(&pr(NO_TOUR), &pr(SHOWN));
+    let started = agents(&fake)
+        .write_tour(&pr(NO_TOUR), &pr(SHOWN), None)
+        .map(WriterHandOver::into_terminal);
     active.writer_started(&pr(NO_TOUR), started);
 
     let WritingStage::Failed(reason) = loading_stage(&active) else {

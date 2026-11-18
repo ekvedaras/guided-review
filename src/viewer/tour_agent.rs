@@ -8,7 +8,9 @@ use sha2::{Digest, Sha256};
 
 use super::active_pr::OpenOrigin;
 use super::toasts::ToastTone;
-use crate::review_subject::{LocalChangeSet, ReviewSubject};
+use crate::local_work_tree::LocalWorkTree;
+use crate::pull_request::RepoName;
+use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 /// A herdr terminal, as `hc` names it (`t7`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -438,13 +440,15 @@ impl TourAgents {
         })
     }
 
-    /// Starts the tour agent that writes the PR's tour with the tour skill. It replaces any agent the PR had:
-    /// one the app started is ended, one the reviewer started only loses the PR's label.
+    /// Has the PR's tour written by the reviewer's own agent of the PR when there is one: the terminal
+    /// with the PR's label, else the one Claude terminal working on the PR's head branch in a clone of its
+    /// repo. With none, a tour agent is started, and one the app started before is ended first.
     pub fn write_tour(
         &self,
         subject: &ReviewSubject,
         active: &ReviewSubject,
-    ) -> anyhow::Result<TerminalId> {
+        head_branch: Option<&BranchName>,
+    ) -> anyhow::Result<WriterHandOver> {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
@@ -455,18 +459,79 @@ impl TourAgents {
             .into_iter()
             .map(|agent| agent.terminal)
             .collect();
+        let mut reviewers = Vec::new();
         for old in self.port.terminals_of(subject)? {
             if app_started.contains(&old) {
                 self.port.kill(&old).with_context(|| {
                     format!("could not end the old tour agent {old} of {subject}")
                 })?;
             } else {
-                self.port
-                    .release(&old, subject)
-                    .with_context(|| format!("could not take the label of {subject} off {old}"))?;
+                reviewers.push(old);
             }
         }
-        self.launch(subject, active, writer_task(subject))
+        let reviewers_agent = match reviewers.into_iter().next() {
+            Some(labelled) => Some(labelled),
+            None => self.only_reviewers_agent_on(subject, head_branch, &app_started)?,
+        };
+        let Some(terminal) = reviewers_agent else {
+            return self
+                .launch(subject, active, writer_task(subject))
+                .map(WriterHandOver::Started);
+        };
+        self.claim(subject, &terminal)?;
+        self.hand_task(terminal, &reviewers_agent_writer_task(subject))
+    }
+
+    /// The reviewer's Claude working on the PR's head branch; several are not guessed between.
+    fn only_reviewers_agent_on(
+        &self,
+        subject: &ReviewSubject,
+        head_branch: Option<&BranchName>,
+        app_started: &[TerminalId],
+    ) -> anyhow::Result<Option<TerminalId>> {
+        let (Some(pr), Some(branch)) = (subject.pull_request(), head_branch) else {
+            return Ok(None);
+        };
+        let mut on_branch: Vec<TerminalId> = self
+            .port
+            .live_terminals()?
+            .into_iter()
+            .filter(|live| {
+                live.runs_claude
+                    && !app_started.contains(&live.terminal)
+                    && has_checked_out(&live.cwd, &pr.repo, branch)
+            })
+            .map(|live| live.terminal)
+            .collect();
+        match on_branch.len() {
+            0 => Ok(None),
+            1 => Ok(Some(on_branch.remove(0))),
+            _ => {
+                let named: Vec<String> = on_branch.iter().map(ToString::to_string).collect();
+                bail!(
+                    "several agents work on {branch} ({}): run `guided-review open {subject}` from the one to write the tour",
+                    named.join(", ")
+                )
+            }
+        }
+    }
+
+    /// Types the task into the agent when it is idle, never into a working one; else the task waits.
+    fn hand_task(&self, terminal: TerminalId, task: &str) -> anyhow::Result<WriterHandOver> {
+        match self.port.status(&terminal)? {
+            AgentStatus::Working | AgentStatus::WaitingForYou => {
+                Ok(WriterHandOver::Waiting(terminal))
+            }
+            AgentStatus::Idle | AgentStatus::Failed | AgentStatus::Unreported => {
+                match self.port.send_if_idle(&terminal, task)? {
+                    SendOutcome::Delivered => Ok(WriterHandOver::Delivered(terminal)),
+                    SendOutcome::Refused(_)
+                    | SendOutcome::Starting
+                    | SendOutcome::NoAgent
+                    | SendOutcome::Unreported(_) => Ok(WriterHandOver::Waiting(terminal)),
+                }
+            }
+        }
     }
 
     /// Hands the writer task of a basic tour's guided tour to the PR's tour agent: typed in when the
@@ -482,19 +547,7 @@ impl TourAgents {
         }
         let task = basic_writer_task(subject);
         match self.lookup(subject) {
-            TourAgentState::Agent {
-                terminal,
-                status: AgentStatus::Working | AgentStatus::WaitingForYou,
-            } => Ok(WriterHandOver::Waiting(terminal)),
-            TourAgentState::Agent { terminal, .. } => {
-                match self.port.send_if_idle(&terminal, &task)? {
-                    SendOutcome::Delivered => Ok(WriterHandOver::Delivered(terminal)),
-                    SendOutcome::Refused(_)
-                    | SendOutcome::Starting
-                    | SendOutcome::NoAgent
-                    | SendOutcome::Unreported(_) => Ok(WriterHandOver::Waiting(terminal)),
-                }
-            }
+            TourAgentState::Agent { terminal, .. } => self.hand_task(terminal, &task),
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
             TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
             TourAgentState::None | TourAgentState::Unknown => self
@@ -873,6 +926,13 @@ fn terminal_name(subject: &ReviewSubject) -> String {
 /// Three bytes are the 6 hex characters that end a local change set's agent name.
 const NAME_HASH_BYTES: usize = 3;
 
+/// Whether the folder is in a clone of the repo with the branch checked out.
+fn has_checked_out(cwd: &Path, repo: &RepoName, branch: &BranchName) -> bool {
+    LocalWorkTree::containing(cwd)
+        .and_then(|tree| tree.change_set())
+        .is_ok_and(|change_set| change_set.branch() == branch && change_set.repo() == Some(repo))
+}
+
 /// `write_tour` replaces the subject's agent, which for a local change set is the reviewer's own agent
 /// that wrote the code. A local review always has its basic tour, so its guided tour is written through
 /// `hand_writer_task`, which keeps that agent.
@@ -886,6 +946,16 @@ fn refuse_replacing_the_agent_of_local(subject: &ReviewSubject) -> anyhow::Resul
 /// The first task of an agent that writes a tour. It starts with the skill, so Claude runs it; the rest
 /// reaches the skill as its arguments. The agent runs with a fixed tool list, under which a chained or
 /// unlisted command is denied without a word (docs/wiki/agent-runs.md).
+/// The writer task typed into the reviewer's own agent of the PR, which runs with their tools and context.
+fn reviewers_agent_writer_task(subject: &ReviewSubject) -> String {
+    format!(
+        "/tour {subject} (the reviewer picked this PR in the guided-review app and it has no tour; you work \
+         on its branch, so the app asks you to write it). When `guided-review check {subject}` is clean, run \
+         `guided-review open {subject}`, which shows the tour to the reviewer. Afterwards the reviewer's \
+         comments reach you here as messages: answer each as its message says."
+    )
+}
+
 fn writer_task(subject: &ReviewSubject) -> String {
     format!(
         "/tour {subject} (you are the tour agent of this PR, started by the guided-review app because the reviewer \
@@ -907,6 +977,16 @@ pub enum WriterHandOver {
     Waiting(TerminalId),
     /// The PR had no agent, so one was started with the task as its first.
     Started(TerminalId),
+}
+
+impl WriterHandOver {
+    pub fn into_terminal(self) -> TerminalId {
+        match self {
+            Self::Delivered(terminal) | Self::Waiting(terminal) | Self::Started(terminal) => {
+                terminal
+            }
+        }
+    }
 }
 
 /// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
