@@ -617,7 +617,7 @@ impl ReviewCore {
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
         let branch_link = BranchLink::of(&subject);
-        let related_issues = RelatedIssues::of(&subject, &tour);
+        let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description());
         let pr_controls = PrControls::of(&subject);
         Ok(Self {
             tour,
@@ -1124,6 +1124,7 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
         self.github_answered(Affected::Description);
         if self.state.pr_description() != body {
+            self.related_issues.description_is(body);
             self.state.record(|state| state.saw_pr_description(body))?;
         }
         Ok(())

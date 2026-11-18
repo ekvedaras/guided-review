@@ -124,6 +124,51 @@ fn a_branch_names_an_issue_only_by_a_number_that_starts_its_last_part_or_follows
     }
 }
 
+fn part_of(text: &str) -> Vec<String> {
+    IssueUrl::part_of_in(text, &RepoName::new("acme", "shop"))
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn a_description_names_the_issues_it_is_part_of_by_number_repo_and_number_or_link() {
+    assert_eq!(
+        part_of("Part of #12"),
+        ["https://github.com/acme/shop/issues/12"]
+    );
+    assert_eq!(
+        part_of("Ticket: x\n\n**Part of** acme/stock#4.\nMore text #99"),
+        ["https://github.com/acme/stock/issues/4"]
+    );
+    assert_eq!(
+        part_of("part of https://github.com/acme/shop/issues/8, #9 and #10"),
+        [
+            "https://github.com/acme/shop/issues/8",
+            "https://github.com/acme/shop/issues/9",
+            "https://github.com/acme/shop/issues/10",
+        ]
+    );
+    assert_eq!(part_of("Part of the plan, see #12"), Vec::<String>::new());
+    assert_eq!(part_of("Fixes a bug in #12"), Vec::<String>::new());
+}
+
+#[test]
+fn with_no_linked_issue_the_issues_the_description_is_part_of_come_before_the_tours() {
+    let shop = Shop::new();
+    let mut review = shop.open_with(json!({"issue": issue(3).to_string()}));
+
+    review.set_pr_description("Part of #16 and #17").unwrap();
+
+    assert_eq!(numbers(&review), [16, 17]);
+    let reopened = shop.open_with(json!({}));
+    assert_eq!(
+        numbers(&reopened),
+        [16, 17],
+        "the saved description counts at open"
+    );
+}
+
 #[test]
 fn an_issue_url_reads_and_writes_as_its_github_page() {
     let url: IssueUrl = "https://github.com/acme/shop/issues/12".parse().unwrap();

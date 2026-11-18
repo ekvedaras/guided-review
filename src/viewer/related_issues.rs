@@ -1,6 +1,6 @@
 //! The GitHub issues a review is about, and where each came from. The first source that names any
-//! wins: the issues GitHub links to the PR, then the one the guided tour names, then the one the
-//! branch is named after. A rebuilt review keeps what GitHub said and reads the rest again.
+//! wins: the issues GitHub links to the PR, then the ones its description says it is part of, then
+//! the one the guided tour names, then the one the branch is named after. A rebuilt review keeps what GitHub said and reads the rest again.
 
 use std::sync::Arc;
 
@@ -35,13 +35,15 @@ pub(super) struct RelatedIssues {
     on_github: Option<PullRequestIssues>,
     /// The PR's repo, where its head branch's issue is; `None` for a local review.
     pr_repo: Option<RepoName>,
+    /// `Part of #12` in the PR's description, which GitHub does not link.
+    part_of_in_description: Vec<RelatedIssue>,
     named_by_tour: Option<RelatedIssue>,
     of_local_branch: Option<RelatedIssue>,
     shown: Arc<[RelatedIssue]>,
 }
 
 impl RelatedIssues {
-    pub(super) fn of(subject: &ReviewSubject, tour: &Tour) -> Self {
+    pub(super) fn of(subject: &ReviewSubject, tour: &Tour, description: &str) -> Self {
         let of_local_branch = subject.local().and_then(|change_set| {
             IssueUrl::of_branch(change_set.repo()?, change_set.branch()).map(RelatedIssue::untitled)
         });
@@ -52,12 +54,24 @@ impl RelatedIssues {
         let mut issues = Self {
             on_github: None,
             pr_repo: subject.pull_request().map(|pr| pr.repo.clone()),
+            part_of_in_description: Vec::new(),
             named_by_tour,
             of_local_branch,
             shown: Arc::default(),
         };
-        issues.choose_shown();
+        issues.description_is(description);
         issues
+    }
+
+    pub(super) fn description_is(&mut self, description: &str) {
+        self.part_of_in_description = self
+            .pr_repo
+            .as_ref()
+            .map_or_else(Vec::new, |repo| IssueUrl::part_of_in(description, repo))
+            .into_iter()
+            .map(RelatedIssue::untitled)
+            .collect();
+        self.choose_shown();
     }
 
     pub(super) fn carry_on_from(&mut self, replaced: Self) {
@@ -85,7 +99,9 @@ impl RelatedIssues {
             let branch = self.on_github.as_ref()?.head_branch.as_ref()?;
             IssueUrl::of_branch(repo, branch).map(RelatedIssue::untitled)
         };
+        let part_of = Some(self.part_of_in_description.clone()).filter(|issues| !issues.is_empty());
         self.shown = linked
+            .or(part_of)
             .or_else(|| self.named_by_tour.clone().map(|issue| vec![issue]))
             .or_else(|| self.of_local_branch.clone().map(|issue| vec![issue]))
             .or_else(|| of_pr_branch().map(|issue| vec![issue]))
