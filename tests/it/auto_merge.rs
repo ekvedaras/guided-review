@@ -7,8 +7,8 @@ use crate::support::work::drive_without_agents;
 use guided_review::update::Build;
 use guided_review::viewer::{
     AutoMerge, Checks, Command, Effect, Intent, MergeChange, MergeMethod, MergeMethods, MergeOffer,
-    MergeRefusal, Mergeability, Merging, PaletteAction, PrStatus, PressStep, Problem, Readiness,
-    Review, WindowMoment,
+    MergeRefusal, Mergeability, Merging, OpenPrStatus, PaletteAction, PrStatus, PressStep, Problem,
+    Readiness, Review, WindowMoment,
 };
 
 #[test]
@@ -43,13 +43,13 @@ fn the_title_bar_button_says_what_a_click_offers_and_hides_where_the_viewer_cann
 
 fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeGitHub, Instant) {
     let mut review = pull.open();
-    let github = pull.github().with_status(PrStatus {
+    let github = pull.github().with_status(PrStatus::Open(OpenPrStatus {
         readiness: Readiness::Ready,
         checks: Checks::Running,
         check_runs: Arc::default(),
         viewer_may_change_readiness: true,
         merging,
-    });
+    }));
     let now = Instant::now();
     pull.read(&mut review, &github, now);
     (review, github, now)
@@ -110,7 +110,10 @@ fn the_same_press_again_within_ten_seconds_turns_auto_merge_on() {
         [MergeChange::EnableAutoMerge(MergeMethod::Merge)]
     );
     assert_eq!(
-        review.pr_status().map(|status| status.merging.auto_merge),
+        review
+            .pr_status()
+            .and_then(PrStatus::open)
+            .map(|status| status.merging.auto_merge),
         Some(AutoMerge::On(MergeMethod::Merge))
     );
     assert_eq!(review.problems(), []);
@@ -174,7 +177,10 @@ fn with_auto_merge_on_the_same_key_turns_it_off() {
     assert!(note.contains("turn off auto-merge"), "{note}");
     assert_eq!(merging_calls(&pull), [MergeChange::DisableAutoMerge]);
     assert_eq!(
-        review.pr_status().map(|status| status.merging.auto_merge),
+        review
+            .pr_status()
+            .and_then(PrStatus::open)
+            .map(|status| status.merging.auto_merge),
         Some(AutoMerge::Off)
     );
 }
@@ -200,10 +206,41 @@ fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press(
         merging_calls(&pull),
         [MergeChange::MergeNow(MergeMethod::Merge)]
     );
-    assert_eq!(
-        review.pr_status().map(|status| status.merging.mergeability),
-        Some(Mergeability::NotOpen)
-    );
+    assert_eq!(review.pr_status(), Some(&PrStatus::Merged));
+}
+
+#[test]
+fn a_merged_or_closed_pr_says_so_and_neither_key_nor_the_palette_offers_a_change() {
+    let pull = Pull::new();
+    for (status, label) in [(PrStatus::Merged, "Merged"), (PrStatus::Closed, "Closed")] {
+        let mut review = pull.open();
+        let github = pull.github().with_status(status.clone());
+        let now = Instant::now();
+        pull.read(&mut review, &github, now);
+
+        assert_eq!(review.pr_status(), Some(&status));
+        assert_eq!(status.label(), label);
+        assert_eq!(
+            review.ask_to_change_merging(now),
+            PressStep::Nothing,
+            "{label}"
+        );
+        assert_eq!(
+            review.ask_to_change_readiness(now),
+            PressStep::Nothing,
+            "{label}"
+        );
+        let offered: Vec<PaletteAction> = review
+            .palette_actions(Build::Local)
+            .into_iter()
+            .filter(|action| {
+                [Some(Command::ToggleAutoMerge), Some(Command::ToggleDraft)]
+                    .contains(&action.command())
+            })
+            .collect();
+        assert_eq!(offered, [], "{label}");
+        assert_eq!(review.next_due(), None, "{label}");
+    }
 }
 
 #[test]
@@ -236,7 +273,10 @@ fn a_change_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() 
     drive_without_agents(&mut review, &github, &pull.source(), now);
 
     assert_eq!(
-        review.pr_status().map(|status| status.merging.auto_merge),
+        review
+            .pr_status()
+            .and_then(PrStatus::open)
+            .map(|status| status.merging.auto_merge),
         Some(AutoMerge::Off)
     );
     assert_eq!(
@@ -342,13 +382,6 @@ fn nothing_is_offered_where_github_would_refuse_and_the_refusal_says_why() {
     let cases = [
         (
             Merging {
-                mergeability: Mergeability::NotOpen,
-                ..blocked
-            },
-            MergeRefusal::NotOpen,
-        ),
-        (
-            Merging {
                 auto_merge: AutoMerge::On(MergeMethod::Merge),
                 viewer_may_disable_auto_merge: false,
                 ..blocked
@@ -408,29 +441,21 @@ fn the_preferred_method_is_used_where_the_repo_allows_it_else_its_first_allowed_
 }
 
 #[test]
-fn github_merge_states_are_merge_now_blocked_or_not_open() {
+fn github_merge_states_are_merge_now_or_blocked() {
     for status in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] {
         assert_eq!(
-            Mergeability::from_github("OPEN", status),
+            Mergeability::from_github(status),
             Mergeability::Now,
             "{status}"
         );
     }
     for status in ["BLOCKED", "BEHIND", "DIRTY", "DRAFT", "UNKNOWN"] {
         assert_eq!(
-            Mergeability::from_github("OPEN", status),
+            Mergeability::from_github(status),
             Mergeability::Blocked,
             "{status}"
         );
     }
-    assert_eq!(
-        Mergeability::from_github("MERGED", "UNKNOWN"),
-        Mergeability::NotOpen
-    );
-    assert_eq!(
-        Mergeability::from_github("CLOSED", "CLEAN"),
-        Mergeability::NotOpen
-    );
 }
 
 #[test]

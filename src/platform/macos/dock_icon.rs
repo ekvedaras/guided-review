@@ -4,6 +4,7 @@
 //! cover.
 
 use crate::app_icon::{AppIcon, Look};
+use crate::update::Build;
 
 const SIZE: u16 = 512;
 
@@ -56,7 +57,7 @@ fn paint(look: Look) {
 }
 
 fn picture(look: Look) -> Option<Vec<u8>> {
-    AppIcon::running(look)
+    AppIcon::of(Build::running(), look)
         .png(SIZE)
         .inspect_err(|error| eprintln!("could not draw the Dock icon: {error:#}"))
         .ok()

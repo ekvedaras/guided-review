@@ -92,8 +92,8 @@ pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use app_state::AppStateFile;
 pub use app_window::{
-    AfterClose, AppWindow, FailedBuild, Relaunched, ShowReview, ShowSettings, ShowSwitcher,
-    ShowWriting,
+    AfterClose, AppWindow, FailedBuild, Relaunched, ShowBuilding, ShowReview, ShowSettings,
+    ShowSwitcher, ShowWriting,
 };
 pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place, ShownOn};
 pub use ask_desk::{
@@ -175,7 +175,9 @@ pub use ports::{
     ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
-pub use pr_status::{CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, PrStatus, Readiness};
+pub use pr_status::{
+    CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, OpenPrStatus, PrStatus, Readiness,
+};
 pub use pr_switcher::{NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact, WritingFact};
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use press_again::{CONFIRM_WITHIN, PressStep};

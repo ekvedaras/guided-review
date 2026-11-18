@@ -9,18 +9,19 @@ use guided_review::open_review::open_review;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    Checks, Command, MergeMethod, PaletteAction, PrStatus, PressStep, Readiness, Review,
+    Checks, Command, MergeMethod, OpenPrStatus, PaletteAction, PrStatus, PressStep, Readiness,
+    Review,
 };
 
 /// A ready PR the viewer may turn into a draft and turn auto-merge on for, so both keys ask.
 fn both_changes_offered() -> PrStatus {
-    PrStatus {
+    PrStatus::Open(OpenPrStatus {
         readiness: Readiness::Ready,
         checks: Checks::Passing,
         check_runs: Arc::default(),
         viewer_may_change_readiness: true,
         merging: blocked_merging(),
-    }
+    })
 }
 
 fn read(pull: &Pull) -> (Review, Instant) {

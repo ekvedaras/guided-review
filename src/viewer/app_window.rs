@@ -78,6 +78,15 @@ pub enum FailedBuild<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
     ShowInReview(Review),
 }
 
+/// An open the reviewer asked for starts to build its review. The app comes to the front at once, so
+/// the reviewer sees it took the open; the switching veil names the PR until the review is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowBuilding<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
+    /// No window yet: the switcher alone, under the veil, which also keeps the reason if the build fails.
+    OpenSwitcherOnly,
+    Raise(AppWindow<SettingsOnly, SwitcherOnly, WritingOnly, Review>),
+}
+
 /// The app was launched again while it runs with no window in sight, as by a click on its Dock icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Relaunched<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
@@ -115,6 +124,16 @@ impl<SettingsOnly: Copy, SwitcherOnly: Copy, WritingOnly: Copy, Review: Copy>
             | Self::SwitcherOnly(_)
             | Self::WritingOnly(_)
             | Self::Review(_) => Relaunched::Raise(*self),
+        }
+    }
+
+    pub fn show_building(&self) -> ShowBuilding<SettingsOnly, SwitcherOnly, WritingOnly, Review> {
+        match self {
+            Self::Closed => ShowBuilding::OpenSwitcherOnly,
+            Self::SettingsOnly(_)
+            | Self::SwitcherOnly(_)
+            | Self::WritingOnly(_)
+            | Self::Review(_) => ShowBuilding::Raise(*self),
         }
     }
 

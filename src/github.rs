@@ -16,7 +16,8 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::viewer::{
-    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, PrStatus, Readiness,
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus,
+    PrStatus, Readiness,
 };
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
@@ -772,6 +773,11 @@ impl PullRequestStatusPort for GitHub {
                 .as_str()
                 .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
         };
+        match text("/state")? {
+            "MERGED" => return Ok(PrStatus::Merged),
+            "CLOSED" => return Ok(PrStatus::Closed),
+            _ => {}
+        }
         let rollup = at(pull, "/commits/nodes/0/commit/statusCheckRollup/state").as_str();
         let allowed: Vec<MergeMethod> = [
             ("/mergeCommitAllowed", MergeMethod::Merge),
@@ -790,7 +796,7 @@ impl PullRequestStatusPort for GitHub {
             ),
         };
         let merging = Merging {
-            mergeability: Mergeability::from_github(text("/state")?, text("/mergeStateStatus")?),
+            mergeability: Mergeability::from_github(text("/mergeStateStatus")?),
             auto_merge,
             methods: MergeMethods::only(&allowed),
             repo_allows_auto_merge: flag_of(repository, "/autoMergeAllowed")?,
@@ -801,7 +807,7 @@ impl PullRequestStatusPort for GitHub {
                 Some("ADMIN" | "MAINTAIN" | "WRITE")
             ),
         };
-        Ok(PrStatus {
+        Ok(PrStatus::Open(OpenPrStatus {
             readiness: if flag("/isDraft")? {
                 Readiness::Draft
             } else {
@@ -814,7 +820,7 @@ impl PullRequestStatusPort for GitHub {
             )),
             viewer_may_change_readiness: flag("/viewerCanUpdate")?,
             merging,
-        })
+        }))
     }
 
     fn set_pull_request_readiness(

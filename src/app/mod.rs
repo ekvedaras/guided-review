@@ -45,11 +45,13 @@ use crate::opened_subject::clean_snapshot_refs;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, ToursOnDisk};
+use crate::update::Build;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
-    Relaunched, RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile, ShowReview,
-    ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents, WriteDecision,
+    Relaunched, RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile,
+    ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents,
+    WriteDecision,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -366,6 +368,7 @@ async fn answer_requests(
                         }
                     }
                     OpenDecision::Build(ticket) => {
+                        show_building(&screen, cx);
                         // An open that waits is answered when the build ends; any other at once.
                         let waiting = if open.waits_for_build {
                             Some(reply)
@@ -413,6 +416,25 @@ fn bring_window_back(screen: &SharedScreen, cx: &mut AsyncApp) {
     }
 }
 
+fn show_building(screen: &SharedScreen, cx: &mut AsyncApp) {
+    let window = screen.borrow().window;
+    let shown = cx.update(|cx| {
+        bring_app_to_front(cx);
+        match window.show_building() {
+            ShowBuilding::OpenSwitcherOnly => open_switcher_window(cx).map(AppWindow::SwitcherOnly),
+            ShowBuilding::Raise(window) => any_handle(window)
+                .map_or(Ok(()), |handle| {
+                    handle.update(cx, |_, window, _| raise(window))
+                })
+                .map(|()| window),
+        }
+    });
+    match shown {
+        Ok(window) => screen.borrow_mut().window = window,
+        Err(error) => eprintln!("could not show the PR being opened: {error:#}"),
+    }
+}
+
 fn any_handle(window: OneWindow) -> Option<AnyWindowHandle> {
     match window {
         AppWindow::Closed => None,
@@ -445,7 +467,7 @@ fn show_settings(screen: &SharedScreen, folders: &AppFolders, cx: &mut AsyncApp)
                 let folders = folders.clone();
                 window
                     .update(cx, |_, window, cx| {
-                        window.set_window_title(&marked_if_dev("Settings".to_owned()));
+                        window.set_window_title(&marked_with_build("Settings".to_owned()));
                         window.replace_root(cx, |window, cx| {
                             SettingsWindow::new(folders, window, cx)
                         });
@@ -807,7 +829,7 @@ fn replace_review_with_switcher(
 ) -> anyhow::Result<WindowHandle<SwitcherWindow>> {
     let switching = cx.global::<PrSwitching>().clone();
     window.update(cx, |_, window, cx| {
-        window.set_window_title(&marked_if_dev("Pick a pull request".to_owned()));
+        window.set_window_title(&marked_with_build("Pick a pull request".to_owned()));
         window.replace_root(cx, |window, cx| SwitcherWindow::new(switching, window, cx));
     })?;
     Ok(WindowHandle::new(window.window_id()))
@@ -866,7 +888,7 @@ fn replace_switcher_with_writing(
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<WritingWindow>> {
     window.update(cx, |_, window, cx| {
-        window.set_window_title(&marked_if_dev("Writing a tour".to_owned()));
+        window.set_window_title(&marked_with_build("Writing a tour".to_owned()));
         window.replace_root(cx, |window, cx| WritingWindow::new(active, window, cx));
         raise(window);
     })?;
@@ -1044,7 +1066,7 @@ fn window_options(title: String, cx: &App) -> WindowOptions {
     WindowOptions {
         focus: takes_focus(),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(Os::RUNNING.titlebar(marked_if_dev(title).into())),
+        titlebar: Some(Os::RUNNING.titlebar(marked_with_build(title).into())),
         app_id: Some(platform::APP_ID.to_owned()),
         ..Default::default()
     }
@@ -1054,13 +1076,8 @@ fn window_title(opened: &OpenedReview) -> String {
     opened.review.window_title()
 }
 
-/// A debug build names itself in its title, which the Window menu and Mission Control show.
-fn marked_if_dev(title: String) -> String {
-    if cfg!(debug_assertions) {
-        format!("{title} (dev)")
-    } else {
-        title
-    }
+fn marked_with_build(title: String) -> String {
+    Build::running().marked_title(title)
 }
 
 fn new_layout(
@@ -1069,7 +1086,7 @@ fn new_layout(
     window: &mut Window,
     cx: &mut Context<'_, OneStepLayout>,
 ) -> OneStepLayout {
-    window.set_window_title(&marked_if_dev(window_title(&opened)));
+    window.set_window_title(&marked_with_build(window_title(&opened)));
     let collaborators = Collaborators {
         github: opened.github,
         ide: opened.ide,

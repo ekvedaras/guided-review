@@ -3,17 +3,12 @@
 use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 use sha2::{Digest, Sha256};
 
+use crate::update::Build;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppIcon {
     build: Build,
     look: Look,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Build {
-    Release,
-    /// A debug build's icon carries a badge, so it is not taken for the installed app in the Dock.
-    Dev,
 }
 
 /// Light or dark, as macOS shows its windows.
@@ -53,27 +48,14 @@ pub fn digest_the_pictures_were_exported_from() -> &'static str {
 }
 
 impl AppIcon {
-    pub const fn release(look: Look) -> Self {
-        Self {
-            build: Build::Release,
-            look,
-        }
+    pub const fn of(build: Build, look: Look) -> Self {
+        Self { build, look }
     }
 
-    pub const fn dev(look: Look) -> Self {
-        Self {
-            build: Build::Dev,
-            look,
-        }
-    }
-
-    /// The one a build of this kind shows in the Dock.
-    pub const fn running(look: Look) -> Self {
-        if cfg!(debug_assertions) {
-            Self::dev(look)
-        } else {
-            Self::release(look)
-        }
+    /// A local build's icon carries the `DEV` badge, so it is not taken for the release install in
+    /// the Dock. The snapshot build stays out of the Dock, so it needs none.
+    const fn wears_dev_badge(self) -> bool {
+        matches!(self.build, Build::Local)
     }
 
     /// The look as Icon Composer draws it, exported by `scripts/app-icon-pictures`: the glass, corners
@@ -90,7 +72,7 @@ impl AppIcon {
         let mut pixmap = Pixmap::new(u32::from(size), u32::from(size))
             .ok_or_else(|| anyhow::anyhow!("no picture can be {size} pixels wide"))?;
         place_on_icon_grid(&Pixmap::decode_png(self.exported())?, &mut pixmap);
-        if self.build == Build::Dev {
+        if self.wears_dev_badge() {
             let mut options = usvg::Options::default();
             options.fontdb_mut().load_system_fonts();
             paint(DEV_BADGE, &options, &mut pixmap)?;

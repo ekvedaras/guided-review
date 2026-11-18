@@ -27,9 +27,9 @@ use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
     Checks, CommentId, CommentPlace, GitHubError, IssueDetails, IssueDetailsPort, NoAccess,
-    NotDelivered, PictureUploadPort, PrStatus, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestIssues, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
-    Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
+    NotDelivered, OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestIssues, PullRequestReactionsPort, PullRequestStatusPort,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
     RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
     ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId, TurnStopper, Viewed,
     ViewedFile, ViewedFilesPort, ViewedState,
@@ -227,13 +227,13 @@ impl FakeGitHub {
             edited_now: Mutex::default(),
             deleted_now: Mutex::default(),
             description: Mutex::default(),
-            status: Mutex::new(PrStatus {
+            status: Mutex::new(PrStatus::Open(OpenPrStatus {
                 readiness: Readiness::Ready,
                 checks: Checks::NoneRun,
                 check_runs: Arc::default(),
                 viewer_may_change_readiness: true,
                 merging: blocked_merging(),
-            }),
+            })),
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),
             issues: Mutex::default(),
@@ -520,7 +520,9 @@ impl PullRequestStatusPort for FakeGitHub {
             readiness,
         });
         self.fail_if_connection_lost()?;
-        self.status.lock().unwrap().readiness = readiness;
+        if let PrStatus::Open(status) = &mut *self.status.lock().unwrap() {
+            status.readiness = readiness;
+        }
         Ok(())
     }
 
@@ -530,11 +532,17 @@ impl PullRequestStatusPort for FakeGitHub {
             change,
         });
         self.fail_if_connection_lost()?;
-        let merging = &mut self.status.lock().unwrap().merging;
-        match change {
-            MergeChange::EnableAutoMerge(method) => merging.auto_merge = AutoMerge::On(method),
-            MergeChange::DisableAutoMerge => merging.auto_merge = AutoMerge::Off,
-            MergeChange::MergeNow(_) => merging.mergeability = Mergeability::NotOpen,
+        let mut status = self.status.lock().unwrap();
+        let auto_merge = match change {
+            MergeChange::EnableAutoMerge(method) => AutoMerge::On(method),
+            MergeChange::DisableAutoMerge => AutoMerge::Off,
+            MergeChange::MergeNow(_) => {
+                *status = PrStatus::Merged;
+                return Ok(());
+            }
+        };
+        if let PrStatus::Open(open) = &mut *status {
+            open.merging.auto_merge = auto_merge;
         }
         Ok(())
     }

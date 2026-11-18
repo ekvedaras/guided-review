@@ -22,7 +22,10 @@ impl ReviewCore {
         }
         self.clear_problem(ProblemKind::NotRead(Read::PrStatus));
         self.github_answered(Affected::PrStatus);
-        if status.checks == Checks::Running {
+        if status
+            .open()
+            .is_some_and(|status| status.checks == Checks::Running)
+        {
             self.work.want_in(WorkKind::PullPrStatus, CHECKS_RECHECK);
         }
         if let Some(controls) = &mut self.pr_controls {

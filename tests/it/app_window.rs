@@ -1,6 +1,6 @@
 use guided_review::viewer::{
-    ActivePr, AfterClose, AppWindow, FailedBuild, OpenDecision, OpenOrigin, Relaunched, ShowReview,
-    ShowSettings, ShowSwitcher, ShowWriting,
+    ActivePr, AfterClose, AppWindow, FailedBuild, OpenDecision, OpenOrigin, Relaunched,
+    ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +117,26 @@ fn closing_the_review_ends_the_app_even_while_another_pr_builds() {
     let mut window = Window::Review(ReviewWindow);
 
     assert_eq!(window.closed(&building()), AfterClose::EndApp);
+}
+
+#[test]
+fn an_open_that_builds_with_no_window_opens_the_switcher_at_once_to_say_what_it_opens() {
+    assert_eq!(
+        Window::Closed.show_building(),
+        ShowBuilding::OpenSwitcherOnly
+    );
+}
+
+#[test]
+fn an_open_that_builds_raises_the_window_at_once_holding_what_it_holds() {
+    for window in [
+        Window::SettingsOnly(SettingsOnlyWindow),
+        Window::SwitcherOnly(SwitcherOnlyWindow),
+        Window::WritingOnly(WritingOnlyWindow),
+        Window::Review(ReviewWindow),
+    ] {
+        assert_eq!(window.show_building(), ShowBuilding::Raise(window));
+    }
 }
 
 #[test]
