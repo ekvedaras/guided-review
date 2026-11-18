@@ -1282,9 +1282,9 @@ impl OneStepLayout {
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
             Effect::OpenCheck(url) => open_link(&url, cx),
-            Effect::OpenIssue(url) => {
+            Effect::OpenIssue(link) => {
                 self.issue_list_open = false;
-                open_link(&url.to_string(), cx);
+                open_link(&link.to_string(), cx);
             }
             Effect::ListIssues => {
                 self.issue_list_open = !self.issue_list_open;
@@ -2360,13 +2360,10 @@ impl OneStepLayout {
         let (label, tip): (SharedString, SharedString) = match &*issues {
             [] => return None,
             [only] => (
-                format!("#{}", only.url.number()).into(),
+                only.link.label().into(),
                 only.title
                     .as_deref()
-                    .map_or_else(
-                        || format!("Open issue #{}", only.url.number()),
-                        str::to_owned,
-                    )
+                    .map_or_else(|| format!("Open {}", only.link), str::to_owned)
                     .into(),
             ),
             several => (
@@ -2411,7 +2408,7 @@ impl OneStepLayout {
             let title = issue
                 .title
                 .as_deref()
-                .map_or_else(|| issue.url.repo().to_string(), str::to_owned);
+                .map_or_else(|| issue.link.to_string(), str::to_owned);
             div()
                 .id(("title-bar-issue-row", place))
                 .flex()
@@ -2434,7 +2431,7 @@ impl OneStepLayout {
                     div()
                         .flex_none()
                         .text_color(colors.muted_text)
-                        .child(format!("#{}", issue.url.number())),
+                        .child(issue.link.label()),
                 )
                 .child(div().flex_1().min_w_0().truncate().child(title))
         });

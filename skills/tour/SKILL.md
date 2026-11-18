@@ -48,7 +48,7 @@ A reviewer skims: short lines, visuals over prose. Text fields are small Markdow
 - `why`: one or two lines. What this is and why it comes here.
 - `check`: risky steps only. One line saying what to verify.
 - `tldr`: only when a step has several separate points.
-- `issue`: the full URL of the GitHub issue the change is for, when you know it from the work, the PR's text or the branch name. Leave it out when you do not know it. The app shows it as a button.
+- `issue`: the full URL of the GitHub issue, or of the ticket in another tracker, the change is for, when you know it from the work, the PR's text or the branch name. Leave it out when you do not know it. The app shows it as a button.
 - `diagram`: Mermaid source on a step that holds a state machine, a flow across classes, or a tricky sequence. Under 12 nodes.
 
 ## Shape

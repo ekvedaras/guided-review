@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::file_path::FilePath;
 use crate::image_facts;
-use crate::issue::IssueUrl;
+use crate::issue::{IssueLink, IssueUrl};
 use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
@@ -590,7 +590,7 @@ impl PullRequestDescriptionPort for GitHub {
                     .parse()
                     .ok()?;
                 Some(RelatedIssue {
-                    url: IssueUrl::new(repo, at(node, "/number").as_u64()?),
+                    link: IssueLink::GitHub(IssueUrl::new(repo, at(node, "/number").as_u64()?)),
                     title: at(node, "/title").as_str().map(Arc::from),
                 })
             })

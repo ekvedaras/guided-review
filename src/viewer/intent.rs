@@ -7,7 +7,7 @@ use super::file_tree::FolderPath;
 use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
 use super::review::{ReadSubject, ReviewCore, Screen};
-use crate::issue::IssueUrl;
+use crate::issue::IssueLink;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
@@ -131,7 +131,7 @@ pub enum Effect {
     OpenPr,
     OpenOnGitHub(PullRequestUrl),
     OpenChecksOnGitHub(PullRequestUrl),
-    OpenIssue(IssueUrl),
+    OpenIssue(IssueLink),
     /// The review is about several issues: the window lists them to pick one.
     ListIssues,
     /// A check's run, on the page GitHub gave.
@@ -355,14 +355,14 @@ impl ReviewCore {
             }
             Intent::OpenIssue => match &*self.related_issues() {
                 [] => Effect::Nothing,
-                [only] => Effect::OpenIssue(only.url.clone()),
+                [only] => Effect::OpenIssue(only.link.clone()),
                 [_, _, ..] => Effect::ListIssues,
             },
             Intent::OpenIssueAt(place) => self
                 .related_issues()
                 .get(place)
                 .map_or(Effect::Nothing, |issue| {
-                    Effect::OpenIssue(issue.url.clone())
+                    Effect::OpenIssue(issue.link.clone())
                 }),
             Intent::ToggleDraft => Effect::ChangeReadiness,
             Intent::ToggleAutoMerge => Effect::ChangeMerging,

@@ -3,7 +3,7 @@ use std::time::Instant;
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::work::drive_without_agents;
-use guided_review::issue::IssueUrl;
+use guided_review::issue::{IssueLink, IssueUrl};
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
@@ -27,7 +27,7 @@ fn issue(number: u64) -> IssueUrl {
 
 fn linked(number: u64, title: &str) -> RelatedIssue {
     RelatedIssue {
-        url: issue(number),
+        link: IssueLink::GitHub(issue(number)),
         title: Some(title.into()),
     }
 }
@@ -36,7 +36,10 @@ fn numbers(review: &Review) -> Vec<u64> {
     review
         .related_issues()
         .iter()
-        .map(|related| related.url.number())
+        .map(|related| match &related.link {
+            IssueLink::GitHub(url) => url.number(),
+            IssueLink::Ticket(_) => 0,
+        })
         .collect()
 }
 
@@ -125,7 +128,7 @@ fn a_branch_names_an_issue_only_by_a_number_that_starts_its_last_part_or_follows
 }
 
 fn part_of(text: &str) -> Vec<String> {
-    IssueUrl::part_of_in(text, &RepoName::new("acme", "shop"))
+    IssueLink::named_in(text, &RepoName::new("acme", "shop"))
         .iter()
         .map(ToString::to_string)
         .collect()
@@ -151,6 +154,65 @@ fn a_description_names_the_issues_it_is_part_of_by_number_repo_and_number_or_lin
     );
     assert_eq!(part_of("Part of the plan, see #12"), Vec::<String>::new());
     assert_eq!(part_of("Fixes a bug in #12"), Vec::<String>::new());
+    assert_eq!(part_of("Suffix #12, prefix: #13"), Vec::<String>::new());
+}
+
+#[test]
+fn a_description_names_the_issues_githubs_closing_keywords_name_in_the_order_it_names_them() {
+    for keyword in [
+        "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved",
+    ] {
+        assert_eq!(
+            part_of(&format!(
+                "{keyword} #3\n{} acme/stock#4",
+                keyword.to_uppercase()
+            )),
+            [
+                "https://github.com/acme/shop/issues/3",
+                "https://github.com/acme/stock/issues/4",
+            ],
+            "{keyword}"
+        );
+    }
+    assert_eq!(
+        part_of("Closes: #5"),
+        ["https://github.com/acme/shop/issues/5"]
+    );
+    assert_eq!(
+        part_of("Fixes #7, part of #6 and fixes #7"),
+        [
+            "https://github.com/acme/shop/issues/7",
+            "https://github.com/acme/shop/issues/6",
+        ]
+    );
+}
+
+#[test]
+fn a_ticket_line_names_its_link_as_a_ticket() {
+    assert_eq!(
+        part_of("Ticket: https://tickets.example/t?selected=5631\n\n## TL;DR"),
+        ["https://tickets.example/t?selected=5631"]
+    );
+    assert_eq!(
+        part_of("**Ticket:** [5631](https://tickets.example/5631)"),
+        ["https://tickets.example/5631"]
+    );
+    assert_eq!(part_of("Ticket: none yet"), Vec::<String>::new());
+    let ticket: IssueLink = "https://tickets.example/5631".parse().unwrap();
+    assert_eq!(ticket.label(), "Ticket");
+    assert_eq!(IssueLink::GitHub(issue(12)).label(), "#12");
+    assert!("not a link".parse::<IssueLink>().is_err());
+}
+
+#[test]
+fn a_tours_issue_may_be_a_ticket() {
+    let shop = Shop::new();
+    let review = shop.open_with(json!({"issue": "https://tickets.example/5631"}));
+
+    assert_eq!(
+        review.decide(Intent::OpenIssue, WindowMoment::default()),
+        Effect::OpenIssue("https://tickets.example/5631".parse().unwrap())
+    );
 }
 
 #[test]
@@ -285,7 +347,7 @@ fn the_issue_key_opens_the_one_issue_lists_several_and_does_nothing_with_none() 
     assert_eq!(none.decide(Intent::OpenIssue, moment), Effect::Nothing);
     assert_eq!(
         one.decide(Intent::OpenIssue, moment),
-        Effect::OpenIssue(issue(3))
+        Effect::OpenIssue(IssueLink::GitHub(issue(3)))
     );
     assert_eq!(
         several.decide(Intent::OpenIssue, moment),
@@ -293,7 +355,7 @@ fn the_issue_key_opens_the_one_issue_lists_several_and_does_nothing_with_none() 
     );
     assert_eq!(
         several.decide(Intent::OpenIssueAt(1), moment),
-        Effect::OpenIssue(issue(13))
+        Effect::OpenIssue(IssueLink::GitHub(issue(13)))
     );
     assert_eq!(
         several.decide(Intent::OpenIssueAt(2), moment),
