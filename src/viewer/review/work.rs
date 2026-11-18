@@ -5,6 +5,7 @@ use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
 use crate::viewer::problems::{Problem, ProblemKind, Read};
+use crate::viewer::related_issues::RelatedIssues;
 use crate::viewer::tour_agent::TourAgentState;
 use crate::viewer::work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
@@ -63,6 +64,14 @@ impl ReviewCore {
                 Job::LookUpHeadBranch(self.branch_link.head_branch_to_look_up()?.clone())
             }
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
+            WorkKind::PullRelatedIssues => Job::PullRelatedIssues(pr()?),
+            WorkKind::PullIssueDetails => {
+                let issues = self.related_issues.shown_on_github();
+                if issues.is_empty() {
+                    return None;
+                }
+                Job::PullIssueDetails(issues)
+            }
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
                 home: self.thread_home(),
@@ -103,6 +112,15 @@ impl ReviewCore {
         })
     }
 
+    /// Reads the details of the issues again when the change shows others.
+    pub(super) fn change_related_issues(&mut self, change: impl FnOnce(&mut RelatedIssues)) {
+        let before = self.related_issues.shown_on_github();
+        change(&mut self.related_issues);
+        if self.related_issues.shown_on_github() != before {
+            self.work.want(WorkKind::PullIssueDetails);
+        }
+    }
+
     /// Takes in what a `Work` brought back and makes due what follows from it. A save of it that
     /// is refused or fails is not returned: the saved state names it among the problems.
     pub fn land(&mut self, outcome: WorkOutcome) -> AfterLanding {
@@ -139,6 +157,12 @@ impl ReviewCore {
                 self.set_pr_description(&body).ok();
             }
             Done::PrDescription(Err(error)) => self.could_not_read(Read::PrDescription, &error),
+            // The issue button is a shortcut, not something to warn of: a failed read keeps the last answer.
+            Done::RelatedIssues(Ok(issues)) => {
+                self.change_related_issues(|related| related.github_says(issues));
+            }
+            Done::IssueDetails(Ok(read)) => self.related_issues.details_say(read),
+            Done::RelatedIssues(Err(_)) | Done::IssueDetails(Err(_)) => {}
             Done::SyncViewed(outcome) => {
                 self.apply_sync(outcome).ok();
             }

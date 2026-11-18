@@ -11,6 +11,7 @@ use gpui::{
 };
 
 use super::OneStepLayout;
+use super::issue_card::IssueHover;
 use crate::app::components::diff_view::RowGesture;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
@@ -18,6 +19,8 @@ use crate::app::review_session::ReviewSession;
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::{Updates, running_build};
 use crate::file_path::FilePath;
+use crate::issue::{IssueLink, IssueUrl};
+use crate::pull_request::RepoName;
 use crate::review_subject::ReviewSubject;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
@@ -25,6 +28,7 @@ use crate::viewer::{
     MergeMethod, MergeMethods, Mergeability, Merging, PageRow, PieceLabels, PrStatus, Problem,
     ProblemKind, Readiness, TerminalId, TextBox,
 };
+use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -79,10 +83,13 @@ enum Scene {
     TitleBarAutoMergeOn,
     TitleBarMergeNow,
     TitleBarChecksList,
+    TitleBarIssue,
+    TitleBarIssueCard,
+    TitleBarIssueList,
 }
 
 impl Scene {
-    const ALL: [Self; 47] = [
+    const ALL: [Self; 50] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -130,6 +137,9 @@ impl Scene {
         Self::TitleBarAutoMergeOn,
         Self::TitleBarMergeNow,
         Self::TitleBarChecksList,
+        Self::TitleBarIssue,
+        Self::TitleBarIssueCard,
+        Self::TitleBarIssueList,
     ];
 
     fn file_name(self) -> &'static str {
@@ -181,6 +191,53 @@ impl Scene {
             Self::TitleBarAutoMergeOn => "66-title-bar-auto-merge-on",
             Self::TitleBarMergeNow => "67-title-bar-merge-now",
             Self::TitleBarChecksList => "68-title-bar-checks-list",
+            Self::TitleBarIssue => "69-title-bar-issue",
+            Self::TitleBarIssueCard => "70-title-bar-issue-card",
+            Self::TitleBarIssueList => "71-title-bar-issue-list",
+        }
+    }
+
+    /// The issues a title bar scene shows, made up on the sample PR's repo; empty for every other scene.
+    fn staged_issues(self) -> Vec<(RelatedIssue, Option<IssueDetails>)> {
+        let Ok(repo) = "ekvedaras/guided-review".parse::<RepoName>() else {
+            return Vec::new();
+        };
+        let link = |number| IssueLink::GitHub(IssueUrl::new(repo.clone(), number));
+        let titled = |number, title: &str| {
+            (
+                RelatedIssue {
+                    link: link(number),
+                    title: Some(title.into()),
+                },
+                None,
+            )
+        };
+        match self {
+            Self::TitleBarIssue => vec![titled(9001, "Show the issue a review is about")],
+            Self::TitleBarIssueCard => {
+                let title = "Show the issue a review is about in the title bar";
+                let details = IssueDetails {
+                    title: title.into(),
+                    state: IssueState::Open,
+                    author: Some("octocat".into()),
+                    labels: ["enhancement", "title bar"].map(Into::into).into(),
+                    assignees: ["mona", "hubot"].map(Into::into).into(),
+                    body: IssueDetails::markdown_of(ISSUE_BODY),
+                };
+                vec![(
+                    RelatedIssue {
+                        link: link(9001),
+                        title: Some(title.into()),
+                    },
+                    Some(details),
+                )]
+            }
+            Self::TitleBarIssueList => vec![
+                titled(9001, "Show the issue a review is about"),
+                titled(9002, "Name the issue in the PR description"),
+                titled(9003, "List several issues when a PR closes more than one"),
+            ],
+            _ => Vec::new(),
         }
     }
 
@@ -700,6 +757,14 @@ impl OneStepLayout {
                 }
                 self.checks_hover.chip = scene == Scene::TitleBarChecksList;
             }
+            Scene::TitleBarIssue | Scene::TitleBarIssueCard | Scene::TitleBarIssueList => {
+                let issues = scene.staged_issues();
+                self.session.update(cx, |session, cx| {
+                    session.stage_related_issues(issues, cx);
+                });
+                self.issue_hover.target = (scene == Scene::TitleBarIssueCard).then_some(0);
+                self.issue_list_open = scene == Scene::TitleBarIssueList;
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self
@@ -832,6 +897,12 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::unstage_pr_status);
                 self.checks_hover.chip = false;
             }
+            Scene::TitleBarIssue | Scene::TitleBarIssueCard | Scene::TitleBarIssueList => {
+                self.session
+                    .update(cx, ReviewSession::unstage_related_issues);
+                self.issue_hover = IssueHover::default();
+                self.issue_list_open = false;
+            }
             Scene::RefreshRunning => self
                 .session
                 .update(cx, ReviewSession::unstage_refresh_running),
@@ -913,3 +984,37 @@ fn sample_agent_screen() -> Vec<String> {
     .map(str::to_owned)
     .collect()
 }
+
+/// Long enough to scroll in the issue card, and to show Markdown the card renders.
+const ISSUE_BODY: &str = "The title bar should say which issue the PR is about, so a reviewer can open it without leaving the review.
+
+## What to show
+
+- The issue's number on a button, with the key that opens it.
+- On hover, a card with the issue's title, state, author, labels and assignees.
+- Its description, as Markdown, cut to a set height.
+
+## Why
+
+Reviewers keep asking where the PR came from. The answer is nearly always in the issue, and the PR description only links it.
+
+## Details
+
+1. Read the issues GitHub links to the PR first.
+2. Then the ones the description names with a closing keyword or `Part of`.
+3. Then the one the guided tour names, and last the one the branch is named after.
+
+A ticket elsewhere has no card, only its link. A failed read keeps what was shown before, since the button is a shortcut and not something to warn about.
+
+## Out of scope
+
+Editing the issue, commenting on it and showing its timeline. The issue's page is one click away for those.
+
+## Open questions
+
+- Should a closed issue look different on the button?
+- Should the card show the issue's milestone?
+- How many issues are too many for a list?
+
+> Keep the card quiet: it appears on hover and leaves with the mouse.
+";

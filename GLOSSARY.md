@@ -44,6 +44,10 @@
 
 **Clone offer**: The sidebar's offer to clone the PR's repo when no local clone was found and its code is read from GitHub. The folder is suggested beside the clones Settings names, else in a usual code folder of home (`~/Work`, `~/Code`, `~/Projects`, `~/PhpStormProjects`, …), else in home; a picked folder that already is a clone is used as it is. `gh repo clone` makes it, Settings saves it, and the tour is read again on it in place. Not now hides it for this review only.
 
+**Related issue**: The GitHub issue, or ticket in another tracker, a review is about, which the title bar's button and the key `I` open. The first source that names any wins: the issues GitHub links to the PR (its closing references), then the ones its description names after GitHub's closing keywords (`Closes`, `Fixes`, `Resolves` and their forms), `Part of` (`#12`, `owner/repo#12` or a link) or `Ticket:` (any link), then the guided tour's `issue`, then the branch name (`123-totals`, `feat/123-totals`, `issue-123`, `gh-123`). With several, the button lists them, each opened by a click or its number key. Avoid: linked issue (that is only GitHub's source).
+
+**Issue card**: What a hover of the issue button, or of a row of its list, shows: for a GitHub issue its title, state (open, closed as completed or as not planned), author, labels, assignees and description cut to a set height; for a ticket only its link. The viewer reads the details of the shown issues from GitHub in one trip, again on window focus and whenever the shown issues change, and keeps the last answer when a read fails.
+
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 
 **Step**: One stop in a tour. It holds diff pieces, a diagram, or both, and a short text that says what they do and why they come at this point. A step can have child steps: the details of that step. The reader sees a step first, then its child steps.

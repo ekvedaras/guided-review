@@ -9,8 +9,10 @@ use super::github_outage::OutageCause;
 use super::merging::MergeChange;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
+use super::related_issues::{IssueDetails, PullRequestIssues};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
+use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, ReviewSubject};
 
@@ -58,6 +60,18 @@ pub trait PullRequestDescriptionPort: Send + Sync {
     fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, GitHubError>;
 
     fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
+
+    /// The issues the PR would close, as its description or GitHub's sidebar links them.
+    fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError>;
+}
+
+/// What GitHub says of issues, which a review shows on a hover of its issue button.
+pub trait IssueDetailsPort: Send + Sync {
+    /// The details of each of `issues` in one read, in no set order.
+    fn issue_details(
+        &self,
+        issues: &[IssueUrl],
+    ) -> Result<Vec<(IssueUrl, IssueDetails)>, GitHubError>;
 }
 
 /// The viewer's reactions on the PR itself, which GitHub shows under its description.
@@ -171,6 +185,7 @@ pub trait GitHubPort:
     ChangeTipsPort
     + PullsOfBranchPort
     + PullRequestDescriptionPort
+    + IssueDetailsPort
     + PullRequestReactionsPort
     + PullRequestStatusPort
     + PictureUploadPort
@@ -184,6 +199,7 @@ impl<T> GitHubPort for T where
     T: ChangeTipsPort
         + PullsOfBranchPort
         + PullRequestDescriptionPort
+        + IssueDetailsPort
         + PullRequestReactionsPort
         + PullRequestStatusPort
         + PictureUploadPort

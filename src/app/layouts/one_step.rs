@@ -3,8 +3,7 @@ use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
     ParentElement, PathPromptOptions, Pixels, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Subscription, Window, actions, anchored, deferred, div,
-    list, px,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -45,6 +44,7 @@ use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_b
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
+use crate::app::components::key_cap::{KeyLabel, key_cap};
 use crate::app::components::loading_screen::LoadingScreen;
 use crate::app::components::markdown_view::{
     InlineMarkdown, MarkdownView, PreparedMarkdown, UnderPicture, bullet, parsed_markdown,
@@ -54,6 +54,7 @@ use crate::app::components::motion::{
     pop_in, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
+use crate::app::components::overlay::popover;
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
@@ -108,9 +109,12 @@ use crate::viewer::{
     SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
     Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
+use crate::viewer::{IssueDetails, RelatedIssue};
+use issue_card::{CardSide, IssueHover, issue_card};
 
 #[cfg(feature = "snapshots")]
 mod gallery;
+mod issue_card;
 #[cfg(feature = "snapshots")]
 mod scenes;
 
@@ -140,6 +144,7 @@ actions!(
         ToggleRead,
         ToggleShortcuts,
         OpenPrOnGitHub,
+        OpenIssue,
         CloseWindow
     ]
 );
@@ -176,6 +181,13 @@ pub struct OneStepLayout {
     hovered_touching_row: Option<(usize, RowPlace)>,
     /// The mouse is on the title bar's status chip or on the list of checks it opens.
     checks_hover: ChecksHover,
+    /// The title bar lists the review's issues, as `I` does when there are several.
+    issue_list_open: bool,
+    issue_card_scroll: gpui::ScrollHandle,
+    /// The mouse is on the issue button, a row of its list, or the card of an issue.
+    issue_hover: IssueHover,
+    /// The description of the issue whose card shows, prepared once for as long as the card shows it.
+    issue_card_body: std::cell::RefCell<Option<(Arc<IssueDetails>, Rc<PreparedMarkdown>)>>,
     on_code_gesture: OnTextSpot,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
@@ -400,6 +412,10 @@ impl OneStepLayout {
             code_selection: None,
             hovered_touching_row: None,
             checks_hover: ChecksHover::default(),
+            issue_list_open: false,
+            issue_card_scroll: gpui::ScrollHandle::new(),
+            issue_hover: IssueHover::default(),
+            issue_card_body: std::cell::RefCell::new(None),
             on_code_gesture,
             selection_notice: None,
             scrollbar_grab: None,
@@ -1276,6 +1292,16 @@ impl OneStepLayout {
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
             Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
             Effect::OpenCheck(url) => open_link(&url, cx),
+            Effect::OpenIssue(link) => {
+                self.issue_list_open = false;
+                self.issue_hover = IssueHover::default();
+                open_link(&link.to_string(), cx);
+            }
+            Effect::ListIssues => {
+                self.issue_list_open = !self.issue_list_open;
+                self.issue_hover = IssueHover::default();
+                cx.notify();
+            }
             Effect::ChangeReadiness => self.change_readiness(cx),
             Effect::ChangeMerging => self.change_merging(cx),
             Effect::Restart(restart) => match crate::platform::running_binary() {
@@ -2327,12 +2353,226 @@ impl OneStepLayout {
                     )
                     .child(div().flex_1())
                     .child(jump)
+                    .children(self.issue_button(&colors, cx))
                     .children(open_pr)
                     .children(github),
             )
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
             })
+    }
+
+    /// The review's issue, or how many there are; a click is the key `I`.
+    fn issue_button(
+        &self,
+        colors: &Colors,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let issues = self.session.read(cx).review().related_issues();
+        let (label, tip): (SharedString, SharedString) = match &*issues {
+            [] => return None,
+            [only] => (
+                only.link.label().into(),
+                only.title
+                    .as_deref()
+                    .map_or_else(|| format!("Open {}", only.link), str::to_owned)
+                    .into(),
+            ),
+            several => (
+                format!("{} issues", several.len()).into(),
+                "List the related issues".into(),
+            ),
+        };
+        let several = issues.len() > 1;
+        let list = (self.issue_list_open && several).then(|| self.issue_list(colors, &issues, cx));
+        let button = button(
+            colors,
+            "title-bar-issue",
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+        )
+        .child(button_icon(
+            colors,
+            ButtonKind::Ghost,
+            ButtonSize::Small,
+            Icon::CircleDot,
+        ))
+        .child(label)
+        .child(button_keys(
+            colors,
+            ButtonKind::Ghost,
+            Command::OpenIssue,
+            cx,
+        ))
+        .when(several, |button| {
+            button.tooltip(tooltip(move |_| tip.clone()))
+        })
+        .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenIssue, window, cx)));
+        let card = match (&*issues, self.issue_hover.shown()) {
+            ([only], Some(0)) => Some(popover(self.issue_card_element(
+                colors,
+                only,
+                0,
+                CardSide::Below,
+                cx,
+            ))),
+            _ => None,
+        };
+        Some(
+            div()
+                .id("title-bar-issue-hover")
+                .flex_none()
+                .when(!several, |wrapper| {
+                    wrapper.on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
+                        this.issue_hover.target = is_hovered.then_some(0);
+                        cx.notify();
+                    }))
+                })
+                .child(button)
+                .children(card)
+                .children(list),
+        )
+    }
+
+    /// The card of one issue, with a gap on the side it is opened from that the mouse may cross.
+    fn issue_card_element(
+        &self,
+        colors: &Colors,
+        issue: &RelatedIssue,
+        place: usize,
+        side: CardSide,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let details = self.session.read(cx).review().issue_details(&issue.link);
+        let body = details.as_ref().and_then(|details| {
+            let mut prepared = self.issue_card_body.borrow_mut();
+            let is_current = prepared
+                .as_ref()
+                .is_some_and(|(shown, _)| Arc::ptr_eq(shown, details));
+            if !is_current {
+                let markdown = details.body.clone()?;
+                *prepared = Some((Arc::clone(details), Rc::new(PreparedMarkdown::of(markdown))));
+            }
+            prepared.as_ref().map(|(_, body)| Rc::clone(body))
+        });
+        div()
+            .id(("title-bar-issue-card", place))
+            .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                this.issue_hover.card = is_hovered.then_some(place);
+                cx.notify();
+            }))
+            .map(|element| match side {
+                CardSide::Below => element.pt_1(),
+                CardSide::Right => element.pl_2(),
+            })
+            // The thumb is drawn from the scroll offset, so a wheel turn redraws the card.
+            .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
+            .child(issue_card(
+                colors,
+                &issue.link,
+                details.as_deref(),
+                body,
+                &self.issue_card_scroll,
+            ))
+    }
+
+    /// Under the issue button: each issue with its number key; a click or the key opens it.
+    fn issue_list(
+        &self,
+        colors: &Colors,
+        issues: &[RelatedIssue],
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let rows = issues.iter().enumerate().map(|(place, issue)| {
+            let title = issue
+                .title
+                .as_deref()
+                .map_or_else(|| issue.link.to_string(), str::to_owned);
+            div()
+                .id(("title-bar-issue-row", place))
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .h(px(28.))
+                .rounded(px(INNER_RADIUS))
+                .cursor_pointer()
+                .hover(|row| row.bg(colors.hover))
+                .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                    let leaves_row = !is_hovered && this.issue_hover.target == Some(place);
+                    if *is_hovered {
+                        this.issue_hover.target = Some(place);
+                    } else if leaves_row {
+                        this.issue_hover.target = None;
+                    }
+                    cx.notify();
+                }))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.act(Intent::OpenIssueAt(place), window, cx);
+                }))
+                .children(
+                    ISSUE_KEYS
+                        .get(place)
+                        .map(|key| key_cap(colors, KeyLabel::Text(key))),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(colors.muted_text)
+                        .child(issue.link.label()),
+                )
+                .child(div().flex_1().min_w_0().truncate().child(title))
+        });
+        let rows: Vec<_> = rows.collect();
+        let card = self.issue_hover.shown().and_then(|place| {
+            let issue = issues.get(place)?;
+            Some(
+                self.issue_card_element(colors, issue, place, CardSide::Right, cx)
+                    .absolute()
+                    .top_0()
+                    .left(gpui::relative(1.)),
+            )
+        });
+        popover(
+            div()
+                .id("title-bar-issue-list")
+                .relative()
+                .mt_1()
+                .w(px(CHECKS_LIST_WIDTH))
+                .p_1()
+                .flex()
+                .flex_col()
+                .text_sm()
+                .bg(colors.overlay)
+                .border_1()
+                .border_color(colors.border)
+                .rounded(px(CARD_RADIUS))
+                .shadow(colors.overlay_shadow())
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.issue_list_open = false;
+                    cx.notify();
+                }))
+                .children(rows)
+                .children(card),
+        )
+    }
+
+    /// While the issue list is open, a number opens its issue and Escape closes it.
+    fn pick_issue_by_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = event.keystroke.key.as_str();
+        if key == "escape" {
+            self.issue_list_open = false;
+            cx.stop_propagation();
+            cx.notify();
+        } else if let Some(place) = ISSUE_KEYS.iter().position(|face| *face == key) {
+            cx.stop_propagation();
+            self.act(Intent::OpenIssueAt(place), window, cx);
+        }
     }
 
     /// Draft or ready, in the colour and with the icon of the checks, which a hover lists. Pressing
@@ -2452,32 +2692,30 @@ impl OneStepLayout {
                 })
                 .child(format!("and {} more on GitHub", list.hidden))
         });
-        deferred(
-            anchored().snap_to_window_with_margin(px(8.)).child(
-                div()
-                    .id("title-bar-checks-hover")
-                    .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
-                        this.checks_hover.list = *is_hovered;
-                        cx.notify();
-                    }))
-                    .child(div().h(px(4.)))
-                    .child(
-                        div()
-                            .id("title-bar-checks-list")
-                            .w(px(CHECKS_LIST_WIDTH))
-                            .p_1()
-                            .flex()
-                            .flex_col()
-                            .text_sm()
-                            .bg(colors.overlay)
-                            .border_1()
-                            .border_color(colors.border)
-                            .rounded(px(CARD_RADIUS))
-                            .shadow(colors.overlay_shadow())
-                            .children(rows)
-                            .children(more),
-                    ),
-            ),
+        popover(
+            div()
+                .id("title-bar-checks-hover")
+                .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
+                    this.checks_hover.list = *is_hovered;
+                    cx.notify();
+                }))
+                .child(div().h(px(4.)))
+                .child(
+                    div()
+                        .id("title-bar-checks-list")
+                        .w(px(CHECKS_LIST_WIDTH))
+                        .p_1()
+                        .flex()
+                        .flex_col()
+                        .text_sm()
+                        .bg(colors.overlay)
+                        .border_1()
+                        .border_color(colors.border)
+                        .rounded(px(CARD_RADIUS))
+                        .shadow(colors.overlay_shadow())
+                        .children(rows)
+                        .children(more),
+                ),
         )
     }
 
@@ -3586,6 +3824,8 @@ impl ChecksHover {
 }
 
 const CHECKS_LIST_WIDTH: f32 = 340.;
+/// The keys that open the issue list's rows, in order.
+const ISSUE_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 /// What the PR's name and title keep of the bar: its icon, the name (which never truncates) and
 /// the chevron, with a few characters of title. Past it the title is cut with an ellipsis, down to
 /// nothing, and the controls to its right keep their width.
@@ -4851,6 +5091,12 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &OpenPrOnGitHub, window, cx| {
                 this.act(Intent::OpenOnGitHub, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &OpenIssue, window, cx| {
+                this.act(Intent::OpenIssue, window, cx);
+            }))
+            .when(self.issue_list_open, |root| {
+                root.on_key_down(cx.listener(Self::pick_issue_by_key))
+            })
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 if this.may_leave(Departure::CloseWindow, cx) {
                     window.remove_window();

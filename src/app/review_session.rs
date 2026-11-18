@@ -80,6 +80,12 @@ pub struct ReviewSession {
     /// The status a title bar scene shows, held over a GitHub read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_pr_status: Option<crate::viewer::PrStatus>,
+    /// The issues a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    #[cfg(feature = "snapshots")]
+    staged_related_issues: Vec<(
+        crate::viewer::RelatedIssue,
+        Option<crate::viewer::IssueDetails>,
+    )>,
     /// The Refresh a banner scene shows under way.
     #[cfg(feature = "snapshots")]
     staged_refresh: Option<JobProgress>,
@@ -182,6 +188,8 @@ impl ReviewSession {
             pr_status_before_staging: None,
             #[cfg(feature = "snapshots")]
             staged_pr_status: None,
+            #[cfg(feature = "snapshots")]
+            staged_related_issues: Vec::new(),
             #[cfg(feature = "snapshots")]
             staged_refresh: None,
             tour_agent_follow: None,
@@ -304,7 +312,10 @@ impl ReviewSession {
                 |this, outcome, cx| {
                     let after = this.change(cx, |review| review.land(outcome));
                     #[cfg(feature = "snapshots")]
-                    this.keep_staged_pr_status();
+                    {
+                        this.keep_staged_pr_status();
+                        this.keep_staged_related_issues();
+                    }
                     match after {
                         AfterLanding::Nothing => {}
                         AfterLanding::TourAgentIs(state) if state.can_retry() => {
@@ -805,6 +816,36 @@ impl ReviewSession {
         }
         self.review.pr_status_is(status.clone());
         self.staged_pr_status = Some(status);
+        cx.notify();
+    }
+
+    /// The title bar as GitHub would have it name `issues`; `unstage_related_issues` takes them off.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_related_issues(
+        &mut self,
+        issues: Vec<(
+            crate::viewer::RelatedIssue,
+            Option<crate::viewer::IssueDetails>,
+        )>,
+        cx: &mut Context<Self>,
+    ) {
+        self.review.stage_related_issues(issues.clone());
+        self.staged_related_issues = issues;
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn keep_staged_related_issues(&mut self) {
+        if !self.staged_related_issues.is_empty() {
+            self.review
+                .stage_related_issues(self.staged_related_issues.clone());
+        }
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_related_issues(&mut self, cx: &mut Context<Self>) {
+        self.staged_related_issues.clear();
+        self.review.unstage_related_issues();
         cx.notify();
     }
 

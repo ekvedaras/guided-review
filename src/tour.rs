@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
+use crate::issue::IssueLink;
 use crate::piece_id::PieceId;
 use crate::pull_request::{ChangeTips, RepoName, Sha};
 use crate::review_subject::ReviewSubject;
@@ -81,6 +82,9 @@ pub struct GuidedTour {
     /// Markdown the tour writer wrote to the reviewer's summary instructions.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reviewer_summary: String,
+    /// The issue or ticket the change is for, when the tour writer knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue: Option<IssueLink>,
     #[serde(default)]
     pub steps: Vec<Step>,
 }
@@ -111,7 +115,7 @@ struct BasicFile {
 }
 
 /// What a basic file must not hold: only a guided tour has them.
-const GUIDED_ONLY_FIELDS: [&str; 4] = ["title", "summary", "reviewer_summary", "steps"];
+const GUIDED_ONLY_FIELDS: [&str; 5] = ["title", "summary", "reviewer_summary", "issue", "steps"];
 
 /// What a tour file says it is. A file with no `kind` is a guided tour, as every file written
 /// before the basic tour existed.

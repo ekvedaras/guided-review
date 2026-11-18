@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
+use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
@@ -61,6 +62,7 @@ use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesO
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
+use super::related_issues::{IssueDetails, RelatedIssue, RelatedIssues};
 use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
@@ -292,6 +294,7 @@ pub struct ReviewCore {
     /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
     local_heading: Option<Arc<str>>,
     branch_link: BranchLink,
+    related_issues: RelatedIssues,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -440,6 +443,7 @@ impl Review {
         self.work = replaced.work;
         self.jobs = replaced.jobs;
         self.branch_link = replaced.branch_link;
+        self.related_issues.carry_on_from(replaced.related_issues);
         if let (Some(controls), Some(replaced)) = (&mut self.pr_controls, replaced.pr_controls) {
             controls.carry_on_from(replaced);
         }
@@ -614,6 +618,7 @@ impl ReviewCore {
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
         let branch_link = BranchLink::of(&subject);
+        let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description());
         let pr_controls = PrControls::of(&subject);
         Ok(Self {
             tour,
@@ -624,6 +629,7 @@ impl ReviewCore {
             local_heading,
             local_facts: None,
             branch_link,
+            related_issues,
             base,
             head,
             pr_head: None,
@@ -1024,6 +1030,27 @@ impl ReviewCore {
         )
     }
 
+    /// What GitHub last said of the issue; `None` for a ticket and until it answers.
+    pub fn issue_details(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
+        self.related_issues.details_of(link)
+    }
+
+    /// The issues the review is about, best source first; empty when none names one.
+    pub fn related_issues(&self) -> Arc<[RelatedIssue]> {
+        self.related_issues.shown()
+    }
+
+    /// The issues a snapshot scene shows, as if GitHub linked them to the PR.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_related_issues(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
+        self.related_issues.staged(issues);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_related_issues(&mut self) {
+        self.related_issues.unstaged();
+    }
+
     /// Whether the review has a PR page to open.
     pub fn can_open_on_github(&self) -> bool {
         self.subject.has_github_page()
@@ -1114,6 +1141,7 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
         self.github_answered(Affected::Description);
         if self.state.pr_description() != body {
+            self.change_related_issues(|related| related.description_is(body));
             self.state.record(|state| state.saw_pr_description(body))?;
         }
         Ok(())
@@ -2164,6 +2192,7 @@ impl ReviewCore {
                     .flat_map(PrControls::palette_actions),
             )
             .chain(self.can_open_pr().then_some(PaletteAction::OpenPr))
+            .chain((!self.related_issues().is_empty()).then_some(PaletteAction::OpenIssue))
             .chain(self.subject.pull_request().into_iter().flat_map(|_| {
                 [
                     PaletteAction::OpenOnGitHub,

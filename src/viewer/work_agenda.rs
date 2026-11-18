@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
+use crate::issue::IssueUrl;
 use crate::local_work_tree::OnDisk;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
@@ -19,6 +20,7 @@ use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::ReactionChange;
+use super::related_issues::{IssueDetails, PullRequestIssues};
 use super::reviewing_mark::REVIEWING_MARK;
 use super::threads::{ReviewThread, ThreadId};
 use super::tour_agent::{TourAgentState, TourAgents};
@@ -44,6 +46,8 @@ pub enum WorkKind {
     LookUpPullOfBranch,
     LookUpHeadBranch,
     PullPrDescription,
+    PullRelatedIssues,
+    PullIssueDetails,
     SyncViewed,
     PullThreads,
     PullPendingReview,
@@ -72,12 +76,14 @@ impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
     /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
     /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
-    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 12] = [
+    pub(super) const READ_AGAIN_ON_FOCUS: [Self; 14] = [
         Self::CheckPrHead,
         Self::CheckWorkingTree,
         Self::CheckWorkingCopy,
         Self::LookUpPullOfBranch,
         Self::PullPrDescription,
+        Self::PullRelatedIssues,
+        Self::PullIssueDetails,
         Self::SyncViewed,
         Self::PullThreads,
         Self::PullPendingReview,
@@ -102,6 +108,8 @@ impl WorkKind {
             | Self::LookUpPullOfBranch
             | Self::LookUpHeadBranch
             | Self::PullPrDescription
+            | Self::PullRelatedIssues
+            | Self::PullIssueDetails
             | Self::PullThreads
             | Self::PullPendingReview
             | Self::PullLastReview
@@ -241,6 +249,8 @@ pub(super) enum Job {
     },
     LookUpHeadBranch(PullRequestUrl),
     PullPrDescription(PullRequestUrl),
+    PullRelatedIssues(PullRequestUrl),
+    PullIssueDetails(Vec<IssueUrl>),
     SyncViewed(SyncRequest),
     PullThreads {
         home: ThreadHome,
@@ -276,6 +286,8 @@ impl Job {
             Self::LookUpPullOfBranch { .. } => WorkKind::LookUpPullOfBranch,
             Self::LookUpHeadBranch(_) => WorkKind::LookUpHeadBranch,
             Self::PullPrDescription(_) => WorkKind::PullPrDescription,
+            Self::PullRelatedIssues(_) => WorkKind::PullRelatedIssues,
+            Self::PullIssueDetails(_) => WorkKind::PullIssueDetails,
             Self::SyncViewed(_) => WorkKind::SyncViewed,
             Self::PullThreads { .. } => WorkKind::PullThreads,
             Self::PullPendingReview(_) => WorkKind::PullPendingReview,
@@ -319,6 +331,8 @@ impl Work {
             }
             Job::LookUpHeadBranch(pr) => Done::HeadBranch(github.pull_request_head_branch(&pr)),
             Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
+            Job::PullRelatedIssues(pr) => Done::RelatedIssues(github.pull_request_issues(&pr)),
+            Job::PullIssueDetails(issues) => Done::IssueDetails(github.issue_details(&issues)),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
             Job::PullThreads { home, head } => Done::Threads(match &home {
@@ -380,6 +394,8 @@ pub(super) enum Done {
     PullOfBranch(Result<Option<PullOfBranch>, GitHubError>),
     HeadBranch(Result<Option<BranchName>, GitHubError>),
     PrDescription(Result<String, GitHubError>),
+    RelatedIssues(Result<PullRequestIssues, GitHubError>),
+    IssueDetails(Result<Vec<(IssueUrl, IssueDetails)>, GitHubError>),
     SyncViewed(SyncOutcome),
     Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), GitHubError>),
     PendingReview {

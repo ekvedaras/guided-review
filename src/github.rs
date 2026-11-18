@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::file_path::FilePath;
 use crate::image_facts;
+use crate::issue::{IssueLink, IssueUrl};
 use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
@@ -19,9 +20,10 @@ use crate::viewer::{
 };
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
-    NoAccess, OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
-    ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    IssueDetails, IssueDetailsPort, IssueState, NoAccess, OutageCause, PictureUploadPort,
+    PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
+    RelatedIssue, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
     ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
     Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
 };
@@ -559,6 +561,133 @@ impl PullRequestDescriptionPort for GitHub {
         )
         .with_context(|| format!("could not change the description of {pr} on GitHub"))?;
         Ok(())
+    }
+
+    fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                        pullRequest(number: $number) {
+                            headRefName
+                            closingIssuesReferences(first: 20) {
+                                nodes { number title repository { nameWithOwner } }
+                            }
+                        }
+                    }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read the issues of {pr}")))?;
+        let pull = at(&data, "/repository/pullRequest");
+        let linked = at(pull, "/closingIssuesReferences/nodes")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|node| {
+                let repo: RepoName = at(node, "/repository/nameWithOwner")
+                    .as_str()?
+                    .parse()
+                    .ok()?;
+                Some(RelatedIssue {
+                    link: IssueLink::GitHub(IssueUrl::new(repo, at(node, "/number").as_u64()?)),
+                    title: at(node, "/title").as_str().map(Arc::from),
+                })
+            })
+            .collect();
+        let head_branch = at(pull, "/headRefName")
+            .as_str()
+            .and_then(|name| BranchName::new(name).ok());
+        Ok(PullRequestIssues {
+            linked,
+            head_branch,
+        })
+    }
+}
+
+impl IssueDetailsPort for GitHub {
+    fn issue_details(
+        &self,
+        issues: &[IssueUrl],
+    ) -> Result<Vec<(IssueUrl, IssueDetails)>, GitHubError> {
+        if issues.is_empty() {
+            return Ok(Vec::new());
+        }
+        let declarations: String = (0..issues.len())
+            .map(|place| {
+                format!("$owner{place}: String!, $name{place}: String!, $number{place}: Int!")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let selections = (0..issues.len())
+            .map(|place| {
+                format!(
+                    "issue{place}: repository(owner: $owner{place}, name: $name{place}) {{
+                        issue: issueOrPullRequest(number: $number{place}) {{
+                            ... on Issue {{
+                                title body state stateReason
+                                author {{ login }}
+                                labels(first: 20) {{ nodes {{ name }} }}
+                                assignees(first: 10) {{ nodes {{ login }} }}
+                            }}
+                            ... on PullRequest {{
+                                title body state
+                                author {{ login }}
+                                labels(first: 20) {{ nodes {{ name }} }}
+                                assignees(first: 10) {{ nodes {{ login }} }}
+                            }}
+                        }}
+                    }}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let variables: serde_json::Map<String, serde_json::Value> = issues
+            .iter()
+            .enumerate()
+            .flat_map(|(place, issue)| {
+                [
+                    (format!("owner{place}"), issue.repo().owner().into()),
+                    (format!("name{place}"), issue.repo().name().into()),
+                    (format!("number{place}"), issue.number().into()),
+                ]
+            })
+            .collect();
+        let data = self
+            .graphql(
+                &format!("query({declarations}) {{ {selections} }}"),
+                &serde_json::Value::Object(variables),
+            )
+            .map_err(|error| error.context("could not read the issues"))?;
+        let names_in = |node: &serde_json::Value, pointer: &str, field: &str| -> Arc<[Arc<str>]> {
+            at(node, pointer)
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| at(entry, field).as_str().map(Arc::from))
+                .collect()
+        };
+        Ok(issues
+            .iter()
+            .enumerate()
+            .filter_map(|(place, url)| {
+                let issue = at(&data, &format!("/issue{place}/issue"));
+                let details = IssueDetails {
+                    title: at(issue, "/title").as_str()?.into(),
+                    state: IssueState::of_github(
+                        at(issue, "/state").as_str()?,
+                        at(issue, "/stateReason").as_str(),
+                    ),
+                    author: at(issue, "/author/login").as_str().map(Arc::from),
+                    labels: names_in(issue, "/labels/nodes", "/name"),
+                    assignees: names_in(issue, "/assignees/nodes", "/login"),
+                    body: IssueDetails::markdown_of(
+                        at(issue, "/body").as_str().unwrap_or_default(),
+                    ),
+                };
+                Some((url.clone(), details))
+            })
+            .collect())
     }
 }
 

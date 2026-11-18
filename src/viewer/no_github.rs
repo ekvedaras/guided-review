@@ -4,14 +4,16 @@ use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::merging::MergeChange;
 use super::ports::{
-    ChangeTipsPort, GitHubError, NoAccess, PictureUploadPort, PullOfBranch,
+    ChangeTipsPort, GitHubError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
     Resolution, ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort,
 };
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
+use super::related_issues::{IssueDetails, PullRequestIssues};
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
+use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
 use crate::review_subject::BranchName;
 use std::sync::Arc;
@@ -92,6 +94,19 @@ impl PullRequestDescriptionPort for NoGitHub {
         _body: &str,
     ) -> anyhow::Result<()> {
         Ok(refused()?)
+    }
+
+    fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+        refused()
+    }
+}
+
+impl IssueDetailsPort for NoGitHub {
+    fn issue_details(
+        &self,
+        _issues: &[IssueUrl],
+    ) -> Result<Vec<(IssueUrl, IssueDetails)>, GitHubError> {
+        refused()
     }
 }
 

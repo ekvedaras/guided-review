@@ -56,6 +56,7 @@ mod press_again;
 mod problems;
 mod reactions;
 mod refresh;
+mod related_issues;
 mod relevant_prs;
 mod remembered_prs;
 mod rendered_view;
@@ -167,10 +168,11 @@ pub use page::{
 };
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort, NoAccess,
-    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort,
-    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort,
+    IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_status::{CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, PrStatus, Readiness};
@@ -180,6 +182,7 @@ pub use press_again::{CONFIRM_WITHIN, PressStep};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
+pub use related_issues::{IssueDetails, IssueState, PullRequestIssues, RelatedIssue};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };

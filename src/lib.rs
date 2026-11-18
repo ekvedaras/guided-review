@@ -18,6 +18,7 @@ pub mod hex;
 pub mod home;
 pub mod ide;
 pub mod image_facts;
+pub mod issue;
 pub mod json;
 pub mod language;
 pub mod line_number;

@@ -107,7 +107,6 @@ impl ShownEntry {
 
 fn action_icon(action: PaletteAction) -> Icon {
     match action {
-        PaletteAction::NextUnreadStep => Icon::CircleDot,
         PaletteAction::MarkStepRead
         | PaletteAction::MarkStepUnread
         | PaletteAction::MarkFileRead
@@ -124,6 +123,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::FinishReview => Icon::ListChecks,
         PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
+        PaletteAction::NextUnreadStep | PaletteAction::OpenIssue => Icon::CircleDot,
         PaletteAction::OpenPr
         | PaletteAction::ConvertToDraft
         | PaletteAction::MarkReadyForReview
