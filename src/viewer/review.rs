@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
+use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
@@ -61,7 +62,7 @@ use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesO
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
-use super::related_issues::{RelatedIssue, RelatedIssues};
+use super::related_issues::{IssueDetails, RelatedIssue, RelatedIssues};
 use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::reviewing_mark::ReviewingMark;
@@ -1029,6 +1030,11 @@ impl ReviewCore {
         )
     }
 
+    /// What GitHub last said of the issue; `None` for a ticket and until it answers.
+    pub fn issue_details(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
+        self.related_issues.details_of(link)
+    }
+
     /// The issues the review is about, best source first; empty when none names one.
     pub fn related_issues(&self) -> Arc<[RelatedIssue]> {
         self.related_issues.shown()
@@ -1124,7 +1130,7 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
         self.github_answered(Affected::Description);
         if self.state.pr_description() != body {
-            self.related_issues.description_is(body);
+            self.change_related_issues(|related| related.description_is(body));
             self.state.record(|state| state.saw_pr_description(body))?;
         }
         Ok(())

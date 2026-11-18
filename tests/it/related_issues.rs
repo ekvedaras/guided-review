@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::issue::{IssueLink, IssueUrl};
 use guided_review::local_git::LocalGit;
@@ -12,8 +13,8 @@ use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::GuidedTour;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    Command, Effect, Intent, PaletteAction, PullRequestIssues, RelatedIssue, Review,
-    ReviewStateFile, WindowMoment,
+    Command, Effect, Intent, IssueDetails, IssueState, PaletteAction, PullRequestIssues,
+    RelatedIssue, Review, ReviewStateFile, WindowMoment,
 };
 use serde_json::json;
 
@@ -29,6 +30,17 @@ fn linked(number: u64, title: &str) -> RelatedIssue {
     RelatedIssue {
         link: IssueLink::GitHub(issue(number)),
         title: Some(title.into()),
+    }
+}
+
+fn details(title: &str, body: &str) -> IssueDetails {
+    IssueDetails {
+        title: title.into(),
+        state: IssueState::of_github("CLOSED", Some("NOT_PLANNED")),
+        author: Some("ada".into()),
+        labels: Arc::from([Arc::from("bug")]),
+        assignees: Arc::from([Arc::from("grace")]),
+        body: IssueDetails::markdown_of(body),
     }
 }
 
@@ -384,5 +396,81 @@ fn the_palette_offers_the_issue_only_when_there_is_one_and_i_is_its_key() {
             .map(|chord| chord.keystroke())
             .collect::<Vec<_>>(),
         ["i"]
+    );
+}
+
+fn github_with_details(shop: &Shop) -> FakeGitHub {
+    shop.github(PullRequestIssues {
+        linked: vec![linked(12, "Totals are wrong"), linked(13, "Totals round")],
+        head_branch: None,
+    })
+    .with_issue_details(
+        issue(12),
+        details("Totals are wrong", "The **total** is off"),
+    )
+    .with_issue_details(issue(13), details("Totals round", ""))
+}
+
+#[test]
+fn the_details_of_the_shown_issues_are_read_after_github_names_them_and_kept_with_each() {
+    let shop = Shop::new();
+    let mut review = shop.open_with(json!({}));
+
+    shop.read(&mut review, &github_with_details(&shop));
+
+    let first = review
+        .issue_details(&IssueLink::GitHub(issue(12)))
+        .expect("details of #12");
+    assert_eq!(&*first.title, "Totals are wrong");
+    assert_eq!(first.state, IssueState::ClosedAsNotPlanned);
+    assert_eq!(first.author.as_deref(), Some("ada"));
+    assert!(first.body.is_some());
+    let second = review
+        .issue_details(&IssueLink::GitHub(issue(13)))
+        .expect("details of #13");
+    assert_eq!(&*second.title, "Totals round");
+    assert!(second.body.is_none(), "an empty description has no body");
+    assert!(
+        review
+            .issue_details(&IssueLink::GitHub(issue(99)))
+            .is_none()
+    );
+}
+
+#[test]
+fn a_failed_read_of_details_keeps_what_was_read_and_a_rebuilt_review_keeps_it_too() {
+    let shop = Shop::new();
+    let mut review = shop.open_with(json!({}));
+    let github = github_with_details(&shop);
+    shop.read(&mut review, &github);
+
+    github.inject(GitHubFault::ReadsFail);
+    shop.read(&mut review, &github);
+
+    assert!(
+        review
+            .issue_details(&IssueLink::GitHub(issue(12)))
+            .is_some()
+    );
+    let mut rebuilt = shop.open_with(json!({}));
+    rebuilt.carry_on_from(review);
+    assert!(
+        rebuilt
+            .issue_details(&IssueLink::GitHub(issue(12)))
+            .is_some()
+    );
+}
+
+#[test]
+fn a_ticket_has_no_details_to_read() {
+    let shop = Shop::new();
+    let mut review = shop.open_with(json!({"issue": "https://tickets.example/5631"}));
+
+    shop.read(&mut review, &github_with_details(&shop));
+
+    assert!(
+        review
+            .issue_details(&"https://tickets.example/5631".parse().unwrap())
+            .is_none()
     );
 }

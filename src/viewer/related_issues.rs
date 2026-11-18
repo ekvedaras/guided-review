@@ -3,12 +3,15 @@
 //! keywords GitHub did not link, `Ticket:`), then the one the guided tour names, then the one the
 //! branch is named after. A rebuilt review keeps what GitHub said and reads the rest again.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::issue::{IssueLink, IssueUrl};
 use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::tour::Tour;
+
+use super::markdown::Markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelatedIssue {
@@ -24,6 +27,55 @@ impl RelatedIssue {
 
     fn of_github(url: IssueUrl) -> Self {
         Self::untitled(IssueLink::GitHub(url))
+    }
+}
+
+/// Where a GitHub issue stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueState {
+    Open,
+    ClosedAsCompleted,
+    ClosedAsNotPlanned,
+    /// Closed for a reason GitHub names that the card does not tell apart, as a duplicate.
+    Closed,
+}
+
+impl IssueState {
+    pub fn of_github(state: &str, reason: Option<&str>) -> Self {
+        match (state, reason) {
+            ("OPEN", _) => Self::Open,
+            (_, Some("COMPLETED")) => Self::ClosedAsCompleted,
+            (_, Some("NOT_PLANNED")) => Self::ClosedAsNotPlanned,
+            _ => Self::Closed,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Open => "Open",
+            Self::ClosedAsCompleted => "Closed as completed",
+            Self::ClosedAsNotPlanned => "Closed as not planned",
+            Self::Closed => "Closed",
+        }
+    }
+}
+
+/// What a GitHub issue says of itself, for the card its button shows on a hover. The body is
+/// parsed here, once, so drawing the card parses nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueDetails {
+    pub title: Arc<str>,
+    pub state: IssueState,
+    pub author: Option<Arc<str>>,
+    pub labels: Arc<[Arc<str>]>,
+    pub assignees: Arc<[Arc<str>]>,
+    /// `None` for an issue with no description.
+    pub body: Option<Markdown>,
+}
+
+impl IssueDetails {
+    pub fn markdown_of(body: &str) -> Option<Markdown> {
+        (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
     }
 }
 
@@ -44,6 +96,8 @@ pub(super) struct RelatedIssues {
     named_by_tour: Option<RelatedIssue>,
     of_local_branch: Option<RelatedIssue>,
     shown: Arc<[RelatedIssue]>,
+    /// What GitHub last said of each shown issue; an issue no longer shown keeps its entry.
+    details: HashMap<IssueUrl, Arc<IssueDetails>>,
 }
 
 impl RelatedIssues {
@@ -63,6 +117,7 @@ impl RelatedIssues {
             named_by_tour,
             of_local_branch,
             shown: Arc::default(),
+            details: HashMap::new(),
         };
         issues.description_is(description);
         issues
@@ -81,7 +136,34 @@ impl RelatedIssues {
 
     pub(super) fn carry_on_from(&mut self, replaced: Self) {
         self.on_github = replaced.on_github;
+        self.details = replaced.details;
         self.choose_shown();
+    }
+
+    pub(super) fn details_say(&mut self, read: Vec<(IssueUrl, IssueDetails)>) {
+        self.details.extend(
+            read.into_iter()
+                .map(|(url, details)| (url, Arc::new(details))),
+        );
+    }
+
+    /// `None` for a ticket, which GitHub knows nothing of, and for an issue not read yet.
+    pub(super) fn details_of(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
+        match link {
+            IssueLink::GitHub(url) => self.details.get(url).cloned(),
+            IssueLink::Ticket(_) => None,
+        }
+    }
+
+    /// The shown issues GitHub has details of.
+    pub(super) fn shown_on_github(&self) -> Vec<IssueUrl> {
+        self.shown
+            .iter()
+            .filter_map(|issue| match &issue.link {
+                IssueLink::GitHub(url) => Some(url.clone()),
+                IssueLink::Ticket(_) => None,
+            })
+            .collect()
     }
 
     pub(super) fn github_says(&mut self, issues: PullRequestIssues) {

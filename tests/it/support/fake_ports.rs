@@ -22,15 +22,17 @@ pub fn blocked_merging() -> Merging {
     }
 }
 use guided_review::file_path::FilePath;
+use guided_review::issue::IssueUrl;
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
-    Checks, CommentId, CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
-    PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
-    ReactionCount, Readiness, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    Checks, CommentId, CommentPlace, GitHubError, IssueDetails, IssueDetailsPort, NoAccess,
+    NotDelivered, PictureUploadPort, PrStatus, PullOfBranch, PullRequestDescriptionPort,
+    PullRequestIssues, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
+    Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
+    RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId, TurnStopper, Viewed,
+    ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -205,6 +207,7 @@ pub struct FakeGitHub {
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
     head_branches: Mutex<Vec<(String, String)>>,
     issues: Mutex<PullRequestIssues>,
+    issue_details: Mutex<Vec<(IssueUrl, IssueDetails)>>,
 }
 
 impl FakeGitHub {
@@ -234,6 +237,7 @@ impl FakeGitHub {
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),
             issues: Mutex::default(),
+            issue_details: Mutex::default(),
         }
     }
 
@@ -271,6 +275,12 @@ impl FakeGitHub {
     /// The PR's status as it is on GitHub.
     pub fn with_issues(self, issues: PullRequestIssues) -> Self {
         *self.issues.lock().unwrap() = issues;
+        self
+    }
+
+    /// What GitHub says of an issue.
+    pub fn with_issue_details(self, issue: IssueUrl, details: IssueDetails) -> Self {
+        self.issue_details.lock().unwrap().push((issue, details));
         self
     }
 
@@ -473,6 +483,23 @@ impl PullRequestDescriptionPort for FakeGitHub {
     fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
         self.fail_if_reads_fail()?;
         Ok(self.issues.lock().unwrap().clone())
+    }
+}
+
+impl IssueDetailsPort for FakeGitHub {
+    fn issue_details(
+        &self,
+        issues: &[IssueUrl],
+    ) -> Result<Vec<(IssueUrl, IssueDetails)>, GitHubError> {
+        self.fail_if_reads_fail()?;
+        Ok(self
+            .issue_details
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(url, _)| issues.contains(url))
+            .cloned()
+            .collect())
     }
 }
 

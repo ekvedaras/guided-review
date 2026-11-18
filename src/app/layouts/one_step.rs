@@ -96,7 +96,6 @@ use crate::ide::{Ide, NoIde};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
-use crate::viewer::RelatedIssue;
 use crate::viewer::{
     AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
     CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
@@ -110,9 +109,12 @@ use crate::viewer::{
     SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView, ToastTone,
     Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
+use crate::viewer::{IssueDetails, RelatedIssue};
+use issue_card::{CardSide, IssueHover, issue_card};
 
 #[cfg(feature = "snapshots")]
 mod gallery;
+mod issue_card;
 #[cfg(feature = "snapshots")]
 mod scenes;
 
@@ -181,6 +183,10 @@ pub struct OneStepLayout {
     checks_hover: ChecksHover,
     /// The title bar lists the review's issues, as `I` does when there are several.
     issue_list_open: bool,
+    /// The mouse is on the issue button, a row of its list, or the card of an issue.
+    issue_hover: IssueHover,
+    /// The description of the issue whose card shows, prepared once for as long as the card shows it.
+    issue_card_body: std::cell::RefCell<Option<(Arc<IssueDetails>, Rc<PreparedMarkdown>)>>,
     on_code_gesture: OnTextSpot,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
@@ -406,6 +412,8 @@ impl OneStepLayout {
             hovered_touching_row: None,
             checks_hover: ChecksHover::default(),
             issue_list_open: false,
+            issue_hover: IssueHover::default(),
+            issue_card_body: std::cell::RefCell::new(None),
             on_code_gesture,
             selection_notice: None,
             scrollbar_grab: None,
@@ -1284,10 +1292,12 @@ impl OneStepLayout {
             Effect::OpenCheck(url) => open_link(&url, cx),
             Effect::OpenIssue(link) => {
                 self.issue_list_open = false;
+                self.issue_hover = IssueHover::default();
                 open_link(&link.to_string(), cx);
             }
             Effect::ListIssues => {
                 self.issue_list_open = !self.issue_list_open;
+                self.issue_hover = IssueHover::default();
                 cx.notify();
             }
             Effect::ChangeReadiness => self.change_readiness(cx),
@@ -2371,8 +2381,8 @@ impl OneStepLayout {
                 "List the related issues".into(),
             ),
         };
-        let list = (self.issue_list_open && issues.len() > 1)
-            .then(|| self.issue_list(colors, &issues, cx));
+        let several = issues.len() > 1;
+        let list = (self.issue_list_open && several).then(|| self.issue_list(colors, &issues, cx));
         let button = button(
             colors,
             "title-bar-issue",
@@ -2392,9 +2402,66 @@ impl OneStepLayout {
             Command::OpenIssue,
             cx,
         ))
-        .tooltip(tooltip(move |_| tip.clone()))
+        .when(several, |button| {
+            button.tooltip(tooltip(move |_| tip.clone()))
+        })
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenIssue, window, cx)));
-        Some(div().flex_none().child(button).children(list))
+        let card = match (&*issues, self.issue_hover.shown()) {
+            ([only], Some(0)) => Some(deferred(
+                anchored()
+                    .snap_to_window_with_margin(px(8.))
+                    .child(self.issue_card_element(colors, only, 0, CardSide::Below, cx)),
+            )),
+            _ => None,
+        };
+        Some(
+            div()
+                .id("title-bar-issue-hover")
+                .flex_none()
+                .when(!several, |wrapper| {
+                    wrapper.on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
+                        this.issue_hover.target = is_hovered.then_some(0);
+                        cx.notify();
+                    }))
+                })
+                .child(button)
+                .children(card)
+                .children(list),
+        )
+    }
+
+    /// The card of one issue, with a gap on the side it is opened from that the mouse may cross.
+    fn issue_card_element(
+        &self,
+        colors: &Colors,
+        issue: &RelatedIssue,
+        place: usize,
+        side: CardSide,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let details = self.session.read(cx).review().issue_details(&issue.link);
+        let body = details.as_ref().and_then(|details| {
+            let mut prepared = self.issue_card_body.borrow_mut();
+            let is_current = prepared
+                .as_ref()
+                .is_some_and(|(shown, _)| Arc::ptr_eq(shown, details));
+            if !is_current {
+                let markdown = details.body.clone()?;
+                *prepared = Some((Arc::clone(details), Rc::new(PreparedMarkdown::of(markdown))));
+            }
+            prepared.as_ref().map(|(_, body)| Rc::clone(body))
+        });
+        div()
+            .id(("title-bar-issue-card", place))
+            .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                this.issue_hover.card = is_hovered.then_some(place);
+                cx.notify();
+            }))
+            .map(|element| match side {
+                CardSide::Below => element.pt_1(),
+                CardSide::Right => element.pl_2(),
+            })
+            .child(issue_card(colors, &issue.link, details.as_deref(), body))
     }
 
     /// Under the issue button: each issue with its number key; a click or the key opens it.
@@ -2419,6 +2486,15 @@ impl OneStepLayout {
                 .rounded(px(INNER_RADIUS))
                 .cursor_pointer()
                 .hover(|row| row.bg(colors.hover))
+                .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                    let leaves_row = !is_hovered && this.issue_hover.target == Some(place);
+                    if *is_hovered {
+                        this.issue_hover.target = Some(place);
+                    } else if leaves_row {
+                        this.issue_hover.target = None;
+                    }
+                    cx.notify();
+                }))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.act(Intent::OpenIssueAt(place), window, cx);
                 }))
@@ -2435,10 +2511,21 @@ impl OneStepLayout {
                 )
                 .child(div().flex_1().min_w_0().truncate().child(title))
         });
+        let rows: Vec<_> = rows.collect();
+        let card = self.issue_hover.shown().and_then(|place| {
+            let issue = issues.get(place)?;
+            Some(
+                self.issue_card_element(colors, issue, place, CardSide::Right, cx)
+                    .absolute()
+                    .top_0()
+                    .left(gpui::relative(1.)),
+            )
+        });
         deferred(
             anchored().snap_to_window_with_margin(px(8.)).child(
                 div()
                     .id("title-bar-issue-list")
+                    .relative()
                     .mt_1()
                     .w(px(CHECKS_LIST_WIDTH))
                     .p_1()
@@ -2454,7 +2541,8 @@ impl OneStepLayout {
                         this.issue_list_open = false;
                         cx.notify();
                     }))
-                    .children(rows),
+                    .children(rows)
+                    .children(card),
             ),
         )
     }
