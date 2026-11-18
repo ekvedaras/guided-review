@@ -1,1 +1,1 @@
-The PR switcher groups rows by repo, puts each title first with its facts below, and names only guided tours.
+The PR switcher groups rows by repo, leads each with its author's picture, and names only guided tours.

@@ -3,7 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use guided_review::viewer::{
-    PrSwitcher, RelevantPullRequest, RelevantPullRequests, RememberedPullRequestsFile, WhyListed,
+    PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests, RememberedPullRequestsFile,
+    WhyListed,
 };
 use tempfile::TempDir;
 
@@ -13,7 +14,10 @@ fn relevant(number: u32) -> RelevantPullRequest {
             .parse()
             .unwrap(),
         title: format!("Change {number}"),
-        author: "alice".to_owned(),
+        author: PrAuthor {
+            login: "alice".into(),
+            avatar_url: Some("https://avatars.githubusercontent.com/alice?s=64".into()),
+        },
         is_draft: number == 2,
         updated_at: "2026-11-06T07:00:00Z".to_owned(),
         why_listed: WhyListed::ReviewRequested,

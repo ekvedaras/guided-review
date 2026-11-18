@@ -48,8 +48,16 @@ fn a_row_says_who_wrote_it_whether_it_is_a_draft_and_why_it_is_listed() {
         panic!("expected four, got {relevant:?}");
     };
     assert_eq!(
-        (blog.title.as_str(), blog.author.as_str(), blog.is_draft),
+        (
+            blog.title.as_str(),
+            blog.author.login.as_ref(),
+            blog.is_draft
+        ),
         ("Fix feed", "ekvedaras", true)
+    );
+    assert_eq!(
+        blog.author.avatar_url.as_deref(),
+        Some("https://avatars.githubusercontent.com/ekvedaras?s=64")
     );
     assert_eq!(blog.why_listed, WhyListed::Mine);
     assert_eq!(blog.updated_at, "2026-11-06T07:00:00Z");
@@ -58,7 +66,11 @@ fn a_row_says_who_wrote_it_whether_it_is_a_draft_and_why_it_is_listed() {
         WhyListed::ReviewRequested,
         "my team is asked"
     );
-    assert_eq!(api.author, "ghost", "GitHub shows a deleted author as null");
+    assert_eq!(
+        (api.author.login.as_ref(), api.author.avatar_url.as_deref()),
+        ("ghost", None),
+        "GitHub shows a deleted author as null"
+    );
     assert_eq!(shop.why_listed, WhyListed::ReviewRequested, "I am asked");
     assert!(!shop.is_draft);
     assert_eq!(old.why_listed, WhyListed::Involved);

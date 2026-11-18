@@ -19,8 +19,8 @@ use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, AgentLinkOff, AgentPort, AgentStatus, AppAgent, GitHubError,
-    LiveTerminal, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, SendOutcome,
-    TerminalId, TourAgentPort, TourAgentStart, TurnStopper, WhyListed,
+    LiveTerminal, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
+    SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TurnStopper, WhyListed,
 };
 
 const FOLDER_ENV: &str = "GUIDED_REVIEW_SNAPSHOTS";
@@ -263,7 +263,12 @@ impl RelevantPullRequestsPort for SamplePullRequests {
                     Some(RelevantPullRequest {
                         url,
                         title: title.to_owned(),
-                        author: author.to_owned(),
+                        author: PrAuthor {
+                            login: author.into(),
+                            avatar_url: (author == "ekvedaras").then(|| {
+                                "https://avatars.githubusercontent.com/ekvedaras?s=64".into()
+                            }),
+                        },
                         is_draft,
                         updated_at: format!("2026-11-{:02}T12:00:00Z", 20 - nth),
                         why_listed,

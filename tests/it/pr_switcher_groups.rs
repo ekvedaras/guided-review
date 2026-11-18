@@ -2,14 +2,17 @@ use std::path::Path;
 
 use crate::support::folders_in;
 use guided_review::viewer::{
-    PrSwitcher, RelevantPullRequest, RelevantPullRequests, ScreenLine, WhyListed,
+    PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests, ScreenLine, WhyListed,
 };
 
 fn relevant(url: &str) -> RelevantPullRequest {
     RelevantPullRequest {
         url: url.parse().unwrap(),
         title: format!("Change {url}"),
-        author: "alice".to_owned(),
+        author: PrAuthor {
+            login: "alice".into(),
+            avatar_url: None,
+        },
         is_draft: false,
         updated_at: "2026-11-06T07:00:00Z".to_owned(),
         why_listed: WhyListed::Involved,
@@ -35,8 +38,11 @@ fn visible_urls(switcher: &PrSwitcher) -> Vec<String> {
         .collect()
 }
 
-fn heading(repo: &str) -> ScreenLine {
-    ScreenLine::Heading(repo.to_owned())
+fn heading(repo: &str, rows: usize) -> ScreenLine {
+    ScreenLine::Heading {
+        name: repo.to_owned(),
+        rows,
+    }
 }
 
 #[test]
@@ -72,10 +78,10 @@ fn the_screen_names_each_repo_once_above_its_rows() {
     assert_eq!(
         switcher.screen(),
         [
-            heading("acme/shop"),
+            heading("acme/shop", 2),
             ScreenLine::Row(0),
             ScreenLine::Row(1),
-            heading("acme/blog"),
+            heading("acme/blog", 1),
             ScreenLine::Row(2),
         ]
     );
@@ -94,8 +100,8 @@ fn scrolled_down_the_top_row_still_names_its_repo() {
 
     switcher.scroll_by(2);
 
-    let expected: Vec<_> = std::iter::once(heading("acme/shop"))
-        .chain((2..12).map(ScreenLine::Row))
+    let expected: Vec<_> = std::iter::once(heading("acme/shop", 12))
+        .chain((2..10).map(ScreenLine::Row))
         .collect();
     assert_eq!(switcher.screen(), expected);
 }
@@ -106,13 +112,13 @@ fn repo_names_take_room_so_fewer_rows_fit_when_every_row_is_of_another_repo() {
         .map(|number| format!("https://github.com/acme/repo-{number}/pull/1"))
         .collect();
     let mut switcher = listing(urls.iter().map(String::as_str));
-    assert_eq!(switcher.rows_on_screen(), 7);
+    assert_eq!(switcher.rows_on_screen(), 5);
 
-    for _ in 0..7 {
+    for _ in 0..5 {
         switcher.select_next();
     }
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (7, 1));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (5, 1));
     switcher.scroll_by(99);
-    assert_eq!(switcher.first_shown(), 5, "the last row ends the screen");
+    assert_eq!(switcher.first_shown(), 7, "the last row ends the screen");
 }

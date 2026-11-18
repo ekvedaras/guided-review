@@ -1,4 +1,5 @@
 use super::ports::GitHubError;
+use super::pr_origin::PrAuthor;
 use crate::pull_request::PullRequestUrl;
 
 /// The open PRs the reviewer has something to do with, for the PR switcher.
@@ -19,7 +20,7 @@ pub struct RelevantPullRequests {
 pub struct RelevantPullRequest {
     pub url: PullRequestUrl,
     pub title: String,
-    pub author: String,
+    pub author: PrAuthor,
     pub is_draft: bool,
     /// As GitHub writes it, `2026-11-05T13:35:33Z`, which sorts as time does.
     pub updated_at: String,

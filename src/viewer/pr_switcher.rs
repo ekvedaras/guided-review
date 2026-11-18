@@ -87,8 +87,9 @@ pub enum WritingFact {
 /// A line of the switcher's screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScreenLine {
-    /// The repo, or the folder of a local review with no repo, whose rows follow.
-    Heading(String),
+    /// The repo, or the folder of a local review with no repo, whose rows follow, and how many rows
+    /// it has in the whole list.
+    Heading { name: String, rows: usize },
     /// The nth visible row.
     Row(usize),
 }
@@ -127,8 +128,8 @@ impl Default for PrSwitcher {
 }
 
 impl PrSwitcher {
-    /// The screen's height in lines: a row takes two, a repo's name one. Ten rows of one repo fill it.
-    pub const SCREEN_LINES: usize = 21;
+    /// The screen's height in lines: a row takes two, a repo's name one. Eight rows of one repo fill it.
+    pub const SCREEN_LINES: usize = 17;
     pub const ROW_LINES: usize = 2;
     pub const HEADING_LINES: usize = 1;
 
@@ -154,6 +155,11 @@ impl PrSwitcher {
         }
         switcher.memory = Some(memory);
         switcher
+    }
+
+    /// The visible row under the pointer.
+    pub fn hovered(&self) -> Option<usize> {
+        self.hovered_screen_row.map(|row| self.first_shown + row)
     }
 
     /// The pointer is over the `nth` visible row.
@@ -377,7 +383,10 @@ impl PrSwitcher {
         let mut lines = Vec::new();
         for nth in self.first_shown..self.first_shown + self.rows_on_screen() {
             if let Some(group) = Self::opened_group(&groups, nth, self.first_shown) {
-                lines.push(ScreenLine::Heading(group.to_owned()));
+                lines.push(ScreenLine::Heading {
+                    name: group.to_owned(),
+                    rows: groups.iter().filter(|other| **other == group).count(),
+                });
             }
             lines.push(ScreenLine::Row(nth));
         }
@@ -497,7 +506,7 @@ impl SwitcherRow {
             "{} {} {}",
             pull_request.url.short(),
             pull_request.title,
-            pull_request.author
+            pull_request.author.login
         );
         let group = pull_request.url.repo.to_string();
         Self::new(

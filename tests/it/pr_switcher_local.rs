@@ -11,7 +11,7 @@ use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    ActivePr, NoGitHub, Pick, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
+    ActivePr, NoGitHub, Pick, PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
     ReviewStateFile, SwitcherRow, WhyListed,
 };
 
@@ -312,7 +312,10 @@ fn github_row() -> RelevantPullRequests {
         pull_requests: vec![RelevantPullRequest {
             url: SHOP_7.parse().unwrap(),
             title: "Add checkout".to_owned(),
-            author: "alice".to_owned(),
+            author: PrAuthor {
+                login: "alice".into(),
+                avatar_url: None,
+            },
             is_draft: false,
             updated_at: "2026-11-06T07:00:00Z".to_owned(),
             why_listed: WhyListed::Involved,

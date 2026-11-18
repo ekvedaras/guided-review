@@ -7,8 +7,8 @@ use std::str::FromStr;
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use guided_review::tour::{BasicTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
-    ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrSwitcher, RelevantPullRequest,
-    RelevantPullRequests, RelevantPullRequestsPort, WhyListed, WritingFact,
+    ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrAuthor, PrSwitcher,
+    RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed, WritingFact,
 };
 use tempfile::TempDir;
 
@@ -25,7 +25,10 @@ fn relevant(url: &str, title: &str, author: &str, why: WhyListed) -> RelevantPul
     RelevantPullRequest {
         url: pr(url),
         title: title.to_owned(),
-        author: author.to_owned(),
+        author: PrAuthor {
+            login: author.into(),
+            avatar_url: None,
+        },
         is_draft: false,
         updated_at: "2026-11-06T07:00:00Z".to_owned(),
         why_listed: why,
@@ -86,7 +89,7 @@ fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
     assert_eq!(feed.pull_request().unwrap().title, "Fix feed");
     assert!(feed.pull_request().unwrap().is_draft);
     assert_eq!(feed.pull_request().unwrap().why_listed, WhyListed::Mine);
-    assert_eq!(limits.pull_request().unwrap().author, "dave");
+    assert_eq!(limits.pull_request().unwrap().author.login.as_ref(), "dave");
 }
 
 fn write_basic_tour(home: &Path, url: &str) {
@@ -343,25 +346,25 @@ fn twelve_pull_requests() -> PrSwitcher {
 }
 
 #[test]
-fn the_list_shows_ten_rows_from_the_top_until_the_selection_leaves_them() {
+fn the_list_shows_eight_rows_from_the_top_until_the_selection_leaves_them() {
     let mut switcher = twelve_pull_requests();
 
-    for _ in 0..9 {
+    for _ in 0..7 {
         switcher.select_next();
     }
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (9, 0));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (7, 0));
 }
 
 #[test]
 fn moving_down_past_the_last_shown_row_scrolls_by_just_one_row() {
     let mut switcher = twelve_pull_requests();
 
-    for _ in 0..10 {
+    for _ in 0..8 {
         switcher.select_next();
     }
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (8, 1));
 }
 
 #[test]
@@ -370,11 +373,11 @@ fn moving_up_inside_the_shown_rows_does_not_scroll() {
     for _ in 0..11 {
         switcher.select_next();
     }
-    assert_eq!(switcher.first_shown(), 2);
+    assert_eq!(switcher.first_shown(), 4);
 
     switcher.select_previous();
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 2));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 4));
 }
 
 #[test]
@@ -383,14 +386,14 @@ fn moving_up_above_the_first_shown_row_scrolls_by_just_one_row() {
     for _ in 0..11 {
         switcher.select_next();
     }
-    for _ in 0..9 {
+    for _ in 0..7 {
         switcher.select_previous();
     }
-    assert_eq!((switcher.selected(), switcher.first_shown()), (2, 2));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (4, 4));
 
     switcher.select_previous();
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (1, 1));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (3, 3));
 }
 
 #[test]
@@ -403,7 +406,7 @@ fn the_selection_stops_at_both_ends_of_the_list() {
         switcher.select_next();
     }
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (11, 2));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (11, 4));
 }
 
 #[test]
@@ -423,10 +426,10 @@ fn scrolling_the_wheel_moves_the_rows_and_leaves_the_selection_where_it_is() {
     let mut switcher = twelve_pull_requests();
 
     switcher.scroll_by(5);
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 2));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 4));
 
     switcher.scroll_by(-1);
-    assert_eq!(switcher.first_shown(), 1);
+    assert_eq!(switcher.first_shown(), 3);
     switcher.scroll_by(-9);
     assert_eq!(switcher.first_shown(), 0);
 }
@@ -447,7 +450,7 @@ fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected()
         .map(|row| row.pull_request().unwrap().url.short())
         .collect();
     assert_eq!(marked, ["acme/shop#11"]);
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
+    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 3));
 }
 
 #[test]

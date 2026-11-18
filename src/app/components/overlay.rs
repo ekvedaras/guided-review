@@ -10,6 +10,7 @@ use crate::viewer::{Closing, Motion, Presence, Shown};
 
 use super::motion::{OVERLAY_RISE, STATE, along, fade_in, fade_out, panel_level, scrim_level};
 use super::palette::{CARD_RADIUS, CONTROL_RADIUS, Colors, TEXT_FONT, inside_edge};
+use super::sidebar_row::RowPlace;
 
 /// The layer a modal overlay sits in: it covers the window, takes every click, and fades its
 /// scrim in under the panel. The caller adds the close on a click outside and the panel.
@@ -189,6 +190,22 @@ pub fn overlay_panel(colors: &Colors) -> Div {
 /// A row of a picker list (jump palette, PR switcher): the selected one sits on `current` with
 /// its edge, the others light up under the mouse, and every one darkens while pressed.
 pub fn picker_row(colors: &Colors, id: impl Into<ElementId>, is_selected: bool) -> Stateful<Div> {
+    let place = if is_selected {
+        RowPlace::Current
+    } else {
+        RowPlace::Apart
+    };
+    picker_row_at(colors, id, place, None)
+}
+
+/// A picker row that touches its neighbours: the selected row and a hovered neighbour square the
+/// corners where they meet, as sidebar rows do.
+pub fn picker_row_at(
+    colors: &Colors,
+    id: impl Into<ElementId>,
+    place: RowPlace,
+    hovered_touching: Option<RowPlace>,
+) -> Stateful<Div> {
     div()
         .id(id)
         .mx_2()
@@ -200,13 +217,24 @@ pub fn picker_row(colors: &Colors, id: impl Into<ElementId>, is_selected: bool) 
         .border_1()
         .overflow_hidden()
         .cursor_pointer()
-        .map(|row| {
-            if is_selected {
-                row.bg(colors.current).border_color(colors.current_border)
-            } else {
-                row.border_color(gpui::transparent_black())
-                    .hover(|row| row.bg(colors.hover))
-            }
+        .map(|row| match place {
+            RowPlace::Current => row
+                .bg(colors.current)
+                .border_color(colors.current_border)
+                .map(|row| match hovered_touching {
+                    Some(RowPlace::JustAboveCurrent) => row.rounded_t(px(0.)),
+                    Some(RowPlace::JustBelowCurrent) => row.rounded_b(px(0.)),
+                    _ => row,
+                }),
+            RowPlace::JustAboveCurrent => row
+                .border_color(gpui::transparent_black())
+                .hover(|row| row.bg(colors.hover).rounded_b(px(0.))),
+            RowPlace::JustBelowCurrent => row
+                .border_color(gpui::transparent_black())
+                .hover(|row| row.bg(colors.hover).rounded_t(px(0.))),
+            RowPlace::Apart => row
+                .border_color(gpui::transparent_black())
+                .hover(|row| row.bg(colors.hover)),
         })
         .active(|row| row.bg(colors.pressed))
 }

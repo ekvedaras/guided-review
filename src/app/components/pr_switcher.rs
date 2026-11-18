@@ -26,16 +26,18 @@ use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
 use super::motion::OVERLAY;
 use super::overlay::{
-    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
+    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
 };
-use super::palette::{CODE_FONT, Colors, Tone};
+use super::palette::{CODE_FONT, Colors, INNER_RADIUS, Tone};
+use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
+use super::thread_view::avatar_circle;
 
 /// A row is two lines high, a repo's name one: `PrSwitcher::ROW_LINES` and `HEADING_LINES`.
-const LINE_HEIGHT: Pixels = px(22.);
-const ROW_HEIGHT: Pixels = px(44.);
-const LEAD_WIDTH: Pixels = px(36.);
+const LINE_HEIGHT: Pixels = px(28.);
+const ROW_HEIGHT: Pixels = px(56.);
+const LEAD_SIZE: f32 = 30.;
 const MIN_THUMB_HEIGHT: Pixels = px(20.);
 
 /// What the switcher needs from the app: where the list comes from, and how to ask the app to show
@@ -146,9 +148,12 @@ struct RowWords {
     is_draft: bool,
 }
 
-/// What a row is, in the narrow column before its title.
+/// What leads a row: the PR author's picture, or a folder for a local review.
 enum Lead {
-    Number(SharedString),
+    Author {
+        login: SharedString,
+        avatar_url: Option<SharedString>,
+    },
     LocalFolder,
 }
 
@@ -170,12 +175,20 @@ impl ShownRow {
     fn of(row: &SwitcherRow, switcher: &PrSwitcher) -> Self {
         let words = match &row.kind {
             RowKind::PullRequest(pull_request) => RowWords {
-                lead: Lead::Number(format!("#{}", pull_request.url.number).into()),
+                lead: Lead::Author {
+                    login: pull_request.author.login.to_string().into(),
+                    avatar_url: pull_request
+                        .author
+                        .avatar_url
+                        .as_deref()
+                        .map(|url| url.to_owned().into()),
+                },
                 title: pull_request.title.clone().into(),
                 title_is_branch: false,
                 facts: format!(
-                    "{} · {}",
-                    pull_request.author,
+                    "#{} · {} · {}",
+                    pull_request.url.number,
+                    pull_request.author.login,
                     match pull_request.why_listed {
                         WhyListed::Mine => "mine",
                         WhyListed::ReviewRequested => "review requested",
@@ -461,31 +474,62 @@ impl PrSwitcherView {
             .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
-    fn row(&self, index: usize, shown: &ShownRow, cx: &mut Context<Self>) -> impl IntoElement {
+    fn row(
+        &self,
+        index: usize,
+        shown: &ShownRow,
+        place: (RowPlace, Option<RowPlace>),
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let is_selected = index == self.switching.list.read(cx).selected();
         let is_writing = shown.tour.writing != WritingFact::None;
         let lead = match &shown.words.lead {
-            Lead::Number(number) => div().child(number.clone()).into_any_element(),
-            Lead::LocalFolder => {
-                sized_icon(Icon::FolderGit, colors.muted_text, px(13.)).into_any_element()
+            Lead::Author { login, avatar_url } => {
+                avatar_circle(&colors, login, avatar_url.as_deref(), LEAD_SIZE, cx)
             }
+            Lead::LocalFolder => div()
+                .flex_none()
+                .size(px(LEAD_SIZE))
+                .rounded(px(INNER_RADIUS))
+                .bg(colors.inset)
+                .border_1()
+                .border_color(colors.subtle_border)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(sized_icon(Icon::FolderGit, colors.muted_text, px(14.)))
+                .into_any_element(),
         };
         let title = div()
-            .flex_1()
             .min_w_0()
             .truncate()
+            .line_height(px(20.))
             .font_weight(FontWeight::MEDIUM)
+            .text_color(if is_writing {
+                colors.muted_text
+            } else {
+                colors.text
+            })
             .when(shown.words.title_is_branch, |title| {
-                title.font_family(*CODE_FONT)
+                title.font_family(*CODE_FONT).text_size(px(13.))
             })
             .child(shown.words.title.clone());
-        picker_row(
+        let facts = div()
+            .min_w_0()
+            .truncate()
+            .line_height(px(16.))
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(shown.words.facts.clone());
+        let (place, hovered_touching) = place;
+        picker_row_at(
             &colors,
             SharedString::from(format!("pr-switcher-row-{index}")),
-            is_selected,
+            place,
+            hovered_touching,
         )
         .h(ROW_HEIGHT)
+        .px_3()
         .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
             this.switching.list.update(cx, |list, _| {
                 if *is_hovered {
@@ -499,49 +543,16 @@ impl PrSwitcherView {
             this.switching.list.update(cx, |list, _| list.select(index));
             this.pick(window, cx);
         }))
+        .child(lead)
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .text_color(if is_writing {
-                            colors.muted_text
-                        } else {
-                            colors.text
-                        })
-                        .child(
-                            div()
-                                .flex_none()
-                                .w(LEAD_WIDTH)
-                                .flex()
-                                .justify_end()
-                                .text_xs()
-                                .text_color(colors.muted_text)
-                                .child(lead),
-                        )
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap_3()
-                        .text_xs()
-                        .text_color(colors.muted_text)
-                        .child(div().flex_none().w(LEAD_WIDTH))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(shown.words.facts.clone()),
-                        ),
-                ),
+                .gap(px(2.))
+                .child(title)
+                .child(facts),
         )
         .child(self.states(index, shown, &colors, cx))
     }
@@ -584,11 +595,14 @@ impl PrSwitcherView {
             .when(shown.is_active, |states| {
                 states.child(chip(colors, Tone::Accent).child("viewing"))
             })
-            .children(
-                shown
-                    .tour_label
-                    .map(|label| chip(colors, tour_tone).child(label)),
-            )
+            .children(shown.tour_label.map(|label| {
+                let is_guided = shown.tour.writing == WritingFact::None;
+                chip(colors, tour_tone)
+                    .when(is_guided, |chip| {
+                        chip.child(sized_icon(Icon::Sparkles, colors.accent, px(12.)))
+                    })
+                    .child(label)
+            }))
             .when(shown.offers_drop_review, |states| {
                 states.child(
                     icon_label_button(
@@ -607,20 +621,35 @@ impl PrSwitcherView {
             })
     }
 
-    /// The repo, or folder, whose rows follow, on the rows' own left edge.
-    fn heading(name: &str, colors: &Colors) -> impl IntoElement {
+    /// The repo, or folder, whose rows follow, with how many there are; a hairline parts it from the
+    /// group above.
+    fn heading(name: &str, rows: usize, is_first: bool, colors: &Colors) -> impl IntoElement {
         div()
             .h(LINE_HEIGHT)
             .mx_2()
-            .px(px(9.))
+            .px(px(13.))
             .flex()
             .items_end()
-            .pb(px(3.))
+            .gap_2()
+            .pb(px(5.))
+            .when(!is_first, |heading| {
+                heading.border_t_1().border_color(colors.subtle_border)
+            })
             .text_xs()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(colors.muted_text)
-            .truncate()
-            .child(SharedString::from(name.to_owned()))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(colors.text)
+                    .child(SharedString::from(name.to_owned())),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(colors.muted_text)
+                    .child(SharedString::from(rows.to_string())),
+            )
     }
 }
 
@@ -638,14 +667,46 @@ impl Render for PrSwitcherView {
             list.is_refreshing(),
         );
         let screen = list.screen();
+        let (selected, hovered) = (list.selected(), list.hovered());
+        let row_at = |line: Option<&ScreenLine>| match line {
+            Some(ScreenLine::Row(nth)) => Some(*nth),
+            _ => None,
+        };
         let lines: Vec<_> = screen
             .iter()
-            .filter_map(|line| match line {
-                ScreenLine::Heading(name) => Some(Self::heading(name, &colors).into_any_element()),
-                ScreenLine::Row(nth) => self
-                    .shown
-                    .get(*nth)
-                    .map(|shown| self.row(*nth, shown, cx).into_any_element()),
+            .enumerate()
+            .filter_map(|(at, line)| match line {
+                ScreenLine::Heading { name, rows } => {
+                    Some(Self::heading(name, *rows, at == 0, &colors).into_any_element())
+                }
+                ScreenLine::Row(nth) => {
+                    let above = at
+                        .checked_sub(1)
+                        .and_then(|above| row_at(screen.get(above)));
+                    let below = row_at(screen.get(at + 1));
+                    let place = if *nth == selected {
+                        RowPlace::Current
+                    } else if below == Some(selected) {
+                        RowPlace::JustAboveCurrent
+                    } else if above == Some(selected) {
+                        RowPlace::JustBelowCurrent
+                    } else {
+                        RowPlace::Apart
+                    };
+                    let hovered_touching = match hovered {
+                        Some(hovered) if hovered != selected && above == Some(hovered) => {
+                            Some(RowPlace::JustAboveCurrent)
+                        }
+                        Some(hovered) if hovered != selected && below == Some(hovered) => {
+                            Some(RowPlace::JustBelowCurrent)
+                        }
+                        _ => None,
+                    };
+                    self.shown.get(*nth).map(|shown| {
+                        self.row(*nth, shown, (place, hovered_touching), cx)
+                            .into_any_element()
+                    })
+                }
             })
             .collect();
         let overflows = rows_on_screen < self.shown.len();

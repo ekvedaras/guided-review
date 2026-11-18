@@ -5,6 +5,7 @@ use anyhow::Context;
 use crate::app_folders::AppFolders;
 use serde::{Deserialize, Serialize};
 
+use super::pr_origin::PrAuthor;
 use super::relevant_prs::{RelevantPullRequest, WhyListed};
 
 /// `pull-requests.json` in the state files folder: the switcher's last list from GitHub, shown at once
@@ -19,6 +20,9 @@ struct Remembered {
     url: String,
     title: String,
     author: String,
+    /// Lists kept before pictures were kept have none.
+    #[serde(default)]
+    author_avatar_url: Option<String>,
     is_draft: bool,
     updated_at: String,
     why_listed: RememberedWhy,
@@ -74,7 +78,10 @@ impl RememberedPullRequestsFile {
                 Ok(RelevantPullRequest {
                     url: pull_request.url.parse()?,
                     title: pull_request.title,
-                    author: pull_request.author,
+                    author: PrAuthor {
+                        login: pull_request.author.into(),
+                        avatar_url: pull_request.author_avatar_url.map(Into::into),
+                    },
                     is_draft: pull_request.is_draft,
                     updated_at: pull_request.updated_at,
                     why_listed: match pull_request.why_listed {
@@ -93,7 +100,8 @@ impl RememberedPullRequestsFile {
             .map(|pull_request| Remembered {
                 url: pull_request.url.to_string(),
                 title: pull_request.title.clone(),
-                author: pull_request.author.clone(),
+                author: pull_request.author.login.to_string(),
+                author_avatar_url: pull_request.author.avatar_url.as_deref().map(str::to_owned),
                 is_draft: pull_request.is_draft,
                 updated_at: pull_request.updated_at.clone(),
                 why_listed: match pull_request.why_listed {

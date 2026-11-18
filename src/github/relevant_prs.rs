@@ -7,7 +7,8 @@ use super::GitHub;
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    GitHubError, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
+    GitHubError, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
+    WhyListed,
 };
 
 const TEAM_SEARCH_LIMIT: usize = 10;
@@ -29,7 +30,7 @@ const PULL_REQUEST_FIELDS: &str = "fragment pr on PullRequest {
     title
     isDraft
     updatedAt
-    author { login }
+    author { login avatarUrl(size: 64) }
     reviewRequests(first: 20) {
         nodes { requestedReviewer { ... on User { login } ... on Team { combinedSlug } } }
     }
@@ -43,14 +44,16 @@ struct PullRequestJson {
     is_draft: bool,
     #[serde(rename = "updatedAt")]
     updated_at: String,
-    author: Option<LoginJson>,
+    author: Option<AuthorJson>,
     #[serde(rename = "reviewRequests")]
     review_requests: ReviewRequestsJson,
 }
 
 #[derive(Deserialize)]
-struct LoginJson {
+struct AuthorJson {
     login: String,
+    #[serde(rename = "avatarUrl")]
+    avatar_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -129,7 +132,16 @@ impl RelevantPullRequestsPort for GitHub {
                     RelevantPullRequest {
                         url,
                         title: json.title,
-                        author: json.author.map_or_else(|| "ghost".to_owned(), |a| a.login),
+                        author: json.author.map_or_else(
+                            || PrAuthor {
+                                login: "ghost".into(),
+                                avatar_url: None,
+                            },
+                            |author| PrAuthor {
+                                login: author.login.into(),
+                                avatar_url: author.avatar_url.map(Into::into),
+                            },
+                        ),
                         is_draft: json.is_draft,
                         updated_at: json.updated_at,
                         why_listed,
