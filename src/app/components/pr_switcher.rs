@@ -29,6 +29,7 @@ use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
 };
 use super::palette::{CODE_FONT, Colors, INNER_RADIUS, Tone};
+use super::scrollbar::{ScrollThumb, TRACK_WIDTH, scrollbar};
 use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -38,7 +39,6 @@ use super::thread_view::avatar_circle;
 const LINE_HEIGHT: Pixels = px(28.);
 const ROW_HEIGHT: Pixels = px(56.);
 const LEAD_SIZE: f32 = 30.;
-const MIN_THUMB_HEIGHT: Pixels = px(20.);
 
 /// What the switcher needs from the app: where the list comes from, and how to ask the app to show
 /// a PR. Nothing in it belongs to one PR, so it may live as long as the app.
@@ -710,8 +710,11 @@ impl Render for PrSwitcherView {
             })
             .collect();
         let overflows = rows_on_screen < self.shown.len();
-        let scrollbar =
-            overflows.then(|| scrollbar(first_shown, rows_on_screen, self.shown.len(), &colors));
+        let scrollbar = rows_thumb(first_shown, rows_on_screen, self.shown.len()).map(|thumb| {
+            scrollbar(&colors, "pr-switcher-scrollbar", thumb, false)
+                .top(px(8.))
+                .h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32)
+        });
         let empty_text = if is_loading {
             "Loading your pull requests from GitHub..."
         } else {
@@ -757,7 +760,8 @@ impl Render for PrSwitcherView {
                             .flex_col()
                             .on_scroll(cx.listener(Self::on_scroll))
                             .when(overflows, |list| {
-                                list.h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32 + px(16.))
+                                list.pr(TRACK_WIDTH - px(8.))
+                                    .h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32 + px(16.))
                             })
                             .children(lines)
                             .when(self.shown.is_empty(), |list| {
@@ -802,24 +806,13 @@ impl Render for PrSwitcherView {
     }
 }
 
-/// A thumb on the right edge of the rows: where the rows shown sit in the whole list. It shows only
-/// when some rows are out of sight.
-fn scrollbar(
-    first_shown: usize,
-    on_screen: usize,
-    total: usize,
-    colors: &Colors,
-) -> impl IntoElement {
+/// Where the rows on screen sit in the whole list, drawn as a thumb on the track beside the rows.
+fn rows_thumb(first_shown: usize, on_screen: usize, total: usize) -> Option<ScrollThumb> {
     let track = LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32;
-    let share = |rows: usize| track * (rows as f32 / total as f32);
-    let height = share(on_screen).max(MIN_THUMB_HEIGHT);
-    let top = px(8.) + share(first_shown).min(track - height);
-    div()
-        .absolute()
-        .right(px(2.))
-        .top(top)
-        .w(px(5.))
-        .h(height)
-        .rounded_full()
-        .bg(colors.muted_text)
+    let row = track / on_screen.max(1) as f32;
+    ScrollThumb::of(
+        track,
+        row * first_shown as f32,
+        row * total.saturating_sub(on_screen) as f32,
+    )
 }

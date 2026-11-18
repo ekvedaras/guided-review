@@ -11,13 +11,13 @@ use gpui::{
 
 use crate::app::components::markdown_view::{MarkdownView, PreparedMarkdown};
 use crate::app::components::palette::{CARD_RADIUS, Colors, Tone};
+use crate::app::components::scrollbar::{ScrollThumb, scrollbar};
 use crate::issue::IssueLink;
 use crate::viewer::{IssueDetails, IssueState};
 
 const ISSUE_CARD_WIDTH: f32 = 560.;
 /// How tall the issue's description is before it scrolls.
 const ISSUE_BODY_HEIGHT: f32 = 420.;
-const MIN_THUMB_HEIGHT: f32 = 24.;
 
 /// Which of the issue button, or the rows of its list, and which card the mouse is on; the card
 /// shows while it is on either, so the mouse can cross the gap between them.
@@ -169,21 +169,11 @@ pub fn issue_card(
 
 /// A thumb on the description's right edge, shown only when some of it is out of sight.
 fn scroll_thumb(colors: &Colors, scroll: &ScrollHandle) -> Option<impl IntoElement + use<>> {
-    let hidden = scroll.max_offset().y;
     let view = scroll.bounds().size.height;
-    if hidden <= px(0.) || view <= px(0.) {
-        return None;
-    }
-    let height = (view * (view / (view + hidden))).max(px(MIN_THUMB_HEIGHT));
-    let scrolled = (-scroll.offset().y / hidden).clamp(0., 1.);
+    let thumb = ScrollThumb::of(view, -scroll.offset().y, scroll.max_offset().y)?;
     Some(
-        div()
-            .absolute()
-            .right_0()
-            .top(px(8.) + (view - height) * scrolled)
-            .w(px(5.))
-            .h(height)
-            .rounded_full()
-            .bg(colors.muted_text),
+        scrollbar(colors, "issue-card-scrollbar", thumb, false)
+            .top(px(8.))
+            .h(view),
     )
 }

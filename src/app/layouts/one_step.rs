@@ -55,7 +55,6 @@ use crate::app::components::motion::{
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::overlay::popover;
-use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone,
     TrailStage,
@@ -66,6 +65,7 @@ use crate::app::components::pr_switcher::{
 };
 use crate::app::components::refresh_banner::RefreshBanner;
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::scrollbar::{ScrollThumb, scrollbar};
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
@@ -2931,14 +2931,9 @@ impl OneStepLayout {
         let colors = Colors::active(cx);
         let is_dragging = self.scrollbar_grab.is_some();
         Some(
-            div()
-                .id("page-scrollbar")
-                .group("page-scrollbar")
-                .absolute()
+            scrollbar(&colors, "page-scrollbar", thumb, is_dragging)
                 .top_0()
                 .bottom_0()
-                .right_0()
-                .w(px(12.))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
@@ -2954,21 +2949,6 @@ impl OneStepLayout {
                         this.screen_list.scrollbar_drag_started();
                         this.drag_scrollbar_to(event.position.y, cx);
                     }),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top(thumb.top)
-                        .right(px(3.))
-                        .w(px(6.))
-                        .h(thumb.height)
-                        .rounded_full()
-                        .bg(colors
-                            .muted_text
-                            .opacity(if is_dragging { 0.6 } else { 0.3 }))
-                        .group_hover("page-scrollbar", |thumb| {
-                            thumb.bg(colors.muted_text.opacity(0.6))
-                        }),
                 ),
         )
     }

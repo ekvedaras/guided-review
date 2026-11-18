@@ -1,6 +1,47 @@
-//! The page's scrollbar: a thumb on the right edge that shows where the view is and drags it.
+//! The one scrollbar look: a thumb on the right edge of what scrolls, that shows where the view is.
+//! The page, the PR switcher and the issue card all draw it here, so they look the same.
 
-use gpui::{Pixels, px};
+use gpui::prelude::FluentBuilder;
+use gpui::{Div, ElementId, InteractiveElement, ParentElement, Pixels, Stateful, Styled, div, px};
+
+use super::palette::Colors;
+
+/// The track's width at the right edge; the thumb sits in its middle.
+pub const TRACK_WIDTH: Pixels = px(12.);
+const THUMB_WIDTH: Pixels = px(6.);
+
+/// The track and its thumb, quiet at rest and brighter under the pointer or while dragged. The
+/// caller places the track (its top and bottom, which must span the `track` the thumb was made for)
+/// and adds a drag when it has one.
+pub fn scrollbar(
+    colors: &Colors,
+    id: impl Into<ElementId>,
+    thumb: ScrollThumb,
+    is_dragging: bool,
+) -> Stateful<Div> {
+    let id = id.into();
+    let group = gpui::SharedString::from(format!("{id}"));
+    div()
+        .id(id)
+        .group(group.clone())
+        .absolute()
+        .right_0()
+        .w(TRACK_WIDTH)
+        .child(
+            div()
+                .absolute()
+                .top(thumb.top)
+                .right((TRACK_WIDTH - THUMB_WIDTH) / 2.)
+                .w(THUMB_WIDTH)
+                .h(thumb.height)
+                .rounded_full()
+                .bg(colors.muted_text.opacity(0.3))
+                .when(is_dragging, |thumb| {
+                    thumb.bg(colors.muted_text.opacity(0.6))
+                })
+                .group_hover(group, |thumb| thumb.bg(colors.muted_text.opacity(0.6))),
+        )
+}
 
 const MIN_THUMB_HEIGHT: Pixels = px(24.);
 
