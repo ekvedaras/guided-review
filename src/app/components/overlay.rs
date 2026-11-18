@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnimationElement, Context, Div, ElementId, InteractiveElement, IntoElement, ParentElement,
-    Stateful, StatefulInteractiveElement, Styled, div, px,
+    AnimationElement, Context, Deferred, Div, ElementId, InteractiveElement, IntoElement,
+    ParentElement, Stateful, StatefulInteractiveElement, Styled, anchored, deferred, div, px,
 };
 
 use crate::viewer::{Closing, Motion, Presence, Shown};
@@ -121,6 +121,22 @@ pub fn rise_for<E: IntoElement + Styled + ParentElement + 'static>(
                 .opacity(level)
                 .top(OVERLAY_RISE * (1. - level))
         },
+    )
+}
+
+/// A panel that floats over the page beside what opens it: a list, a card or a picker. It is
+/// drawn on top, kept inside the window, and takes the mouse, so the page under it neither lights
+/// up nor scrolls while the mouse is on it. The one way to build one: `gpui::deferred` is
+/// disallowed elsewhere (`clippy.toml`), since a bare one lets hover and scroll through (#133).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one place a floating panel is built, so every one occludes"
+)]
+pub fn popover(panel: impl IntoElement) -> Deferred {
+    deferred(
+        anchored()
+            .snap_to_window_with_margin(px(8.))
+            .child(div().occlude().child(panel)),
     )
 }
 

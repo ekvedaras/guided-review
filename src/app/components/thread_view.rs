@@ -5,12 +5,13 @@ use std::sync::Arc;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
-    deferred, div, img, px,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, img,
+    px,
 };
 
 use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
+use crate::app::components::overlay::popover;
 use crate::viewer::{
     Audience, CommentId, HandOffButton, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
     ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadView,
@@ -412,42 +413,40 @@ impl ThreadElement {
         .on_click(toggle_picker);
         let picker = is_picking.then(|| {
             let close_ui = ui.clone();
-            deferred(
-                anchored().snap_to_window_with_margin(px(8.)).child(
-                    div()
-                        .id(SharedString::from(format!("react-picker-{}", comment.id)))
-                        .mt(px(28.))
-                        .p_1()
-                        .flex()
-                        .gap_0p5()
-                        .bg(colors.overlay)
-                        .border_1()
-                        .border_color(colors.border)
-                        .rounded(px(CARD_RADIUS))
-                        .shadow(colors.overlay_shadow())
-                        .on_mouse_down_out(move |_, _, cx| {
-                            close_ui.update(cx, |ui, cx| {
-                                ui.picking_reaction = None;
-                                cx.notify();
-                            });
-                        })
-                        .children(summary.iter().map(|count| {
-                            reaction_pill(
-                                colors,
-                                SharedString::from(format!(
-                                    "react-pick-{}-{}",
-                                    comment.id,
-                                    count.reaction.github_name()
-                                )),
-                                count.reaction.emoji().to_owned(),
-                                0,
-                                count.viewer_has_reacted,
-                            )
-                            .h(px(28.))
-                            .min_w(px(32.))
-                            .on_click(react(count.reaction, count.viewer_has_reacted))
-                        })),
-                ),
+            popover(
+                div()
+                    .id(SharedString::from(format!("react-picker-{}", comment.id)))
+                    .mt(px(28.))
+                    .p_1()
+                    .flex()
+                    .gap_0p5()
+                    .bg(colors.overlay)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(CARD_RADIUS))
+                    .shadow(colors.overlay_shadow())
+                    .on_mouse_down_out(move |_, _, cx| {
+                        close_ui.update(cx, |ui, cx| {
+                            ui.picking_reaction = None;
+                            cx.notify();
+                        });
+                    })
+                    .children(summary.iter().map(|count| {
+                        reaction_pill(
+                            colors,
+                            SharedString::from(format!(
+                                "react-pick-{}-{}",
+                                comment.id,
+                                count.reaction.github_name()
+                            )),
+                            count.reaction.emoji().to_owned(),
+                            0,
+                            count.viewer_has_reacted,
+                        )
+                        .h(px(28.))
+                        .min_w(px(32.))
+                        .on_click(react(count.reaction, count.viewer_has_reacted))
+                    })),
             )
             .with_priority(1)
         });

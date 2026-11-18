@@ -3,8 +3,7 @@ use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
     ParentElement, PathPromptOptions, Pixels, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Subscription, Window, actions, anchored, deferred, div,
-    list, px,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -55,6 +54,7 @@ use crate::app::components::motion::{
     pop_in, slide_in, turn_to,
 };
 use crate::app::components::new_commits_banner::NewCommitsBanner;
+use crate::app::components::overlay::popover;
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
     CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
@@ -2409,11 +2409,13 @@ impl OneStepLayout {
         })
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenIssue, window, cx)));
         let card = match (&*issues, self.issue_hover.shown()) {
-            ([only], Some(0)) => Some(deferred(
-                anchored()
-                    .snap_to_window_with_margin(px(8.))
-                    .child(self.issue_card_element(colors, only, 0, CardSide::Below, cx)),
-            )),
+            ([only], Some(0)) => Some(popover(self.issue_card_element(
+                colors,
+                only,
+                0,
+                CardSide::Below,
+                cx,
+            ))),
             _ => None,
         };
         Some(
@@ -2531,29 +2533,27 @@ impl OneStepLayout {
                     .left(gpui::relative(1.)),
             )
         });
-        deferred(
-            anchored().snap_to_window_with_margin(px(8.)).child(
-                div()
-                    .id("title-bar-issue-list")
-                    .relative()
-                    .mt_1()
-                    .w(px(CHECKS_LIST_WIDTH))
-                    .p_1()
-                    .flex()
-                    .flex_col()
-                    .text_sm()
-                    .bg(colors.overlay)
-                    .border_1()
-                    .border_color(colors.border)
-                    .rounded(px(CARD_RADIUS))
-                    .shadow(colors.overlay_shadow())
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        this.issue_list_open = false;
-                        cx.notify();
-                    }))
-                    .children(rows)
-                    .children(card),
-            ),
+        popover(
+            div()
+                .id("title-bar-issue-list")
+                .relative()
+                .mt_1()
+                .w(px(CHECKS_LIST_WIDTH))
+                .p_1()
+                .flex()
+                .flex_col()
+                .text_sm()
+                .bg(colors.overlay)
+                .border_1()
+                .border_color(colors.border)
+                .rounded(px(CARD_RADIUS))
+                .shadow(colors.overlay_shadow())
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.issue_list_open = false;
+                    cx.notify();
+                }))
+                .children(rows)
+                .children(card),
         )
     }
 
@@ -2692,32 +2692,30 @@ impl OneStepLayout {
                 })
                 .child(format!("and {} more on GitHub", list.hidden))
         });
-        deferred(
-            anchored().snap_to_window_with_margin(px(8.)).child(
-                div()
-                    .id("title-bar-checks-hover")
-                    .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
-                        this.checks_hover.list = *is_hovered;
-                        cx.notify();
-                    }))
-                    .child(div().h(px(4.)))
-                    .child(
-                        div()
-                            .id("title-bar-checks-list")
-                            .w(px(CHECKS_LIST_WIDTH))
-                            .p_1()
-                            .flex()
-                            .flex_col()
-                            .text_sm()
-                            .bg(colors.overlay)
-                            .border_1()
-                            .border_color(colors.border)
-                            .rounded(px(CARD_RADIUS))
-                            .shadow(colors.overlay_shadow())
-                            .children(rows)
-                            .children(more),
-                    ),
-            ),
+        popover(
+            div()
+                .id("title-bar-checks-hover")
+                .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
+                    this.checks_hover.list = *is_hovered;
+                    cx.notify();
+                }))
+                .child(div().h(px(4.)))
+                .child(
+                    div()
+                        .id("title-bar-checks-list")
+                        .w(px(CHECKS_LIST_WIDTH))
+                        .p_1()
+                        .flex()
+                        .flex_col()
+                        .text_sm()
+                        .bg(colors.overlay)
+                        .border_1()
+                        .border_color(colors.border)
+                        .rounded(px(CARD_RADIUS))
+                        .shadow(colors.overlay_shadow())
+                        .children(rows)
+                        .children(more),
+                ),
         )
     }
 
