@@ -103,6 +103,7 @@ mod presence;
 mod problems;
 mod read_ticks;
 mod refresh;
+mod related_issues;
 mod release_install;
 mod relevant_prs;
 mod rendered_view;

@@ -63,7 +63,7 @@ use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
     AskAboutStep, CloseWindow, Collaborators, CopySelection, FocusNextChange, FocusPreviousChange,
-    GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenPrOnGitHub, ReadDown, ReadUp,
+    GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenIssue, OpenPrOnGitHub, ReadDown, ReadUp,
     ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge, ToggleDraft, ToggleFold, ToggleJump,
     TogglePieceLabels, ToggleRead, ToggleRenderedView, ToggleSettings, ToggleShortcuts,
     ToggleWhitespace, ToggleWrapLines,
@@ -966,6 +966,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
                 Command::OpenOnGitHub => KeyBinding::new(&keys, OpenPrOnGitHub, context),
+                Command::OpenIssue => KeyBinding::new(&keys, OpenIssue, context),
                 Command::CloseWindow => KeyBinding::new(&keys, CloseWindow, context),
                 Command::Quit => KeyBinding::new(&keys, Quit, context),
             }

@@ -56,6 +56,7 @@ mod press_again;
 mod problems;
 mod reactions;
 mod refresh;
+mod related_issues;
 mod relevant_prs;
 mod remembered_prs;
 mod rendered_view;
@@ -180,6 +181,7 @@ pub use press_again::{CONFIRM_WITHIN, PressStep};
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};
+pub use related_issues::{PullRequestIssues, RelatedIssue};
 pub use relevant_prs::{
     RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
 };

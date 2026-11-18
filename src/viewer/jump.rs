@@ -208,6 +208,8 @@ pub enum PaletteAction {
     OpenOnGitHub,
     /// GitHub's checks page of the PR.
     OpenChecksOnGitHub,
+    /// Offered only where the review knows its issue; lists them when there are several.
+    OpenIssue,
     /// Offered only where the PR is ready and the viewer may change it.
     ConvertToDraft,
     /// Offered only where the PR is a draft and the viewer may change it.
@@ -253,6 +255,7 @@ impl PaletteAction {
             Self::OpenPr => "Open PR",
             Self::OpenOnGitHub => "Open on GitHub",
             Self::OpenChecksOnGitHub => "Open checks on GitHub",
+            Self::OpenIssue => "Open related issue",
             Self::ConvertToDraft => "Convert to draft",
             Self::MarkReadyForReview => "Mark as ready for review",
             Self::EnableAutoMerge => "Enable auto-merge",
@@ -283,6 +286,7 @@ impl PaletteAction {
                 Some(Command::ToggleAutoMerge)
             }
             Self::Settings => Some(Command::Settings),
+            Self::OpenIssue => Some(Command::OpenIssue),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
             Self::AskAboutStep => Some(Command::AskAboutStep),

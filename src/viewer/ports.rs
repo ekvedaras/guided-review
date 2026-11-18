@@ -9,6 +9,7 @@ use super::github_outage::OutageCause;
 use super::merging::MergeChange;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
+use super::related_issues::PullRequestIssues;
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
@@ -58,6 +59,9 @@ pub trait PullRequestDescriptionPort: Send + Sync {
     fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, GitHubError>;
 
     fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
+
+    /// The issues the PR would close, as its description or GitHub's sidebar links them.
+    fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError>;
 }
 
 /// The viewer's reactions on the PR itself, which GitHub shows under its description.

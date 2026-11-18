@@ -10,6 +10,7 @@ use super::ports::{
 };
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
+use super::related_issues::PullRequestIssues;
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
@@ -92,6 +93,10 @@ impl PullRequestDescriptionPort for NoGitHub {
         _body: &str,
     ) -> anyhow::Result<()> {
         Ok(refused()?)
+    }
+
+    fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+        refused()
     }
 }
 

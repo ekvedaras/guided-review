@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::file_path::FilePath;
 use crate::image_facts;
+use crate::issue::IssueUrl;
 use crate::json::at;
 use crate::line_number::LineNumber;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
@@ -20,10 +21,11 @@ use crate::viewer::{
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
     NoAccess, OutageCause, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
-    ReactionCount, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
+    PullRequestIssues, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
+    Reaction, ReactionChange, ReactionCount, RelatedIssue, RepoCloner, Resolution, ReviewOutcome,
+    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
+    SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -559,6 +561,47 @@ impl PullRequestDescriptionPort for GitHub {
         )
         .with_context(|| format!("could not change the description of {pr} on GitHub"))?;
         Ok(())
+    }
+
+    fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                        pullRequest(number: $number) {
+                            headRefName
+                            closingIssuesReferences(first: 20) {
+                                nodes { number title repository { nameWithOwner } }
+                            }
+                        }
+                    }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read the issues of {pr}")))?;
+        let pull = at(&data, "/repository/pullRequest");
+        let linked = at(pull, "/closingIssuesReferences/nodes")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|node| {
+                let repo: RepoName = at(node, "/repository/nameWithOwner")
+                    .as_str()?
+                    .parse()
+                    .ok()?;
+                Some(RelatedIssue {
+                    url: IssueUrl::new(repo, at(node, "/number").as_u64()?),
+                    title: at(node, "/title").as_str().map(Arc::from),
+                })
+            })
+            .collect();
+        let head_branch = at(pull, "/headRefName")
+            .as_str()
+            .and_then(|name| BranchName::new(name).ok());
+        Ok(PullRequestIssues {
+            linked,
+            head_branch,
+        })
     }
 }
 

@@ -7,6 +7,7 @@ use super::file_tree::FolderPath;
 use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
 use super::review::{ReadSubject, ReviewCore, Screen};
+use crate::issue::IssueUrl;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
@@ -53,6 +54,10 @@ pub enum Intent {
     /// A row of the title bar's check list, by its place in the list; the row past the last is the
     /// "and more" one. Opens the check's run, else the checks page.
     OpenCheck(usize),
+    /// `I`: opens the review's issue, or lists them when there are several.
+    OpenIssue,
+    /// A row of the issue list, by its place in it.
+    OpenIssueAt(usize),
     /// `D`: asks, and on the same press again soon after, converts the PR to a draft or marks it ready.
     ToggleDraft,
     /// `Shift+M`: asks, and on the same press again soon after, turns auto-merge on or off, or
@@ -85,6 +90,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::SendTasks => Self::SendTasks,
             PaletteAction::OpenPr => Self::OpenPr,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
+            PaletteAction::OpenIssue => Self::OpenIssue,
             PaletteAction::OpenChecksOnGitHub => Self::OpenChecksOnGitHub,
             PaletteAction::ConvertToDraft | PaletteAction::MarkReadyForReview => Self::ToggleDraft,
             PaletteAction::EnableAutoMerge
@@ -125,6 +131,9 @@ pub enum Effect {
     OpenPr,
     OpenOnGitHub(PullRequestUrl),
     OpenChecksOnGitHub(PullRequestUrl),
+    OpenIssue(IssueUrl),
+    /// The review is about several issues: the window lists them to pick one.
+    ListIssues,
     /// A check's run, on the page GitHub gave.
     OpenCheck(String),
     /// The window asks the review to change the PR between draft and ready, and says what it answers.
@@ -251,6 +260,8 @@ impl Intent {
             | Self::OpenOnGitHub
             | Self::OpenChecksOnGitHub
             | Self::OpenCheck(_)
+            | Self::OpenIssue
+            | Self::OpenIssueAt(_)
             | Self::CheckForUpdates
             | Self::RestartApp => false,
         };
@@ -342,6 +353,17 @@ impl ReviewCore {
                     (None, None) => Effect::Nothing,
                 }
             }
+            Intent::OpenIssue => match &*self.related_issues() {
+                [] => Effect::Nothing,
+                [only] => Effect::OpenIssue(only.url.clone()),
+                [_, _, ..] => Effect::ListIssues,
+            },
+            Intent::OpenIssueAt(place) => self
+                .related_issues()
+                .get(place)
+                .map_or(Effect::Nothing, |issue| {
+                    Effect::OpenIssue(issue.url.clone())
+                }),
             Intent::ToggleDraft => Effect::ChangeReadiness,
             Intent::ToggleAutoMerge => Effect::ChangeMerging,
             Intent::CheckForUpdates => Effect::CheckForUpdates,

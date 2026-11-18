@@ -44,6 +44,8 @@
 
 **Clone offer**: The sidebar's offer to clone the PR's repo when no local clone was found and its code is read from GitHub. The folder is suggested beside the clones Settings names, else in a usual code folder of home (`~/Work`, `~/Code`, `~/Projects`, `~/PhpStormProjects`, …), else in home; a picked folder that already is a clone is used as it is. `gh repo clone` makes it, Settings saves it, and the tour is read again on it in place. Not now hides it for this review only.
 
+**Related issue**: A GitHub issue the review is about, which the title bar's button and the key `I` open. The first source that names any wins: the issues GitHub links to the PR (its closing references), then the guided tour's `issue`, then the branch name (`123-totals`, `feat/123-totals`, `issue-123`, `gh-123`). With several, the button lists them, each opened by a click or its number key. Avoid: ticket, linked issue (that is only GitHub's source).
+
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 
 **Step**: One stop in a tour. It holds diff pieces, a diagram, or both, and a short text that says what they do and why they come at this point. A step can have child steps: the details of that step. The reader sees a step first, then its child steps.

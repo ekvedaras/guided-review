@@ -26,11 +26,11 @@ use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
     Checks, CommentId, CommentPlace, GitHubError, NoAccess, NotDelivered, PictureUploadPort,
-    PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestReactionsPort,
-    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, Readiness,
-    RelevantPullRequests, RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId,
-    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
+    ReactionCount, Readiness, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -204,6 +204,7 @@ pub struct FakeGitHub {
     status: Mutex<PrStatus>,
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
     head_branches: Mutex<Vec<(String, String)>>,
+    issues: Mutex<PullRequestIssues>,
 }
 
 impl FakeGitHub {
@@ -232,6 +233,7 @@ impl FakeGitHub {
             }),
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),
+            issues: Mutex::default(),
         }
     }
 
@@ -267,6 +269,11 @@ impl FakeGitHub {
     }
 
     /// The PR's status as it is on GitHub.
+    pub fn with_issues(self, issues: PullRequestIssues) -> Self {
+        *self.issues.lock().unwrap() = issues;
+        self
+    }
+
     pub fn with_status(self, status: PrStatus) -> Self {
         self.set_status(status);
         self
@@ -461,6 +468,11 @@ impl PullRequestDescriptionPort for FakeGitHub {
         self.fail_if_connection_lost()?;
         body.clone_into(&mut self.description.lock().unwrap());
         Ok(())
+    }
+
+    fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+        self.fail_if_reads_fail()?;
+        Ok(self.issues.lock().unwrap().clone())
     }
 }
 

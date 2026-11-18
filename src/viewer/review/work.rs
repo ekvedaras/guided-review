@@ -63,6 +63,7 @@ impl ReviewCore {
                 Job::LookUpHeadBranch(self.branch_link.head_branch_to_look_up()?.clone())
             }
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
+            WorkKind::PullRelatedIssues => Job::PullRelatedIssues(pr()?),
             WorkKind::SyncViewed => Job::SyncViewed(self.sync_request()?),
             WorkKind::PullThreads => Job::PullThreads {
                 home: self.thread_home(),
@@ -139,6 +140,9 @@ impl ReviewCore {
                 self.set_pr_description(&body).ok();
             }
             Done::PrDescription(Err(error)) => self.could_not_read(Read::PrDescription, &error),
+            // The issue button is a shortcut, not something to warn of: a failed read keeps the last answer.
+            Done::RelatedIssues(Ok(issues)) => self.related_issues.github_says(issues),
+            Done::RelatedIssues(Err(_)) => {}
             Done::SyncViewed(outcome) => {
                 self.apply_sync(outcome).ok();
             }
