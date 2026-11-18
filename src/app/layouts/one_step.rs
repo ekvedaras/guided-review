@@ -2418,7 +2418,7 @@ impl OneStepLayout {
         let mut base_chip = chip(colors, Tone::Neutral);
         base_chip.style().flex_shrink = Some(1.);
         let base = base
-            .min_w(px(BASE_BRANCH_MIN_WIDTH))
+            .min_w(base_branch_min_width(&route.base.to_string(), cx))
             .flex()
             .child(
                 base_chip
@@ -3912,6 +3912,21 @@ const PR_TITLE_MIN_WIDTH: f32 = 290.;
 const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 100.;
 const BASE_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 10.;
 const BASE_BRANCH_MIN_WIDTH: f32 = 120.;
+
+/// The base branch keeps `BASE_BRANCH_MIN_WIDTH` when the title bar is short of room, but never
+/// more than its chip: a fixed minimum left a short name like `main` with a gap beside its chip.
+fn base_branch_min_width(name: &str, cx: &App) -> Pixels {
+    // The chip's `text_xs` code, its padding and its border, as `chip` draws them.
+    const CHIP_TEXT_SIZE: f32 = 12.;
+    const CHIP_EDGES: f32 = 14.;
+    let text = cx.text_system();
+    let font_id = text.resolve_font(&gpui::font(*CODE_FONT));
+    let name_width = name
+        .chars()
+        .filter_map(|ch| text.advance(font_id, px(CHIP_TEXT_SIZE), ch).ok())
+        .fold(px(CHIP_EDGES), |width, glyph| width + glyph.width);
+    name_width.min(px(BASE_BRANCH_MIN_WIDTH))
+}
 const ROUTE_AVATAR_SIZE: f32 = 18.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
