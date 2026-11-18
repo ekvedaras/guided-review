@@ -872,15 +872,29 @@ fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement 
 
 /// The author's picture as a circle, or their first letter in one while it downloads or when it cannot.
 fn person_avatar(colors: &Colors, comment: &ThreadComment, size: f32, cx: &mut App) -> AnyElement {
+    avatar_circle(
+        colors,
+        &comment.author,
+        comment.avatar_url.as_deref(),
+        size,
+        cx,
+    )
+}
+
+/// A person's picture as a circle, or their first letter in one while it downloads or when it cannot.
+pub fn avatar_circle(
+    colors: &Colors,
+    login: &str,
+    avatar_url: Option<&str>,
+    size: f32,
+    cx: &mut App,
+) -> AnyElement {
     let circle = div()
         .flex_none()
         .size(px(size))
         .rounded_full()
         .overflow_hidden();
-    let picture = comment
-        .avatar_url
-        .as_deref()
-        .and_then(|url| AvatarPictures::picture(url, cx));
+    let picture = avatar_url.and_then(|url| AvatarPictures::picture(url, cx));
     match picture {
         Some(picture) => circle
             .child(img(picture).size_full().rounded_full())
@@ -893,8 +907,7 @@ fn person_avatar(colors: &Colors, comment: &ThreadComment, size: f32, cx: &mut A
             .text_xs()
             .text_color(colors.muted_text)
             .child(
-                comment
-                    .author
+                login
                     .chars()
                     .next()
                     .map_or_default(|first| first.to_uppercase().collect::<String>()),

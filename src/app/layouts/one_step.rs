@@ -57,7 +57,8 @@ use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::overlay::popover;
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
-    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
+    CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone,
+    TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
 use crate::app::components::pr_switcher::{
@@ -76,7 +77,7 @@ use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
     DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnHandOffButton, OnReplyDraft, OnThreadAction,
-    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
+    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement, avatar_circle,
 };
 use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge, title_inset};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -146,6 +147,8 @@ actions!(
         ToggleShortcuts,
         OpenPrOnGitHub,
         OpenIssue,
+        AskToOpenPr,
+        TogglePrSwitcher,
         CloseWindow
     ]
 );
@@ -1337,9 +1340,7 @@ impl OneStepLayout {
     ) {
         let session = self.session.read(cx);
         let font_size = window.rem_size() * 0.875;
-        let font_id = window
-            .text_system()
-            .resolve_font(&gpui::font(*crate::app::components::palette::CODE_FONT));
+        let font_id = window.text_system().resolve_font(&gpui::font(*CODE_FONT));
         let char_width = window
             .text_system()
             .advance(font_id, font_size, 'm')
@@ -2257,6 +2258,7 @@ impl OneStepLayout {
                 Icon::PullRequest,
             ))
             .child("Open PR")
+            .child(button_keys(&colors, ButtonKind::Ghost, Command::OpenPr, cx))
             .tooltip(tooltip(|_| {
                 "Ask your agent to open the PR: it types `pr it`".into()
             }))
@@ -2326,7 +2328,13 @@ impl OneStepLayout {
                         .into_any_element(),
                 ],
             })
-            .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
+            .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)))
+            .child(button_keys(
+                &colors,
+                ButtonKind::Ghost,
+                Command::SwitchPr,
+                cx,
+            ));
         let page_share = scrolled_share(
             -self.screen_list.scroll_px_offset_for_scrollbar().y,
             self.screen_list.max_offset_for_scrollbar().y,
@@ -2343,6 +2351,7 @@ impl OneStepLayout {
                     .gap_2()
                     .text_sm()
                     .child(switch_pr)
+                    .children(self.merge_route_parts(&colors, cx))
                     .children(status.as_ref().map(|status| {
                         match status {
                             PrStatus::Open(open) => {
@@ -2376,6 +2385,58 @@ impl OneStepLayout {
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
             })
+    }
+
+    /// Beside the title: the PR author's picture, the branch it merges into, and the branch it comes
+    /// from. Each is a child of the bar so that the head branch alone is cut, before the title.
+    fn merge_route_parts(&self, colors: &Colors, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let review = self.session.read(cx).review();
+        let (Some(route), Some(sentence)) = (review.merge_route(), review.merge_route_sentence())
+        else {
+            return Vec::new();
+        };
+        let sentence = SharedString::from(sentence);
+        let explained = |id: &'static str| {
+            let sentence = sentence.clone();
+            div().id(id).tooltip(tooltip(move |_| sentence.clone()))
+        };
+        let picture = review.pr_author().cloned().map(|author| {
+            explained("title-bar-pr-author")
+                .flex_none()
+                .child(avatar_circle(
+                    colors,
+                    &author.login,
+                    author.avatar_url.as_deref(),
+                    ROUTE_AVATAR_SIZE,
+                    cx,
+                ))
+                .into_any_element()
+        });
+        let mut base = explained("title-bar-base-branch");
+        base.style().flex_shrink = Some(BASE_BRANCH_SHRINKS_BEFORE_TITLE);
+        let mut base_chip = chip(colors, Tone::Neutral);
+        base_chip.style().flex_shrink = Some(1.);
+        let base = base
+            .min_w(px(BASE_BRANCH_MIN_WIDTH))
+            .flex()
+            .child(
+                base_chip
+                    .min_w_0()
+                    .font_family(*CODE_FONT)
+                    .child(div().min_w_0().truncate().child(route.base.to_string())),
+            )
+            .into_any_element();
+        let mut head = explained("title-bar-head-branch");
+        head.style().flex_shrink = Some(HEAD_BRANCH_SHRINKS_BEFORE_TITLE);
+        let head = head
+            .min_w_0()
+            .truncate()
+            .font_family(*CODE_FONT)
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(format!("← {}", route.head))
+            .into_any_element();
+        picture.into_iter().chain([base, head]).collect()
     }
 
     /// The review's issue, or how many there are; a click is the key `I`.
@@ -3521,7 +3582,7 @@ impl OneStepLayout {
                         .flex()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .font_family(*crate::app::components::palette::CODE_FONT)
+                        .font_family(*CODE_FONT)
                         .text_sm()
                         .children(folder.map(|folder| {
                             div()
@@ -3844,10 +3905,16 @@ impl ChecksHover {
 const CHECKS_LIST_WIDTH: f32 = 340.;
 /// The keys that open the issue list's rows, in order.
 const ISSUE_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-/// What the PR's name and title keep of the bar: its icon, the name (which never truncates) and
-/// the chevron, with a few characters of title. Past it the title is cut with an ellipsis, down to
+/// What the PR's name and title keep of the bar: its icon, the name (which never truncates), the
+/// chevron and the switch keys, with a few characters of title. Past it the title is cut with an ellipsis, down to
 /// nothing, and the controls to its right keep their width.
-const PR_TITLE_MIN_WIDTH: f32 = 220.;
+const PR_TITLE_MIN_WIDTH: f32 = 290.;
+/// The head branch gives up its room first, then the base branch down to a few characters, then the
+/// PR's title; the author's picture never shrinks.
+const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 100.;
+const BASE_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 10.;
+const BASE_BRANCH_MIN_WIDTH: f32 = 120.;
+const ROUTE_AVATAR_SIZE: f32 = 18.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
 const TITLE_SHRINKS_FIRST: f32 = 10_000.;
@@ -4275,7 +4342,7 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
             div()
                 .flex()
                 .gap_2()
-                .font_family(*crate::app::components::palette::CODE_FONT)
+                .font_family(*CODE_FONT)
                 .child(
                     div()
                         .text_color(colors.success)
@@ -4449,7 +4516,7 @@ fn line_counts(colors: &Colors, added: usize, removed: usize) -> impl IntoElemen
         .flex()
         .gap_2()
         .text_sm()
-        .font_family(*crate::app::components::palette::CODE_FONT)
+        .font_family(*CODE_FONT)
         .child(div().text_color(colors.success).child(format!("+{added}")))
         .child(
             div()
@@ -5111,6 +5178,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleJump, window, cx| {
                 this.act(Intent::ToggleJump, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &TogglePrSwitcher, window, cx| {
+                this.act(Intent::TogglePrSwitcher, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleSettings, window, cx| {
                 this.act(Intent::ToggleSettings, window, cx);
             }))
@@ -5128,6 +5198,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &OpenIssue, window, cx| {
                 this.act(Intent::OpenIssue, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &AskToOpenPr, window, cx| {
+                this.act(Intent::OpenPr, window, cx);
             }))
             .when(self.issue_list_open, |root| {
                 root.on_key_down(cx.listener(Self::pick_issue_by_key))

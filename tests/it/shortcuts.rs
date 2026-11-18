@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use gpui::Keystroke;
-use guided_review::viewer::{Chord, Command, KeyScope, ShortcutGroup, in_group};
+use guided_review::viewer::{Chord, Command, KeyScope, PaletteAction, ShortcutGroup, in_group};
 
 #[test]
 fn every_command_is_listed_once_under_one_heading_of_the_sheet() {
@@ -205,4 +205,15 @@ fn s_hides_whitespace_and_a_asks_about_the_step_wherever_the_page_takes_keys() {
     assert_eq!(Command::AskAboutStep.scope(), KeyScope::Page);
     assert_eq!(Command::AskAboutStep.group(), ShortcutGroup::Read);
     assert_eq!(Command::AskAboutStep.config_name(), "ask_about_step");
+}
+
+#[test]
+fn switch_pull_request_has_a_key_that_works_anywhere_in_the_window() {
+    assert_eq!(
+        Command::SwitchPr.default_chords()[0].keystroke(),
+        "secondary-p"
+    );
+    assert_eq!(Command::SwitchPr.config_name(), "switch_pr");
+    assert_eq!(Command::SwitchPr.scope(), KeyScope::Window);
+    assert_eq!(PaletteAction::SwitchPr.command(), Some(Command::SwitchPr));
 }

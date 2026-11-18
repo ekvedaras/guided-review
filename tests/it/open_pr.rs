@@ -14,8 +14,9 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{StepId, Tour};
 use guided_review::update::Build;
 use guided_review::viewer::{
-    AgentStatus, BranchOffer, Effect, Intent, NoteSubject, OwnAgentHandOff, PageRow, PaletteAction,
-    Review, ReviewStateFile, TerminalId, ToastTone, TourAgentPort, TourAgents, WindowMoment,
+    AgentStatus, BranchOffer, Command, Effect, Intent, NoteSubject, OwnAgentHandOff, PageRow,
+    PaletteAction, Review, ReviewStateFile, TerminalId, ToastTone, TourAgentPort, TourAgents,
+    WindowMoment,
 };
 use serde_json::json;
 
@@ -126,6 +127,10 @@ fn a_local_review_offers_open_pr_and_not_open_on_github() {
     assert!(offered(&opened.review, PaletteAction::OpenPr));
     assert!(!offered(&opened.review, PaletteAction::OpenOnGitHub));
     assert_eq!(PaletteAction::OpenPr.label(), "Open PR");
+    assert_eq!(PaletteAction::OpenPr.command(), Some(Command::OpenPr));
+    assert_eq!(Command::OpenPr.default_chords()[0].keystroke(), "p");
+    assert_eq!(Command::OpenPr.config_name(), "open_pr");
+    assert!(Command::ALL.contains(&Command::OpenPr));
     assert_eq!(
         opened
             .review
