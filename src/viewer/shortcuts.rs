@@ -41,6 +41,7 @@ const PRIMARY_ENTER: Chord = Chord::key(Key::Enter).with(Modifier::Primary);
 const PRIMARY_SHIFT_ENTER: Chord = PRIMARY_ENTER.with(Modifier::Shift);
 const ESCAPE: Chord = Chord::key(Key::Escape);
 const PRIMARY_K: Chord = primary('k');
+const PRIMARY_P: Chord = primary('p');
 const PRIMARY_C: Chord = primary('c');
 const PRIMARY_COMMA: Chord = primary(',');
 const PRIMARY_W: Chord = primary('w');
@@ -135,6 +136,7 @@ pub enum Command {
     OpenOnGitHub,
     OpenIssue,
     OpenPr,
+    SwitchPr,
     ToggleDraft,
     ToggleAutoMerge,
     CloseWindow,
@@ -142,7 +144,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -169,6 +171,7 @@ impl Command {
         Self::OpenOnGitHub,
         Self::OpenIssue,
         Self::OpenPr,
+        Self::SwitchPr,
         Self::ToggleDraft,
         Self::ToggleAutoMerge,
         Self::CloseWindow,
@@ -204,6 +207,7 @@ impl Command {
             Self::OpenOnGitHub => &[G],
             Self::OpenIssue => &[I],
             Self::OpenPr => &[P],
+            Self::SwitchPr => &[PRIMARY_P],
             Self::ToggleDraft => &[D],
             Self::ToggleAutoMerge => &[SHIFT_M],
             Self::CloseWindow => &[PRIMARY_W],
@@ -240,6 +244,7 @@ impl Command {
             Self::OpenOnGitHub => "open_on_github",
             Self::OpenIssue => "open_issue",
             Self::OpenPr => "open_pr",
+            Self::SwitchPr => "switch_pr",
             Self::ToggleDraft => "toggle_draft",
             Self::ToggleAutoMerge => "toggle_auto_merge",
             Self::CloseWindow => "close_window",
@@ -277,7 +282,7 @@ impl Command {
             | Self::OpenPr
             | Self::ToggleDraft
             | Self::ToggleAutoMerge => KeyScope::Page,
-            Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
+            Self::Jump | Self::SwitchPr | Self::Settings | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
             Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
@@ -308,6 +313,7 @@ impl Command {
             | Self::OpenOnGitHub
             | Self::OpenIssue
             | Self::OpenPr
+            | Self::SwitchPr
             | Self::ToggleDraft
             | Self::ToggleAutoMerge
             | Self::CloseWindow
@@ -345,6 +351,7 @@ impl Command {
             Self::OpenIssue => {
                 "Open the related issue on GitHub, or list them when there are several"
             }
+            Self::SwitchPr => "Switch to another pull request or local review",
             Self::OpenPr => "Ask your agent to open a pull request for the branch",
             Self::ToggleDraft => {
                 "Convert the pull request to a draft, or mark it ready; press again to confirm"

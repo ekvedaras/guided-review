@@ -67,8 +67,8 @@ use layouts::one_step::{
     AskAboutStep, AskToOpenPr, CloseWindow, Collaborators, CopySelection, FocusNextChange,
     FocusPreviousChange, GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenIssue,
     OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge, ToggleDraft,
-    ToggleFold, ToggleJump, TogglePieceLabels, ToggleRead, ToggleRenderedView, ToggleSettings,
-    ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
+    ToggleFold, ToggleJump, TogglePieceLabels, TogglePrSwitcher, ToggleRead, ToggleRenderedView,
+    ToggleSettings, ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -990,6 +990,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::OpenOnGitHub => KeyBinding::new(&keys, OpenPrOnGitHub, context),
                 Command::OpenIssue => KeyBinding::new(&keys, OpenIssue, context),
                 Command::OpenPr => KeyBinding::new(&keys, AskToOpenPr, context),
+                Command::SwitchPr => KeyBinding::new(&keys, TogglePrSwitcher, context),
                 Command::CloseWindow => KeyBinding::new(&keys, CloseWindow, context),
                 Command::Quit => KeyBinding::new(&keys, Quit, context),
             }

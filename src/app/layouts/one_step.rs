@@ -148,6 +148,7 @@ actions!(
         OpenPrOnGitHub,
         OpenIssue,
         AskToOpenPr,
+        TogglePrSwitcher,
         CloseWindow
     ]
 );
@@ -2327,7 +2328,13 @@ impl OneStepLayout {
                         .into_any_element(),
                 ],
             })
-            .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)));
+            .child(sized_icon(Icon::ChevronDown, colors.muted_text, px(12.)))
+            .child(button_keys(
+                &colors,
+                ButtonKind::Ghost,
+                Command::SwitchPr,
+                cx,
+            ));
         let page_share = scrolled_share(
             -self.screen_list.scroll_px_offset_for_scrollbar().y,
             self.screen_list.max_offset_for_scrollbar().y,
@@ -5162,6 +5169,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &ToggleJump, window, cx| {
                 this.act(Intent::ToggleJump, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TogglePrSwitcher, window, cx| {
+                this.act(Intent::TogglePrSwitcher, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleSettings, window, cx| {
                 this.act(Intent::ToggleSettings, window, cx);
