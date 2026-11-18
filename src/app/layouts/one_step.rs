@@ -3898,7 +3898,7 @@ const ISSUE_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const PR_TITLE_MIN_WIDTH: f32 = 220.;
 /// The author's picture and the base branch never shrink; the head branch gives up room ten times
 /// faster than the PR's title, so the title is cut after it.
-const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = 100_000.;
+const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = TITLE_SHRINKS_FIRST * 10.;
 const ROUTE_AVATAR_SIZE: f32 = 18.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
