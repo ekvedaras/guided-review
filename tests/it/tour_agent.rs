@@ -2,7 +2,7 @@ use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort,
-    TourAgentState, TourAgents, TourKind,
+    TourAgentState, TourAgents, TourKind, WriterHandOver,
 };
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -324,7 +324,10 @@ fn a_fourth_app_started_agent_is_refused_naming_the_working_ones_when_none_is_id
 fn writing_a_tour_starts_the_prs_one_tour_agent_in_its_folder_on_the_tour_skill() {
     let fake = Arc::new(FakeTourAgent::new());
 
-    let terminal = starting(&fake).write_tour(&url(PR_9), &pr()).unwrap();
+    let terminal = starting(&fake)
+        .write_tour(&url(PR_9), &pr())
+        .unwrap()
+        .into_terminal();
 
     let calls = fake.calls();
     let [
@@ -353,17 +356,18 @@ fn writing_a_tour_starts_the_prs_one_tour_agent_in_its_folder_on_the_tour_skill(
 }
 
 #[test]
-fn writing_a_tour_again_ends_the_app_started_agent_of_the_pr_first_and_unlabels_the_reviewers() {
+fn writing_a_tour_again_ends_the_app_started_agent_of_the_pr_and_hands_the_task_to_the_reviewers() {
     let fake = Arc::new(
         FakeTourAgent::new()
             .with_terminal("mine", Some(PR_9), AgentStatus::Idle)
             .app_started("t1", PR_9, AgentStatus::Idle, 100),
     );
 
-    let terminal = starting(&fake).write_tour(&url(PR_9), &pr()).unwrap();
+    let handed = starting(&fake).write_tour(&url(PR_9), &pr()).unwrap();
 
     assert_eq!(kills(&fake), [TourAgentCall::Kill(TerminalId::new("t1"))]);
-    assert_eq!(fake.agents_of(PR_9), [terminal.to_string()]);
+    assert_eq!(handed, WriterHandOver::Delivered(TerminalId::new("mine")));
+    assert_eq!(fake.agents_of(PR_9), ["mine"]);
 }
 
 #[test]

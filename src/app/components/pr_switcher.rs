@@ -17,8 +17,9 @@ use crate::local_change_sets::find_local_rows;
 use crate::opened_subject::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    ActivePr, LineAnchor, ListLine, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort,
-    RowKind, SwitcherRow, TourAgentPort, TourFact, WhyListed, WritingFact,
+    ActivePr, LineAnchor, ListLine, LocalRow, Pick, PrSwitcher, Presence, PullsOfBranchPort,
+    RelevantPullRequestsPort, RowKind, SwitcherRow, TourAgentPort, TourFact, WhyListed,
+    WritingFact,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_label_button};
@@ -60,6 +61,8 @@ pub struct PrSwitching {
     pub active: Entity<ActivePr>,
     /// Herdr, where tour agents write tours.
     pub agents: Arc<dyn TourAgentPort>,
+    /// Which branch a PR is opened from, so the reviewer's agent on it writes its tour.
+    pub head_branches: Arc<dyn PullsOfBranchPort>,
     /// The list, kept from one opening to the next and from one PR to the next.
     pub list: Entity<PrSwitcher>,
 }

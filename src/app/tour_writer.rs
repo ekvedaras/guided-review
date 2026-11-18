@@ -46,33 +46,44 @@ pub fn write_in_background(pr: ReviewSubject, cx: &mut App) {
         decision
     });
     if decision == WriteDecision::StartWriter {
-        hand_over(&switching, pr, cx);
+        hand_over(&switching, pr, WriterTask::GuidedOfBasic, cx);
     }
 }
 
-fn hand_over(switching: &PrSwitching, pr: ReviewSubject, cx: &mut App) {
+/// What the PR's agent is asked to write.
+#[derive(Clone, Copy)]
+enum WriterTask {
+    /// The tour of a PR that has none.
+    Tour,
+    /// The guided tour of a PR read as a basic tour.
+    GuidedOfBasic,
+}
+
+/// Hands the writer task to the PR's agent, waiting while it is busy, and follows it once it has the task.
+fn hand_over(switching: &PrSwitching, pr: ReviewSubject, task: WriterTask, cx: &mut App) {
     let active = switching.active.clone();
     let shown = active
         .read(cx)
         .shown()
         .cloned()
         .unwrap_or_else(|| pr.clone());
-    let (port, folders) = (Arc::clone(&switching.agents), switching.folders.clone());
+    let port = Arc::clone(&switching.agents);
+    let agents = TourAgents::new(Arc::clone(&port))
+        .finding_head_branches_with(Arc::clone(&switching.head_branches))
+        .with_summary_skill(SummaryInstructions::skill_for_launch(&switching.folders))
+        .starting_in(writer_folder(&pr, &switching.folders));
     cx.spawn(async move |cx| {
         loop {
-            let (task_pr, task_shown, task_port, task_folders) = (
-                pr.clone(),
-                shown.clone(),
-                Arc::clone(&port),
-                folders.clone(),
-            );
+            let (task_pr, task_shown, task_agents) = (pr.clone(), shown.clone(), agents.clone());
             let handed = cx
                 .background_executor()
                 .spawn(async move {
-                    TourAgents::new(task_port)
-                        .with_summary_skill(SummaryInstructions::skill_for_launch(&task_folders))
-                        .starting_in(writer_folder(&task_pr, &task_folders))
-                        .hand_writer_task(&task_pr, &task_shown)
+                    match task {
+                        WriterTask::Tour => task_agents.write_tour(&task_pr, &task_shown),
+                        WriterTask::GuidedOfBasic => {
+                            task_agents.hand_writer_task(&task_pr, &task_shown)
+                        }
+                    }
                 })
                 .await;
             let terminal = match handed {
@@ -153,7 +164,9 @@ pub fn stop_waiting(cx: &mut App) {
 
 /// Brings the writer's terminal up in herdr. Slow (it runs `herdr-app`), so it runs off the UI thread.
 pub fn show_agent(pr: ReviewSubject, cx: &mut App) {
-    let agents = TourAgents::new(Arc::clone(&cx.global::<PrSwitching>().agents));
+    let switching = cx.global::<PrSwitching>();
+    let agents = TourAgents::new(Arc::clone(&switching.agents))
+        .finding_head_branches_with(Arc::clone(&switching.head_branches));
     cx.background_executor()
         .spawn(async move {
             if let Err(error) = agents.show(&pr) {
@@ -164,34 +177,7 @@ pub fn show_agent(pr: ReviewSubject, cx: &mut App) {
 }
 
 fn start(switching: &PrSwitching, pr: ReviewSubject, cx: &mut App) {
-    let active = switching.active.clone();
-    let shown = active
-        .read(cx)
-        .shown()
-        .cloned()
-        .unwrap_or_else(|| pr.clone());
-    let (port, folders) = (Arc::clone(&switching.agents), switching.folders.clone());
-    cx.spawn(async move |cx| {
-        let (writer_pr, writer_port) = (pr.clone(), Arc::clone(&port));
-        let started = cx
-            .background_executor()
-            .spawn(async move {
-                TourAgents::new(writer_port)
-                    .with_summary_skill(SummaryInstructions::skill_for_launch(&folders))
-                    .starting_in(writer_folder(&writer_pr, &folders))
-                    .write_tour(&writer_pr, &shown)
-            })
-            .await;
-        let terminal = started.as_ref().ok().cloned();
-        active.update(cx, |active, cx| {
-            active.writer_started(&pr, started);
-            cx.notify();
-        });
-        if let Some(terminal) = terminal {
-            follow(&active, port, &pr, terminal, cx).await;
-        }
-    })
-    .detach();
+    hand_over(switching, pr, WriterTask::Tour, cx);
 }
 
 enum WriterEvent {

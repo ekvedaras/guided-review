@@ -133,6 +133,7 @@ mod toasts;
 mod tour_agent;
 mod tour_file;
 mod tour_skill;
+mod tour_writer_on_head_branch;
 mod tour_writing;
 mod updates;
 mod viewed_sync;
