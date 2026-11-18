@@ -86,6 +86,9 @@ pub struct ReviewSession {
         crate::viewer::RelatedIssue,
         Option<crate::viewer::IssueDetails>,
     )>,
+    /// The author and branches a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    #[cfg(feature = "snapshots")]
+    staged_pr_origin: Option<crate::viewer::PullRequestOrigin>,
     /// The Refresh a banner scene shows under way.
     #[cfg(feature = "snapshots")]
     staged_refresh: Option<JobProgress>,
@@ -190,6 +193,8 @@ impl ReviewSession {
             staged_pr_status: None,
             #[cfg(feature = "snapshots")]
             staged_related_issues: Vec::new(),
+            #[cfg(feature = "snapshots")]
+            staged_pr_origin: None,
             #[cfg(feature = "snapshots")]
             staged_refresh: None,
             tour_agent_follow: None,
@@ -315,6 +320,7 @@ impl ReviewSession {
                     {
                         this.keep_staged_pr_status();
                         this.keep_staged_related_issues();
+                        this.keep_staged_pr_origin();
                     }
                     match after {
                         AfterLanding::Nothing => {}
@@ -831,6 +837,32 @@ impl ReviewSession {
     ) {
         self.review.stage_related_issues(issues.clone());
         self.staged_related_issues = issues;
+        cx.notify();
+    }
+
+    /// The title bar as GitHub would have it name `origin`; `unstage_pr_origin` takes it off.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_pr_origin(
+        &mut self,
+        origin: crate::viewer::PullRequestOrigin,
+        cx: &mut Context<Self>,
+    ) {
+        self.review.stage_pr_origin(Some(origin.clone()));
+        self.staged_pr_origin = Some(origin);
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn keep_staged_pr_origin(&mut self) {
+        if let Some(origin) = self.staged_pr_origin.clone() {
+            self.review.stage_pr_origin(Some(origin));
+        }
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_pr_origin(&mut self, cx: &mut Context<Self>) {
+        self.staged_pr_origin = None;
+        self.review.stage_pr_origin(None);
         cx.notify();
     }
 

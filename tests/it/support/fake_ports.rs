@@ -28,11 +28,11 @@ use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
     Checks, CommentId, CommentPlace, GitHubError, IssueDetails, IssueDetailsPort, NoAccess,
     NotDelivered, OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestIssues, PullRequestReactionsPort, PullRequestStatusPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
-    RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, SubmittedReview, ThreadId, TurnStopper, Viewed,
-    ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
+    ReactionCount, Readiness, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -207,6 +207,7 @@ pub struct FakeGitHub {
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
     head_branches: Mutex<Vec<(String, String)>>,
     issues: Mutex<PullRequestIssues>,
+    origin: Mutex<Option<PullRequestOrigin>>,
     issue_details: Mutex<Vec<(IssueUrl, IssueDetails)>>,
 }
 
@@ -237,6 +238,7 @@ impl FakeGitHub {
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),
             issues: Mutex::default(),
+            origin: Mutex::default(),
             issue_details: Mutex::default(),
         }
     }
@@ -276,6 +278,17 @@ impl FakeGitHub {
     pub fn with_issues(self, issues: PullRequestIssues) -> Self {
         *self.issues.lock().unwrap() = issues;
         self
+    }
+
+    /// Who opened the PR and the branches it merges from and into.
+    pub fn with_origin(self, origin: PullRequestOrigin) -> Self {
+        self.set_origin(origin);
+        self
+    }
+
+    /// A change made on the GitHub web page, like retargeting the PR.
+    pub fn set_origin(&self, origin: PullRequestOrigin) {
+        *self.origin.lock().unwrap() = Some(origin);
     }
 
     /// What GitHub says of an issue.
@@ -483,6 +496,17 @@ impl PullRequestDescriptionPort for FakeGitHub {
     fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
         self.fail_if_reads_fail()?;
         Ok(self.issues.lock().unwrap().clone())
+    }
+}
+
+impl PullRequestOriginPort for FakeGitHub {
+    fn pull_request_origin(&self, pr: &PullRequestUrl) -> Result<PullRequestOrigin, GitHubError> {
+        self.fail_if_reads_fail()?;
+        self.origin
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| GitHubError::Other(anyhow::anyhow!("no origin for {pr}")))
     }
 }
 

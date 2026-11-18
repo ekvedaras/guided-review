@@ -91,6 +91,7 @@ fn a_window_coming_to_the_front_reads_github_and_the_clone_and_sends_what_waits_
             WorkKind::CheckWorkingCopy,
             WorkKind::PullPrDescription,
             WorkKind::PullRelatedIssues,
+            WorkKind::PullPrOrigin,
             WorkKind::SyncViewed,
             WorkKind::PullThreads,
             WorkKind::PullPendingReview,

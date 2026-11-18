@@ -57,7 +57,8 @@ use crate::app::components::new_commits_banner::NewCommitsBanner;
 use crate::app::components::overlay::popover;
 use crate::app::components::page_scrollbar::ScrollThumb;
 use crate::app::components::palette::{
-    CARD_RADIUS, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone, TrailStage,
+    CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, SIDEBAR_WIDTH, TEXT_FONT, Tone,
+    TrailStage,
 };
 use crate::app::components::picture_zoom::{PictureZoom, use_picture_zoom};
 use crate::app::components::pr_switcher::{
@@ -76,7 +77,7 @@ use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
     DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnHandOffButton, OnReplyDraft, OnThreadAction,
-    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement,
+    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement, avatar_circle,
 };
 use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge, title_inset};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -1338,9 +1339,7 @@ impl OneStepLayout {
     ) {
         let session = self.session.read(cx);
         let font_size = window.rem_size() * 0.875;
-        let font_id = window
-            .text_system()
-            .resolve_font(&gpui::font(*crate::app::components::palette::CODE_FONT));
+        let font_id = window.text_system().resolve_font(&gpui::font(*CODE_FONT));
         let char_width = window
             .text_system()
             .advance(font_id, font_size, 'm')
@@ -2345,6 +2344,7 @@ impl OneStepLayout {
                     .gap_2()
                     .text_sm()
                     .child(switch_pr)
+                    .children(self.merge_route_chip(&colors, cx))
                     .children(status.as_ref().map(|status| {
                         match status {
                             PrStatus::Open(open) => {
@@ -2378,6 +2378,50 @@ impl OneStepLayout {
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
             })
+    }
+
+    /// Beside the title: the PR author's picture and the branch it merges into, from the branch it
+    /// comes from. The branch is cut first when the bar is narrow, then the title.
+    fn merge_route_chip(
+        &self,
+        colors: &Colors,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let review = self.session.read(cx).review();
+        let route = review.merge_route()?;
+        let sentence: SharedString = review.merge_route_sentence()?.into();
+        let author = review.pr_author().cloned();
+        let picture = author.map(|author| {
+            avatar_circle(
+                colors,
+                &author.login,
+                author.avatar_url.as_deref(),
+                ROUTE_AVATAR_SIZE,
+                cx,
+            )
+        });
+        let mut route_chip = chip(colors, Tone::Neutral).font_family(*CODE_FONT);
+        route_chip.style().flex_shrink = Some(1.);
+        let mut origin = div().id("title-bar-merge-route");
+        origin.style().flex_shrink = Some(ROUTE_SHRINKS_BEFORE_TITLE);
+        Some(
+            origin
+                .min_w(px(ROUTE_MIN_WIDTH))
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .gap_1p5()
+                .tooltip(tooltip(move |_| sentence.clone()))
+                .children(picture)
+                .child(
+                    route_chip.min_w_0().child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(format!("{} ← {}", route.base, route.head)),
+                    ),
+                ),
+        )
     }
 
     /// The review's issue, or how many there are; a click is the key `I`.
@@ -3523,7 +3567,7 @@ impl OneStepLayout {
                         .flex()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .font_family(*crate::app::components::palette::CODE_FONT)
+                        .font_family(*CODE_FONT)
                         .text_sm()
                         .children(folder.map(|folder| {
                             div()
@@ -3850,6 +3894,11 @@ const ISSUE_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 /// the chevron, with a few characters of title. Past it the title is cut with an ellipsis, down to
 /// nothing, and the controls to its right keep their width.
 const PR_TITLE_MIN_WIDTH: f32 = 220.;
+/// What the author's picture and branches keep of the bar: the picture and a few characters of the
+/// branches. They give up room ten times faster than the PR's title, so the title is cut after them.
+const ROUTE_MIN_WIDTH: f32 = 96.;
+const ROUTE_SHRINKS_BEFORE_TITLE: f32 = 100_000.;
+const ROUTE_AVATAR_SIZE: f32 = 18.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
 const TITLE_SHRINKS_FIRST: f32 = 10_000.;
@@ -4277,7 +4326,7 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
             div()
                 .flex()
                 .gap_2()
-                .font_family(*crate::app::components::palette::CODE_FONT)
+                .font_family(*CODE_FONT)
                 .child(
                     div()
                         .text_color(colors.success)
@@ -4451,7 +4500,7 @@ fn line_counts(colors: &Colors, added: usize, removed: usize) -> impl IntoElemen
         .flex()
         .gap_2()
         .text_sm()
-        .font_family(*crate::app::components::palette::CODE_FONT)
+        .font_family(*CODE_FONT)
         .child(div().text_color(colors.success).child(format!("+{added}")))
         .child(
             div()

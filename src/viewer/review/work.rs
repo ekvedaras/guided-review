@@ -65,6 +65,7 @@ impl ReviewCore {
             }
             WorkKind::PullPrDescription => Job::PullPrDescription(pr()?),
             WorkKind::PullRelatedIssues => Job::PullRelatedIssues(pr()?),
+            WorkKind::PullPrOrigin => Job::PullPrOrigin(pr()?),
             WorkKind::PullIssueDetails => {
                 let issues = self.related_issues.shown_on_github();
                 if issues.is_empty() {
@@ -161,8 +162,10 @@ impl ReviewCore {
             Done::RelatedIssues(Ok(issues)) => {
                 self.change_related_issues(|related| related.github_says(issues));
             }
+            // Like the issue button, the origin is no cause for a warning: a failed read keeps the last answer.
+            Done::PrOrigin(Ok(origin)) => self.pr_origin = Some(origin),
             Done::IssueDetails(Ok(read)) => self.related_issues.details_say(read),
-            Done::RelatedIssues(Err(_)) | Done::IssueDetails(Err(_)) => {}
+            Done::RelatedIssues(Err(_)) | Done::PrOrigin(Err(_)) | Done::IssueDetails(Err(_)) => {}
             Done::SyncViewed(outcome) => {
                 self.apply_sync(outcome).ok();
             }

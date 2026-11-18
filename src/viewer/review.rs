@@ -59,6 +59,7 @@ use super::page::Page;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_controls::PrControls;
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
+use super::pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
@@ -295,6 +296,8 @@ pub struct ReviewCore {
     local_heading: Option<Arc<str>>,
     branch_link: BranchLink,
     related_issues: RelatedIssues,
+    /// What GitHub last said of the PR's author and branches; `None` until it answers, and always for a local review.
+    pr_origin: Option<PullRequestOrigin>,
     base: Sha,
     head: Sha,
     /// Unknown until GitHub answers.
@@ -444,6 +447,7 @@ impl Review {
         self.jobs = replaced.jobs;
         self.branch_link = replaced.branch_link;
         self.related_issues.carry_on_from(replaced.related_issues);
+        self.pr_origin = replaced.pr_origin;
         if let (Some(controls), Some(replaced)) = (&mut self.pr_controls, replaced.pr_controls) {
             controls.carry_on_from(replaced);
         }
@@ -630,6 +634,7 @@ impl ReviewCore {
             local_facts: None,
             branch_link,
             related_issues,
+            pr_origin: None,
             base,
             head,
             pr_head: None,
@@ -1038,6 +1043,40 @@ impl ReviewCore {
     /// The issues the review is about, best source first; empty when none names one.
     pub fn related_issues(&self) -> Arc<[RelatedIssue]> {
         self.related_issues.shown()
+    }
+
+    /// The branch the review's change goes into and the one it comes from: a PR's as GitHub last said,
+    /// a local review's from git (its branch and the repo's default branch). `None` until either is known.
+    pub fn merge_route(&self) -> Option<MergeRoute> {
+        match &self.local_facts {
+            Some(facts) => Some(MergeRoute {
+                base: facts.default_branch.clone(),
+                head: HeadBranch::of_repo(facts.branch.clone()),
+            }),
+            None => self.pr_origin.as_ref().map(|origin| origin.route.clone()),
+        }
+    }
+
+    /// Who opened the PR; `None` for a local review, for a PR GitHub has not answered for yet, and for
+    /// one whose author's account is gone.
+    pub fn pr_author(&self) -> Option<&PrAuthor> {
+        self.pr_origin.as_ref()?.author.as_ref()
+    }
+
+    /// What the author and route chip says when hovered: "ada wants to merge feat/x into main".
+    pub fn merge_route_sentence(&self) -> Option<String> {
+        let MergeRoute { base, head } = self.merge_route()?;
+        Some(match (&self.local_facts, self.pr_author()) {
+            (Some(_), _) => format!("Reviewing {head} against {base}"),
+            (None, Some(author)) => format!("{} wants to merge {head} into {base}", author.login),
+            (None, None) => format!("Merges {head} into {base}"),
+        })
+    }
+
+    /// The author and branches a snapshot scene shows, as if GitHub said them of the PR.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_pr_origin(&mut self, origin: Option<PullRequestOrigin>) {
+        self.pr_origin = origin;
     }
 
     /// The issues a snapshot scene shows, as if GitHub linked them to the PR.

@@ -5,9 +5,11 @@ use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::merging::MergeChange;
 use super::ports::{
     ChangeTipsPort, GitHubError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
-    Resolution, ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort,
+    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, Resolution, ReviewThreadsPort, ReviewWritesPort,
+    Viewed, ViewedFile, ViewedFilesPort,
 };
+use super::pr_origin::PullRequestOrigin;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
@@ -97,6 +99,12 @@ impl PullRequestDescriptionPort for NoGitHub {
     }
 
     fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+        refused()
+    }
+}
+
+impl PullRequestOriginPort for NoGitHub {
+    fn pull_request_origin(&self, _pr: &PullRequestUrl) -> Result<PullRequestOrigin, GitHubError> {
         refused()
     }
 }

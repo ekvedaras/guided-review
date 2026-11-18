@@ -46,6 +46,10 @@
 
 **Related issue**: The GitHub issue, or ticket in another tracker, a review is about, which the title bar's button and the key `I` open. The first source that names any wins: the issues GitHub links to the PR (its closing references), then the ones its description names after GitHub's closing keywords (`Closes`, `Fixes`, `Resolves` and their forms), `Part of` (`#12`, `owner/repo#12` or a link) or `Ticket:` (any link), then the guided tour's `issue`, then the branch name (`123-totals`, `feat/123-totals`, `issue-123`, `gh-123`). With several, the button lists them, each opened by a click or its number key. Avoid: linked issue (that is only GitHub's source).
 
+**Merge route**: The branch a review's change goes into (base) and the one it comes from (head), shown in the title bar as `base ← head`. A PR's is what GitHub says now, read again since the PR can be retargeted, and a head from a fork is written `owner:branch`; a local review's is its repo's default branch and its own branch. Avoid: target branch (**target** is not a review subject).
+
+**PR author**: Who opened the PR, shown in the title bar as a round picture beside the merge route. A PR whose author's account is gone has none, and a local review never does. Avoid: owner, opener.
+
 **Issue card**: What a hover of the issue button, or of a row of its list, shows: for a GitHub issue its title, state (open, closed as completed or as not planned), author, labels, assignees and description cut to a set height; for a ticket only its link. The viewer reads the details of the shown issues from GitHub in one trip, again on window focus and whenever the shown issues change, and keeps the last answer when a read fails.
 
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.

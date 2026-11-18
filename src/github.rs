@@ -21,12 +21,13 @@ use crate::viewer::{
 };
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
-    IssueDetails, IssueDetailsPort, IssueState, NoAccess, OutageCause, PictureUploadPort,
-    PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestReactionsPort,
-    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
-    RelatedIssue, RepoCloner, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Side, SubmittedReview, ThreadComment, ThreadId,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState, percent_encode_path,
+    HeadBranch, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, NoAccess, OutageCause,
+    PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
+    PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestStatusPort,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RelatedIssue, RepoCloner,
+    Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
+    SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState, percent_encode_path,
 };
 
 #[derive(Clone)]
@@ -602,6 +603,55 @@ impl PullRequestDescriptionPort for GitHub {
         Ok(PullRequestIssues {
             linked,
             head_branch,
+        })
+    }
+}
+
+impl PullRequestOriginPort for GitHub {
+    fn pull_request_origin(&self, pr: &PullRequestUrl) -> Result<PullRequestOrigin, GitHubError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                        pullRequest(number: $number) {
+                            author { login avatarUrl(size: 64) }
+                            baseRefName
+                            headRefName
+                            headRepositoryOwner { login }
+                            isCrossRepository
+                        }
+                    }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read the branches of {pr}")))?;
+        let pull = at(&data, "/repository/pullRequest");
+        let branch_at = |pointer: &str| {
+            at(pull, pointer)
+                .as_str()
+                .and_then(|name| BranchName::new(name).ok())
+        };
+        let (Some(base), Some(head)) = (branch_at("/baseRefName"), branch_at("/headRefName"))
+        else {
+            return Err(anyhow::anyhow!("GitHub named no branches for {pr}").into());
+        };
+        let fork_owner = at(pull, "/isCrossRepository")
+            .as_bool()
+            .filter(|is_fork| *is_fork)
+            .and_then(|_| at(pull, "/headRepositoryOwner/login").as_str());
+        let author = at(pull, "/author/login").as_str().map(|login| PrAuthor {
+            login: login.into(),
+            avatar_url: at(pull, "/author/avatarUrl").as_str().map(Arc::from),
+        });
+        Ok(PullRequestOrigin {
+            author,
+            route: MergeRoute {
+                base,
+                head: fork_owner.map_or_else(
+                    || HeadBranch::of_repo(head.clone()),
+                    |owner| HeadBranch::of_fork(owner, head.clone()),
+                ),
+            },
         })
     }
 }

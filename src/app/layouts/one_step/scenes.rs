@@ -21,13 +21,14 @@ use crate::app::updater::Updates;
 use crate::file_path::FilePath;
 use crate::issue::{IssueLink, IssueUrl};
 use crate::pull_request::RepoName;
-use crate::review_subject::ReviewSubject;
+use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, AutoMerge, CheckRun, CheckState, Checks, FileView, LineKind, LineLocation,
     MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus, PageRow, PieceLabels, PrStatus,
     Problem, ProblemKind, Readiness, TerminalId, TextBox,
 };
+use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
 
 const MAX_SCREENS: usize = 16;
@@ -88,10 +89,11 @@ enum Scene {
     TitleBarIssueList,
     TitleBarMerged,
     TitleBarClosed,
+    TitleBarPrOrigin,
 }
 
 impl Scene {
-    const ALL: [Self; 52] = [
+    const ALL: [Self; 53] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -144,6 +146,7 @@ impl Scene {
         Self::TitleBarIssueList,
         Self::TitleBarMerged,
         Self::TitleBarClosed,
+        Self::TitleBarPrOrigin,
     ];
 
     fn file_name(self) -> &'static str {
@@ -200,6 +203,7 @@ impl Scene {
             Self::TitleBarIssueList => "71-title-bar-issue-list",
             Self::TitleBarMerged => "72-title-bar-merged",
             Self::TitleBarClosed => "73-title-bar-closed",
+            Self::TitleBarPrOrigin => "74-title-bar-pr-origin",
         }
     }
 
@@ -245,6 +249,20 @@ impl Scene {
             ],
             _ => Vec::new(),
         }
+    }
+
+    /// The author and branches a title bar scene shows; a letter stands in for the picture, which would be a download.
+    fn staged_origin() -> Option<PullRequestOrigin> {
+        Some(PullRequestOrigin {
+            author: Some(PrAuthor {
+                login: "octocat".into(),
+                avatar_url: None,
+            }),
+            route: MergeRoute {
+                base: BranchName::new("release/2.x").ok()?,
+                head: HeadBranch::of_repo(BranchName::new("feature/show-the-pr-author").ok()?),
+            },
+        })
     }
 
     /// The PR status a title bar scene shows; `None` for every other scene.
@@ -777,6 +795,12 @@ impl OneStepLayout {
                 self.issue_hover.target = (scene == Scene::TitleBarIssueCard).then_some(0);
                 self.issue_list_open = scene == Scene::TitleBarIssueList;
             }
+            Scene::TitleBarPrOrigin => {
+                if let Some(origin) = Scene::staged_origin() {
+                    self.session
+                        .update(cx, |session, cx| session.stage_pr_origin(origin, cx));
+                }
+            }
             Scene::JumpActions => {
                 let query = ">";
                 let groups = self
@@ -917,6 +941,7 @@ impl OneStepLayout {
                 self.issue_hover = IssueHover::default();
                 self.issue_list_open = false;
             }
+            Scene::TitleBarPrOrigin => self.session.update(cx, ReviewSession::unstage_pr_origin),
             Scene::RefreshRunning => self
                 .session
                 .update(cx, ReviewSession::unstage_refresh_running),

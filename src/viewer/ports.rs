@@ -7,6 +7,7 @@ use super::comments::{CommentPlace, SendMode};
 use super::finish_review::{ReviewVerdict, SubmittedReview};
 use super::github_outage::OutageCause;
 use super::merging::MergeChange;
+use super::pr_origin::PullRequestOrigin;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
@@ -63,6 +64,11 @@ pub trait PullRequestDescriptionPort: Send + Sync {
 
     /// The issues the PR would close, as its description or GitHub's sidebar links them.
     fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError>;
+}
+
+/// Who opened a PR and the branches it merges from and into, which the title bar shows.
+pub trait PullRequestOriginPort: Send + Sync {
+    fn pull_request_origin(&self, pr: &PullRequestUrl) -> Result<PullRequestOrigin, GitHubError>;
 }
 
 /// What GitHub says of issues, which a review shows on a hover of its issue button.
@@ -186,6 +192,7 @@ pub trait GitHubPort:
     + PullsOfBranchPort
     + PullRequestDescriptionPort
     + IssueDetailsPort
+    + PullRequestOriginPort
     + PullRequestReactionsPort
     + PullRequestStatusPort
     + PictureUploadPort
@@ -200,6 +207,7 @@ impl<T> GitHubPort for T where
         + PullsOfBranchPort
         + PullRequestDescriptionPort
         + IssueDetailsPort
+        + PullRequestOriginPort
         + PullRequestReactionsPort
         + PullRequestStatusPort
         + PictureUploadPort
