@@ -27,6 +27,7 @@ const O: Chord = key('o');
 const D: Chord = key('d');
 const G: Chord = key('g');
 const I: Chord = key('i');
+const P: Chord = key('p');
 const QUESTION: Chord = key('?');
 const OPEN_BRACKET: Chord = key('[');
 const CLOSE_BRACKET: Chord = key(']');
@@ -133,6 +134,7 @@ pub enum Command {
     Shortcuts,
     OpenOnGitHub,
     OpenIssue,
+    OpenPr,
     ToggleDraft,
     ToggleAutoMerge,
     CloseWindow,
@@ -140,7 +142,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -166,6 +168,7 @@ impl Command {
         Self::Shortcuts,
         Self::OpenOnGitHub,
         Self::OpenIssue,
+        Self::OpenPr,
         Self::ToggleDraft,
         Self::ToggleAutoMerge,
         Self::CloseWindow,
@@ -200,6 +203,7 @@ impl Command {
             Self::Shortcuts => &[QUESTION],
             Self::OpenOnGitHub => &[G],
             Self::OpenIssue => &[I],
+            Self::OpenPr => &[P],
             Self::ToggleDraft => &[D],
             Self::ToggleAutoMerge => &[SHIFT_M],
             Self::CloseWindow => &[PRIMARY_W],
@@ -235,6 +239,7 @@ impl Command {
             Self::Shortcuts => "shortcuts",
             Self::OpenOnGitHub => "open_on_github",
             Self::OpenIssue => "open_issue",
+            Self::OpenPr => "open_pr",
             Self::ToggleDraft => "toggle_draft",
             Self::ToggleAutoMerge => "toggle_auto_merge",
             Self::CloseWindow => "close_window",
@@ -269,6 +274,7 @@ impl Command {
             | Self::Shortcuts
             | Self::OpenOnGitHub
             | Self::OpenIssue
+            | Self::OpenPr
             | Self::ToggleDraft
             | Self::ToggleAutoMerge => KeyScope::Page,
             Self::Jump | Self::Settings | Self::CloseWindow => KeyScope::Window,
@@ -301,6 +307,7 @@ impl Command {
             | Self::Shortcuts
             | Self::OpenOnGitHub
             | Self::OpenIssue
+            | Self::OpenPr
             | Self::ToggleDraft
             | Self::ToggleAutoMerge
             | Self::CloseWindow
@@ -338,6 +345,7 @@ impl Command {
             Self::OpenIssue => {
                 "Open the related issue on GitHub, or list them when there are several"
             }
+            Self::OpenPr => "Ask your agent to open a pull request for the branch",
             Self::ToggleDraft => {
                 "Convert the pull request to a draft, or mark it ready; press again to confirm"
             }

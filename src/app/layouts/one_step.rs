@@ -146,6 +146,7 @@ actions!(
         ToggleShortcuts,
         OpenPrOnGitHub,
         OpenIssue,
+        AskToOpenPr,
         CloseWindow
     ]
 );
@@ -2257,6 +2258,7 @@ impl OneStepLayout {
                 Icon::PullRequest,
             ))
             .child("Open PR")
+            .child(button_keys(&colors, ButtonKind::Ghost, Command::OpenPr, cx))
             .tooltip(tooltip(|_| {
                 "Ask your agent to open the PR: it types `pr it`".into()
             }))
@@ -5128,6 +5130,9 @@ impl Render for OneStepLayout {
             }))
             .on_action(cx.listener(|this, _: &OpenIssue, window, cx| {
                 this.act(Intent::OpenIssue, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &AskToOpenPr, window, cx| {
+                this.act(Intent::OpenPr, window, cx);
             }))
             .when(self.issue_list_open, |root| {
                 root.on_key_down(cx.listener(Self::pick_issue_by_key))

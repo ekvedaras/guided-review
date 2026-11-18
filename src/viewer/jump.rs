@@ -287,6 +287,7 @@ impl PaletteAction {
             }
             Self::Settings => Some(Command::Settings),
             Self::OpenIssue => Some(Command::OpenIssue),
+            Self::OpenPr => Some(Command::OpenPr),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
             Self::AskAboutStep => Some(Command::AskAboutStep),
@@ -294,7 +295,6 @@ impl PaletteAction {
             | Self::SwitchToGuidedTour
             | Self::FinishReview
             | Self::SendTasks
-            | Self::OpenPr
             | Self::OpenOnGitHub
             | Self::OpenChecksOnGitHub
             | Self::SwitchPr
