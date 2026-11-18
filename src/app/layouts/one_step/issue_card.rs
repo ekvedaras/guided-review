@@ -5,13 +5,12 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Div, InteractiveElement, IntoElement, ParentElement, ScrollHandle, SharedString,
+    AnyElement, Div, InteractiveElement, ParentElement, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
 
 use crate::app::components::markdown_view::{MarkdownView, PreparedMarkdown};
 use crate::app::components::palette::{CARD_RADIUS, Colors, Tone};
-use crate::app::components::scrollbar::{ScrollThumb, scrollbar};
 use crate::issue::IssueLink;
 use crate::viewer::{IssueDetails, IssueState};
 
@@ -66,6 +65,7 @@ pub fn issue_card(
     details: Option<&IssueDetails>,
     body: Option<Rc<PreparedMarkdown>>,
     scroll: &ScrollHandle,
+    scrollbar: Option<AnyElement>,
 ) -> Div {
     let card = div()
         .w(px(ISSUE_CARD_WIDTH))
@@ -163,17 +163,6 @@ pub fn issue_card(
                     .track_scroll(scroll)
                     .child(MarkdownView::new(format!("issue-card-{link}"), body)),
             )
-            .children(scroll_thumb(colors, scroll))
+            .children(scrollbar)
     }))
-}
-
-/// A thumb on the description's right edge, shown only when some of it is out of sight.
-fn scroll_thumb(colors: &Colors, scroll: &ScrollHandle) -> Option<impl IntoElement + use<>> {
-    let view = scroll.bounds().size.height;
-    let thumb = ScrollThumb::of(view, -scroll.offset().y, scroll.max_offset().y)?;
-    Some(
-        scrollbar(colors, "issue-card-scrollbar", thumb, false)
-            .top(px(8.))
-            .h(view),
-    )
 }

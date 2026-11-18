@@ -2,7 +2,8 @@ use std::path::Path;
 
 use crate::support::folders_in;
 use guided_review::viewer::{
-    PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests, ScreenLine, WhyListed,
+    LineAnchor, ListLine, PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
+    WhyListed,
 };
 
 fn relevant(url: &str) -> RelevantPullRequest {
@@ -38,8 +39,8 @@ fn visible_urls(switcher: &PrSwitcher) -> Vec<String> {
         .collect()
 }
 
-fn heading(repo: &str, rows: usize) -> ScreenLine {
-    ScreenLine::Heading {
+fn heading(repo: &str, rows: usize) -> ListLine {
+    ListLine::Heading {
         name: repo.to_owned(),
         rows,
     }
@@ -68,7 +69,7 @@ fn rows_of_a_repo_are_together_and_the_repos_come_in_the_order_of_their_newest_r
 }
 
 #[test]
-fn the_screen_names_each_repo_once_above_its_rows() {
+fn the_list_names_each_repo_once_above_its_rows() {
     let switcher = listing([
         "https://github.com/acme/shop/pull/7",
         "https://github.com/acme/blog/pull/3",
@@ -76,79 +77,15 @@ fn the_screen_names_each_repo_once_above_its_rows() {
     ]);
 
     assert_eq!(
-        switcher.screen(),
+        switcher.lines(),
         [
             heading("acme/shop", 2),
-            ScreenLine::Row(0),
-            ScreenLine::Row(1),
+            ListLine::Row(0),
+            ListLine::Row(1),
             heading("acme/blog", 1),
-            ScreenLine::Row(2),
+            ListLine::Row(2),
         ]
     );
-}
-
-fn twelve_of_one_repo() -> PrSwitcher {
-    let urls: Vec<String> = (1..=12)
-        .map(|number| format!("https://github.com/acme/shop/pull/{number}"))
-        .collect();
-    listing(urls.iter().map(String::as_str))
-}
-
-#[test]
-fn scrolled_down_the_top_row_still_names_its_repo() {
-    let mut switcher = twelve_of_one_repo();
-
-    switcher.scroll_by(2);
-
-    let expected: Vec<_> = std::iter::once(heading("acme/shop", 12))
-        .chain((2..10).map(ScreenLine::Row))
-        .collect();
-    assert_eq!(switcher.screen(), expected);
-}
-
-#[test]
-fn repo_names_take_room_so_fewer_rows_fit_when_every_row_is_of_another_repo() {
-    let urls: Vec<String> = (1..=12)
-        .map(|number| format!("https://github.com/acme/repo-{number}/pull/1"))
-        .collect();
-    let mut switcher = listing(urls.iter().map(String::as_str));
-    assert_eq!(switcher.rows_on_screen(), 5);
-
-    for _ in 0..5 {
-        switcher.select_next();
-    }
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (5, 1));
-    switcher.scroll_by(99);
-    assert_eq!(switcher.first_shown(), 7, "the last row ends the screen");
-}
-
-#[test]
-fn the_screen_ends_on_the_start_of_the_next_rows_when_a_whole_one_does_not_fit() {
-    let urls: Vec<String> = (1..=12)
-        .map(|number| format!("https://github.com/acme/repo-{number}/pull/1"))
-        .collect();
-    let switcher = listing(urls.iter().map(String::as_str));
-
-    let screen = switcher.screen();
-
-    assert_eq!(switcher.rows_on_screen(), 5, "whole rows");
-    assert_eq!(
-        screen[screen.len() - 2..],
-        [heading("acme/repo-6", 1), ScreenLine::Row(5)],
-        "the sixth repo starts at the bottom, cut off, so no gap is left"
-    );
-}
-
-#[test]
-fn a_dragged_scrollbar_puts_the_screen_at_a_row_but_never_past_the_last_screen() {
-    let mut switcher = twelve_of_one_repo();
-
-    switcher.scroll_to(2);
-    assert_eq!(switcher.first_shown(), 2);
-    switcher.scroll_to(99);
-    assert_eq!(switcher.first_shown(), switcher.last_first_shown());
-    assert_eq!(switcher.last_first_shown(), 4);
 }
 
 #[test]
@@ -160,4 +97,65 @@ fn the_switcher_says_it_looks_in_local_folders_until_they_are_read() {
     switcher.local_found(Vec::new(), &folders_in(Path::new("/nowhere")));
 
     assert!(!switcher.is_finding_local());
+}
+
+#[test]
+fn a_row_is_found_again_on_its_new_line_when_rows_come_in_above_it() {
+    let mut switcher = listing([
+        "https://github.com/acme/shop/pull/7",
+        "https://github.com/acme/blog/pull/3",
+    ]);
+    let line = switcher.line_of_row(1).unwrap();
+    let anchor = switcher.anchor_at(line).unwrap();
+
+    switcher.loaded(
+        Ok(RelevantPullRequests {
+            pull_requests: [
+                "https://github.com/acme/shop/pull/9",
+                "https://github.com/acme/shop/pull/7",
+                "https://github.com/acme/blog/pull/3",
+            ]
+            .into_iter()
+            .map(relevant)
+            .collect(),
+            teams_left_out: Vec::new(),
+        }),
+        &folders_in(Path::new("/nowhere")),
+    );
+
+    let now = switcher.line_after_change(&anchor, line);
+    assert_eq!(switcher.lines()[now], ListLine::Row(2));
+    assert_eq!(
+        anchor,
+        LineAnchor::Row("https://github.com/acme/blog/pull/3".parse().unwrap())
+    );
+}
+
+#[test]
+fn a_repo_name_is_found_again_and_a_line_that_left_stays_where_it_was() {
+    let mut switcher = listing([
+        "https://github.com/acme/shop/pull/7",
+        "https://github.com/acme/blog/pull/3",
+        "https://github.com/acme/blog/pull/4",
+    ]);
+    let blog = switcher.anchor_at(2).unwrap();
+    let gone = switcher.anchor_at(1).unwrap();
+    assert_eq!(blog, LineAnchor::Heading("acme/blog".to_owned()));
+
+    switcher.loaded(
+        Ok(RelevantPullRequests {
+            pull_requests: [
+                "https://github.com/acme/blog/pull/3",
+                "https://github.com/acme/blog/pull/4",
+            ]
+            .into_iter()
+            .map(relevant)
+            .collect(),
+            teams_left_out: Vec::new(),
+        }),
+        &folders_in(Path::new("/nowhere")),
+    );
+
+    assert_eq!(switcher.line_after_change(&blog, 2), 0);
+    assert_eq!(switcher.line_after_change(&gone, 1), 1);
 }

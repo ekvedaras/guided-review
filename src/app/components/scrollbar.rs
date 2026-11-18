@@ -2,7 +2,10 @@
 //! The page, the PR switcher and the issue card all draw it here, so they look the same.
 
 use gpui::prelude::FluentBuilder;
-use gpui::{Div, ElementId, InteractiveElement, ParentElement, Pixels, Stateful, Styled, div, px};
+use gpui::{
+    Bounds, Div, ElementId, InteractiveElement, ListState, ParentElement, Pixels, ScrollHandle,
+    Stateful, Styled, div, point, px,
+};
 
 use super::palette::Colors;
 
@@ -44,6 +47,122 @@ pub fn scrollbar(
 }
 
 const MIN_THUMB_HEIGHT: Pixels = px(24.);
+
+/// What a scrollbar scrolls: gpui's list (the page, the PR switcher) or a scrolling box (the issue card).
+pub trait ScrollSource {
+    /// The part on screen, in window pixels; the track runs beside it, top to bottom.
+    fn viewport(&self) -> Bounds<Pixels>;
+    /// How far it is scrolled down.
+    fn scrolled(&self) -> Pixels;
+    /// How far it can scroll down.
+    fn scrollable(&self) -> Pixels;
+    fn scroll_to(&self, scrolled: Pixels);
+    fn drag_started(&self) {}
+    fn drag_ended(&self) {}
+}
+
+impl ScrollSource for ListState {
+    fn viewport(&self) -> Bounds<Pixels> {
+        self.viewport_bounds()
+    }
+
+    fn scrolled(&self) -> Pixels {
+        -self.scroll_px_offset_for_scrollbar().y
+    }
+
+    fn scrollable(&self) -> Pixels {
+        self.max_offset_for_scrollbar().y
+    }
+
+    fn scroll_to(&self, scrolled: Pixels) {
+        self.set_offset_from_scrollbar(point(Pixels::ZERO, -scrolled));
+    }
+
+    fn drag_started(&self) {
+        self.scrollbar_drag_started();
+    }
+
+    fn drag_ended(&self) {
+        self.scrollbar_drag_ended();
+    }
+}
+
+impl ScrollSource for ScrollHandle {
+    fn viewport(&self) -> Bounds<Pixels> {
+        self.bounds()
+    }
+
+    fn scrolled(&self) -> Pixels {
+        -self.offset().y
+    }
+
+    fn scrollable(&self) -> Pixels {
+        self.max_offset().y
+    }
+
+    fn scroll_to(&self, scrolled: Pixels) {
+        self.set_offset(point(self.offset().x, -scrolled));
+    }
+}
+
+/// A drag of a scrollbar's thumb: where on the thumb the pointer holds it. A press on the track off
+/// the thumb takes the thumb's middle there. The owner calls `drag_to` on every pointer move until
+/// `release`, wherever the pointer is.
+#[derive(Debug, Default)]
+pub struct ScrollbarDrag {
+    grab: Option<Pixels>,
+}
+
+impl ScrollbarDrag {
+    pub fn thumb(source: &impl ScrollSource) -> Option<ScrollThumb> {
+        ScrollThumb::of(
+            source.viewport().size.height,
+            source.scrolled(),
+            source.scrollable(),
+        )
+    }
+
+    pub const fn is_dragging(&self) -> bool {
+        self.grab.is_some()
+    }
+
+    /// `pointer_y` is in window pixels.
+    pub fn press(&mut self, source: &impl ScrollSource, pointer_y: Pixels) {
+        let Some(thumb) = Self::thumb(source) else {
+            return;
+        };
+        let on_track = pointer_y - source.viewport().top();
+        let is_on_thumb = on_track >= thumb.top && on_track <= thumb.top + thumb.height;
+        self.grab = Some(if is_on_thumb {
+            on_track - thumb.top
+        } else {
+            thumb.height / 2.
+        });
+        source.drag_started();
+        self.drag_to(source, pointer_y);
+    }
+
+    pub fn drag_to(&self, source: &impl ScrollSource, pointer_y: Pixels) {
+        let (Some(grab), Some(thumb)) = (self.grab, Self::thumb(source)) else {
+            return;
+        };
+        let viewport = source.viewport();
+        source.scroll_to(thumb.scrolled_at(
+            pointer_y - viewport.top() - grab,
+            viewport.size.height,
+            source.scrollable(),
+        ));
+    }
+
+    /// Whether a drag was under way.
+    pub fn release(&mut self, source: &impl ScrollSource) -> bool {
+        let was_dragging = self.grab.take().is_some();
+        if was_dragging {
+            source.drag_ended();
+        }
+        was_dragging
+    }
+}
 
 /// Where the thumb sits on its track, in pixels from the track's top.
 #[derive(Debug, Clone, Copy, PartialEq)]

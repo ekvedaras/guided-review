@@ -181,7 +181,8 @@ pub use pr_status::{
     CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, OpenPrStatus, PrStatus, Readiness,
 };
 pub use pr_switcher::{
-    NotPickable, Pick, PrSwitcher, RowKind, ScreenLine, SwitcherRow, TourFact, WritingFact,
+    LineAnchor, ListLine, NotPickable, Pick, PrSwitcher, RowKind, SwitcherRow, TourFact,
+    WritingFact,
 };
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use press_again::{CONFIRM_WITHIN, PressStep};

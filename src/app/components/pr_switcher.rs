@@ -4,9 +4,10 @@ use std::time::Instant;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, FontWeight, Global, InteractiveElement,
-    IntoElement, KeyDownEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, FontWeight, Global,
+    InteractiveElement, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
+    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, div, list, px,
 };
 
 use crate::app::tour_writer;
@@ -16,8 +17,8 @@ use crate::local_change_sets::find_local_rows;
 use crate::opened_subject::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    ActivePr, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort, RowKind, ScreenLine,
-    SwitcherRow, TourAgentPort, TourFact, WhyListed, WritingFact,
+    ActivePr, LineAnchor, ListLine, LocalRow, Pick, PrSwitcher, Presence, RelevantPullRequestsPort,
+    RowKind, SwitcherRow, TourAgentPort, TourFact, WhyListed, WritingFact,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_label_button};
@@ -29,7 +30,7 @@ use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
 };
 use super::palette::{CODE_FONT, Colors, INNER_RADIUS, Tone};
-use super::scrollbar::{ScrollThumb, TRACK_WIDTH, scrollbar};
+use super::scrollbar::{ScrollbarDrag, TRACK_WIDTH, scrollbar};
 use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -124,8 +125,12 @@ pub struct PrSwitcherView {
     presence: Presence,
     query: String,
     shown: Vec<ShownRow>,
-    /// Wheel movement not yet enough for a whole row.
-    scrolled: Pixels,
+    /// The list as drawn, and what each line holds, to find it again when the list changes.
+    lines: Vec<ListLine>,
+    anchors: Vec<Option<LineAnchor>>,
+    list_state: ListState,
+    /// The line under the pointer, which stays where it is when the list changes.
+    hovered_line: Option<usize>,
     /// Why the picked row did not open.
     refusal: Option<SharedString>,
     notice: Option<SharedString>,
@@ -133,8 +138,7 @@ pub struct PrSwitcherView {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     _list_changes: Subscription,
-    /// While the scrollbar is dragged: where the pointer went down, and the first row then.
-    scrollbar_grab: Option<(Pixels, usize)>,
+    drag: ScrollbarDrag,
     /// A snapshot scene keeps the last row selected as the rows come in.
     #[cfg(feature = "snapshots")]
     staged_at_end: bool,
@@ -267,14 +271,17 @@ impl PrSwitcherView {
             presence: Presence::lasting(OVERLAY),
             query: String::new(),
             shown: Vec::new(),
-            scrolled: px(0.),
+            lines: Vec::new(),
+            anchors: Vec::new(),
+            list_state: ListState::new(0, ListAlignment::Top, px(200.)).measure_all(),
+            hovered_line: None,
             refusal: None,
             notice: None,
             switching,
             focus: cx.focus_handle(),
             owner_focus,
             _list_changes: list_changes,
-            scrollbar_grab: None,
+            drag: ScrollbarDrag::default(),
             #[cfg(feature = "snapshots")]
             staged_at_end: false,
         };
@@ -300,6 +307,8 @@ impl PrSwitcherView {
             list.select_active();
         });
         self.refresh_shown(cx);
+        self.list_state.scroll_to(ListOffset::default());
+        self.reveal_selected(cx);
         window.focus(&self.focus, cx);
         self.switching.refresh(cx);
         cx.notify();
@@ -360,14 +369,85 @@ impl PrSwitcherView {
         self.open(window, cx);
     }
 
+    /// Takes the list's rows. When its lines changed, the line under the pointer, or else the top one,
+    /// stays where it was on screen, so a click lands on the row it was aimed at.
     fn refresh_shown(&mut self, cx: &mut Context<Self>) {
         #[cfg(feature = "snapshots")]
         if self.staged_at_end {
             self.switching.list.update(cx, |list, _| list.select_last());
         }
+        let scrolled = self.scrolled();
+        let kept_line = self
+            .hovered_line
+            .filter(|line| {
+                let top = top_of(&self.lines, *line);
+                top >= scrolled && top < scrolled + self.list_height()
+            })
+            .unwrap_or_else(|| self.list_state.logical_scroll_top().item_ix);
+        let kept = self
+            .anchors
+            .get(kept_line)
+            .cloned()
+            .flatten()
+            .map(|anchor| (anchor, top_of(&self.lines, kept_line) - scrolled));
         let list = self.switching.list.read(cx);
         self.shown = list.visible().map(|row| ShownRow::of(row, list)).collect();
         self.notice = list.notice().map(Into::into);
+        let lines = list.lines();
+        if lines == self.lines {
+            return;
+        }
+        let line_now = kept
+            .as_ref()
+            .map(|(anchor, on_screen)| (list.line_after_change(anchor, kept_line), *on_screen));
+        self.anchors = (0..lines.len()).map(|line| list.anchor_at(line)).collect();
+        self.lines = lines;
+        self.hovered_line = None;
+        self.list_state.reset(self.lines.len());
+        if let Some((line, on_screen)) = line_now {
+            self.scroll_to_px(top_of(&self.lines, line) - on_screen);
+        }
+        #[cfg(feature = "snapshots")]
+        if self.staged_at_end {
+            self.reveal_selected(cx);
+        }
+    }
+
+    /// How far the list is scrolled, from its lines' fixed heights, so it is right before gpui has
+    /// measured them.
+    fn scrolled(&self) -> Pixels {
+        let top = self.list_state.logical_scroll_top();
+        top_of(&self.lines, top.item_ix) + top.offset_in_item
+    }
+
+    fn scroll_to_px(&self, scrolled: Pixels) {
+        let most = (content_height(&self.lines) - self.list_height()).max(px(0.));
+        self.list_state
+            .scroll_to(offset_at(&self.lines, scrolled.clamp(px(0.), most)));
+    }
+
+    /// The list's height: all of it, up to eight rows and a repo's name.
+    fn list_height(&self) -> Pixels {
+        content_height(&self.lines).min(ROW_HEIGHT * 8. + LINE_HEIGHT)
+    }
+
+    /// Scrolls only as far as the selected row needs to be in full sight, below the repo name that
+    /// stays at the top.
+    fn reveal_selected(&mut self, cx: &mut Context<Self>) {
+        let list = self.switching.list.read(cx);
+        let Some(line) = list.line_of_row(list.selected()) else {
+            return;
+        };
+        let (top, scrolled, height) = (
+            top_of(&self.lines, line),
+            self.scrolled(),
+            self.list_height(),
+        );
+        if top - LINE_HEIGHT < scrolled {
+            self.scroll_to_px(top - LINE_HEIGHT);
+        } else if top + ROW_HEIGHT > scrolled + height {
+            self.scroll_to_px(top + ROW_HEIGHT - height);
+        }
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -442,50 +522,9 @@ impl PrSwitcherView {
                 .update(cx, |list, _| list.select_previous()),
             _ => return,
         }
+        self.reveal_selected(cx);
         self.refusal = None;
         cx.notify();
-    }
-
-    fn on_scroll(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.scrolled += event.delta.pixel_delta(ROW_HEIGHT).y;
-        while self.scrolled.abs() >= ROW_HEIGHT {
-            let up = self.scrolled > px(0.);
-            self.scrolled += if up { -ROW_HEIGHT } else { ROW_HEIGHT };
-            let rows = if up { -1 } else { 1 };
-            self.switching
-                .list
-                .update(cx, |list, _| list.scroll_by(rows));
-        }
-        cx.notify();
-    }
-
-    /// Puts the screen at the row whose thumb sits nearest to where the pointer has moved it since it
-    /// was grabbed.
-    fn drag_scrollbar_to(&mut self, pointer_y: Pixels, cx: &mut Context<Self>) {
-        let Some((grabbed_at, first_then)) = self.scrollbar_grab else {
-            return;
-        };
-        let list = self.switching.list.read(cx);
-        let (on_screen, total, last_first) = (
-            list.rows_on_screen(),
-            self.shown.len(),
-            list.last_first_shown(),
-        );
-        let top_at = |first: usize| rows_thumb(first, on_screen, total).map(|thumb| thumb.top);
-        let Some(top_then) = top_at(first_then) else {
-            return;
-        };
-        let wanted = top_then + (pointer_y - grabbed_at);
-        let nearest = (0..=last_first).min_by(|a, b| {
-            let off = |first| top_at(first).map_or(f32::MAX, |top| f32::from((top - wanted).abs()));
-            off(*a).total_cmp(&off(*b))
-        });
-        if let Some(first) = nearest {
-            self.switching
-                .list
-                .update(cx, |list, _| list.scroll_to(first));
-            cx.notify();
-        }
     }
 
     fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
@@ -499,6 +538,7 @@ impl PrSwitcherView {
                     this.query = query;
                     this.refusal = None;
                     this.refresh_shown(cx);
+                    this.list_state.scroll_to(ListOffset::default());
                     cx.notify();
                 });
             })
@@ -563,6 +603,15 @@ impl PrSwitcherView {
         .h(ROW_HEIGHT)
         .px_3()
         .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            let line = this
+                .lines
+                .iter()
+                .position(|line| *line == ListLine::Row(index));
+            if *is_hovered {
+                this.hovered_line = line;
+            } else if this.hovered_line == line {
+                this.hovered_line = None;
+            }
             this.switching.list.update(cx, |list, _| {
                 if *is_hovered {
                     list.hover(index);
@@ -685,19 +734,107 @@ impl PrSwitcherView {
     }
 }
 
+impl PrSwitcherView {
+    /// What line `ix` of the list draws: a repo's name, or a row joined to the selected one beside it.
+    fn line_element(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(self.line_content(ix, cx))
+            .into_any_element()
+    }
+
+    fn line_content(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let colors = Colors::active(cx);
+        let row_at = |line: Option<&ListLine>| match line {
+            Some(ListLine::Row(nth)) => Some(*nth),
+            _ => None,
+        };
+        match self.lines.get(ix).cloned() {
+            Some(ListLine::Heading { name, rows }) => {
+                Self::heading(&name, rows, ix == 0, &colors).into_any_element()
+            }
+            Some(ListLine::Row(nth)) => {
+                let list = self.switching.list.read(cx);
+                let (selected, hovered) = (list.selected(), list.hovered());
+                let above = ix
+                    .checked_sub(1)
+                    .and_then(|above| row_at(self.lines.get(above)));
+                let below = row_at(self.lines.get(ix + 1));
+                let place = if nth == selected {
+                    RowPlace::Current
+                } else if below == Some(selected) {
+                    RowPlace::JustAboveCurrent
+                } else if above == Some(selected) {
+                    RowPlace::JustBelowCurrent
+                } else {
+                    RowPlace::Apart
+                };
+                let hovered_touching = match hovered {
+                    Some(hovered) if hovered != selected && above == Some(hovered) => {
+                        Some(RowPlace::JustAboveCurrent)
+                    }
+                    Some(hovered) if hovered != selected && below == Some(hovered) => {
+                        Some(RowPlace::JustBelowCurrent)
+                    }
+                    _ => None,
+                };
+                match self.shown.get(nth) {
+                    Some(shown) => self
+                        .row(nth, shown, (place, hovered_touching), cx)
+                        .into_any_element(),
+                    None => div().into_any_element(),
+                }
+            }
+            None => div().into_any_element(),
+        }
+    }
+
+    /// The name of the repo whose rows are at the top, stuck there while they scroll under it, and
+    /// pushed up by the next repo's name as it arrives.
+    fn sticky_heading(&self, colors: &Colors) -> Option<impl IntoElement + use<>> {
+        let top = self.list_state.logical_scroll_top().item_ix;
+        let (name, rows) = self
+            .lines
+            .get(..=top)?
+            .iter()
+            .rev()
+            .find_map(|line| match line {
+                ListLine::Heading { name, rows } => Some((name.clone(), *rows)),
+                ListLine::Row(_) => None,
+            })?;
+        let next = self
+            .lines
+            .iter()
+            .enumerate()
+            .skip(top + 1)
+            .find(|(_, line)| matches!(line, ListLine::Heading { .. }))
+            .map(|(line, _)| top_of(&self.lines, line) - self.scrolled());
+        let pushed = next.map_or(px(0.), |next_top| (next_top - LINE_HEIGHT).min(px(0.)));
+        Some(
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(pushed)
+                .bg(colors.overlay)
+                .child(Self::heading(&name, rows, true, colors)),
+        )
+    }
+}
+
 impl Render for PrSwitcherView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::active(cx);
         if self.presence.shown().is_none() {
             return div().into_any_element();
         }
-        let list = self.switching.list.read(cx);
-        let (first_shown, rows_on_screen, is_loading, is_refreshing, is_finding_local) = (
-            list.first_shown(),
-            list.rows_on_screen(),
-            list.is_loading(),
-            list.is_refreshing(),
-            list.is_finding_local(),
+        let switcher = self.switching.list.read(cx);
+        let (is_loading, is_refreshing, is_finding_local) = (
+            switcher.is_loading(),
+            switcher.is_refreshing(),
+            switcher.is_finding_local(),
         );
         let busy: Vec<&str> = [
             (is_refreshing && !is_loading).then_some("Refreshing from GitHub..."),
@@ -706,65 +843,24 @@ impl Render for PrSwitcherView {
         .into_iter()
         .flatten()
         .collect();
-        let screen = list.screen();
-        let (selected, hovered) = (list.selected(), list.hovered());
-        let row_at = |line: Option<&ScreenLine>| match line {
-            Some(ScreenLine::Row(nth)) => Some(*nth),
-            _ => None,
-        };
-        let lines: Vec<_> = screen
-            .iter()
-            .enumerate()
-            .filter_map(|(at, line)| match line {
-                ScreenLine::Heading { name, rows } => {
-                    Some(Self::heading(name, *rows, at == 0, &colors).into_any_element())
-                }
-                ScreenLine::Row(nth) => {
-                    let above = at
-                        .checked_sub(1)
-                        .and_then(|above| row_at(screen.get(above)));
-                    let below = row_at(screen.get(at + 1));
-                    let place = if *nth == selected {
-                        RowPlace::Current
-                    } else if below == Some(selected) {
-                        RowPlace::JustAboveCurrent
-                    } else if above == Some(selected) {
-                        RowPlace::JustBelowCurrent
-                    } else {
-                        RowPlace::Apart
-                    };
-                    let hovered_touching = match hovered {
-                        Some(hovered) if hovered != selected && above == Some(hovered) => {
-                            Some(RowPlace::JustAboveCurrent)
-                        }
-                        Some(hovered) if hovered != selected && below == Some(hovered) => {
-                            Some(RowPlace::JustBelowCurrent)
-                        }
-                        _ => None,
-                    };
-                    self.shown.get(*nth).map(|shown| {
-                        self.row(*nth, shown, (place, hovered_touching), cx)
-                            .into_any_element()
-                    })
-                }
-            })
-            .collect();
-        let overflows = rows_on_screen < self.shown.len();
-        let is_dragging = self.scrollbar_grab.is_some();
-        let scrollbar = rows_thumb(first_shown, rows_on_screen, self.shown.len()).map(|thumb| {
-            scrollbar(&colors, "pr-switcher-scrollbar", thumb, is_dragging)
-                .top(px(8.))
-                .h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32)
-                .on_mouse_down(
-                    gpui::MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        let first = this.switching.list.read(cx).first_shown();
-                        this.scrollbar_grab = Some((event.position.y, first));
-                        cx.notify();
-                    }),
-                )
-        });
+        let overflows = content_height(&self.lines) > self.list_height();
+        let is_dragging = self.drag.is_dragging();
+        let scrollbar = ScrollbarDrag::thumb(&self.list_state)
+            .filter(|_| overflows)
+            .map(|thumb| {
+                scrollbar(&colors, "pr-switcher-scrollbar", thumb, is_dragging)
+                    .top_0()
+                    .bottom_0()
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.drag.press(&this.list_state, event.position.y);
+                            cx.notify();
+                        }),
+                    )
+            });
+        let sticky = self.sticky_heading(&colors).filter(|_| overflows);
         let empty_text = if is_loading {
             "Loading your pull requests from GitHub..."
         } else {
@@ -772,16 +868,46 @@ impl Render for PrSwitcherView {
         };
         let message = self.refusal.clone().or_else(|| self.notice.clone());
         let closes_on_scrim = self.place == SwitcherPlace::OverReview;
+        let rows = if self.shown.is_empty() {
+            div()
+                .px_4()
+                .py_3()
+                .text_color(colors.muted_text)
+                .child(empty_text)
+                .into_any_element()
+        } else {
+            div()
+                .id("pr-switcher-list")
+                .relative()
+                .h(self.list_height())
+                .overflow_hidden()
+                .when(overflows, |list| list.pr(TRACK_WIDTH - px(8.)))
+                .child(
+                    list(
+                        self.list_state.clone(),
+                        cx.processor(|this, ix, _window, cx| this.line_element(ix, cx)),
+                    )
+                    .size_full(),
+                )
+                .children(sticky)
+                .children(scrollbar)
+                .into_any_element()
+        };
         modal_layer_for(&colors, "pr-switcher-scrim", &self.presence)
             .when(is_dragging, |layer| {
                 layer
                     .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
-                        this.drag_scrollbar_to(event.position.y, cx);
+                        if event.pressed_button == Some(gpui::MouseButton::Left) {
+                            this.drag.drag_to(&this.list_state, event.position.y);
+                        } else {
+                            this.drag.release(&this.list_state);
+                        }
+                        cx.notify();
                     }))
                     .on_mouse_up(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, _, cx| {
-                            this.scrollbar_grab = None;
+                            this.drag.release(&this.list_state);
                             cx.notify();
                         }),
                     )
@@ -814,31 +940,7 @@ impl Render for PrSwitcherView {
                             .child(sized_icon(Icon::Search, colors.muted_text, px(16.)))
                             .child(div().flex_1().min_w_0().child(self.query_box(cx))),
                     )
-                    .child(
-                        div()
-                            .id("pr-switcher-list")
-                            .relative()
-                            .py_2()
-                            .flex()
-                            .flex_col()
-                            .on_scroll(cx.listener(Self::on_scroll))
-                            .when(overflows, |list| {
-                                list.overflow_hidden()
-                                    .pr(TRACK_WIDTH - px(8.))
-                                    .h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32 + px(16.))
-                            })
-                            .children(lines)
-                            .when(self.shown.is_empty(), |list| {
-                                list.child(
-                                    div()
-                                        .px_4()
-                                        .py_3()
-                                        .text_color(colors.muted_text)
-                                        .child(empty_text),
-                                )
-                            })
-                            .children(scrollbar),
-                    )
+                    .child(rows)
                     .children(message.map(|message| {
                         notice_band(&colors, Tone::Warning)
                             .px_4()
@@ -868,13 +970,42 @@ impl Render for PrSwitcherView {
     }
 }
 
-/// Where the rows on screen sit in the whole list, drawn as a thumb on the track beside the rows.
-fn rows_thumb(first_shown: usize, on_screen: usize, total: usize) -> Option<ScrollThumb> {
-    let track = LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32;
-    let row = track / on_screen.max(1) as f32;
-    ScrollThumb::of(
-        track,
-        row * first_shown as f32,
-        row * total.saturating_sub(on_screen) as f32,
-    )
+/// A line's height: every row and every repo name is drawn at a fixed height, so where a line sits is
+/// known before gpui measures it.
+fn line_height(line: &ListLine) -> Pixels {
+    match line {
+        ListLine::Heading { .. } => LINE_HEIGHT,
+        ListLine::Row(_) => ROW_HEIGHT,
+    }
+}
+
+fn top_of(lines: &[ListLine], line: usize) -> Pixels {
+    lines
+        .iter()
+        .take(line)
+        .map(line_height)
+        .fold(px(0.), |sum, height| sum + height)
+}
+
+fn content_height(lines: &[ListLine]) -> Pixels {
+    top_of(lines, lines.len())
+}
+
+/// The line `scrolled` falls in, and how far into it.
+fn offset_at(lines: &[ListLine], scrolled: Pixels) -> ListOffset {
+    let mut top = px(0.);
+    for (item_ix, line) in lines.iter().enumerate() {
+        let height = line_height(line);
+        if scrolled < top + height {
+            return ListOffset {
+                item_ix,
+                offset_in_item: scrolled - top,
+            };
+        }
+        top += height;
+    }
+    ListOffset {
+        item_ix: lines.len().saturating_sub(1),
+        offset_in_item: px(0.),
+    }
 }

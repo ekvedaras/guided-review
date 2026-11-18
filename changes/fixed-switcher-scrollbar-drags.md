@@ -1,1 +1,1 @@
-The PR switcher's scrollbar can be dragged.
+The scrollbars of the PR switcher and the issue card can be dragged.

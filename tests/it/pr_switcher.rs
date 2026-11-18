@@ -346,57 +346,6 @@ fn twelve_pull_requests() -> PrSwitcher {
 }
 
 #[test]
-fn the_list_shows_eight_rows_from_the_top_until_the_selection_leaves_them() {
-    let mut switcher = twelve_pull_requests();
-
-    for _ in 0..7 {
-        switcher.select_next();
-    }
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (7, 0));
-}
-
-#[test]
-fn moving_down_past_the_last_shown_row_scrolls_by_just_one_row() {
-    let mut switcher = twelve_pull_requests();
-
-    for _ in 0..8 {
-        switcher.select_next();
-    }
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (8, 1));
-}
-
-#[test]
-fn moving_up_inside_the_shown_rows_does_not_scroll() {
-    let mut switcher = twelve_pull_requests();
-    for _ in 0..11 {
-        switcher.select_next();
-    }
-    assert_eq!(switcher.first_shown(), 4);
-
-    switcher.select_previous();
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 4));
-}
-
-#[test]
-fn moving_up_above_the_first_shown_row_scrolls_by_just_one_row() {
-    let mut switcher = twelve_pull_requests();
-    for _ in 0..11 {
-        switcher.select_next();
-    }
-    for _ in 0..7 {
-        switcher.select_previous();
-    }
-    assert_eq!((switcher.selected(), switcher.first_shown()), (4, 4));
-
-    switcher.select_previous();
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (3, 3));
-}
-
-#[test]
 fn the_selection_stops_at_both_ends_of_the_list() {
     let mut switcher = twelve_pull_requests();
 
@@ -406,11 +355,11 @@ fn the_selection_stops_at_both_ends_of_the_list() {
         switcher.select_next();
     }
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (11, 4));
+    assert_eq!(switcher.selected(), 11);
 }
 
 #[test]
-fn typing_puts_the_selection_and_the_scroll_back_on_top() {
+fn typing_puts_the_selection_back_on_the_first_row() {
     let mut switcher = twelve_pull_requests();
     for _ in 0..11 {
         switcher.select_next();
@@ -418,20 +367,7 @@ fn typing_puts_the_selection_and_the_scroll_back_on_top() {
 
     switcher.filter("change");
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));
-}
-
-#[test]
-fn scrolling_the_wheel_moves_the_rows_and_leaves_the_selection_where_it_is() {
-    let mut switcher = twelve_pull_requests();
-
-    switcher.scroll_by(5);
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 4));
-
-    switcher.scroll_by(-1);
-    assert_eq!(switcher.first_shown(), 3);
-    switcher.scroll_by(-9);
-    assert_eq!(switcher.first_shown(), 0);
+    assert_eq!(switcher.selected(), 0);
 }
 
 #[test]
@@ -450,7 +386,7 @@ fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected()
         .map(|row| row.pull_request().unwrap().url.short())
         .collect();
     assert_eq!(marked, ["acme/shop#11"]);
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 3));
+    assert_eq!(switcher.selected(), 10);
 }
 
 #[test]
@@ -462,5 +398,5 @@ fn with_no_pull_request_under_review_the_list_opens_on_its_first_row() {
     switcher.check_tours(&folders_in(home.path()), &ActivePr::default());
     switcher.select_active();
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));
+    assert_eq!(switcher.selected(), 0);
 }
