@@ -183,6 +183,7 @@ pub struct OneStepLayout {
     checks_hover: ChecksHover,
     /// The title bar lists the review's issues, as `I` does when there are several.
     issue_list_open: bool,
+    issue_card_scroll: gpui::ScrollHandle,
     /// The mouse is on the issue button, a row of its list, or the card of an issue.
     issue_hover: IssueHover,
     /// The description of the issue whose card shows, prepared once for as long as the card shows it.
@@ -412,6 +413,7 @@ impl OneStepLayout {
             hovered_touching_row: None,
             checks_hover: ChecksHover::default(),
             issue_list_open: false,
+            issue_card_scroll: gpui::ScrollHandle::new(),
             issue_hover: IssueHover::default(),
             issue_card_body: std::cell::RefCell::new(None),
             on_code_gesture,
@@ -2461,7 +2463,15 @@ impl OneStepLayout {
                 CardSide::Below => element.pt_1(),
                 CardSide::Right => element.pl_2(),
             })
-            .child(issue_card(colors, &issue.link, details.as_deref(), body))
+            // The thumb is drawn from the scroll offset, so a wheel turn redraws the card.
+            .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
+            .child(issue_card(
+                colors,
+                &issue.link,
+                details.as_deref(),
+                body,
+                &self.issue_card_scroll,
+            ))
     }
 
     /// Under the issue button: each issue with its number key; a click or the key opens it.
