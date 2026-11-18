@@ -2344,7 +2344,7 @@ impl OneStepLayout {
                     .gap_2()
                     .text_sm()
                     .child(switch_pr)
-                    .children(self.merge_route_chip(&colors, cx))
+                    .children(self.merge_route_parts(&colors, cx))
                     .children(status.as_ref().map(|status| {
                         match status {
                             PrStatus::Open(open) => {
@@ -2380,48 +2380,50 @@ impl OneStepLayout {
             })
     }
 
-    /// Beside the title: the PR author's picture and the branch it merges into, from the branch it
-    /// comes from. The branch is cut first when the bar is narrow, then the title.
-    fn merge_route_chip(
-        &self,
-        colors: &Colors,
-        cx: &mut Context<Self>,
-    ) -> Option<impl IntoElement + use<>> {
+    /// Beside the title: the PR author's picture, the branch it merges into, and the branch it comes
+    /// from. Each is a child of the bar so that the head branch alone is cut, before the title.
+    fn merge_route_parts(&self, colors: &Colors, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let review = self.session.read(cx).review();
-        let route = review.merge_route()?;
-        let sentence: SharedString = review.merge_route_sentence()?.into();
-        let author = review.pr_author().cloned();
-        let picture = author.map(|author| {
-            avatar_circle(
-                colors,
-                &author.login,
-                author.avatar_url.as_deref(),
-                ROUTE_AVATAR_SIZE,
-                cx,
-            )
+        let (Some(route), Some(sentence)) = (review.merge_route(), review.merge_route_sentence())
+        else {
+            return Vec::new();
+        };
+        let sentence = SharedString::from(sentence);
+        let explained = |id: &'static str| {
+            let sentence = sentence.clone();
+            div().id(id).tooltip(tooltip(move |_| sentence.clone()))
+        };
+        let picture = review.pr_author().cloned().map(|author| {
+            explained("title-bar-pr-author")
+                .flex_none()
+                .child(avatar_circle(
+                    colors,
+                    &author.login,
+                    author.avatar_url.as_deref(),
+                    ROUTE_AVATAR_SIZE,
+                    cx,
+                ))
+                .into_any_element()
         });
-        let mut route_chip = chip(colors, Tone::Neutral).font_family(*CODE_FONT);
-        route_chip.style().flex_shrink = Some(1.);
-        let mut origin = div().id("title-bar-merge-route");
-        origin.style().flex_shrink = Some(ROUTE_SHRINKS_BEFORE_TITLE);
-        Some(
-            origin
-                .min_w(px(ROUTE_MIN_WIDTH))
-                .overflow_hidden()
-                .flex()
-                .items_center()
-                .gap_1p5()
-                .tooltip(tooltip(move |_| sentence.clone()))
-                .children(picture)
-                .child(
-                    route_chip.min_w_0().child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .child(format!("{} ← {}", route.base, route.head)),
-                    ),
-                ),
-        )
+        let base = explained("title-bar-base-branch")
+            .flex_none()
+            .child(
+                chip(colors, Tone::Neutral)
+                    .font_family(*CODE_FONT)
+                    .child(route.base.to_string()),
+            )
+            .into_any_element();
+        let mut head = explained("title-bar-head-branch");
+        head.style().flex_shrink = Some(HEAD_BRANCH_SHRINKS_BEFORE_TITLE);
+        let head = head
+            .min_w_0()
+            .truncate()
+            .font_family(*CODE_FONT)
+            .text_xs()
+            .text_color(colors.muted_text)
+            .child(format!("← {}", route.head))
+            .into_any_element();
+        picture.into_iter().chain([base, head]).collect()
     }
 
     /// The review's issue, or how many there are; a click is the key `I`.
@@ -3894,10 +3896,9 @@ const ISSUE_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 /// the chevron, with a few characters of title. Past it the title is cut with an ellipsis, down to
 /// nothing, and the controls to its right keep their width.
 const PR_TITLE_MIN_WIDTH: f32 = 220.;
-/// What the author's picture and branches keep of the bar: the picture and a few characters of the
-/// branches. They give up room ten times faster than the PR's title, so the title is cut after them.
-const ROUTE_MIN_WIDTH: f32 = 96.;
-const ROUTE_SHRINKS_BEFORE_TITLE: f32 = 100_000.;
+/// The author's picture and the base branch never shrink; the head branch gives up room ten times
+/// faster than the PR's title, so the title is cut after it.
+const HEAD_BRANCH_SHRINKS_BEFORE_TITLE: f32 = 100_000.;
 const ROUTE_AVATAR_SIZE: f32 = 18.;
 /// The PR's name and title shrink this many times faster than the status chip, so they give up
 /// room down to their minimum before the chip loses any.
