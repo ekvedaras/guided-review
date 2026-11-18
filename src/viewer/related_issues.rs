@@ -38,12 +38,15 @@ pub enum IssueState {
     ClosedAsNotPlanned,
     /// Closed for a reason GitHub names that the card does not tell apart, as a duplicate.
     Closed,
+    /// A pull request named as an issue, as `Part of #12` can, once merged.
+    Merged,
 }
 
 impl IssueState {
     pub fn of_github(state: &str, reason: Option<&str>) -> Self {
         match (state, reason) {
             ("OPEN", _) => Self::Open,
+            ("MERGED", _) => Self::Merged,
             (_, Some("COMPLETED")) => Self::ClosedAsCompleted,
             (_, Some("NOT_PLANNED")) => Self::ClosedAsNotPlanned,
             _ => Self::Closed,
@@ -56,6 +59,7 @@ impl IssueState {
             Self::ClosedAsCompleted => "Closed as completed",
             Self::ClosedAsNotPlanned => "Closed as not planned",
             Self::Closed => "Closed",
+            Self::Merged => "Merged",
         }
     }
 }

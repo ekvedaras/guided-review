@@ -623,11 +623,19 @@ impl IssueDetailsPort for GitHub {
             .map(|place| {
                 format!(
                     "issue{place}: repository(owner: $owner{place}, name: $name{place}) {{
-                        issue(number: $number{place}) {{
-                            title body state stateReason
-                            author {{ login }}
-                            labels(first: 20) {{ nodes {{ name }} }}
-                            assignees(first: 10) {{ nodes {{ login }} }}
+                        issue: issueOrPullRequest(number: $number{place}) {{
+                            ... on Issue {{
+                                title body state stateReason
+                                author {{ login }}
+                                labels(first: 20) {{ nodes {{ name }} }}
+                                assignees(first: 10) {{ nodes {{ login }} }}
+                            }}
+                            ... on PullRequest {{
+                                title body state
+                                author {{ login }}
+                                labels(first: 20) {{ nodes {{ name }} }}
+                                assignees(first: 10) {{ nodes {{ login }} }}
+                            }}
                         }}
                     }}"
                 )

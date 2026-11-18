@@ -39,7 +39,7 @@ pub enum CardSide {
 fn state_tone(state: IssueState) -> Tone {
     match state {
         IssueState::Open => Tone::Success,
-        IssueState::ClosedAsCompleted => Tone::Accent,
+        IssueState::ClosedAsCompleted | IssueState::Merged => Tone::Accent,
         IssueState::ClosedAsNotPlanned | IssueState::Closed => Tone::Neutral,
     }
 }

@@ -244,6 +244,13 @@ fn with_no_linked_issue_the_issues_the_description_is_part_of_come_before_the_to
 }
 
 #[test]
+fn a_pull_request_named_as_an_issue_reads_as_merged_once_merged() {
+    assert_eq!(IssueState::of_github("MERGED", None), IssueState::Merged);
+    assert_eq!(IssueState::Merged.label(), "Merged");
+    assert_eq!(IssueState::of_github("OPEN", None), IssueState::Open);
+}
+
+#[test]
 fn an_issue_url_reads_and_writes_as_its_github_page() {
     let url: IssueUrl = "https://github.com/acme/shop/issues/12".parse().unwrap();
 
