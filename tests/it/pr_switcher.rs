@@ -7,8 +7,8 @@ use std::str::FromStr;
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use guided_review::tour::{BasicTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
-    ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrSwitcher, RelevantPullRequest,
-    RelevantPullRequests, RelevantPullRequestsPort, WhyListed, WritingFact,
+    ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrAuthor, PrSwitcher,
+    RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed, WritingFact,
 };
 use tempfile::TempDir;
 
@@ -25,7 +25,10 @@ fn relevant(url: &str, title: &str, author: &str, why: WhyListed) -> RelevantPul
     RelevantPullRequest {
         url: pr(url),
         title: title.to_owned(),
-        author: author.to_owned(),
+        author: PrAuthor {
+            login: author.into(),
+            avatar_url: None,
+        },
         is_draft: false,
         updated_at: "2026-11-06T07:00:00Z".to_owned(),
         why_listed: why,
@@ -86,7 +89,7 @@ fn a_row_carries_what_the_reviewer_needs_to_pick_without_opening() {
     assert_eq!(feed.pull_request().unwrap().title, "Fix feed");
     assert!(feed.pull_request().unwrap().is_draft);
     assert_eq!(feed.pull_request().unwrap().why_listed, WhyListed::Mine);
-    assert_eq!(limits.pull_request().unwrap().author, "dave");
+    assert_eq!(limits.pull_request().unwrap().author.login.as_ref(), "dave");
 }
 
 fn write_basic_tour(home: &Path, url: &str) {
@@ -159,12 +162,13 @@ fn picking_a_pull_request_with_no_tour_shows_it_as_a_basic_tour() {
     assert_eq!(switcher.pick(0).unwrap(), Pick::Show(pr(BLOG_7)));
     assert_eq!(
         switcher.tour_label(switcher.visible().next().unwrap()),
-        "basic"
+        None,
+        "a basic tour, as most rows have, is not named"
     );
 }
 
 #[test]
-fn a_row_labels_the_tour_it_opens_basic_guided_or_guided_ready() {
+fn a_row_names_the_tour_it_opens_only_when_it_is_guided_or_guided_ready() {
     let home = home_with_tour_of(API_31);
     write_basic_tour(home.path(), BLOG_7);
     write_basic_tour(home.path(), SHOP_7);
@@ -176,7 +180,7 @@ fn a_row_labels_the_tour_it_opens_basic_guided_or_guided_ready() {
         .visible()
         .map(|row| switcher.tour_label(row))
         .collect();
-    assert_eq!(labels, ["basic", "guided", "guided ready"]);
+    assert_eq!(labels, [None, Some("guided"), Some("guided ready")]);
 }
 
 #[test]
@@ -199,7 +203,10 @@ fn rows_say_which_tours_are_being_written_failed_or_have_an_unseen_agent_reply()
     );
     assert_eq!(tours[1].on_disk, ToursOnDisk::Guided);
     let labels: Vec<_> = rows.iter().map(|row| switcher.tour_label(row)).collect();
-    assert_eq!(labels, ["writing", "guided", "writing failed"]);
+    assert_eq!(
+        labels,
+        [Some("writing"), Some("guided"), Some("writing failed")]
+    );
     let unseen: Vec<_> = rows.iter().map(|row| row.has_unseen_reply).collect();
     assert_eq!(unseen, [false, true, false]);
     assert_eq!(
@@ -339,57 +346,6 @@ fn twelve_pull_requests() -> PrSwitcher {
 }
 
 #[test]
-fn the_list_shows_ten_rows_from_the_top_until_the_selection_leaves_them() {
-    let mut switcher = twelve_pull_requests();
-
-    for _ in 0..9 {
-        switcher.select_next();
-    }
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (9, 0));
-}
-
-#[test]
-fn moving_down_past_the_last_shown_row_scrolls_by_just_one_row() {
-    let mut switcher = twelve_pull_requests();
-
-    for _ in 0..10 {
-        switcher.select_next();
-    }
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
-}
-
-#[test]
-fn moving_up_inside_the_shown_rows_does_not_scroll() {
-    let mut switcher = twelve_pull_requests();
-    for _ in 0..11 {
-        switcher.select_next();
-    }
-    assert_eq!(switcher.first_shown(), 2);
-
-    switcher.select_previous();
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 2));
-}
-
-#[test]
-fn moving_up_above_the_first_shown_row_scrolls_by_just_one_row() {
-    let mut switcher = twelve_pull_requests();
-    for _ in 0..11 {
-        switcher.select_next();
-    }
-    for _ in 0..9 {
-        switcher.select_previous();
-    }
-    assert_eq!((switcher.selected(), switcher.first_shown()), (2, 2));
-
-    switcher.select_previous();
-
-    assert_eq!((switcher.selected(), switcher.first_shown()), (1, 1));
-}
-
-#[test]
 fn the_selection_stops_at_both_ends_of_the_list() {
     let mut switcher = twelve_pull_requests();
 
@@ -399,11 +355,11 @@ fn the_selection_stops_at_both_ends_of_the_list() {
         switcher.select_next();
     }
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (11, 2));
+    assert_eq!(switcher.selected(), 11);
 }
 
 #[test]
-fn typing_puts_the_selection_and_the_scroll_back_on_top() {
+fn typing_puts_the_selection_back_on_the_first_row() {
     let mut switcher = twelve_pull_requests();
     for _ in 0..11 {
         switcher.select_next();
@@ -411,20 +367,7 @@ fn typing_puts_the_selection_and_the_scroll_back_on_top() {
 
     switcher.filter("change");
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));
-}
-
-#[test]
-fn scrolling_the_wheel_moves_the_rows_and_leaves_the_selection_where_it_is() {
-    let mut switcher = twelve_pull_requests();
-
-    switcher.scroll_by(5);
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 2));
-
-    switcher.scroll_by(-1);
-    assert_eq!(switcher.first_shown(), 1);
-    switcher.scroll_by(-9);
-    assert_eq!(switcher.first_shown(), 0);
+    assert_eq!(switcher.selected(), 0);
 }
 
 #[test]
@@ -443,7 +386,7 @@ fn the_pull_request_under_review_is_marked_and_the_list_opens_with_it_selected()
         .map(|row| row.pull_request().unwrap().url.short())
         .collect();
     assert_eq!(marked, ["acme/shop#11"]);
-    assert_eq!((switcher.selected(), switcher.first_shown()), (10, 1));
+    assert_eq!(switcher.selected(), 10);
 }
 
 #[test]
@@ -455,5 +398,5 @@ fn with_no_pull_request_under_review_the_list_opens_on_its_first_row() {
     switcher.check_tours(&folders_in(home.path()), &ActivePr::default());
     switcher.select_active();
 
-    assert_eq!((switcher.selected(), switcher.first_shown()), (0, 0));
+    assert_eq!(switcher.selected(), 0);
 }

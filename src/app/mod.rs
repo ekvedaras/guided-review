@@ -50,8 +50,8 @@ use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
     Relaunched, RelevantPullRequestsPort, RememberedPullRequestsFile, ReviewStateFile,
-    ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgents,
-    WriteDecision,
+    ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone, TourAgentPort,
+    TourAgents, WriteDecision,
 };
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
@@ -180,7 +180,7 @@ fn pr_switching(
         relevant: relevant_pull_requests(),
         folders: folders.clone(),
         active,
-        agents: Arc::new(HcTourAgents::new(Tour::tours_dir(folders))),
+        agents: switcher_agents(folders),
         list: cx.new(|_| {
             PrSwitcher::remembering_in(RememberedPullRequestsFile::in_folders(folders), folders)
         }),
@@ -208,6 +208,15 @@ fn pr_switching(
             }
         }),
     }
+}
+
+fn switcher_agents(folders: &AppFolders) -> Arc<dyn TourAgentPort> {
+    let herdr: Arc<dyn TourAgentPort> = Arc::new(HcTourAgents::new(Tour::tours_dir(folders)));
+    #[cfg(feature = "snapshots")]
+    if snapshots::is_on() {
+        return Arc::new(snapshots::NoReviewerTerminals(herdr));
+    }
+    herdr
 }
 
 fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {

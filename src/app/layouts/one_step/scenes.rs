@@ -90,10 +90,11 @@ enum Scene {
     TitleBarMerged,
     TitleBarClosed,
     TitleBarPrOrigin,
+    PrSwitcherEnd,
 }
 
 impl Scene {
-    const ALL: [Self; 53] = [
+    const ALL: [Self; 54] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -147,6 +148,7 @@ impl Scene {
         Self::TitleBarMerged,
         Self::TitleBarClosed,
         Self::TitleBarPrOrigin,
+        Self::PrSwitcherEnd,
     ];
 
     fn file_name(self) -> &'static str {
@@ -204,6 +206,7 @@ impl Scene {
             Self::TitleBarMerged => "72-title-bar-merged",
             Self::TitleBarClosed => "73-title-bar-closed",
             Self::TitleBarPrOrigin => "74-title-bar-pr-origin",
+            Self::PrSwitcherEnd => "75-pr-switcher-end",
         }
     }
 
@@ -370,7 +373,71 @@ async fn shoot(
         camera.take(scene.file_name(), cx).await?;
         layout.update_in(cx, |layout, window, cx| layout.unstage(scene, window, cx))?;
     }
+    drag_the_issue_cards_scrollbar(camera, layout, cx).await?;
     pick_a_word_and_copy(camera, layout, cx).await
+}
+
+/// The issue card's description dragged down by its scrollbar, as the mouse gives it: pressed on the
+/// thumb, moved down with the button held, then let go on the card, which stays.
+async fn drag_the_issue_cards_scrollbar(
+    camera: &Camera,
+    layout: &WeakEntity<OneStepLayout>,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    layout.update_in(cx, |layout, window, cx| {
+        layout.stage(Scene::TitleBarIssueCard, window, cx);
+    })?;
+    camera.take("76-issue-card-before-drag", cx).await?;
+    let body = layout.update(cx, |layout, _| layout.issue_card_scroll.bounds())?;
+    let press = point(body.right() - px(6.), body.top() + px(20.));
+    let to = point(press.x, press.y + px(120.));
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: press,
+                pressed_button: None,
+                modifiers: Modifiers::default(),
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: press,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        // A frame between, as the screen gives: a drag listens for moves from the frame after the press.
+        window.refresh();
+        window.draw(cx).clear(cx);
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: to,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            }),
+            cx,
+        );
+        window.refresh();
+        window.draw(cx).clear(cx);
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: to,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+    })?;
+    camera.take("76-issue-card-dragged", cx).await?;
+    layout.update_in(cx, |layout, window, cx| {
+        layout.unstage(Scene::TitleBarIssueCard, window, cx);
+    })?;
+    Ok(())
 }
 
 /// With a comment box open on the page, a double click on the first added line's code on screen, as the
@@ -598,6 +665,11 @@ impl OneStepLayout {
                 ReviewSession::stage_local_review_on_disk(cx);
                 self.pr_switcher
                     .update(cx, |switcher, cx| switcher.open(window, cx));
+            }
+            Scene::PrSwitcherEnd => {
+                ReviewSession::stage_local_review_on_disk(cx);
+                self.pr_switcher
+                    .update(cx, |switcher, cx| switcher.open_at_end(window, cx));
             }
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
@@ -829,7 +901,7 @@ impl OneStepLayout {
             Scene::JumpPalette | Scene::JumpActions => self
                 .jump
                 .update(cx, |palette, cx| palette.close(window, cx)),
-            Scene::PrSwitcher => self
+            Scene::PrSwitcher | Scene::PrSwitcherEnd => self
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.close(window, cx)),
             Scene::FinishReview => {

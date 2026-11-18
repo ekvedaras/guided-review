@@ -21,25 +21,55 @@ pub fn find_local_rows(
     agents: &dyn TourAgentPort,
     pulls: &dyn PullsOfBranchPort,
 ) -> Vec<LocalRow> {
-    let mut rows: Vec<LocalRow> = local_reviews_on_disk(folders)
+    let reviews: Vec<LocalChangeSet> = local_reviews_on_disk(folders).into_iter().collect();
+    let roots = folders_to_look_in(folders, config, agents);
+    // Each folder asks git on its own, a big work tree for seconds, so they are all asked at once.
+    let (mut rows, of_folders) = std::thread::scope(|scope| {
+        let of_folders = scope.spawn(|| in_parallel(&roots, row_of_folder));
+        let rows: Vec<LocalRow> = in_parallel(&reviews, |change_set| {
+            Some(row_of_review(change_set, folders))
+        })
         .into_iter()
-        .map(|change_set| row_of_review(&change_set, folders))
+        .flatten()
         .collect();
+        (rows, of_folders.join().unwrap_or_default())
+    });
     let reviewed: HashSet<LocalChangeSet> = rows.iter().map(|row| row.change_set.clone()).collect();
     rows.extend(
-        folders_to_look_in(folders, config, agents)
-            .iter()
-            .filter_map(row_of_folder)
+        of_folders
+            .into_iter()
+            .flatten()
             .filter(|row| !reviewed.contains(&row.change_set)),
     );
-    for row in &mut rows {
-        row.open_pr = open_pr_of(&row.change_set, pulls).filter(|pr| {
+    let open_prs = in_parallel(&rows, |row| {
+        open_pr_of(&row.change_set, pulls).filter(|pr| {
             !ReviewStateFile::for_subject(folders, &ReviewSubject::from(row.change_set.clone()))
                 .has_declined_move_to(pr)
-        });
+        })
+    });
+    for (row, open_pr) in rows.iter_mut().zip(open_prs) {
+        row.open_pr = open_pr;
     }
     rows.sort_by_cached_key(|row| ReviewSubject::from(row.change_set.clone()).to_string());
     rows
+}
+
+/// `look` of each item, each on its own thread, in the items' order. A look that panics gives
+/// nothing, so the rows it would add are left out like any folder git cannot read.
+fn in_parallel<Item: Sync, Found: Send + Default>(
+    items: &[Item],
+    look: impl Fn(&Item) -> Found + Sync,
+) -> Vec<Found> {
+    std::thread::scope(|scope| {
+        let looks: Vec<_> = items
+            .iter()
+            .map(|item| scope.spawn(|| look(item)))
+            .collect();
+        looks
+            .into_iter()
+            .map(|looking| looking.join().unwrap_or_default())
+            .collect()
+    })
 }
 
 /// The open PR whose head is the branch. A row is only a convenience, so a failed look names none.

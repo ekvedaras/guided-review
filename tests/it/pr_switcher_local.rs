@@ -11,11 +11,12 @@ use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    ActivePr, NoGitHub, Pick, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
+    ActivePr, NoGitHub, Pick, PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
     ReviewStateFile, SwitcherRow, WhyListed,
 };
 
 const SHOP_7: &str = "https://github.com/acme/shop/pull/7";
+const BLOG_3: &str = "https://github.com/acme/blog/pull/3";
 
 /// `main`, then `feature` one commit ahead with one file written and not committed.
 fn shop_on_feature() -> FixtureRepo {
@@ -250,7 +251,7 @@ fn a_row_labels_the_review_it_opens_like_a_pull_request_row_does() {
     let folders = repo.folders();
     let mut switcher = found(&folders, &config, &FakeTourAgent::new());
     let label = |switcher: &PrSwitcher| switcher.tour_label(the_only_row(switcher));
-    assert_eq!(label(&switcher), "basic");
+    assert_eq!(label(&switcher), None);
 
     make_the_review(&repo);
     let subject = subject_of(&repo);
@@ -259,7 +260,7 @@ fn a_row_labels_the_review_it_opens_like_a_pull_request_row_does() {
     std::fs::write(guided, "{}").unwrap();
     switcher.check_tours(&folders, &ActivePr::default());
 
-    assert_eq!(label(&switcher), "guided ready");
+    assert_eq!(label(&switcher), Some("guided ready"));
     assert_eq!(
         the_only_row(&switcher).tour.on_disk,
         ToursOnDisk::BasicWithGuided
@@ -280,7 +281,10 @@ fn a_row_says_when_the_app_is_writing_its_guided_tour() {
 
     switcher.check_tours(&folders, &active);
 
-    assert_eq!(switcher.tour_label(the_only_row(&switcher)), "writing");
+    assert_eq!(
+        switcher.tour_label(the_only_row(&switcher)),
+        Some("writing")
+    );
 }
 
 #[test]
@@ -308,7 +312,10 @@ fn github_row() -> RelevantPullRequests {
         pull_requests: vec![RelevantPullRequest {
             url: SHOP_7.parse().unwrap(),
             title: "Add checkout".to_owned(),
-            author: "alice".to_owned(),
+            author: PrAuthor {
+                login: "alice".into(),
+                avatar_url: None,
+            },
             is_draft: false,
             updated_at: "2026-11-06T07:00:00Z".to_owned(),
             why_listed: WhyListed::Involved,
@@ -349,6 +356,37 @@ fn local_rows_come_after_the_pull_requests_and_a_new_github_list_keeps_them() {
         .map(|row| row.pull_request().is_some())
         .collect();
     assert_eq!(kinds, [true, false]);
+}
+
+#[test]
+fn a_local_row_sits_with_the_pull_requests_of_its_repo() {
+    let repo = shop_on_feature();
+    let folders = repo.folders();
+    let mut switcher = PrSwitcher::default();
+    let mut listed = github_row();
+    let mut blog = listed.pull_requests[0].clone();
+    blog.url = BLOG_3.parse().unwrap();
+    listed.pull_requests.push(blog);
+    switcher.loaded(Ok(listed), &folders);
+
+    switcher.local_found(
+        find_local_rows(
+            &folders,
+            &clone_named_in_config(repo.path()),
+            &FakeTourAgent::new(),
+            &NoGitHub::default(),
+        ),
+        &folders,
+    );
+
+    assert_eq!(
+        subjects(&switcher),
+        [
+            SHOP_7.to_owned(),
+            subject_of(&repo).to_string(),
+            BLOG_3.to_owned()
+        ]
+    );
 }
 
 #[test]

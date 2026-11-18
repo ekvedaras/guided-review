@@ -20,26 +20,14 @@ pub struct PrSwitcher {
     filter: String,
     /// Nth visible row.
     selected: usize,
-    /// Nth visible row at the top of the rows shown.
-    first_shown: usize,
     state: LoadState,
     is_refreshing: bool,
-    /// The row under the pointer, counted from the top of the rows on screen, as the pointer stays
-    /// where it is when the wheel moves the rows.
-    hovered_screen_row: Option<usize>,
+    is_finding_local: bool,
+    /// The nth visible row under the pointer.
+    hovered: Option<usize>,
     memory: Option<RememberedPullRequestsFile>,
     /// The list from last time could not be read, or this one could not be kept for next time.
     memory_problem: Option<String>,
-}
-
-/// Where the reviewer is in the list, kept across a new list from GitHub so rows do not jump under
-/// the pointer: the selected PR stays selected, and the hovered PR, or the selected one when none
-/// is, stays on its row of the screen.
-struct Place {
-    selected: Option<ReviewSubject>,
-    /// The row to keep on screen, and its place counted from the top of the screen.
-    pinned: Option<(ReviewSubject, usize)>,
-    first_shown: usize,
 }
 
 enum LoadState {
@@ -56,6 +44,8 @@ pub struct SwitcherRow {
     pub has_unseen_reply: bool,
     /// The PR under review.
     pub is_active: bool,
+    /// The repo, or the folder of a local review with no repo, that the row is listed under.
+    pub group: String,
     haystack: String,
 }
 
@@ -82,6 +72,23 @@ pub enum WritingFact {
     Failed,
 }
 
+/// What a line of the list holds, found again by it after the list changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LineAnchor {
+    Heading(String),
+    Row(ReviewSubject),
+}
+
+/// A line of the switcher's list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListLine {
+    /// The repo, or the folder of a local review with no repo, whose rows follow, and how many rows
+    /// it has in the whole list.
+    Heading { name: String, rows: usize },
+    /// The nth visible row.
+    Row(usize),
+}
+
 /// What picking a row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pick {
@@ -105,10 +112,10 @@ impl Default for PrSwitcher {
             visible: Vec::new(),
             filter: String::new(),
             selected: 0,
-            first_shown: 0,
             state: LoadState::Loading,
             is_refreshing: true,
-            hovered_screen_row: None,
+            is_finding_local: true,
+            hovered: None,
             memory: None,
             memory_problem: None,
         }
@@ -116,8 +123,6 @@ impl Default for PrSwitcher {
 }
 
 impl PrSwitcher {
-    pub const ROWS_SHOWN: usize = 10;
-
     /// Starts on the list GitHub gave last time, when there is one, and keeps each new one for next time.
     pub fn remembering_in(memory: RememberedPullRequestsFile, folders: &AppFolders) -> Self {
         let mut switcher = Self::default();
@@ -142,22 +147,28 @@ impl PrSwitcher {
         switcher
     }
 
+    /// The visible row under the pointer.
+    pub fn hovered(&self) -> Option<usize> {
+        self.hovered
+    }
+
     /// The pointer is over the `nth` visible row.
     pub fn hover(&mut self, nth: usize) {
-        self.hovered_screen_row = nth.checked_sub(self.first_shown);
+        self.hovered = Some(nth);
     }
 
     /// The pointer left the `nth` visible row. Rows report leaving and entering in no set order, so
     /// leaving a row the pointer is no longer over changes nothing.
     pub fn unhover(&mut self, nth: usize) {
-        if self.hovered_screen_row == nth.checked_sub(self.first_shown) {
-            self.hovered_screen_row = None;
+        if self.hovered == Some(nth) {
+            self.hovered = None;
         }
     }
 
     /// A read of the list starts; the rows listed so far stay until its answer.
     pub fn refreshing(&mut self) {
         self.is_refreshing = true;
+        self.is_finding_local = true;
     }
 
     pub fn is_refreshing(&self) -> bool {
@@ -199,37 +210,19 @@ impl PrSwitcher {
         }
     }
 
-    fn place(&self) -> Place {
-        let subject_of = |nth: usize| self.visible().nth(nth).map(|row| row.subject.clone());
-        let selected_screen_row = self
-            .selected
-            .checked_sub(self.first_shown)
-            .filter(|&row| row < Self::ROWS_SHOWN);
-        let pinned_screen_row = self.hovered_screen_row.or(selected_screen_row);
-        Place {
-            selected: subject_of(self.selected),
-            pinned: pinned_screen_row.and_then(|screen_row| {
-                subject_of(self.first_shown + screen_row).map(|subject| (subject, screen_row))
-            }),
-            first_shown: self.first_shown,
-        }
+    /// The selected row's subject, which stays selected across a new list while it is in it.
+    fn place(&self) -> Option<ReviewSubject> {
+        self.visible()
+            .nth(self.selected)
+            .map(|row| row.subject.clone())
     }
 
-    /// A pinned row that left the list leaves the rows where they were.
-    fn keep(&mut self, place: Place) {
-        let nth_of =
-            |subject: &ReviewSubject| self.visible().position(|row| &row.subject == subject);
-        let selected = place.selected.and_then(|subject| nth_of(&subject));
-        let pinned_first_shown = place.pinned.and_then(|(subject, screen_row)| {
-            nth_of(&subject).map(|nth| nth.saturating_sub(screen_row))
-        });
-        if let Some(nth) = selected {
+    fn keep(&mut self, selected: Option<ReviewSubject>) {
+        let nth =
+            selected.and_then(|subject| self.visible().position(|row| row.subject == subject));
+        if let Some(nth) = nth {
             self.selected = nth;
         }
-        let last_first = self.visible.len().saturating_sub(Self::ROWS_SHOWN);
-        self.first_shown = pinned_first_shown
-            .unwrap_or(place.first_shown)
-            .min(last_first);
     }
 
     /// Looks for tours again, as one may have been written since the list loaded, and takes what the
@@ -248,6 +241,7 @@ impl PrSwitcher {
     /// Takes the local change sets found off the UI thread, after the PRs: they replace the local
     /// rows listed before, and the PR rows stay as they are.
     pub fn local_found(&mut self, found: Vec<LocalRow>, folders: &AppFolders) {
+        self.is_finding_local = false;
         let place = self.place();
         self.local = found
             .into_iter()
@@ -273,14 +267,14 @@ impl PrSwitcher {
             .then(|| row.subject.clone())
     }
 
-    /// What the row says of the PR's tour.
-    pub fn tour_label(&self, row: &SwitcherRow) -> &'static str {
+    /// What the row says of the PR's tour, when it is more than the basic tour most rows have.
+    pub fn tour_label(&self, row: &SwitcherRow) -> Option<&'static str> {
         match (row.tour.writing, row.tour.on_disk) {
-            (WritingFact::Writing, _) => "writing",
-            (WritingFact::Failed, _) => "writing failed",
-            (WritingFact::None, ToursOnDisk::None | ToursOnDisk::Basic) => "basic",
-            (WritingFact::None, ToursOnDisk::Guided) => "guided",
-            (WritingFact::None, ToursOnDisk::BasicWithGuided) => "guided ready",
+            (WritingFact::Writing, _) => Some("writing"),
+            (WritingFact::Failed, _) => Some("writing failed"),
+            (WritingFact::None, ToursOnDisk::None | ToursOnDisk::Basic) => None,
+            (WritingFact::None, ToursOnDisk::Guided) => Some("guided"),
+            (WritingFact::None, ToursOnDisk::BasicWithGuided) => Some("guided ready"),
         }
     }
 
@@ -288,45 +282,35 @@ impl PrSwitcher {
         text.clone_into(&mut self.filter);
         self.apply_filter();
         self.selected = 0;
-        self.first_shown = 0;
     }
 
     pub fn selected(&self) -> usize {
         self.selected
     }
 
-    /// The nth visible row at the top of the `ROWS_SHOWN` rows on screen.
-    pub fn first_shown(&self) -> usize {
-        self.first_shown
-    }
-
     pub fn select_next(&mut self) {
         self.select((self.selected + 1).min(self.visible.len().saturating_sub(1)));
+    }
+
+    pub fn select_last(&mut self) {
+        self.select(self.visible.len().saturating_sub(1));
     }
 
     pub fn select_previous(&mut self) {
         self.select(self.selected.saturating_sub(1));
     }
 
-    /// Scrolls only as far as the row needs to be on screen, and not at all when it is.
     pub fn select(&mut self, nth: usize) {
         self.selected = nth;
-        if nth < self.first_shown {
-            self.first_shown = nth;
-        } else if nth >= self.first_shown + Self::ROWS_SHOWN {
-            self.first_shown = nth + 1 - Self::ROWS_SHOWN;
-        }
     }
 
-    /// The wheel moves the rows, not the selection.
-    pub fn scroll_by(&mut self, rows: isize) {
-        let last_first = self.visible.len().saturating_sub(Self::ROWS_SHOWN);
-        self.first_shown = self.first_shown.saturating_add_signed(rows).min(last_first);
+    /// Whether the local folders are being read for the local rows.
+    pub fn is_finding_local(&self) -> bool {
+        self.is_finding_local
     }
 
-    /// Puts the selection on the PR under review, or the first row, scrolling from the top.
+    /// Puts the selection on the PR under review, or the first row.
     pub fn select_active(&mut self) {
-        self.first_shown = 0;
         let active = self.visible().position(|row| row.is_active);
         self.select(active.unwrap_or(0));
     }
@@ -351,6 +335,57 @@ impl PrSwitcher {
         }
     }
 
+    /// The list as it is drawn, top to bottom: each repo's name, then its rows.
+    pub fn lines(&self) -> Vec<ListLine> {
+        let groups: Vec<&str> = self.visible().map(|row| row.group.as_str()).collect();
+        let mut lines = Vec::with_capacity(groups.len());
+        for (nth, group) in groups.iter().enumerate() {
+            let above = nth.checked_sub(1).and_then(|above| groups.get(above));
+            if above != Some(group) {
+                lines.push(ListLine::Heading {
+                    name: (*group).to_owned(),
+                    rows: groups.iter().filter(|other| *other == group).count(),
+                });
+            }
+            lines.push(ListLine::Row(nth));
+        }
+        lines
+    }
+
+    /// The line the `nth` visible row is drawn on.
+    pub fn line_of_row(&self, nth: usize) -> Option<usize> {
+        self.lines()
+            .iter()
+            .position(|line| *line == ListLine::Row(nth))
+    }
+
+    /// What is drawn on `line`, to find it again once the list changes.
+    pub fn anchor_at(&self, line: usize) -> Option<LineAnchor> {
+        match self.lines().get(line)? {
+            ListLine::Heading { name, .. } => Some(LineAnchor::Heading(name.clone())),
+            ListLine::Row(nth) => self
+                .visible()
+                .nth(*nth)
+                .map(|row| LineAnchor::Row(row.subject.clone())),
+        }
+    }
+
+    /// Where what was on `line_before` is now; when it left the list, the same line, so the rows
+    /// stay where they were.
+    pub fn line_after_change(&self, anchor: &LineAnchor, line_before: usize) -> usize {
+        let lines = self.lines();
+        let now = lines.iter().position(|line| match (line, anchor) {
+            (ListLine::Heading { name, .. }, LineAnchor::Heading(anchored)) => name == anchored,
+            (ListLine::Row(nth), LineAnchor::Row(subject)) => self
+                .visible()
+                .nth(*nth)
+                .is_some_and(|row| &row.subject == subject),
+            _ => false,
+        });
+        now.unwrap_or(line_before)
+            .min(lines.len().saturating_sub(1))
+    }
+
     /// The rows the filter lets through, newest update first.
     pub fn visible(&self) -> impl Iterator<Item = &SwitcherRow> {
         self.visible.iter().filter_map(|&index| self.row_at(index))
@@ -373,6 +408,29 @@ impl PrSwitcher {
         }
     }
 
+    /// Puts each repo's rows together, the repos in the order of their newest row, rows in list order.
+    fn group_visible(&mut self) {
+        let mut groups: Vec<&str> = Vec::new();
+        for &index in &self.visible {
+            if let Some(row) = self.row_at(index)
+                && !groups.contains(&row.group.as_str())
+            {
+                groups.push(&row.group);
+            }
+        }
+        let rank_of = |index: usize| {
+            self.row_at(index)
+                .and_then(|row| groups.iter().position(|group| *group == row.group))
+        };
+        let mut ranked: Vec<(Option<usize>, usize)> = self
+            .visible
+            .iter()
+            .map(|&index| (rank_of(index), index))
+            .collect();
+        ranked.sort_by_key(|&(rank, _)| rank);
+        self.visible = ranked.into_iter().map(|(_, index)| index).collect();
+    }
+
     fn apply_filter(&mut self) {
         let lowered = self.filter.to_lowercase();
         let words: Vec<&str> = lowered.split_whitespace().collect();
@@ -384,9 +442,9 @@ impl PrSwitcher {
             .filter(|(_, row)| words.iter().all(|word| row.haystack.contains(word)))
             .map(|(index, _)| index)
             .collect();
+        self.group_visible();
         let last = self.visible.len().saturating_sub(1);
         self.select(self.selected.min(last));
-        self.scroll_by(0);
     }
 }
 
@@ -396,12 +454,14 @@ impl SwitcherRow {
             "{} {} {}",
             pull_request.url.short(),
             pull_request.title,
-            pull_request.author
+            pull_request.author.login
         );
+        let group = pull_request.url.repo.to_string();
         Self::new(
             ReviewSubject::from(pull_request.url.clone()),
             RowKind::PullRequest(pull_request),
             &haystack,
+            group,
             folders,
         )
     }
@@ -415,11 +475,22 @@ impl SwitcherRow {
             repo.unwrap_or_default(),
             local.change_set.branch().as_str()
         );
-        Self::new(subject, RowKind::Local(local), &haystack, folders)
+        let group = local.change_set.repo().map_or_else(
+            || local.change_set.folder().name().into_owned(),
+            ToString::to_string,
+        );
+        Self::new(subject, RowKind::Local(local), &haystack, group, folders)
     }
 
-    fn new(subject: ReviewSubject, kind: RowKind, haystack: &str, folders: &AppFolders) -> Self {
+    fn new(
+        subject: ReviewSubject,
+        kind: RowKind,
+        haystack: &str,
+        group: String,
+        folders: &AppFolders,
+    ) -> Self {
         Self {
+            group,
             tour: TourFact::on_disk_of(&subject, folders),
             has_unseen_reply: false,
             is_active: false,

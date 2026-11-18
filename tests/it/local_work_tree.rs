@@ -465,3 +465,23 @@ fn two_worktrees_on_different_branches_are_two_change_sets_with_their_own_snapsh
     );
     assert!(files_of(&repo, &second_snapshot).contains("fix.txt"));
 }
+
+#[test]
+fn a_glance_counts_every_uncommitted_file_once_and_none_that_git_ignores() {
+    let repo = shop_with_work_in_progress();
+    repo.write("src/old.rs", "gone soon\n");
+    repo.write("src/moved.rs", "moves\n");
+    repo.commit("Add files that change below");
+    repo.git(&["rm", "-q", "src/old.rs"]);
+    repo.git(&["mv", "src/moved.rs", "src/renamed.rs"]);
+    repo.write("staged.txt", "staged\n");
+    repo.git(&["add", "staged.txt"]);
+    repo.write("staged.txt", "staged, then changed\n");
+    repo.write("deep/new/file.txt", "new\n");
+    repo.write("target/more.bin", "ignored\n");
+
+    let glance = work_tree(&repo).glance().unwrap();
+
+    // old (deleted), moved and renamed (two, as renames are not followed), staged, deep/new/file.
+    assert_eq!(glance.uncommitted_files, 5);
+}
