@@ -24,6 +24,7 @@ pub struct PrSwitcher {
     first_shown: usize,
     state: LoadState,
     is_refreshing: bool,
+    is_finding_local: bool,
     /// The row under the pointer, counted from the top of the rows on screen, as the pointer stays
     /// where it is when the wheel moves the rows.
     hovered_screen_row: Option<usize>,
@@ -120,6 +121,7 @@ impl Default for PrSwitcher {
             first_shown: 0,
             state: LoadState::Loading,
             is_refreshing: true,
+            is_finding_local: true,
             hovered_screen_row: None,
             memory: None,
             memory_problem: None,
@@ -178,6 +180,7 @@ impl PrSwitcher {
     /// A read of the list starts; the rows listed so far stay until its answer.
     pub fn refreshing(&mut self) {
         self.is_refreshing = true;
+        self.is_finding_local = true;
     }
 
     pub fn is_refreshing(&self) -> bool {
@@ -268,6 +271,7 @@ impl PrSwitcher {
     /// Takes the local change sets found off the UI thread, after the PRs: they replace the local
     /// rows listed before, and the PR rows stay as they are.
     pub fn local_found(&mut self, found: Vec<LocalRow>, folders: &AppFolders) {
+        self.is_finding_local = false;
         let place = self.place();
         self.local = found
             .into_iter()
@@ -344,6 +348,16 @@ impl PrSwitcher {
         }
     }
 
+    /// The first row of the screen once the scrollbar is dragged there.
+    pub fn scroll_to(&mut self, first: usize) {
+        self.first_shown = first.min(self.last_first_shown());
+    }
+
+    /// Whether the local folders are being read for the local rows.
+    pub fn is_finding_local(&self) -> bool {
+        self.is_finding_local
+    }
+
     /// The wheel moves the rows, not the selection.
     pub fn scroll_by(&mut self, rows: isize) {
         let last_first = self.last_first_shown();
@@ -378,17 +392,32 @@ impl PrSwitcher {
     }
 
     /// What is on screen, top to bottom: the rows from `first_shown`, each repo's name above its first one.
+    /// Below the whole rows, what starts before the screen's foot follows too, cut off by it, so the
+    /// screen never ends on a gap while more rows are below.
     pub fn screen(&self) -> Vec<ScreenLine> {
         let groups = self.visible_groups();
         let mut lines = Vec::new();
-        for nth in self.first_shown..self.first_shown + self.rows_on_screen() {
+        let mut used = 0;
+        let whole = self.first_shown + self.rows_on_screen();
+        for nth in self.first_shown..groups.len() {
             if let Some(group) = Self::opened_group(&groups, nth, self.first_shown) {
+                if nth >= whole && used >= Self::SCREEN_LINES {
+                    break;
+                }
                 lines.push(ScreenLine::Heading {
                     name: group.to_owned(),
                     rows: groups.iter().filter(|other| **other == group).count(),
                 });
+                used += Self::HEADING_LINES;
+            }
+            if nth >= whole && used >= Self::SCREEN_LINES {
+                break;
             }
             lines.push(ScreenLine::Row(nth));
+            used += Self::ROW_LINES;
+            if nth >= whole {
+                break;
+            }
         }
         lines
     }
@@ -429,7 +458,7 @@ impl PrSwitcher {
     }
 
     /// The last `first_shown` that still fills the screen: from it, the last row is on screen.
-    fn last_first_shown(&self) -> usize {
+    pub fn last_first_shown(&self) -> usize {
         let groups = self.visible_groups();
         let total = groups.len();
         (0..total)

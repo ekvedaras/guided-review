@@ -122,3 +122,42 @@ fn repo_names_take_room_so_fewer_rows_fit_when_every_row_is_of_another_repo() {
     switcher.scroll_by(99);
     assert_eq!(switcher.first_shown(), 7, "the last row ends the screen");
 }
+
+#[test]
+fn the_screen_ends_on_the_start_of_the_next_rows_when_a_whole_one_does_not_fit() {
+    let urls: Vec<String> = (1..=12)
+        .map(|number| format!("https://github.com/acme/repo-{number}/pull/1"))
+        .collect();
+    let switcher = listing(urls.iter().map(String::as_str));
+
+    let screen = switcher.screen();
+
+    assert_eq!(switcher.rows_on_screen(), 5, "whole rows");
+    assert_eq!(
+        screen[screen.len() - 2..],
+        [heading("acme/repo-6", 1), ScreenLine::Row(5)],
+        "the sixth repo starts at the bottom, cut off, so no gap is left"
+    );
+}
+
+#[test]
+fn a_dragged_scrollbar_puts_the_screen_at_a_row_but_never_past_the_last_screen() {
+    let mut switcher = twelve_of_one_repo();
+
+    switcher.scroll_to(2);
+    assert_eq!(switcher.first_shown(), 2);
+    switcher.scroll_to(99);
+    assert_eq!(switcher.first_shown(), switcher.last_first_shown());
+    assert_eq!(switcher.last_first_shown(), 4);
+}
+
+#[test]
+fn the_switcher_says_it_looks_in_local_folders_until_they_are_read() {
+    let mut switcher = PrSwitcher::default();
+    switcher.refreshing();
+    assert!(switcher.is_finding_local());
+
+    switcher.local_found(Vec::new(), &folders_in(Path::new("/nowhere")));
+
+    assert!(!switcher.is_finding_local());
+}

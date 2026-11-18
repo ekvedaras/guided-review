@@ -133,6 +133,8 @@ pub struct PrSwitcherView {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     _list_changes: Subscription,
+    /// While the scrollbar is dragged: where the pointer went down, and the first row then.
+    scrollbar_grab: Option<(Pixels, usize)>,
     /// A snapshot scene keeps the last row selected as the rows come in.
     #[cfg(feature = "snapshots")]
     staged_at_end: bool,
@@ -272,6 +274,7 @@ impl PrSwitcherView {
             focus: cx.focus_handle(),
             owner_focus,
             _list_changes: list_changes,
+            scrollbar_grab: None,
             #[cfg(feature = "snapshots")]
             staged_at_end: false,
         };
@@ -454,6 +457,35 @@ impl PrSwitcherView {
                 .update(cx, |list, _| list.scroll_by(rows));
         }
         cx.notify();
+    }
+
+    /// Puts the screen at the row whose thumb sits nearest to where the pointer has moved it since it
+    /// was grabbed.
+    fn drag_scrollbar_to(&mut self, pointer_y: Pixels, cx: &mut Context<Self>) {
+        let Some((grabbed_at, first_then)) = self.scrollbar_grab else {
+            return;
+        };
+        let list = self.switching.list.read(cx);
+        let (on_screen, total, last_first) = (
+            list.rows_on_screen(),
+            self.shown.len(),
+            list.last_first_shown(),
+        );
+        let top_at = |first: usize| rows_thumb(first, on_screen, total).map(|thumb| thumb.top);
+        let Some(top_then) = top_at(first_then) else {
+            return;
+        };
+        let wanted = top_then + (pointer_y - grabbed_at);
+        let nearest = (0..=last_first).min_by(|a, b| {
+            let off = |first| top_at(first).map_or(f32::MAX, |top| f32::from((top - wanted).abs()));
+            off(*a).total_cmp(&off(*b))
+        });
+        if let Some(first) = nearest {
+            self.switching
+                .list
+                .update(cx, |list, _| list.scroll_to(first));
+            cx.notify();
+        }
     }
 
     fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
@@ -660,12 +692,20 @@ impl Render for PrSwitcherView {
             return div().into_any_element();
         }
         let list = self.switching.list.read(cx);
-        let (first_shown, rows_on_screen, is_loading, is_refreshing) = (
+        let (first_shown, rows_on_screen, is_loading, is_refreshing, is_finding_local) = (
             list.first_shown(),
             list.rows_on_screen(),
             list.is_loading(),
             list.is_refreshing(),
+            list.is_finding_local(),
         );
+        let busy: Vec<&str> = [
+            (is_refreshing && !is_loading).then_some("Refreshing from GitHub..."),
+            is_finding_local.then_some("Looking in your folders..."),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let screen = list.screen();
         let (selected, hovered) = (list.selected(), list.hovered());
         let row_at = |line: Option<&ScreenLine>| match line {
@@ -710,10 +750,20 @@ impl Render for PrSwitcherView {
             })
             .collect();
         let overflows = rows_on_screen < self.shown.len();
+        let is_dragging = self.scrollbar_grab.is_some();
         let scrollbar = rows_thumb(first_shown, rows_on_screen, self.shown.len()).map(|thumb| {
-            scrollbar(&colors, "pr-switcher-scrollbar", thumb, false)
+            scrollbar(&colors, "pr-switcher-scrollbar", thumb, is_dragging)
                 .top(px(8.))
                 .h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32)
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let first = this.switching.list.read(cx).first_shown();
+                        this.scrollbar_grab = Some((event.position.y, first));
+                        cx.notify();
+                    }),
+                )
         });
         let empty_text = if is_loading {
             "Loading your pull requests from GitHub..."
@@ -723,6 +773,19 @@ impl Render for PrSwitcherView {
         let message = self.refusal.clone().or_else(|| self.notice.clone());
         let closes_on_scrim = self.place == SwitcherPlace::OverReview;
         modal_layer_for(&colors, "pr-switcher-scrim", &self.presence)
+            .when(is_dragging, |layer| {
+                layer
+                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                        this.drag_scrollbar_to(event.position.y, cx);
+                    }))
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.scrollbar_grab = None;
+                            cx.notify();
+                        }),
+                    )
+            })
             .when(closes_on_scrim, |scrim| {
                 scrim.on_mouse_down(
                     gpui::MouseButton::Left,
@@ -760,7 +823,8 @@ impl Render for PrSwitcherView {
                             .flex_col()
                             .on_scroll(cx.listener(Self::on_scroll))
                             .when(overflows, |list| {
-                                list.pr(TRACK_WIDTH - px(8.))
+                                list.overflow_hidden()
+                                    .pr(TRACK_WIDTH - px(8.))
                                     .h(LINE_HEIGHT * PrSwitcher::SCREEN_LINES as f32 + px(16.))
                             })
                             .children(lines)
@@ -795,9 +859,7 @@ impl Render for PrSwitcherView {
                             .child(key_hint(&colors, &[KeyLabel::Icon(Icon::Enter)], "open"))
                             .child(key_hint(&colors, &[KeyLabel::Text("esc")], "close"))
                             .child(div().flex_1())
-                            .when(is_refreshing && !is_loading, |footer| {
-                                footer.child("Refreshing from GitHub...")
-                            }),
+                            .when(!busy.is_empty(), |footer| footer.child(busy.join(" · "))),
                     ),
                 "pr-switcher-rise",
                 &self.presence,

@@ -198,12 +198,7 @@ impl LocalWorkTree {
             .git(&["rev-list", "--count", &format!("{base}..{head}")])?
             .parse()
             .map_err(|error| self.failed(error))?;
-        let uncommitted_files = self
-            .changed_files(
-                &Sha::new(&self.tree_of("HEAD")?),
-                &Sha::new(&self.working_tree_id()?),
-            )?
-            .len();
+        let uncommitted_files = self.uncommitted_file_count()?;
         Ok(Glance {
             commits_ahead,
             uncommitted_files,
@@ -480,6 +475,23 @@ impl LocalWorkTree {
 
     /// The tree id of the files on disk: `HEAD`'s tree with every change and every untracked file that
     /// is not ignored, written from an index of its own so the reviewer's index is never opened.
+    /// What `changed_files` from `HEAD` to the working tree counts, from git's own index: a working tree
+    /// made from a fresh index hashes every file, seconds in a big repo, and a glance is taken of many.
+    fn uncommitted_file_count(&self) -> Result<usize, OpenRefusal> {
+        Ok(self
+            .git_untrimmed(&[
+                "--no-optional-locks",
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--no-renames",
+            ])?
+            .split('\0')
+            .filter(|entry| !entry.is_empty())
+            .count())
+    }
+
     fn working_tree_id(&self) -> Result<String, OpenRefusal> {
         let index = TemporaryIndex::new();
         let env = [("GIT_INDEX_FILE", index.path().as_os_str())];
