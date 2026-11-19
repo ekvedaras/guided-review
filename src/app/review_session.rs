@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Context, EventEmitter, ListAlignment, ListOffset, ListState, Subscription, Task, Window,
-    px,
+    App, Context, EventEmitter, ListAlignment, ListOffset, ListState, Pixels, Subscription, Task,
+    Window, px,
 };
 
 use crate::app::components::image_row::ImagePictures;
@@ -38,6 +38,10 @@ use crate::viewer::{
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Rows laid out beyond the visible part, so a fast scroll does not show a blank edge.
 const LIST_OVERDRAW: f32 = 300.;
+/// What a row not drawn yet counts as, a code line's height: most rows are code lines. gpui counts
+/// a row with no estimate as 0 px, so the page seemed short and its scrollbar thumb shrank while
+/// rows further down were first drawn.
+const ROW_HEIGHT_ESTIMATE: Pixels = px(23.);
 /// The file the Changed on disk scene writes into the staged local review's folder.
 #[cfg(feature = "snapshots")]
 const CHANGED_ON_DISK_FILE: &str = "later.txt";
@@ -232,7 +236,8 @@ impl ReviewSession {
             work_timer: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
-            screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
+            screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW))
+                .with_uniform_item_height(ROW_HEIGHT_ESTIMATE),
             rows,
             review,
             github,
@@ -801,7 +806,9 @@ impl ReviewSession {
         let started = Instant::now();
         let rows = PageRows::of(&self.review, &self.open_details);
         match rows.change_from(&self.rows) {
-            RowsChange::OtherScreen => self.screen_list.reset(rows.len()),
+            RowsChange::OtherScreen => self
+                .screen_list
+                .reset_with_uniform_height(rows.len(), ROW_HEIGHT_ESTIMATE),
             RowsChange::Spliced { old, new_count } => self.splice_keeping_place(old, new_count),
             RowsChange::Unchanged => {}
         }
@@ -844,7 +851,8 @@ impl ReviewSession {
             step.is_ticked = true;
         }
         self.rows.stage_all_read(total, &self.open_details);
-        self.screen_list.reset(self.rows.len());
+        self.screen_list
+            .reset_with_uniform_height(self.rows.len(), ROW_HEIGHT_ESTIMATE);
         cx.notify();
     }
 
@@ -933,7 +941,8 @@ impl ReviewSession {
     pub fn stage_unread_end(&mut self, cx: &mut Context<Self>) {
         self.is_unread_end_staged = true;
         self.draw_unread_end();
-        self.screen_list.reset(self.rows.len());
+        self.screen_list
+            .reset_with_uniform_height(self.rows.len(), ROW_HEIGHT_ESTIMATE);
         cx.notify();
     }
 
