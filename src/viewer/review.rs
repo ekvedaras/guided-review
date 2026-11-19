@@ -1,4 +1,3 @@
-mod ai_review_run;
 mod ask_why;
 mod finding_actions;
 mod guided_tour;
@@ -8,6 +7,7 @@ pub use finding_actions::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;
 mod pr_controls;
+mod run_ai_review;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
