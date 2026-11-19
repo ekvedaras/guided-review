@@ -1,1 +1,1 @@
-Ask why on a finding opens a box under it with the usual question, which you can edit; the question goes to the review agent, whose answer shows under the finding, or else opens Ask. Ask again under the answer to follow up.
+Ask why on a finding talks it over with the review agent in a box under the finding.
