@@ -271,7 +271,7 @@ fn a_batch_comment_keeps_open_a_finding_whose_lines_already_have_a_comment_on_th
 
     assert_eq!(batch.done.len(), 1);
     assert_eq!(batch.refused, [(id("b"), FindingRefusal::DraftInTheWay)]);
-    assert_eq!(shown_ids(&review), ["b"]);
+    assert_eq!(shown_ids(&review), ["a", "b"]);
 }
 
 #[test]

@@ -90,19 +90,44 @@ impl ReviewCore {
         self.record_decision(finding, Fate::Dismissed)
     }
 
-    /// The finding's text goes into a comment box on its lines, after any text there, and the
-    /// finding goes. The reviewer edits and sends it with the usual actions.
+    /// The finding's text goes into a comment box on its lines, after any text there. The finding
+    /// stays open until that comment is sent.
     pub fn use_finding(&mut self, id: &FindingId) -> Result<CommentPlace, FindingRefusal> {
         let finding = self.open_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
         self.comment_desk
             .add_text_at(&mut self.state, &place, &self.head, &finding.body)
             .map_err(FindingRefusal::Comment)?;
-        self.record_decision(finding, Fate::Used)?;
+        self.findings_in_boxes.retain(|(_, boxed)| boxed.id != finding.id);
+        self.findings_in_boxes.push((place.clone(), finding));
         Ok(place)
     }
 
-    /// The finding, marked as AI, goes straight to the send action, with no box to edit it in.
+    /// The comment sent from `place` closes the findings whose text it carries.
+    pub(super) fn decide_findings_sent_from(
+        &mut self,
+        place: &CommentPlace,
+    ) -> anyhow::Result<()> {
+        let (sent, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.findings_in_boxes)
+            .into_iter()
+            .partition(|(boxed_at, _)| boxed_at == place);
+        self.findings_in_boxes = waiting;
+        for (_, finding) in sent {
+            self.record_decision(finding, Fate::Used)
+                .map_err(|refusal| anyhow::anyhow!("{refusal}"))?;
+        }
+        Ok(())
+    }
+
+    /// A box that was discarded carries no finding any more.
+    pub(super) fn forget_findings_of_gone_boxes(&mut self) {
+        let state = &self.state;
+        self.findings_in_boxes
+            .retain(|(place, _)| state.draft_at(place).is_some());
+    }
+
+    /// The finding, marked as AI, goes straight to the send action, with no box to edit it in. It
+    /// goes when the send lands; a failed send keeps it.
     pub fn use_finding_as_is(
         &mut self,
         id: &FindingId,
@@ -123,7 +148,7 @@ impl ReviewCore {
         let request = self
             .start_sending(&place, mode, Audience::Author)
             .ok_or(FindingRefusal::NotThere)?;
-        self.record_decision(finding, Fate::Used)?;
+        self.findings_in_boxes.push((place, finding));
         Ok(request)
     }
 

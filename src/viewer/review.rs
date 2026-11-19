@@ -334,6 +334,9 @@ pub struct ReviewCore {
     findings: FindingPlacement,
     /// The finding the reviewer was last taken to, so the next one comes after it.
     finding_cursor: Option<FindingId>,
+    /// Findings whose text sits in a comment box: each is decided when that comment is sent, not
+    /// when the box opens, so closing the box unsent loses nothing.
+    findings_in_boxes: Vec<(CommentPlace, Finding)>,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
@@ -675,6 +678,7 @@ impl ReviewCore {
             threads: ThreadPlacement::default(),
             findings: FindingPlacement::default(),
             finding_cursor: None,
+            findings_in_boxes: Vec::new(),
             thread_fold_flipped: BTreeSet::new(),
             screen,
             state: SavedState::new(state, state_file),
@@ -1982,7 +1986,9 @@ impl ReviewCore {
     }
 
     pub fn discard(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
-        self.comment_desk.discard(&mut self.state, text_box)
+        let discarded = self.comment_desk.discard(&mut self.state, text_box);
+        self.forget_findings_of_gone_boxes();
+        discarded
     }
 
     /// Whatever came of it, the next hand-off may go now.
@@ -2277,6 +2283,7 @@ impl ReviewCore {
     }
 
     fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
+        let sent_from = outcome.request.draft.place.clone();
         let threads = outcome.threads.clone();
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
@@ -2287,6 +2294,9 @@ impl ReviewCore {
         );
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
+        if matches!(result, Ok(CommentResult::Sent | CommentResult::Queued(_))) {
+            self.decide_findings_sent_from(&sent_from)?;
+        }
         result
     }
 

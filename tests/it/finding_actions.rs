@@ -2,6 +2,8 @@
 
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::app_path::AppPath;
+use crate::support::fake_ports::GitHubFault;
 use guided_review::findings::FindingId;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
@@ -102,9 +104,11 @@ fn a_dismissed_finding_goes_from_its_screen_and_stays_gone_when_the_review_opens
 }
 
 #[test]
-fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_goes() {
+fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_goes_when_it_is_sent() {
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice."), on_line_2("b", "Two.")]);
     let mut review = shop.open();
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
 
     let place = review.use_finding(&id("a")).unwrap();
 
@@ -114,9 +118,47 @@ fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_g
     assert_eq!((start.line.get(), end.line.get()), (2, 2));
     assert_eq!(review.composing(), Some(&place));
     assert_eq!(drafts(&review)[0].body, "Say it twice.");
-    assert_eq!(shown_findings(review.page()), ["b"]);
+    assert_eq!(shown_findings(review.page()), ["a", "b"]);
     assert_eq!(drafts(&shop.open())[0].body, "Say it twice.");
+    assert_eq!(shown_findings(shop.open().page()), ["a", "b"]);
+
+    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+
+    assert_eq!(result.unwrap(), Some(CommentResult::Sent));
+    assert_eq!(shown_findings(review.page()), ["b"]);
     assert_eq!(shown_findings(shop.open().page()), ["b"]);
+}
+
+#[test]
+fn a_finding_used_in_a_box_whose_send_is_rejected_stays_open() {
+    let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
+    let mut review = shop.open();
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let place = review.use_finding(&id("a")).unwrap();
+
+    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+
+    assert!(matches!(result.unwrap(), Some(CommentResult::Rejected(_))));
+    assert_eq!(shown_findings(review.page()), ["a"]);
+}
+
+#[test]
+fn using_a_finding_as_is_whose_send_is_rejected_keeps_the_finding() {
+    let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
+    let mut review = shop.open();
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    github.inject(GitHubFault::NewThreadsAnswerNull);
+
+    let request = review
+        .use_finding_as_is(&id("a"), SendMode::AddToReview)
+        .unwrap();
+    let result = review.apply_comment(request.run(&github)).unwrap();
+
+    assert!(matches!(result, CommentResult::Rejected(_)));
+    assert_eq!(shown_findings(review.page()), ["a"]);
 }
 
 #[test]
@@ -140,7 +182,7 @@ fn using_a_finding_on_a_file_comments_on_the_file_and_one_about_the_whole_change
         on_change,
         Err(FindingRefusal::Comment(CommentRefusal::NoLines))
     );
-    assert_eq!(review.ai_review().counts().total(), 1);
+    assert_eq!(review.ai_review().counts().total(), 2);
 }
 
 #[test]
@@ -206,7 +248,7 @@ fn using_a_finding_as_is_does_not_send_a_comment_the_reviewer_is_writing_on_thos
     let refused = review.use_finding_as_is(&id("b"), SendMode::AddToReview);
 
     assert!(matches!(refused, Err(FindingRefusal::DraftInTheWay)));
-    assert_eq!(shown_findings(review.page()), ["b"]);
+    assert_eq!(shown_findings(review.page()), ["a", "b"]);
     assert_eq!(drafts(&review)[0].body, "One.");
 }
 
