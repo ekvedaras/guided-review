@@ -167,16 +167,26 @@ impl ReviewCore {
         }
     }
 
-    /// The Ask why threads a snapshot scene shows on the open findings, and their removal.
+    /// The Ask why threads a snapshot scene shows on the open findings.
     #[cfg(feature = "snapshots")]
-    pub fn stage_finding_threads(&mut self, staged: bool) {
-        let findings = match (&self.ai_review, staged) {
-            (crate::viewer::ai_review::AiReview::Findings(file), true) => file.findings.clone(),
+    pub fn stage_finding_threads(&mut self) {
+        let findings = match &self.ai_review {
+            crate::viewer::ai_review::AiReview::Findings(file) => file.findings.clone(),
             _ => Vec::new(),
         };
+        self.show_staged_finding_threads(&findings);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_finding_threads(&mut self) {
+        self.show_staged_finding_threads(&[]);
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn show_staged_finding_threads(&mut self, findings: &[Finding]) {
         self.record_reporting("the staged finding threads", |state| {
             *state.finding_threads_mut() =
-                crate::viewer::finding_threads::FindingThreads::staged(&findings);
+                crate::viewer::finding_threads::FindingThreads::staged(findings);
         });
         self.place_threads();
     }

@@ -390,7 +390,10 @@ async fn answer_requests(
                     Ok(subject) => subject,
                     Err(error) => {
                         eprintln!("refused to open {}: {error:#}", open.subject);
-                        answer_asker(&reply, refused(&ReviewSubject::not_a_subject(&open.subject)));
+                        answer_asker(
+                            &reply,
+                            refused(&ReviewSubject::not_a_subject(&open.subject)),
+                        );
                         continue;
                     }
                 };

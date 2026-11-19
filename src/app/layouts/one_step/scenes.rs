@@ -834,7 +834,7 @@ impl OneStepLayout {
                     .map(|line| line.location.clone());
                 if let Some(at) = first_line {
                     review.ai_review_is(AiReview::staged_on(&at.path, at.line));
-                    review.stage_fix_requests(true);
+                    review.stage_fix_requests();
                 }
             }),
             Scene::AiReviewOutdated => self.change_review(cx, |review| {
@@ -858,7 +858,7 @@ impl OneStepLayout {
                         .map(|line| line.location.clone());
                     if let Some(at) = first_line {
                         review.ai_review_is(AiReview::staged_on(&at.path, at.line));
-                        review.stage_finding_threads(true);
+                        review.stage_finding_threads();
                     }
                 });
                 if let Ok(answered) = FindingId::try_from("a".to_owned()) {
@@ -1089,13 +1089,13 @@ impl OneStepLayout {
                     self.finding_questions.close(&answered);
                 }
                 self.change_review(cx, |review| {
-                    review.stage_finding_threads(false);
+                    review.unstage_finding_threads();
                     review.ai_review_is(AiReview::NotRun);
                     review.go_to_summary();
                 });
             }
             Scene::AiReviewFixRequests => self.change_review(cx, |review| {
-                review.stage_fix_requests(false);
+                review.unstage_fix_requests();
                 review.ai_review_is(AiReview::NotRun);
                 review.go_to_summary();
             }),

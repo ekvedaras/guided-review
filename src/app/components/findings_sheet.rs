@@ -37,6 +37,23 @@ pub enum FindingsEvent {
     GoTo(FindingId),
 }
 
+/// Whether a checkbox or a batch button has findings ticked behind it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Selection {
+    Selected,
+    Unselected,
+}
+
+impl Selection {
+    const fn of(is_selected: bool) -> Self {
+        if is_selected {
+            Self::Selected
+        } else {
+            Self::Unselected
+        }
+    }
+}
+
 pub struct FindingsSheet {
     presence: Presence,
     focus: FocusHandle,
@@ -137,7 +154,8 @@ impl FindingsSheet {
         }
     }
 
-    fn checkbox(colors: &Colors, is_selected: bool) -> impl IntoElement {
+    fn checkbox(colors: &Colors, selection: Selection) -> impl IntoElement {
+        let is_selected = selection == Selection::Selected;
         div()
             .flex_none()
             .size(px(16.))
@@ -185,7 +203,7 @@ impl FindingsSheet {
                     this.list.toggle_under_cursor();
                     cx.notify();
                 }))
-                .child(Self::checkbox(colors, row.is_selected)),
+                .child(Self::checkbox(colors, Selection::of(row.is_selected))),
         )
         .child(chip(colors, tone_of(row.severity)).child(row.severity.to_string()))
         .children(
@@ -270,13 +288,12 @@ impl FindingsSheet {
         id: &'static str,
         label: String,
         kind: ButtonKind,
-        has_selection: bool,
+        selection: Selection,
     ) -> gpui::Stateful<gpui::Div> {
         let base = button(colors, id, kind, ButtonSize::Small).child(label);
-        if has_selection {
-            base
-        } else {
-            base.opacity(0.45).cursor_default()
+        match selection {
+            Selection::Selected => base,
+            Selection::Unselected => base.opacity(0.45).cursor_default(),
         }
     }
 }
@@ -319,7 +336,7 @@ impl Render for FindingsSheet {
         let colors = Colors::active(cx);
         let rows = self.list.rows();
         let selected = self.list.selected().len();
-        let has_selection = selected > 0;
+        let selection = Selection::of(selected > 0);
         let all_selected = self.list.all_selected();
         let header = div()
             .px_5()
@@ -349,7 +366,7 @@ impl Render for FindingsSheet {
                         this.list.toggle_all();
                         cx.notify();
                     }))
-                    .child(Self::checkbox(&colors, all_selected))
+                    .child(Self::checkbox(&colors, Selection::of(all_selected)))
                     .child("Select all"),
             )
             .child(
@@ -358,7 +375,7 @@ impl Render for FindingsSheet {
                     "findings-dismiss",
                     format!("Dismiss ({selected})"),
                     ButtonKind::Secondary,
-                    has_selection,
+                    selection,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.ask(FindingsEvent::Dismiss, cx);
@@ -370,7 +387,7 @@ impl Render for FindingsSheet {
                     "findings-fix",
                     format!("Fix ({selected})"),
                     ButtonKind::Secondary,
-                    has_selection,
+                    selection,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.ask(FindingsEvent::Fix, cx);
@@ -382,7 +399,7 @@ impl Render for FindingsSheet {
                     "findings-comment",
                     format!("Comment ({selected})"),
                     ButtonKind::Primary,
-                    has_selection,
+                    selection,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.ask(FindingsEvent::Comment, cx);

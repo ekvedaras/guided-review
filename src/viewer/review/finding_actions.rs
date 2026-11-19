@@ -243,15 +243,25 @@ impl ReviewCore {
         (screen_at, first_line)
     }
 
-    /// The fixes a snapshot scene shows on the open findings, and their removal.
+    /// The fixes a snapshot scene shows on the open findings.
     #[cfg(feature = "snapshots")]
-    pub fn stage_fix_requests(&mut self, staged: bool) {
-        let findings = match (&self.ai_review, staged) {
-            (AiReview::Findings(file), true) => file.findings.clone(),
+    pub fn stage_fix_requests(&mut self) {
+        let findings = match &self.ai_review {
+            AiReview::Findings(file) => file.findings.clone(),
             _ => Vec::new(),
         };
+        self.show_staged_fix_requests(&findings);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub fn unstage_fix_requests(&mut self) {
+        self.show_staged_fix_requests(&[]);
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn show_staged_fix_requests(&mut self, findings: &[Finding]) {
         self.record_reporting("the staged fix requests", |state| {
-            *state.fix_requests_mut() = FixRequests::staged(&findings);
+            *state.fix_requests_mut() = FixRequests::staged(findings);
         });
         self.place_threads();
     }

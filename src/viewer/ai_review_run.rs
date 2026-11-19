@@ -90,15 +90,22 @@ pub struct RunningReview {
     pub status: Option<AgentStatus>,
     /// The agent's last screen lines, top first.
     pub screen: Vec<String>,
-    /// The agent took its first turn, so going idle now means it stopped, not that it is starting up.
-    has_worked: bool,
+    first_turn: FirstTurn,
+}
+
+/// Whether the agent took its first turn: going idle after it means the agent stopped, before it
+/// means the agent is starting up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstTurn {
+    NotTakenYet,
+    Taken,
 }
 
 impl AiReviewRun {
     /// A run the agent works in, as a snapshot scene shows it.
     #[cfg(feature = "snapshots")]
     pub fn staged_running() -> Self {
-        Self::Running(RunningReview::new(TerminalId::new("t1"), true))
+        Self::Running(RunningReview::found_again(TerminalId::new("t1")))
     }
 
     /// A run that ended because the agent stopped, as a snapshot scene shows it.
@@ -126,7 +133,7 @@ impl AiReviewRun {
             return;
         }
         *self = match started {
-            Ok(terminal) => Self::Running(RunningReview::new(terminal, false)),
+            Ok(terminal) => Self::Running(RunningReview::starting(terminal)),
             Err(error) => Self::Failed {
                 reason: format!("The review agent could not start: {error:#}"),
                 agent: None,
@@ -136,7 +143,7 @@ impl AiReviewRun {
 
     /// Found again after a restart. It started before, so going idle now means it stopped.
     pub(super) fn resumed(&mut self, terminal: TerminalId, status: Option<AgentStatus>) {
-        *self = Self::Running(RunningReview::new(terminal, true));
+        *self = Self::Running(RunningReview::found_again(terminal));
         if let Some(status) = status {
             self.status_is(status);
         }
@@ -148,8 +155,8 @@ impl AiReviewRun {
         };
         running.status = Some(status);
         match status {
-            AgentStatus::Working => running.has_worked = true,
-            AgentStatus::Idle if running.has_worked => {
+            AgentStatus::Working => running.first_turn = FirstTurn::Taken,
+            AgentStatus::Idle if running.first_turn == FirstTurn::Taken => {
                 *self = Self::Failed {
                     reason: "The review agent stopped without findings. Show the agent to answer it, or try again."
                         .to_owned(),
@@ -200,12 +207,20 @@ impl AiReviewRun {
 }
 
 impl RunningReview {
-    const fn new(terminal: TerminalId, has_worked: bool) -> Self {
+    const fn starting(terminal: TerminalId) -> Self {
+        Self::on(terminal, FirstTurn::NotTakenYet)
+    }
+
+    const fn found_again(terminal: TerminalId) -> Self {
+        Self::on(terminal, FirstTurn::Taken)
+    }
+
+    const fn on(terminal: TerminalId, first_turn: FirstTurn) -> Self {
         Self {
             terminal,
             status: None,
             screen: Vec::new(),
-            has_worked,
+            first_turn,
         }
     }
 }
