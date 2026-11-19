@@ -168,6 +168,8 @@
 
 **Severity**: How much a finding matters: `must fix`, `should fix` or `nit`, most severe first. Avoid: priority, level.
 
+**Use / Use as is / Dismiss**: What the reviewer does with one finding. Use puts its text in a comment box on its lines (a task in a local review) to edit and send; Use as is sends it at once to Add to review (Add to tasks), starting with 🤖; Dismiss drops it, and the next AI review is told not to report it again. A decided finding is kept in the review's state file and never shown again.
+
 **Findings file**: What the review agent writes beside the tour (`<number>.findings.json`, the path `guided-review findings-path <key>` prints): the tour's pin (`pr` or `local`, `base`, `head`) and `findings`. `check-findings` checks it and pins it, `findings-done` tells the app, which reads the file whole, never half of it. The file is the state: an app that is not running reads it when it opens the review. Avoid: report, review file.
 
 **Review agent**: The AI session, in its own herdr terminal and apart from the tour agent, that does one review subject's AI review. Avoid: reviewer (that is the person), review subagent.

@@ -1,5 +1,8 @@
 mod ai_review_run;
+mod finding_actions;
 mod guided_tour;
+
+pub use finding_actions::FindingRefusal;
 mod jobs;
 mod kept;
 mod pr_controls;
@@ -810,7 +813,12 @@ impl ReviewCore {
 
     /// Reads the review agent's findings file again, as the app does when the agent says it is done.
     pub fn read_findings(&mut self, folders: &AppFolders) {
-        let read = AiReview::read(folders, &self.subject);
+        let mut read = AiReview::read(folders, &self.subject);
+        if let AiReview::Findings(file) = &mut read {
+            let decided = self.state.finding_decisions();
+            file.findings
+                .retain(|finding| !decided.has_decided(finding));
+        }
         self.run_ends_with(&read);
         self.ai_review = read;
         self.place_threads();

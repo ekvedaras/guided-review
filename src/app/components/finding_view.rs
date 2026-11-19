@@ -17,7 +17,8 @@ pub fn tone_of(severity: Severity) -> Tone {
     }
 }
 
-pub fn finding_card(colors: &Colors, row: &FindingRow) -> Div {
+/// `actions` are the buttons that decide the finding, which the layout makes because their clicks are its.
+pub fn finding_card(colors: &Colors, row: &FindingRow, actions: impl IntoElement) -> Div {
     card(colors)
         .m_2()
         .px_3()
@@ -37,4 +38,5 @@ pub fn finding_card(colors: &Colors, row: &FindingRow) -> Div {
             MarkdownView::new(format!("finding-{}", row.id), parsed_markdown(&row.body))
                 .into_element(),
         )
+        .child(actions)
 }

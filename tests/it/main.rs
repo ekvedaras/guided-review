@@ -53,6 +53,7 @@ mod eval_adapters;
 mod fake_app;
 mod file_path;
 mod file_reads;
+mod finding_actions;
 mod finding_placement;
 mod findings_done;
 mod finish_review;

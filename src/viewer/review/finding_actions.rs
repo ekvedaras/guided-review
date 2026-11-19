@@ -1,0 +1,148 @@
+use std::fmt;
+
+use super::ReviewCore;
+use crate::file_path::FilePath;
+use crate::findings::{Anchor, AnchorSide, Finding, FindingId};
+use crate::line_number::LineNumber;
+use crate::viewer::ai_review::AiReview;
+use crate::viewer::comment_desk::TourFreshness;
+use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
+use crate::viewer::finding_decisions::Fate;
+use crate::viewer::hand_offs::Audience;
+use crate::viewer::step_page::{LineLocation, Side};
+
+/// Why an action on a finding did not happen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindingRefusal {
+    /// The finding is not among the open ones: it was decided already, or a new run replaced it.
+    NotThere,
+    /// The decision could not be kept.
+    NotKept(String),
+    /// A comment box with text is open on those lines: sending the finding would send that text unread.
+    DraftInTheWay,
+    Comment(CommentRefusal),
+}
+
+impl fmt::Display for FindingRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotThere => f.write_str("This finding is not open any more"),
+            Self::NotKept(reason) => write!(f, "The decision could not be kept: {reason}"),
+            Self::DraftInTheWay => {
+                f.write_str("A comment box is open on these lines: use the finding there, or send that comment first")
+            }
+            Self::Comment(refusal) => refusal.fmt(f),
+        }
+    }
+}
+
+/// Starts a comment made from a finding the reviewer did not edit.
+const AI_MARK: &str = "🤖";
+
+impl ReviewCore {
+    fn open_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
+        let AiReview::Findings(file) = &self.ai_review else {
+            return Err(FindingRefusal::NotThere);
+        };
+        file.findings
+            .iter()
+            .find(|finding| finding.id == *id)
+            .cloned()
+            .ok_or(FindingRefusal::NotThere)
+    }
+
+    /// Kept in the state file, then taken off the screens.
+    fn record_decision(&mut self, finding: Finding, fate: Fate) -> Result<(), FindingRefusal> {
+        let id = finding.id.clone();
+        self.state
+            .record(|state| state.decide_finding(finding, fate))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        if let AiReview::Findings(file) = &mut self.ai_review {
+            file.findings.retain(|open| open.id != id);
+        }
+        self.place_threads();
+        Ok(())
+    }
+
+    /// The finding goes, and a later run is told it was dismissed.
+    pub fn dismiss_finding(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        self.record_decision(finding, Fate::Dismissed)
+    }
+
+    /// The finding's text goes into a comment box on its lines, after any text there, and the
+    /// finding goes. The reviewer edits and sends it with the usual actions.
+    pub fn use_finding(&mut self, id: &FindingId) -> Result<CommentPlace, FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        let place = self.comment_place_of(&finding.anchor)?;
+        self.comment_desk
+            .add_text_at(&mut self.state, &place, &self.head, &finding.body)
+            .map_err(FindingRefusal::Comment)?;
+        self.record_decision(finding, Fate::Used)?;
+        Ok(place)
+    }
+
+    /// The finding, marked as AI, goes straight to the send action, with no box to edit it in.
+    pub fn use_finding_as_is(
+        &mut self,
+        id: &FindingId,
+        mode: SendMode,
+    ) -> Result<CommentRequest, FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        let place = self.comment_place_of(&finding.anchor)?;
+        if let Some(refusal) = self.send_refusal(mode) {
+            return Err(FindingRefusal::Comment(refusal));
+        }
+        if self.state.draft_at(&place).is_some() {
+            return Err(FindingRefusal::DraftInTheWay);
+        }
+        let text = format!("{AI_MARK} {}", finding.body);
+        self.comment_desk
+            .add_text_at(&mut self.state, &place, &self.head, &text)
+            .map_err(FindingRefusal::Comment)?;
+        let request = self
+            .start_sending(&place, mode, Audience::Author)
+            .ok_or(FindingRefusal::NotThere)?;
+        self.record_decision(finding, Fate::Used)?;
+        Ok(request)
+    }
+
+    /// What "Use as is" sends with: into the pending review, or into the tasks of a local review.
+    pub const fn add_mode(&self) -> SendMode {
+        if self.subject.comments_are_agent_tasks() {
+            SendMode::AddToTasks
+        } else {
+            SendMode::AddToReview
+        }
+    }
+
+    fn comment_place_of(&self, anchor: &Anchor) -> Result<CommentPlace, FindingRefusal> {
+        if self.tour_freshness() == TourFreshness::Behind {
+            return Err(FindingRefusal::Comment(CommentRefusal::TourIsOld));
+        }
+        let at = |file: &FilePath, side: AnchorSide, line: LineNumber| LineLocation {
+            path: file.clone(),
+            side: match side {
+                AnchorSide::Base => Side::Base,
+                AnchorSide::Head => Side::Head,
+            },
+            line,
+        };
+        match anchor {
+            Anchor::File { file } if self.files.iter().any(|changed| changed.path == *file) => {
+                Ok(CommentPlace::on_file(file))
+            }
+            Anchor::Lines { file, side, lines }
+                if self.files.iter().any(|changed| changed.path == *file) =>
+            {
+                Ok(CommentPlace::Lines {
+                    start: at(file, *side, lines[0]),
+                    end: at(file, *side, lines[1]),
+                })
+            }
+            Anchor::Change | Anchor::File { .. } | Anchor::Lines { .. } => {
+                Err(FindingRefusal::Comment(CommentRefusal::NoLines))
+            }
+        }
+    }
+}

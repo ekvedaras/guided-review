@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
+use crate::findings::Finding;
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, RepoName, Sha};
 use crate::repin::{Repin, RepinStatus};
@@ -16,6 +17,7 @@ use crate::tour::Tour;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
+use super::finding_decisions::{Fate, FindingDecisions};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::local_threads::LocalThreads;
 use super::move_to_pr::MovedReview;
@@ -112,6 +114,9 @@ struct ViewerSections {
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
     github_baseline_due: bool,
+    /// What the reviewer did with the findings of an AI review.
+    #[serde(default, skip_serializing_if = "FindingDecisions::is_empty")]
+    finding_decisions: FindingDecisions,
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
     comment_queue: Vec<QueuedComment>,
@@ -473,6 +478,14 @@ impl ReviewState {
         if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
             self.viewer.unsent_viewed.remove(path);
         }
+    }
+
+    pub const fn finding_decisions(&self) -> &FindingDecisions {
+        &self.viewer.finding_decisions
+    }
+
+    pub(super) fn decide_finding(&mut self, finding: Finding, fate: Fate) {
+        self.viewer.finding_decisions.record(finding, fate);
     }
 
     pub fn hand_offs(&self) -> &HandOffs {

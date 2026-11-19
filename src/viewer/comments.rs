@@ -352,6 +352,14 @@ impl CommentRequest {
         }
     }
 
+    pub const fn place(&self) -> &CommentPlace {
+        &self.draft.place
+    }
+
+    pub const fn audience(&self) -> Audience {
+        self.audience
+    }
+
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
     /// A local review's comment never reaches GitHub: it becomes a thread in the state file.
     pub fn run(

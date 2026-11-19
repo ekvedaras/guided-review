@@ -96,6 +96,7 @@ use crate::app::sidebar_rows::{
 use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
+use crate::findings::FindingId;
 use crate::ide::{Ide, NoIde};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
@@ -114,7 +115,7 @@ use crate::viewer::{
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
     ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
-use crate::viewer::{IssueDetails, RelatedIssue};
+use crate::viewer::{FindingRefusal, FindingRow, IssueDetails, RelatedIssue};
 use issue_card::{CardSide, IssueHover, issue_card};
 
 #[cfg(feature = "snapshots")]
@@ -1123,6 +1124,75 @@ impl OneStepLayout {
             Ok(()) => crate::app::tour_writer::write_in_background(subject, cx),
             Err(refusal) => post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned()),
         }
+    }
+
+    /// Use, Use as is and Dismiss, which decide one finding.
+    fn finding_actions(
+        &self,
+        colors: &Colors,
+        finding: &FindingRow,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let small_button = |name: &str, kind, icon, label| {
+            icon_label_button(
+                colors,
+                SharedString::from(format!("finding-{name}-{}", finding.id)),
+                kind,
+                ButtonSize::Small,
+                icon,
+                label,
+            )
+        };
+        let (use_id, as_is_id, dismiss_id) =
+            (finding.id.clone(), finding.id.clone(), finding.id.clone());
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                small_button("use", ButtonKind::Secondary, Icon::Pencil, "Use").on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.use_finding(&use_id, window, cx);
+                    }),
+                ),
+            )
+            .child(
+                small_button("use-as-is", ButtonKind::Ghost, Icon::Send, "Use as is").on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        let sent = this
+                            .session
+                            .update(cx, |session, cx| session.use_finding_as_is(&as_is_id, cx));
+                        this.finding_refused(sent, cx);
+                    }),
+                ),
+            )
+            .child(
+                small_button("dismiss", ButtonKind::Ghost, Icon::Close, "Dismiss").on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        let dismissed = this
+                            .session
+                            .update(cx, |session, cx| session.dismiss_finding(&dismiss_id, cx));
+                        this.finding_refused(dismissed, cx);
+                    }),
+                ),
+            )
+    }
+
+    fn use_finding(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let used = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.use_finding(id))
+        });
+        if used.is_ok() {
+            window.focus(&self.composer_focus, cx);
+        }
+        self.finding_refused(used.map(|_| ()), cx);
+    }
+
+    fn finding_refused(&mut self, done: Result<(), FindingRefusal>, cx: &mut Context<Self>) {
+        if let Err(refusal) = done {
+            post_toast(cx, ToastTone::Neutral, refusal.to_string());
+        }
+        cx.notify();
     }
 
     /// Run AI review, from the summary, the sidebar and the palette: the review takes the asking, and the
@@ -3534,7 +3604,8 @@ impl OneStepLayout {
                 }
             }
             PageRow::Finding(finding) => {
-                let card = finding_card(&colors, &finding);
+                let actions = self.finding_actions(&colors, &finding, cx);
+                let card = finding_card(&colors, &finding, actions);
                 match finding.place {
                     ThreadRowPlace::UnderLine => hung_row().child(card).into_any_element(),
                     ThreadRowPlace::AfterCode => div().pb_3().child(card).into_any_element(),

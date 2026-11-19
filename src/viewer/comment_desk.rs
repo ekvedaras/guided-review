@@ -229,8 +229,19 @@ impl CommentDesk {
         text: &str,
     ) -> Result<CommentPlace, CommentRefusal> {
         let place = CommentPlace::of(selected);
-        self.open_draft(state, &place, head, Some(text))?;
+        self.add_text_at(state, &place, head, text)?;
         Ok(place)
+    }
+
+    /// Like `add_to_draft`, for a place that is not taken from selected rows.
+    pub(super) fn add_text_at(
+        &mut self,
+        state: &mut SavedState,
+        place: &CommentPlace,
+        head: &Sha,
+        text: &str,
+    ) -> Result<(), CommentRefusal> {
+        self.open_draft(state, place, head, Some(text))
     }
 
     /// The box is open in memory even when its save fails; the reviewer learns its text is not

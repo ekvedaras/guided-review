@@ -94,6 +94,21 @@ pub enum Anchor {
     },
 }
 
+impl fmt::Display for Anchor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Change => f.write_str("the whole change"),
+            Self::File { file } => write!(f, "{file}"),
+            Self::Lines { file, side, lines } if lines[0] == lines[1] => {
+                write!(f, "{file} line {} of the {side}", lines[0])
+            }
+            Self::Lines { file, side, lines } => {
+                write!(f, "{file} lines {} to {} of the {side}", lines[0], lines[1])
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
     pub id: FindingId,

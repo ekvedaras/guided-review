@@ -5,14 +5,17 @@ use std::fmt;
 use std::path::PathBuf;
 
 use crate::app_folders::AppFolders;
+use crate::findings::Finding;
 use crate::instructions::ReviewInstructions;
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
+use crate::viewer::ReviewStateFile;
 
 pub struct ReviewBrief {
     subject: ReviewSubject,
     findings_path: PathBuf,
     instructions: ReviewInstructions,
+    dismissed: Vec<Finding>,
 }
 
 impl ReviewBrief {
@@ -21,12 +24,41 @@ impl ReviewBrief {
             subject: subject.clone(),
             findings_path: Tour::findings_path_for(folders, subject),
             instructions: ReviewInstructions::of(folders),
+            dismissed: dismissed_by_the_reviewer(folders, subject),
         }
     }
 
     /// A launch warning, such as a config that could not be read, for stderr.
     pub fn warning(&self) -> Option<&str> {
         self.instructions.warning()
+    }
+}
+
+/// A state file that cannot be read tells nothing: the app says so where the reviewer looks.
+fn dismissed_by_the_reviewer(folders: &AppFolders, subject: &ReviewSubject) -> Vec<Finding> {
+    ReviewStateFile::for_subject(folders, subject)
+        .load()
+        .map_or_default(|state| state.finding_decisions().dismissed().cloned().collect())
+}
+
+impl ReviewBrief {
+    fn write_dismissed(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.dismissed.is_empty() {
+            return writeln!(f, "dismissed findings: none");
+        }
+        writeln!(
+            f,
+            "dismissed findings: the reviewer turned these down, so do not report them again:"
+        )?;
+        for finding in &self.dismissed {
+            let first_line = finding.body.lines().next().unwrap_or_default();
+            writeln!(
+                f,
+                "- {} ({}): {first_line}",
+                finding.anchor, finding.severity
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -55,9 +87,9 @@ Run one command per Bash call: no `&&`, `;`, pipes or `$(...)`.
 4. Run `guided-review findings-done {subject}`. Without it the review counts as failed.
 5. Stop.
 
-dismissed findings: none
 "
         )?;
+        self.write_dismissed(f)?;
         write!(f, "{}", self.instructions)
     }
 }

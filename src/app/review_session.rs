@@ -2,6 +2,7 @@
 //! to GitHub, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
 
 use crate::file_path::FilePath;
+use crate::findings::FindingId;
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -29,12 +30,12 @@ use crate::github::{GhCloner, GitHub};
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
     AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer,
-    CommentOutcome, CommentPlace, CommentResult, FinishResult, GitHubPort, HandOffButton,
-    HandOffId, ImageCache, JobOutcome, JobProgress, LineLocation, NoteSubject, OldHead,
-    OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, ReplacingJob, Review, ReviewChange,
-    ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
-    TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal, FinishResult,
+    GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome, JobProgress, LineLocation,
+    NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, ReplacingJob,
+    Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox,
+    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
+    TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -465,6 +466,14 @@ impl ReviewSession {
         self.review.saw_end_of_screen();
     }
 
+    pub fn dismiss_finding(
+        &mut self,
+        id: &FindingId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.dismiss_finding(id))
+    }
+
     pub fn send_comment(
         &mut self,
         place: &CommentPlace,
@@ -475,6 +484,30 @@ impl ReviewSession {
         let Some(request) = self.review.start_sending(place, mode, audience) else {
             return;
         };
+        self.run_comment_request(place, request, (mode, audience), cx);
+    }
+
+    /// Use as is on a finding: it goes to Add to review, or Add to tasks in a local review, unread.
+    pub fn use_finding_as_is(
+        &mut self,
+        id: &FindingId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        let mode = self.review.add_mode();
+        let request = self.change(cx, |review| review.use_finding_as_is(id, mode))?;
+        let place = request.place().clone();
+        let audience = request.audience();
+        self.run_comment_request(&place, request, (mode, audience), cx);
+        Ok(())
+    }
+
+    fn run_comment_request(
+        &mut self,
+        place: &CommentPlace,
+        request: CommentRequest,
+        (mode, audience): (SendMode, Audience),
+        cx: &mut Context<Self>,
+    ) {
         let github = Arc::clone(&self.github);
         let state_file = self.review.state_file();
         let place = place.clone();
