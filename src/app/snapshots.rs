@@ -20,7 +20,8 @@ use crate::review_subject::ReviewSubject;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, AgentLinkOff, AgentPort, AgentStatus, AppAgent, GitHubError,
     LiveTerminal, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
-    SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TurnStopper, WhyListed,
+    ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TurnStopper,
+    WhyListed,
 };
 
 const FOLDER_ENV: &str = "GUIDED_REVIEW_SNAPSHOTS";
@@ -296,6 +297,10 @@ impl TourAgentPort for NoReviewerTerminals {
         self.0.terminals_of(subject)
     }
 
+    fn review_terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>> {
+        self.0.review_terminals_of(subject)
+    }
+
     fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>> {
         Ok(Vec::new())
     }
@@ -338,6 +343,10 @@ impl TourAgentPort for NoReviewerTerminals {
 
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
         self.0.start(start)
+    }
+
+    fn start_review(&self, start: &ReviewAgentStart) -> anyhow::Result<TerminalId> {
+        self.0.start_review(start)
     }
 
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()> {

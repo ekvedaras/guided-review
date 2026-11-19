@@ -5,6 +5,7 @@ mod active_pr;
 mod agent_event;
 mod agent_pool;
 mod ai_review;
+mod ai_review_run;
 mod app_state;
 mod app_window;
 mod ask;
@@ -66,6 +67,7 @@ mod rendered_view;
 mod reopen_after_save;
 mod replacing_jobs;
 mod review;
+mod review_agents;
 mod review_builder;
 mod review_state;
 mod reviewing_mark;
@@ -94,6 +96,7 @@ pub use active_pr::{
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ai_review::AiReview;
+pub use ai_review_run::{AiReviewRefusal, AiReviewRun, RunningReview};
 pub use app_state::AppStateFile;
 pub use app_window::{
     AfterClose, AppWindow, FailedBuild, Relaunched, ShowBuilding, ShowReview, ShowSettings,
@@ -212,6 +215,7 @@ pub use review::{
     NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop,
     SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadFile, UnreadStep,
 };
+pub use review_agents::ReviewAgents;
 pub use review_builder::ReviewBuilder;
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use reviewing_mark::ReviewingMarkRemoval;
@@ -232,9 +236,9 @@ pub use thread_actions::{
 pub use threads::{CommentId, ReviewThread, ThreadComment, ThreadId, ThreadView};
 pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::{
-    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff, SendOutcome,
-    TerminalId, TourAgentPort, TourAgentStart, TourAgentState, TourAgents, TourKind,
-    WriterHandOver,
+    AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff,
+    ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TourAgentState,
+    TourAgents, TourKind, WriterHandOver,
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;

@@ -99,10 +99,56 @@ pub enum SendOutcome {
     NoAgent,
 }
 
-/// A tour agent the app started, as far as ending the right one needs to know it.
+/// What an agent the app started is for. The role is part of the herdr label that claims the terminal, so a
+/// subject's tour agent and its review agent are found apart and never taken for one another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentRole {
+    /// Knows the subject's tour and answers the reviewer's comments on it.
+    Tour,
+    /// Reads the subject's code once and writes findings.
+    Review,
+}
+
+impl AgentRole {
+    /// One key for a PR and a local change set alike: the value is the subject's key.
+    pub const REVIEW_LABEL_KEY: &'static str = "gr.review";
+
+    /// The herdr label key that claims an agent of this role for the subject.
+    pub const fn label_key(self, subject: &ReviewSubject) -> &'static str {
+        match self {
+            Self::Tour => subject.agent_label_key(),
+            Self::Review => Self::REVIEW_LABEL_KEY,
+        }
+    }
+
+    fn name_prefix(self) -> &'static str {
+        match self {
+            Self::Tour => "tour",
+            Self::Review => "review",
+        }
+    }
+
+    fn local_name_prefix(self) -> &'static str {
+        match self {
+            Self::Tour => "local-",
+            Self::Review => "review-local-",
+        }
+    }
+
+    /// Every herdr label key an agent of any role can be claimed by, with the role it names.
+    pub fn label_keys() -> impl Iterator<Item = (&'static str, Self)> {
+        ReviewSubject::AGENT_LABEL_KEYS
+            .into_iter()
+            .map(|key| (key, Self::Tour))
+            .chain([(Self::REVIEW_LABEL_KEY, Self::Review)])
+    }
+}
+
+/// An agent the app started, as far as ending the right one needs to know it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppAgent {
     pub terminal: TerminalId,
+    pub role: AgentRole,
     pub subject: Option<ReviewSubject>,
     pub status: AgentStatus,
     /// Milliseconds since the epoch when the status last changed: for an idle agent, when it last finished.
@@ -121,7 +167,21 @@ pub struct TourAgentStart {
     pub summary_skill: Option<String>,
 }
 
-/// At most this many tour agents the app started stay alive.
+/// What a new review agent is started with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewAgentStart {
+    pub subject: ReviewSubject,
+    pub name: String,
+    /// The throwaway checkout of the reviewed head, never the reviewer's own folder.
+    pub folder: PathBuf,
+    pub first_task: String,
+    /// What the agent may do without asking: the list `--allowedTools` gets.
+    pub tools: String,
+    /// What it may never do, whatever the permission mode would decide: `--disallowedTools`.
+    pub denied_tools: String,
+}
+
+/// At most this many agents the app started stay alive, tour agents and review agents together.
 const MAX_APP_AGENTS: usize = 5;
 
 /// Why tour agents cannot be reached. Each case asks the reviewer for a different thing.
@@ -164,7 +224,7 @@ pub struct HerdrRefused {
 }
 
 impl AgentLinkOff {
-    fn because_of(error: &anyhow::Error) -> Self {
+    pub(super) fn because_of(error: &anyhow::Error) -> Self {
         Self::HerdrFailed(
             error
                 .downcast_ref::<HerdrRefused>()
@@ -181,6 +241,9 @@ pub trait TourAgentPort: Send + Sync {
 
     /// The live terminals labelled as the tour agent of the subject.
     fn terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>>;
+
+    /// The live terminals labelled as the review agent of the subject; never a tour agent.
+    fn review_terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>>;
 
     /// Every live terminal herdr lists.
     fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>>;
@@ -211,12 +274,16 @@ pub trait TourAgentPort: Send + Sync {
     /// Brings the terminal up in the herdr app.
     fn show(&self, terminal: &TerminalId) -> anyhow::Result<()>;
 
-    /// The live tour agents the app started, never the ones the reviewer started.
+    /// The live agents the app started, tour and review, never the ones the reviewer started.
     fn app_started(&self) -> anyhow::Result<Vec<AppAgent>>;
 
     /// Starts an interactive Claude in a new terminal that outlives the app, labelled as the app's tour
     /// agent of the PR.
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId>;
+
+    /// Starts an interactive Claude in a new terminal that outlives the app, labelled as the review agent of
+    /// the subject, with the tools it may and may not use.
+    fn start_review(&self, start: &ReviewAgentStart) -> anyhow::Result<TerminalId>;
 
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()>;
 
@@ -445,8 +512,8 @@ impl TourAgents {
         else {
             bail!("no folder to start a tour agent for {subject} in");
         };
-        let name = terminal_name(subject);
-        self.make_room(active)?;
+        let name = terminal_name(AgentRole::Tour, subject);
+        make_room(self.port.as_ref(), active)?;
         self.port.start(&TourAgentStart {
             subject: subject.clone(),
             name,
@@ -641,36 +708,6 @@ impl TourAgents {
         }
     }
 
-    fn make_room(&self, active: &ReviewSubject) -> anyhow::Result<()> {
-        let mut agents = self.port.app_started()?;
-        if agents.len() < MAX_APP_AGENTS {
-            return Ok(());
-        }
-        agents.sort_by_key(|agent| agent.status_since_ms);
-        let to_end = agents.iter().find(|agent| {
-            agent.status == AgentStatus::Idle && agent.subject.as_ref() != Some(active)
-        });
-        let Some(to_end) = to_end else {
-            let busy: Vec<String> = agents
-                .iter()
-                .filter(|agent| agent.status != AgentStatus::Idle)
-                .map(|agent| {
-                    agent
-                        .subject
-                        .as_ref()
-                        .map_or_else(|| agent.terminal.to_string(), ToString::to_string)
-                })
-                .collect();
-            bail!(
-                "{MAX_APP_AGENTS} tour agents are already running and none can be ended; busy: {}",
-                busy.join(", ")
-            );
-        };
-        self.port
-            .kill(&to_end.terminal)
-            .with_context(|| format!("could not end the tour agent {}", to_end.terminal))
-    }
-
     pub fn lookup(&self, subject: &ReviewSubject) -> TourAgentState {
         if let Err(reason) = self.port.link() {
             return TourAgentState::LinkOff(reason);
@@ -686,27 +723,7 @@ impl TourAgents {
         subject: &ReviewSubject,
         on_change: &mut dyn FnMut(TourAgentState) -> ControlFlow<()>,
     ) {
-        let state = self.lookup(subject);
-        let followed = match &state {
-            TourAgentState::Agent { terminal, .. } => Some(terminal.clone()),
-            _ => None,
-        };
-        if on_change(state).is_break() {
-            return;
-        }
-        let Some(terminal) = followed else {
-            return;
-        };
-        let followed = self.port.follow(&terminal, &mut |status| {
-            on_change(TourAgentState::Agent {
-                terminal: terminal.clone(),
-                status,
-            })
-        });
-        if let Err(error) = followed {
-            // The stream is over either way, so there is nothing left to break.
-            let _ended = on_change(TourAgentState::LinkOff(AgentLinkOff::because_of(&error)));
-        }
+        follow_state(self.port.as_ref(), self.lookup(subject), on_change);
     }
 
     /// Types the text into the PR's tour agent only when it is idle: never into a working agent and never
@@ -893,6 +910,74 @@ impl TourAgents {
     }
 }
 
+/// Ends the idle tour agent used longest ago when the app has started as many agents as it keeps, never the
+/// one of `active`. A review agent is never ended here, though it holds a slot: an idle one has stopped
+/// without findings, and its screen is what the reviewer reads to see why. Refuses, naming the busy ones,
+/// when nothing can be ended.
+pub(super) fn make_room(port: &dyn TourAgentPort, active: &ReviewSubject) -> anyhow::Result<()> {
+    let mut agents = port.app_started()?;
+    if agents.len() < MAX_APP_AGENTS {
+        return Ok(());
+    }
+    agents.sort_by_key(|agent| agent.status_since_ms);
+    let can_be_ended = |agent: &AppAgent| {
+        agent.role == AgentRole::Tour
+            && agent.status == AgentStatus::Idle
+            && agent.subject.as_ref() != Some(active)
+    };
+    let Some(to_end) = agents.iter().find(|agent| can_be_ended(agent)) else {
+        let busy: Vec<String> = agents
+            .iter()
+            .filter(|agent| agent.status != AgentStatus::Idle || agent.role == AgentRole::Review)
+            .map(|agent| {
+                let who = agent
+                    .subject
+                    .as_ref()
+                    .map_or_else(|| agent.terminal.to_string(), ToString::to_string);
+                match agent.role {
+                    AgentRole::Tour => who,
+                    AgentRole::Review => format!("review of {who}"),
+                }
+            })
+            .collect();
+        bail!(
+            "{MAX_APP_AGENTS} agents are already running and none can be ended; busy: {}",
+            busy.join(", ")
+        );
+    };
+    port.kill(&to_end.terminal)
+        .with_context(|| format!("could not end the tour agent {}", to_end.terminal))
+}
+
+/// Passes the state now and at each status change of the agent it names, until herdr's stream ends or
+/// `on_change` breaks.
+pub(super) fn follow_state(
+    port: &dyn TourAgentPort,
+    state: TourAgentState,
+    on_change: &mut dyn FnMut(TourAgentState) -> ControlFlow<()>,
+) {
+    let followed = match &state {
+        TourAgentState::Agent { terminal, .. } => Some(terminal.clone()),
+        _ => None,
+    };
+    if on_change(state).is_break() {
+        return;
+    }
+    let Some(terminal) = followed else {
+        return;
+    };
+    let followed = port.follow(&terminal, &mut |status| {
+        on_change(TourAgentState::Agent {
+            terminal: terminal.clone(),
+            status,
+        })
+    });
+    if let Err(error) = followed {
+        // The stream is over either way, so there is nothing left to break.
+        let _ended = on_change(TourAgentState::LinkOff(AgentLinkOff::because_of(&error)));
+    }
+}
+
 fn claude_terminals_on(
     live: &[LiveTerminal],
     repo: &RepoName,
@@ -923,17 +1008,23 @@ fn claude_terminals_in(live: &[LiveTerminal], change_set: &LocalChangeSet) -> Ve
 
 /// Herdr names are 1-32 of a-z 0-9 - _, so a long repo name is cut and the PR number stays. A local change
 /// set's name ends on a short hash of its key, so a long folder or branch name stays unique.
-fn terminal_name(subject: &ReviewSubject) -> String {
+pub(super) fn terminal_name(role: AgentRole, subject: &ReviewSubject) -> String {
     let (head, tail) = match subject {
         ReviewSubject::PullRequest(pr) => (
-            format!("tour-{}-{}", pr.repo.owner(), pr.repo.name()),
+            format!(
+                "{}-{}-{}",
+                role.name_prefix(),
+                pr.repo.owner(),
+                pr.repo.name()
+            ),
             format!("-{}", pr.number),
         ),
         ReviewSubject::Local(change_set) => {
             let digest = Sha256::digest(subject.to_string().as_bytes());
             (
                 format!(
-                    "local-{}-{}",
+                    "{}{}-{}",
+                    role.local_name_prefix(),
                     change_set.folder().name(),
                     change_set.branch().as_str()
                 ),

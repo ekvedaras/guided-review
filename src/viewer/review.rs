@@ -1,3 +1,4 @@
+mod ai_review_run;
 mod guided_tour;
 mod jobs;
 mod kept;
@@ -24,6 +25,7 @@ use std::path::{Path, PathBuf};
 use crate::config::AskSettings;
 
 use super::ai_review::AiReview;
+use super::ai_review_run::AiReviewRun;
 use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
@@ -355,6 +357,7 @@ pub struct ReviewCore {
     agent_link_is_off: bool,
     /// The review agent's findings, read from their file. Not saved: the file is the state.
     ai_review: AiReview,
+    ai_review_run: AiReviewRun,
     /// What is known of the guided tour of a basic review's PR. Not saved: the app tells it at a build.
     guided_tour: GuidedTourProgress,
     /// After a switch from a basic tour: how many steps started read. Not saved.
@@ -687,6 +690,7 @@ impl ReviewCore {
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
             ai_review: AiReview::NotRun,
+            ai_review_run: AiReviewRun::NotRun,
             guided_tour: GuidedTourProgress::NotAsked,
             steps_started_read: None,
             read_carrier: None,
@@ -792,7 +796,9 @@ impl ReviewCore {
 
     /// Reads the review agent's findings file again, as the app does when the agent says it is done.
     pub fn read_findings(&mut self, folders: &AppFolders) {
-        self.ai_review = AiReview::read(folders, &self.subject);
+        let read = AiReview::read(folders, &self.subject);
+        self.run_ends_with(&read);
+        self.ai_review = read;
     }
 
     /// For a failure the reviewer must know about; it stays until its kind is cleared.

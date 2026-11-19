@@ -6,8 +6,8 @@ use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
 
 use guided_review::viewer::{
-    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
-    TourAgentPort, TourAgentStart,
+    AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, ReviewAgentStart,
+    SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
 };
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
@@ -25,6 +25,14 @@ pub enum TourAgentCall {
         folder: PathBuf,
         first_task: String,
     },
+    StartReview {
+        name: String,
+        subject: ReviewSubject,
+        folder: PathBuf,
+        first_task: String,
+        tools: String,
+        denied_tools: String,
+    },
     Kill(TerminalId),
     /// Text typed into the terminal.
     Send {
@@ -39,6 +47,10 @@ pub struct FakeTourAgent {
     /// Herdr answers `server status` but refuses to list terminals, with this reason.
     refusing: Mutex<Option<String>>,
     terminals: Mutex<BTreeMap<TerminalId, (Option<ReviewSubject>, AgentStatus)>>,
+    /// The terminals labelled as a review agent, which is a label of its own beside the tour agent's.
+    reviewing: Mutex<BTreeMap<TerminalId, ReviewSubject>>,
+    /// Herdr fails to start an agent, with this reason.
+    start_refusal: Mutex<Option<String>>,
     /// What `follow` reports, in order, before its stream ends.
     coming: Mutex<VecDeque<AgentStatus>>,
     calls: Mutex<Vec<TourAgentCall>>,
@@ -57,6 +69,8 @@ impl FakeTourAgent {
             link: Mutex::new(Ok(())),
             refusing: Mutex::new(None),
             terminals: Mutex::default(),
+            reviewing: Mutex::default(),
+            start_refusal: Mutex::new(None),
             coming: Mutex::default(),
             calls: Mutex::default(),
             live: Mutex::default(),
@@ -98,6 +112,43 @@ impl FakeTourAgent {
             .unwrap()
             .insert(TerminalId::new(terminal), since_ms);
         self.with_terminal(terminal, Some(pr), status)
+    }
+
+    /// A review agent the app started, last changed `since_ms` after the epoch.
+    pub fn review_agent(
+        self,
+        terminal: &str,
+        subject: &str,
+        status: AgentStatus,
+        since_ms: u64,
+    ) -> Self {
+        self.reviewing
+            .lock()
+            .unwrap()
+            .insert(TerminalId::new(terminal), subject.parse().unwrap());
+        self.started_by_app
+            .lock()
+            .unwrap()
+            .insert(TerminalId::new(terminal), since_ms);
+        self.with_terminal(terminal, None, status)
+    }
+
+    /// Herdr fails every start of an agent with this reason.
+    pub fn failing_to_start(self, reason: &str) -> Self {
+        *self.start_refusal.lock().unwrap() = Some(reason.to_owned());
+        self
+    }
+
+    /// The terminals that carry the review label of the subject now.
+    pub fn review_agents_of(&self, subject: &str) -> Vec<String> {
+        let subject: ReviewSubject = subject.parse().unwrap();
+        self.reviewing
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, labelled)| **labelled == subject)
+            .map(|(terminal, _)| terminal.to_string())
+            .collect()
     }
 
     pub fn set_status(&self, terminal: &str, status: AgentStatus) {
@@ -218,6 +269,17 @@ impl TourAgentPort for FakeTourAgent {
             .collect())
     }
 
+    fn review_terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>> {
+        Ok(self
+            .reviewing
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, labelled)| *labelled == subject)
+            .map(|(terminal, _)| terminal.clone())
+            .collect())
+    }
+
     fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>> {
         Ok(self.live.lock().unwrap().clone())
     }
@@ -314,9 +376,15 @@ impl TourAgentPort for FakeTourAgent {
             .iter()
             .filter_map(|(terminal, since)| {
                 let (pr, status) = terminals.get(terminal)?;
+                let reviewed = self.reviewing.lock().unwrap().get(terminal).cloned();
                 Some(AppAgent {
                     terminal: terminal.clone(),
-                    subject: pr.clone(),
+                    role: if reviewed.is_some() {
+                        AgentRole::Review
+                    } else {
+                        AgentRole::Tour
+                    },
+                    subject: reviewed.or_else(|| pr.clone()),
                     status: *status,
                     status_since_ms: *since,
                 })
@@ -325,6 +393,9 @@ impl TourAgentPort for FakeTourAgent {
     }
 
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
+        if let Some(reason) = self.start_refusal.lock().unwrap().clone() {
+            anyhow::bail!("{reason}");
+        }
         self.record(TourAgentCall::Start {
             name: start.name.clone(),
             subject: start.subject.clone(),
@@ -344,8 +415,35 @@ impl TourAgentPort for FakeTourAgent {
         Ok(terminal)
     }
 
+    fn start_review(&self, start: &ReviewAgentStart) -> anyhow::Result<TerminalId> {
+        if let Some(reason) = self.start_refusal.lock().unwrap().clone() {
+            anyhow::bail!("{reason}");
+        }
+        self.record(TourAgentCall::StartReview {
+            name: start.name.clone(),
+            subject: start.subject.clone(),
+            folder: start.folder.clone(),
+            first_task: start.first_task.clone(),
+            tools: start.tools.clone(),
+            denied_tools: start.denied_tools.clone(),
+        });
+        let mut terminals = self.terminals.lock().unwrap();
+        let terminal = TerminalId::new(format!("t{}", 100 + terminals.len()));
+        terminals.insert(terminal.clone(), (None, AgentStatus::Working));
+        self.reviewing
+            .lock()
+            .unwrap()
+            .insert(terminal.clone(), start.subject.clone());
+        self.started_by_app
+            .lock()
+            .unwrap()
+            .insert(terminal.clone(), u64::MAX);
+        Ok(terminal)
+    }
+
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()> {
         self.record(TourAgentCall::Kill(terminal.clone()));
+        self.reviewing.lock().unwrap().remove(terminal);
         self.terminals.lock().unwrap().remove(terminal);
         self.started_by_app.lock().unwrap().remove(terminal);
         Ok(())
