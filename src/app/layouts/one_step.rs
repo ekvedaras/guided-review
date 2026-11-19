@@ -1720,14 +1720,8 @@ impl OneStepLayout {
             .child(
                 div()
                     .flex()
-                    .items_baseline()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("AI review"),
-                    )
+                    .flex_col()
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child("AI review"))
                     .child(
                         div()
                             .min_w_0()
@@ -1742,7 +1736,9 @@ impl OneStepLayout {
             .child(
                 div()
                     .flex()
-                    .gap_2()
+                    .flex_wrap()
+                    .gap_x_2()
+                    .gap_y_1()
                     .children(show)
                     .children(list)
                     .children(next)
