@@ -6,8 +6,8 @@ use guided_review::pull_request::RepoName;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    NextScreen, Problem, ReadProgress, Review, ReviewState, ReviewStateFile, Screen, SummaryStats,
-    TourLead,
+    NextScreen, PageRow, Problem, ReadProgress, Review, ReviewState, ReviewStateFile, Screen,
+    SummaryStats, TourLead,
 };
 use serde_json::{Value, json};
 
@@ -449,6 +449,27 @@ fn the_summary_leads_into_the_tour_from_where_the_reader_is() {
             finish: review.finish_action()
         }
     );
+}
+
+#[test]
+fn the_last_screen_leads_back_to_a_step_passed_unread() {
+    let shop = Shop::with_pull();
+    let mut review = shop.open();
+    review.tick(&"readme".into()).unwrap();
+    review.tick(&"emails".into()).unwrap();
+
+    review.go_to_safety_net();
+
+    let page = review.page();
+    let Some(PageRow::ScreenFooter(footer)) = page.rows().last() else {
+        panic!("no footer");
+    };
+    assert_eq!(footer.next, None);
+    assert_eq!(footer.unread_left, 1);
+    match &footer.lead {
+        Some(TourLead::Continue(next)) => assert_eq!(next.id, "greeting".into()),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

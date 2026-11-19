@@ -79,7 +79,7 @@ impl ReviewCore {
                 head: self.head.clone(),
             },
             WorkKind::PullPendingReview => Job::PullPendingReview(pr()?),
-            WorkKind::PullLastReview => Job::PullLastReview(pr()?),
+            WorkKind::PullReviews => Job::PullReviews(pr()?),
             WorkKind::PullPrStatus => Job::PullPrStatus(pr()?),
             WorkKind::SendQueuedComment => Job::SendQueuedComment(self.queued_comment_request()?),
             WorkKind::ChangeReviewingMark => Job::ChangeReviewingMark {
@@ -184,8 +184,8 @@ impl ReviewCore {
                     Err(error) => self.could_not_read(Read::Authorship, &error),
                 }
             }
-            Done::LastReview(Ok(last)) => self.last_review_is(last),
-            Done::LastReview(Err(error)) => self.could_not_read(Read::LastReview, &error),
+            Done::Reviews(Ok(reviews)) => self.reviews_are(reviews),
+            Done::Reviews(Err(error)) => self.could_not_read(Read::LastReview, &error),
             Done::PrStatus(Ok(status)) => self.pr_status_is(status),
             Done::PrStatus(Err(error)) => self.could_not_read(Read::PrStatus, &error),
             Done::ReviewingMark { change, result } => self.reviewing_mark_landed(change, result),

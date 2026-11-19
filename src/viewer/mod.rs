@@ -50,6 +50,7 @@ mod ports;
 mod pr_controls;
 mod pr_notes;
 mod pr_origin;
+mod pr_reviewers;
 mod pr_status;
 mod pr_switcher;
 mod presence;
@@ -177,6 +178,10 @@ pub use ports::{
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
+pub use pr_reviewers::{
+    PullRequestReviews, ReviewRecord, Reviewer, ReviewerKind, ReviewerLine, ReviewerStatus,
+    ReviewersOnGitHub, Stance, StanceAge, Standing, Whose, YourReview,
+};
 pub use pr_status::{
     CHECKS_SHOWN, CheckList, CheckRun, CheckState, Checks, OpenPrStatus, PrStatus, Readiness,
 };
@@ -207,6 +212,7 @@ pub use review::{
 };
 pub use review_builder::ReviewBuilder;
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
+pub use reviewing_mark::ReviewingMarkRemoval;
 pub use row_selection::{RowSelection, SelectedLines};
 pub use saved_state::RepinRunning;
 pub use screen_fold::ScreenFold;

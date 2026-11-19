@@ -21,6 +21,7 @@ pub mod palette;
 pub mod picture_zoom;
 pub mod pr_switcher;
 pub mod refresh_banner;
+pub mod reviews_block;
 pub mod safety_net_view;
 pub mod scrollbar;
 pub mod segmented;

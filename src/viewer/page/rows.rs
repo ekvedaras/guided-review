@@ -145,8 +145,11 @@ pub struct ScreenFooter {
     pub next: Option<NextScreen>,
     /// A basic tour's file screen: its number among the files, and how many files there are.
     pub file_place: Option<(usize, usize)>,
-    /// On the last screen once every step is read: the end of the tour.
+    /// On the last screen: the end of the tour once every step is read, else the way back to the
+    /// first step left unread.
     pub lead: Option<TourLead>,
+    /// Steps, or a basic tour's files, not read yet.
+    pub unread_left: usize,
 }
 
 /// The summary's strip of counts, each cut when the page is built.

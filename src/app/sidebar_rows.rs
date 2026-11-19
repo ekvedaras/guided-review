@@ -3,11 +3,12 @@
 
 use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
+use std::sync::Arc;
 
 use crate::viewer::{
     ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress,
-    GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, Screen, StepId,
-    TerminalId, TourAgentState, TreeRow,
+    GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, ReviewerLine,
+    ReviewerStatus, Screen, StanceAge, StepId, TerminalId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -35,13 +36,61 @@ pub struct SidebarSafetyNet {
     pub is_current: bool,
 }
 
-/// How the viewer's last review on GitHub ended, shown under the finish button.
+/// Where the viewer stands on the PR, the lead of the sidebar's reviews.
 #[derive(Clone)]
-pub struct SidebarLastReview {
-    pub headline: SharedString,
+pub struct SidebarYourReview {
+    pub title: SharedString,
+    /// When the last review was sent and what happened since; empty when none was sent.
+    pub since: SharedString,
     pub body: SharedString,
     pub is_body_long: bool,
-    pub is_old: bool,
+    pub status: ReviewerStatus,
+    pub age: StanceAge,
+    pub is_marked_done: bool,
+    pub avatar_url: Option<SharedString>,
+}
+
+/// The PR's reviews in the sidebar: the viewer's, then everyone else's.
+#[derive(Clone, Default)]
+pub struct SidebarReviews {
+    pub yours: Option<SidebarYourReview>,
+    pub others: Vec<ReviewerLine>,
+}
+
+impl SidebarReviews {
+    pub fn of(review: &Review) -> Self {
+        Self {
+            yours: review.your_review().map(|yours| SidebarYourReview {
+                title: yours.title().into(),
+                since: yours.since().into(),
+                body: yours.body().to_owned().into(),
+                is_body_long: yours.body_is_long(),
+                status: yours.status,
+                age: yours.age,
+                is_marked_done: yours.is_marked_done,
+                avatar_url: yours.avatar_url.as_deref().map(|url| url.to_owned().into()),
+            }),
+            others: review
+                .reviewer_lines()
+                .into_iter()
+                .filter(|line| !line.is_viewer)
+                .collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.yours.is_none() && self.others.is_empty()
+    }
+}
+
+/// How finishing reads in the sidebar.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SidebarFinish {
+    /// A review of the viewer's is on GitHub already, so finishing updates it.
+    pub has_last_review: bool,
+    /// A re-review with nothing new to send can be marked done.
+    pub can_mark_done: bool,
+    pub is_marked_done: bool,
 }
 
 /// The PR's tour agent as the sidebar says it.
@@ -97,7 +146,8 @@ pub struct SidebarRows {
     pub guided_tour: Option<SidebarGuidedTour>,
     pub progress: ReadProgress,
     pub progress_unit: ReadUnit,
-    pub last_review: Option<SidebarLastReview>,
+    pub reviews: Arc<SidebarReviews>,
+    pub finish: SidebarFinish,
     /// Approve and Request changes show only on someone else's PR.
     pub finishing: Finishing,
     pub approve_warning: Option<ApproveWarning>,
@@ -156,7 +206,6 @@ impl SidebarRows {
             thread_count: size.threads,
             is_current: review.screen() == &Screen::SafetyNet,
         });
-        let is_old = review.last_review_is_old();
         Self {
             tour_agent: SidebarTourAgent {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
@@ -176,12 +225,12 @@ impl SidebarRows {
                 ),
                 banner: review.guided_tour_banner(),
             }),
-            last_review: review.last_review().map(|last| SidebarLastReview {
-                headline: last.headline(is_old).into(),
-                body: last.body.clone().into(),
-                is_body_long: last.body_is_long(),
-                is_old,
-            }),
+            reviews: Arc::new(SidebarReviews::of(review)),
+            finish: SidebarFinish {
+                has_last_review: review.last_review().is_some(),
+                can_mark_done: review.can_mark_done(),
+                is_marked_done: review.is_marked_done(),
+            },
             progress_unit: review.read_unit(),
             finishing: Finishing::of(review),
             approve_warning: review.approve_warning(),

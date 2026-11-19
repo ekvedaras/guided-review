@@ -78,10 +78,10 @@ impl AppPath for Review {
     }
 
     fn pull_last_review(&mut self, github: &dyn GitHubPort) -> anyhow::Result<()> {
-        let last = github
-            .viewer_latest_review(&pr_of(self))
+        let reviews = github
+            .reviews(&pr_of(self))
             .inspect_err(|error| self.could_not_read(Read::LastReview, error))?;
-        self.last_review_is(last);
+        self.reviews_are(reviews);
         Ok(())
     }
 

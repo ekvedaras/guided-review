@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::comments::{CommentPlace, SendMode};
-use super::finish_review::{ReviewVerdict, SubmittedReview};
+use super::finish_review::ReviewVerdict;
 use super::github_outage::OutageCause;
 use super::merging::MergeChange;
 use super::pr_origin::PullRequestOrigin;
+use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
@@ -148,12 +149,9 @@ pub trait ReviewWritesPort: Send + Sync {
     /// Whether the viewer has a pending review on the PR, one made here or on the web.
     fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError>;
 
-    /// The latest review the viewer sent on the PR, from here or from the web; `None` when
-    /// there is none. A pending review is not sent, so it is not this.
-    fn viewer_latest_review(
-        &self,
-        pr: &PullRequestUrl,
-    ) -> Result<Option<SubmittedReview>, GitHubError>;
+    /// The PR's reviews: the latest one the viewer sent, from here or from the web (a pending
+    /// review is not sent, so it is not this), and where each reviewer stands.
+    fn reviews(&self, pr: &PullRequestUrl) -> Result<PullRequestReviews, GitHubError>;
 
     /// Whether the viewer wrote the PR. GitHub refuses their approval or change request.
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError>;

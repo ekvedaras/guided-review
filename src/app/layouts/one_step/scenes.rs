@@ -15,7 +15,7 @@ use super::issue_card::IssueHover;
 use crate::app::components::diff_view::RowGesture;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
-use crate::app::review_session::ReviewSession;
+use crate::app::review_session::{ReviewSession, StagedReReview};
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
 use crate::file_path::FilePath;
@@ -91,10 +91,13 @@ enum Scene {
     TitleBarClosed,
     TitleBarPrOrigin,
     PrSwitcherEnd,
+    ReReview,
+    ReReviewDone,
+    TourEndUnread,
 }
 
 impl Scene {
-    const ALL: [Self; 54] = [
+    const ALL: [Self; 57] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -149,6 +152,9 @@ impl Scene {
         Self::TitleBarClosed,
         Self::TitleBarPrOrigin,
         Self::PrSwitcherEnd,
+        Self::ReReview,
+        Self::ReReviewDone,
+        Self::TourEndUnread,
     ];
 
     fn file_name(self) -> &'static str {
@@ -207,6 +213,9 @@ impl Scene {
             Self::TitleBarClosed => "73-title-bar-closed",
             Self::TitleBarPrOrigin => "74-title-bar-pr-origin",
             Self::PrSwitcherEnd => "75-pr-switcher-end",
+            Self::ReReview => "77-re-review",
+            Self::ReReviewDone => "78-re-review-done",
+            Self::TourEndUnread => "79-tour-end-unread",
         }
     }
 
@@ -757,6 +766,17 @@ impl OneStepLayout {
                 self.session.update(cx, ReviewSession::stage_all_read);
                 self.scroll_to_row(self.screen_list.item_count());
             }
+            Scene::ReReview => self.session.update(cx, |session, cx| {
+                session.stage_re_review(StagedReReview::Open, cx);
+            }),
+            Scene::ReReviewDone => self.session.update(cx, |session, cx| {
+                session.stage_re_review(StagedReReview::MarkedDone, cx);
+            }),
+            Scene::TourEndUnread => {
+                self.change_review(cx, |review| while review.go_forward() {});
+                self.session.update(cx, ReviewSession::stage_unread_end);
+                self.scroll_to_row(self.screen_list.item_count());
+            }
             Scene::DescriptionFolds => {
                 self.change_review(cx, |review| review.go_to_summary());
                 self.toggle_description_folds(cx);
@@ -951,9 +971,12 @@ impl OneStepLayout {
                     toaster.0.update(cx, ToastShelf::clear);
                 }
             }
-            Scene::AllRead => {
+            Scene::AllRead | Scene::TourEndUnread => {
                 self.session.update(cx, ReviewSession::unstage);
                 self.go_to_first_open_code(cx);
+            }
+            Scene::ReReview | Scene::ReReviewDone => {
+                self.session.update(cx, ReviewSession::unstage);
             }
             Scene::DescriptionFolds => {
                 self.toggle_description_folds(cx);

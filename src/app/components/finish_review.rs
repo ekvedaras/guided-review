@@ -1,17 +1,19 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    App, ClickEvent, Context, Entity, FocusHandle, IntoElement, ParentElement, RenderOnce,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{ApproveWarning, CLAMPED_BODY_LINES, FinishResult, ReviewVerdict};
+use gpui::prelude::FluentBuilder;
 
-use crate::app::sidebar_rows::SidebarLastReview;
+use crate::viewer::{ApproveWarning, FinishResult, ReviewVerdict};
+
+use crate::app::sidebar_rows::SidebarFinish;
 
 use super::button::{ButtonKind, ButtonSize, button, button_icon};
-use super::icon::{Icon, sized_icon};
-use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in, turn_to};
+use super::icon::Icon;
+use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in};
 use super::palette::{Colors, Tone};
 use super::segmented::{Segment, SegmentLayout, Segmented};
 use super::text_box::{Field, TextBox};
@@ -24,10 +26,12 @@ pub type OnFinish =
 /// Hands the review body to the core, which saves it, each time it changes.
 pub type OnBodyEdit = Rc<dyn Fn(String, &mut App)>;
 
+/// Marks a re-review done, which the layout carries out as the review's intent.
+pub type OnMarkDone = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// What the reviewer is doing in the finish dialog. The body is not here: the core keeps it.
 struct FinishUi {
     is_open: bool,
-    is_last_review_body_open: bool,
     verdict: ReviewVerdict,
     /// The reviewer saw the unread warning and has to say yes to it once more.
     is_confirming_approval: bool,
@@ -43,7 +47,6 @@ impl FinishUi {
         Self {
             answered_open_request: open_request,
             is_open: has_draft,
-            is_last_review_body_open: false,
             verdict: ReviewVerdict::Comment,
             is_confirming_approval: false,
             is_busy: false,
@@ -81,11 +84,12 @@ pub struct FinishReviewDialog {
     is_everything_read: bool,
     finishing: Finishing,
     warning: Option<ApproveWarning>,
-    /// A review of the viewer's is on GitHub already, so this one updates it.
-    last_review: Option<SidebarLastReview>,
+    finish: SidebarFinish,
     body: String,
     on_body_edit: OnBodyEdit,
     on_finish: OnFinish,
+    /// Offered only with this, and only on a re-review with nothing new to send.
+    on_mark_done: Option<OnMarkDone>,
     open_request: u32,
 }
 
@@ -94,7 +98,7 @@ impl FinishReviewDialog {
         is_everything_read: bool,
         finishing: Finishing,
         warning: Option<ApproveWarning>,
-        last_review: Option<SidebarLastReview>,
+        finish: SidebarFinish,
         body: String,
         on_body_edit: OnBodyEdit,
         on_finish: OnFinish,
@@ -103,12 +107,18 @@ impl FinishReviewDialog {
             is_everything_read,
             finishing,
             warning,
-            last_review,
+            finish,
             body,
             on_body_edit,
             on_finish,
+            on_mark_done: None,
             open_request: 0,
         }
+    }
+
+    pub fn on_mark_done(mut self, on_mark_done: OnMarkDone) -> Self {
+        self.on_mark_done = Some(on_mark_done);
+        self
     }
 
     /// A new count opens the form and puts the keys in its body box.
@@ -232,7 +242,6 @@ impl RenderOnce for FinishReviewDialog {
             state.is_busy,
             state.is_confirming_approval,
         );
-        let is_last_review_body_open = state.is_last_review_body_open;
         let (problem, focus) = (state.problem.clone(), state.focus.clone());
         let focus_of_body = focus.clone();
         let body = if is_busy {
@@ -241,23 +250,31 @@ impl RenderOnce for FinishReviewDialog {
             body_box(&ui, &focus, &self.body, &self.on_body_edit).into_any_element()
         };
 
+        let finish = self.finish;
+        let can_approve_again = (finish.can_mark_done || finish.is_marked_done)
+            && self.finishing == Finishing::AnyVerdict;
+        let is_finish_the_way_on =
+            self.is_everything_read && !finish.can_mark_done && !finish.is_marked_done;
         let open_button = {
             let (ui, focus) = (ui.clone(), focus);
             let kind = if is_open {
                 ButtonKind::Pressed
-            } else if self.is_everything_read {
+            } else if is_finish_the_way_on {
                 ButtonKind::Primary
             } else {
                 ButtonKind::Secondary
             };
             button(&colors, "finish-review", kind, ButtonSize::Regular)
-                .child(button_icon(
-                    &colors,
-                    kind,
-                    ButtonSize::Regular,
-                    Icon::ListChecks,
-                ))
-                .child(if self.last_review.is_some() {
+                .when(can_approve_again, Styled::flex_1)
+                .when(!can_approve_again, |button| {
+                    button.child(button_icon(
+                        &colors,
+                        kind,
+                        ButtonSize::Regular,
+                        Icon::ListChecks,
+                    ))
+                })
+                .child(if finish.has_last_review {
                     "Update review"
                 } else {
                     "Finish review"
@@ -267,66 +284,91 @@ impl RenderOnce for FinishReviewDialog {
                     window.focus(&focus, cx);
                 })
         };
-        let last_review = self.last_review.as_ref().map(|last| {
-            let headline_color = if last.is_old {
-                colors.warning
+        let can_finish = self.finishing != Finishing::NothingToFinish;
+        let is_confirming_approve_again = can_approve_again && is_confirming && !is_open;
+        let approve_again = can_approve_again.then(|| {
+            let (ui, on_finish, text) = (ui.clone(), Rc::clone(&self.on_finish), self.body.clone());
+            let must_confirm = self.warning.is_some() && !is_confirming;
+            button(
+                &colors,
+                "approve-again",
+                ButtonKind::Secondary,
+                ButtonSize::Regular,
+            )
+            .flex_1()
+            .child(if is_confirming_approve_again {
+                "Approve anyway"
             } else {
-                colors.muted_text
-            };
+                "Approve again"
+            })
+            .on_click(move |_: &ClickEvent, _, cx| {
+                update(&ui, cx, |ui| {
+                    ui.verdict = ReviewVerdict::Approve;
+                    ui.is_confirming_approval = must_confirm;
+                });
+                if !must_confirm {
+                    submit(&ui, text.clone(), &on_finish, cx);
+                }
+            })
+        });
+        let mark_done = self
+            .on_mark_done
+            .as_ref()
+            .filter(|_| finish.can_mark_done)
+            .map(|on_mark_done| {
+                let on_mark_done = Rc::clone(on_mark_done);
+                let kind = if is_open {
+                    ButtonKind::Secondary
+                } else {
+                    ButtonKind::Primary
+                };
+                button(&colors, "mark-done", kind, ButtonSize::Regular)
+                    .w_full()
+                    .child(button_icon(&colors, kind, ButtonSize::Regular, Icon::Check))
+                    .child("Mark done")
+                    .on_click(move |_, window, cx| on_mark_done(window, cx))
+            });
+        let quick_note = (!is_open)
+            .then(|| {
+                let warning = self
+                    .warning
+                    .filter(|_| is_confirming_approve_again)
+                    .map(|warning| unread_warning_text(&warning));
+                let busy = is_busy.then(|| "Sending...".to_owned());
+                busy.or(warning).or_else(|| problem.clone())
+            })
+            .flatten()
+            .map(|note| {
+                let color = if is_busy {
+                    colors.muted_text
+                } else {
+                    colors.danger
+                };
+                div().text_sm().text_color(color).child(note)
+            });
+        let actions = if can_approve_again && can_finish {
             div()
-                .id("last-review")
                 .flex()
                 .flex_col()
-                .gap_1()
-                .text_xs()
+                .gap_2()
+                .children(mark_done)
                 .child(
                     div()
-                        .text_color(headline_color)
-                        .child(last.headline.clone()),
-                )
-                .children((!last.body.is_empty()).then(|| {
-                    let body = div().text_color(colors.muted_text).child(last.body.clone());
-                    if last.is_body_long && !is_last_review_body_open {
-                        body.line_clamp(CLAMPED_BODY_LINES)
-                    } else {
-                        body
-                    }
-                }))
-                .children(last.is_body_long.then(|| {
-                    let ui = ui.clone();
-                    div()
-                        .id("last-review-body-toggle")
                         .flex()
-                        .items_center()
-                        .gap_1()
-                        .cursor_pointer()
-                        .text_color(colors.muted_text)
-                        .hover(|toggle| toggle.text_color(colors.text))
-                        .on_click(move |_, _, cx| {
-                            update(&ui, cx, |ui| {
-                                ui.is_last_review_body_open.toggle();
-                            });
-                        })
-                        .child(turn_to(
-                            sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
-                            "last-review-chevron",
-                            is_last_review_body_open,
-                            1.,
-                        ))
-                        .child(if is_last_review_body_open {
-                            "Show less"
-                        } else {
-                            "Show all"
-                        })
-                }))
-        });
-        let can_finish = self.finishing != Finishing::NothingToFinish;
+                        .gap_2()
+                        .children(approve_again)
+                        .child(open_button),
+                )
+                .into_any_element()
+        } else {
+            open_button.into_any_element()
+        };
         let wrapper = div()
             .flex()
             .flex_col()
             .gap_2()
-            .children(can_finish.then_some(open_button))
-            .children(last_review);
+            .children(can_finish.then_some(actions))
+            .children(quick_note);
         if !is_open || !can_finish {
             return wrapper.into_any_element();
         }

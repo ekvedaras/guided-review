@@ -96,6 +96,7 @@ mod pr_controls;
 mod pr_description;
 mod pr_notes;
 mod pr_origin;
+mod pr_reviewers;
 mod pr_status;
 mod pr_switcher;
 mod pr_switcher_groups;

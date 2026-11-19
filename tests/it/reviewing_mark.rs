@@ -9,8 +9,8 @@ use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    Problem, Reaction, ReactionChange, Review, ReviewOutcome, ReviewStateFile, ReviewVerdict,
-    SubmittedReview,
+    Effect, FinishAction, Intent, Problem, Reaction, ReactionChange, Review, ReviewOutcome,
+    ReviewStateFile, ReviewVerdict, SubmittedReview, WindowMoment,
 };
 use serde_json::json;
 
@@ -208,6 +208,143 @@ fn eyes_github_refused_are_a_problem_until_they_go_on_at_the_next_try() {
             .iter()
             .any(|problem| matches!(problem, Problem::ReviewingMarkNotChanged(_)))
     );
+}
+
+#[test]
+fn closing_the_review_takes_the_eyes_off() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+
+    review.close().unwrap().run(&github).unwrap();
+
+    assert_eq!(
+        pull.eyes_changes(),
+        vec![ReactionChange::Add, ReactionChange::Remove]
+    );
+}
+
+#[test]
+fn closing_a_review_whose_eyes_are_already_off_sends_nothing() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+    review.finish_review(ReviewVerdict::Approve, "ship it", &github);
+    drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
+
+    assert!(review.close().is_none());
+}
+
+#[test]
+fn closing_a_review_that_put_no_eyes_on_sends_nothing() {
+    let pull = Pull::new();
+    let github = pull.github().with_viewer_as_pull_author();
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+
+    assert!(review.close().is_none());
+}
+
+#[test]
+fn a_closed_review_does_not_put_the_eyes_back() {
+    let pull = Pull::new();
+    let github = pull.github();
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+    review.close().unwrap().run(&github).unwrap();
+
+    pull.come_to_front(&mut review, &github);
+
+    assert_eq!(
+        pull.eyes_changes(),
+        vec![ReactionChange::Add, ReactionChange::Remove]
+    );
+}
+
+#[test]
+fn marking_a_re_review_done_takes_the_eyes_off() {
+    let pull = Pull::new();
+    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+    assert!(review.can_mark_done());
+
+    review.mark_done().unwrap();
+    pull.come_to_front(&mut review, &github);
+
+    assert_eq!(
+        pull.eyes_changes(),
+        vec![ReactionChange::Add, ReactionChange::Remove]
+    );
+    assert!(review.is_marked_done());
+    assert!(!review.can_mark_done());
+}
+
+#[test]
+fn a_pr_marked_done_gets_no_eyes_when_opened_again() {
+    let pull = Pull::new();
+    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+    review.mark_done().unwrap();
+    pull.come_to_front(&mut review, &github);
+    drop(review);
+
+    let mut again = pull.open();
+    pull.come_to_front(&mut again, &github);
+
+    assert!(again.is_marked_done());
+    assert_eq!(
+        pull.eyes_changes(),
+        vec![ReactionChange::Add, ReactionChange::Remove]
+    );
+}
+
+#[test]
+fn mark_done_is_offered_only_when_the_last_review_saw_an_older_commit() {
+    let pull = Pull::new();
+    let never_reviewed = pull.github();
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &never_reviewed);
+    assert!(!review.can_mark_done());
+
+    let reviewed_at_head = pull.github().with_last_review(earlier_review(&pull.head));
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &reviewed_at_head);
+    assert!(!review.can_mark_done());
+}
+
+#[test]
+fn mark_done_is_not_offered_while_a_pending_review_waits_to_be_sent() {
+    let pull = Pull::new();
+    let github = pull
+        .github()
+        .with_last_review(earlier_review(&pull.base))
+        .with_web_pending_review();
+    let mut review = pull.open();
+
+    pull.come_to_front(&mut review, &github);
+
+    assert!(!review.can_mark_done());
+}
+
+#[test]
+fn a_re_review_finishes_by_marking_it_done_and_then_has_nothing_left_to_finish() {
+    let pull = Pull::new();
+    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let mut review = pull.open();
+    pull.come_to_front(&mut review, &github);
+    assert_eq!(review.finish_action(), Some(FinishAction::MarkDone));
+
+    let Effect::Change(change) = review.decide(Intent::MarkDone, WindowMoment::default()) else {
+        panic!("marking done changes the review");
+    };
+    review.apply(change).unwrap();
+
+    assert!(review.is_marked_done());
+    assert_eq!(review.finish_action(), None);
 }
 
 #[test]

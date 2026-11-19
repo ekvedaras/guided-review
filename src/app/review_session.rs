@@ -51,6 +51,25 @@ pub struct TourWork {
     pub tour_agents: TourAgents,
 }
 
+/// Which re-review the snapshot run draws in the sidebar.
+#[cfg(feature = "snapshots")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StagedReReview {
+    Open,
+    MarkedDone,
+}
+
+/// How long a quitting app waits for the reviewing mark to come off. A thread still running then
+/// dies with the process, so the mark may stay on.
+const REVIEWING_MARK_OFF_WAIT: Duration = Duration::from_secs(2);
+
+/// Whether closing waits for the reviewing mark to come off: a quit must, as its threads die with it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnClose {
+    WaitForIt,
+    LeaveItRunning,
+}
+
 pub enum SessionEvent {
     /// A re-pin or a Refresh replaced the review: what the layout keeps about the old one is stale.
     Reopened,
@@ -92,6 +111,10 @@ pub struct ReviewSession {
     /// The Refresh a banner scene shows under way.
     #[cfg(feature = "snapshots")]
     staged_refresh: Option<JobProgress>,
+    #[cfg(feature = "snapshots")]
+    staged_re_review: Option<StagedReReview>,
+    #[cfg(feature = "snapshots")]
+    is_unread_end_staged: bool,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
@@ -170,9 +193,12 @@ impl ReviewSession {
         let open_details = OpenDetails::default();
         cx.on_app_quit(|this, _| {
             this.save_typing_now();
+            this.take_reviewing_mark_off(OnClose::WaitForIt);
             async {}
         })
         .detach();
+        cx.on_release(|this, _| this.take_reviewing_mark_off(OnClose::LeaveItRunning))
+            .detach();
         let rows = PageRows::of(&review, &open_details);
         let clone_offer = review
             .subject()
@@ -197,12 +223,17 @@ impl ReviewSession {
             staged_pr_origin: None,
             #[cfg(feature = "snapshots")]
             staged_refresh: None,
+            #[cfg(feature = "snapshots")]
+            staged_re_review: None,
+            #[cfg(feature = "snapshots")]
+            is_unread_end_staged: false,
             tour_agent_follow: None,
             show_agent: None,
             work_timer: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
-            screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW)),
+            screen_list: ListState::new(rows.len(), ListAlignment::Top, px(LIST_OVERDRAW))
+                .measure_all(),
             rows,
             review,
             github,
@@ -759,6 +790,10 @@ impl ReviewSession {
     fn splice_keeping_place(&self, old: Range<usize>, new_count: usize) {
         let top = self.screen_list.logical_scroll_top();
         self.screen_list.splice(old.clone(), new_count);
+        // gpui measures every row only after a reset; spliced rows would count as 0 px until drawn,
+        // so the scrollbar thumb shrank while the reader scrolled down past them. Rows already
+        // measured are not measured again.
+        self.screen_list.clone().measure_all();
         if old.contains(&top.item_ix) && new_count > 0 {
             self.screen_list.scroll_to(ListOffset {
                 item_ix: top.item_ix.min(old.start + new_count - 1),
@@ -776,6 +811,10 @@ impl ReviewSession {
             RowsChange::Unchanged => {}
         }
         self.rows = rows;
+        #[cfg(feature = "snapshots")]
+        if self.is_unread_end_staged {
+            self.draw_unread_end();
+        }
         self.show_sidebar(cx);
         self.old_head = self.review.old_head();
         self.refresh_brief = self.review.refresh_brief();
@@ -812,6 +851,105 @@ impl ReviewSession {
         self.rows.stage_all_read(total, &self.open_details);
         self.screen_list.reset(self.rows.len());
         cx.notify();
+    }
+
+    /// The sidebar of a re-review of someone else's PR that others reviewed too, drawn only: nothing
+    /// is asked of GitHub, so no 👀 goes on or off. The next rebuild of the rows undoes it.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_re_review(&mut self, stage: StagedReReview, cx: &mut Context<Self>) {
+        self.staged_re_review = Some(stage);
+        self.sidebar = self.sidebar_rows();
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn draw_re_review(&self, stage: StagedReReview, sidebar: &mut SidebarRows) {
+        use crate::app::components::finish_review::Finishing;
+        use crate::app::sidebar_rows::{SidebarFinish, SidebarReviews, SidebarYourReview};
+        use crate::viewer::{ReviewerKind, ReviewerLine, ReviewerStatus, StanceAge};
+
+        let is_marked_done = stage == StagedReReview::MarkedDone;
+        let reviewer = |name: &str, kind, status, age| ReviewerLine {
+            name: name.into(),
+            avatar_url: None,
+            kind,
+            status,
+            age,
+            is_viewer: false,
+        };
+        sidebar.reviews = Arc::new(SidebarReviews {
+            yours: Some(SidebarYourReview {
+                title: "You approved".into(),
+                since: if is_marked_done {
+                    "Last review 2026-11-18 · new commits checked"
+                } else {
+                    "Last review 2026-11-18 · PR has new commits since"
+                }
+                .into(),
+                body: "Reads well. One naming nit inline, nothing blocking.".into(),
+                is_body_long: false,
+                status: ReviewerStatus::Approved,
+                age: StanceAge::BeforeNewCommits,
+                is_marked_done,
+                avatar_url: self
+                    .review
+                    .pr_author()
+                    .and_then(|author| author.avatar_url.as_deref())
+                    .map(|url| url.to_owned().into()),
+            }),
+            others: vec![
+                reviewer(
+                    "alice",
+                    ReviewerKind::Person,
+                    ReviewerStatus::ChangesRequested,
+                    StanceAge::Current,
+                ),
+                reviewer(
+                    "bob",
+                    ReviewerKind::Person,
+                    ReviewerStatus::Approved,
+                    StanceAge::BeforeNewCommits,
+                ),
+                reviewer(
+                    "carol",
+                    ReviewerKind::Person,
+                    ReviewerStatus::Commented,
+                    StanceAge::Current,
+                ),
+                reviewer(
+                    "backend",
+                    ReviewerKind::Team,
+                    ReviewerStatus::Waiting,
+                    StanceAge::Current,
+                ),
+            ],
+        });
+        sidebar.finish = SidebarFinish {
+            has_last_review: true,
+            can_mark_done: !is_marked_done,
+            is_marked_done,
+        };
+        sidebar.finishing = Finishing::AnyVerdict;
+    }
+
+    /// The last screen as it ends when steps were passed unread, without ticking anything, so no
+    /// viewed mark goes to GitHub. The next rebuild of the rows undoes it.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_unread_end(&mut self, cx: &mut Context<Self>) {
+        self.is_unread_end_staged = true;
+        self.draw_unread_end();
+        self.screen_list.reset(self.rows.len());
+        cx.notify();
+    }
+
+    #[cfg(feature = "snapshots")]
+    fn draw_unread_end(&mut self) {
+        let progress = self.review.progress();
+        self.rows.stage_unread_end(
+            &self.review.tour_lead(),
+            progress.total - progress.read,
+            &self.open_details,
+        );
     }
 
     /// The title bar as GitHub would have it say `status`; `unstage_pr_status` puts back what was read.
@@ -1158,6 +1296,8 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     pub fn unstage(&mut self, cx: &mut Context<Self>) {
+        self.staged_re_review = None;
+        self.is_unread_end_staged = false;
         self.screen_list.reset(0);
         self.rows = PageRows::none();
         self.rebuild_rows(cx);
@@ -1385,7 +1525,16 @@ impl ReviewSession {
     }
 
     fn sidebar_rows(&self) -> SidebarRows {
-        SidebarRows::of(&self.review, &self.tour_agent)
+        #[cfg_attr(
+            not(feature = "snapshots"),
+            expect(unused_mut, reason = "staged below")
+        )]
+        let mut rows = SidebarRows::of(&self.review, &self.tour_agent);
+        #[cfg(feature = "snapshots")]
+        if let Some(stage) = self.staged_re_review {
+            self.draw_re_review(stage, &mut rows);
+        }
+        rows
     }
 
     pub fn add_to_notes(&mut self, subject: &NoteSubject, cx: &mut Context<Self>) {
@@ -1470,6 +1619,27 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    /// The review closes, so the 👀 on the PR comes off. Nobody is left to see a failure, so it is
+    /// only logged.
+    fn take_reviewing_mark_off(&mut self, on_close: OnClose) {
+        let Some(removal) = self.review.close() else {
+            return;
+        };
+        let github = Arc::clone(&self.github);
+        let (landed, has_landed) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Err(error) = removal.run(github.as_ref()) {
+                eprintln!("could not take the reviewing mark off: {error:#}");
+            }
+            // The quit stopped waiting once the wait ran out, so nobody may be listening.
+            landed.send(()).ok();
+        });
+        if on_close == OnClose::WaitForIt {
+            // Past the wait the app quits anyway; the mark staying on is the price.
+            has_landed.recv_timeout(REVIEWING_MARK_OFF_WAIT).ok();
+        }
     }
 
     /// For when the file is about to be read or the app to end: what was typed goes to disk now.

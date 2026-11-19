@@ -12,13 +12,13 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::comments::{CommentOutcome, CommentRequest};
-use super::finish_review::SubmittedReview;
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_threads::ThreadHome;
 use super::merging::MergeChange;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
 use super::pr_origin::PullRequestOrigin;
+use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::ReactionChange;
 use super::related_issues::{IssueDetails, PullRequestIssues};
@@ -53,7 +53,7 @@ pub enum WorkKind {
     SyncViewed,
     PullThreads,
     PullPendingReview,
-    PullLastReview,
+    PullReviews,
     PullPrStatus,
     SendQueuedComment,
     ChangeReviewingMark,
@@ -90,7 +90,7 @@ impl WorkKind {
         Self::SyncViewed,
         Self::PullThreads,
         Self::PullPendingReview,
-        Self::PullLastReview,
+        Self::PullReviews,
         Self::PullPrStatus,
         Self::SendQueuedComment,
         Self::ChangeReviewingMark,
@@ -116,7 +116,7 @@ impl WorkKind {
             | Self::PullIssueDetails
             | Self::PullThreads
             | Self::PullPendingReview
-            | Self::PullLastReview
+            | Self::PullReviews
             | Self::PullPrStatus => WhileRunning::Replaces,
         }
     }
@@ -262,7 +262,7 @@ pub(super) enum Job {
         head: Sha,
     },
     PullPendingReview(PullRequestUrl),
-    PullLastReview(PullRequestUrl),
+    PullReviews(PullRequestUrl),
     PullPrStatus(PullRequestUrl),
     SendQueuedComment(CommentRequest),
     ChangeReviewingMark {
@@ -297,7 +297,7 @@ impl Job {
             Self::SyncViewed(_) => WorkKind::SyncViewed,
             Self::PullThreads { .. } => WorkKind::PullThreads,
             Self::PullPendingReview(_) => WorkKind::PullPendingReview,
-            Self::PullLastReview(_) => WorkKind::PullLastReview,
+            Self::PullReviews(_) => WorkKind::PullReviews,
             Self::PullPrStatus(_) => WorkKind::PullPrStatus,
             Self::SendQueuedComment(_) => WorkKind::SendQueuedComment,
             Self::ChangeReviewingMark { .. } => WorkKind::ChangeReviewingMark,
@@ -355,7 +355,7 @@ impl Work {
                 exists: github.has_pending_review(&pr),
                 authored: github.viewer_authored(&pr),
             },
-            Job::PullLastReview(pr) => Done::LastReview(github.viewer_latest_review(&pr)),
+            Job::PullReviews(pr) => Done::Reviews(github.reviews(&pr)),
             Job::PullPrStatus(pr) => Done::PrStatus(github.pull_request_status(&pr)),
             Job::SendQueuedComment(request) => Done::QueuedComment(request.run(github)),
             Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
@@ -410,7 +410,7 @@ pub(super) enum Done {
         exists: Result<bool, GitHubError>,
         authored: Result<bool, GitHubError>,
     },
-    LastReview(Result<Option<SubmittedReview>, GitHubError>),
+    Reviews(Result<PullRequestReviews, GitHubError>),
     PrStatus(Result<PrStatus, GitHubError>),
     QueuedComment(CommentOutcome),
     ReviewingMark {

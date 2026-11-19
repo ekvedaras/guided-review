@@ -1,13 +1,34 @@
 use super::finish_review::SubmittedReview;
+use super::ports::{GitHubError, PullRequestReactionsPort};
 use super::reactions::{Reaction, ReactionChange};
-use crate::pull_request::Sha;
+use crate::pull_request::{PullRequestUrl, Sha};
 
 /// What the viewer puts on the PR itself while the reviewer reviews it.
 pub const REVIEWING_MARK: Reaction = Reaction::Eyes;
 
+/// Takes the reviewing mark off a PR whose review closes.
+#[derive(Debug)]
+pub struct ReviewingMarkRemoval {
+    pr: PullRequestUrl,
+}
+
+impl ReviewingMarkRemoval {
+    pub(super) fn of(pr: PullRequestUrl) -> Self {
+        Self { pr }
+    }
+
+    pub fn run(
+        &self,
+        github: &(impl PullRequestReactionsPort + ?Sized),
+    ) -> Result<(), GitHubError> {
+        github.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
+    }
+}
+
 /// The 👀 on the PR, which tells its author the reviewer is on it. It goes on once the PR is known
-/// to be someone else's and the reviewer's last review did not see the tour's head, and comes off
-/// when a review of the reviewer's is sent, from the app or the web. Not saved.
+/// to be someone else's and the reviewer's last review did not see the tour's head, nor was the
+/// review marked done there, and comes off when a review of the reviewer's is sent, from the app or
+/// the web, at Mark done, and when the review closes. Not saved.
 #[derive(Debug)]
 pub(super) struct ReviewingMark {
     tour_head: Sha,
@@ -82,6 +103,25 @@ impl ReviewingMark {
             self.is_finished = true;
             self.to_send = self.is_asked_for.then_some(ReactionChange::Remove);
         }
+    }
+
+    /// The reviewer marked the review done: as after a review sent, the mark comes off for good.
+    pub(super) fn done(&mut self) {
+        if !self.is_finished {
+            self.is_finished = true;
+            self.to_send = self.is_asked_for.then_some(ReactionChange::Remove);
+        }
+    }
+
+    /// The review closes: true when the mark may be on GitHub, so it has to come off now. Nothing
+    /// puts it on again after.
+    pub(super) fn close(&mut self) -> bool {
+        let is_off = self.is_finished && self.to_send.is_none();
+        let may_be_on = self.is_asked_for && !is_off;
+        self.is_finished = true;
+        self.is_asked_for = false;
+        self.to_send = None;
+        may_be_on
     }
 
     /// What GitHub must be told next; `None` when it shows the mark as it should be.

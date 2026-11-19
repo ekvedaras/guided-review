@@ -50,7 +50,7 @@ impl Affected {
             Self::Comments => WorkKind::PullThreads,
             Self::ViewedMarks => WorkKind::SyncViewed,
             Self::PendingReview | Self::Authorship => WorkKind::PullPendingReview,
-            Self::LastReview => WorkKind::PullLastReview,
+            Self::LastReview => WorkKind::PullReviews,
             Self::PrStatus => WorkKind::PullPrStatus,
         }
     }

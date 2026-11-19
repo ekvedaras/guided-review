@@ -29,10 +29,11 @@ use guided_review::viewer::{
     Checks, CommentId, CommentPlace, GitHubError, IssueDetails, IssueDetailsPort, NoAccess,
     NotDelivered, OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch,
     PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
-    ReactionCount, Readiness, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    SubmittedReview, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
+    Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
+    RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadId, TurnStopper,
+    Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -197,6 +198,7 @@ pub struct FakeGitHub {
     faults: Mutex<Vec<GitHubFault>>,
     viewer_is_author: AtomicBool,
     last_review: Mutex<Option<SubmittedReview>>,
+    standings: Mutex<Vec<Standing>>,
     /// What the reviewer changed since: GitHub shows it on the next read of the threads.
     resolved_now: Mutex<BTreeMap<ThreadId, bool>>,
     reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
@@ -223,6 +225,7 @@ impl FakeGitHub {
             faults: Mutex::default(),
             viewer_is_author: AtomicBool::new(false),
             last_review: Mutex::default(),
+            standings: Mutex::default(),
             resolved_now: Mutex::default(),
             reacted_now: Mutex::default(),
             edited_now: Mutex::default(),
@@ -317,6 +320,11 @@ impl FakeGitHub {
     }
 
     /// A review the viewer sent on the GitHub web page.
+    pub fn with_standings(self, standings: Vec<Standing>) -> Self {
+        *self.standings.lock().unwrap() = standings;
+        self
+    }
+
     pub fn with_last_review(self, review: SubmittedReview) -> Self {
         *self.last_review.lock().unwrap() = Some(review);
         self
@@ -798,12 +806,12 @@ impl ReviewWritesPort for FakeGitHub {
         Ok(self.has_pending_review_now())
     }
 
-    fn viewer_latest_review(
-        &self,
-        _pr: &PullRequestUrl,
-    ) -> Result<Option<SubmittedReview>, GitHubError> {
+    fn reviews(&self, _pr: &PullRequestUrl) -> Result<PullRequestReviews, GitHubError> {
         self.fail_if_reads_fail()?;
-        Ok(self.last_review.lock().unwrap().clone())
+        Ok(PullRequestReviews {
+            viewer_last: self.last_review.lock().unwrap().clone(),
+            standings: self.standings.lock().unwrap().clone(),
+        })
     }
 
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {

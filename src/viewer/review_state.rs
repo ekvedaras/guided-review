@@ -121,6 +121,10 @@ struct ViewerSections {
     /// The comments sent with Ask agent and where each is with the tour agent.
     #[serde(default)]
     hand_offs: HandOffs,
+    /// The head the reviewer marked the review done at, with no new review sent. New commits move
+    /// the head on, so the mark then says nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    done_at: Option<ReadTick>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -386,6 +390,17 @@ impl ReviewState {
 
     pub fn untick(&mut self, step: &StepId) {
         self.viewer.read_ticks.remove(step);
+    }
+
+    pub fn mark_done(&mut self, head: &Sha) {
+        self.viewer.done_at = Some(ReadTick { head: head.clone() });
+    }
+
+    pub fn is_done_at(&self, head: &Sha) -> bool {
+        self.viewer
+            .done_at
+            .as_ref()
+            .is_some_and(|done| done.head == *head)
     }
 
     pub fn file_read_tick(&self, path: &FilePath) -> Option<&ReadTick> {
