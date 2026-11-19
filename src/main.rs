@@ -24,6 +24,7 @@ use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_t
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
+use guided_review::review_worktree::GitReviewWorktrees;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
@@ -359,14 +360,18 @@ fn findings_path(subject: &ReviewSubject) -> anyhow::Result<()> {
 fn check_findings(subject: &ReviewSubject) -> anyhow::Result<()> {
     let opened = opened(subject)?;
     let subject = &opened.subject();
-    let path = Tour::findings_path_for(&AppFolders::running()?, subject);
+    let folders = AppFolders::running()?;
+    let path = Tour::findings_path_for(&folders, subject);
     let mut findings = FindingsFile::load_of(&path, subject)?;
 
     let code = opened.code_to_read()?;
     if findings.pin.head.is_empty() {
-        findings
-            .pin
-            .pin_to(subject, &code.merge_base()?, &code.tips.head);
+        let agent_head = GitReviewWorktrees::under(folders.review_worktrees()).head_of(subject);
+        findings.pin.pin_to(
+            subject,
+            &code.merge_base()?,
+            agent_head.as_ref().unwrap_or(&code.tips.head),
+        );
     } else if findings.pin.head != code.tips.head {
         println!("warning: {}", subject.moved_on());
     }

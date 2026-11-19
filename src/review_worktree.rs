@@ -54,6 +54,16 @@ impl GitReviewWorktrees {
             .join(subject.file_stem())
     }
 
+    /// The commit the subject's checkout stands at: the head its review agent reads, which a PR may
+    /// have moved past since. `None` when there is no checkout.
+    pub fn head_of(&self, subject: &ReviewSubject) -> Option<Sha> {
+        let path = self.path_of(subject);
+        path.exists()
+            .then(|| git(&path, &["rev-parse", "HEAD"]).ok())
+            .flatten()
+            .map(|head| Sha::new(&head))
+    }
+
     /// Removes every checkout under the folder but the kept subjects', as after a crash that left
     /// one behind. Says what it could not remove.
     pub fn sweep(&self, keep: &[ReviewSubject]) -> Vec<String> {
