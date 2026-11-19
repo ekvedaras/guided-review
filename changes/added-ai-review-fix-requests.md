@@ -1,1 +1,1 @@
-Send findings to the tour agent with Fix, or X in the findings list; each gets its own commit.
+Send findings to the tour agent with Fix, or X in the findings list; each gets its own commit, and the finding's thread says what happened to the request: requested, then fixed in a commit, or not fixed with the reason.

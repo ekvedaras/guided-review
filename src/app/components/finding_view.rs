@@ -75,6 +75,7 @@ pub fn finding_card(
             let who = match said.author {
                 WhyAuthor::Reviewer => "You",
                 WhyAuthor::ReviewAgent => "Review agent",
+                WhyAuthor::TourAgent => "Tour agent",
             };
             div()
                 .pl_3()

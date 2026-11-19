@@ -15,7 +15,7 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentStatus, FindingRefusal, FixReply, FixState, PageRow, Review, TerminalId, TourAgentPort,
-    TourAgents, WorkPorts,
+    TourAgents, WhyAuthor, WorkPorts,
 };
 use serde_json::{Value, json};
 
@@ -288,6 +288,77 @@ fn an_answer_for_a_finding_nobody_asked_to_fix_is_refused() {
     let refused = review.fix_replied(&id("a"), &FixReply::Working);
 
     assert!(refused.is_err());
+}
+
+fn said_on_thread(review: &Review, finding: &str) -> Vec<(WhyAuthor, String)> {
+    review
+        .finding_thread(&id(finding))
+        .map_or_default(|thread| {
+            thread
+                .messages()
+                .iter()
+                .map(|message| (message.author, message.body.clone()))
+                .collect()
+        })
+}
+
+#[test]
+fn the_fix_request_and_the_tour_agents_answer_are_said_on_the_findings_thread() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let mut review = shop.open();
+    let asked_why = |review: &Review| {
+        review.page().rows().iter().find_map(|row| match row {
+            PageRow::Finding(finding) if finding.id == id("a") => finding.asked.clone(),
+            _ => None,
+        })
+    };
+
+    review.fix_findings(&[id("a"), id("b")]);
+
+    assert_eq!(
+        said_on_thread(&review, "a"),
+        [(WhyAuthor::Reviewer, "Fix requested".to_owned())]
+    );
+    assert_eq!(asked_why(&review), None);
+    review
+        .fix_replied(
+            &id("a"),
+            &FixReply::NotFixed {
+                reason: "It is on purpose.".to_owned(),
+            },
+        )
+        .unwrap();
+    review
+        .fix_replied(
+            &id("b"),
+            &FixReply::Fixed {
+                commit: "abc1234".to_owned(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        said_on_thread(&review, "a"),
+        [
+            (WhyAuthor::Reviewer, "Fix requested".to_owned()),
+            (
+                WhyAuthor::TourAgent,
+                "Not fixed: It is on purpose.".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(
+        said_on_thread(&review, "b"),
+        [
+            (WhyAuthor::Reviewer, "Fix requested".to_owned()),
+            (WhyAuthor::TourAgent, "Fixed in abc1234".to_owned()),
+        ]
+    );
+    assert_eq!(
+        said_on_thread(&shop.open(), "a").len(),
+        2,
+        "the thread is kept with the review"
+    );
 }
 
 fn fix_lines(review: &Review) -> Vec<(String, Option<String>)> {

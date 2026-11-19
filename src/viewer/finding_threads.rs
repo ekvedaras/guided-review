@@ -18,6 +18,8 @@ use super::tour_agent::{AgentStatus, SendOutcome};
 pub enum WhyAuthor {
     Reviewer,
     ReviewAgent,
+    /// The tour agent, on a fix it was asked for.
+    TourAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +39,8 @@ pub enum WhyState {
     Answered,
     EndedWithoutAnswer,
     Failed(String),
+    /// The thread only holds what was said about a fix: no question was asked.
+    NotAsked,
 }
 
 /// What the review agent says to a question on a finding.
@@ -73,6 +77,7 @@ impl WhyState {
             Self::Answered => "The review agent answered".to_owned(),
             Self::EndedWithoutAnswer => "The review agent stopped without answering".to_owned(),
             Self::Failed(reason) => format!("Not asked: {reason}"),
+            Self::NotAsked => String::new(),
         }
     }
 }
@@ -84,6 +89,11 @@ impl FindingThread {
 
     pub const fn state(&self) -> &WhyState {
         &self.state
+    }
+
+    /// Where the latest question is, when one was asked.
+    pub fn asked_line(&self) -> Option<String> {
+        (self.state != WhyState::NotAsked).then(|| self.state.line())
     }
 }
 
@@ -140,6 +150,23 @@ impl FindingThreads {
                 })
                 .collect(),
         )
+    }
+
+    /// Something said on the finding's thread that is no question: it starts the thread when there is none.
+    pub(super) fn say(&mut self, finding: Finding, author: WhyAuthor, body: String) {
+        let said = WhyMessage { author, body };
+        match self
+            .0
+            .iter_mut()
+            .find(|thread| thread.finding.id == finding.id)
+        {
+            Some(thread) => thread.messages.push(said),
+            None => self.0.push(FindingThread {
+                finding,
+                messages: vec![said],
+                state: WhyState::NotAsked,
+            }),
+        }
     }
 
     pub fn is_asking(&self, id: &FindingId) -> bool {
@@ -292,6 +319,7 @@ fn questions_message(threads: &[&FindingThread], subject: &ReviewSubject) -> Str
             let who = match said.author {
                 WhyAuthor::Reviewer => "Reviewer",
                 WhyAuthor::ReviewAgent => "You",
+                WhyAuthor::TourAgent => "Tour agent",
             };
             lines.push(format!("{who} said before: {}", said.body));
         }

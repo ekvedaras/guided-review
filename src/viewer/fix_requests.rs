@@ -214,12 +214,12 @@ impl FixRequests {
         }
     }
 
-    /// Takes in the tour agent's word on one finding. Returns the finding when it is fixed, which closes it.
+    /// Takes in the tour agent's word on one finding, and returns the finding.
     pub(super) fn replied(
         &mut self,
         id: &FindingId,
         reply: &FixReply,
-    ) -> Result<Option<Finding>, NoFixRequest> {
+    ) -> Result<Finding, NoFixRequest> {
         let request = self
             .0
             .iter_mut()
@@ -234,7 +234,7 @@ impl FixRequests {
                 reason: reason.clone(),
             },
         };
-        Ok(matches!(reply, FixReply::Fixed { .. }).then(|| request.finding.clone()))
+        Ok(request.finding.clone())
     }
 }
 

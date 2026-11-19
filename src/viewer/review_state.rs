@@ -18,7 +18,7 @@ use crate::tour::Tour;
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::finding_decisions::{Fate, FindingDecisions};
-use super::finding_threads::{FindingThreads, NoQuestion, WhyReply};
+use super::finding_threads::{FindingThreads, NoQuestion, WhyAuthor, WhyReply};
 use super::fix_requests::{FixReply, FixRequests, NoFixRequest};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::local_threads::LocalThreads;
@@ -526,8 +526,19 @@ impl ReviewState {
 
     /// The tour agent's word on one finding; a finding it fixed is closed like one the reviewer decided.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> Result<(), NoFixRequest> {
-        if let Some(fixed) = self.viewer.fix_requests.replied(id, reply)? {
-            self.viewer.finding_decisions.record(fixed, Fate::Fixed);
+        let finding = self.viewer.fix_requests.replied(id, reply)?;
+        let said = match reply {
+            FixReply::Working => None,
+            FixReply::Fixed { commit } => Some(format!("Fixed in {commit}")),
+            FixReply::NotFixed { reason } => Some(format!("Not fixed: {reason}")),
+        };
+        if let Some(said) = said {
+            self.viewer
+                .finding_threads
+                .say(finding.clone(), WhyAuthor::TourAgent, said);
+        }
+        if matches!(reply, FixReply::Fixed { .. }) {
+            self.viewer.finding_decisions.record(finding, Fate::Fixed);
         }
         Ok(())
     }

@@ -754,7 +754,8 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         asked: view
             .thread
             .as_ref()
-            .map(|thread| thread.state().line().into()),
+            .and_then(crate::viewer::FindingThread::asked_line)
+            .map(Into::into),
         thread: view
             .thread
             .as_ref()

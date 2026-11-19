@@ -8,6 +8,7 @@ use crate::viewer::ai_review::AiReview;
 use crate::viewer::comment_desk::TourFreshness;
 use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
 use crate::viewer::finding_decisions::Fate;
+use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
 #[cfg(feature = "snapshots")]
 use crate::viewer::fix_requests::FixRequests;
@@ -189,10 +190,16 @@ impl ReviewCore {
         if to_fix.is_empty() {
             return batch;
         }
-        match self
-            .state
-            .record(|state| state.fix_requests_mut().request(to_fix))
-        {
+        match self.state.record(|state| {
+            for finding in &to_fix {
+                state.finding_threads_mut().say(
+                    finding.clone(),
+                    WhyAuthor::Reviewer,
+                    "Fix requested".to_owned(),
+                );
+            }
+            state.fix_requests_mut().request(to_fix);
+        }) {
             Ok(()) => {
                 self.work.want(WorkKind::DeliverHandOff);
                 self.place_threads();
