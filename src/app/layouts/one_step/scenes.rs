@@ -101,10 +101,11 @@ enum Scene {
     AiReviewFindingsList,
     AiReviewFixRequests,
     AiReviewAskWhy,
+    AiReviewOutdated,
 }
 
 impl Scene {
-    const ALL: [Self; 64] = [
+    const ALL: [Self; 65] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -169,6 +170,7 @@ impl Scene {
         Self::AiReviewFindingsList,
         Self::AiReviewFixRequests,
         Self::AiReviewAskWhy,
+        Self::AiReviewOutdated,
     ];
 
     fn file_name(self) -> &'static str {
@@ -237,6 +239,7 @@ impl Scene {
             Self::AiReviewFindingsList => "84-ai-review-findings-list",
             Self::AiReviewFixRequests => "85-ai-review-fix-requests",
             Self::AiReviewAskWhy => "86-ai-review-ask-why",
+            Self::AiReviewOutdated => "87-ai-review-outdated",
         }
     }
 
@@ -833,6 +836,17 @@ impl OneStepLayout {
                     review.stage_fix_requests(true);
                 }
             }),
+            Scene::AiReviewOutdated => self.change_review(cx, |review| {
+                review.go_forward();
+                let first_line = review
+                    .page()
+                    .lines()
+                    .next()
+                    .map(|line| line.location.clone());
+                if let Some(at) = first_line {
+                    review.ai_review_is(AiReview::staged_outdated_on(&at.path, at.line));
+                }
+            }),
             Scene::AiReviewAskWhy => self.change_review(cx, |review| {
                 review.go_forward();
                 let first_line = review
@@ -1059,7 +1073,7 @@ impl OneStepLayout {
                     .update(cx, |sheet, cx| sheet.close(window, cx));
                 self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
             }
-            Scene::AiReviewOnLines => self.change_review(cx, |review| {
+            Scene::AiReviewOnLines | Scene::AiReviewOutdated => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::NotRun);
                 review.go_to_summary();
             }),

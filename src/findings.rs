@@ -116,6 +116,32 @@ pub struct Finding {
     /// Markdown; its first line is what a list shows of the finding.
     pub body: String,
     pub anchor: Anchor,
+    /// Set when new commits changed the finding's lines after it was written: it may no longer be true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outdated: Option<Outdated>,
+}
+
+impl Finding {
+    /// The same finding by its id and its text: a later run may reuse an id for something else.
+    pub fn is_same_as(&self, other: &Self) -> bool {
+        self.id == other.id && self.body == other.body
+    }
+
+    /// Takes the place and outdated mark of the same finding among `moved`, which a re-pin followed to new
+    /// commits.
+    pub fn follow(&mut self, moved: &[Self]) {
+        if let Some(found) = moved.iter().find(|finding| finding.is_same_as(self)) {
+            self.anchor = found.anchor.clone();
+            self.outdated = found.outdated.clone();
+        }
+    }
+}
+
+/// What an outdated finding's lines said when the review agent wrote it, since the code under it now
+/// shows what they are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Outdated {
+    pub before: Vec<String>,
 }
 
 /// The findings file, pinned to the base and head the review agent read, like a tour is.

@@ -96,6 +96,13 @@ impl FindingThreads {
         self.0.is_empty()
     }
 
+    /// A re-pin moved the findings: a question not delivered yet tells the review agent their new place.
+    pub(super) fn follow(&mut self, moved: &[Finding]) {
+        for thread in &mut self.0 {
+            thread.finding.follow(moved);
+        }
+    }
+
     pub fn thread_of(&self, id: &FindingId) -> Option<&FindingThread> {
         self.0.iter().find(|thread| thread.finding.id == *id)
     }

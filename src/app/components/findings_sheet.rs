@@ -24,7 +24,7 @@ use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
 };
-use super::palette::Colors;
+use super::palette::{Colors, Tone};
 
 /// What the reviewer asked of the selected findings, or of one of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +188,10 @@ impl FindingsSheet {
                 .child(Self::checkbox(colors, row.is_selected)),
         )
         .child(chip(colors, tone_of(row.severity)).child(row.severity.to_string()))
+        .children(
+            row.is_outdated
+                .then(|| chip(colors, Tone::Warning).child("Outdated")),
+        )
         .child(
             div()
                 .flex_none()

@@ -20,6 +20,8 @@ pub struct FindingsListRow {
     pub is_under_cursor: bool,
     /// Where the fix the reviewer asked for is, when one was asked for.
     pub fix: Option<String>,
+    /// New commits changed its lines since the review agent wrote it.
+    pub is_outdated: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -72,6 +74,7 @@ impl FindingsList {
                 is_open: self.open.as_ref() == Some(&finding.id),
                 is_under_cursor: position == self.cursor,
                 fix: self.fixes.get(&finding.id).cloned(),
+                is_outdated: finding.outdated.is_some(),
             })
             .collect()
     }

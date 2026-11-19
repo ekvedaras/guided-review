@@ -110,6 +110,8 @@ pub struct FindingRow {
     pub asked: Option<Arc<str>>,
     /// False while a question waits for its answer.
     pub can_ask_why: bool,
+    /// Set when new commits changed its lines: what they said when the review agent wrote it.
+    pub outdated: Option<Arc<[String]>>,
 }
 
 /// An ask button and what it asks about.

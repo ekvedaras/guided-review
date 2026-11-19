@@ -182,4 +182,6 @@
 
 **Ask why**: The reviewer's question about one finding. While the review agent lives, it goes onto the finding's thread (kept in the review's state file, for a PR too) and the review agent answers with `guided-review agent-reply <key> <finding id>`; once it is gone, the question opens in the Ask panel on the finding's lines, with the finding told. Avoid: explain, challenge.
 
+**Outdated finding**: A finding whose lines new commits changed after the review agent wrote it. A re-pin moves every finding with its lines, like a local thread, and pins the findings file to the new head; an outdated one is kept, marked Outdated, with what its lines said, since it may already be fixed. Its decisions, fix requests and questions follow it. Avoid: stale finding.
+
 **Fix request**: A finding the reviewer sent to the tour agent to fix in code, alone or in a batch with others. A batch goes as one message in reading order; the tour agent starts one subagent, makes one commit per finding, and answers each with `guided-review fix-reply` (`--working`, `--fixed <commit>` or `--not-fixed --body`). A fixed finding is closed like a dismissed one and its commit is named in the sidebar; a not fixed one stays, with the reason. Avoid: task (that is a local review's comment), auto-fix.

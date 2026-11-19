@@ -31,9 +31,16 @@ impl FindingDecisions {
 
     /// A finding counts as decided only when its id and its text are the same: a new run may reuse an id.
     pub fn has_decided(&self, finding: &Finding) -> bool {
-        self.0.iter().any(|decision| {
-            decision.finding.id == finding.id && decision.finding.body == finding.body
-        })
+        self.0
+            .iter()
+            .any(|decision| decision.finding.is_same_as(finding))
+    }
+
+    /// A re-pin moved the findings: the decided ones keep their new place, for the brief of a later run.
+    pub(super) fn follow(&mut self, moved: &[Finding]) {
+        for decision in &mut self.0 {
+            decision.finding.follow(moved);
+        }
     }
 
     pub fn record(&mut self, finding: Finding, fate: Fate) {

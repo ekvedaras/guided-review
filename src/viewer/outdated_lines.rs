@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::code_source::{CodeSource, FileDiff};
+use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
 use crate::pull_request::Sha;
 
@@ -26,52 +27,77 @@ pub fn follow_outdated(
     source: &(impl CodeSource + ?Sized),
     head: &Sha,
 ) -> BTreeMap<ThreadId, FollowedLines> {
-    let mut diffs: HashMap<String, Option<Vec<FileDiff>>> = HashMap::new();
+    let mut follower = LineFollower::new(source);
     threads
         .iter()
         .filter(|thread| thread.is_outdated && !thread.is_file_comment && thread.side == Side::Head)
         .filter_map(|thread| {
-            let commit = thread.original_commit.as_ref()?;
+            let commit = Sha::new(thread.original_commit.as_ref()?);
             let end = thread.original_line?;
             let start = thread.original_start_line.unwrap_or(end);
-            let diffs = diffs
-                .entry(commit.clone())
-                .or_insert_with(|| source.diff(&Sha::new(commit), head).ok())
-                .as_ref()?;
-            let diff = diffs
-                .iter()
-                .find(|diff| diff.new_path.as_ref() == Some(&thread.path));
-            if diffs
-                .iter()
-                .any(|diff| diff.old_path.as_ref() == Some(&thread.path) && diff.new_path.is_none())
-            {
-                return None;
-            }
-            let old_path = diff
-                .and_then(|diff| diff.old_path.as_ref())
-                .unwrap_or(&thread.path);
-            let old_file = source.file_at(&Sha::new(commit), old_path).ok()?;
-            let before: Vec<String> = old_file
-                .lines()
-                .skip(number(start) - 1)
-                .take(number(end) + 1 - number(start))
-                .map(str::to_owned)
-                .collect();
-            let (new_start, start_changed) = follow_line(diff, number(start));
-            let (new_end, end_changed) = follow_line(diff, number(end));
-            let end = LineNumber::try_from(new_end).ok()?;
-            let start = LineNumber::try_from(new_start.min(new_end)).ok()?;
-            Some((
-                thread.id.clone(),
-                FollowedLines {
-                    start,
-                    end,
-                    before,
-                    were_changed: start_changed || end_changed,
-                },
-            ))
+            let followed = follower.follow(&thread.path, [start, end], &commit, head)?;
+            Some((thread.id.clone(), followed))
         })
         .collect()
+}
+
+/// Follows lines of one commit to another, reading each pair of commits' diff once.
+pub struct LineFollower<'a, S: CodeSource + ?Sized> {
+    source: &'a S,
+    diffs: HashMap<(Sha, Sha), Option<Vec<FileDiff>>>,
+}
+
+impl<'a, S: CodeSource + ?Sized> LineFollower<'a, S> {
+    pub fn new(source: &'a S) -> Self {
+        Self {
+            source,
+            diffs: HashMap::new(),
+        }
+    }
+
+    /// Where `lines` of `path` at `from` are at `to`. `None` when the file is gone at `to` or the code
+    /// cannot be read.
+    pub fn follow(
+        &mut self,
+        path: &FilePath,
+        [start, end]: [LineNumber; 2],
+        from: &Sha,
+        to: &Sha,
+    ) -> Option<FollowedLines> {
+        let source = self.source;
+        let diffs = self
+            .diffs
+            .entry((from.clone(), to.clone()))
+            .or_insert_with(|| source.diff(from, to).ok())
+            .as_ref()?;
+        let diff = diffs
+            .iter()
+            .find(|diff| diff.new_path.as_ref() == Some(path));
+        if diffs
+            .iter()
+            .any(|diff| diff.old_path.as_ref() == Some(path) && diff.new_path.is_none())
+        {
+            return None;
+        }
+        let old_path = diff.and_then(|diff| diff.old_path.as_ref()).unwrap_or(path);
+        let old_file = source.file_at(from, old_path).ok()?;
+        let before: Vec<String> = old_file
+            .lines()
+            .skip(number(start) - 1)
+            .take(number(end) + 1 - number(start))
+            .map(str::to_owned)
+            .collect();
+        let (new_start, start_changed) = follow_line(diff, number(start));
+        let (new_end, end_changed) = follow_line(diff, number(end));
+        let end = LineNumber::try_from(new_end).ok()?;
+        let start = LineNumber::try_from(new_start.min(new_end)).ok()?;
+        Some(FollowedLines {
+            start,
+            end,
+            before,
+            were_changed: start_changed || end_changed,
+        })
+    }
 }
 
 /// The line at head that `line` at the old commit became, and whether it changed on the way.

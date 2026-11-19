@@ -26,6 +26,7 @@ mod display_options;
 mod file_block;
 mod file_tree;
 mod finding_decisions;
+mod finding_follow;
 mod finding_placement;
 mod finding_threads;
 mod findings_list;

@@ -760,6 +760,7 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
             .as_ref()
             .map_or_else(|| Arc::from([]), |thread| thread.messages().into()),
         can_ask_why,
+        outdated: view.finding.outdated.map(|outdated| outdated.before.into()),
     }))
 }
 

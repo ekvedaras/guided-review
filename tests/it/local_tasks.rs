@@ -7,9 +7,11 @@ use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run, file_path};
+use guided_review::findings::{Finding, FindingsFile};
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::review_subject::ReviewSubject;
+use guided_review::tour::Tour;
 use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
@@ -507,6 +509,42 @@ fn after_update_a_local_thread_follows_its_line_and_one_whose_line_changed_shows
     assert_eq!(followed.before, ["world"]);
     assert_eq!(said(&changed)[0].1, "Say who the world is");
     assert_eq!(feature.sent.github_calls(), []);
+}
+
+#[test]
+fn after_update_a_local_reviews_finding_follows_its_line() {
+    let feature = Feature::with_work_in_progress();
+    let mut opened = feature.open();
+    let folders = feature.repo.folders();
+    let tour = Tour::load_of(
+        &Tour::shown_path_for(&folders, &feature.subject),
+        &feature.subject,
+    )
+    .unwrap();
+    let finding: Finding = serde_json::from_value(serde_json::json!({
+        "id": "world", "severity": "nit", "body": "Who is the world?",
+        "anchor": {"kind": "lines", "file": "README.md", "side": "head", "lines": [2, 2]},
+    }))
+    .unwrap();
+    FindingsFile {
+        pin: tour.pin().clone(),
+        findings: vec![finding],
+    }
+    .save(&Tour::findings_path_for(&folders, &feature.subject))
+    .unwrap();
+    feature.repo.write("README.md", "intro\nhello\nworld\n");
+
+    update(&feature, &mut opened);
+
+    let file = FindingsFile::read_of(&folders, &feature.subject)
+        .unwrap()
+        .unwrap();
+    assert_eq!(file.pin.head, *opened.review.head());
+    assert_eq!(
+        serde_json::to_value(&file.findings[0].anchor).unwrap(),
+        serde_json::json!({"kind": "lines", "file": "README.md", "side": "head", "lines": [3, 3]})
+    );
+    assert_eq!(file.findings[0].outdated, None);
 }
 
 #[test]

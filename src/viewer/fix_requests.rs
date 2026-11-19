@@ -85,6 +85,13 @@ impl FixRequests {
         self.0.is_empty()
     }
 
+    /// A re-pin moved the findings: a request not delivered yet tells the tour agent their new place.
+    pub(super) fn follow(&mut self, moved: &[Finding]) {
+        for request in &mut self.0 {
+            request.finding.follow(moved);
+        }
+    }
+
     pub fn state_of(&self, id: &FindingId) -> Option<&FixState> {
         self.0
             .iter()

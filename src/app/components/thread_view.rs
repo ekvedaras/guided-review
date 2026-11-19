@@ -136,18 +136,13 @@ pub struct ThreadChanges {
     pub on_hand_off_button: OnHandOffButton,
 }
 
-/// What an outdated thread's lines were when it was written, since the code under it shows what they are now.
-fn before_block(colors: &Colors, before: &[String]) -> gpui::Div {
+/// What outdated lines were when they were written about, since the code under them shows what they are now.
+pub fn before_block(colors: &Colors, label: &'static str, before: &[String]) -> gpui::Div {
     div()
         .flex()
         .flex_col()
         .gap_1()
-        .child(
-            div()
-                .text_xs()
-                .text_color(colors.muted_text)
-                .child("When commented, the lines were:"),
-        )
+        .child(div().text_xs().text_color(colors.muted_text).child(label))
         .child(
             div()
                 .py_1()
@@ -1231,7 +1226,9 @@ impl RenderOnce for ThreadElement {
                     .then(|| self.view.followed.as_ref())
                     .flatten()
                     .filter(|followed| followed.were_changed)
-                    .map(|followed| before_block(&colors, &followed.before)),
+                    .map(|followed| {
+                        before_block(&colors, "When commented, the lines were:", &followed.before)
+                    }),
             )
             .children(comments)
             .children(self.view.hand_off_line.as_ref().map(|line| {

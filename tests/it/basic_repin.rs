@@ -90,6 +90,7 @@ impl Shop {
 
     fn repin_onto(&self, head: &str) {
         repin_tour(
+            &self.repo.folders(),
             &ReviewSubject::from(self.pr()),
             &self.tour_path(),
             &self.state_file(),

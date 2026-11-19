@@ -58,6 +58,7 @@ mod finding_actions;
 mod finding_placement;
 mod findings_done;
 mod findings_list;
+mod findings_repin;
 mod finish_review;
 mod fix_reply;
 mod fix_requests;

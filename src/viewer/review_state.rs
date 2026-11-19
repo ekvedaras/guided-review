@@ -488,6 +488,14 @@ impl ReviewState {
         }
     }
 
+    /// Every snapshot of a finding kept beside the findings file (decisions, fix requests, questions) takes
+    /// the place a re-pin followed it to.
+    pub(super) fn follow_findings(&mut self, moved: &[Finding]) {
+        self.viewer.finding_decisions.follow(moved);
+        self.viewer.fix_requests.follow(moved);
+        self.viewer.finding_threads.follow(moved);
+    }
+
     pub const fn finding_decisions(&self) -> &FindingDecisions {
         &self.viewer.finding_decisions
     }

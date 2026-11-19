@@ -3,12 +3,14 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
+use crate::findings::FindingsFile;
 use crate::opened_subject::update_shown_tour;
 use crate::pull_request::{ChangeTips, Sha};
 use crate::repin::{Repin, repin};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
+use super::finding_follow::follow_findings;
 use super::local_threads::LocalThreadStore;
 use super::ports::ChangeTipsPort;
 use super::review::Review;
@@ -18,6 +20,7 @@ use super::review_state::{RepinRecord, ReviewStateFile};
 /// Re-pin as both the CLI and the app run it: the tour moves to the new commits, and the
 /// per-PR state learns what became of each piece, so the viewer can show it.
 pub fn repin_tour(
+    folders: &AppFolders,
     subject: &ReviewSubject,
     tour_path: &Path,
     state_file: &ReviewStateFile,
@@ -34,7 +37,24 @@ pub fn repin_tour(
     if !subject.has_github_threads() {
         LocalThreadStore::in_file(state_file.clone()).follow_to(source, new_head)?;
     }
+    follow_findings_file(folders, subject, state_file, source, new_base, new_head)?;
     Ok((tour, result))
+}
+
+fn follow_findings_file(
+    folders: &AppFolders,
+    subject: &ReviewSubject,
+    state_file: &ReviewStateFile,
+    source: &dyn CodeSource,
+    new_base: &Sha,
+    new_head: &Sha,
+) -> anyhow::Result<()> {
+    let Some(mut findings) = FindingsFile::read_of(folders, subject)? else {
+        return Ok(());
+    };
+    follow_findings(&mut findings, subject, source, new_base, new_head);
+    findings.save(&Tour::findings_path_for(folders, subject))?;
+    state_file.update(|state| state.follow_findings(&findings.findings))
 }
 
 /// Finds the code source that can read the given tips, fetching what is missing.

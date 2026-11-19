@@ -153,6 +153,7 @@ pub(super) fn repin_to_live_tips(
     let source = pick_code_source(&tips)?;
     let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
     let (tour, repinned) = repin_tour(
+        folders,
         &subject,
         tour_path,
         &ReviewStateFile::for_subject(folders, &subject),
