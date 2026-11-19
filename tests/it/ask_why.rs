@@ -277,6 +277,45 @@ fn the_finding_shows_its_thread_and_where_the_question_is() {
     );
 }
 
+#[test]
+fn a_follow_up_after_the_answer_goes_to_the_review_agent_with_the_talk_so_far() {
+    let shop = Shop::with_findings(&[on_line("f1", 2, "B is shouted.")]);
+    let mut review = shop.open();
+    let fake = idle_review_agent(&mut review);
+    ask_why(&mut review, "f1", "Why?", &mut FakeAskProcesses::default());
+    let delivery = review.why_delivery().unwrap();
+    review.why_delivered(delivery.run(&shop.agents(&fake)));
+    review
+        .why_replied(
+            &id("f1"),
+            &WhyReply::Answer("Because it shouts.".to_owned()),
+        )
+        .unwrap();
+
+    let idle_again = Arc::new(FakeTourAgent::new().review_agent("r1", PR, AgentStatus::Idle, 0));
+
+    ask_why(
+        &mut review,
+        "f1",
+        "Is it on purpose?",
+        &mut FakeAskProcesses::default(),
+    );
+    let delivery = review.why_delivery().unwrap();
+    review.why_delivered(delivery.run(&shop.agents(&idle_again)));
+
+    let calls = idle_again.calls();
+    let Some(TourAgentCall::Send { text, .. }) = calls.last() else {
+        panic!("{calls:?}");
+    };
+    for part in [
+        "Reviewer said before: Why?",
+        "You said before: Because it shouts.",
+        "Question: Is it on purpose?",
+    ] {
+        assert!(text.contains(part), "{part} missing from {text}");
+    }
+}
+
 const BUILD: &str = "test-build";
 
 fn state_file(home: &Path) -> ReviewStateFile {

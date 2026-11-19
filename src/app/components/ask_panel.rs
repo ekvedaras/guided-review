@@ -261,12 +261,13 @@ impl AskPanel {
     pub fn ask_why(
         &mut self,
         finding: &FindingId,
+        question: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<WhyAsked, FindingRefusal> {
         let settings = self.settings.clone();
         let asked = self.change(cx, |review, processes| {
-            review.ask_why(finding, "", &settings, Instant::now(), processes)
+            review.ask_why(finding, question, &settings, Instant::now(), processes)
         })?;
         if asked == WhyAsked::InAskPanel {
             self.presence.open(Instant::now());

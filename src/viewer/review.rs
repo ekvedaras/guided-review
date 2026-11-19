@@ -3,7 +3,7 @@ mod ask_why;
 mod finding_actions;
 mod guided_tour;
 
-pub use ask_why::WhyAsked;
+pub use ask_why::{DEFAULT_WHY_QUESTION, WhyAsked};
 pub use finding_actions::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;

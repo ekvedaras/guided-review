@@ -19,6 +19,7 @@ use crate::app::review_session::{ReviewSession, StagedReReview};
 use crate::app::snapshots::{Camera, StagedFinishReview, StagedGallery, sample_pr};
 use crate::app::updater::Updates;
 use crate::file_path::FilePath;
+use crate::findings::FindingId;
 use crate::issue::{IssueLink, IssueUrl};
 use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
@@ -847,18 +848,24 @@ impl OneStepLayout {
                     review.ai_review_is(AiReview::staged_outdated_on(&at.path, at.line));
                 }
             }),
-            Scene::AiReviewAskWhy => self.change_review(cx, |review| {
-                review.go_forward();
-                let first_line = review
-                    .page()
-                    .lines()
-                    .next()
-                    .map(|line| line.location.clone());
-                if let Some(at) = first_line {
-                    review.ai_review_is(AiReview::staged_on(&at.path, at.line));
-                    review.stage_finding_threads(true);
+            Scene::AiReviewAskWhy => {
+                self.change_review(cx, |review| {
+                    review.go_forward();
+                    let first_line = review
+                        .page()
+                        .lines()
+                        .next()
+                        .map(|line| line.location.clone());
+                    if let Some(at) = first_line {
+                        review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                        review.stage_finding_threads(true);
+                    }
+                });
+                if let Ok(answered) = FindingId::try_from("a".to_owned()) {
+                    self.finding_questions
+                        .open(&answered, "Is it on purpose?", cx);
                 }
-            }),
+            }
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -1077,11 +1084,16 @@ impl OneStepLayout {
                 review.ai_review_is(AiReview::NotRun);
                 review.go_to_summary();
             }),
-            Scene::AiReviewAskWhy => self.change_review(cx, |review| {
-                review.stage_finding_threads(false);
-                review.ai_review_is(AiReview::NotRun);
-                review.go_to_summary();
-            }),
+            Scene::AiReviewAskWhy => {
+                if let Ok(answered) = FindingId::try_from("a".to_owned()) {
+                    self.finding_questions.close(&answered);
+                }
+                self.change_review(cx, |review| {
+                    review.stage_finding_threads(false);
+                    review.ai_review_is(AiReview::NotRun);
+                    review.go_to_summary();
+                });
+            }
             Scene::AiReviewFixRequests => self.change_review(cx, |review| {
                 review.stage_fix_requests(false);
                 review.ai_review_is(AiReview::NotRun);

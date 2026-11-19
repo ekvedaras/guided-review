@@ -29,7 +29,7 @@ pub enum WhyAsked {
 }
 
 /// What Ask why asks when the reviewer typed nothing.
-const WHY: &str = "Why is this a finding? What did you see in the code?";
+pub const DEFAULT_WHY_QUESTION: &str = "Why is this a finding? What did you see in the code?";
 
 impl Review {
     pub fn ask_why(
@@ -42,7 +42,7 @@ impl Review {
     ) -> Result<WhyAsked, FindingRefusal> {
         let finding = self.open_finding(id)?;
         let question = match question.trim() {
-            "" => WHY,
+            "" => DEFAULT_WHY_QUESTION,
             typed => typed,
         };
         if !self.review_agent.is_alive() {

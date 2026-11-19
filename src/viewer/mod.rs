@@ -229,9 +229,9 @@ pub use replacing_jobs::{
     AfterJob, JobOutcome, JobProgress, ReplacingJob, ReplacingJobs, StartedJob,
 };
 pub use review::{
-    FindingRefusal, FindingsBatch, NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit,
-    ReadingPlace, Review, RouteStop, SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats,
-    TourLead, UnreadFile, UnreadStep, WhyAsked,
+    DEFAULT_WHY_QUESTION, FindingRefusal, FindingsBatch, NextScreen, OldHead, ReadProgress,
+    ReadSubject, ReadUnit, ReadingPlace, Review, RouteStop, SafetyNetSize, Screen, SidebarEntry,
+    StepId, SummaryStats, TourLead, UnreadFile, UnreadStep, WhyAsked,
 };
 pub use review_agents::ReviewAgents;
 pub use review_builder::ReviewBuilder;

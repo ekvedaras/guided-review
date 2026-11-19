@@ -38,7 +38,7 @@ use crate::app::components::diff_view::{
     hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
     rendered_block_row, rendered_file_waiting_row,
 };
-use crate::app::components::finding_view::finding_card;
+use crate::app::components::finding_view::{FindingQuestions, finding_card};
 use crate::app::components::findings_sheet::{FindingsEvent, FindingsSheet};
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
 use crate::app::components::fold_toggle::FoldToggle;
@@ -117,7 +117,8 @@ use crate::viewer::{
     ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
 use crate::viewer::{
-    FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue, WhyAsked, WhyReply,
+    DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue,
+    WhyAsked, WhyReply,
 };
 use issue_card::{CardSide, IssueHover, issue_card};
 
@@ -187,6 +188,8 @@ pub struct OneStepLayout {
     focus: FocusHandle,
     /// The comment being written takes keys with this one.
     composer_focus: FocusHandle,
+    /// The Ask why boxes open on findings.
+    finding_questions: FindingQuestions,
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
     /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
@@ -426,6 +429,7 @@ impl OneStepLayout {
             description_diagrams: DiagramSet::default(),
             focus,
             composer_focus: cx.focus_handle(),
+            finding_questions: FindingQuestions::default(),
             ask,
             code_selection: None,
             hovered_touching_row: None,
@@ -1232,7 +1236,7 @@ impl OneStepLayout {
                 actions.child(
                     small_button("ask-why", ButtonKind::Ghost, Icon::Sparkles, "Ask why").on_click(
                         cx.listener(move |this, _, window, cx| {
-                            this.ask_why(&why_id, window, cx);
+                            this.open_why_question(&why_id, window, cx);
                         }),
                     ),
                 )
@@ -1299,11 +1303,44 @@ impl OneStepLayout {
         self.finding_refused(used.map(|_| ()), cx);
     }
 
-    /// To the review agent on the finding's thread while it lives, else into the Ask panel.
-    fn ask_why(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+    /// Ask why opens a box under the finding, with the usual question in it to ask as is or to edit.
+    fn open_why_question(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.finding_questions.open(id, DEFAULT_WHY_QUESTION, cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    fn type_why_question(&mut self, id: &FindingId, text: String) {
+        self.finding_questions.type_in(id, text);
+    }
+
+    fn give_up_why_question(
+        &mut self,
+        id: &FindingId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.finding_questions.close(id);
+        window.focus(&self.focus, cx);
+    }
+
+    /// The typed question goes to the review agent on the finding's thread while it lives, else into the
+    /// Ask panel. A question that was refused stays in its box.
+    fn send_why_question(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let question = self
+            .finding_questions
+            .text_of(id)
+            .unwrap_or_default()
+            .to_owned();
         let asked = self
             .ask
-            .update(cx, |panel, cx| panel.ask_why(id, window, cx));
+            .update(cx, |panel, cx| panel.ask_why(id, &question, window, cx));
+        if asked.is_ok() {
+            self.finding_questions.close(id);
+            if asked == Ok(WhyAsked::ToReviewAgent) {
+                window.focus(&self.focus, cx);
+            }
+        }
         if asked == Ok(WhyAsked::ToReviewAgent) {
             self.session.update(cx, ReviewSession::deliver_questions);
         }
@@ -3755,7 +3792,15 @@ impl OneStepLayout {
             }
             PageRow::Finding(finding) => {
                 let actions = self.finding_actions(&colors, &finding, cx);
-                let card = finding_card(&colors, &finding, actions);
+                let question = self.finding_questions.view(
+                    &colors,
+                    &finding.id,
+                    cx.entity(),
+                    Self::type_why_question,
+                    Self::send_why_question,
+                    Self::give_up_why_question,
+                );
+                let card = finding_card(&colors, &finding, question, actions);
                 match finding.place {
                     ThreadRowPlace::UnderLine => hung_row().child(card).into_any_element(),
                     ThreadRowPlace::AfterCode => div().pb_3().child(card).into_any_element(),
