@@ -41,6 +41,27 @@ pub fn repin_tour(
     Ok((tour, result))
 }
 
+/// A findings file a review agent wrote after a re-pin, pinned to the commits it read, follows to the
+/// commits the review is at now. A file already there is left alone.
+pub fn catch_up_findings(
+    folders: &AppFolders,
+    subject: &ReviewSubject,
+    state_file: &ReviewStateFile,
+    source: &dyn CodeSource,
+    base: &Sha,
+    head: &Sha,
+) -> anyhow::Result<()> {
+    let Some(findings) = FindingsFile::read_of(folders, subject)? else {
+        return Ok(());
+    };
+    let is_behind = findings.pin.is_pinned()
+        && (findings.pin.base != *base || findings.pin.head != *head);
+    if is_behind {
+        follow_findings_file(folders, subject, state_file, source, base, head)?;
+    }
+    Ok(())
+}
+
 fn follow_findings_file(
     folders: &AppFolders,
     subject: &ReviewSubject,

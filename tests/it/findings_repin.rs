@@ -21,7 +21,7 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentStatus, PageRow, Review, ReviewAgents, ReviewStateFile, TerminalId, TourAgentPort,
-    TourAgents, WorkPorts, repin_tour,
+    TourAgents, WorkPorts, catch_up_findings, repin_tour,
 };
 use serde_json::{Value, json};
 
@@ -65,6 +65,16 @@ impl Shop {
             base,
             first_head,
         }
+    }
+
+    /// What a review agent that started before a re-pin leaves when it finishes after it.
+    fn write_findings_read_at_first_head(&self, findings: &[Value]) {
+        std::fs::write(
+            Tour::findings_path_for(&self.repo.folders(), &pr()),
+            json!({"pr": PR, "base": self.base, "head": self.first_head, "findings": findings})
+                .to_string(),
+        )
+        .unwrap();
     }
 
     fn commit_second_head(&self) -> String {
@@ -164,6 +174,42 @@ fn a_finding_on_lines_no_commit_changed_moves_with_them_and_stays_current() {
     let moved = shop.finding("two");
     assert_eq!(moved.anchor, lines(AnchorSide::Head, 3, 3));
     assert_eq!(moved.outdated, None);
+}
+
+#[test]
+fn a_findings_file_written_after_a_re_pin_at_the_old_head_is_followed_when_the_review_opens() {
+    let shop = Shop::with_findings(&[]);
+    let second = shop.commit_second_head();
+    shop.repin_onto(&second);
+    shop.write_findings_read_at_first_head(&[finding("two", on_lines("head", 2, 2))]);
+
+    let review = shop.open();
+
+    assert_eq!(review.ai_review().counts().total(), 1);
+    let file = shop.findings();
+    assert_eq!(file.pin.head, Sha::new(&second));
+    assert_eq!(shop.finding("two").anchor, lines(AnchorSide::Head, 3, 3));
+}
+
+#[test]
+fn findings_done_after_a_re_pin_follows_a_file_read_at_the_old_head_to_the_current_head() {
+    let shop = Shop::with_findings(&[]);
+    let second = shop.commit_second_head();
+    shop.repin_onto(&second);
+    shop.write_findings_read_at_first_head(&[finding("two", on_lines("head", 2, 2))]);
+
+    catch_up_findings(
+        &shop.repo.folders(),
+        &pr(),
+        &ReviewStateFile::for_subject(&shop.repo.folders(), &pr()),
+        &shop.source(),
+        &Sha::new(&shop.base),
+        &Sha::new(&second),
+    )
+    .unwrap();
+
+    assert_eq!(shop.findings().pin.head, Sha::new(&second));
+    assert_eq!(shop.finding("two").anchor, lines(AnchorSide::Head, 3, 3));
 }
 
 #[test]

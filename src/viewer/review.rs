@@ -21,7 +21,7 @@ use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::Sha;
+use crate::pull_request::{ChangeTips, Sha};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
@@ -1442,6 +1442,11 @@ impl ReviewCore {
 
     pub fn head(&self) -> &Sha {
         &self.head
+    }
+
+    /// The commits the review reads between.
+    pub fn pinned_tips(&self) -> ChangeTips {
+        self.tour.pin().pinned_tips()
     }
 
     /// What the AI is told about a place: pointers, the shown diff lines, step title and why.

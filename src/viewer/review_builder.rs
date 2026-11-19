@@ -7,6 +7,7 @@ use crate::tour::Tour;
 
 use super::branch_link::LocalReviewsOfRepo;
 use super::code_link::WorkingCopy;
+use super::new_commits::catch_up_findings;
 use super::problems::Problem;
 use super::review::Review;
 use super::review_state::ReviewStateFile;
@@ -40,6 +41,17 @@ impl ReviewBuilder {
             .transpose()?;
         let working_copy = WorkingCopy::of(source.working_tree_is_at(&tour.pin().head));
         let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
+        let pin = tour.pin();
+        if let Err(error) = catch_up_findings(
+            &self.folders,
+            &self.subject,
+            &state_file,
+            source,
+            &pin.base,
+            &pin.head,
+        ) {
+            eprintln!("could not follow the findings to the review's commits: {error:#}");
+        }
         let mut review = match tour {
             Tour::Basic(tour) => Review::open_basic(tour, source, state_file)?,
             Tour::Guided(tour) => Review::open(tour, source, state_file)?,

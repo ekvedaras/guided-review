@@ -375,7 +375,7 @@ async fn answer_requests(
                 reply.send(answer).ok();
             }
             Request::FindingsDone { pr } => {
-                let answer = read_findings(&screen, pr, cx);
+                let answer = read_findings(&screen, pr, cx).await;
                 reply.send(answer).ok();
             }
             Request::Open(open) => {
@@ -711,7 +711,7 @@ fn take_why_reply(
 }
 
 /// Only the review in the window holds findings to read again; any other reads its file when it opens.
-fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> Answer {
+async fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> Answer {
     let (active, window) = {
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
@@ -720,6 +720,15 @@ fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> Answer
     let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
         return Answer::NotShown { pr };
     };
+    let catch_up = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_catch_up(cx)));
+    if let Ok(catch_up) = catch_up
+        && let Err(error) = cx
+            .background_executor()
+            .spawn(async move { catch_up() })
+            .await
+    {
+        eprintln!("could not follow the findings to the review's commits: {error:#}");
+    }
     let count = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_done(cx)));
     match count {
         Ok(count) => Answer::FindingsRead { pr, count },

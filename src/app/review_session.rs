@@ -3,7 +3,7 @@
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
-use crate::viewer::{FixReply, WhyReply};
+use crate::viewer::{FixReply, WhyReply, catch_up_findings};
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -1790,6 +1790,26 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         self.change(cx, |review| review.why_replied(finding, reply))
+    }
+
+    /// What a review agent's word that it is done may first need: a findings file pinned to older
+    /// commits than the review's (the agent finished after a re-pin) follows to them. Reads code, so
+    /// it runs off the main thread.
+    pub fn findings_catch_up(&self) -> impl FnOnce() -> anyhow::Result<()> + Send + use<> {
+        let repinner = Arc::clone(&self.tour_work.repinner);
+        let state_file = self.review.state_file();
+        let tips = self.review.pinned_tips();
+        move || {
+            let source = (repinner.pick_code_source)(&tips)?;
+            catch_up_findings(
+                &repinner.folders,
+                &repinner.subject,
+                &state_file,
+                source.as_ref(),
+                &tips.base_branch_tip,
+                &tips.head,
+            )
+        }
     }
 
     /// The review agent says its findings are on disk: how many the review shows now.

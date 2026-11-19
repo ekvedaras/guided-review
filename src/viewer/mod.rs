@@ -178,7 +178,9 @@ pub use merging::{
 pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
-pub use new_commits::{PickCodeSource, RepinnedTour, TourReloader, TourRepinner, repin_tour};
+pub use new_commits::{
+    PickCodeSource, RepinnedTour, TourReloader, TourRepinner, catch_up_findings, repin_tour,
+};
 pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};

@@ -528,6 +528,13 @@ impl OneStepLayout {
             .update(cx, |session, cx| session.why_replied(finding, reply, cx))
     }
 
+    pub fn findings_catch_up(
+        &self,
+        cx: &Context<Self>,
+    ) -> impl FnOnce() -> anyhow::Result<()> + Send + use<> {
+        self.session.read(cx).findings_catch_up()
+    }
+
     pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
         self.session.update(cx, ReviewSession::findings_done)
     }
