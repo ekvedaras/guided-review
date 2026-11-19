@@ -136,7 +136,8 @@ impl ReviewCore {
         }
     }
 
-    fn keep_ai_run_open(&mut self, open: bool) {        if let Err(error) = self.state.record(|state| state.ai_run_is(open)) {
+    fn keep_ai_run_open(&mut self, open: bool) {
+        if let Err(error) = self.state.record(|state| state.ai_run_is(open)) {
             eprintln!("could not keep whether the review agent is still at work: {error:#}");
         }
     }

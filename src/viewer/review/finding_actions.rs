@@ -98,16 +98,14 @@ impl ReviewCore {
         self.comment_desk
             .add_text_at(&mut self.state, &place, &self.head, &finding.body)
             .map_err(FindingRefusal::Comment)?;
-        self.findings_in_boxes.retain(|(_, boxed)| boxed.id != finding.id);
+        self.findings_in_boxes
+            .retain(|(_, boxed)| boxed.id != finding.id);
         self.findings_in_boxes.push((place.clone(), finding));
         Ok(place)
     }
 
     /// The comment sent from `place` closes the findings whose text it carries.
-    pub(super) fn decide_findings_sent_from(
-        &mut self,
-        place: &CommentPlace,
-    ) -> anyhow::Result<()> {
+    pub(super) fn decide_findings_sent_from(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
         let (sent, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.findings_in_boxes)
             .into_iter()
             .partition(|(boxed_at, _)| boxed_at == place);

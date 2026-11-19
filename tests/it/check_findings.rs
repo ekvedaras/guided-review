@@ -114,7 +114,11 @@ fn a_file_with_no_pin_is_pinned_to_the_head_the_review_agent_was_started_at_when
     let shop = Shop::with_pull();
     let worktrees = GitReviewWorktrees::under(shop.repo.folders().review_worktrees());
     worktrees
-        .add(&PR.parse().unwrap(), shop.repo.path(), &Sha::new(&shop.head))
+        .add(
+            &PR.parse().unwrap(),
+            shop.repo.path(),
+            &Sha::new(&shop.head),
+        )
         .unwrap();
     shop.repo.write("README.md", "hello\nworld\nagain\n");
     let newer = shop.repo.commit("newer");

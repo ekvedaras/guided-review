@@ -1,9 +1,9 @@
 //! What the reviewer does with one finding: use it, use it as is, dismiss it.
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::GitHubFault;
+use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use guided_review::findings::FindingId;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
@@ -104,7 +104,8 @@ fn a_dismissed_finding_goes_from_its_screen_and_stays_gone_when_the_review_opens
 }
 
 #[test]
-fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_goes_when_it_is_sent() {
+fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_goes_when_it_is_sent()
+ {
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice."), on_line_2("b", "Two.")]);
     let mut review = shop.open();
     let sent = SentLog::default();

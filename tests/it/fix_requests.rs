@@ -174,7 +174,10 @@ fn a_batch_reads_in_the_order_of_the_tours_steps_not_the_order_of_the_changed_fi
     let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
         panic!("{calls:?}");
     };
-    let (about_a, about_b) = (text.find("About a.").unwrap(), text.find("About b.").unwrap());
+    let (about_a, about_b) = (
+        text.find("About a.").unwrap(),
+        text.find("About b.").unwrap(),
+    );
     assert!(about_b < about_a, "{text}");
 }
 

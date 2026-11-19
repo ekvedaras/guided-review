@@ -54,8 +54,8 @@ pub fn catch_up_findings(
     let Some(findings) = FindingsFile::read_of(folders, subject)? else {
         return Ok(());
     };
-    let is_behind = findings.pin.is_pinned()
-        && (findings.pin.base != *base || findings.pin.head != *head);
+    let is_behind =
+        findings.pin.is_pinned() && (findings.pin.base != *base || findings.pin.head != *head);
     if is_behind {
         follow_findings_file(folders, subject, state_file, source, base, head)?;
     }

@@ -137,7 +137,10 @@ fn a_pr_with_no_clone_fails_with_what_to_do_not_with_gits_message() {
 
     let reason = format!("{error:#}");
     assert!(reason.contains("no clone"), "{reason}");
-    assert!(reason.contains("https://github.com/acme/shop/pull/7"), "{reason}");
+    assert!(
+        reason.contains("https://github.com/acme/shop/pull/7"),
+        "{reason}"
+    );
     assert!(reason.contains("open the PR from a clone"), "{reason}");
     assert!(!reason.contains("not a git repository"), "{reason}");
 }
