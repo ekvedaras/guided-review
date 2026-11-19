@@ -60,6 +60,21 @@ pub struct FindingsBatch<T> {
 /// Starts a comment made from a finding the reviewer did not edit.
 const AI_MARK: &str = "🤖";
 
+/// Where a finding comes in a batch to fix: by the screen that shows it in reading order, then by its
+/// first line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ReadingOrder {
+    screen: ScreenOrder,
+    first_line: u32,
+}
+
+/// A finding no screen shows comes after every screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ScreenOrder {
+    At(usize),
+    Nowhere,
+}
+
 impl ReviewCore {
     pub(super) fn open_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
         let AiReview::Findings(file) = &self.ai_review else {
@@ -229,18 +244,21 @@ impl ReviewCore {
     }
 
     /// The tour's own order: the screen that shows the finding, then its first line.
-    fn reading_order_of(&self, finding: &Finding) -> (usize, u32) {
+    fn reading_order_of(&self, finding: &Finding) -> ReadingOrder {
         let screen_at = self
             .findings
             .home_of(&finding.id)
             .map(|home| self.screen_of_home(home))
             .and_then(|screen| self.reading_position(&screen))
-            .unwrap_or(usize::MAX);
+            .map_or(ScreenOrder::Nowhere, ScreenOrder::At);
         let first_line = match &finding.anchor {
             Anchor::Change | Anchor::File { .. } => 0,
             Anchor::Lines { lines, .. } => lines.start.get(),
         };
-        (screen_at, first_line)
+        ReadingOrder {
+            screen: screen_at,
+            first_line,
+        }
     }
 
     /// The fixes a snapshot scene shows on the open findings.

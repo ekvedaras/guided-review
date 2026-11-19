@@ -36,7 +36,8 @@ pub fn follow_outdated(
             let commit = Sha::new(thread.original_commit.as_ref()?);
             let end = thread.original_line?;
             let start = thread.original_start_line.unwrap_or(end);
-            let followed = follower.follow(&thread.path, LineRange::new(start, end), &commit, head)?;
+            let followed =
+                follower.follow(&thread.path, LineRange::new(start, end), &commit, head)?;
             Some((thread.id.clone(), followed))
         })
         .collect()
