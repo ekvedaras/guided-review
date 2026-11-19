@@ -72,17 +72,12 @@ impl FindingPlacement {
                     .map_or(FindingHome::SafetyNet, |(id, _)| {
                         FindingHome::Step(id.clone())
                     }),
-                (Anchor::Lines { file, .. }, Some(steps)) => steps
+                (Anchor::Lines { .. }, Some(steps)) => steps
                     .iter()
                     .find(|(_, parts)| {
                         anchor.as_ref().is_some_and(|location| {
                             parts.iter().any(|piece| hangs_under_a_row(piece, location))
                         })
-                    })
-                    .or_else(|| {
-                        steps
-                            .iter()
-                            .find(|(_, parts)| parts.iter().any(|piece| piece.id.path() == file))
                     })
                     .map_or(FindingHome::SafetyNet, |(id, _)| {
                         FindingHome::Step(id.clone())

@@ -126,10 +126,14 @@ fn a_finding_about_the_whole_change_shows_on_the_summary() {
 }
 
 #[test]
-fn a_finding_on_a_line_its_step_does_not_show_follows_the_code_of_that_step() {
-    let review = on_step(shop(&[finding("a", "nit", on_lines("head", 3, 3))]));
+fn a_finding_on_a_line_the_step_of_its_file_does_not_show_goes_to_the_safety_net_after_its_code() {
+    let mut review = shop(&[finding("a", "nit", on_lines("head", 3, 3))]);
+    review.go_forward();
+    assert_eq!(shapes(review.page()), ["-2", "+2"]);
 
-    assert_eq!(shapes(review.page()), ["-2", "+2", "finding a AfterCode"]);
+    review.go_to_safety_net();
+
+    assert_eq!(shapes(review.page()), ["-1", "+1", "finding a AfterCode"]);
 }
 
 /// A basic tour of the same change: an overview, then a screen for each file.
