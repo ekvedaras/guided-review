@@ -3,6 +3,7 @@
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
+use crate::viewer::FixReply;
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -482,6 +483,15 @@ impl ReviewSession {
     ) -> Vec<(FindingId, FindingRefusal)> {
         self.change(cx, |review| review.dismiss_findings(ids))
             .refused
+    }
+
+    /// Fix, on one finding or in the findings list: the findings go to the tour agent as one message.
+    pub fn fix_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.fix_findings(ids)).refused
     }
 
     /// Comment in the findings list: each selected finding goes in as is, as Use as is does.
@@ -1735,6 +1745,15 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         self.change(cx, |review| review.hand_off_replied(id, replied))
+    }
+
+    pub fn fix_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &FixReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.change(cx, |review| review.fix_replied(finding, reply))
     }
 
     /// The review agent says its findings are on disk: how many the review shows now.

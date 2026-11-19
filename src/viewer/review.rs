@@ -1767,7 +1767,13 @@ impl ReviewCore {
             AiReview::Findings(file) => file.findings.as_slice(),
             AiReview::NotRun | AiReview::Unreadable(_) => &[],
         };
-        let findings = FindingPlacement::of(&self.tour, &self.files, findings, &display);
+        let findings = FindingPlacement::of(
+            &self.tour,
+            &self.files,
+            findings,
+            &display,
+            self.state.fix_requests(),
+        );
         self.threads = threads;
         self.findings = findings;
     }

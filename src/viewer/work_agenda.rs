@@ -12,6 +12,7 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::comments::{CommentOutcome, CommentRequest};
+use super::fix_requests::{FixDeliveryOutcome, FixDeliveryRequest};
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_threads::ThreadHome;
 use super::merging::MergeChange;
@@ -279,6 +280,8 @@ pub(super) enum Job {
     },
     TakeSeenMarksOff(Vec<SeenMarkOff>),
     DeliverHandOff(DeliveryRequest),
+    /// Shares the hand-offs' kind: one is typed into the tour agent at a time.
+    DeliverFixRequests(FixDeliveryRequest),
     CheckAgentLink(ReviewSubject),
 }
 
@@ -304,7 +307,7 @@ impl Job {
             Self::ChangePrReadiness { .. } => WorkKind::ChangePrReadiness,
             Self::ChangeMerging { .. } => WorkKind::ChangeMerging,
             Self::TakeSeenMarksOff(_) => WorkKind::TakeSeenMarksOff,
-            Self::DeliverHandOff(_) => WorkKind::DeliverHandOff,
+            Self::DeliverHandOff(_) | Self::DeliverFixRequests(_) => WorkKind::DeliverHandOff,
             Self::CheckAgentLink(_) => WorkKind::CheckAgentLink,
         }
     }
@@ -377,6 +380,7 @@ impl Work {
                     .collect(),
             ),
             Job::DeliverHandOff(request) => Done::Delivery(request.run(ports.agents, github)),
+            Job::DeliverFixRequests(request) => Done::FixDelivery(request.run(ports.agents)),
             Job::CheckAgentLink(pr) => Done::AgentLink(ports.agents.lookup(&pr)),
         };
         WorkOutcome {
@@ -427,6 +431,7 @@ pub(super) enum Done {
     },
     SeenMarksOff(Vec<SeenMarkOffOutcome>),
     Delivery(DeliveryOutcome),
+    FixDelivery(FixDeliveryOutcome),
     AgentLink(TourAgentState),
 }
 

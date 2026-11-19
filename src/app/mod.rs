@@ -39,6 +39,7 @@ use gpui_platform::application;
 
 use crate::app_folders::AppFolders;
 use crate::app_link::{Answer, AppListener, BUILD_WAIT, OpenRequest, Request};
+use crate::findings::FindingId;
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
@@ -48,6 +49,7 @@ use crate::review_subject::ReviewSubject;
 use crate::review_worktree::GitReviewWorktrees;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::update::Build;
+use crate::viewer::FixReply;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
@@ -356,6 +358,14 @@ async fn answer_requests(
                 let answer = mark_replied(&screen, pr, hand_off, &replied, cx);
                 reply.send(answer).ok();
             }
+            Request::FixReplied {
+                pr,
+                finding,
+                reply: said,
+            } => {
+                let answer = take_fix_reply(&screen, pr, &finding, &said, cx);
+                reply.send(answer).ok();
+            }
             Request::FindingsDone { pr } => {
                 let answer = read_findings(&screen, pr, cx);
                 reply.send(answer).ok();
@@ -632,6 +642,34 @@ fn mark_replied(
             }
             Answer::HandOffAnswered { pr }
         }
+        Err(error) => refused(&format!("{error:#}")),
+    }
+}
+
+/// Only the review in the window holds the fix requests in memory; any other has the answer written
+/// into its state file by the command.
+fn take_fix_reply(
+    screen: &SharedScreen,
+    pr: String,
+    finding: &FindingId,
+    reply: &FixReply,
+    cx: &mut AsyncApp,
+) -> Answer {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+        return Answer::NotShown { pr };
+    };
+    let taken = cx.update(|cx| {
+        window
+            .update(cx, |layout, _, cx| layout.fix_replied(finding, reply, cx))
+            .and_then(|taken| taken)
+    });
+    match taken {
+        Ok(()) => Answer::FixAnswered { pr },
         Err(error) => refused(&format!("{error:#}")),
     }
 }

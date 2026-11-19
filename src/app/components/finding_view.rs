@@ -38,5 +38,11 @@ pub fn finding_card(colors: &Colors, row: &FindingRow, actions: impl IntoElement
             MarkdownView::new(format!("finding-{}", row.id), parsed_markdown(&row.body))
                 .into_element(),
         )
+        .children(row.fix.as_ref().map(|line| {
+            div()
+                .text_sm()
+                .text_color(colors.muted_text)
+                .child(line.to_string())
+        }))
         .child(actions)
 }

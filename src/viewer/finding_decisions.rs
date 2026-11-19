@@ -9,6 +9,8 @@ use crate::findings::Finding;
 pub enum Fate {
     Used,
     Dismissed,
+    /// The tour agent fixed it in a commit.
+    Fixed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

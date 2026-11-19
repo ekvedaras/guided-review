@@ -51,7 +51,7 @@ impl ReviewCore {
                 can_open_findings_list: has_findings,
             },
             AiReviewRun::NotRun => AiReviewStage {
-                line: self.ai_review.line(),
+                line: self.line_with_fixes(),
                 is_failure: matches!(self.ai_review, AiReview::Unreadable(_)),
                 action: action_if_free(match self.ai_review {
                     AiReview::NotRun => AiReviewAction::Run,
@@ -61,6 +61,17 @@ impl ReviewCore {
                 can_go_to_next_finding: has_findings,
                 can_open_findings_list: has_findings,
             },
+        }
+    }
+
+    /// The findings' count, and the commits of the fixes the tour agent made.
+    fn line_with_fixes(&self) -> String {
+        let commits: Vec<&str> = self.state.fix_requests().fixed_commits().collect();
+        let line = self.ai_review.line();
+        match commits.len() {
+            0 => line,
+            1 => format!("{line} · 1 fix: {}", commits.join(", ")),
+            fixes => format!("{line} · {fixes} fixes: {}", commits.join(", ")),
         }
     }
 

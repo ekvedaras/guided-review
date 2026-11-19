@@ -31,6 +31,8 @@ use super::palette::Colors;
 pub enum FindingsEvent {
     Dismiss(Vec<FindingId>),
     Comment(Vec<FindingId>),
+    /// To the tour agent, as one message in reading order.
+    Fix(Vec<FindingId>),
     /// Closes the list and shows the finding on its lines.
     GoTo(FindingId),
 }
@@ -116,6 +118,7 @@ impl FindingsSheet {
             "a" => self.list.toggle_all(),
             "d" => self.ask(FindingsEvent::Dismiss, cx),
             "c" => self.ask(FindingsEvent::Comment, cx),
+            "x" => self.ask(FindingsEvent::Fix, cx),
             "g" => {
                 if let Some(id) = self.list.id_under_cursor().cloned() {
                     self.close(window, cx);
@@ -200,6 +203,13 @@ impl FindingsSheet {
                 .text_color(colors.text)
                 .child(row.first_line.clone()),
         )
+        .children(row.fix.as_ref().map(|line| {
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(line.clone())
+        }))
         .child(sized_icon(
             if row.is_open {
                 Icon::ChevronDown
@@ -322,6 +332,18 @@ impl Render for FindingsSheet {
             .child(
                 Self::batch_button(
                     &colors,
+                    "findings-fix",
+                    format!("Fix ({selected})"),
+                    ButtonKind::Secondary,
+                    has_selection,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.ask(FindingsEvent::Fix, cx);
+                })),
+            )
+            .child(
+                Self::batch_button(
+                    &colors,
                     "findings-comment",
                     format!("Comment ({selected})"),
                     ButtonKind::Primary,
@@ -378,6 +400,7 @@ impl Render for FindingsSheet {
                             .child(key_hint(&colors, &[KeyLabel::Text("a")], "all"))
                             .child(key_hint(&colors, &[KeyLabel::Text("d")], "dismiss"))
                             .child(key_hint(&colors, &[KeyLabel::Text("c")], "comment"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("x")], "fix"))
                             .child(key_hint(&colors, &[KeyLabel::Text("g")], "show")),
                     ),
                 "findings-sheet-rise",

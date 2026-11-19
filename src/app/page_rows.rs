@@ -407,6 +407,8 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             finding.severity.hash(&mut hasher);
             finding.body.hash(&mut hasher);
             finding.place.hash(&mut hasher);
+            finding.fix.hash(&mut hasher);
+            finding.can_fix.hash(&mut hasher);
         }
         PageRow::QueuedComment(queued) => {
             queued.draft.place.hash(&mut hasher);

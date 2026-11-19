@@ -40,7 +40,7 @@ pub fn refresh_writer_tools(clone: &Path, tours: &Path) -> String {
 /// the PR's code (decided 2026-11-10).
 pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>) -> String {
     let tools = format!(
-        "{},Bash(guided-review agent-reply:*)",
+        "{},Bash(guided-review agent-reply:*),Bash(guided-review fix-reply:*)",
         refresh_writer_tools(clone, tours)
     );
     match summary_skill {

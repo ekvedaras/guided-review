@@ -14,6 +14,7 @@ pub mod file_rules;
 pub mod findings;
 pub mod findings_check;
 pub mod findings_done;
+pub mod fix_reply;
 pub mod github;
 pub mod gone_local_reviews;
 pub mod hc_tour_agent;

@@ -13,10 +13,11 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
+use crate::findings::FindingId;
 use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
 use crate::update::ReleaseInstall;
-use crate::viewer::{AgentReplied, HandOffId};
+use crate::viewer::{AgentReplied, FixReply, HandOffId};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
 const START_WAIT: Duration = Duration::from_secs(20);
@@ -119,6 +120,12 @@ pub enum Request {
         #[serde(default)]
         replied: AgentReplied,
     },
+    /// The tour agent's word on one finding of a fix request.
+    FixReplied {
+        pr: String,
+        finding: FindingId,
+        reply: FixReply,
+    },
     /// The review agent's findings are checked and on disk: the app shows them.
     FindingsDone {
         pr: String,
@@ -197,6 +204,7 @@ impl RequestLine {
             Request::Quit => self.replacing.as_deref() == Some(build),
             Request::Open(_)
             | Request::AgentReplied { .. }
+            | Request::FixReplied { .. }
             | Request::FindingsDone { .. }
             | Request::ShowSettings
             | Request::ShowSwitcher => self.across_builds == AcrossBuilds::AnyBuild,
@@ -255,6 +263,10 @@ pub enum Answer {
     HandOffAnswered {
         pr: String,
     },
+    /// The finding's fix state is updated and shown.
+    FixAnswered {
+        pr: String,
+    },
     /// The window read the findings file of this review again and shows `count` findings.
     FindingsRead {
         pr: String,
@@ -299,6 +311,9 @@ impl std::fmt::Display for Answer {
             ),
             Self::HandOffAnswered { pr } => {
                 write!(f, "guided-review app marked the hand-off answered on {pr}")
+            }
+            Self::FixAnswered { pr } => {
+                write!(f, "guided-review app took the fix answer on {pr}")
             }
             Self::FindingsRead { pr, count } => write!(
                 f,

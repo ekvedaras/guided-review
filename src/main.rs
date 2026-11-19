@@ -10,9 +10,11 @@ use guided_review::app_link::{
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
+use guided_review::findings::FindingId;
 use guided_review::findings::FindingsFile;
 use guided_review::findings_check;
 use guided_review::findings_done::findings_done;
+use guided_review::fix_reply::fix_reply;
 use guided_review::github::GitHub;
 use guided_review::instructions::SummaryInstructions;
 use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
@@ -28,6 +30,7 @@ use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
+use guided_review::viewer::FixReply;
 use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile};
 use std::os::unix::process::CommandExt;
 
@@ -107,6 +110,24 @@ enum Command {
         /// Post "Working on it…" now; the answer with --body replaces it
         #[arg(long)]
         working: bool,
+    },
+    /// Say where the tour agent is with one finding of a fix request
+    FixReply {
+        subject: ReviewSubject,
+        /// The finding id from the message
+        finding: String,
+        /// You started on this finding
+        #[arg(long, group = "outcome")]
+        working: bool,
+        /// You fixed it, in this commit
+        #[arg(long, group = "outcome", value_name = "COMMIT")]
+        fixed: Option<String>,
+        /// You did not fix it; give the reason with --body
+        #[arg(long, group = "outcome", requires = "body")]
+        not_fixed: bool,
+        /// The reason, in markdown; `-` reads it from stdin, which keeps its line breaks
+        #[arg(long, requires = "not_fixed")]
+        body: Option<String>,
     },
     /// Run the app itself; `open` starts it when none answers
     #[command(hide = true)]
@@ -188,6 +209,34 @@ fn main() -> anyhow::Result<()> {
                 &reply,
             )?;
             println!("{said}");
+            Ok(())
+        }
+        Command::FixReply {
+            subject,
+            finding,
+            working: _,
+            fixed,
+            not_fixed: _,
+            body,
+        } => {
+            let reply = match (fixed, body) {
+                (Some(commit), _) => FixReply::Fixed { commit },
+                (None, Some(body)) => {
+                    let body = match body.as_str() {
+                        "-" => std::io::read_to_string(std::io::stdin())?,
+                        _ => body,
+                    };
+                    FixReply::NotFixed {
+                        reason: body.trim_end().to_owned(),
+                    }
+                }
+                (None, None) => FixReply::Working,
+            };
+            let finding = FindingId::try_from(finding).map_err(anyhow::Error::msg)?;
+            println!(
+                "{}",
+                fix_reply(&AppFolders::running()?, &subject, &finding, &reply)?
+            );
             Ok(())
         }
         Command::Serve => serve(),

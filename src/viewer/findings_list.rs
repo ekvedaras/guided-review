@@ -1,8 +1,9 @@
 //! The findings list: one compact row per open finding, for going through many of them fast. It
 //! holds what the reviewer has ticked and which row the keys are on, and nothing the findings file holds.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::fix_requests::FixRequests;
 use crate::findings::{Anchor, Finding, FindingId, Severity};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +18,8 @@ pub struct FindingsListRow {
     pub is_selected: bool,
     pub is_open: bool,
     pub is_under_cursor: bool,
+    /// Where the fix the reviewer asked for is, when one was asked for.
+    pub fix: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -25,6 +28,8 @@ pub struct FindingsList {
     selected: BTreeSet<FindingId>,
     cursor: usize,
     open: Option<FindingId>,
+    /// What each finding's fix says, for the findings that have one.
+    fixes: BTreeMap<FindingId, String>,
 }
 
 impl FindingsList {
@@ -36,6 +41,21 @@ impl FindingsList {
             findings,
             ..Self::default()
         }
+    }
+
+    /// The list with where each finding's fix is.
+    #[must_use]
+    pub fn with_fixes(mut self, fixes: &FixRequests) -> Self {
+        self.fixes = self
+            .findings
+            .iter()
+            .filter_map(|finding| {
+                fixes
+                    .state_of(&finding.id)
+                    .map(|state| (finding.id.clone(), state.line()))
+            })
+            .collect();
+        self
     }
 
     pub fn rows(&self) -> Vec<FindingsListRow> {
@@ -51,6 +71,7 @@ impl FindingsList {
                 is_selected: self.selected.contains(&finding.id),
                 is_open: self.open.as_ref() == Some(&finding.id),
                 is_under_cursor: position == self.cursor,
+                fix: self.fixes.get(&finding.id).cloned(),
             })
             .collect()
     }
@@ -128,7 +149,9 @@ impl FindingsList {
 
     /// The same list over the findings another list holds now.
     pub fn refreshed_to(&self, newer: &Self) -> Self {
-        self.refreshed(&newer.findings)
+        let mut list = self.refreshed(&newer.findings);
+        list.fixes.clone_from(&newer.fixes);
+        list
     }
 
     /// The same list over the findings that are still open: what is ticked stays ticked.

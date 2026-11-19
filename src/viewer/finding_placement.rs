@@ -8,6 +8,7 @@ use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
 use super::diff_display::DiffDisplay;
+use super::fix_requests::{FixRequests, FixState};
 use super::review::StepId;
 use super::step_page::{LineLocation, Side};
 use super::threads::{hangs_under_a_row, step_pieces};
@@ -19,6 +20,8 @@ pub struct FindingView {
     pub finding: Finding,
     /// The shown line it hangs under; `None` for a finding shown after the code.
     pub anchor: Option<LineLocation>,
+    /// The fix the reviewer asked for, when one was.
+    pub fix: Option<FixState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,6 +44,7 @@ impl FindingPlacement {
         files: &[ChangedFile],
         findings: &[Finding],
         display: &DiffDisplay,
+        fixes: &FixRequests,
     ) -> Self {
         let steps = tour
             .guided()
@@ -83,6 +87,7 @@ impl FindingPlacement {
             homes.entry(home).or_default().push(FindingView {
                 finding: finding.clone(),
                 anchor,
+                fix: fixes.state_of(&finding.id).cloned(),
             });
         }
         Self { homes }

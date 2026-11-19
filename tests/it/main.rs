@@ -58,6 +58,8 @@ mod finding_placement;
 mod findings_done;
 mod findings_list;
 mod finish_review;
+mod fix_reply;
+mod fix_requests;
 mod focused_change;
 mod fold_key;
 mod fonts;

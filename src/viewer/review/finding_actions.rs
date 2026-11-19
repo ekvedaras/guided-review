@@ -9,8 +9,12 @@ use crate::viewer::comment_desk::TourFreshness;
 use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::findings_list::FindingsList;
+#[cfg(feature = "snapshots")]
+use crate::viewer::fix_requests::FixRequests;
+use crate::viewer::fix_requests::{FixReply, FixState};
 use crate::viewer::hand_offs::Audience;
 use crate::viewer::step_page::{LineLocation, Side};
+use crate::viewer::work_agenda::WorkKind;
 
 /// Why an action on a finding did not happen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +25,8 @@ pub enum FindingRefusal {
     NotKept(String),
     /// A comment box with text is open on those lines: sending the finding would send that text unread.
     DraftInTheWay,
+    /// A fix is asked for already, or under way: asking again would send it twice.
+    BeingFixed,
     Comment(CommentRefusal),
 }
 
@@ -32,6 +38,7 @@ impl fmt::Display for FindingRefusal {
             Self::DraftInTheWay => {
                 f.write_str("A comment box is open on these lines: use the finding there, or send that comment first")
             }
+            Self::BeingFixed => f.write_str("A fix of this finding is asked for already"),
             Self::Comment(refusal) => refusal.fmt(f),
         }
     }
@@ -115,10 +122,100 @@ impl ReviewCore {
         Ok(request)
     }
 
+    /// Sends each finding to the tour agent as one message to fix, in reading order.
+    pub fn fix_findings(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused: Vec::new(),
+        };
+        let mut to_fix = Vec::new();
+        for id in ids {
+            match self.open_finding(id) {
+                Ok(_) if self.state.fix_requests().is_in_progress(id) => {
+                    batch.refused.push((id.clone(), FindingRefusal::BeingFixed));
+                }
+                Ok(finding) => to_fix.push(finding),
+                Err(refusal) => batch.refused.push((id.clone(), refusal)),
+            }
+        }
+        to_fix.sort_by_key(|finding| self.reading_order_of(&finding.anchor));
+        batch.done = to_fix.iter().map(|finding| finding.id.clone()).collect();
+        if to_fix.is_empty() {
+            return batch;
+        }
+        match self
+            .state
+            .record(|state| state.fix_requests_mut().request(to_fix))
+        {
+            Ok(()) => {
+                self.work.want(WorkKind::DeliverHandOff);
+                self.place_threads();
+            }
+            Err(error) => {
+                let reason = format!("{error:#}");
+                for id in std::mem::take(&mut batch.done) {
+                    batch
+                        .refused
+                        .push((id, FindingRefusal::NotKept(reason.clone())));
+                }
+            }
+        }
+        batch
+    }
+
+    /// The tour agent's word on one finding. A finding it fixed is closed.
+    pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> anyhow::Result<()> {
+        self.state.record(|state| state.fix_replied(id, reply))??;
+        if matches!(reply, FixReply::Fixed { .. })
+            && let AiReview::Findings(file) = &mut self.ai_review
+        {
+            file.findings.retain(|open| open.id != *id);
+        }
+        self.place_threads();
+        Ok(())
+    }
+
+    /// The whole change first, then each changed file in the review's order, each by its lines.
+    fn reading_order_of(&self, anchor: &Anchor) -> (usize, u32) {
+        let file_at = |file: &FilePath| {
+            self.files
+                .iter()
+                .position(|changed| changed.path == *file)
+                .map_or(usize::MAX, |position| position + 1)
+        };
+        match anchor {
+            Anchor::Change => (0, 0),
+            Anchor::File { file } => (file_at(file), 0),
+            Anchor::Lines { file, lines, .. } => (file_at(file), lines[0].get()),
+        }
+    }
+
+    /// The fixes a snapshot scene shows on the open findings, and their removal.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_fix_requests(&mut self, staged: bool) {
+        let findings = match (&self.ai_review, staged) {
+            (AiReview::Findings(file), true) => file.findings.clone(),
+            _ => Vec::new(),
+        };
+        self.state
+            .record(|state| {
+                *state.fix_requests_mut() = FixRequests::staged(&findings);
+            })
+            .ok();
+        self.place_threads();
+    }
+
+    /// Where the fix of a finding is, when it was asked for.
+    pub fn fix_state_of(&self, id: &FindingId) -> Option<&FixState> {
+        self.state.fix_requests().state_of(id)
+    }
+
     /// The open findings as the findings list shows them.
     pub fn findings_list(&self) -> FindingsList {
         match &self.ai_review {
-            AiReview::Findings(file) => FindingsList::of(&file.findings),
+            AiReview::Findings(file) => {
+                FindingsList::of(&file.findings).with_fixes(self.state.fix_requests())
+            }
             AiReview::NotRun | AiReview::Unreadable(_) => FindingsList::default(),
         }
     }

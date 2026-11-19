@@ -116,7 +116,7 @@ use crate::viewer::{
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
     ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
-use crate::viewer::{FindingRefusal, FindingRow, IssueDetails, RelatedIssue};
+use crate::viewer::{FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue};
 use issue_card::{CardSide, IssueHover, issue_card};
 
 #[cfg(feature = "snapshots")]
@@ -504,6 +504,16 @@ impl OneStepLayout {
     ) -> anyhow::Result<()> {
         self.session
             .update(cx, |session, cx| session.hand_off_replied(id, replied, cx))
+    }
+
+    pub fn fix_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &FixReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.session
+            .update(cx, |session, cx| session.fix_replied(finding, reply, cx))
     }
 
     pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
@@ -1152,8 +1162,12 @@ impl OneStepLayout {
                 label,
             )
         };
-        let (use_id, as_is_id, dismiss_id) =
-            (finding.id.clone(), finding.id.clone(), finding.id.clone());
+        let (use_id, as_is_id, dismiss_id, fix_id) = (
+            finding.id.clone(),
+            finding.id.clone(),
+            finding.id.clone(),
+            finding.id.clone(),
+        );
         div()
             .flex()
             .items_center()
@@ -1175,6 +1189,25 @@ impl OneStepLayout {
                     }),
                 ),
             )
+            .when(finding.can_fix, |actions| {
+                actions.child(
+                    small_button("fix", ButtonKind::Secondary, Icon::Zap, "Fix").on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            let refused = this
+                                .session
+                                .update(cx, |session, cx| {
+                                    session.fix_findings(std::slice::from_ref(&fix_id), cx)
+                                })
+                                .into_iter()
+                                .next();
+                            this.finding_refused(
+                                refused.map_or(Ok(()), |(_, refusal)| Err(refusal)),
+                                cx,
+                            );
+                        }),
+                    ),
+                )
+            })
             .child(
                 small_button("dismiss", ButtonKind::Ghost, Icon::Close, "Dismiss").on_click(
                     cx.listener(move |this, _, _, cx| {
@@ -1202,6 +1235,9 @@ impl OneStepLayout {
             FindingsEvent::Comment(ids) => self
                 .session
                 .update(cx, |session, cx| session.comment_findings(ids, cx)),
+            FindingsEvent::Fix(ids) => self
+                .session
+                .update(cx, |session, cx| session.fix_findings(ids, cx)),
             FindingsEvent::GoTo(id) => {
                 self.session.update(cx, |session, cx| {
                     session.change(cx, |review| review.go_to_finding(id));

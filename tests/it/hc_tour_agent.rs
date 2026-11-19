@@ -678,6 +678,7 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
     for needed in [
         "Bash(guided-review open:*)",
         "Bash(guided-review agent-reply:*)",
+        "Bash(guided-review fix-reply:*)",
         "Bash(guided-review check:*)",
         "Skill(tour)",
     ] {

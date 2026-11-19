@@ -29,6 +29,7 @@ mod finding_decisions;
 mod finding_placement;
 mod findings_list;
 mod finish_review;
+mod fix_requests;
 mod focused_change;
 mod github_outage;
 mod guided_tour;
@@ -140,6 +141,7 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
     FinishResult, ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
+pub use fix_requests::{FixReply, FixRequest, FixRequests, FixState, NoFixRequest};
 pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};

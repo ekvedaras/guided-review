@@ -99,6 +99,10 @@ pub struct FindingRow {
     /// Markdown, as the review agent wrote it.
     pub body: Arc<str>,
     pub place: ThreadRowPlace,
+    /// Where the fix the reviewer asked for is, when one was asked for.
+    pub fix: Option<Arc<str>>,
+    /// False while a fix is asked for or under way.
+    pub can_fix: bool,
 }
 
 /// An ask button and what it asks about.

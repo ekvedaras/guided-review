@@ -14,6 +14,7 @@ use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
 use crate::viewer::finding_placement::FindingView;
+use crate::viewer::fix_requests::FixState;
 use crate::viewer::focused_change::ChangeFile;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
@@ -738,11 +739,14 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace) -> PageRow {
 }
 
 fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
+    let can_fix = !view.fix.as_ref().is_some_and(FixState::is_in_progress);
     PageRow::Finding(Arc::new(FindingRow {
         id: view.finding.id,
         severity: view.finding.severity,
         body: view.finding.body.into(),
         place,
+        fix: view.fix.map(|state| state.line().into()),
+        can_fix,
     }))
 }
 
