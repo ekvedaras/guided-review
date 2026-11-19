@@ -24,9 +24,9 @@ use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
-    AgentStatus, AiReview, AutoMerge, CheckRun, CheckState, Checks, FileView, LineKind,
-    LineLocation, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus, PageRow,
-    PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId, TextBox,
+    AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
+    LineKind, LineLocation, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus,
+    PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
@@ -95,10 +95,12 @@ enum Scene {
     ReReviewDone,
     TourEndUnread,
     AiReviewFound,
+    AiReviewRunning,
+    AiReviewFailed,
 }
 
 impl Scene {
-    const ALL: [Self; 58] = [
+    const ALL: [Self; 60] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -157,6 +159,8 @@ impl Scene {
         Self::ReReviewDone,
         Self::TourEndUnread,
         Self::AiReviewFound,
+        Self::AiReviewRunning,
+        Self::AiReviewFailed,
     ];
 
     fn file_name(self) -> &'static str {
@@ -219,6 +223,8 @@ impl Scene {
             Self::ReReviewDone => "78-re-review-done",
             Self::TourEndUnread => "79-tour-end-unread",
             Self::AiReviewFound => "80-ai-review-found",
+            Self::AiReviewRunning => "81-ai-review-running",
+            Self::AiReviewFailed => "82-ai-review-failed",
         }
     }
 
@@ -778,6 +784,12 @@ impl OneStepLayout {
             Scene::AiReviewFound => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::staged());
             }),
+            Scene::AiReviewRunning => self.change_review(cx, |review| {
+                review.ai_review_run_is(AiReviewRun::staged_running());
+            }),
+            Scene::AiReviewFailed => self.change_review(cx, |review| {
+                review.ai_review_run_is(AiReviewRun::staged_failed());
+            }),
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -986,6 +998,9 @@ impl OneStepLayout {
             }
             Scene::AiReviewFound => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::NotRun);
+            }),
+            Scene::AiReviewRunning | Scene::AiReviewFailed => self.change_review(cx, |review| {
+                review.ai_review_run_is(AiReviewRun::NotRun);
             }),
             Scene::DescriptionFolds => {
                 self.toggle_description_folds(cx);

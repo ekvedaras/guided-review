@@ -96,7 +96,9 @@ pub use active_pr::{
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
 pub use ai_review::AiReview;
-pub use ai_review_run::{AiReviewRefusal, AiReviewRun, RunningReview};
+pub use ai_review_run::{
+    AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage, RunningReview,
+};
 pub use app_state::AppStateFile;
 pub use app_window::{
     AfterClose, AppWindow, FailedBuild, Relaunched, ShowBuilding, ShowReview, ShowSettings,

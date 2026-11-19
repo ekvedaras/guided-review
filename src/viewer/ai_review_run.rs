@@ -22,6 +22,34 @@ impl AiReviewRefusal {
     }
 }
 
+/// The button the AI review row and the overview offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AiReviewAction {
+    Run,
+    /// After findings: a second run replaces the undecided ones.
+    RunAgain,
+    TryAgain,
+}
+
+impl AiReviewAction {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Run => "Run AI review",
+            Self::RunAgain => "Run again",
+            Self::TryAgain => "Try again",
+        }
+    }
+}
+
+/// What the sidebar's AI review row says and offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AiReviewStage {
+    pub line: String,
+    pub is_failure: bool,
+    pub action: Option<AiReviewAction>,
+    pub can_show_agent: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AiReviewRun {
     #[default]
@@ -44,6 +72,21 @@ pub struct RunningReview {
 }
 
 impl AiReviewRun {
+    /// A run the agent works in, as a snapshot scene shows it.
+    #[cfg(feature = "snapshots")]
+    pub fn staged_running() -> Self {
+        Self::Running(RunningReview::new(TerminalId::new("t1"), true))
+    }
+
+    /// A run that ended because the agent stopped, as a snapshot scene shows it.
+    #[cfg(feature = "snapshots")]
+    pub fn staged_failed() -> Self {
+        Self::Failed(
+            "The review agent stopped without findings. Show the agent to answer it, or try again."
+                .to_owned(),
+        )
+    }
+
     /// A run that has not ended: it holds the review agent and its worktree.
     pub const fn is_on(&self) -> bool {
         matches!(self, Self::Starting | Self::Running(_))
@@ -80,8 +123,7 @@ impl AiReviewRun {
             AgentStatus::Working => running.has_worked = true,
             AgentStatus::Idle if running.has_worked => {
                 *self = Self::Failed(
-                    "The review agent stopped without findings. Its last lines are below; show the agent \
-                     to answer it, or try again."
+                    "The review agent stopped without findings. Show the agent to answer it, or try again."
                         .to_owned(),
                 );
             }

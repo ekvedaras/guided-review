@@ -172,4 +172,8 @@
 
 **Review agent**: The AI session, in its own herdr terminal and apart from the tour agent, that does one review subject's AI review. Avoid: reviewer (that is the person), review subagent.
 
+**Review worktree**: The throwaway checkout of the reviewed head (a PR's pinned head, a local review's snapshot commit) that the review agent works in, outside the clone. It is made when the run starts and removed when the agent ends; the app sweeps leftovers at start. Avoid: sandbox, scratch checkout.
+
+**Run (AI review)**: One go of the review agent, from Run AI review to `findings-done`: not run, starting, running, or failed (it went idle, errored or ended without `findings-done`). Run again and Try again start a new run that replaces the agent and the worktree of the old one. Avoid: job, session.
+
 **Fix request**: A finding the reviewer sent to the tour agent to fix in code, alone or in a batch with others. Avoid: task (that is a local review's comment), auto-fix.

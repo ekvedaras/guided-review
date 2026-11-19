@@ -101,15 +101,15 @@ use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::update::Build;
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
-    CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
-    HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation, MergeOffer, Merging,
-    NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage, OverviewStats,
-    PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep,
-    ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs,
-    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
-    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
+    AgentReplied, AiReviewAction, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView,
+    CheckList, CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
+    CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
+    GitHubPort, HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation, MergeOffer,
+    Merging, NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage,
+    OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress,
+    ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening,
+    RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
+    Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
     ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
@@ -1124,6 +1124,15 @@ impl OneStepLayout {
         }
     }
 
+    /// Run AI review, from the summary, the sidebar and the palette: the review takes the asking, and the
+    /// session starts the review agent.
+    fn run_ai_review(&mut self, cx: &mut Context<Self>) {
+        let asked = self.session.update(cx, ReviewSession::run_ai_review);
+        if let Err(refusal) = asked {
+            post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
+        }
+    }
+
     /// `D` and the palette's actions: the first ask says what asking again does.
     fn change_readiness(&mut self, cx: &mut Context<Self>) {
         let step = self.session.update(cx, |session, cx| {
@@ -1341,6 +1350,10 @@ impl OneStepLayout {
                 ),
             },
             Effect::WriteGuidedTour => self.write_guided_tour(cx),
+            Effect::RunAiReview => self.run_ai_review(cx),
+            Effect::Refused(Refusal::AiReview(refusal)) => {
+                post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
+            }
             Effect::SwitchToGuidedTour => self.switch_to_guided_tour(cx),
             Effect::Refused(Refusal::GuidedTour(refusal)) => {
                 post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
@@ -1384,29 +1397,66 @@ impl OneStepLayout {
     }
 
     /// What the review agent left: its findings by severity, or why its file was not read.
-    fn ai_review_block(colors: &Colors, ai_review: &SidebarAiReview) -> impl IntoElement {
+    fn ai_review_block(
+        colors: &Colors,
+        ai_review: &SidebarAiReview,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let show = ai_review.can_show_agent.then(|| {
+            icon_label_button(
+                colors,
+                "show-review-agent",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Terminal,
+                "Show agent",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::show_review_agent);
+            }))
+        });
+        let action = ai_review.action.map(|action| {
+            icon_label_button(
+                colors,
+                "sidebar-run-ai-review",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                ai_review_icon(action),
+                action.label(),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::RunAiReview, window, cx);
+            }))
+        });
         div()
             .id("ai-review")
             .flex()
-            .items_baseline()
-            .gap_2()
+            .flex_col()
+            .gap_1()
             .text_xs()
             .child(
                 div()
-                    .flex_none()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("AI review"),
+                    .flex()
+                    .items_baseline()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("AI review"),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_color(if ai_review.is_failure {
+                                colors.danger
+                            } else {
+                                colors.muted_text
+                            })
+                            .child(ai_review.line.clone()),
+                    ),
             )
-            .child(
-                div()
-                    .min_w_0()
-                    .text_color(if ai_review.is_unreadable {
-                        colors.danger
-                    } else {
-                        colors.muted_text
-                    })
-                    .child(ai_review.line.clone()),
-            )
+            .child(div().flex().gap_2().children(show).children(action))
     }
 
     /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
@@ -2015,10 +2065,7 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
-        let ai_review = sidebar
-            .ai_review
-            .as_ref()
-            .map(|ai_review| Self::ai_review_block(&colors, ai_review));
+        let ai_review = Self::ai_review_block(&colors, &sidebar.ai_review, cx);
         let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
@@ -2134,7 +2181,7 @@ impl OneStepLayout {
             .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
-            .children(ai_review)
+            .child(ai_review)
             .children(clone_offer)
             .children(changes_not_shown)
             .children(problems)
@@ -3806,6 +3853,19 @@ impl OneStepLayout {
                 cx,
             ))
         });
+        let run_ai_review = toolbar.run_ai_review.map(|action| {
+            icon_label_button(
+                &colors,
+                "run-ai-review",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                ai_review_icon(action),
+                action.label(),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::RunAiReview, window, cx);
+            }))
+        });
         let comment_on_file = toolbar.comment_on_file.as_ref().map(|path| {
             let comment_path = path.clone();
             icon_label_button(
@@ -3831,6 +3891,7 @@ impl OneStepLayout {
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
+            .children(run_ai_review)
             .children(comment_on_file)
             .children(toggles)
             .children(ask.map(|ask| div().pl_1().child(ask)))
@@ -4957,6 +5018,13 @@ fn tool_button(
 
 /// A diff toolbar toggle, a part of the toolbar's joined group: its icon and name, and a check
 /// while it is on.
+fn ai_review_icon(action: AiReviewAction) -> Icon {
+    match action {
+        AiReviewAction::TryAgain => Icon::Refresh,
+        AiReviewAction::Run | AiReviewAction::RunAgain => Icon::Sparkles,
+    }
+}
+
 fn toolbar_toggle(
     colors: &Colors,
     id: &'static str,

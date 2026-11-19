@@ -307,6 +307,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
         PageRow::AskMarker(ask) => ask.id.hash(&mut hasher),
         PageRow::Toolbar(toolbar) => {
             toolbar.ask.as_ref().map(|ask| &ask.id).hash(&mut hasher);
+            toolbar.run_ai_review.hash(&mut hasher);
             toolbar.comment_on_file.hash(&mut hasher);
             toolbar.fold.hash(&mut hasher);
             toolbar.full_diff.hash(&mut hasher);

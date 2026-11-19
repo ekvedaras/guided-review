@@ -6,7 +6,7 @@ use gpui::SharedString;
 use std::sync::Arc;
 
 use crate::viewer::{
-    AiReview, ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner,
+    AiReviewAction, ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner,
     GuidedTourProgress, GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit,
     Review, ReviewerLine, ReviewerStatus, Screen, StanceAge, StepId, TerminalId, TourAgentState,
     TreeRow,
@@ -105,10 +105,12 @@ pub struct SidebarTourAgent {
     pub choices: Vec<TerminalId>,
 }
 
-/// The review agent's findings as the sidebar says it: shown once there is news of them.
+/// The AI review as the sidebar says it: not run yet, running, failed, or what it found.
 pub struct SidebarAiReview {
     pub line: SharedString,
-    pub is_unreadable: bool,
+    pub is_failure: bool,
+    pub can_show_agent: bool,
+    pub action: Option<AiReviewAction>,
 }
 
 /// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
@@ -149,8 +151,7 @@ impl SidebarProblem {
 
 pub struct SidebarRows {
     pub tour_agent: SidebarTourAgent,
-    /// None until the review agent has left findings or a file that cannot be read.
-    pub ai_review: Option<SidebarAiReview>,
+    pub ai_review: SidebarAiReview,
     /// Only a basic review has one.
     pub guided_tour: Option<SidebarGuidedTour>,
     pub progress: ReadProgress,
@@ -216,12 +217,14 @@ impl SidebarRows {
             is_current: review.screen() == &Screen::SafetyNet,
         });
         Self {
-            ai_review: match review.ai_review() {
-                AiReview::NotRun => None,
-                ai_review => Some(SidebarAiReview {
-                    line: ai_review.line().into(),
-                    is_unreadable: matches!(ai_review, AiReview::Unreadable(_)),
-                }),
+            ai_review: {
+                let stage = review.ai_review_stage();
+                SidebarAiReview {
+                    line: stage.line.into(),
+                    is_failure: stage.is_failure,
+                    can_show_agent: stage.can_show_agent,
+                    action: stage.action,
+                }
             },
             tour_agent: SidebarTourAgent {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),

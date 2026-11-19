@@ -11,9 +11,10 @@ use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
 use crate::tour::Step;
 use crate::viewer::{
-    Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LabelSwitch, LineKind,
-    LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place, QueuedComment,
-    ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead, ViewSwitch,
+    AiReviewAction, Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines,
+    LabelSwitch, LineKind, LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place,
+    QueuedComment, ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead,
+    ViewSwitch,
 };
 
 #[derive(Clone)]
@@ -110,6 +111,8 @@ pub struct StepHeading {
 
 /// The controls over a screen's pieces, in one row.
 pub struct Toolbar {
+    /// The button that starts the AI review, on the screens that open a review.
+    pub run_ai_review: Option<AiReviewAction>,
     pub ask: Option<AskAt>,
     /// The file a basic tour's screen shows, which the reviewer can comment on as a whole.
     pub comment_on_file: Option<FilePath>,

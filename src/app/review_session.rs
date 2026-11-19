@@ -20,19 +20,21 @@ use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
+use crate::app::review_agent;
 use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::{GhCloner, GitHub};
-use crate::opened_subject::OpenedChangeSet;
+use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
-    CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome,
-    JobProgress, LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief,
-    RepinnedTour, ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob,
-    TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer,
+    CommentOutcome, CommentPlace, CommentResult, FinishResult, GitHubPort, HandOffButton,
+    HandOffId, ImageCache, JobOutcome, JobProgress, LineLocation, NoteSubject, OldHead,
+    OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, ReplacingJob, Review, ReviewChange,
+    ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox, ThreadAction,
+    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
+    TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -117,6 +119,10 @@ pub struct ReviewSession {
     is_unread_end_staged: bool,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
+    /// The review agent's start, or the look for one an earlier app left running.
+    ai_review_start: Option<Task<()>>,
+    /// Follows the review agent's status for as long as its run lasts.
+    ai_review_follow: Option<Task<()>>,
     /// Wakes the session when the review's earliest work wanted later falls due.
     work_timer: Option<Task<()>>,
     old_head: Option<OldHead>,
@@ -229,6 +235,8 @@ impl ReviewSession {
             is_unread_end_staged: false,
             tour_agent_follow: None,
             show_agent: None,
+            ai_review_start: None,
+            ai_review_follow: None,
             work_timer: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
@@ -1420,8 +1428,115 @@ impl ReviewSession {
         )
         .detach();
         self.follow_tour_agent(cx);
+        self.resume_ai_review(cx);
         self.review.pull_from_github();
         self.run_due_work(cx);
+    }
+
+    /// Run AI review, Run again and Try again: the review takes the asking, and the review agent starts in
+    /// a worktree of the reviewed head, off the UI thread as it runs `git` and `hc`.
+    pub fn run_ai_review(&mut self, cx: &mut Context<Self>) -> Result<(), AiReviewRefusal> {
+        self.change(cx, |review| review.ask_to_run_ai_review())?;
+        // The agent of an earlier run ends when the new one starts, which its follow must not take for
+        // the end of the new run.
+        self.ai_review_follow = None;
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let (subject, head) = (self.review.subject().clone(), self.review.head().clone());
+        self.ai_review_start = Some(self.run_off_thread(
+            cx,
+            move || {
+                let repo = writer_folder(&subject, &folders);
+                agents.start(&subject, &repo, &head, &subject)
+            },
+            |this, started, cx| {
+                let has_started = started.is_ok();
+                this.change(cx, |review| review.ai_review_agent_started(started));
+                if has_started {
+                    this.follow_ai_review(cx);
+                }
+            },
+        ));
+        Ok(())
+    }
+
+    /// After a restart, or a review opened again: a review agent still alive for the subject is the run.
+    fn resume_ai_review(&mut self, cx: &mut Context<Self>) {
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let subject = self.review.subject().clone();
+        self.ai_review_start = Some(self.run_off_thread(
+            cx,
+            move || agents.lookup(&subject),
+            |this, found, cx| {
+                if let TourAgentState::Agent { terminal, status } = found {
+                    this.change(cx, |review| {
+                        review.ai_review_agent_resumed(terminal, Some(status));
+                    });
+                    this.follow_ai_review(cx);
+                }
+            },
+        ));
+    }
+
+    /// Keeps the review agent's status in the run until its terminal ends, then removes its worktree. A
+    /// thread of its own blocks on herdr's events, like the tour agent's follow.
+    fn follow_ai_review(&mut self, cx: &mut Context<Self>) {
+        let (changes, mut arrived) = futures::channel::mpsc::unbounded();
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let (followed, ended_by) = (agents.clone(), self.review.subject().clone());
+        let subject = ended_by.clone();
+        std::thread::spawn(move || {
+            followed.follow(&subject, &mut |state| match state {
+                TourAgentState::Agent { status, .. } => {
+                    match changes.unbounded_send(Some(status)) {
+                        Ok(()) => ControlFlow::Continue(()),
+                        Err(_) => ControlFlow::Break(()),
+                    }
+                }
+                _ => ControlFlow::Continue(()),
+            });
+            // The stream is over: nobody listens when the run ended first.
+            changes.unbounded_send(None).ok();
+        });
+        self.ai_review_follow = Some(cx.spawn(async move |this, cx| {
+            while let Some(status) = futures::StreamExt::next(&mut arrived).await {
+                let Some(status) = status else {
+                    this.update(cx, |this, cx| {
+                        this.change(cx, |review| review.ai_review_agent_gone());
+                    })
+                    .ok();
+                    cx.background_executor()
+                        .spawn(async move {
+                            if let Err(error) = agents.end(&ended_by) {
+                                eprintln!(
+                                    "could not end the review agent of {ended_by}: {error:#}"
+                                );
+                            }
+                        })
+                        .await;
+                    break;
+                };
+                let shown = this.update(cx, |this, cx| {
+                    this.change(cx, |review| review.ai_review_agent_status(status));
+                });
+                if shown.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub fn show_review_agent(&mut self, cx: &mut Context<Self>) {
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let subject = self.review.subject().clone();
+        self.show_agent = Some(self.run_off_thread(
+            cx,
+            move || agents.show(&subject),
+            |this, shown, cx| {
+                this.review.show_agent_result(shown.as_ref().err());
+                this.show_problems(cx);
+            },
+        ));
     }
 
     /// Looks for the PR's tour agent and keeps its status. The follow is a thread of its own because it

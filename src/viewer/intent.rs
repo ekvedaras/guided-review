@@ -3,6 +3,7 @@
 //! The window reports what it alone knows (an overlay open, a reopen under way, the end of the
 //! screen on show) and carries out the `Effect`; the rules that pick the effect are here, once.
 
+use super::ai_review_run::AiReviewRefusal;
 use super::file_tree::FolderPath;
 use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
@@ -43,6 +44,8 @@ pub enum Intent {
     /// Write guided tour, from the overview, the sidebar or the palette.
     WriteGuidedTour,
     SwitchToGuidedTour,
+    /// Run AI review, Run again and Try again, from the overview, the sidebar or the palette.
+    RunAiReview,
     FinishReview,
     /// A re-review with nothing new to send is done, from the sidebar, the finish card or the palette.
     MarkDone,
@@ -88,6 +91,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
+            PaletteAction::RunAiReview => Self::RunAiReview,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::MarkDone => Self::MarkDone,
             PaletteAction::SendTasks => Self::SendTasks,
@@ -127,6 +131,8 @@ pub enum Effect {
     WriteGuidedTour,
     /// The reviewer asked to switch to a ready guided tour.
     SwitchToGuidedTour,
+    /// Starts the AI review's run: the review took it and the app makes the worktree and starts the agent.
+    RunAiReview,
     OpenFinishForm,
     /// Hands a local review's queued tasks to its agent.
     SendTasks,
@@ -190,6 +196,8 @@ pub enum Refusal {
     SettingsOpen,
     /// A guided-tour action that does not apply now.
     GuidedTour(GuidedTourRefusal),
+    /// Run AI review does not apply now.
+    AiReview(AiReviewRefusal),
 }
 
 /// What only the window knows when an intent comes.
@@ -259,6 +267,7 @@ impl Intent {
             | Self::AskAboutScreen
             | Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
+            | Self::RunAiReview
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenPr
@@ -327,6 +336,10 @@ impl ReviewCore {
             Intent::WriteGuidedTour => match self.write_guided_tour_refusal() {
                 None => Effect::WriteGuidedTour,
                 Some(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
+            },
+            Intent::RunAiReview => match self.run_ai_review_refusal() {
+                None => Effect::RunAiReview,
+                Some(refusal) => Effect::Refused(Refusal::AiReview(refusal)),
             },
             Intent::SwitchToGuidedTour => match self.switch_to_guided_tour() {
                 Ok(()) => Effect::SwitchToGuidedTour,

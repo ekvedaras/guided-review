@@ -200,6 +200,8 @@ pub enum PaletteAction {
     /// Asks the PR's tour agent to write the guided tour of a basic review.
     WriteGuidedTour,
     SwitchToGuidedTour,
+    /// Starts the review agent: the AI review of the subject.
+    RunAiReview,
     FinishReview,
     /// A re-review with nothing new to send: done, with no review on GitHub.
     MarkDone,
@@ -252,6 +254,7 @@ impl PaletteAction {
             Self::AskAboutStep => "Ask about this step",
             Self::WriteGuidedTour => "Write guided tour",
             Self::SwitchToGuidedTour => "Switch to guided tour",
+            Self::RunAiReview => "Run AI review",
             Self::FinishReview => "Finish review",
             Self::MarkDone => "Mark review done",
             Self::SendTasks => "Send tasks",
@@ -297,6 +300,7 @@ impl PaletteAction {
             Self::AskAboutStep => Some(Command::AskAboutStep),
             Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
+            | Self::RunAiReview
             | Self::FinishReview
             | Self::MarkDone
             | Self::SendTasks

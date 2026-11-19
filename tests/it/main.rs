@@ -15,6 +15,7 @@ mod active_pr;
 mod agent_link;
 mod agent_reply;
 mod ai_review;
+mod ai_review_lifecycle;
 mod ai_review_run;
 mod app_bundle;
 mod app_folders;

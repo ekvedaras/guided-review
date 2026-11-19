@@ -1,6 +1,6 @@
 use super::ReviewCore;
 use crate::viewer::ai_review::AiReview;
-use crate::viewer::ai_review_run::{AiReviewRefusal, AiReviewRun};
+use crate::viewer::ai_review_run::{AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage};
 use crate::viewer::tour_agent::{AgentStatus, TerminalId};
 
 impl ReviewCore {
@@ -15,6 +15,44 @@ impl ReviewCore {
         }
         self.agent_link_is_off
             .then_some(AiReviewRefusal::AgentLinkOff)
+    }
+
+    /// What the sidebar's AI review row says: the run while there is one, else what the findings file says.
+    pub fn ai_review_stage(&self) -> AiReviewStage {
+        let refusal = self.run_ai_review_refusal();
+        let action_if_free = |action| refusal.is_none().then_some(action);
+        match &self.ai_review_run {
+            AiReviewRun::Starting => AiReviewStage {
+                line: "Starting the review agent...".to_owned(),
+                is_failure: false,
+                action: None,
+                can_show_agent: false,
+            },
+            AiReviewRun::Running(running) => AiReviewStage {
+                line: match running.status {
+                    Some(AgentStatus::WaitingForYou) => "The review agent waits for you".to_owned(),
+                    _ => "Reviewing...".to_owned(),
+                },
+                is_failure: false,
+                action: None,
+                can_show_agent: true,
+            },
+            AiReviewRun::Failed(reason) => AiReviewStage {
+                line: reason.clone(),
+                is_failure: true,
+                action: action_if_free(AiReviewAction::TryAgain),
+                can_show_agent: true,
+            },
+            AiReviewRun::NotRun => AiReviewStage {
+                line: self.ai_review.line(),
+                is_failure: matches!(self.ai_review, AiReview::Unreadable(_)),
+                action: action_if_free(match self.ai_review {
+                    AiReview::NotRun => AiReviewAction::Run,
+                    AiReview::Findings(_) | AiReview::Unreadable(_) => AiReviewAction::RunAgain,
+                }),
+                can_show_agent: false,
+            },
+        }
     }
 
     /// Run AI review and Try again: the run starts, and the app makes the worktree and starts the agent.

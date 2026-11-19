@@ -794,6 +794,12 @@ impl ReviewCore {
         self.ai_review = ai_review;
     }
 
+    /// The run a snapshot scene shows, and its removal.
+    #[cfg(feature = "snapshots")]
+    pub fn ai_review_run_is(&mut self, run: AiReviewRun) {
+        self.ai_review_run = run;
+    }
+
     /// Reads the review agent's findings file again, as the app does when the agent says it is done.
     pub fn read_findings(&mut self, folders: &AppFolders) {
         let read = AiReview::read(folders, &self.subject);
@@ -2324,6 +2330,11 @@ impl ReviewCore {
             .chain(tick)
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
+            .chain(
+                self.run_ai_review_refusal()
+                    .is_none()
+                    .then_some(PaletteAction::RunAiReview),
+            )
             .chain([wrap, whitespace])
             .chain(page_toggles)
             .chain(finish)

@@ -12,6 +12,7 @@ pub mod keymap;
 mod layouts;
 mod page_rows;
 mod prose_selection;
+mod review_agent;
 mod review_session;
 mod settings_window;
 mod sidebar_rows;
@@ -131,6 +132,7 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
         let active = cx.new(|_| ActivePr::remembering_in(remembered));
         let switching = pr_switching(&requests_to_self, &folders, active.clone(), cx);
         switching.refresh(cx);
+        let review_agents = review_agent::agents_of(&switching);
         cx.set_global(switching);
         tour_writer::resume(cx);
         let cleaned = folders.clone();
@@ -140,9 +142,19 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
                 for not_cleaned in clean_snapshot_refs(&cleaned) {
                     eprintln!("{not_cleaned}");
                 }
-                // No review agent survives an app restart yet, so none keeps its checkout.
-                for not_swept in GitReviewWorktrees::under(cleaned.review_worktrees()).sweep(&[]) {
-                    eprintln!("{not_swept}");
+                // A review agent outlives the app, and its checkout with it. Without herdr's answer
+                // which ones run, nothing is swept.
+                match review_agents.running_subjects() {
+                    Ok(running) => {
+                        for not_swept in
+                            GitReviewWorktrees::under(cleaned.review_worktrees()).sweep(&running)
+                        {
+                            eprintln!("{not_swept}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("kept the review worktrees, herdr did not say which agents run: {error:#}");
+                    }
                 }
             })
             .detach();
@@ -344,7 +356,10 @@ async fn answer_requests(
                 reply.send(answer).ok();
             }
             Request::FindingsDone { pr } => {
-                let answer = read_findings(&screen, pr, cx);
+                let answer = read_findings(&screen, pr.clone(), cx);
+                if let Ok(subject) = pr.parse::<ReviewSubject>() {
+                    review_agent::end_in_background(subject, cx);
+                }
                 reply.send(answer).ok();
             }
             Request::Open(open) => {

@@ -152,6 +152,7 @@ impl<'a> Builder<'a> {
                 description: review.pr_description().map(Arc::new),
             })));
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: review.ai_review_stage().action,
             ask: Some(AskAt {
                 id: "ask-tour".into(),
                 place: Place::Tour,
@@ -170,6 +171,7 @@ impl<'a> Builder<'a> {
         self.rows
             .push(PageRow::Overview(Arc::new(self.review.overview_page())));
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: self.review.ai_review_stage().action,
             ask: Some(AskAt {
                 id: "ask-tour".into(),
                 place: Place::Tour,
@@ -188,6 +190,7 @@ impl<'a> Builder<'a> {
     fn file_rows(&mut self, path: &FilePath, page: FilePage) {
         let review = self.review;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: None,
             ask: Some(AskAt {
                 id: format!("ask-file-{path}").into(),
                 place: Place::File { path: path.clone() },
@@ -284,6 +287,7 @@ impl<'a> Builder<'a> {
         let has_code = !page.pieces.is_empty();
         let folds = page.is_folded || step.skim || page.is_ticked;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: None,
             ask: Some(AskAt {
                 id: format!("ask-step-{id}").into(),
                 place: Place::Step { step: id.clone() },
@@ -347,6 +351,7 @@ impl<'a> Builder<'a> {
         let review = self.review;
         self.rows.push(PageRow::SafetyNetIntro);
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: None,
             ask: None,
             comment_on_file: None,
             fold: None,
