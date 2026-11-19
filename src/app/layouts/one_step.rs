@@ -1672,7 +1672,7 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_review_agent);
             }))
         });
-        let list = ai_review.can_open_findings_list.then(|| {
+        let list = ai_review.has_findings.then(|| {
             icon_label_button(
                 colors,
                 "findings-list",
@@ -1685,7 +1685,7 @@ impl OneStepLayout {
                 this.act(Intent::ToggleFindingsList, window, cx);
             }))
         });
-        let next = ai_review.can_go_to_next_finding.then(|| {
+        let next = ai_review.has_findings.then(|| {
             icon_label_button(
                 colors,
                 "next-finding",

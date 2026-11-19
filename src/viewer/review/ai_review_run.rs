@@ -32,8 +32,7 @@ impl ReviewCore {
                 is_failure: false,
                 action: None,
                 can_show_agent: false,
-                can_go_to_next_finding: has_findings,
-                can_open_findings_list: has_findings,
+                has_findings,
             },
             AiReviewRun::Running(running) => AiReviewStage {
                 line: match running.status {
@@ -43,16 +42,14 @@ impl ReviewCore {
                 is_failure: false,
                 action: None,
                 can_show_agent: true,
-                can_go_to_next_finding: has_findings,
-                can_open_findings_list: has_findings,
+                has_findings,
             },
             AiReviewRun::Failed { reason, agent } => AiReviewStage {
                 line: reason.clone(),
                 is_failure: true,
                 action: action_if_free(AiReviewAction::TryAgain),
                 can_show_agent: agent.is_some(),
-                can_go_to_next_finding: has_findings,
-                can_open_findings_list: has_findings,
+                has_findings,
             },
             AiReviewRun::NotRun => AiReviewStage {
                 line: self.line_with_fixes(),
@@ -62,8 +59,7 @@ impl ReviewCore {
                     AiReview::Findings(_) | AiReview::Unreadable(_) => AiReviewAction::RunAgain,
                 }),
                 can_show_agent: self.review_agent.is_alive(),
-                can_go_to_next_finding: has_findings,
-                can_open_findings_list: has_findings,
+                has_findings,
             },
         }
     }

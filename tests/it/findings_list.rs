@@ -341,7 +341,7 @@ fn the_findings_list_is_offered_in_the_sidebar_the_palette_and_by_key_only_while
     let with = Shop::with_findings(&[on_line_2("a", "One.")]).open();
     let without = Shop::with_findings(&[]).open();
 
-    assert!(with.ai_review_stage().can_open_findings_list);
+    assert!(with.ai_review_stage().has_findings);
     assert!(
         with.palette_actions(Build::Local)
             .contains(&PaletteAction::FindingsList)
@@ -350,7 +350,7 @@ fn the_findings_list_is_offered_in_the_sidebar_the_palette_and_by_key_only_while
         with.decide(Intent::ToggleFindingsList, WindowMoment::default()),
         Effect::Toggle(Overlay::Findings)
     );
-    assert!(!without.ai_review_stage().can_open_findings_list);
+    assert!(!without.ai_review_stage().has_findings);
     assert!(
         !without
             .palette_actions(Build::Local)

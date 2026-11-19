@@ -110,8 +110,7 @@ pub struct SidebarAiReview {
     pub line: SharedString,
     pub is_failure: bool,
     pub can_show_agent: bool,
-    pub can_go_to_next_finding: bool,
-    pub can_open_findings_list: bool,
+    pub has_findings: bool,
     pub action: Option<AiReviewAction>,
 }
 
@@ -225,8 +224,7 @@ impl SidebarRows {
                     line: stage.line.into(),
                     is_failure: stage.is_failure,
                     can_show_agent: stage.can_show_agent,
-                    can_go_to_next_finding: stage.can_go_to_next_finding,
-                    can_open_findings_list: stage.can_open_findings_list,
+                    has_findings: stage.has_findings,
                     action: stage.action,
                 }
             },

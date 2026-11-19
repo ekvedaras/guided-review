@@ -48,9 +48,8 @@ pub struct AiReviewStage {
     pub is_failure: bool,
     pub action: Option<AiReviewAction>,
     pub can_show_agent: bool,
-    /// There are findings to walk through, whatever the run is doing.
-    pub can_go_to_next_finding: bool,
-    pub can_open_findings_list: bool,
+    /// There are findings to walk through and to list, whatever the run is doing.
+    pub has_findings: bool,
 }
 
 /// Whether the subject's review agent is alive, as its follow last said; it outlives the run, idle, to be

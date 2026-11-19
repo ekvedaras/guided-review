@@ -241,7 +241,7 @@ fn next_finding_is_offered_in_the_sidebar_and_the_palette_only_while_there_are_f
     let with = shop(&[finding("a", "nit", json!({"kind": "change"}))]);
     let without = shop(&[]);
 
-    assert!(with.ai_review_stage().can_go_to_next_finding);
+    assert!(with.ai_review_stage().has_findings);
     assert!(
         with.palette_actions(Build::Local)
             .contains(&PaletteAction::NextFinding)
@@ -250,7 +250,7 @@ fn next_finding_is_offered_in_the_sidebar_and_the_palette_only_while_there_are_f
         with.decide(Intent::NextFinding, WindowMoment::default()),
         Effect::NextFinding
     );
-    assert!(!without.ai_review_stage().can_go_to_next_finding);
+    assert!(!without.ai_review_stage().has_findings);
     assert!(
         !without
             .palette_actions(Build::Local)
