@@ -138,7 +138,7 @@ impl ReviewCore {
                     },
                     line,
                 };
-                let (start, end) = (at(lines[0]), at(lines[1]));
+                let (start, end) = (at(lines.start), at(lines.end));
                 let pieces = self
                     .pieces_shown_on(shown_on.clone())
                     .unwrap_or_default()

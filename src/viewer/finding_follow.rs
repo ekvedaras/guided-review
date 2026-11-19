@@ -4,6 +4,7 @@
 
 use crate::code_source::CodeSource;
 use crate::findings::{Anchor, AnchorSide, Finding, FindingsFile, Outdated};
+use crate::line_range::LineRange;
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 
@@ -55,7 +56,7 @@ fn follow<S: CodeSource + ?Sized>(
     };
     match follower.follow(file, *lines, from, to) {
         Some(followed) => {
-            *lines = [followed.start, followed.end];
+            *lines = LineRange::new(followed.start, followed.end);
             if followed.were_changed && finding.outdated.is_none() {
                 finding.outdated = Some(Outdated {
                     before: followed.before,
@@ -67,8 +68,8 @@ fn follow<S: CodeSource + ?Sized>(
                 |_| Vec::new(),
                 |text| {
                     text.lines()
-                        .skip(usize::from(lines[0]).saturating_sub(1))
-                        .take(usize::from(lines[1]).saturating_sub(usize::from(lines[0])) + 1)
+                        .skip(usize::from(lines.start).saturating_sub(1))
+                        .take(usize::from(lines.end).saturating_sub(usize::from(lines.start)) + 1)
                         .map(str::to_owned)
                         .collect()
                 },

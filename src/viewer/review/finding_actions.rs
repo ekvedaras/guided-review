@@ -238,7 +238,7 @@ impl ReviewCore {
             .unwrap_or(usize::MAX);
         let first_line = match &finding.anchor {
             Anchor::Change | Anchor::File { .. } => 0,
-            Anchor::Lines { lines, .. } => lines[0].get(),
+            Anchor::Lines { lines, .. } => lines.start.get(),
         };
         (screen_at, first_line)
     }
@@ -389,8 +389,8 @@ impl ReviewCore {
                 if self.files.iter().any(|changed| changed.path == *file) =>
             {
                 Ok(CommentPlace::Lines {
-                    start: at(file, *side, lines[0]),
-                    end: at(file, *side, lines[1]),
+                    start: at(file, *side, lines.start),
+                    end: at(file, *side, lines.end),
                 })
             }
             Anchor::Change | Anchor::File { .. } | Anchor::Lines { .. } => {

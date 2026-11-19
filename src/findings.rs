@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
-use crate::line_number::LineNumber;
+use crate::line_range::LineRange;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin, write_json};
 
@@ -90,7 +90,7 @@ pub enum Anchor {
     Lines {
         file: FilePath,
         side: AnchorSide,
-        lines: [LineNumber; 2],
+        lines: LineRange,
     },
 }
 
@@ -99,12 +99,7 @@ impl fmt::Display for Anchor {
         match self {
             Self::Change => f.write_str("the whole change"),
             Self::File { file } => write!(f, "{file}"),
-            Self::Lines { file, side, lines } if lines[0] == lines[1] => {
-                write!(f, "{file} line {} of the {side}", lines[0])
-            }
-            Self::Lines { file, side, lines } => {
-                write!(f, "{file} lines {} to {} of the {side}", lines[0], lines[1])
-            }
+            Self::Lines { file, side, lines } => write!(f, "{file} {lines} of the {side}"),
         }
     }
 }

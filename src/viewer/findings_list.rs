@@ -203,6 +203,6 @@ fn place_of(anchor: &Anchor) -> String {
     match anchor {
         Anchor::Change => "the whole change".to_owned(),
         Anchor::File { file } => file.to_string(),
-        Anchor::Lines { file, lines, .. } => format!("{file}:{}", lines[0]),
+        Anchor::Lines { file, lines, .. } => format!("{file}:{}", lines.start),
     }
 }

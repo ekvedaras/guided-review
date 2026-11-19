@@ -27,6 +27,7 @@ pub mod issue;
 pub mod json;
 pub mod language;
 pub mod line_number;
+pub mod line_range;
 pub mod local_change_sets;
 pub mod local_facts;
 pub mod local_git;

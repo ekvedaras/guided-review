@@ -116,6 +116,6 @@ fn hangs_at(anchor: &Anchor) -> Option<LineLocation> {
             AnchorSide::Base => Side::Base,
             AnchorSide::Head => Side::Head,
         },
-        line: lines[1],
+        line: lines.end,
     })
 }

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::code_source::{CodeSource, FileDiff};
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
+use crate::line_range::LineRange;
 use crate::pull_request::Sha;
 
 use super::step_page::Side;
@@ -35,7 +36,7 @@ pub fn follow_outdated(
             let commit = Sha::new(thread.original_commit.as_ref()?);
             let end = thread.original_line?;
             let start = thread.original_start_line.unwrap_or(end);
-            let followed = follower.follow(&thread.path, [start, end], &commit, head)?;
+            let followed = follower.follow(&thread.path, LineRange::new(start, end), &commit, head)?;
             Some((thread.id.clone(), followed))
         })
         .collect()
@@ -60,7 +61,7 @@ impl<'a, S: CodeSource + ?Sized> LineFollower<'a, S> {
     pub fn follow(
         &mut self,
         path: &FilePath,
-        [start, end]: [LineNumber; 2],
+        LineRange { start, end }: LineRange,
         from: &Sha,
         to: &Sha,
     ) -> Option<FollowedLines> {

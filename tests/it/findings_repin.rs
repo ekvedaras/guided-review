@@ -13,6 +13,7 @@ use guided_review::file_path::FilePath;
 use guided_review::findings::FindingId;
 use guided_review::findings::{Anchor, AnchorSide, Finding, FindingsFile};
 use guided_review::line_number::LineNumber;
+use guided_review::line_range::LineRange;
 use guided_review::local_git::LocalGit;
 use guided_review::open_review::open_review;
 use guided_review::pull_request::{RepoName, Sha};
@@ -157,10 +158,10 @@ fn lines(side: AnchorSide, from: u32, to: u32) -> Anchor {
     Anchor::Lines {
         file: FilePath::new("app.txt").unwrap(),
         side,
-        lines: [
+        lines: LineRange::new(
             LineNumber::try_from(from).unwrap(),
             LineNumber::try_from(to).unwrap(),
-        ],
+        ),
     }
 }
 

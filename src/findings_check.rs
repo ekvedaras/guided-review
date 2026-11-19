@@ -5,6 +5,7 @@ use std::fmt;
 
 use crate::findings::{Anchor, AnchorSide, FindingId, FindingsFile};
 use crate::line_number::LineNumber;
+use crate::line_range::LineRange;
 use crate::pieces::ChangedFile;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -58,7 +59,7 @@ pub fn check(file: &FindingsFile, changed: &[ChangedFile]) -> Report {
             Anchor::Lines {
                 file,
                 side,
-                lines: [start, end],
+                lines: LineRange { start, end },
             } => {
                 let named = (file.to_string(), *side, [start.get(), end.get()]);
                 let Some(changed_file) = changed.iter().find(|c| c.path == *file) else {
