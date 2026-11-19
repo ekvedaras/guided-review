@@ -1796,7 +1796,7 @@ impl ReviewSession {
     pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
         let folders = self.tour_work.repinner.folders.clone();
         self.change(cx, |review| {
-            review.read_findings(&folders);
+            review.findings_done(&folders);
             review.ai_review().counts().total()
         })
     }

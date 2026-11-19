@@ -83,7 +83,7 @@ impl Desk {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let file = json!({"pr": PR, "base": self.base, "head": self.head, "findings": findings});
         std::fs::write(path, file.to_string()).unwrap();
-        self.review.read_findings(&self.repo.folders());
+        self.review.findings_done(&self.repo.folders());
     }
 }
 
@@ -153,6 +153,25 @@ fn an_idle_agent_found_again_after_findings_were_read_is_not_a_failed_run() {
         .ai_review_agent_resumed(TerminalId::new("t1"), Some(AgentStatus::Idle));
 
     assert_eq!(desk.review.ai_review_run(), &AiReviewRun::NotRun);
+}
+
+#[test]
+fn a_second_run_that_went_idle_without_findings_done_is_a_failed_run_when_the_review_opens_again() {
+    let mut desk = Desk::new();
+    desk.run();
+    desk.findings_done(&[a_nit()]);
+    desk.run();
+    let mut reopened = open_review(&pr(), desk.repo.path(), &desk.repo.folders())
+        .unwrap()
+        .review;
+
+    reopened.ai_review_agent_resumed(TerminalId::new("t1"), Some(AgentStatus::Idle));
+
+    assert!(
+        matches!(reopened.ai_review_run(), AiReviewRun::Failed { .. }),
+        "{:?}",
+        reopened.ai_review_run()
+    );
 }
 
 #[test]

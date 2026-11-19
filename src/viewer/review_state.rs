@@ -116,6 +116,10 @@ struct ViewerSections {
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
     github_baseline_due: bool,
+    /// A review agent was started and has not said findings-done since, so an idle one found
+    /// again later has stopped without its findings, whatever an earlier run left in the file.
+    #[serde(default)]
+    ai_run_open: bool,
     /// What the reviewer did with the findings of an AI review.
     #[serde(default, skip_serializing_if = "FindingDecisions::is_empty")]
     finding_decisions: FindingDecisions,
@@ -494,6 +498,14 @@ impl ReviewState {
         self.viewer.finding_decisions.follow(moved);
         self.viewer.fix_requests.follow(moved);
         self.viewer.finding_threads.follow(moved);
+    }
+
+    pub const fn ai_run_is_open(&self) -> bool {
+        self.viewer.ai_run_open
+    }
+
+    pub(super) const fn ai_run_is(&mut self, open: bool) {
+        self.viewer.ai_run_open = open;
     }
 
     pub const fn finding_decisions(&self) -> &FindingDecisions {

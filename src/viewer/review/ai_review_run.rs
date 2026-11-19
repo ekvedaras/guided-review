@@ -1,4 +1,5 @@
 use super::ReviewCore;
+use crate::app_folders::AppFolders;
 use crate::viewer::ai_review::AiReview;
 use crate::viewer::ai_review_run::{
     AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage, ReviewAgentLife,
@@ -88,6 +89,7 @@ impl ReviewCore {
             return Err(refusal);
         }
         self.ai_review_run = AiReviewRun::starting();
+        self.keep_ai_run_open(true);
         Ok(())
     }
 
@@ -102,7 +104,7 @@ impl ReviewCore {
     pub fn ai_review_agent_resumed(&mut self, terminal: TerminalId, status: Option<AgentStatus>) {
         self.review_agent = ReviewAgentLife::Alive(status);
         let left_idle_after_findings =
-            status == Some(AgentStatus::Idle) && matches!(self.ai_review, AiReview::Findings(_));
+            status == Some(AgentStatus::Idle) && !self.state.ai_run_is_open();
         if left_idle_after_findings {
             return;
         }
@@ -124,6 +126,19 @@ impl ReviewCore {
         self.review_agent = ReviewAgentLife::Gone;
         self.ai_review_run.gone();
         self.questions_hear(FindingThreads::agent_gone);
+    }
+
+    /// The review agent said it is done: its findings are read, and it has no run open.
+    pub fn findings_done(&mut self, folders: &AppFolders) {
+        self.read_findings(folders);
+        if matches!(self.ai_review, AiReview::Findings(_)) {
+            self.keep_ai_run_open(false);
+        }
+    }
+
+    fn keep_ai_run_open(&mut self, open: bool) {        if let Err(error) = self.state.record(|state| state.ai_run_is(open)) {
+            eprintln!("could not keep whether the review agent is still at work: {error:#}");
+        }
     }
 
     /// Kept only when a question moved, so a status change with nothing asked writes nothing.

@@ -820,7 +820,7 @@ impl ReviewCore {
         self.ai_review_run = run;
     }
 
-    /// Reads the review agent's findings file again, as the app does when the agent says it is done.
+    /// Reads the review agent's findings file again; `findings_done` is for the agent's word that it is done.
     pub fn read_findings(&mut self, folders: &AppFolders) {
         let mut read = AiReview::read(folders, &self.subject);
         if let AiReview::Findings(file) = &mut read {
