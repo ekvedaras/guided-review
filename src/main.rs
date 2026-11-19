@@ -14,6 +14,7 @@ use guided_review::findings::FindingsFile;
 use guided_review::findings_check;
 use guided_review::findings_done::findings_done;
 use guided_review::github::GitHub;
+use guided_review::instructions::SummaryInstructions;
 use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
 use guided_review::outline::Outline;
 use guided_review::pieces;
@@ -21,7 +22,6 @@ use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_t
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::show::Show;
-use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
@@ -241,7 +241,7 @@ fn opened(subject: &ReviewSubject) -> anyhow::Result<OpenedSubject> {
 fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
     let folders = AppFolders::running()?;
     match Config::load_from(&folders) {
-        Ok(config) => Ok(config.summary_instructions(&folders)),
+        Ok(config) => Ok(config.instructions(&folders)),
         Err(error) => {
             eprintln!("warning: summary instructions not read: {error:#}");
             Ok(SummaryInstructions::none())

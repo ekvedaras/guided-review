@@ -2,8 +2,8 @@ use crate::support::FixtureRepo;
 use crate::support::folders_in;
 use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use guided_review::ide::{IdeChoice, IdeTemplate};
+use guided_review::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use guided_review::pull_request::RepoName;
-use guided_review::summary_instructions::{SkillName, SummaryInstructionsChoice};
 use guided_review::viewer::{
     Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, SaveOutcome,
     SettingProblem, Settings,
@@ -122,12 +122,12 @@ fn an_edit_is_unsaved_until_save_and_an_edit_back_to_the_saved_value_is_not() {
     assert!(!settings.has_unsaved_changes());
 }
 
-fn summary_instructions_from(config: &str) -> SummaryInstructionsChoice {
+fn summary_instructions_from(config: &str) -> InstructionsChoice {
     let home = tempfile::TempDir::new().unwrap();
     write_config(home.path(), config);
     Settings::load(&folders_in(home.path()))
         .unwrap()
-        .summary_instructions()
+        .instructions(InstructionsKind::Summary)
         .clone()
 }
 
@@ -135,19 +135,19 @@ fn summary_instructions_from(config: &str) -> SummaryInstructionsChoice {
 fn summary_instructions_are_read_as_the_default_file_another_file_a_skill_or_off() {
     assert_eq!(
         summary_instructions_from(""),
-        SummaryInstructionsChoice::DefaultFile
+        InstructionsChoice::DefaultFile
     );
     assert_eq!(
         summary_instructions_from("summary_instructions = \"/notes/summary.md\"\n"),
-        SummaryInstructionsChoice::OtherFile(PathBuf::from("/notes/summary.md"))
+        InstructionsChoice::OtherFile(PathBuf::from("/notes/summary.md"))
     );
     assert_eq!(
         summary_instructions_from("summary_instructions = { skill = \"warm-up\" }\n"),
-        SummaryInstructionsChoice::Skill(skill("warm-up"))
+        InstructionsChoice::Skill(skill("warm-up"))
     );
     assert_eq!(
         summary_instructions_from("summary_instructions = \"off\"\n"),
-        SummaryInstructionsChoice::Off
+        InstructionsChoice::Off
     );
 }
 
@@ -155,7 +155,10 @@ fn summary_instructions_are_read_as_the_default_file_another_file_a_skill_or_off
 fn a_skill_is_written_as_a_table_so_it_is_never_read_as_a_path() {
     let (shop, config, mut settings) = loaded_with_commented_config();
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::Skill(skill("acme:warm-up")));
+    settings.set_instructions(
+        InstructionsKind::Summary,
+        InstructionsChoice::Skill(skill("acme:warm-up")),
+    );
     settings.save().unwrap();
 
     assert_eq!(
@@ -171,7 +174,7 @@ fn a_skill_is_written_as_a_table_so_it_is_never_read_as_a_path() {
 fn off_is_written_as_off_and_the_default_file_as_no_key() {
     let (shop, config, mut settings) = loaded_with_commented_config();
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::Off);
+    settings.set_instructions(InstructionsKind::Summary, InstructionsChoice::Off);
     settings.save().unwrap();
     assert!(
         config_text(shop.home()).contains("\nsummary_instructions = \"off\"\n"),
@@ -179,7 +182,7 @@ fn off_is_written_as_off_and_the_default_file_as_no_key() {
         config_text(shop.home())
     );
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::DefaultFile);
+    settings.set_instructions(InstructionsKind::Summary, InstructionsChoice::DefaultFile);
     settings.save().unwrap();
     assert_eq!(config_text(shop.home()), config);
 }
@@ -320,11 +323,17 @@ fn a_summary_file_that_is_gone_blocks_the_save() {
     let (shop, config, mut settings) = loaded_with_commented_config();
     let gone = shop.home().join("notes/summary.md");
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::OtherFile(gone.clone()));
+    settings.set_instructions(
+        InstructionsKind::Summary,
+        InstructionsChoice::OtherFile(gone.clone()),
+    );
 
     assert_eq!(
         refused(&mut settings, &shop, &config),
-        [SettingProblem::SummaryFileGone(gone)]
+        [SettingProblem::InstructionsFileGone(
+            InstructionsKind::Summary,
+            gone
+        )]
     );
 }
 
@@ -352,7 +361,7 @@ fn the_default_file_choice_knows_whether_the_default_file_exists() {
     assert!(
         !Settings::load(&shop.folders())
             .unwrap()
-            .default_file_exists()
+            .default_file_exists(InstructionsKind::Summary)
     );
 
     std::fs::write(
@@ -364,7 +373,7 @@ fn the_default_file_choice_knows_whether_the_default_file_exists() {
     assert!(
         Settings::load(&shop.folders())
             .unwrap()
-            .default_file_exists()
+            .default_file_exists(InstructionsKind::Summary)
     );
 }
 
@@ -374,12 +383,12 @@ fn a_skill_name_outline_would_reject_is_not_a_skill_name_here_either() {
         assert!(SkillName::parse(name).is_err(), "{name:?}");
     }
     assert_eq!(
-        SummaryInstructionsChoice::skill_named("acme:warm-up"),
-        SummaryInstructionsChoice::Skill(skill("acme:warm-up"))
+        InstructionsChoice::skill_named("acme:warm-up"),
+        InstructionsChoice::Skill(skill("acme:warm-up"))
     );
     assert_eq!(
-        SummaryInstructionsChoice::skill_named("two words"),
-        SummaryInstructionsChoice::Unreadable("{ skill = \"two words\" }".to_owned())
+        InstructionsChoice::skill_named("two words"),
+        InstructionsChoice::Unreadable("{ skill = \"two words\" }".to_owned())
     );
 }
 
@@ -396,7 +405,8 @@ fn summary_instructions_the_config_holds_wrongly_load_and_are_a_problem_on_that_
     let (_home, settings) = loaded_from(bad_skill);
     assert_eq!(
         settings.check(),
-        [SettingProblem::SummaryInstructionsUnreadable(
+        [SettingProblem::InstructionsUnreadable(
+            InstructionsKind::Summary,
             "{ skill = \"two words\" }".to_owned()
         )]
     );
@@ -404,7 +414,8 @@ fn summary_instructions_the_config_holds_wrongly_load_and_are_a_problem_on_that_
     let (_home, settings) = loaded_from("summary_instructions = 7\n");
     assert_eq!(
         settings.check(),
-        [SettingProblem::SummaryInstructionsUnreadable(
+        [SettingProblem::InstructionsUnreadable(
+            InstructionsKind::Summary,
             "7".to_owned()
         )]
     );
@@ -421,7 +432,7 @@ fn save_is_refused_on_an_unreadable_summary_instructions_until_another_choice_is
     assert!(matches!(outcome, SaveOutcome::Refused(problems) if problems.len() == 1));
     assert_eq!(config_text(home.path()), config);
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::Off);
+    settings.set_instructions(InstructionsKind::Summary, InstructionsChoice::Off);
     assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
     assert_eq!(
         config_text(home.path()),
@@ -433,13 +444,20 @@ fn save_is_refused_on_an_unreadable_summary_instructions_until_another_choice_is
 fn a_typed_skill_name_is_a_choice_or_a_problem() {
     let (_home, mut settings) = loaded_from("");
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::skill_named("plugin:skill"));
+    settings.set_instructions(
+        InstructionsKind::Summary,
+        InstructionsChoice::skill_named("plugin:skill"),
+    );
     assert_eq!(settings.check(), []);
 
-    settings.set_summary_instructions(SummaryInstructionsChoice::skill_named("a,b"));
+    settings.set_instructions(
+        InstructionsKind::Summary,
+        InstructionsChoice::skill_named("a,b"),
+    );
     assert_eq!(
         settings.check(),
-        [SettingProblem::SummaryInstructionsUnreadable(
+        [SettingProblem::InstructionsUnreadable(
+            InstructionsKind::Summary,
             "{ skill = \"a,b\" }".to_owned()
         )]
     );
@@ -656,12 +674,19 @@ fn each_problem_words_the_red_line_under_its_setting() {
         "This folder is gone"
     );
     assert_eq!(
-        SettingProblem::SummaryFileGone(PathBuf::from("/notes/summary.md")).message(),
+        SettingProblem::InstructionsFileGone(
+            InstructionsKind::Summary,
+            PathBuf::from("/notes/summary.md")
+        )
+        .message(),
         "The summary file /notes/summary.md is gone"
     );
     assert_eq!(
-        SettingProblem::SummaryInstructionsUnreadable("{ skill = \"two words\" }".to_owned())
-            .message(),
+        SettingProblem::InstructionsUnreadable(
+            InstructionsKind::Summary,
+            "{ skill = \"two words\" }".to_owned()
+        )
+        .message(),
         "{ skill = \"two words\" } is not a file, \"off\" or a skill name"
     );
     assert_eq!(
@@ -726,14 +751,21 @@ fn a_blank_custom_ide_template_is_refused_with_a_message_and_nothing_is_written(
 fn creating_the_default_file_makes_an_empty_one_and_keeps_one_that_is_there() {
     let (home, settings) = loaded_from("");
     let file = home.path().join(".config/guided-review/summary.md");
-    assert!(!settings.default_file_exists());
+    assert!(!settings.default_file_exists(InstructionsKind::Summary));
 
-    assert_eq!(settings.create_default_file().unwrap(), file);
-    assert!(settings.default_file_exists());
+    assert_eq!(
+        settings
+            .create_default_file(InstructionsKind::Summary)
+            .unwrap(),
+        file
+    );
+    assert!(settings.default_file_exists(InstructionsKind::Summary));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
 
     std::fs::write(&file, "Warm me up").unwrap();
-    settings.create_default_file().unwrap();
+    settings
+        .create_default_file(InstructionsKind::Summary)
+        .unwrap();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "Warm me up");
 }
 
@@ -757,12 +789,22 @@ fn a_custom_text_box_opens_on_the_text_of_a_custom_choice_and_only_then() {
     );
     assert_eq!(settings.ide().custom_text(), Some("zed {path}:{line}"));
     assert_eq!(settings.ask_model().custom_text(), Some("claude-opus-4-1"));
-    assert_eq!(settings.summary_instructions().skill_text(), Some("recap"));
+    assert_eq!(
+        settings
+            .instructions(InstructionsKind::Summary)
+            .skill_text(),
+        Some("recap")
+    );
 
     let (_home, settings) = loaded_from("ask_model = \"opus\"\nsummary_instructions = \"off\"\n");
     assert_eq!(settings.ide().custom_text(), None);
     assert_eq!(settings.ask_model().custom_text(), None);
-    assert_eq!(settings.summary_instructions().skill_text(), None);
+    assert_eq!(
+        settings
+            .instructions(InstructionsKind::Summary)
+            .skill_text(),
+        None
+    );
 }
 
 #[test]
@@ -773,7 +815,7 @@ fn settings_opens_showing_only_the_problems_the_config_already_has_in_it() {
         settings.problems_on_open(),
         [
             SettingProblem::AskEffortUnknown("turbo".to_owned()),
-            SettingProblem::SummaryInstructionsUnreadable("5".to_owned()),
+            SettingProblem::InstructionsUnreadable(InstructionsKind::Summary, "5".to_owned()),
         ]
     );
 
@@ -1103,4 +1145,87 @@ fn a_chosen_merge_method_is_written_and_a_merge_commit_leaves_no_line() {
     settings.set_merge_method(MergeMethod::Merge);
     settings.save().unwrap();
     assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+}
+
+#[test]
+fn review_instructions_are_read_saved_and_checked_apart_from_the_summary_ones() {
+    let (home, mut settings) = loaded_from(
+        "summary_instructions = \"off\"\nreview_instructions = { skill = \"audit\" }\n",
+    );
+    assert_eq!(
+        settings.instructions(InstructionsKind::Review).skill_text(),
+        Some("audit")
+    );
+    assert_eq!(
+        settings.instructions(InstructionsKind::Summary),
+        &InstructionsChoice::Off
+    );
+
+    settings.set_instructions(InstructionsKind::Review, InstructionsChoice::Off);
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "summary_instructions = \"off\"\nreview_instructions = \"off\"\n"
+    );
+    settings.set_instructions(InstructionsKind::Review, InstructionsChoice::DefaultFile);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "summary_instructions = \"off\"\n");
+}
+
+#[test]
+fn the_review_default_file_is_review_md_and_a_gone_review_file_is_a_problem_of_the_review_setting()
+{
+    let (home, mut settings) = loaded_from("");
+    assert_eq!(
+        settings.default_file(InstructionsKind::Review),
+        home.path().join(".config/guided-review/review.md")
+    );
+    assert!(!settings.default_file_exists(InstructionsKind::Review));
+
+    let gone = PathBuf::from("/notes/review.md");
+    settings.set_instructions(
+        InstructionsKind::Review,
+        InstructionsChoice::OtherFile(gone.clone()),
+    );
+
+    assert_eq!(
+        settings.check(),
+        [SettingProblem::InstructionsFileGone(
+            InstructionsKind::Review,
+            gone
+        )]
+    );
+    assert_eq!(
+        SettingProblem::InstructionsUnreadable(InstructionsKind::Review, "7".to_owned()).message(),
+        "7 is not a file, \"off\" or a skill name"
+    );
+}
+
+#[test]
+fn creating_the_review_default_file_leaves_the_summary_one_alone() {
+    let (_home, settings) = loaded_from("");
+
+    let file = settings
+        .create_default_file(InstructionsKind::Review)
+        .unwrap();
+
+    assert!(file.ends_with("review.md"));
+    assert!(settings.default_file_exists(InstructionsKind::Review));
+    assert!(!settings.default_file_exists(InstructionsKind::Summary));
+}
+
+#[test]
+fn an_unreadable_review_instructions_is_a_problem_on_open_and_refuses_save() {
+    let (_home, mut settings) = loaded_from("review_instructions = 7\n");
+
+    assert_eq!(
+        settings.problems_on_open(),
+        [SettingProblem::InstructionsUnreadable(
+            InstructionsKind::Review,
+            "7".to_owned()
+        )]
+    );
+    settings.set_instructions(InstructionsKind::Review, InstructionsChoice::Off);
+    assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
 }

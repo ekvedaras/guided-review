@@ -10,9 +10,9 @@ use futures::channel::mpsc::unbounded;
 use gpui::{App, AsyncApp, Entity};
 
 use super::components::pr_switcher::PrSwitching;
+use crate::instructions::SummaryInstructions;
 use crate::opened_subject::writer_folder;
 use crate::review_subject::ReviewSubject;
-use crate::summary_instructions::SummaryInstructions;
 use crate::viewer::{
     ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision, WriterHandOver,
 };

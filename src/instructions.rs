@@ -1,23 +1,102 @@
 use std::fmt;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 
 use crate::app_folders::AppFolders;
+use crate::config::Config;
 use crate::home::expand_home;
 
-/// What tells the tour writer how to write the reviewer summary, as far as it could be read.
+/// Which agent a setting of instructions is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstructionsKind {
+    /// `summary_instructions`: how the tour writer writes the reviewer summary.
+    Summary,
+    /// `review_instructions`: what the review agent looks for.
+    Review,
+}
+
+impl InstructionsKind {
+    pub const ALL: [Self; 2] = [Self::Summary, Self::Review];
+
+    /// The key in the config.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Summary => "summary_instructions",
+            Self::Review => "review_instructions",
+        }
+    }
+
+    /// What the instructions are called to a reader.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Review => "review",
+        }
+    }
+
+    pub fn default_file(self, folders: &AppFolders) -> PathBuf {
+        match self {
+            Self::Summary => folders.summary_file(),
+            Self::Review => folders.review_file(),
+        }
+    }
+
+    pub fn off_env(self) -> &'static str {
+        match self {
+            Self::Summary => Config::SUMMARY_INSTRUCTIONS_OFF_ENV,
+            Self::Review => Config::REVIEW_INSTRUCTIONS_OFF_ENV,
+        }
+    }
+
+    /// What stands in when the config says nothing and the default file is not there.
+    fn built_in(self) -> Option<&'static str> {
+        match self {
+            Self::Summary => None,
+            Self::Review => Some(include_str!("review_guidance.md")),
+        }
+    }
+}
+
+/// Ties `Instructions` to the agent it is for, so a summary cannot be handed to the review agent.
+pub trait Agent {
+    const KIND: InstructionsKind;
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct SummaryInstructions {
+pub struct TourWriter;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Reviewer;
+
+impl Agent for TourWriter {
+    const KIND: InstructionsKind = InstructionsKind::Summary;
+}
+
+impl Agent for Reviewer {
+    const KIND: InstructionsKind = InstructionsKind::Review;
+}
+
+/// What tells an agent how to do its part of the review, as far as it could be read.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Instructions<A: Agent> {
     text: Option<String>,
     skill: Option<String>,
     warning: Option<String>,
+    agent: PhantomData<A>,
 }
 
-/// How `summary_instructions` is set in the config, before it is resolved to the instructions themselves.
+/// What tells the tour writer how to write the reviewer summary.
+pub type SummaryInstructions = Instructions<TourWriter>;
+
+/// What tells the review agent what to look for.
+pub type ReviewInstructions = Instructions<Reviewer>;
+
+/// How `summary_instructions` or `review_instructions` is set in the config, before it is resolved to the instructions themselves.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum SummaryInstructionsChoice {
-    /// No key: `summary.md` in the config folder, when it exists.
+pub enum InstructionsChoice {
+    /// No key: the default file in the config folder (`summary.md`, `review.md`) when it exists.
     #[default]
     DefaultFile,
     /// A path as written, which may start with `~/`.
@@ -28,7 +107,7 @@ pub enum SummaryInstructionsChoice {
     Unreadable(String),
 }
 
-impl SummaryInstructionsChoice {
+impl InstructionsChoice {
     pub fn skill_text(&self) -> Option<&str> {
         match self {
             Self::Skill(name) => Some(name.as_str()),
@@ -58,32 +137,32 @@ impl SummaryInstructionsChoice {
         }
     }
 
-    pub fn resolve(&self, folders: &AppFolders) -> SummaryInstructions {
+    pub fn resolve<A: Agent>(&self, folders: &AppFolders) -> Instructions<A> {
         match self {
-            Self::Off => SummaryInstructions::none(),
+            Self::Off => Instructions::none(),
             Self::OtherFile(path) => read_file(&expand_home(path, folders.home())),
-            Self::Skill(name) => SummaryInstructions::of_skill(name),
-            Self::Unreadable(written) => SummaryInstructions::unreadable(written),
+            Self::Skill(name) => Instructions::of_skill(name),
+            Self::Unreadable(written) => Instructions::unreadable(written),
             Self::DefaultFile => {
-                let default = folders.summary_file();
+                let default = A::KIND.default_file(folders);
                 if default.is_file() {
                     read_file(&default)
                 } else {
-                    SummaryInstructions::none()
+                    Instructions::built_in()
                 }
             }
         }
     }
 }
 
-impl<'de> Deserialize<'de> for SummaryInstructionsChoice {
+impl<'de> Deserialize<'de> for InstructionsChoice {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         toml::Value::deserialize(deserializer).map(|value| Self::from_value(&value))
     }
 }
 
-fn read_file(path: &Path) -> SummaryInstructions {
-    SummaryInstructions::from_file(path, std::fs::read_to_string(path))
+fn read_file<A: Agent>(path: &Path) -> Instructions<A> {
+    Instructions::from_file(path, std::fs::read_to_string(path))
 }
 
 /// A skill the tour writer runs through the Skill tool, such as `warm-up` or `plugin:skill`.
@@ -116,9 +195,21 @@ impl SkillName {
     }
 }
 
-impl SummaryInstructions {
+impl<A: Agent> Instructions<A> {
     pub fn none() -> Self {
-        Self::default()
+        Self {
+            text: None,
+            skill: None,
+            warning: None,
+            agent: PhantomData,
+        }
+    }
+
+    fn built_in() -> Self {
+        Self {
+            text: A::KIND.built_in().map(str::to_owned),
+            ..Self::none()
+        }
     }
 
     /// Blank text is no instructions: a file that was created and never filled in asks for nothing.
@@ -136,9 +227,10 @@ impl SummaryInstructions {
     fn unreadable(written: &str) -> Self {
         Self {
             warning: Some(format!(
-                "summary_instructions {written} is not a file path, \"{}\" or {{ {} = \"<name>\" }}",
-                SummaryInstructionsChoice::OFF,
-                SummaryInstructionsChoice::SKILL_KEY
+                "{} {written} is not a file path, \"{}\" or {{ {} = \"<name>\" }}",
+                A::KIND.key(),
+                InstructionsChoice::OFF,
+                InstructionsChoice::SKILL_KEY
             )),
             ..Self::none()
         }
@@ -154,7 +246,8 @@ impl SummaryInstructions {
     fn broken(path: &Path, error: &std::io::Error) -> Self {
         Self {
             warning: Some(format!(
-                "summary instructions file {} could not be read: {error}",
+                "{} instructions file {} could not be read: {error}",
+                A::KIND.label(),
                 path.display()
             )),
             ..Self::none()
@@ -163,10 +256,13 @@ impl SummaryInstructions {
 
     /// What a launch of the tour agent goes by: a config that cannot be read is no instructions and a warning.
     pub fn of(folders: &AppFolders) -> Self {
-        match crate::config::Config::load_from(folders) {
-            Ok(config) => config.summary_instructions(folders),
+        match Config::load_from(folders) {
+            Ok(config) => config.instructions(folders),
             Err(error) => Self {
-                warning: Some(format!("summary instructions not read: {error:#}")),
+                warning: Some(format!(
+                    "{} instructions not read: {error:#}",
+                    A::KIND.label()
+                )),
                 ..Self::none()
             },
         }
@@ -199,16 +295,20 @@ impl SummaryInstructions {
     }
 }
 
-impl fmt::Display for SummaryInstructions {
+impl<A: Agent> fmt::Display for Instructions<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(warning) = &self.warning {
             writeln!(f, "\nwarning: {warning}")?;
         }
         if let Some(skill) = &self.skill {
-            writeln!(f, "\nsummary instructions: run the skill {skill}")?;
+            writeln!(
+                f,
+                "\n{} instructions: run the skill {skill}",
+                A::KIND.label()
+            )?;
         }
         if let Some(text) = &self.text {
-            write!(f, "\nsummary instructions:\n{text}")?;
+            write!(f, "\n{} instructions:\n{text}", A::KIND.label())?;
             if !text.ends_with('\n') {
                 writeln!(f)?;
             }

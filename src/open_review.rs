@@ -9,9 +9,9 @@ use crate::config::Config;
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
+use crate::instructions::SummaryInstructions;
 use crate::opened_subject::OpenedSubject;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
-use crate::summary_instructions::SummaryInstructions;
 use crate::tour::Tour;
 use crate::viewer::{
     GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher, TourReloader,

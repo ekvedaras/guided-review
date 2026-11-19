@@ -118,6 +118,7 @@ mod repin;
 mod repin_guard;
 mod replacing_jobs;
 mod restart_guard;
+mod review_instructions;
 mod review_rebuild;
 mod review_subject;
 mod review_threads;

@@ -239,6 +239,10 @@ impl AppFolders {
         self.config.join("summary.md")
     }
 
+    pub fn review_file(&self) -> PathBuf {
+        self.config.join("review.md")
+    }
+
     /// Where tours live unless `GUIDED_REVIEW_TOURS_DIR` says otherwise (see `Tour::tours_dir`).
     pub fn tours(&self) -> PathBuf {
         self.state.join("tours")

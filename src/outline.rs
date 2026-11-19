@@ -1,10 +1,10 @@
 use std::fmt;
 
 use crate::image_facts::ImageChange;
+use crate::instructions::SummaryInstructions;
 use crate::pieces::ChangedFile;
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
-use crate::summary_instructions::SummaryInstructions;
 use crate::test_pairing::SubjectCandidates;
 
 const MAX_SIGNATURE_CHARS: usize = 100;

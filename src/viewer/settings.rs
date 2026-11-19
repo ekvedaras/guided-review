@@ -7,9 +7,9 @@ use crate::app_folders::AppFolders;
 use crate::config::{AskEffortChoice, AskModelChoice};
 use crate::home::expand_home;
 use crate::ide::{IdeChoice, IdeTemplate};
+use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::local_git::{CloneProblem, LocalGit};
 use crate::pull_request::RepoName;
-use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
 
 use super::chord::Chord;
 use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
@@ -35,7 +35,8 @@ struct Values {
     /// The last custom value: `ide` while it is not a preset, else what `ide_custom` keeps beside it.
     ide_custom: String,
     ask_model_custom: String,
-    summary_instructions: SummaryInstructionsChoice,
+    summary_instructions: InstructionsChoice,
+    review_instructions: InstructionsChoice,
     clones: Vec<CloneRow>,
     keys: KeyChanges,
     more_lines: MoreLinesEntry,
@@ -62,7 +63,8 @@ impl Values {
             ask_model,
             ask_effort: AskEffortChoice::of(text(ASK_EFFORT).as_deref()),
             ide,
-            summary_instructions: summary_instructions_in(document),
+            summary_instructions: instructions_in(document, InstructionsKind::Summary),
+            review_instructions: instructions_in(document, InstructionsKind::Review),
             clones: document
                 .get(CLONES)
                 .and_then(Item::as_table_like)
@@ -137,9 +139,9 @@ pub enum SettingProblem {
         clone: CloneRow,
         problem: CloneRowProblem,
     },
-    SummaryFileGone(PathBuf),
-    /// The config holds a `summary_instructions` that is not a path, `"off"` or a skill name; the value as written.
-    SummaryInstructionsUnreadable(String),
+    InstructionsFileGone(InstructionsKind, PathBuf),
+    /// The config holds a `summary_instructions` or `review_instructions` that is not a path, `"off"` or a skill name; the value as written.
+    InstructionsUnreadable(InstructionsKind, String),
     /// The config holds an `ask_effort` that `claude --effort` does not accept.
     AskEffortUnknown(String),
     /// Custom is picked and no model is typed.
@@ -156,11 +158,13 @@ impl SettingProblem {
     pub fn message(&self) -> String {
         match self {
             Self::Clone { clone, problem, .. } => problem.message(clone),
-            Self::SummaryFileGone(path) => format!("The summary file {} is gone", path.display()),
-            Self::SummaryInstructionsUnreadable(written) => {
+            Self::InstructionsFileGone(kind, path) => {
+                format!("The {} file {} is gone", kind.label(), path.display())
+            }
+            Self::InstructionsUnreadable(_, written) => {
                 format!(
                     "{written} is not a file, \"{}\" or a skill name",
-                    SummaryInstructionsChoice::OFF
+                    InstructionsChoice::OFF
                 )
             }
             Self::AskModelBlank => "Type the model name, or pick another choice".to_owned(),
@@ -221,44 +225,37 @@ const CLONES: &str = "clones";
 const KEYS: &str = "keys";
 const MORE_LINES: &str = "more_lines";
 const MERGE_METHOD: &str = "merge_method";
-const SUMMARY_INSTRUCTIONS: &str = "summary_instructions";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
 /// A document `toml_edit` accepts and `toml` refuses holds something this config cannot read, so the setting says so.
-fn summary_instructions_in(document: &DocumentMut) -> SummaryInstructionsChoice {
-    let Some(item) = document.get(SUMMARY_INSTRUCTIONS) else {
-        return SummaryInstructionsChoice::DefaultFile;
+fn instructions_in(document: &DocumentMut, kind: InstructionsKind) -> InstructionsChoice {
+    let Some(item) = document.get(kind.key()) else {
+        return InstructionsChoice::DefaultFile;
     };
     document
         .to_string()
         .parse::<toml::Table>()
         .ok()
-        .and_then(|table| {
-            table
-                .get(SUMMARY_INSTRUCTIONS)
-                .map(SummaryInstructionsChoice::from_value)
-        })
-        .unwrap_or_else(|| {
-            SummaryInstructionsChoice::Unreadable(item.to_string().trim().to_owned())
-        })
+        .and_then(|table| table.get(kind.key()).map(InstructionsChoice::from_value))
+        .unwrap_or_else(|| InstructionsChoice::Unreadable(item.to_string().trim().to_owned()))
 }
 
 /// Writing is all Settings adds to what the domain reads.
-fn summary_instructions_value(choice: &SummaryInstructionsChoice) -> anyhow::Result<Option<Value>> {
+fn instructions_value(
+    kind: InstructionsKind,
+    choice: &InstructionsChoice,
+) -> anyhow::Result<Option<Value>> {
     Ok(match choice {
-        SummaryInstructionsChoice::DefaultFile => None,
-        SummaryInstructionsChoice::Off => Some(Value::from(SummaryInstructionsChoice::OFF)),
-        SummaryInstructionsChoice::OtherFile(path) => Some(Value::from(config_path(path)?)),
-        SummaryInstructionsChoice::Skill(name) => {
+        InstructionsChoice::DefaultFile => None,
+        InstructionsChoice::Off => Some(Value::from(InstructionsChoice::OFF)),
+        InstructionsChoice::OtherFile(path) => Some(Value::from(config_path(path)?)),
+        InstructionsChoice::Skill(name) => {
             let mut table = InlineTable::new();
-            table.insert(
-                SummaryInstructionsChoice::SKILL_KEY,
-                Value::from(name.as_str()),
-            );
+            table.insert(InstructionsChoice::SKILL_KEY, Value::from(name.as_str()));
             Some(Value::InlineTable(table))
         }
-        SummaryInstructionsChoice::Unreadable(written) => {
-            anyhow::bail!("{written} is not a {SUMMARY_INSTRUCTIONS} that can be saved")
+        InstructionsChoice::Unreadable(written) => {
+            anyhow::bail!("{written} is not a {} that can be saved", kind.key())
         }
     })
 }
@@ -334,25 +331,31 @@ impl Settings {
         self.edited.ide = ide.template();
     }
 
-    pub fn summary_instructions(&self) -> &SummaryInstructionsChoice {
-        &self.edited.summary_instructions
+    pub fn instructions(&self, kind: InstructionsKind) -> &InstructionsChoice {
+        match kind {
+            InstructionsKind::Summary => &self.edited.summary_instructions,
+            InstructionsKind::Review => &self.edited.review_instructions,
+        }
     }
 
-    pub fn set_summary_instructions(&mut self, choice: SummaryInstructionsChoice) {
-        self.edited.summary_instructions = choice;
+    pub fn set_instructions(&mut self, kind: InstructionsKind, choice: InstructionsChoice) {
+        match kind {
+            InstructionsKind::Summary => self.edited.summary_instructions = choice,
+            InstructionsKind::Review => self.edited.review_instructions = choice,
+        }
     }
 
-    pub fn default_file(&self) -> PathBuf {
-        self.folders.summary_file()
+    pub fn default_file(&self, kind: InstructionsKind) -> PathBuf {
+        kind.default_file(&self.folders)
     }
 
-    pub fn default_file_exists(&self) -> bool {
-        self.default_file().is_file()
+    pub fn default_file_exists(&self, kind: InstructionsKind) -> bool {
+        self.default_file(kind).is_file()
     }
 
     /// Makes an empty default file when there is none, and returns its path to open.
-    pub fn create_default_file(&self) -> anyhow::Result<PathBuf> {
-        let file = self.default_file();
+    pub fn create_default_file(&self, kind: InstructionsKind) -> anyhow::Result<PathBuf> {
+        let file = self.default_file(kind);
         let folder = file
             .parent()
             .with_context(|| format!("{} has no folder", file.display()))?;
@@ -423,7 +426,7 @@ impl Settings {
             .filter(|problem| {
                 matches!(
                     problem,
-                    SettingProblem::SummaryInstructionsUnreadable(_)
+                    SettingProblem::InstructionsUnreadable(..)
                         | SettingProblem::AskEffortUnknown(_)
                         | SettingProblem::MoreLinesNotACount(_)
                         | SettingProblem::Key(_)
@@ -457,14 +460,16 @@ impl Settings {
         {
             problems.push(SettingProblem::IdeTemplateBlank);
         }
-        match &self.edited.summary_instructions {
-            SummaryInstructionsChoice::OtherFile(path) if !self.in_home(path).is_file() => {
-                problems.push(SettingProblem::SummaryFileGone(path.clone()));
+        for kind in InstructionsKind::ALL {
+            match self.instructions(kind) {
+                InstructionsChoice::OtherFile(path) if !self.in_home(path).is_file() => {
+                    problems.push(SettingProblem::InstructionsFileGone(kind, path.clone()));
+                }
+                InstructionsChoice::Unreadable(written) => problems.push(
+                    SettingProblem::InstructionsUnreadable(kind, written.clone()),
+                ),
+                _ => {}
             }
-            SummaryInstructionsChoice::Unreadable(written) => problems.push(
-                SettingProblem::SummaryInstructionsUnreadable(written.clone()),
-            ),
-            _ => {}
         }
         if let MoreLinesEntry::NotACount(written) = &self.edited.more_lines {
             problems.push(SettingProblem::MoreLinesNotACount(written.clone()));
@@ -582,12 +587,21 @@ impl Settings {
         if saved.ask_model_custom_key() != edited.ask_model_custom_key() {
             set_text(root, ASK_MODEL_CUSTOM, edited.ask_model_custom_key());
         }
-        if saved.summary_instructions != edited.summary_instructions {
-            set_value(
-                root,
-                SUMMARY_INSTRUCTIONS,
-                summary_instructions_value(&edited.summary_instructions)?,
-            );
+        for (kind, saved, edited) in [
+            (
+                InstructionsKind::Summary,
+                &saved.summary_instructions,
+                &edited.summary_instructions,
+            ),
+            (
+                InstructionsKind::Review,
+                &saved.review_instructions,
+                &edited.review_instructions,
+            ),
+        ] {
+            if saved != edited {
+                set_value(root, kind.key(), instructions_value(kind, edited)?);
+            }
         }
         if saved.clones != edited.clones {
             write_clones(root, &saved.clones, &edited.clones)?;
