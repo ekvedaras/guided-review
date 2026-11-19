@@ -49,6 +49,89 @@ pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>)
     }
 }
 
+/// What the review agent may do without the auto mode classifier: read and search its worktree, run git's
+/// read commands and test runners, start subagents, call the findings commands, and write its one findings
+/// file. Nothing else is written, so it cannot change code.
+pub fn review_agent_tools(worktree: &Path, findings_file: &Path, skill: Option<&str>) -> String {
+    let findings = format!(
+        "//{}",
+        findings_file.display().to_string().trim_start_matches('/')
+    );
+    let mut tools = vec![
+        format!("Read({})", under(worktree)),
+        format!("Read({findings})"),
+        "Grep".to_owned(),
+        "Glob".to_owned(),
+        "Task".to_owned(),
+        "Agent".to_owned(),
+    ];
+    tools.extend(
+        REVIEW_COMMANDS
+            .iter()
+            .map(|command| format!("Bash({command}:*)")),
+    );
+    tools.push(format!("Write({findings})"));
+    tools.push(format!("Edit({findings})"));
+    if let Some(skill) = skill {
+        tools.push(format!("Skill({skill})"));
+    }
+    tools.join(",")
+}
+
+/// The commands a review agent runs: its own CLI, git's read commands and the common test runners.
+const REVIEW_COMMANDS: [&str; 30] = [
+    "guided-review review-brief",
+    "guided-review check-findings",
+    "guided-review findings-done",
+    "guided-review findings-path",
+    "guided-review agent-reply",
+    "guided-review show",
+    "guided-review outline",
+    "guided-review tour-path",
+    "git log",
+    "git diff",
+    "git show",
+    "git blame",
+    "git status",
+    "git grep",
+    "git ls-files",
+    "git rev-parse",
+    "cargo test",
+    "cargo check",
+    "cargo clippy",
+    "npm test",
+    "npm run test",
+    "pnpm test",
+    "yarn test",
+    "bun test",
+    "npx vitest",
+    "pytest",
+    "go test",
+    "composer test",
+    "vendor/bin/phpunit",
+    "vendor/bin/pest",
+];
+
+/// What the review agent must never do, whatever auto mode would decide: publish anything.
+pub fn review_agent_denied_tools() -> String {
+    [
+        "git push",
+        "git commit",
+        "gh pr review",
+        "gh pr comment",
+        "gh pr merge",
+        "gh pr close",
+        "gh pr edit",
+        "gh pr create",
+        "gh issue comment",
+        "gh api",
+    ]
+    .iter()
+    .map(|command| format!("Bash({command}:*)"))
+    .collect::<Vec<_>>()
+    .join(",")
+}
+
 /// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
 pub struct ClaudeCli {
     binary: PathBuf,

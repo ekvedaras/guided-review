@@ -44,6 +44,7 @@ use crate::open_review::{OpenedReview, open_review};
 use crate::opened_subject::clean_snapshot_refs;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
+use crate::review_worktree::GitReviewWorktrees;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::update::Build;
 use crate::viewer::{
@@ -138,6 +139,10 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
                 // Nobody looks at the start's clean-up; a ref it keeps only waits for the next start.
                 for not_cleaned in clean_snapshot_refs(&cleaned) {
                     eprintln!("{not_cleaned}");
+                }
+                // No review agent survives an app restart yet, so none keeps its checkout.
+                for not_swept in GitReviewWorktrees::under(cleaned.review_worktrees()).sweep(&[]) {
+                    eprintln!("{not_swept}");
                 }
             })
             .detach();

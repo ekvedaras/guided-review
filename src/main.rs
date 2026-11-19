@@ -20,6 +20,7 @@ use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
@@ -44,6 +45,8 @@ enum Command {
     Outline { subject: ReviewSubject },
     /// Print where the tour file of a PR lives
     TourPath { subject: ReviewSubject },
+    /// Print what the review agent is told: the protocol, the review instructions, what to skip
+    ReviewBrief { subject: ReviewSubject },
     /// Print where the findings file of a review lives
     FindingsPath { subject: ReviewSubject },
     /// Pin the findings file of a review to its commits, then list what is wrong with its anchors
@@ -142,6 +145,7 @@ fn main() -> anyhow::Result<()> {
             around,
         } => show(&subject, &ids, around),
         Command::TourPath { subject } => tour_path(&subject),
+        Command::ReviewBrief { subject } => review_brief(&subject),
         Command::FindingsPath { subject } => findings_path(&subject),
         Command::CheckFindings { subject } => check_findings(&subject),
         Command::FindingsDone { subject } => {
@@ -282,6 +286,15 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
         }
         .render()?
     );
+    Ok(())
+}
+
+fn review_brief(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let brief = ReviewBrief::of(&AppFolders::running()?, subject);
+    if let Some(warning) = brief.warning() {
+        eprintln!("warning: {warning}");
+    }
+    print!("{brief}");
     Ok(())
 }
 

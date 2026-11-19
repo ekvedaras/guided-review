@@ -248,6 +248,11 @@ impl AppFolders {
         self.state.join("tours")
     }
 
+    /// The throwaway checkouts of the review agents, which live as long as their agent does.
+    pub fn review_worktrees(&self) -> PathBuf {
+        self.cache.join("review-worktrees")
+    }
+
     /// The state file of each PR, under owner folders, beside the app's own.
     pub fn state_files(&self) -> PathBuf {
         self.state.join("state")
