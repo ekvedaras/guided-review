@@ -16,6 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
+use crate::findings::FindingId;
 use crate::viewer::{
     AskAt, BoxEdges, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review, RowSelection,
     SelectedRows, ShownLine, StepHeading, line_count,
@@ -181,6 +182,10 @@ impl PageRows {
         self.page
             .as_deref()
             .map_or(0, |page| page.widest_line(path))
+    }
+
+    pub fn row_of_finding(&self, id: &FindingId) -> Option<usize> {
+        self.page.as_deref()?.row_of_finding(id)
     }
 
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
@@ -396,6 +401,12 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
                 .open_under(&format!("thread-{}-", view.thread.id))
                 .hash(&mut hasher);
             place.hash(&mut hasher);
+        }
+        PageRow::Finding(finding) => {
+            finding.id.hash(&mut hasher);
+            finding.severity.hash(&mut hasher);
+            finding.body.hash(&mut hasher);
+            finding.place.hash(&mut hasher);
         }
         PageRow::QueuedComment(queued) => {
             queued.draft.place.hash(&mut hasher);

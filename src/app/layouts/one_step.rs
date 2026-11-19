@@ -38,6 +38,7 @@ use crate::app::components::diff_view::{
     hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
     rendered_block_row, rendered_file_waiting_row,
 };
+use crate::app::components::finding_view::finding_card;
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
@@ -1264,6 +1265,18 @@ impl OneStepLayout {
     }
 
     /// Carries out what the review decides the reader's intent does.
+    /// To the next finding, scrolled to its row; the screen's top when its row is not on the page.
+    fn go_to_next_finding(&mut self, cx: &mut Context<Self>) {
+        let row = self.session.update(cx, |session, cx| {
+            let id = session.change(cx, |review| review.go_to_next_finding())?;
+            session.rows().row_of_finding(&id)
+        });
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: row.unwrap_or(0),
+            offset_in_item: px(0.),
+        });
+    }
+
     fn act(&mut self, intent: Intent, window: &mut Window, cx: &mut Context<Self>) {
         let effect = self
             .session
@@ -1317,6 +1330,7 @@ impl OneStepLayout {
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.show(window, cx)),
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
+            Effect::NextFinding => self.go_to_next_finding(cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenPr => self.session.update(cx, ReviewSession::open_pr),
@@ -1415,6 +1429,19 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_review_agent);
             }))
         });
+        let next = ai_review.can_go_to_next_finding.then(|| {
+            icon_label_button(
+                colors,
+                "next-finding",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ArrowRight,
+                "Next finding",
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::NextFinding, window, cx);
+            }))
+        });
         let action = ai_review.action.map(|action| {
             icon_label_button(
                 colors,
@@ -1456,7 +1483,14 @@ impl OneStepLayout {
                             .child(ai_review.line.clone()),
                     ),
             )
-            .child(div().flex().gap_2().children(show).children(action))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .children(show)
+                    .children(next)
+                    .children(action),
+            )
     }
 
     /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
@@ -3497,6 +3531,13 @@ impl OneStepLayout {
                 match place {
                     ThreadRowPlace::UnderLine => hung_row().child(thread).into_any_element(),
                     ThreadRowPlace::AfterCode => div().pb_3().child(thread).into_any_element(),
+                }
+            }
+            PageRow::Finding(finding) => {
+                let card = finding_card(&colors, &finding);
+                match finding.place {
+                    ThreadRowPlace::UnderLine => hung_row().child(card).into_any_element(),
+                    ThreadRowPlace::AfterCode => div().pb_3().child(card).into_any_element(),
                 }
             }
             PageRow::QueuedComment(queued) => hung_row()

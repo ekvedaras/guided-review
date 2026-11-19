@@ -97,10 +97,11 @@ enum Scene {
     AiReviewFound,
     AiReviewRunning,
     AiReviewFailed,
+    AiReviewOnLines,
 }
 
 impl Scene {
-    const ALL: [Self; 60] = [
+    const ALL: [Self; 61] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -161,6 +162,7 @@ impl Scene {
         Self::AiReviewFound,
         Self::AiReviewRunning,
         Self::AiReviewFailed,
+        Self::AiReviewOnLines,
     ];
 
     fn file_name(self) -> &'static str {
@@ -225,6 +227,7 @@ impl Scene {
             Self::AiReviewFound => "80-ai-review-found",
             Self::AiReviewRunning => "81-ai-review-running",
             Self::AiReviewFailed => "82-ai-review-failed",
+            Self::AiReviewOnLines => "83-ai-review-on-lines",
         }
     }
 
@@ -790,6 +793,17 @@ impl OneStepLayout {
             Scene::AiReviewFailed => self.change_review(cx, |review| {
                 review.ai_review_run_is(AiReviewRun::staged_failed());
             }),
+            Scene::AiReviewOnLines => self.change_review(cx, |review| {
+                review.go_forward();
+                let first_line = review
+                    .page()
+                    .lines()
+                    .next()
+                    .map(|line| line.location.clone());
+                if let Some(at) = first_line {
+                    review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                }
+            }),
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -998,6 +1012,10 @@ impl OneStepLayout {
             }
             Scene::AiReviewFound => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::NotRun);
+            }),
+            Scene::AiReviewOnLines => self.change_review(cx, |review| {
+                review.ai_review_is(AiReview::NotRun);
+                review.go_to_summary();
             }),
             Scene::AiReviewRunning | Scene::AiReviewFailed => self.change_review(cx, |review| {
                 review.ai_review_run_is(AiReviewRun::NotRun);

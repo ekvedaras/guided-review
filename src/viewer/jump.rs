@@ -179,6 +179,8 @@ fn looseness(text: &str, query: &[char], query_text: &str) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaletteAction {
     NextUnreadStep,
+    /// To the next finding of the AI review, most severe first.
+    NextFinding,
     MarkStepRead,
     MarkStepUnread,
     /// A basic tour's read tick is per file.
@@ -237,6 +239,7 @@ impl PaletteAction {
     pub fn label(self) -> &'static str {
         match self {
             Self::NextUnreadStep => "Next unread step",
+            Self::NextFinding => "Next finding",
             Self::MarkStepRead => "Mark step as read",
             Self::MarkStepUnread => "Mark step as unread",
             Self::MarkFileRead => "Mark file as read",
@@ -279,7 +282,8 @@ impl PaletteAction {
     pub fn command(self) -> Option<Command> {
         match self {
             Self::NextUnreadStep => Some(Command::NextUnreadStep),
-            Self::MarkStepRead
+            Self::NextFinding
+            | Self::MarkStepRead
             | Self::MarkStepUnread
             | Self::MarkFileRead
             | Self::MarkFileUnread => Some(Command::ToggleRead),

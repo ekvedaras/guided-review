@@ -42,6 +42,7 @@ use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
+use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
 use super::finish_review::{
     ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewVerdict, SubmittedReview,
@@ -86,6 +87,7 @@ use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
+use crate::findings::{Finding, FindingId};
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 use crate::update::Build;
@@ -324,6 +326,9 @@ pub struct ReviewCore {
     pulled_threads: Vec<ReviewThread>,
     followed_lines: BTreeMap<ThreadId, FollowedLines>,
     threads: ThreadPlacement,
+    findings: FindingPlacement,
+    /// The finding the reviewer was last taken to, so the next one comes after it.
+    finding_cursor: Option<FindingId>,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
@@ -661,6 +666,8 @@ impl ReviewCore {
             pulled_threads: Vec::new(),
             followed_lines: BTreeMap::new(),
             threads: ThreadPlacement::default(),
+            findings: FindingPlacement::default(),
+            finding_cursor: None,
             thread_fold_flipped: BTreeSet::new(),
             screen,
             state: SavedState::new(state, state_file),
@@ -792,6 +799,7 @@ impl ReviewCore {
     #[cfg(feature = "snapshots")]
     pub fn ai_review_is(&mut self, ai_review: AiReview) {
         self.ai_review = ai_review;
+        self.place_threads();
     }
 
     /// The run a snapshot scene shows, and its removal.
@@ -805,6 +813,52 @@ impl ReviewCore {
         let read = AiReview::read(folders, &self.subject);
         self.run_ends_with(&read);
         self.ai_review = read;
+        self.place_threads();
+    }
+
+    /// Goes to the screen of the next finding, most severe first, round again after the last.
+    pub fn go_to_next_finding(&mut self) -> Option<FindingId> {
+        let AiReview::Findings(file) = &self.ai_review else {
+            return None;
+        };
+        let mut by_severity: Vec<&Finding> = file.findings.iter().collect();
+        by_severity.sort_by_key(|finding| finding.severity);
+        let after_cursor = self
+            .finding_cursor
+            .as_ref()
+            .and_then(|cursor| by_severity.iter().position(|finding| finding.id == *cursor))
+            .map_or(0, |position| position + 1);
+        let next = by_severity
+            .get(after_cursor)
+            .or_else(|| by_severity.first())?
+            .id
+            .clone();
+        let screen = match self.findings.home_of(&next)? {
+            FindingHome::Step(id) => Screen::Step(id.clone()),
+            FindingHome::File(path) => Screen::File(path.clone()),
+            FindingHome::SafetyNet => Screen::SafetyNet,
+            FindingHome::Change if self.tour.guided().is_some() => Screen::Summary,
+            FindingHome::Change => Screen::Overview,
+        };
+        self.go_to_screen(screen);
+        if let Screen::Step(id) = &self.screen
+            && self.is_folded(id)
+        {
+            self.toggle_fold(&id.clone());
+        }
+        self.finding_cursor = Some(next.clone());
+        Some(next)
+    }
+
+    /// The findings of the open screen: on their lines, or after the code.
+    pub(super) fn findings_here(&self) -> &[FindingView] {
+        let home = match &self.screen {
+            Screen::Step(id) => FindingHome::Step(id.clone()),
+            Screen::File(path) => FindingHome::File(path.clone()),
+            Screen::SafetyNet => FindingHome::SafetyNet,
+            Screen::Summary | Screen::Overview => FindingHome::Change,
+        };
+        self.findings.in_home(&home)
     }
 
     /// For a failure the reviewer must know about; it stays until its kind is cleared.
@@ -1686,13 +1740,20 @@ impl ReviewCore {
             ignores_whitespace: false,
             links: &links,
         };
-        self.threads = ThreadPlacement::of(
+        let threads = ThreadPlacement::of(
             &self.tour,
             &self.files,
             &self.pulled_threads,
             &self.followed_lines,
             &display,
         );
+        let findings = match &self.ai_review {
+            AiReview::Findings(file) => file.findings.as_slice(),
+            AiReview::NotRun | AiReview::Unreadable(_) => &[],
+        };
+        let findings = FindingPlacement::of(&self.tour, &self.files, findings, &display);
+        self.threads = threads;
+        self.findings = findings;
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
@@ -2330,6 +2391,7 @@ impl ReviewCore {
             .chain(tick)
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
+            .chain(self.has_findings().then_some(PaletteAction::NextFinding))
             .chain(
                 self.run_ai_review_refusal()
                     .is_none()

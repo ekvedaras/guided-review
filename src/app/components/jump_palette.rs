@@ -126,7 +126,9 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::MarkDone => Icon::CircleCheck,
         PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
-        PaletteAction::NextUnreadStep | PaletteAction::OpenIssue => Icon::CircleDot,
+        PaletteAction::NextUnreadStep | PaletteAction::NextFinding | PaletteAction::OpenIssue => {
+            Icon::CircleDot
+        }
         PaletteAction::OpenPr
         | PaletteAction::ConvertToDraft
         | PaletteAction::MarkReadyForReview

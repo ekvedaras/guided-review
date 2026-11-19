@@ -199,7 +199,7 @@ pub struct ThreadView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Home {
+pub(super) enum Home {
     Step(StepId),
     SafetyNet,
     File(FilePath),
@@ -272,19 +272,7 @@ impl ThreadPlacement {
         followed: &BTreeMap<ThreadId, FollowedLines>,
         display: &DiffDisplay,
     ) -> Self {
-        let steps: Vec<(StepId, Vec<PieceDiff>)> = tour
-            .steps()
-            .into_iter()
-            .map(|step| {
-                let parts = step
-                    .pieces
-                    .iter()
-                    .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-                    .filter_map(|part| PieceDiff::of(&part, files, display))
-                    .collect();
-                (step.id.clone(), parts)
-            })
-            .collect();
+        let steps = step_pieces(tour, files, display);
         let mut homes: BTreeMap<Home, Vec<ReviewThread>> = BTreeMap::new();
         for thread in threads {
             let home = steps
@@ -322,7 +310,27 @@ impl ThreadPlacement {
     }
 }
 
-fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
+/// The code each step shows, in the tour's order.
+pub(super) fn step_pieces(
+    tour: &GuidedTour,
+    files: &[ChangedFile],
+    display: &DiffDisplay,
+) -> Vec<(StepId, Vec<PieceDiff>)> {
+    tour.steps()
+        .into_iter()
+        .map(|step| {
+            let parts = step
+                .pieces
+                .iter()
+                .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
+                .filter_map(|part| PieceDiff::of(&part, files, display))
+                .collect();
+            (step.id.clone(), parts)
+        })
+        .collect()
+}
+
+pub(super) fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
     piece.lines().any(|row| row.holds(location))
 }
 

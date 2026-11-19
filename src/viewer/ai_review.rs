@@ -27,6 +27,24 @@ impl AiReview {
         serde_json::from_value(file).map_or(Self::NotRun, Self::Findings)
     }
 
+    /// Findings of every severity on the line a snapshot scene shows, as a review agent's file would hold them.
+    #[cfg(feature = "snapshots")]
+    pub fn staged_on(
+        path: &crate::file_path::FilePath,
+        line: crate::line_number::LineNumber,
+    ) -> Self {
+        let finding = |id: &str, severity: &str, body: &str| {
+            serde_json::json!({"id": id, "severity": severity, "body": body, "anchor": {
+                "kind": "lines", "file": path, "side": "head", "lines": [line, line],
+            }})
+        };
+        let file = serde_json::json!({"findings": [
+            finding("a", "must fix", "This can fail when the list is empty.\n\nGuard it before taking the first item."),
+            finding("b", "nit", "Prefer the shorter name here."),
+        ]});
+        serde_json::from_value(file).map_or(Self::NotRun, Self::Findings)
+    }
+
     /// A file that cannot be read is shown as such, never an error: the review opens without it.
     pub fn read(folders: &AppFolders, subject: &ReviewSubject) -> Self {
         match FindingsFile::read_of(folders, subject) {

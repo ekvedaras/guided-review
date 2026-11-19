@@ -22,6 +22,8 @@ pub enum Intent {
     MarkReadAndGoOn,
     PreviousScreen,
     NextUnreadStep,
+    /// From the sidebar's AI review row and the palette: to the next finding, most severe first.
+    NextFinding,
     /// Ticks or unticks the step on screen.
     ToggleRead,
     ToggleWrapLines,
@@ -77,6 +79,7 @@ impl From<PaletteAction> for Intent {
     fn from(action: PaletteAction) -> Self {
         match action {
             PaletteAction::NextUnreadStep => Self::NextUnreadStep,
+            PaletteAction::NextFinding => Self::NextFinding,
             PaletteAction::MarkStepRead
             | PaletteAction::MarkStepUnread
             | PaletteAction::MarkFileRead
@@ -131,6 +134,8 @@ pub enum Effect {
     WriteGuidedTour,
     /// The reviewer asked to switch to a ready guided tour.
     SwitchToGuidedTour,
+    /// Goes to the next finding and scrolls to it; the window does the scrolling.
+    NextFinding,
     /// Starts the AI review's run: the review took it and the app makes the worktree and starts the agent.
     RunAiReview,
     OpenFinishForm,
@@ -248,6 +253,7 @@ impl Intent {
             Self::NextScreen
             | Self::PreviousScreen
             | Self::NextUnreadStep
+            | Self::NextFinding
             | Self::ToggleRead
             | Self::MarkDone
             | Self::ToggleWrapLines
@@ -309,6 +315,7 @@ impl ReviewCore {
             }),
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
+            Intent::NextFinding if self.has_findings() => Effect::NextFinding,
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
                     Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))
@@ -352,7 +359,7 @@ impl ReviewCore {
                 None => Effect::OpenFinishForm,
             },
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
-            Intent::OpenPr | Intent::MarkDone => Effect::Nothing,
+            Intent::NextFinding | Intent::OpenPr | Intent::MarkDone => Effect::Nothing,
             Intent::OpenOnGitHub => self
                 .subject()
                 .pull_request()

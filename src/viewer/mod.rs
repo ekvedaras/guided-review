@@ -25,6 +25,7 @@ mod disk_news;
 mod display_options;
 mod file_block;
 mod file_tree;
+mod finding_placement;
 mod finish_review;
 mod focused_change;
 mod github_outage;
@@ -170,10 +171,10 @@ pub use no_github::NoGitHub;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
-    Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow, RouteStopRow,
-    ScreenFooter, SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
-    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
+    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FoldControl, FullDiffControl,
+    HunkGapRow, Page, PageRow, PieceHeading, PieceLabel, PinnedHeader, ReviewerSummaryRow,
+    RouteStopRow, ScreenFooter, SelectedRows, ShownLine, StepHeading, StepIntro, StepNotes,
+    SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
 };
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{

@@ -20,6 +20,7 @@ impl ReviewCore {
     /// What the sidebar's AI review row says: the run while there is one, else what the findings file says.
     pub fn ai_review_stage(&self) -> AiReviewStage {
         let refusal = self.run_ai_review_refusal();
+        let has_findings = self.has_findings();
         let action_if_free = |action| refusal.is_none().then_some(action);
         match &self.ai_review_run {
             AiReviewRun::Starting => AiReviewStage {
@@ -27,6 +28,7 @@ impl ReviewCore {
                 is_failure: false,
                 action: None,
                 can_show_agent: false,
+                can_go_to_next_finding: has_findings,
             },
             AiReviewRun::Running(running) => AiReviewStage {
                 line: match running.status {
@@ -36,12 +38,14 @@ impl ReviewCore {
                 is_failure: false,
                 action: None,
                 can_show_agent: true,
+                can_go_to_next_finding: has_findings,
             },
             AiReviewRun::Failed { reason, agent } => AiReviewStage {
                 line: reason.clone(),
                 is_failure: true,
                 action: action_if_free(AiReviewAction::TryAgain),
                 can_show_agent: agent.is_some(),
+                can_go_to_next_finding: has_findings,
             },
             AiReviewRun::NotRun => AiReviewStage {
                 line: self.ai_review.line(),
@@ -51,8 +55,13 @@ impl ReviewCore {
                     AiReview::Findings(_) | AiReview::Unreadable(_) => AiReviewAction::RunAgain,
                 }),
                 can_show_agent: false,
+                can_go_to_next_finding: has_findings,
             },
         }
+    }
+
+    pub fn has_findings(&self) -> bool {
+        self.ai_review.counts().total() > 0
     }
 
     /// Run AI review and Try again: the run starts, and the app makes the worktree and starts the agent.
