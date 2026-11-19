@@ -176,6 +176,18 @@ fn a_writer_that_could_not_start_failed_with_the_reason() {
                 "https://github.com/acme/shop/pull/11",
                 AgentStatus::Working,
                 3,
+            )
+            .app_started(
+                "t4",
+                "https://github.com/acme/shop/pull/12",
+                AgentStatus::Working,
+                4,
+            )
+            .app_started(
+                "t5",
+                "https://github.com/acme/shop/pull/13",
+                AgentStatus::Working,
+                5,
             ),
     );
     let mut active = showing_a_pr();

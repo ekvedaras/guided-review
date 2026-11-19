@@ -264,6 +264,8 @@ fn the_sidebar_line_names_the_agent_and_its_status() {
 const PR_9: &str = "https://github.com/acme/shop/pull/9";
 const PR_10: &str = "https://github.com/acme/shop/pull/10";
 const PR_11: &str = "https://github.com/acme/shop/pull/11";
+const PR_12: &str = "https://github.com/acme/shop/pull/12";
+const PR_13: &str = "https://github.com/acme/shop/pull/13";
 
 fn starting(fake: &Arc<FakeTourAgent>) -> TourAgents {
     agents(fake).starting_in("/clones/shop".into())
@@ -281,12 +283,32 @@ fn url(pr: &str) -> ReviewSubject {
 }
 
 #[test]
-fn a_fourth_app_started_agent_ends_the_idle_one_used_longest_ago_that_is_not_the_active_prs() {
+fn five_app_started_agents_live_side_by_side() {
     let fake = Arc::new(
         FakeTourAgent::new()
             .app_started("t1", OTHER_PR, AgentStatus::Idle, 100)
             .app_started("t2", PR_9, AgentStatus::Idle, 200)
-            .app_started("t3", PR_10, AgentStatus::Idle, 300),
+            .app_started("t3", PR_10, AgentStatus::Idle, 300)
+            .app_started("t4", PR_11, AgentStatus::Idle, 400),
+    );
+
+    starting(&fake)
+        .start(&pr(), &url(OTHER_PR), TourKind::Guided)
+        .unwrap();
+
+    assert_eq!(kills(&fake), []);
+    assert_eq!(fake.agents_of(PR).len(), 1, "a new agent runs for the PR");
+}
+
+#[test]
+fn a_sixth_app_started_agent_ends_the_idle_one_used_longest_ago_that_is_not_the_active_prs() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .app_started("t1", OTHER_PR, AgentStatus::Idle, 100)
+            .app_started("t2", PR_9, AgentStatus::Idle, 200)
+            .app_started("t3", PR_10, AgentStatus::Idle, 300)
+            .app_started("t4", PR_11, AgentStatus::Idle, 400)
+            .app_started("t5", PR_12, AgentStatus::Idle, 500),
     );
 
     starting(&fake)
@@ -298,12 +320,14 @@ fn a_fourth_app_started_agent_ends_the_idle_one_used_longest_ago_that_is_not_the
 }
 
 #[test]
-fn a_fourth_app_started_agent_is_refused_naming_the_working_ones_when_none_is_idle() {
+fn a_sixth_app_started_agent_is_refused_naming_the_working_ones_when_none_is_idle() {
     let fake = Arc::new(
         FakeTourAgent::new()
             .app_started("t1", OTHER_PR, AgentStatus::Working, 100)
             .app_started("t2", PR_9, AgentStatus::Working, 200)
-            .app_started("t3", PR_10, AgentStatus::Idle, 300),
+            .app_started("t3", PR_11, AgentStatus::Working, 250)
+            .app_started("t4", PR_12, AgentStatus::Working, 280)
+            .app_started("t5", PR_10, AgentStatus::Idle, 300),
     );
 
     let refused = starting(&fake)
@@ -408,7 +432,9 @@ fn agents_the_reviewer_started_are_neither_counted_nor_ended() {
             .with_terminal("mine1", Some(OTHER_PR), AgentStatus::Idle)
             .app_started("t1", PR_9, AgentStatus::Idle, 300)
             .app_started("t2", PR_10, AgentStatus::Idle, 400)
-            .app_started("t3", PR_11, AgentStatus::Idle, 500),
+            .app_started("t3", PR_11, AgentStatus::Idle, 500)
+            .app_started("t4", PR_12, AgentStatus::Idle, 600)
+            .app_started("t5", PR_13, AgentStatus::Idle, 700),
     );
 
     starting(&full)

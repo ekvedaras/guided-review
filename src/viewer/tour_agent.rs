@@ -122,7 +122,7 @@ pub struct TourAgentStart {
 }
 
 /// At most this many tour agents the app started stay alive.
-const MAX_APP_AGENTS: usize = 3;
+const MAX_APP_AGENTS: usize = 5;
 
 /// Why tour agents cannot be reached. Each case asks the reviewer for a different thing.
 #[derive(Debug, Clone, PartialEq, Eq)]
