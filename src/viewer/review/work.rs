@@ -232,9 +232,9 @@ impl ReviewCore {
                 } else {
                     AfterLanding::Nothing
                 };
-                self.state
-                    .record(|state| state.fix_requests_mut().apply_delivery(outcome))
-                    .ok();
+                self.record_reporting("the fix requests", |state| {
+                    state.fix_requests_mut().apply_delivery(outcome);
+                });
                 self.place_threads();
                 return after;
             }
@@ -268,9 +268,9 @@ impl ReviewCore {
             self.record_hand_offs(|hand_offs| hand_offs.agent_status_is(*status))
                 .ok();
             if !self.state.fix_requests().is_empty() {
-                self.state
-                    .record(|state| state.fix_requests_mut().agent_status_is(*status))
-                    .ok();
+                self.record_reporting("the fix requests", |state| {
+                    state.fix_requests_mut().agent_status_is(*status);
+                });
                 self.place_threads();
             }
             self.work.want(WorkKind::TakeSeenMarksOff);

@@ -300,6 +300,13 @@ struct Screen {
 
 type SharedScreen = Rc<RefCell<Screen>>;
 
+/// The asker (a CLI call) may have given up and gone before the app answers; there is nobody left to tell.
+fn answer_asker(reply: &std::sync::mpsc::Sender<Answer>, answer: Answer) {
+    if reply.send(answer).is_err() {
+        eprintln!("the asker went away before the answer was ready");
+    }
+}
+
 async fn answer_requests(
     mut asked: UnboundedReceiver<Asked>,
     active: Entity<ActivePr>,
@@ -339,16 +346,16 @@ async fn answer_requests(
         };
         match request {
             Request::Quit => {
-                reply.send(Answer::Quitting).ok();
+                answer_asker(&reply, Answer::Quitting);
                 cx.update(|cx| cx.quit());
             }
             Request::ShowSettings => {
                 let answer = show_settings(&screen, &folders, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::ShowSwitcher => {
                 let answer = show_switcher(&screen, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::AgentReplied {
                 pr,
@@ -356,7 +363,7 @@ async fn answer_requests(
                 replied,
             } => {
                 let answer = mark_replied(&screen, pr, hand_off, &replied, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::FixReplied {
                 pr,
@@ -364,7 +371,7 @@ async fn answer_requests(
                 reply: said,
             } => {
                 let answer = take_fix_reply(&screen, pr, &finding, &said, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::WhyReplied {
                 pr,
@@ -372,20 +379,18 @@ async fn answer_requests(
                 reply: said,
             } => {
                 let answer = take_why_reply(&screen, pr, &finding, &said, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::FindingsDone { pr } => {
                 let answer = read_findings(&screen, pr, cx).await;
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::Open(open) => {
                 let pr = match open.subject.parse::<ReviewSubject>() {
                     Ok(subject) => subject,
                     Err(error) => {
                         eprintln!("refused to open {}: {error:#}", open.subject);
-                        reply
-                            .send(refused(&ReviewSubject::not_a_subject(&open.subject)))
-                            .ok();
+                        answer_asker(&reply, refused(&ReviewSubject::not_a_subject(&open.subject)));
                         continue;
                     }
                 };
@@ -405,21 +410,19 @@ async fn answer_requests(
                         if decision == WriteDecision::StartWriter {
                             cx.update(|cx| tour_writer::start_writer(pr, cx));
                         }
-                        reply.send(Answer::Writing { pr: open.subject }).ok();
+                        answer_asker(&reply, Answer::Writing { pr: open.subject });
                         continue;
                     }
                 };
                 match decision {
                     OpenDecision::KeepInBackground => {
-                        reply
-                            .send(Answer::KeptInBackground { pr: open.subject })
-                            .ok();
+                        answer_asker(&reply, Answer::KeptInBackground { pr: open.subject });
                     }
                     OpenDecision::GuidedReady => {
-                        reply.send(Answer::GuidedReady { pr: open.subject }).ok();
+                        answer_asker(&reply, Answer::GuidedReady { pr: open.subject });
                     }
                     OpenDecision::Reload => {
-                        reply.send(Answer::Reloaded { pr: open.subject }).ok();
+                        answer_asker(&reply, Answer::Reloaded { pr: open.subject });
                         let window = screen.borrow().window.review();
                         if let Some(window) = window {
                             show_again(window, cx);

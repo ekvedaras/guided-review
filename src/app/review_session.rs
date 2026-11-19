@@ -1570,7 +1570,7 @@ impl ReviewSession {
                 }
                 _ => ControlFlow::Continue(()),
             });
-            // The stream is over: nobody listens when the run ended first.
+            // The receiver is gone when the run ended first: nobody is left to tell the stream is over.
             changes.unbounded_send(None).ok();
         });
         self.ai_review_follow = Some(cx.spawn(async move |this, cx| {

@@ -2261,6 +2261,13 @@ impl ReviewCore {
         Ok(())
     }
 
+    /// A change kept in memory stays shown when its save fails; the failure goes to stderr.
+    pub(super) fn record_reporting(&mut self, what: &str, change: impl FnOnce(&mut ReviewState)) {
+        if let Err(error) = self.state.record(change) {
+            eprintln!("could not save {what}: {error:#}");
+        }
+    }
+
     /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
     /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
     fn record_hand_offs<T>(

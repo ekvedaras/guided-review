@@ -174,12 +174,10 @@ impl ReviewCore {
             (crate::viewer::ai_review::AiReview::Findings(file), true) => file.findings.clone(),
             _ => Vec::new(),
         };
-        self.state
-            .record(|state| {
-                *state.finding_threads_mut() =
-                    crate::viewer::finding_threads::FindingThreads::staged(&findings);
-            })
-            .ok();
+        self.record_reporting("the staged finding threads", |state| {
+            *state.finding_threads_mut() =
+                crate::viewer::finding_threads::FindingThreads::staged(&findings);
+        });
         self.place_threads();
     }
 

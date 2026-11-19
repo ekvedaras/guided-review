@@ -250,11 +250,9 @@ impl ReviewCore {
             (AiReview::Findings(file), true) => file.findings.clone(),
             _ => Vec::new(),
         };
-        self.state
-            .record(|state| {
-                *state.fix_requests_mut() = FixRequests::staged(&findings);
-            })
-            .ok();
+        self.record_reporting("the staged fix requests", |state| {
+            *state.fix_requests_mut() = FixRequests::staged(&findings);
+        });
         self.place_threads();
     }
 
