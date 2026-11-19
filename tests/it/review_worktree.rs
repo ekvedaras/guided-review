@@ -126,6 +126,23 @@ fn the_sweep_of_a_folder_that_is_not_there_has_nothing_to_do() {
 }
 
 #[test]
+fn a_pr_with_no_clone_fails_with_what_to_do_not_with_gits_message() {
+    let shop = Shop::reviewing_a_head_that_the_clone_has_moved_past();
+    let no_clone = tempfile::TempDir::new().unwrap();
+
+    let error = shop
+        .worktrees
+        .add(&subject(7), no_clone.path(), &shop.reviewed)
+        .unwrap_err();
+
+    let reason = format!("{error:#}");
+    assert!(reason.contains("no clone"), "{reason}");
+    assert!(reason.contains("https://github.com/acme/shop/pull/7"), "{reason}");
+    assert!(reason.contains("open the PR from a clone"), "{reason}");
+    assert!(!reason.contains("not a git repository"), "{reason}");
+}
+
+#[test]
 fn the_fake_keeps_the_record_a_test_of_the_agent_reads() {
     let fake = FakeReviewWorktrees::default();
     let repo = std::path::Path::new("/clones/shop");

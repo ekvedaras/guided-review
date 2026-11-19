@@ -88,6 +88,10 @@ impl ReviewWorktreePort for GitReviewWorktrees {
         repo: &Path,
         head: &Sha,
     ) -> anyhow::Result<ReviewWorktree> {
+        anyhow::ensure!(
+            git(repo, &["rev-parse", "--git-dir"]).is_ok(),
+            "There is no clone on this Mac to check the code of {subject} out of: open the PR from a clone of its repository, then run the AI review again"
+        );
         let path = self.path_of(subject);
         remove_checkout(&path)?;
         if let Some(parent) = path.parent() {
