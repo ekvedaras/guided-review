@@ -27,6 +27,7 @@ mod file_block;
 mod file_tree;
 mod finding_decisions;
 mod finding_placement;
+mod finding_threads;
 mod findings_list;
 mod finish_review;
 mod fix_requests;
@@ -136,6 +137,10 @@ pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
 pub use finding_decisions::{Fate, FindingDecision, FindingDecisions};
+pub use finding_threads::{
+    FindingThread, FindingThreads, NoQuestion, WhyAuthor, WhyDeliveryOutcome, WhyDeliveryRequest,
+    WhyMessage, WhyReply, WhyState,
+};
 pub use findings_list::{FindingsList, FindingsListRow};
 pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
@@ -223,7 +228,7 @@ pub use replacing_jobs::{
 pub use review::{
     FindingRefusal, FindingsBatch, NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit,
     ReadingPlace, Review, RouteStop, SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats,
-    TourLead, UnreadFile, UnreadStep,
+    TourLead, UnreadFile, UnreadStep, WhyAsked,
 };
 pub use review_agents::ReviewAgents;
 pub use review_builder::ReviewBuilder;

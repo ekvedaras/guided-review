@@ -14,10 +14,12 @@ use gpui::{
 
 use crate::app::review_session::ReviewSession;
 use crate::config::AskSettings;
+use crate::findings::FindingId;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, Ask, AskDesk, AskId, AskProcessEvent, AskProcesses, AskTarget,
     Author, NotDelivered, Place, Presence, Question, Review, Shown, TurnStopper,
 };
+use crate::viewer::{FindingRefusal, WhyAsked};
 
 use super::button::{ButtonKind, ButtonSize, icon_button, icon_label_button};
 use super::card::card;
@@ -252,6 +254,28 @@ impl AskPanel {
             _ => window.focus(&self.focus, cx),
         }
         cx.notify();
+    }
+
+    /// Ask why on a finding: onto its thread for the review agent, or, with that agent gone, into this
+    /// panel on the finding's lines, where the question is sent at once.
+    pub fn ask_why(
+        &mut self,
+        finding: &FindingId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<WhyAsked, FindingRefusal> {
+        let settings = self.settings.clone();
+        let asked = self.change(cx, |review, processes| {
+            review.ask_why(finding, "", &settings, Instant::now(), processes)
+        })?;
+        if asked == WhyAsked::InAskPanel {
+            self.presence.open(Instant::now());
+            self.leaving_target = None;
+            self.question.clear();
+            window.focus(&self.question_focus, cx);
+        }
+        cx.notify();
+        Ok(asked)
     }
 
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {

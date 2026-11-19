@@ -7,7 +7,7 @@ use super::chip::chip;
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::palette::{Colors, Tone};
 use crate::findings::Severity;
-use crate::viewer::FindingRow;
+use crate::viewer::{FindingRow, WhyAuthor};
 
 pub fn tone_of(severity: Severity) -> Tone {
     match severity {
@@ -39,6 +39,33 @@ pub fn finding_card(colors: &Colors, row: &FindingRow, actions: impl IntoElement
                 .into_element(),
         )
         .children(row.fix.as_ref().map(|line| {
+            div()
+                .text_sm()
+                .text_color(colors.muted_text)
+                .child(line.to_string())
+        }))
+        .children(row.thread.iter().enumerate().map(|(at, said)| {
+            let who = match said.author {
+                WhyAuthor::Reviewer => "You",
+                WhyAuthor::ReviewAgent => "Review agent",
+            };
+            div()
+                .pl_3()
+                .border_l_2()
+                .border_color(colors.border)
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(div().text_xs().text_color(colors.muted_text).child(who))
+                .child(
+                    MarkdownView::new(
+                        format!("finding-{}-why-{at}", row.id),
+                        parsed_markdown(&said.body),
+                    )
+                    .into_element(),
+                )
+        }))
+        .children(row.asked.as_ref().map(|line| {
             div()
                 .text_sm()
                 .text_color(colors.muted_text)

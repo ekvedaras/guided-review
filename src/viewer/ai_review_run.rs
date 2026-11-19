@@ -53,6 +53,22 @@ pub struct AiReviewStage {
     pub can_open_findings_list: bool,
 }
 
+/// Whether the subject's review agent is alive, as its follow last said; it outlives the run, idle, to be
+/// talked to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReviewAgentLife {
+    #[default]
+    Gone,
+    /// With its last status, when one came.
+    Alive(Option<AgentStatus>),
+}
+
+impl ReviewAgentLife {
+    pub const fn is_alive(self) -> bool {
+        matches!(self, Self::Alive(_))
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AiReviewRun {
     #[default]

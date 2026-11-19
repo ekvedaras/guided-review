@@ -180,4 +180,6 @@
 
 **Run (AI review)**: One go of the review agent, from Run AI review to `findings-done`: not run, starting, running, or failed (it went idle, errored or ended without `findings-done`). Run again and Try again start a new run that replaces the agent and the worktree of the old one. Avoid: job, session.
 
+**Ask why**: The reviewer's question about one finding. While the review agent lives, it goes onto the finding's thread (kept in the review's state file, for a PR too) and the review agent answers with `guided-review agent-reply <key> <finding id>`; once it is gone, the question opens in the Ask panel on the finding's lines, with the finding told. Avoid: explain, challenge.
+
 **Fix request**: A finding the reviewer sent to the tour agent to fix in code, alone or in a batch with others. A batch goes as one message in reading order; the tour agent starts one subagent, makes one commit per finding, and answers each with `guided-review fix-reply` (`--working`, `--fixed <commit>` or `--not-fixed --body`). A fixed finding is closed like a dismissed one and its commit is named in the sidebar; a not fixed one stays, with the reason. Avoid: task (that is a local review's comment), auto-fix.

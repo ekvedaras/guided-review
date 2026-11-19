@@ -27,6 +27,8 @@ pub enum FindingRefusal {
     DraftInTheWay,
     /// A fix is asked for already, or under way: asking again would send it twice.
     BeingFixed,
+    /// A question on it waits for its answer: another would cross it.
+    BeingAsked,
     Comment(CommentRefusal),
 }
 
@@ -39,6 +41,9 @@ impl fmt::Display for FindingRefusal {
                 f.write_str("A comment box is open on these lines: use the finding there, or send that comment first")
             }
             Self::BeingFixed => f.write_str("A fix of this finding is asked for already"),
+            Self::BeingAsked => {
+                f.write_str("A question on this finding waits for the review agent's answer")
+            }
             Self::Comment(refusal) => refusal.fmt(f),
         }
     }
@@ -55,7 +60,7 @@ pub struct FindingsBatch<T> {
 const AI_MARK: &str = "🤖";
 
 impl ReviewCore {
-    fn open_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
+    pub(super) fn open_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
         let AiReview::Findings(file) = &self.ai_review else {
             return Err(FindingRefusal::NotThere);
         };

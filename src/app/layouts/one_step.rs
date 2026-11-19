@@ -116,7 +116,9 @@ use crate::viewer::{
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
     ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
-use crate::viewer::{FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue};
+use crate::viewer::{
+    FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue, WhyAsked, WhyReply,
+};
 use issue_card::{CardSide, IssueHover, issue_card};
 
 #[cfg(feature = "snapshots")]
@@ -514,6 +516,16 @@ impl OneStepLayout {
     ) -> anyhow::Result<()> {
         self.session
             .update(cx, |session, cx| session.fix_replied(finding, reply, cx))
+    }
+
+    pub fn why_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &WhyReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.session
+            .update(cx, |session, cx| session.why_replied(finding, reply, cx))
     }
 
     pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
@@ -1162,7 +1174,8 @@ impl OneStepLayout {
                 label,
             )
         };
-        let (use_id, as_is_id, dismiss_id, fix_id) = (
+        let (use_id, as_is_id, dismiss_id, fix_id, why_id) = (
+            finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
@@ -1204,6 +1217,15 @@ impl OneStepLayout {
                                 refused.map_or(Ok(()), |(_, refusal)| Err(refusal)),
                                 cx,
                             );
+                        }),
+                    ),
+                )
+            })
+            .when(finding.can_ask_why, |actions| {
+                actions.child(
+                    small_button("ask-why", ButtonKind::Ghost, Icon::Sparkles, "Ask why").on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.ask_why(&why_id, window, cx);
                         }),
                     ),
                 )
@@ -1268,6 +1290,17 @@ impl OneStepLayout {
             window.focus(&self.composer_focus, cx);
         }
         self.finding_refused(used.map(|_| ()), cx);
+    }
+
+    /// To the review agent on the finding's thread while it lives, else into the Ask panel.
+    fn ask_why(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let asked = self
+            .ask
+            .update(cx, |panel, cx| panel.ask_why(id, window, cx));
+        if asked == Ok(WhyAsked::ToReviewAgent) {
+            self.session.update(cx, ReviewSession::deliver_questions);
+        }
+        self.finding_refused(asked.map(|_| ()), cx);
     }
 
     fn finding_refused(&mut self, done: Result<(), FindingRefusal>, cx: &mut Context<Self>) {

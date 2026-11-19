@@ -1,7 +1,9 @@
 mod ai_review_run;
+mod ask_why;
 mod finding_actions;
 mod guided_tour;
 
+pub use ask_why::WhyAsked;
 pub use finding_actions::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;
@@ -28,7 +30,7 @@ use std::path::{Path, PathBuf};
 use crate::config::AskSettings;
 
 use super::ai_review::AiReview;
-use super::ai_review_run::AiReviewRun;
+use super::ai_review_run::{AiReviewRun, ReviewAgentLife};
 use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
@@ -366,6 +368,8 @@ pub struct ReviewCore {
     /// The review agent's findings, read from their file. Not saved: the file is the state.
     ai_review: AiReview,
     ai_review_run: AiReviewRun,
+    /// Not saved: the app looks for the review agent when it opens the review.
+    review_agent: ReviewAgentLife,
     /// What is known of the guided tour of a basic review's PR. Not saved: the app tells it at a build.
     guided_tour: GuidedTourProgress,
     /// After a switch from a basic tour: how many steps started read. Not saved.
@@ -701,6 +705,7 @@ impl ReviewCore {
             agent_link_is_off: false,
             ai_review: AiReview::NotRun,
             ai_review_run: AiReviewRun::NotRun,
+            review_agent: ReviewAgentLife::Gone,
             guided_tour: GuidedTourProgress::NotAsked,
             steps_started_read: None,
             read_carrier: None,
@@ -1520,13 +1525,9 @@ impl ReviewCore {
     }
 
     /// The rows an Ask about lines or a piece is on, in its step at the tour head.
-    fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
-        let (shown_on, only_piece) = match place {
-            Place::Tour | Place::Step { .. } | Place::File { .. } => return None,
-            Place::Piece { step, piece } => (ShownOn::Step { step: step.clone() }, Some(piece)),
-            Place::Lines { shown_on, .. } => (shown_on.clone(), None),
-        };
-        let pieces = match shown_on {
+    /// The pieces the screen shows, as its page draws them; `None` when the tour has no such screen.
+    fn pieces_shown_on(&self, shown_on: ShownOn) -> Option<Vec<PieceDiff>> {
+        Some(match shown_on {
             ShownOn::Step { step } => {
                 let links = self.links();
                 let display = self.display(&links);
@@ -1541,7 +1542,16 @@ impl ReviewCore {
                 let file = self.files.iter().find(|file| file.path == path)?;
                 FilePage::of(file, &self.files, &display).pieces
             }
+        })
+    }
+
+    fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
+        let (shown_on, only_piece) = match place {
+            Place::Tour | Place::Step { .. } | Place::File { .. } => return None,
+            Place::Piece { step, piece } => (ShownOn::Step { step: step.clone() }, Some(piece)),
+            Place::Lines { shown_on, .. } => (shown_on.clone(), None),
         };
+        let pieces = self.pieces_shown_on(shown_on)?;
         let blocks = FileBlock::group(pieces);
         let shown: Vec<&DiffLine> = match only_piece {
             Some(id) => blocks
@@ -1773,6 +1783,7 @@ impl ReviewCore {
             findings,
             &display,
             self.state.fix_requests(),
+            self.state.finding_threads(),
         );
         self.threads = threads;
         self.findings = findings;

@@ -740,6 +740,10 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace) -> PageRow {
 
 fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
     let can_fix = !view.fix.as_ref().is_some_and(FixState::is_in_progress);
+    let can_ask_why = !view
+        .thread
+        .as_ref()
+        .is_some_and(|thread| thread.state().is_in_progress());
     PageRow::Finding(Arc::new(FindingRow {
         id: view.finding.id,
         severity: view.finding.severity,
@@ -747,6 +751,15 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         place,
         fix: view.fix.map(|state| state.line().into()),
         can_fix,
+        asked: view
+            .thread
+            .as_ref()
+            .map(|thread| thread.state().line().into()),
+        thread: view
+            .thread
+            .as_ref()
+            .map_or_else(|| Arc::from([]), |thread| thread.messages().into()),
+        can_ask_why,
     }))
 }
 

@@ -17,7 +17,7 @@ use crate::findings::FindingId;
 use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
 use crate::update::ReleaseInstall;
-use crate::viewer::{AgentReplied, FixReply, HandOffId};
+use crate::viewer::{AgentReplied, FixReply, HandOffId, WhyReply};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
 const START_WAIT: Duration = Duration::from_secs(20);
@@ -126,6 +126,12 @@ pub enum Request {
         finding: FindingId,
         reply: FixReply,
     },
+    /// The review agent's word on a question about one finding.
+    WhyReplied {
+        pr: String,
+        finding: FindingId,
+        reply: WhyReply,
+    },
     /// The review agent's findings are checked and on disk: the app shows them.
     FindingsDone {
         pr: String,
@@ -205,6 +211,7 @@ impl RequestLine {
             Request::Open(_)
             | Request::AgentReplied { .. }
             | Request::FixReplied { .. }
+            | Request::WhyReplied { .. }
             | Request::FindingsDone { .. }
             | Request::ShowSettings
             | Request::ShowSwitcher => self.across_builds == AcrossBuilds::AnyBuild,
@@ -267,6 +274,10 @@ pub enum Answer {
     FixAnswered {
         pr: String,
     },
+    /// The answer is on the finding's thread and shown.
+    WhyAnswered {
+        pr: String,
+    },
     /// The window read the findings file of this review again and shows `count` findings.
     FindingsRead {
         pr: String,
@@ -314,6 +325,12 @@ impl std::fmt::Display for Answer {
             }
             Self::FixAnswered { pr } => {
                 write!(f, "guided-review app took the fix answer on {pr}")
+            }
+            Self::WhyAnswered { pr } => {
+                write!(
+                    f,
+                    "guided-review app put the answer on the finding's thread on {pr}"
+                )
             }
             Self::FindingsRead { pr, count } => write!(
                 f,

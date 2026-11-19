@@ -8,8 +8,8 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 
 use super::tour_agent::{
-    AgentLinkOff, AgentRole, ReviewAgentStart, TerminalId, TourAgentPort, TourAgentState,
-    follow_state, make_room, terminal_name,
+    AgentLinkOff, AgentRole, ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort,
+    TourAgentState, follow_state, make_room, terminal_name,
 };
 use crate::app_folders::AppFolders;
 use crate::claude_cli::{review_agent_denied_tools, review_agent_tools};
@@ -93,6 +93,15 @@ impl ReviewAgents {
         on_change: &mut dyn FnMut(TourAgentState) -> ControlFlow<()>,
     ) {
         follow_state(self.port.as_ref(), self.lookup(subject), on_change);
+    }
+
+    /// Types `text` into the subject's review agent when it is idle.
+    pub fn send_if_idle(&self, subject: &ReviewSubject, text: &str) -> anyhow::Result<SendOutcome> {
+        match self.lookup(subject) {
+            TourAgentState::Agent { terminal, .. } => self.port.send_if_idle(&terminal, text),
+            TourAgentState::LinkOff(reason) => bail!("agents are off: {reason}"),
+            _ => Ok(SendOutcome::NoAgent),
+        }
     }
 
     pub fn show(&self, subject: &ReviewSubject) -> anyhow::Result<()> {

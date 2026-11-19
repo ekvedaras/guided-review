@@ -100,10 +100,11 @@ enum Scene {
     AiReviewOnLines,
     AiReviewFindingsList,
     AiReviewFixRequests,
+    AiReviewAskWhy,
 }
 
 impl Scene {
-    const ALL: [Self; 63] = [
+    const ALL: [Self; 64] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -167,6 +168,7 @@ impl Scene {
         Self::AiReviewOnLines,
         Self::AiReviewFindingsList,
         Self::AiReviewFixRequests,
+        Self::AiReviewAskWhy,
     ];
 
     fn file_name(self) -> &'static str {
@@ -234,6 +236,7 @@ impl Scene {
             Self::AiReviewOnLines => "83-ai-review-on-lines",
             Self::AiReviewFindingsList => "84-ai-review-findings-list",
             Self::AiReviewFixRequests => "85-ai-review-fix-requests",
+            Self::AiReviewAskWhy => "86-ai-review-ask-why",
         }
     }
 
@@ -830,6 +833,18 @@ impl OneStepLayout {
                     review.stage_fix_requests(true);
                 }
             }),
+            Scene::AiReviewAskWhy => self.change_review(cx, |review| {
+                review.go_forward();
+                let first_line = review
+                    .page()
+                    .lines()
+                    .next()
+                    .map(|line| line.location.clone());
+                if let Some(at) = first_line {
+                    review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                    review.stage_finding_threads(true);
+                }
+            }),
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -1045,6 +1060,11 @@ impl OneStepLayout {
                 self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
             }
             Scene::AiReviewOnLines => self.change_review(cx, |review| {
+                review.ai_review_is(AiReview::NotRun);
+                review.go_to_summary();
+            }),
+            Scene::AiReviewAskWhy => self.change_review(cx, |review| {
+                review.stage_finding_threads(false);
                 review.ai_review_is(AiReview::NotRun);
                 review.go_to_summary();
             }),

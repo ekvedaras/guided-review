@@ -10,9 +10,10 @@ use crate::review_subject::ReviewSubject;
 use anyhow::Context;
 
 use crate::app_link::{Answer, AppFolder, Request, tell_app};
+use crate::findings::FindingId;
 use crate::viewer::{
     AgentReplied, HandOffId, ReplyPlacement, ReviewStateFile, ReviewThreadsPort, ReviewWritesPort,
-    ThreadHome,
+    ThreadHome, WhyReply,
 };
 
 /// What the agent posts on the hand-off's thread.
@@ -20,6 +21,60 @@ pub enum AgentReply<'a> {
     Answer(&'a str),
     /// "Working on it…", which the answer replaces later.
     WorkingOnIt,
+}
+
+/// What `agent-reply` answers: a question on a finding's thread, when the review has one with that id,
+/// else a hand-off.
+pub enum ReplyTo {
+    Finding(FindingId),
+    HandOff(HandOffId),
+}
+
+impl ReplyTo {
+    /// A finding's id may look like a hand-off's, so the review's findings with a thread come first.
+    pub fn of(folders: &AppFolders, subject: &ReviewSubject, id: &str) -> anyhow::Result<Self> {
+        let state = ReviewStateFile::for_subject(folders, subject).load()?;
+        if let Ok(finding) = FindingId::try_from(id.to_owned())
+            && state.finding_threads().thread_of(&finding).is_some()
+        {
+            return Ok(Self::Finding(finding));
+        }
+        Ok(Self::HandOff(id.parse()?))
+    }
+}
+
+/// The review agent's answer to a question on a finding: taken by the app when it shows the review, else
+/// kept in the state file under its lock.
+pub fn why_reply(
+    folders: &AppFolders,
+    subject: &ReviewSubject,
+    finding: &FindingId,
+    reply: &AgentReply<'_>,
+) -> anyhow::Result<String> {
+    let reply = match reply {
+        AgentReply::Answer(body) => WhyReply::Answer((*body).to_owned()),
+        AgentReply::WorkingOnIt => WhyReply::Working,
+    };
+    let told = tell_app(
+        &AppFolder::of(folders),
+        &Request::WhyReplied {
+            pr: subject.to_string(),
+            finding: finding.clone(),
+            reply: reply.clone(),
+        },
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("could not tell the app: {error:#}");
+        None
+    });
+    if matches!(told, Some(Answer::WhyAnswered { .. })) {
+        return Ok(format!("told the app that {finding} {reply}"));
+    }
+    let state_file = ReviewStateFile::for_subject(folders, subject);
+    let mut kept = Ok(());
+    state_file.update(|state| kept = state.why_replied(finding, &reply))?;
+    kept?;
+    Ok(format!("{finding} {reply}: on its thread for {subject}"))
 }
 
 /// Says where the reply went. Nothing is posted for a hand-off the review does not have.

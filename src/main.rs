@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use guided_review::agent_reply::{AgentReply, agent_reply};
+use guided_review::agent_reply::{AgentReply, ReplyTo, agent_reply, why_reply};
 use guided_review::app_folders::AppFolders;
 use guided_review::app_link::{
     Answer, AppFolder, AppListener, BindError, Caller, OpenRequest, Request, hand_over,
@@ -31,7 +31,7 @@ use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
 use guided_review::viewer::FixReply;
-use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile};
+use guided_review::viewer::{RefreshBrief, ReviewStateFile};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
@@ -99,11 +99,12 @@ enum Command {
     /// Write the files the release archives' Desktop entries are made of, for every OS
     #[command(hide = true)]
     DesktopEntryTemplate { out: std::path::PathBuf },
-    /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
+    /// Answer a reviewer's hand-off on its GitHub thread, the reply starting with the robot mark, or a
+    /// question on a finding on its thread
     AgentReply {
         subject: ReviewSubject,
-        /// The hand-off id from the message, like `h0`
-        hand_off: HandOffId,
+        /// The hand-off id from the message, like `h0`, or the finding's id
+        id: String,
         /// The answer in GitHub markdown; `-` reads it from stdin, which keeps its line breaks
         #[arg(long, required_unless_present = "working", conflicts_with = "working")]
         body: Option<String>,
@@ -189,7 +190,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::AgentReply {
             subject,
-            hand_off,
+            id,
             body,
             working: _,
         } => {
@@ -201,13 +202,13 @@ fn main() -> anyhow::Result<()> {
                 Some(body) => AgentReply::Answer(body.trim_end()),
                 None => AgentReply::WorkingOnIt,
             };
-            let said = agent_reply(
-                &GitHub::from_env(),
-                &AppFolders::running()?,
-                &subject,
-                hand_off,
-                &reply,
-            )?;
+            let folders = AppFolders::running()?;
+            let said = match ReplyTo::of(&folders, &subject, &id)? {
+                ReplyTo::Finding(finding) => why_reply(&folders, &subject, &finding, &reply)?,
+                ReplyTo::HandOff(hand_off) => {
+                    agent_reply(&GitHub::from_env(), &folders, &subject, hand_off, &reply)?
+                }
+            };
             println!("{said}");
             Ok(())
         }

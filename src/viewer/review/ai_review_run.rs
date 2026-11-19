@@ -1,6 +1,9 @@
 use super::ReviewCore;
 use crate::viewer::ai_review::AiReview;
-use crate::viewer::ai_review_run::{AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage};
+use crate::viewer::ai_review_run::{
+    AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage, ReviewAgentLife,
+};
+use crate::viewer::finding_threads::FindingThreads;
 use crate::viewer::tour_agent::{AgentStatus, TerminalId};
 
 impl ReviewCore {
@@ -57,7 +60,7 @@ impl ReviewCore {
                     AiReview::NotRun => AiReviewAction::Run,
                     AiReview::Findings(_) | AiReview::Unreadable(_) => AiReviewAction::RunAgain,
                 }),
-                can_show_agent: false,
+                can_show_agent: self.review_agent.is_alive(),
                 can_go_to_next_finding: has_findings,
                 can_open_findings_list: has_findings,
             },
@@ -89,11 +92,15 @@ impl ReviewCore {
     }
 
     pub fn ai_review_agent_started(&mut self, started: anyhow::Result<TerminalId>) {
+        if started.is_ok() {
+            self.review_agent = ReviewAgentLife::Alive(None);
+        }
         self.ai_review_run.started(started);
     }
 
     /// An agent left idle after its findings were read waits to be talked to: it is no run to fail.
     pub fn ai_review_agent_resumed(&mut self, terminal: TerminalId, status: Option<AgentStatus>) {
+        self.review_agent = ReviewAgentLife::Alive(status);
         let left_idle_after_findings =
             status == Some(AgentStatus::Idle) && matches!(self.ai_review, AiReview::Findings(_));
         if left_idle_after_findings {
@@ -103,7 +110,9 @@ impl ReviewCore {
     }
 
     pub fn ai_review_agent_status(&mut self, status: AgentStatus) {
+        self.review_agent = ReviewAgentLife::Alive(Some(status));
         self.ai_review_run.status_is(status);
+        self.questions_hear(|threads| threads.agent_status_is(status));
     }
 
     pub fn ai_review_agent_screen(&mut self, lines: Vec<String>) {
@@ -112,7 +121,27 @@ impl ReviewCore {
 
     /// Herdr no longer follows the review agent: its terminal ended.
     pub fn ai_review_agent_gone(&mut self) {
+        self.review_agent = ReviewAgentLife::Gone;
         self.ai_review_run.gone();
+        self.questions_hear(FindingThreads::agent_gone);
+    }
+
+    /// Kept only when a question moved, so a status change with nothing asked writes nothing.
+    fn questions_hear(&mut self, news: impl FnOnce(&mut FindingThreads) -> bool) {
+        if self.state.finding_threads().is_empty() {
+            return;
+        }
+        let mut threads = self.state.finding_threads().clone();
+        if !news(&mut threads) {
+            return;
+        }
+        if let Err(error) = self
+            .state
+            .record(|state| *state.finding_threads_mut() = threads)
+        {
+            eprintln!("could not keep where the questions on findings are: {error:#}");
+        }
+        self.place_threads();
     }
 
     /// The findings file was read again: a run that was waiting for it is over, with findings or a reason.

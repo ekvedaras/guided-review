@@ -3,7 +3,7 @@
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
-use crate::viewer::FixReply;
+use crate::viewer::{FixReply, WhyReply};
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -125,6 +125,9 @@ pub struct ReviewSession {
     ai_review_start: Option<Task<()>>,
     /// Follows the review agent's status for as long as its run lasts.
     ai_review_follow: Option<Task<()>>,
+    /// Ask why questions being typed into the review agent; one message at a time.
+    questions_delivery: Option<Task<()>>,
+    is_delivering_questions: bool,
     /// Wakes the session when the review's earliest work wanted later falls due.
     work_timer: Option<Task<()>>,
     old_head: Option<OldHead>,
@@ -239,6 +242,8 @@ impl ReviewSession {
             show_agent: None,
             ai_review_start: None,
             ai_review_follow: None,
+            questions_delivery: None,
+            is_delivering_questions: false,
             work_timer: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
@@ -1542,6 +1547,7 @@ impl ReviewSession {
                         review.ai_review_agent_resumed(terminal, Some(status));
                     });
                     this.follow_ai_review(cx);
+                    this.deliver_questions(cx);
                 }
             },
         ));
@@ -1587,12 +1593,33 @@ impl ReviewSession {
                 };
                 let shown = this.update(cx, |this, cx| {
                     this.change(cx, |review| review.ai_review_agent_status(status));
+                    this.deliver_questions(cx);
                 });
                 if shown.is_err() {
                     break;
                 }
             }
         }));
+    }
+
+    /// Ask why questions that wait go to the review agent once it is idle, off the UI thread as it runs `hc`.
+    pub fn deliver_questions(&mut self, cx: &mut Context<Self>) {
+        if self.is_delivering_questions {
+            return;
+        }
+        let Some(delivery) = self.review.why_delivery() else {
+            return;
+        };
+        self.is_delivering_questions = true;
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        self.questions_delivery = Some(self.run_off_thread(
+            cx,
+            move || delivery.run(&agents),
+            |this, outcome, cx| {
+                this.is_delivering_questions = false;
+                this.change(cx, |review| review.why_delivered(outcome));
+            },
+        ));
     }
 
     pub fn show_review_agent(&mut self, cx: &mut Context<Self>) {
@@ -1754,6 +1781,15 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         self.change(cx, |review| review.fix_replied(finding, reply))
+    }
+
+    pub fn why_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &WhyReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.change(cx, |review| review.why_replied(finding, reply))
     }
 
     /// The review agent says its findings are on disk: how many the review shows now.

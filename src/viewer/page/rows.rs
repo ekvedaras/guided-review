@@ -11,6 +11,7 @@ use crate::findings::{FindingId, Severity};
 use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
 use crate::tour::Step;
+use crate::viewer::finding_threads::WhyMessage;
 use crate::viewer::{
     AiReviewAction, Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines,
     LabelSwitch, LineKind, LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place,
@@ -103,6 +104,12 @@ pub struct FindingRow {
     pub fix: Option<Arc<str>>,
     /// False while a fix is asked for or under way.
     pub can_fix: bool,
+    /// Ask why: the questions and the review agent's answers, oldest first.
+    pub thread: Arc<[WhyMessage]>,
+    /// Where the latest question is, once one was asked.
+    pub asked: Option<Arc<str>>,
+    /// False while a question waits for its answer.
+    pub can_ask_why: bool,
 }
 
 /// An ask button and what it asks about.

@@ -49,7 +49,6 @@ use crate::review_subject::ReviewSubject;
 use crate::review_worktree::GitReviewWorktrees;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::update::Build;
-use crate::viewer::FixReply;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
@@ -57,6 +56,7 @@ use crate::viewer::{
     ReviewStateFile, ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone,
     TourAgentPort, TourAgents, WriteDecision,
 };
+use crate::viewer::{FixReply, WhyReply};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
@@ -366,6 +366,14 @@ async fn answer_requests(
                 let answer = take_fix_reply(&screen, pr, &finding, &said, cx);
                 reply.send(answer).ok();
             }
+            Request::WhyReplied {
+                pr,
+                finding,
+                reply: said,
+            } => {
+                let answer = take_why_reply(&screen, pr, &finding, &said, cx);
+                reply.send(answer).ok();
+            }
             Request::FindingsDone { pr } => {
                 let answer = read_findings(&screen, pr, cx);
                 reply.send(answer).ok();
@@ -670,6 +678,34 @@ fn take_fix_reply(
     });
     match taken {
         Ok(()) => Answer::FixAnswered { pr },
+        Err(error) => refused(&format!("{error:#}")),
+    }
+}
+
+/// Only the review in the window holds the finding threads in memory; any other has the answer written
+/// into its state file by the command.
+fn take_why_reply(
+    screen: &SharedScreen,
+    pr: String,
+    finding: &FindingId,
+    reply: &WhyReply,
+    cx: &mut AsyncApp,
+) -> Answer {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+        return Answer::NotShown { pr };
+    };
+    let taken = cx.update(|cx| {
+        window
+            .update(cx, |layout, _, cx| layout.why_replied(finding, reply, cx))
+            .and_then(|taken| taken)
+    });
+    match taken {
+        Ok(()) => Answer::WhyAnswered { pr },
         Err(error) => refused(&format!("{error:#}")),
     }
 }

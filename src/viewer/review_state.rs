@@ -18,6 +18,7 @@ use crate::tour::Tour;
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::finding_decisions::{Fate, FindingDecisions};
+use super::finding_threads::{FindingThreads, NoQuestion, WhyReply};
 use super::fix_requests::{FixReply, FixRequests, NoFixRequest};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::local_threads::LocalThreads;
@@ -121,6 +122,9 @@ struct ViewerSections {
     /// The findings sent to the tour agent to fix, and where each fix is.
     #[serde(default, skip_serializing_if = "FixRequests::is_empty")]
     fix_requests: FixRequests,
+    /// Ask why: the threads under findings, with the review agent's answers.
+    #[serde(default, skip_serializing_if = "FindingThreads::is_empty")]
+    finding_threads: FindingThreads,
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
     comment_queue: Vec<QueuedComment>,
@@ -506,6 +510,19 @@ impl ReviewState {
             self.viewer.finding_decisions.record(fixed, Fate::Fixed);
         }
         Ok(())
+    }
+
+    pub const fn finding_threads(&self) -> &FindingThreads {
+        &self.viewer.finding_threads
+    }
+
+    pub(super) fn finding_threads_mut(&mut self) -> &mut FindingThreads {
+        &mut self.viewer.finding_threads
+    }
+
+    /// The review agent's word on a question about one finding.
+    pub fn why_replied(&mut self, id: &FindingId, reply: &WhyReply) -> Result<(), NoQuestion> {
+        self.viewer.finding_threads.replied(id, reply)
     }
 
     pub fn hand_offs(&self) -> &HandOffs {
