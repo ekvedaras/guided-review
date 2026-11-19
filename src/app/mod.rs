@@ -356,10 +356,7 @@ async fn answer_requests(
                 reply.send(answer).ok();
             }
             Request::FindingsDone { pr } => {
-                let answer = read_findings(&screen, pr.clone(), cx);
-                if let Ok(subject) = pr.parse::<ReviewSubject>() {
-                    review_agent::end_in_background(subject, cx);
-                }
+                let answer = read_findings(&screen, pr, cx);
                 reply.send(answer).ok();
             }
             Request::Open(open) => {

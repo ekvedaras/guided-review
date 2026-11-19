@@ -53,7 +53,7 @@ impl ReviewAgents {
             bail!("agents are off: {reason}");
         }
         self.end(subject)?;
-        make_room(self.port.as_ref(), active)?;
+        make_room(self.port.as_ref(), Some(self.worktrees.as_ref()), active)?;
         let worktree = self
             .worktrees
             .add(subject, repo, head)

@@ -38,7 +38,7 @@ fn running_review() -> (FixtureRepo, String, String, Review) {
 }
 
 fn failure(review: &Review) -> String {
-    let AiReviewRun::Failed(reason) = review.ai_review_run() else {
+    let AiReviewRun::Failed { reason, .. } = review.ai_review_run() else {
         panic!("failed, got {:?}", review.ai_review_run());
     };
     reason.clone()

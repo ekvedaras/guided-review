@@ -13,6 +13,7 @@ use super::components::pr_switcher::PrSwitching;
 use crate::instructions::SummaryInstructions;
 use crate::opened_subject::writer_folder;
 use crate::review_subject::ReviewSubject;
+use crate::review_worktree::GitReviewWorktrees;
 use crate::viewer::{
     ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision, WriterHandOver,
 };
@@ -71,6 +72,9 @@ fn hand_over(switching: &PrSwitching, pr: ReviewSubject, task: WriterTask, cx: &
     let agents = TourAgents::new(Arc::clone(&port))
         .finding_head_branches_with(Arc::clone(&switching.head_branches))
         .with_summary_skill(SummaryInstructions::skill_for_launch(&switching.folders))
+        .removing_review_worktrees_with(Arc::new(GitReviewWorktrees::under(
+            switching.folders.review_worktrees(),
+        )))
         .starting_in(writer_folder(&pr, &switching.folders));
     cx.spawn(async move |cx| {
         loop {

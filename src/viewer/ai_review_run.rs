@@ -57,8 +57,12 @@ pub enum AiReviewRun {
     /// The worktree is being made and the agent started.
     Starting,
     Running(RunningReview),
-    /// The run ended without findings, for this reason.
-    Failed(String),
+    /// The run ended without findings, for this reason. `agent` is the review agent's terminal when it is
+    /// still there to show and answer.
+    Failed {
+        reason: String,
+        agent: Option<TerminalId>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,10 +85,12 @@ impl AiReviewRun {
     /// A run that ended because the agent stopped, as a snapshot scene shows it.
     #[cfg(feature = "snapshots")]
     pub fn staged_failed() -> Self {
-        Self::Failed(
-            "The review agent stopped without findings. Show the agent to answer it, or try again."
-                .to_owned(),
-        )
+        Self::Failed {
+            reason:
+                "The review agent stopped without findings. Show the agent to answer it, or try again."
+                    .to_owned(),
+            agent: Some(TerminalId::new("t1")),
+        }
     }
 
     /// A run that has not ended: it holds the review agent and its worktree.
@@ -102,7 +108,10 @@ impl AiReviewRun {
         }
         *self = match started {
             Ok(terminal) => Self::Running(RunningReview::new(terminal, false)),
-            Err(error) => Self::Failed(format!("The review agent could not start: {error:#}")),
+            Err(error) => Self::Failed {
+                reason: format!("The review agent could not start: {error:#}"),
+                agent: None,
+            },
         };
     }
 
@@ -122,14 +131,17 @@ impl AiReviewRun {
         match status {
             AgentStatus::Working => running.has_worked = true,
             AgentStatus::Idle if running.has_worked => {
-                *self = Self::Failed(
-                    "The review agent stopped without findings. Show the agent to answer it, or try again."
+                *self = Self::Failed {
+                    reason: "The review agent stopped without findings. Show the agent to answer it, or try again."
                         .to_owned(),
-                );
+                    agent: Some(running.terminal.clone()),
+                };
             }
             AgentStatus::Failed => {
-                *self =
-                    Self::Failed("The review agent reported an error without findings.".to_owned());
+                *self = Self::Failed {
+                    reason: "The review agent reported an error without findings.".to_owned(),
+                    agent: Some(running.terminal.clone()),
+                };
             }
             AgentStatus::Idle | AgentStatus::WaitingForYou | AgentStatus::Unreported => {}
         }
@@ -143,7 +155,10 @@ impl AiReviewRun {
 
     pub(super) fn gone(&mut self) {
         if self.is_on() {
-            *self = Self::Failed("The review agent's terminal ended without findings.".to_owned());
+            *self = Self::Failed {
+                reason: "The review agent's terminal ended without findings.".to_owned(),
+                agent: None,
+            };
         }
     }
 
@@ -153,9 +168,14 @@ impl AiReviewRun {
 
     pub(super) fn findings_cannot_be_read(&mut self, reason: &str) {
         if self.is_on() {
-            *self = Self::Failed(format!(
-                "The review agent's findings cannot be read: {reason}"
-            ));
+            let agent = match self {
+                Self::Running(running) => Some(running.terminal.clone()),
+                _ => None,
+            };
+            *self = Self::Failed {
+                reason: format!("The review agent's findings cannot be read: {reason}"),
+                agent,
+            };
         }
     }
 }

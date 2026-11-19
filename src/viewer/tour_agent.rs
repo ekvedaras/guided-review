@@ -12,6 +12,7 @@ use super::toasts::ToastTone;
 use crate::local_work_tree::LocalWorkTree;
 use crate::pull_request::{PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
+use crate::review_worktree::ReviewWorktreePort;
 
 /// A herdr terminal, as `hc` names it (`t7`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -454,6 +455,7 @@ pub struct TourAgents {
     /// Tells which branch a PR is opened from, so the reviewer's Claude on it is found. `None`: a PR's
     /// agent is only the terminal with its label.
     head_branches: Option<Arc<dyn PullsOfBranchPort>>,
+    review_worktrees: Option<Arc<dyn ReviewWorktreePort>>,
     /// Head branches GitHub already told, so a lookup asks it once per PR.
     known_head_branches: Arc<Mutex<Vec<KnownHeadBranch>>>,
 }
@@ -465,12 +467,22 @@ impl TourAgents {
             folder: None,
             summary_skill: None,
             head_branches: None,
+            review_worktrees: None,
             known_head_branches: Arc::default(),
         }
     }
 
     pub fn finding_head_branches_with(mut self, head_branches: Arc<dyn PullsOfBranchPort>) -> Self {
         self.head_branches = Some(head_branches);
+        self
+    }
+
+    /// Makes room by ending an idle review agent too, and removes its worktree with it.
+    pub fn removing_review_worktrees_with(
+        mut self,
+        worktrees: Arc<dyn ReviewWorktreePort>,
+    ) -> Self {
+        self.review_worktrees = Some(worktrees);
         self
     }
 
@@ -513,7 +525,7 @@ impl TourAgents {
             bail!("no folder to start a tour agent for {subject} in");
         };
         let name = terminal_name(AgentRole::Tour, subject);
-        make_room(self.port.as_ref(), active)?;
+        make_room(self.port.as_ref(), self.review_worktrees.as_deref(), active)?;
         self.port.start(&TourAgentStart {
             subject: subject.clone(),
             name,
@@ -910,20 +922,21 @@ impl TourAgents {
     }
 }
 
-/// Ends the idle tour agent used longest ago when the app has started as many agents as it keeps, never the
-/// one of `active`. A review agent is never ended here, though it holds a slot: an idle one has stopped
-/// without findings, and its screen is what the reviewer reads to see why. Refuses, naming the busy ones,
-/// when nothing can be ended.
-pub(super) fn make_room(port: &dyn TourAgentPort, active: &ReviewSubject) -> anyhow::Result<()> {
+/// Ends the idle agent the app started used longest ago, a review agent's worktree with it, when the app
+/// has started as many agents as it keeps, never the one of `active`. Refuses, naming the busy ones, when
+/// nothing can be ended.
+pub(super) fn make_room(
+    port: &dyn TourAgentPort,
+    worktrees: Option<&dyn ReviewWorktreePort>,
+    active: &ReviewSubject,
+) -> anyhow::Result<()> {
     let mut agents = port.app_started()?;
     if agents.len() < MAX_APP_AGENTS {
         return Ok(());
     }
     agents.sort_by_key(|agent| agent.status_since_ms);
     let can_be_ended = |agent: &AppAgent| {
-        agent.role == AgentRole::Tour
-            && agent.status == AgentStatus::Idle
-            && agent.subject.as_ref() != Some(active)
+        agent.status == AgentStatus::Idle && agent.subject.as_ref() != Some(active)
     };
     let Some(to_end) = agents.iter().find(|agent| can_be_ended(agent)) else {
         let busy: Vec<String> = agents
@@ -946,7 +959,14 @@ pub(super) fn make_room(port: &dyn TourAgentPort, active: &ReviewSubject) -> any
         );
     };
     port.kill(&to_end.terminal)
-        .with_context(|| format!("could not end the tour agent {}", to_end.terminal))
+        .with_context(|| format!("could not end the agent {}", to_end.terminal))?;
+    if to_end.role == AgentRole::Review
+        && let (Some(worktrees), Some(subject)) = (worktrees, &to_end.subject)
+        && let Err(error) = worktrees.remove(subject)
+    {
+        eprintln!("could not remove the worktree of {subject}: {error:#}");
+    }
+    Ok(())
 }
 
 /// Passes the state now and at each status change of the agent it names, until herdr's stream ends or

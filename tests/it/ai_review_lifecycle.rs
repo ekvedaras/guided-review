@@ -84,7 +84,6 @@ impl Desk {
         let file = json!({"pr": PR, "base": self.base, "head": self.head, "findings": findings});
         std::fs::write(path, file.to_string()).unwrap();
         self.review.read_findings(&self.repo.folders());
-        self.agents().end(&pr()).unwrap();
     }
 }
 
@@ -124,14 +123,14 @@ fn an_agent_that_goes_idle_without_findings_fails_the_run_and_keeps_its_terminal
 
     assert!(matches!(
         desk.review.ai_review_run(),
-        AiReviewRun::Failed(_)
+        AiReviewRun::Failed { .. }
     ));
     assert_eq!(desk.fake.review_agents_of(PR).len(), 1);
     assert_eq!(desk.worktrees.standing(), [PR]);
 }
 
 #[test]
-fn findings_done_clears_the_run_and_ends_the_agent_and_its_worktree() {
+fn findings_done_clears_the_run_and_leaves_the_agent_idle_to_talk_to() {
     let mut desk = Desk::new();
     desk.run();
     desk.review.ai_review_agent_status(AgentStatus::Working);
@@ -140,8 +139,34 @@ fn findings_done_clears_the_run_and_ends_the_agent_and_its_worktree() {
 
     assert_eq!(desk.review.ai_review_run(), &AiReviewRun::NotRun);
     assert_eq!(desk.review.ai_review().counts().nit, 1);
-    assert_eq!(desk.fake.review_agents_of(PR), Vec::<String>::new());
-    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
+    assert_eq!(desk.fake.review_agents_of(PR).len(), 1);
+    assert_eq!(desk.worktrees.standing(), [PR]);
+}
+
+#[test]
+fn an_idle_agent_found_again_after_findings_were_read_is_not_a_failed_run() {
+    let mut desk = Desk::new();
+    desk.run();
+    desk.findings_done(&[a_nit()]);
+
+    desk.review
+        .ai_review_agent_resumed(TerminalId::new("t1"), Some(AgentStatus::Idle));
+
+    assert_eq!(desk.review.ai_review_run(), &AiReviewRun::NotRun);
+}
+
+#[test]
+fn a_run_whose_terminal_is_gone_does_not_offer_show_agent_but_a_stopped_agent_does() {
+    let mut desk = Desk::new();
+    desk.run();
+    desk.review.ai_review_agent_status(AgentStatus::Working);
+    desk.review.ai_review_agent_status(AgentStatus::Idle);
+    assert!(desk.review.ai_review_stage().can_show_agent);
+
+    desk.review.ask_to_run_ai_review().unwrap();
+    desk.review.ai_review_agent_gone();
+
+    assert!(!desk.review.ai_review_stage().can_show_agent);
 }
 
 #[test]
@@ -174,7 +199,7 @@ fn an_agent_that_could_not_start_fails_the_run_and_leaves_no_worktree() {
 
     desk.run();
 
-    let AiReviewRun::Failed(reason) = desk.review.ai_review_run() else {
+    let AiReviewRun::Failed { reason, .. } = desk.review.ai_review_run() else {
         panic!("failed, got {:?}", desk.review.ai_review_run());
     };
     assert!(reason.contains("herdr refused"), "{reason}");

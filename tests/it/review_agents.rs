@@ -7,6 +7,7 @@ use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::folders_in;
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
+use guided_review::review_worktree::ReviewWorktreePort;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentStatus, ReviewAgents, SendOutcome, TerminalId, TourAgentPort, TourAgentState, TourAgents,
@@ -50,6 +51,7 @@ impl Desk {
 
     fn tour_agents(&self) -> TourAgents {
         TourAgents::new(Arc::clone(&self.fake) as Arc<dyn TourAgentPort>)
+            .removing_review_worktrees_with(Arc::new(self.worktrees.clone()))
             .starting_in("/clones/shop".into())
     }
 
@@ -285,35 +287,60 @@ fn with_five_busy_agents_no_review_agent_starts_and_no_worktree_is_made() {
     assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
 }
 
+fn four_working_tour_agents(fake: FakeTourAgent) -> FakeTourAgent {
+    (2..=5).fold(fake, |fake, n| {
+        fake.app_started(
+            &format!("t{n}"),
+            &format!("https://github.com/acme/shop/pull/{}", n + 20),
+            AgentStatus::Working,
+            0,
+        )
+    })
+}
+
 #[test]
-fn an_idle_review_agent_holds_its_slot_and_is_never_ended_to_make_room() {
+fn an_idle_review_agent_is_ended_with_its_worktree_like_an_idle_tour_agent_when_room_is_needed() {
+    let desk = Desk::with(four_working_tour_agents(FakeTourAgent::new().review_agent(
+        "t1",
+        OTHER_PR,
+        AgentStatus::Idle,
+        0,
+    )));
+    desk.worktrees
+        .add(
+            &OTHER_PR.parse().unwrap(),
+            Path::new("/clones/shop"),
+            &Sha::new("abc"),
+        )
+        .unwrap();
+
+    desk.tour_agents()
+        .start(&pr(), &pr(), TourKind::Guided)
+        .unwrap();
+
+    assert!(
+        desk.fake
+            .calls()
+            .contains(&TourAgentCall::Kill(TerminalId::new("t1")))
+    );
+    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
+}
+
+#[test]
+fn the_idle_agent_used_longest_ago_is_ended_whether_it_reviews_or_writes_a_tour() {
     let desk = Desk::with(
-        FakeTourAgent::new()
-            .review_agent("t1", OTHER_PR, AgentStatus::Idle, 0)
-            .app_started(
-                "t2",
-                "https://github.com/acme/shop/pull/22",
-                AgentStatus::Idle,
-                5,
-            )
-            .app_started(
-                "t3",
-                "https://github.com/acme/shop/pull/23",
-                AgentStatus::Working,
-                0,
-            )
-            .app_started(
-                "t4",
-                "https://github.com/acme/shop/pull/24",
-                AgentStatus::Working,
-                0,
-            )
-            .app_started(
-                "t5",
-                "https://github.com/acme/shop/pull/25",
-                AgentStatus::Working,
-                0,
-            ),
+        four_working_tour_agents(FakeTourAgent::new().review_agent(
+            "t1",
+            OTHER_PR,
+            AgentStatus::Idle,
+            9,
+        ))
+        .app_started(
+            "t6",
+            "https://github.com/acme/shop/pull/26",
+            AgentStatus::Idle,
+            1,
+        ),
     );
 
     desk.tour_agents()
@@ -322,7 +349,7 @@ fn an_idle_review_agent_holds_its_slot_and_is_never_ended_to_make_room() {
 
     let calls = desk.fake.calls();
     assert!(
-        calls.contains(&TourAgentCall::Kill(TerminalId::new("t2"))),
+        calls.contains(&TourAgentCall::Kill(TerminalId::new("t6"))),
         "{calls:?}"
     );
     assert!(
@@ -332,25 +359,48 @@ fn an_idle_review_agent_holds_its_slot_and_is_never_ended_to_make_room() {
 }
 
 #[test]
-fn with_only_review_agents_to_end_a_tour_agent_is_refused_naming_them() {
-    let desk = Desk::with((1..=5).fold(FakeTourAgent::new(), |fake, n| {
-        fake.review_agent(
-            &format!("t{n}"),
-            &format!("https://github.com/acme/shop/pull/{}", n + 20),
-            AgentStatus::Idle,
-            n,
-        )
-    }));
+fn the_review_agent_of_the_open_subject_is_not_ended_while_room_can_be_made_elsewhere() {
+    let desk = Desk::with(
+        four_working_tour_agents(FakeTourAgent::new().review_agent("t1", PR, AgentStatus::Idle, 0))
+            .app_started(
+                "t6",
+                "https://github.com/acme/shop/pull/26",
+                AgentStatus::Idle,
+                9,
+            ),
+    );
+
+    desk.tour_agents()
+        .start(&OTHER_PR.parse().unwrap(), &pr(), TourKind::Guided)
+        .unwrap();
+
+    let calls = desk.fake.calls();
+    assert!(
+        !calls.contains(&TourAgentCall::Kill(TerminalId::new("t1"))),
+        "{calls:?}"
+    );
+    assert!(
+        calls.contains(&TourAgentCall::Kill(TerminalId::new("t6"))),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn with_only_busy_agents_and_the_open_review_agent_a_start_is_refused_naming_them() {
+    let desk = Desk::with(four_working_tour_agents(FakeTourAgent::new().review_agent(
+        "t1",
+        PR,
+        AgentStatus::Idle,
+        0,
+    )));
 
     let error = desk
         .tour_agents()
-        .start(&pr(), &pr(), TourKind::Guided)
+        .start(&OTHER_PR.parse().unwrap(), &pr(), TourKind::Guided)
         .unwrap_err();
 
     assert!(
-        error
-            .to_string()
-            .contains("review of https://github.com/acme/shop/pull/21"),
+        error.to_string().contains(&format!("review of {PR}")),
         "{error}"
     );
 }

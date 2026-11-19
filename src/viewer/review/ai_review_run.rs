@@ -37,11 +37,11 @@ impl ReviewCore {
                 action: None,
                 can_show_agent: true,
             },
-            AiReviewRun::Failed(reason) => AiReviewStage {
+            AiReviewRun::Failed { reason, agent } => AiReviewStage {
                 line: reason.clone(),
                 is_failure: true,
                 action: action_if_free(AiReviewAction::TryAgain),
-                can_show_agent: true,
+                can_show_agent: agent.is_some(),
             },
             AiReviewRun::NotRun => AiReviewStage {
                 line: self.ai_review.line(),
@@ -68,7 +68,13 @@ impl ReviewCore {
         self.ai_review_run.started(started);
     }
 
+    /// An agent left idle after its findings were read waits to be talked to: it is no run to fail.
     pub fn ai_review_agent_resumed(&mut self, terminal: TerminalId, status: Option<AgentStatus>) {
+        let left_idle_after_findings =
+            status == Some(AgentStatus::Idle) && matches!(self.ai_review, AiReview::Findings(_));
+        if left_idle_after_findings {
+            return;
+        }
         self.ai_review_run.resumed(terminal, status);
     }
 
